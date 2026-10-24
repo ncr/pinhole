@@ -3,8 +3,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -12,10 +11,10 @@ use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rusqlite::Connection;
 
-use pinhole_core::auth::{FixedSession, ProcessProvider};
-use pinhole_core::cloudkit::{PhotosClient, Traffic, LIBRARY_COUNT};
-use pinhole_core::db;
-use pinhole_core::source::{pair_records, Asset, ICloudSource, Page, PhotoSource};
+use pinhole_core::auth::ProcessProvider;
+use pinhole_core::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use pinhole_core::{db, sync};
+use pinhole_core::source::{pair_records, Asset};
 
 #[derive(Parser)]
 struct Cli {
@@ -37,7 +36,7 @@ enum Cmd {
     Count,
     /// How many assets one list request can return, and how long it takes.
     PageSize,
-    /// Read the whole library's metadata into the index. Resumable.
+    /// Read the whole library's metadata into the index.
     Walk {
         /// Assets per request.
         #[arg(long, default_value_t = 100)]
@@ -45,11 +44,8 @@ enum Cmd {
         /// Keep the raw CloudKit records too, to inspect fields.
         #[arg(long)]
         raw: bool,
-        /// Start over instead of resuming.
-        #[arg(long)]
-        restart: bool,
-        /// Requests in flight at once. Above 1 the walk always starts over.
-        #[arg(long, default_value_t = 1)]
+        /// Requests in flight at once.
+        #[arg(long, default_value_t = 4)]
         parallel: usize,
     },
     /// Ask CloudKit's change feed what changed since the walk began.
@@ -76,6 +72,11 @@ enum Cmd {
         #[arg(long, default_value = "own")]
         pool: String,
     },
+    /// Show how one list page's records fit together.
+    Page {
+        #[arg(long)]
+        rank: u64,
+    },
     /// Check whether videos can be streamed: ranged reads, latency, expiry.
     Stream {
         #[arg(long, default_value_t = 3)]
@@ -96,12 +97,12 @@ fn main() -> Result<()> {
         Cmd::Session => session(&client),
         Cmd::Count => count(&mut client),
         Cmd::PageSize => page_size(&mut client),
-        Cmd::Walk { per_page, raw, parallel, .. } if parallel > 1 => walk_parallel(client, &db_path, per_page, raw, parallel),
-        Cmd::Walk { per_page, raw, restart, .. } => walk(client, &db_path, per_page, raw, restart),
+        Cmd::Walk { per_page, raw, parallel } => walk(client, &db_path, per_page, raw, parallel),
         Cmd::Changes { from_start } => changes(&mut client, &db_path, from_start),
         Cmd::Stats => stats(&db_path),
         Cmd::Sample { kind, n, threads, out, pool } => sample(&mut client, &db_path, &kind, n, threads, out, &pool),
         Cmd::Stream { n } => stream(&mut client, &db_path, n),
+        Cmd::Page { rank } => page(&mut client, rank),
     }
 }
 
@@ -170,137 +171,21 @@ fn page_size(client: &mut PhotosClient) -> Result<()> {
     Ok(())
 }
 
-fn walk(client: PhotosClient, db_path: &PathBuf, per_page: u32, raw: bool, restart: bool) -> Result<()> {
+fn walk(mut client: PhotosClient, db_path: &PathBuf, per_page: u32, raw: bool, parallel: usize) -> Result<()> {
     let mut conn = db::open(db_path)?;
-    let mut source = ICloudSource { client, keep_raw: raw };
-    let total = source.count()?;
-    let mut rank: u64 = if restart { 0 } else { db::meta(&conn, "walk_next_rank").and_then(|v| v.parse().ok()).unwrap_or(0) };
-    if rank == 0 {
-        db::set_meta(&conn, "walk_started_at", &now_secs().to_string())?;
-    }
-    eprintln!("library: {total} assets; starting at {rank}, {per_page} per request");
-
-    let started = Instant::now();
-    let start_rank = rank;
-    let mut pages = 0u64;
-    loop {
-        let page = source.page(rank, per_page)?;
-        if pages == 0 && rank == 0 {
-            // The token from the walk's first page is where the change feed
-            // picks up afterwards: everything after it is "new since".
-            if let Some(token) = &page.sync_token {
-                db::set_meta(&conn, "walk_sync_token", token)?;
-            }
+    let report = sync::walk(&mut client, &mut conn, per_page, parallel, raw, &|done, total| {
+        if done % 4000 < per_page as u64 {
+            eprintln!("{done:>7}/{total}");
         }
-        if page.records == 0 {
-            break;
-        }
-        db::upsert_assets(&mut conn, &page.assets, Some(rank), now_secs())?;
-        // A page whose records failed to pair still moves the cursor, or the
-        // walk would ask for the same page forever.
-        rank += (page.assets.len() as u64).max(1);
-        pages += 1;
-        db::set_meta(&conn, "walk_next_rank", &rank.to_string())?;
-        if pages % 20 == 0 {
-            let done = rank - start_rank;
-            let rate = done as f64 / started.elapsed().as_secs_f64();
-            let left = total.saturating_sub(rank) as f64 / rate.max(0.001);
-            eprintln!("{rank:>7}/{total}  {rate:>6.0} assets/s  ~{left:.0}s left  ({} requests, {} retries)", source.client.traffic.requests, source.client.traffic.retries);
-        }
-    }
-    let secs = started.elapsed().as_secs_f64();
-    let t = &source.client.traffic;
-    db::set_meta(&conn, "walk_done_at", &now_secs().to_string())?;
-    println!("walked {} assets in {:.1}s ({:.0}/s)", rank - start_rank, secs, (rank - start_rank) as f64 / secs);
-    println!("requests {}  avg {:.0} ms  received {:.1} MB  retries {}  session refreshes {}",
-        t.requests, t.time.as_millis() as f64 / t.requests.max(1) as f64, t.bytes as f64 / 1e6, t.retries, t.session_refreshes);
+    })?;
+    let t = &report.traffic;
+    println!("walked {} assets in {:.1}s ({:.0}/s) with {parallel} in flight; iCloud reports {}",
+        report.assets, report.seconds, report.assets as f64 / report.seconds, report.reported);
+    println!("requests {}  avg {:.0} ms  received {:.1} MB  retries {}  short pages {}",
+        t.requests, t.time.as_millis() as f64 / t.requests.max(1) as f64, t.bytes as f64 / 1e6, t.retries, report.short_pages);
+    println!("split pairs repaired {}, still unpaired {}, removed {}", report.repaired, report.unpaired, report.removed);
     let indexed: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
-    println!("index now holds {indexed} assets; iCloud reports {total}");
-    Ok(())
-}
-
-/// The list is addressed by position, so pages can be fetched side by side:
-/// workers take the next free position, the main thread writes the index.
-fn walk_parallel(mut client: PhotosClient, db_path: &PathBuf, per_page: u32, raw: bool, parallel: usize) -> Result<()> {
-    let mut conn = db::open(db_path)?;
-    let total = client.count(LIBRARY_COUNT)?;
-    db::set_meta(&conn, "walk_started_at", &now_secs().to_string())?;
-    eprintln!("library: {total} assets; {parallel} requests at a time, {per_page} per request");
-
-    let next = Arc::new(AtomicU64::new(0));
-    let (tx, rx) = mpsc::channel::<Result<(u64, Page, Traffic)>>();
-    let session = client.session().clone();
-    let started = Instant::now();
-    let workers: Vec<_> = (0..parallel)
-        .map(|_| {
-            let (next, tx, session) = (next.clone(), tx.clone(), session.clone());
-            std::thread::spawn(move || {
-                let client = match PhotosClient::new(Box::new(FixedSession(session))) {
-                    Ok(c) => c,
-                    Err(e) => return drop(tx.send(Err(e))),
-                };
-                let mut source = ICloudSource { client, keep_raw: raw };
-                loop {
-                    let rank = next.fetch_add(per_page as u64, Ordering::SeqCst);
-                    if rank >= total {
-                        break;
-                    }
-                    let before = source.client.traffic.clone();
-                    let result = source.page(rank, per_page).map(|p| {
-                        let t = &source.client.traffic;
-                        let delta = Traffic {
-                            requests: t.requests - before.requests,
-                            bytes: t.bytes - before.bytes,
-                            time: t.time - before.time,
-                            retries: t.retries - before.retries,
-                            session_refreshes: 0,
-                        };
-                        (rank, p, delta)
-                    });
-                    let failed = result.is_err();
-                    if tx.send(result).is_err() || failed {
-                        break;
-                    }
-                }
-            })
-        })
-        .collect();
-    drop(tx);
-
-    let mut traffic = Traffic::default();
-    let (mut assets, mut pages, mut short_pages) = (0u64, 0u64, 0u64);
-    for message in rx {
-        let (rank, page, t) = message?;
-        if rank == 0 {
-            if let Some(token) = &page.sync_token {
-                db::set_meta(&conn, "walk_sync_token", token)?;
-            }
-        }
-        if (page.assets.len() as u32) < per_page && rank + (per_page as u64) < total {
-            short_pages += 1;
-        }
-        db::upsert_assets(&mut conn, &page.assets, Some(rank), now_secs())?;
-        assets += page.assets.len() as u64;
-        pages += 1;
-        traffic.requests += t.requests;
-        traffic.bytes += t.bytes;
-        traffic.time += t.time;
-        traffic.retries += t.retries;
-        if pages % 40 == 0 {
-            let rate = assets as f64 / started.elapsed().as_secs_f64();
-            eprintln!("{assets:>7}/{total}  {rate:>6.0} assets/s  ~{:.0}s left  ({} retries)", total.saturating_sub(assets) as f64 / rate, traffic.retries);
-        }
-    }
-    for w in workers {
-        let _ = w.join();
-    }
-    let secs = started.elapsed().as_secs_f64();
-    db::set_meta(&conn, "walk_done_at", &now_secs().to_string())?;
-    println!("walked {assets} assets in {secs:.1}s ({:.0}/s) with {parallel} in flight", assets as f64 / secs);
-    println!("requests {}  avg {:.0} ms  received {:.1} MB  retries {}  short pages {short_pages}",
-        traffic.requests, traffic.time.as_millis() as f64 / traffic.requests.max(1) as f64, traffic.bytes as f64 / 1e6, traffic.retries);
-    let indexed: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
-    println!("index now holds {indexed} assets; iCloud reports {total}");
+    println!("index now holds {indexed} assets");
     Ok(())
 }
 
@@ -402,7 +287,7 @@ fn date(ms: i64) -> String {
 fn fresh_assets(client: &mut PhotosClient, ids: &[(String, String)]) -> Result<Vec<Asset>> {
     let mut out = Vec::new();
     for chunk in ids.chunks(100) {
-        let names: Vec<&str> = chunk.iter().flat_map(|(master, asset)| [master.as_str(), asset.as_str()]).collect();
+        let names: Vec<&str> = chunk.iter().flat_map(|(asset, master)| [asset.as_str(), master.as_str()]).collect();
         let started = Instant::now();
         let r = client.lookup(&names)?;
         let assets = pair_records(r["records"].as_array().map(Vec::as_slice).unwrap_or(&[]), false);
@@ -412,10 +297,10 @@ fn fresh_assets(client: &mut PhotosClient, ids: &[(String, String)]) -> Result<V
     Ok(out)
 }
 
-/// Random (master, asset) record names matching an SQL filter on `assets a`.
+/// Random (asset, master) record names matching an SQL filter on `assets a`.
 fn random_ids(conn: &Connection, filter: &str, n: usize) -> Result<Vec<(String, String)>> {
     let mut ids: Vec<(String, String)> = conn
-        .prepare(&format!("SELECT id, asset_record FROM assets a WHERE {filter}"))?
+        .prepare(&format!("SELECT id, master_id FROM assets a WHERE {filter}"))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
     ids.shuffle(&mut rand::thread_rng());
@@ -540,5 +425,29 @@ fn stream(client: &mut PhotosClient, db_path: &PathBuf, n: usize) -> Result<()> 
             println!("  {kind:<9} 8 MB read at {:.1} MB/s; the file plays at {bitrate:.1} Mbit/s", buf.len() as f64 / 1e6 / secs);
         }
     }
+    Ok(())
+}
+
+fn page(client: &mut PhotosClient, rank: u64) -> Result<()> {
+    let r = client.list_page(rank, 200)?;
+    let records = r["records"].as_array().cloned().unwrap_or_default();
+    let mut masters = std::collections::HashSet::new();
+    let mut refs = std::collections::HashMap::<String, usize>::new();
+    let mut other = std::collections::BTreeMap::<String, usize>::new();
+    for rec in &records {
+        match rec["recordType"].as_str() {
+            Some("CPLMaster") => { masters.insert(rec["recordName"].as_str().unwrap_or("").to_owned()); }
+            Some("CPLAsset") => {
+                *refs.entry(rec["fields"]["masterRef"]["value"]["recordName"].as_str().unwrap_or("").to_owned()).or_default() += 1;
+            }
+            t => *other.entry(t.unwrap_or("?").to_owned()).or_default() += 1,
+        }
+    }
+    let shared = refs.values().filter(|&&n| n > 1).count();
+    let orphan_assets = refs.keys().filter(|m| !masters.contains(*m)).count();
+    let orphan_masters = masters.iter().filter(|m| !refs.contains_key(*m)).count();
+    println!("rank {rank}: {} records: {} masters, {} assets, other {:?}", records.len(), masters.len(), refs.values().sum::<usize>(), other);
+    println!("masters shared by several assets: {shared}; assets whose master is not on the page: {orphan_assets}; masters without an asset: {orphan_masters}");
+    println!("paired by master: {}", pair_records(&records, false).len());
     Ok(())
 }

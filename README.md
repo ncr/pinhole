@@ -18,17 +18,28 @@ auth/PROTOCOL.md          the sign-in provider protocol: JSON lines over stdio
 auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
 core/                     the Rust core: session, CloudKit client, index
 core/src/bin/probe.rs     pinhole-probe, which measures the API
+core/src/bin/sync.rs      pinhole-sync, which builds the local library
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 app/                      the window: Qt Quick, with the grid in C++
 ```
 
 ## Trying the grid
 
+On your own library (after adopting a session with `import_icloudpd`, below):
+
 ```bash
-core/target/release/pinhole-fake --count 100000   # ~1 min, 6 GB in ~/.local/share/pinhole/fake
+core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library
 app/bin/build
 app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
+```
+
+`pinhole-sync` only fetches what is missing, so running it again is quick.
+Without a real library the window opens the synthetic one:
+
+```bash
+core/target/release/pinhole-fake --count 100000   # ~1 min, 6 GB in ~/.local/share/pinhole/fake
+app/build/pinhole --library ~/.local/share/pinhole/fake
 ```
 
 The two boundaries that are meant to be swapped:

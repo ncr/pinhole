@@ -69,6 +69,34 @@ The remaining slow frames spend their time in the render pass or the swap,
 not in Pinhole's code, often in frames that changed nothing: GPU and driver
 time on Asahi.
 
+## The real library
+
+`pinhole-sync all` built it in 11 minutes: the index in 5 (49,018 assets read
+with overlap, 48,950 kept, exactly iCloud's count) and all 48,949 thumbnails
+in 6 (137/s sustained, 3.1 GB, no failures, no throttling). Thumbnails are
+named by iCloud's checksum, so a rebuild reuses them: the second run
+downloaded nothing.
+
+The same benchmark on it, in a half-width window (845×1058, sharing the
+workspace), warm and then with every thumbnail and the index evicted from the
+page cache:
+
+| Phase | warm fps / missed | cold fps / missed | cold placeholders |
+|---|---|---|---|
+| Idle | 121 / 0 | 121 / 0 | 0% |
+| Scroll 1,500 / 5,000 / 15,000 px/s | 118–120 / 0–2 | 119–120 / 0–2 | 0–11% |
+| Three flings | 119 / 1 | 119 / 2 | 4% |
+| Scrub all in 5 s | 120 / 0 | 120 / 2 | 81% |
+| Random jumps | 120 / 1 | 118 / 7 | 2% |
+| Pinch sweep | 120 / 6 | 117 / 19 (3%) | 0% |
+| Scroll 15,000 px/s at 30 columns | 119 / 3 | 109 / 41 (10%) | 12% |
+| Zoom steps | 120 / 0 | 120 / 2 | 0% |
+
+- Loading the index cold: 48,950 items in 469 ms.
+- Jumps cold: all visible cells sharp after 46 ms median, 78 ms at worst.
+- Cold costs show only where decoding is heaviest (pinch sweep, zoomed-out
+  fast scroll). The tiny-thumbnail tier below would take both off the disk.
+
 ## Not done or not verified
 
 - **Real input.** Scrolling, inertia and pinch were driven by the script. The
@@ -80,8 +108,6 @@ time on Asahi.
   64 px) packed into pages, so zoomed-out and scrubbing views need no
   per-cell decoding or uploading. The same tier would fix the 11% placeholders
   in fast scrolling at 30 columns.
-- **Cold disk.** The thumbnails were freshly written and largely in the page
-  cache; a cold start reads them from the SSD.
 - **Omarchy conventions** skipped for the spike: theme colours, translations,
   `?` help, the date scrubber, badges for video, Live Photo and favourites.
 - The animated zoom step is one glide at a time; a step during a glide

@@ -52,6 +52,27 @@ pub struct Traffic {
     pub session_refreshes: u64,
 }
 
+impl Traffic {
+    /// What happened since an earlier snapshot of the same counters.
+    pub fn since(&self, before: &Traffic) -> Traffic {
+        Traffic {
+            requests: self.requests - before.requests,
+            bytes: self.bytes - before.bytes,
+            time: self.time - before.time,
+            retries: self.retries - before.retries,
+            session_refreshes: self.session_refreshes - before.session_refreshes,
+        }
+    }
+
+    pub fn add(&mut self, other: &Traffic) {
+        self.requests += other.requests;
+        self.bytes += other.bytes;
+        self.time += other.time;
+        self.retries += other.retries;
+        self.session_refreshes += other.session_refreshes;
+    }
+}
+
 pub struct PhotosClient {
     http: Client,
     provider: Box<dyn SessionProvider>,

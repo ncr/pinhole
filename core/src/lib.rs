@@ -11,3 +11,4 @@ pub mod cloudkit;
 pub mod db;
 pub mod session;
 pub mod source;
+pub mod sync;

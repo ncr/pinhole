@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO assets (id, rank, asset_record, item_type, filename, asset_date, added_date, favorite,
+            "INSERT INTO assets (id, rank, master_id, item_type, filename, asset_date, added_date, favorite,
                 duration, is_video, is_live, thumb_path, thumb_w, thumb_h, avg_color)
              VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;

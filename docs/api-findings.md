@@ -27,10 +27,15 @@ read-only.
 The index without raw records and without stored URLs is roughly **90 MB**
 (487 MB with them; raw JSON is 298 MB, URLs 98 MB).
 
-Open issue: the index holds 48,798 assets against iCloud's 48,948 (0.3% short).
-30 pages came back with fewer than 100 paired assets, most likely pages whose
-boundary splits a CPLAsset from its CPLMaster. A reconciling pass (lookup of
-the unpaired record names) will close it; not done yet.
+**Assets, not masters, are the unit.** A duplicated photo is a second
+CPLAsset on the same CPLMaster: this library has 48,950 assets on 48,800
+masters. Keyed by master, 150 assets went missing. A page is capped at 200
+*records*, so with shared masters it holds 100–104 assets; since masters
+never outnumber assets, a full page always holds at least 100, and stepping
+pages by 100 positions can overlap but never skip. Keyed by asset record,
+the index matches iCloud's count exactly. Halves split across pages turned
+out not to happen, but `sync::walk` pairs them up (looking up missing
+masters) in case they do.
 
 ## Staying up to date
 

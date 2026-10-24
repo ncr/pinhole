@@ -2,6 +2,7 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -37,10 +38,15 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("0.1.0");
     app.setDesktopFileName("pinhole");
 
+    // The real library once pinhole-sync has made one, the synthetic one
+    // otherwise.
+    const QString data = QDir::homePath() + "/.local/share/pinhole/";
+    const QString defaultLibrary =
+        QFile::exists(data + "library/library.sqlite") ? data + "library" : data + "fake";
+
     QCommandLineParser parser;
     parser.addHelpOption();
-    parser.addOption({"library", "Library directory (library.sqlite and thumbs/).", "dir",
-                      QDir::homePath() + "/.local/share/pinhole/fake"});
+    parser.addOption({"library", "Library directory (library.sqlite and thumbs/).", "dir", defaultLibrary});
     parser.addOption({"bench", "Run the scripted benchmark, print the results and quit."});
     parser.addOption({"decoders", "Thumbnail decoding threads.", "n",
                       QString::number(std::max(2, QThread::idealThreadCount() - 4))});
@@ -50,10 +56,14 @@ int main(int argc, char *argv[]) {
 
     Library library;
     QString error;
+    QElapsedTimer loadTimer;
+    loadTimer.start();
     if (!library.open(parser.value("library"), &error)) {
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
         return 1;
     }
+    std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
+                 loadTimer.elapsed());
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     FrameStats stats;
