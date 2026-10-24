@@ -3,43 +3,55 @@
 #include "framestats.h"
 #include "library.h"
 #include "thumbnailloader.h"
+#include "touchpadhold.h"
 
+#include <QFile>
+#include <QInputDevice>
 #include <QNativeGestureEvent>
 #include <QQuickWindow>
-#include <QSGFlatColorMaterial>
 #include <QSGGeometryNode>
+#include <QSGOpacityNode>
 #include <QSGTexture>
 #include <QSGTextureMaterial>
 #include <QSGVertexColorMaterial>
-#include <QThread>
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_map>
 
 namespace {
 
-constexpr int kMinColumns = 1;
-constexpr int kMaxColumns = 40;
-// Seconds for a cell to glide to its place after the column count changes,
-// and for the visual zoom to settle after a pinch.
-constexpr double kTransition = 0.22;
-// Inertia: velocity falls by this factor per millisecond, like a flick on a
-// Mac trackpad.
-constexpr double kDecayPerMs = 0.998;
+// The zoom levels, as column counts. Neighbours are about 1.4x apart: close
+// enough that a cross-fade between two of them reads as one motion.
+constexpr std::array<int, 11> kLevels = {1, 2, 3, 4, 6, 8, 11, 15, 21, 29, 40};
+constexpr int kDefaultLevel = 5;
+// Seconds for a zoom to settle after the fingers lift, or for a zoom step.
+constexpr double kSettleSeconds = 0.3;
+// A pinch released while still moving goes on this long, in seconds, when
+// picking the level it lands on: a quick pinch commits.
+constexpr double kPinchProjection = 0.12;
 // Texture data uploaded per frame, at most, and the time that may take.
 // More and a frame could miss its vsync. Counted in bytes, not textures: a
 // 1/8 thumbnail is 64 times cheaper than a full one.
 const qint64 kUploadBytesPerFrame = qint64(qEnvironmentVariableIntValue("PINHOLE_UPLOAD_MB") > 0
-                                                    ? qEnvironmentVariableIntValue("PINHOLE_UPLOAD_MB") : 8) << 20;
+                                               ? qEnvironmentVariableIntValue("PINHOLE_UPLOAD_MB")
+                                               : 8)
+                                    << 20;
 constexpr qint64 kUploadNanos = 3'000'000;
-// Each upload also has a fixed cost on the GPU, whatever its size: frames
-// with a hundred tiny uploads stalled for 20-30 ms.
-const int kUploadsPerFrame = qEnvironmentVariableIntValue("PINHOLE_UPLOAD_COUNT") > 0
-                                 ? qEnvironmentVariableIntValue("PINHOLE_UPLOAD_COUNT") : 1000;
+// Cells this small (device pixels) are drawn from mosaic pages rather than
+// their own thumbnails; see thumbnailloader.h. Pages kept on the GPU, at
+// 4 MB each.
+constexpr double kMosaicBelowPx = 100;
+constexpr size_t kMaxPages = 64;
 
 double easeOut(double t) { return 1 - std::pow(1 - std::clamp(t, 0.0, 1.0), 3); }
+double lerp(double a, double b, double t) { return a + (b - a) * t; }
+QPointF lerp(QPointF a, QPointF b, double t) { return a + (b - a) * t; }
+
+// A hairline gap between cells, wider when cells are big.
+double gapFor(int columns) { return columns <= 12 ? 2 : 1; }
 
 // Texture coordinates of the centred square of a w x h image.
 QRectF squareCrop(int w, int h) {
@@ -55,6 +67,23 @@ QRectF squareCrop(int w, int h) {
 
 } // namespace
 
+// PINHOLE_INPUT_LOG=<file>: every scroll and gesture event as it arrives,
+// for tuning scrolling against what the touchpad really sends.
+static void logInput(const QString &line) {
+    static QFile *file = [] {
+        const QString path = qEnvironmentVariable("PINHOLE_INPUT_LOG");
+        if (path.isEmpty())
+            return static_cast<QFile *>(nullptr);
+        auto *f = new QFile(path);
+        return f->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text) ? f : (delete f, nullptr);
+    }();
+    if (!file)
+        return;
+    static QElapsedTimer clock = [] { QElapsedTimer t; t.start(); return t; }();
+    file->write(QStringLiteral("%1 %2\n").arg(clock.nsecsElapsed() / 1e6, 10, 'f', 2).arg(line).toUtf8());
+    file->flush();
+}
+
 // Everything the render thread owns.
 struct GridRenderState {
     struct Entry {
@@ -63,14 +92,24 @@ struct GridRenderState {
         quint64 lastUsed = 0;
     };
     std::unordered_map<int, Entry> cache;
+    struct Page {
+        QSGTexture *texture = nullptr;
+        quint64 lastUsed = 0;
+    };
+    std::unordered_map<int, Page> pages;
     qint64 bytes = 0;
     int textures = 0;
     quint64 frame = 0;
 
-    // One node per texture (atlas page), keyed by the texture's comparison
-    // key, plus one for the colour placeholders.
-    std::unordered_map<qint64, QSGGeometryNode *> groups;
-    QSGGeometryNode *placeholders = nullptr;
+    // Two drawing slots: the main layer, and during a zoom the one faded
+    // over it. Each is one node per texture (atlas page), keyed by the
+    // texture's comparison key, plus one for the colour placeholders.
+    struct Slot {
+        QSGOpacityNode *opacity = nullptr;
+        QSGGeometryNode *placeholders = nullptr;
+        std::unordered_map<qint64, QSGGeometryNode *> groups;
+    };
+    Slot drawSlots[2];
 
     double lastScroll = 0;
     qint64 lastFrameAt = 0;
@@ -80,6 +119,9 @@ struct GridRenderState {
             for (QSGTexture *t : entry.texture)
                 delete t;
         cache.clear();
+        for (auto &[index, page] : pages)
+            delete page.texture;
+        pages.clear();
         bytes = 0;
         textures = 0;
     }
@@ -88,6 +130,10 @@ struct GridRenderState {
 
 PhotoGrid::PhotoGrid(QQuickItem *parent)
     : QQuickItem(parent), m_render(std::make_unique<GridRenderState>()) {
+    if (const double gain = qEnvironmentVariable("PINHOLE_SCROLL_GAIN").toDouble(); gain > 0)
+        m_physics.params().trackingGain = gain;
+    m_level = kDefaultLevel;
+    m_columns = kLevels[size_t(m_level)];
     setFlag(ItemHasContents);
     setAcceptedMouseButtons(Qt::AllButtons);
     setClip(true);
@@ -108,6 +154,32 @@ void PhotoGrid::setSources(const Library *library, ThumbnailLoader *loader, Fram
     scrollToEnd();
 }
 
+void PhotoGrid::setTouchpadHold(TouchpadHold *hold) {
+    m_hold = hold;
+    connect(hold, &TouchpadHold::began, this, [this](quint32 time, quint32 fingers) {
+        logInput(QStringLiteral("hold begin time=%1 fingers=%2").arg(time).arg(fingers));
+        touched(time, "hold");
+    });
+    connect(hold, &TouchpadHold::ended, this, [](quint32 time, bool cancelled) {
+        logInput(QStringLiteral("hold end time=%1 cancelled=%2").arg(time).arg(cancelled));
+    });
+}
+
+void PhotoGrid::touched(double timeMs, const char *) {
+    if (timeMs < m_coastFrom)
+        return;
+    m_physics.touch(timeMs);
+    m_scroll = m_physics.position();
+    updateAnimating();
+    update();
+}
+
+void PhotoGrid::mousePressEvent(QMouseEvent *event) {
+    // A click, or a tap with tap-to-click, is a touch too.
+    touched(double(event->timestamp()), "click");
+    event->accept();
+}
+
 int PhotoGrid::count() const { return m_library ? m_library->count() : 0; }
 
 void PhotoGrid::setStatsVisible(bool visible) {
@@ -116,6 +188,9 @@ void PhotoGrid::setStatsVisible(bool visible) {
     m_statsVisible = visible;
     emit statsVisibleChanged();
 }
+
+int PhotoGrid::levelCount() { return int(kLevels.size()); }
+int PhotoGrid::columnsAt(int level) { return kLevels[size_t(std::clamp(level, 0, levelCount() - 1))]; }
 
 // Layout
 
@@ -128,166 +203,307 @@ double PhotoGrid::maxScroll(int columns) const {
     return std::max(0.0, rows * s - height());
 }
 
-void PhotoGrid::clampScroll() {
-    const double max = maxScroll(m_columns);
-    if (m_scroll < 0 || m_scroll > max) {
-        m_scroll = std::clamp(m_scroll, 0.0, max);
-        m_velocity = 0;
-        m_wheelRemaining = 0;
-    }
+void PhotoGrid::syncBounds() { m_physics.setBounds(0, maxScroll(m_columns), height()); }
+
+void PhotoGrid::setScroll(double y) {
+    syncBounds();
+    m_scroll = std::clamp(y, 0.0, maxScroll(m_columns));
+    m_physics.jumpTo(m_scroll);
+    updateAnimating();
+    update();
 }
 
-QRectF PhotoGrid::cellRect(int index, const Layout &l) const {
+QRectF PhotoGrid::cellRect(int index, const Layer &l) const {
     const double s = strideFor(l.columns);
-    // A hairline gap between cells, wider when cells are big.
-    const double gap = l.columns <= 12 ? 2 : 1;
-    const int row = index / l.columns;
-    const int col = index % l.columns;
-    const double x = col * s;
-    const double y = row * s - l.scroll;
-    const QPointF a = l.anchor;
-    return {a.x() + (x - a.x()) * l.scale, a.y() + (y - a.y()) * l.scale, (s - gap) * l.scale, (s - gap) * l.scale};
+    const double size = (s - gapFor(l.columns)) * l.scale;
+    const double x = (index % l.columns) * s;
+    const double y = (index / l.columns) * s;
+    return {l.at.x() + (x - l.pin.x()) * l.scale, l.at.y() + (y - l.pin.y()) * l.scale, size, size};
 }
 
-// Switch to `columns` at visual `scale` around `anchor`, keeping the photo
-// under the anchor under it, and let the cells glide there.
-void PhotoGrid::relayout(int columns, double scale, QPointF anchor, bool glide) {
-    columns = std::clamp(columns, kMinColumns, kMaxColumns);
-    const Layout before{m_columns, m_scroll, m_scale, m_anchor};
-    if (columns == m_columns && anchor == m_anchor) {
-        m_scale = scale;
-        update();
-        return;
+QPointF PhotoGrid::pinIn(int columns) const {
+    const double s = strideFor(columns);
+    return {(m_zoom.index % columns + m_zoom.fraction.x()) * s, (m_zoom.index / columns + m_zoom.fraction.y()) * s};
+}
+
+int PhotoGrid::levelForColumns(int columns) const {
+    int best = 0;
+    for (int i = 0; i < levelCount(); ++i)
+        if (std::abs(kLevels[size_t(i)] - columns) < std::abs(kLevels[size_t(best)] - columns))
+            best = i;
+    return best;
+}
+
+// What is drawn now: the grid at rest, or during a zoom the two levels
+// around the current cell size, the stronger one first.
+std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
+    if (!m_zoom.active)
+        return {Layer{m_columns, 1, QPointF(0, m_scroll), QPointF(0, 0), 1}};
+
+    auto layerFor = [&](int level, double weight) {
+        const int columns = kLevels[size_t(level)];
+        const double scale = m_zoom.stride / strideFor(columns);
+        const QPointF pin = pinIn(columns);
+        // Vertically the pinned photo stays under the fingers. Across, a
+        // level is kept where it covers the window: in another level the
+        // photo sits in a different column, and pinning it there would slide
+        // the whole grid sideways and open a dark band at one edge. A level
+        // scaled up keeps both edges outside the view; one scaled down (only
+        // ever the faded one on top) keeps them inside.
+        const double grid = width() * scale;
+        double left = m_zoom.at.x() - pin.x() * scale;
+        left = scale >= 1 ? std::clamp(left, width() - grid, 0.0) : std::clamp(left, 0.0, width() - grid);
+        // Down the window the same, near the library's ends: a level tall
+        // enough to fill the window is kept filling it, rather than holding
+        // the pinned photo's height and showing empty space past the first or
+        // last row.
+        const double tall = (count() + columns - 1) / columns * strideFor(columns) * scale;
+        double top = m_zoom.at.y() - pin.y() * scale;
+        top = tall >= height() ? std::clamp(top, height() - tall, 0.0) : 0.0;
+        return Layer{columns, scale, pin, QPointF(left + pin.x() * scale, top + pin.y() * scale), weight};
+    };
+    // Two levels at one cell size: the denser is scaled up and always covers
+    // the view, the coarser is scaled down and leaves gaps at the edges. So
+    // the denser is drawn whole underneath and the coarser faded over it:
+    // its share over the rest blends just like two half-transparent layers,
+    // without the background ever showing through.
+    auto pair = [&](int a, double aWeight, int b) -> std::vector<Layer> {
+        const bool aDenser = kLevels[size_t(a)] > kLevels[size_t(b)];
+        const int dense = aDenser ? a : b, coarse = aDenser ? b : a;
+        const double coarseWeight = aDenser ? 1 - aWeight : aWeight;
+        if (coarseWeight >= 0.999)
+            return {layerFor(coarse, 1)};
+        if (coarseWeight <= 0.001)
+            return {layerFor(dense, 1)};
+        return {layerFor(dense, 1), layerFor(coarse, coarseWeight)};
+    };
+    if (m_zoom.settling) {
+        const double w = lerp(m_zoom.fromWeight, 1, easeOut(m_zoom.t));
+        if (m_zoom.partner == m_zoom.target)
+            return {layerFor(m_zoom.target, 1)};
+        return pair(m_zoom.target, w, m_zoom.partner);
     }
 
-    // The point under the anchor, as an item and a fraction within it.
-    const double s0 = strideFor(m_columns);
-    const double lx = m_anchor.x() + (anchor.x() - m_anchor.x()) / m_scale;
-    const double ly = m_anchor.y() + (anchor.y() - m_anchor.y()) / m_scale + m_scroll;
-    const int col0 = std::clamp(int(lx / s0), 0, m_columns - 1);
-    const int row0 = std::max(0, int(ly / s0));
-    const double fy = ly / s0 - row0;
-    const int index = std::clamp(row0 * m_columns + col0, 0, std::max(0, count() - 1));
+    // Pinching: the two levels whose cell sizes bracket the current one.
+    // Strides shrink as the column count grows.
+    const int last = levelCount() - 1;
+    if (m_zoom.stride >= strideFor(kLevels.front()))
+        return {layerFor(0, 1)};
+    if (m_zoom.stride <= strideFor(kLevels.back()))
+        return {layerFor(last, 1)};
+    int coarse = 0;
+    while (coarse < last - 1 && m_zoom.stride < strideFor(kLevels[size_t(coarse + 1)]))
+        coarse += 1;
+    const int dense = coarse + 1;
+    const double sDense = strideFor(kLevels[size_t(dense)]);
+    const double sCoarse = strideFor(kLevels[size_t(coarse)]);
+    // The coarser level's share grows with the zoom, measured as a ratio.
+    const double t = std::log(m_zoom.stride / sDense) / std::log(sCoarse / sDense);
+    return pair(coarse, t, dense);
+}
 
-    const bool columnsChanged = columns != m_columns;
-    m_columns = columns;
-    m_scale = scale;
-    m_anchor = anchor;
-    const double s1 = strideFor(columns);
-    const double y1 = (index / columns + fy) * s1;
-    // With the anchor as the fixed point of the scale, the anchor shows
-    // layout point `anchor` whatever the scale.
-    m_scroll = y1 - anchor.y();
-    clampScroll();
-
-    if (columnsChanged) {
-        if (glide) {
-            m_transitionFrom = before;
-            m_transitionT = 0;
-        }
-        emit this->columnsChanged();
+void PhotoGrid::beginZoom(QPointF at) {
+    m_physics.stop();
+    m_driveVelocity = 0;
+    // Find the photo under `at` in whatever is shown now (a settle that is
+    // still running counts: the zoom continues from where it is).
+    const std::vector<Layer> shown = layers();
+    const Layer &l = shown.front();
+    const double s = strideFor(l.columns);
+    const QPointF content = l.pin + (at - l.at) / l.scale;
+    const int col = std::clamp(int(std::floor(content.x() / s)), 0, l.columns - 1);
+    const int row = std::max(0, int(std::floor(content.y() / s)));
+    int index = row * l.columns + col;
+    QPointF fraction(content.x() / s - col, content.y() / s - row);
+    if (index >= count()) {
+        // Past the last photo: pin the last one, at the same point in it.
+        index = std::max(0, count() - 1);
     }
+    fraction = QPointF(std::clamp(fraction.x(), 0.0, 1.0), std::clamp(fraction.y(), 0.0, 1.0));
+
+    m_zoom.active = true;
+    m_zoom.settling = false;
+    m_zoom.index = index;
+    m_zoom.fraction = fraction;
+    m_zoom.stride = s * l.scale;
+    m_zoom.startStride = m_zoom.stride;
+    m_zoom.pinchScale = 1;
+    m_zoom.samples.clear();
+    // The pinned point where it is drawn now (not quite `at` when the
+    // fingers are past the last photo), so taking over moves nothing.
+    m_zoom.at = l.at + (pinIn(l.columns) - l.pin) * l.scale;
+    m_zoom.pinStart = m_zoom.at;
+    m_zoom.fingerStart = at;
+    m_pinTracked = false; // a new photo is pinned: start measuring afresh
+    updateAnimating();
+}
+
+void PhotoGrid::zoomTo(double stride, QPointF at) {
+    // Past the closest level the zoom gives a little, like a rubber band,
+    // and springs back on release.
+    const double finest = strideFor(kLevels.back());
+    const double coarsest = strideFor(kLevels.front());
+    // Zooming out stops at the last level: shrinking past it would leave
+    // the window's edges empty.
+    if (stride < finest)
+        stride = finest;
+    else if (stride > coarsest)
+        stride = coarsest * std::pow(stride / coarsest, 0.3);
+    m_zoom.stride = stride;
+    // Moving fingers pan: the pinned point follows them.
+    m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
+    const double now = m_clock.nsecsElapsed() / 1e9;
+    m_zoom.samples.emplace_back(now, std::log(stride));
+    while (m_zoom.samples.size() > 2 && now - m_zoom.samples.front().first > 0.1)
+        m_zoom.samples.erase(m_zoom.samples.begin());
+    update();
+}
+
+void PhotoGrid::settleZoom(int level) {
+    level = std::clamp(level, 0, levelCount() - 1);
+    const std::vector<Layer> shown = layers();
+    const int columns = kLevels[size_t(level)];
+    // The partner is whichever other level is showing, fading out; the
+    // target's share is its opacity if it is the faded one on top, or what
+    // the faded one leaves if it is the base.
+    int partner = level;
+    double weight = 0;
+    for (size_t k = 0; k < shown.size(); ++k) {
+        if (shown[k].columns == columns)
+            weight = k == 0 ? (shown.size() > 1 ? 1 - shown[1].opacity : 1) : shown[k].opacity;
+        else
+            partner = levelForColumns(shown[k].columns);
+    }
+
+    // The pinned photo keeps its height on screen; across it lands in its
+    // own column. Near the ends the scroll limit has the last word.
+    const QPointF pin = pinIn(columns);
+    const double scroll = std::clamp(pin.y() - m_zoom.at.y(), 0.0, maxScroll(columns));
+
+    m_zoom.settling = true;
+    m_zoom.target = level;
+    m_zoom.partner = partner;
+    m_zoom.fromStride = m_zoom.stride;
+    m_zoom.toStride = strideFor(columns);
+    m_zoom.fromAt = m_zoom.at;
+    m_zoom.toAt = QPointF(pin.x(), pin.y() - scroll);
+    m_zoom.fromWeight = weight;
+    m_zoom.toScroll = scroll;
+    m_zoom.t = 0;
     updateAnimating();
     update();
 }
 
 void PhotoGrid::zoomStep(int delta) {
-    const QPointF anchor = isUnderMouse() ? mapFromGlobal(QCursor::pos()) : QPointF(width() / 2, height() / 2);
-    relayout(m_columns + delta, 1, anchor, true);
+    const QPointF at = isUnderMouse() ? mapFromGlobal(QCursor::pos()) : QPointF(width() / 2, height() / 2);
+    const int from = m_zoom.active ? m_zoom.target : m_level;
+    beginZoom(at);
+    settleZoom(from + delta);
 }
 
-void PhotoGrid::setEffectiveStride(double effective, QPointF anchor) {
-    m_pinching = true;
-    m_snapT = 1;
-    const int columns = std::clamp(int(std::lround(width() / effective)), kMinColumns, kMaxColumns);
-    // During a pinch the column count changes several times a second; a
-    // glide each time would keep every cell permanently in flight. The
-    // scale is continuous, so reflowing at once reads as one motion.
-    relayout(columns, effective / strideFor(columns), anchor, false);
+void PhotoGrid::setEffectiveStride(double stride, QPointF anchor) {
+    if (!m_zoom.active || m_zoom.settling)
+        beginZoom(anchor);
+    zoomTo(stride, anchor);
 }
 
 void PhotoGrid::endContinuousZoom() {
-    m_pinching = false;
-    if (std::abs(m_scale - 1) > 1e-3) {
-        m_snapFrom = m_scale;
-        m_snapT = 0;
+    if (!m_zoom.active || m_zoom.settling)
+        return;
+    // Where the pinch was heading: its speed at release, carried on briefly.
+    double logStride = std::log(m_zoom.stride);
+    if (m_zoom.samples.size() >= 2) {
+        const auto &[t0, l0] = m_zoom.samples.front();
+        const auto &[t1, l1] = m_zoom.samples.back();
+        if (t1 - t0 > 0.01)
+            logStride += (l1 - l0) / (t1 - t0) * kPinchProjection;
     }
-    updateAnimating();
+    // Land on the level nearest that, but never more than one level past
+    // the two being cross-faded.
+    const std::vector<Layer> shown = layers();
+    int lo = levelCount() - 1, hi = 0;
+    for (const Layer &l : shown) {
+        lo = std::min(lo, levelForColumns(l.columns));
+        hi = std::max(hi, levelForColumns(l.columns));
+    }
+    lo = std::max(0, lo - 1);
+    hi = std::min(levelCount() - 1, hi + 1);
+    int best = lo;
+    for (int i = lo; i <= hi; ++i)
+        if (std::abs(std::log(strideFor(kLevels[size_t(i)])) - logStride) <
+            std::abs(std::log(strideFor(kLevels[size_t(best)])) - logStride))
+            best = i;
+    settleZoom(best);
 }
 
-void PhotoGrid::scrollToStart() {
-    m_velocity = 0;
-    m_wheelRemaining = 0;
-    m_scroll = 0;
-    update();
+void PhotoGrid::setColumnsNow(int columns) {
+    const double fraction = maxScroll(m_columns) > 0 ? m_scroll / maxScroll(m_columns) : 1;
+    m_zoom = {};
+    m_level = levelForColumns(columns);
+    m_columns = kLevels[size_t(m_level)];
+    setScroll(fraction * maxScroll(m_columns));
+    emit columnsChanged();
 }
 
-void PhotoGrid::scrollToEnd() {
-    m_velocity = 0;
-    m_wheelRemaining = 0;
-    m_scroll = maxScroll(m_columns);
-    update();
-}
+void PhotoGrid::scrollToStart() { setScroll(0); }
+
+void PhotoGrid::scrollToEnd() { setScroll(maxScroll(m_columns)); }
 
 void PhotoGrid::scrollPages(qreal pages) {
-    m_wheelRemaining += pages * height() * 0.9;
+    syncBounds();
+    m_physics.nudge(pages * height() * 0.9);
     updateAnimating();
 }
 
 void PhotoGrid::setDriveVelocity(double v) {
     m_driveVelocity = v;
-    m_velocity = 0;
+    m_physics.jumpTo(m_scroll);
     updateAnimating();
 }
 
 void PhotoGrid::fling(double v) {
-    m_velocity = v;
+    syncBounds();
+    m_physics.fling(v);
     updateAnimating();
 }
 
-void PhotoGrid::jumpToFraction(double f) {
-    m_velocity = 0;
-    m_wheelRemaining = 0;
-    m_scroll = std::clamp(f, 0.0, 1.0) * maxScroll(m_columns);
-    update();
-}
+void PhotoGrid::jumpToFraction(double f) { setScroll(std::clamp(f, 0.0, 1.0) * maxScroll(m_columns)); }
 
 // Motion
 
 void PhotoGrid::advance(qreal dt) {
     dt = std::clamp(dt, 0.0, 0.05);
     if (m_driveVelocity != 0) {
-        m_scroll += m_driveVelocity * dt;
-        clampScroll();
-    } else if (m_velocity != 0) {
-        m_scroll += m_velocity * dt;
-        m_velocity *= std::pow(kDecayPerMs, dt * 1000);
-        if (std::abs(m_velocity) < 8)
-            m_velocity = 0;
-        clampScroll();
+        setScroll(m_scroll + m_driveVelocity * dt);
+    } else if (m_physics.animating()) {
+        if (m_hold)
+            m_hold->poll();
+        m_physics.step(dt);
+        m_scroll = m_physics.position();
     }
-    if (m_wheelRemaining != 0) {
-        // Mouse wheel notches ease in over ~80 ms instead of jumping.
-        const double step = m_wheelRemaining * (1 - std::exp(-dt / 0.08));
-        m_scroll += step;
-        m_wheelRemaining -= step;
-        if (std::abs(m_wheelRemaining) < 0.5)
-            m_wheelRemaining = 0;
-        clampScroll();
-    }
-    if (m_transitionT < 1)
-        m_transitionT = std::min(1.0, m_transitionT + dt / kTransition);
-    if (m_snapT < 1) {
-        m_snapT = std::min(1.0, m_snapT + dt / kTransition);
-        m_scale = m_snapFrom + (1 - m_snapFrom) * easeOut(m_snapT);
+    if (m_zoom.active && m_zoom.settling) {
+        m_zoom.t = std::min(1.0, m_zoom.t + dt / kSettleSeconds);
+        const double e = easeOut(m_zoom.t);
+        // Scale moves as a ratio, so zooming in and out feel the same speed.
+        m_zoom.stride = std::exp(lerp(std::log(m_zoom.fromStride), std::log(m_zoom.toStride), e));
+        m_zoom.at = lerp(m_zoom.fromAt, m_zoom.toAt, e);
+        if (m_zoom.t >= 1) {
+            const bool changed = m_level != m_zoom.target;
+            m_zoom.active = false;
+            m_zoom.settling = false;
+            m_level = m_zoom.target;
+            m_columns = kLevels[size_t(m_level)];
+            setScroll(m_zoom.toScroll);
+            if (changed)
+                emit columnsChanged();
+        }
     }
     updateAnimating();
     update();
 }
 
 void PhotoGrid::updateAnimating() {
-    const bool animating = m_driveVelocity != 0 || m_velocity != 0 || m_wheelRemaining != 0 || m_transitionT < 1 ||
-                           m_snapT < 1;
+    const bool animating = m_driveVelocity != 0 || m_physics.animating() || (m_zoom.active && m_zoom.settling);
     if (animating != m_animating) {
         m_animating = animating;
         emit animatingChanged();
@@ -301,56 +517,72 @@ void PhotoGrid::geometryChange(const QRectF &newGeometry, const QRectF &oldGeome
         const double ratio = newGeometry.width() / oldGeometry.width();
         m_scroll *= ratio;
     }
-    clampScroll();
-    update();
+    setScroll(m_scroll);
 }
 
 void PhotoGrid::wheelEvent(QWheelEvent *event) {
+    logInput(QStringLiteral("wheel phase=%1 pixel=%2,%3 angle=%4,%5 inverted=%6 device=%7 type=%8 ts=%9 mods=%10")
+                 .arg(int(event->phase()))
+                 .arg(event->pixelDelta().x()).arg(event->pixelDelta().y())
+                 .arg(event->angleDelta().x()).arg(event->angleDelta().y())
+                 .arg(event->inverted())
+                 .arg(event->device() ? event->device()->name() : QStringLiteral("?"))
+                 .arg(event->device() ? int(event->device()->type()) : -1)
+                 .arg(event->timestamp())
+                 .arg(int(event->modifiers())));
     if (event->modifiers() & Qt::ControlModifier) {
         const int notches = event->angleDelta().y() / 120;
-        if (notches != 0)
-            relayout(m_columns - notches, 1, event->position(), true);
+        if (notches != 0) {
+            const int from = m_zoom.active ? m_zoom.target : m_level;
+            beginZoom(event->position());
+            settleZoom(from - notches);
+        }
+        event->accept();
+        return;
+    }
+    if (m_zoom.active) {
+        // No scrolling while a zoom is in flight; it settles in a moment.
         event->accept();
         return;
     }
 
-    const qint64 now = m_clock.nsecsElapsed();
-    if (!event->pixelDelta().isNull()) {
-        // Touchpad: follow the fingers exactly, and keep the motion going
-        // after they lift.
-        if (event->phase() == Qt::ScrollBegin) {
-            m_velocity = 0;
-            m_wheelSamples.clear();
+    // A touchpad reports begin, update and end phases; a mouse wheel none.
+    // The begin and end come with no movement in them, and each arrives
+    // twice, so they are recognised by phase, and repeats ignored.
+    const double t = double(event->timestamp());
+    const double dy = -event->pixelDelta().y();
+    switch (event->phase()) {
+    case Qt::ScrollBegin:
+        if (!m_physics.tracking()) {
+            syncBounds();
+            m_physics.begin(t);
         }
-        const double dy = -event->pixelDelta().y();
-        if (event->phase() == Qt::ScrollMomentum) {
-            m_scroll += dy;
-        } else if (event->phase() == Qt::ScrollEnd) {
-            // Release velocity from the last 80 ms of movement.
-            double distance = 0;
-            qint64 first = now;
-            for (const auto &s : m_wheelSamples) {
-                if (now - s.at < 80'000'000) {
-                    distance += s.dy;
-                    first = std::min(first, s.at);
-                }
-            }
-            const double span = std::max(0.016, (now - first) / 1e9);
-            if (std::abs(distance) > 4)
-                m_velocity = distance / span;
-            m_wheelSamples.clear();
+        break;
+    case Qt::ScrollUpdate:
+    case Qt::ScrollMomentum:
+        syncBounds();
+        m_physics.move(t, !event->pixelDelta().isNull() ? dy : -event->angleDelta().y() / 8.0);
+        break;
+    case Qt::ScrollEnd:
+        // Holds from before this lift (the fingers landing for this very
+        // scroll) are handed out now, while nothing coasts for them to stop.
+        if (m_hold)
+            m_hold->poll();
+        m_coastFrom = t;
+        m_physics.end(t);
+        break;
+    case Qt::NoScrollPhase:
+        syncBounds();
+        if (!event->pixelDelta().isNull()) {
+            // Smooth scrolling without phases: follow it directly.
+            setScroll(m_scroll + dy);
         } else {
-            m_velocity = 0;
-            m_scroll += dy;
-            m_wheelSamples.push_back({now, dy});
-            if (m_wheelSamples.size() > 32)
-                m_wheelSamples.erase(m_wheelSamples.begin());
+            // Mouse wheel: three quarters of a row per notch, eased.
+            m_physics.nudge(-event->angleDelta().y() / 120.0 * stride() * 0.75);
         }
-    } else {
-        // Mouse wheel: a third of a row per notch, eased.
-        m_wheelRemaining += -event->angleDelta().y() / 120.0 * stride() * 0.75;
+        break;
     }
-    clampScroll();
+    m_scroll = m_physics.position();
     updateAnimating();
     update();
     event->accept();
@@ -359,16 +591,27 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
 bool PhotoGrid::event(QEvent *event) {
     if (event->type() == QEvent::NativeGesture) {
         auto *g = static_cast<QNativeGestureEvent *>(event);
+        logInput(QStringLiteral("gesture type=%1 value=%2 delta=%3,%4 fingers=%5 pos=%6,%7")
+                     .arg(int(g->gestureType()))
+                     .arg(g->value())
+                     .arg(g->delta().x()).arg(g->delta().y())
+                     .arg(g->fingerCount())
+                     .arg(g->position().x()).arg(g->position().y()));
         switch (g->gestureType()) {
         case Qt::BeginNativeGesture:
-            m_velocity = 0;
+            beginZoom(g->position());
             break;
         case Qt::ZoomNativeGesture:
-            setEffectiveStride(stride() * m_scale * (1 + g->value()), g->position());
+            // `value` is the change in scale since the last event; the scale
+            // since the pinch began is their sum. Multiplying them instead
+            // compounds, and a quick pinch zoomed 14 times over.
+            if (!m_zoom.active || m_zoom.settling)
+                beginZoom(g->position());
+            m_zoom.pinchScale = std::clamp(m_zoom.pinchScale + g->value(), 0.02, 50.0);
+            zoomTo(m_zoom.startStride * m_zoom.pinchScale, g->position());
             break;
         case Qt::EndNativeGesture:
-            if (m_pinching)
-                endContinuousZoom();
+            endContinuousZoom();
             break;
         default:
             break;
@@ -392,8 +635,8 @@ void PhotoGrid::itemChange(ItemChange change, const ItemChangeData &value) {
 void PhotoGrid::invalidateSceneGraph() {
     // Render thread, with the scene graph going away: its textures go too.
     m_render->dropAll();
-    m_render->groups.clear();
-    m_render->placeholders = nullptr;
+    for (auto &slot : m_render->drawSlots)
+        slot = {};
 }
 
 void PhotoGrid::releaseResources() {
@@ -410,32 +653,39 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     auto *root = old;
     if (!root) {
         root = new QSGNode;
-        rs.groups.clear();
-        rs.placeholders = new QSGGeometryNode;
-        auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
-        geometry->setDrawingMode(QSGGeometry::DrawTriangles);
-        rs.placeholders->setGeometry(geometry);
-        rs.placeholders->setFlag(QSGNode::OwnsGeometry);
-        rs.placeholders->setMaterial(new QSGVertexColorMaterial);
-        rs.placeholders->setFlag(QSGNode::OwnsMaterial);
-        root->appendChildNode(rs.placeholders);
+        for (auto &slot : rs.drawSlots) {
+            slot = {};
+            slot.opacity = new QSGOpacityNode;
+            slot.placeholders = new QSGGeometryNode;
+            auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
+            geometry->setDrawingMode(QSGGeometry::DrawTriangles);
+            slot.placeholders->setGeometry(geometry);
+            slot.placeholders->setFlag(QSGNode::OwnsGeometry);
+            slot.placeholders->setMaterial(new QSGVertexColorMaterial);
+            slot.placeholders->setFlag(QSGNode::OwnsMaterial);
+            slot.opacity->appendChildNode(slot.placeholders);
+            root->appendChildNode(slot.opacity);
+        }
     }
     if (!m_library || !m_loader || width() <= 0 || count() == 0)
         return root;
 
     const qreal dpr = window()->effectiveDevicePixelRatio();
+    const std::vector<Layer> drawn = layers();
+    const QRectF view(0, 0, width(), height());
 
     // Speed, in rows per second, decides how sharp a thumbnail is worth
     // decoding and how far ahead to look.
     const qint64 now = m_clock.nsecsElapsed();
     const double s = stride();
-    const double rowsOnScreen = height() / (s * m_scale);
+    const double rowsOnScreen = height() / s;
     if (rs.lastFrameAt > 0) {
         const double dt = std::max(1e-3, (now - rs.lastFrameAt) / 1e9);
         const double rows = (m_scroll - rs.lastScroll) / s;
         // A jump (scrubber, Home, End) is not motion: nothing is moving once
         // it lands, so it should not be decoded as if it were.
-        const bool jumped = std::abs(rows) > rowsOnScreen && m_driveVelocity == 0 && m_velocity == 0;
+        const bool jumped = std::abs(rows) > rowsOnScreen && m_driveVelocity == 0 && !m_physics.animating() &&
+                            !m_physics.tracking();
         m_speedRows = jumped ? 0 : m_speedRows * 0.7 + rows / dt * 0.3;
     }
     rs.lastFrameAt = now;
@@ -445,34 +695,70 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     // decoders could not keep up anyway: coarse previews only.
     const bool scrubbing = speed > rowsOnScreen * 3;
     const bool fast = speed > rowsOnScreen * 0.75;
+    // How far ahead to fetch, in rows: a screen and a half, or half a
+    // second of travel when that is more. A mosaic page takes about 0.1 s
+    // to build; at scrubbing speed a screen ahead is passed before it lands.
+    const int lookahead = int(std::ceil(std::max(rowsOnScreen * 1.5, speed * 0.5)));
 
-    // 1. What is on screen.
-    const Layout layout{m_columns, m_scroll, m_scale, m_anchor};
-    const double top = m_anchor.y() + (0 - m_anchor.y()) / m_scale + m_scroll;
-    const double bottom = m_anchor.y() + (height() - m_anchor.y()) / m_scale + m_scroll;
-    const int firstRow = std::max(0, int(std::floor(top / s)));
-    const int lastRow = int(std::floor(bottom / s));
-    const int first = std::min(count(), firstRow * m_columns);
-    const int last = std::min(count(), (lastRow + 1) * m_columns);
-    const double transition = easeOut(m_transitionT);
+    // 1. What each layer shows: rows and columns in view.
+    struct Range {
+        int firstRow, lastRow, firstCol, lastCol;
+    };
+    std::vector<Range> ranges;
+    for (const Layer &l : drawn) {
+        const double ls = strideFor(l.columns);
+        const QPointF topLeft = l.pin + (view.topLeft() - l.at) / l.scale;
+        const QPointF bottomRight = l.pin + (view.bottomRight() - l.at) / l.scale;
+        ranges.push_back({std::max(0, int(std::floor(topLeft.y() / ls))), int(std::floor(bottomRight.y() / ls)),
+                          std::clamp(int(std::floor(topLeft.x() / ls)), 0, l.columns - 1),
+                          std::clamp(int(std::floor(bottomRight.x() / ls)), 0, l.columns - 1)});
+    }
 
     // 2. Turn decoded thumbnails into textures, within this frame's budget.
     // A thumbnail whose cell has meanwhile gone far off screen is dropped:
     // uploading it would only delay the ones that are still wanted, and
     // when scrolling fast that delay is what leaves cells empty.
-    const int keepFrom = std::max(0, firstRow - int(rowsOnScreen * 3) - 1) * m_columns;
-    const int keepTo = (lastRow + int(rowsOnScreen * 3) + 2) * m_columns;
+    auto keptRange = [&](int lo, int hi) {
+        for (size_t k = 0; k < drawn.size(); ++k) {
+            const int margin = std::max(int(height() / strideFor(drawn[k].columns) * 3) + 2, k == 0 ? lookahead + 2 : 0);
+            const int from = std::max(0, ranges[k].firstRow - margin) * drawn[k].columns;
+            const int to = (ranges[k].lastRow + margin) * drawn[k].columns;
+            if (hi >= from && lo < to)
+                return true;
+        }
+        return false;
+    };
+    auto kept = [&](int index) { return keptRange(index, index); };
     int uploads = 0;
     qint64 uploadBytes = 0;
     QElapsedTimer uploadTimer;
     uploadTimer.start();
-    while (uploadBytes < kUploadBytesPerFrame && uploads < kUploadsPerFrame && uploadTimer.nsecsElapsed() < kUploadNanos) {
-        auto ready = m_loader->takeReady(size_t(std::min(16, kUploadsPerFrame - uploads)));
+    while (uploadBytes < kUploadBytesPerFrame && uploadTimer.nsecsElapsed() < kUploadNanos) {
+        auto ready = m_loader->takeReady(16);
         if (ready.empty())
             break;
         for (auto &d : ready) {
+            if (isPageKey(d.key)) {
+                const int page = keyPage(d.key);
+                if (!keptRange(page * kMosaicCount, page * kMosaicCount + kMosaicCount - 1))
+                    continue;
+                auto &p = rs.pages[page];
+                if (p.texture) {
+                    delete p.texture;
+                    rs.bytes -= qint64(d.image.width()) * d.image.height() * 4;
+                }
+                // A texture of its own, not in an atlas: it is a whole page.
+                p.texture = window()->createTextureFromImage(d.image);
+                p.texture->setFiltering(QSGTexture::Linear);
+                p.lastUsed = rs.frame;
+                const qint64 bytes = qint64(d.image.width()) * d.image.height() * 4;
+                rs.bytes += bytes;
+                uploads += 1;
+                uploadBytes += bytes;
+                continue;
+            }
             const int index = keyIndex(d.key);
-            if (index < keepFrom || index >= keepTo)
+            if (!kept(index))
                 continue;
             auto &entry = rs.cache[index];
             const int level = keyLevel(d.key);
@@ -493,10 +779,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         }
     }
     const qint64 uploadNanos = uploadTimer.nsecsElapsed();
-    const QRectF view(0, 0, width(), height());
 
-    const double cellDevicePx = (s - 2) * m_scale * dpr;
-    auto desiredLevel = [&](const LibraryItem &item) {
+    auto desiredLevel = [&](const LibraryItem &item, double cellDevicePx) {
         const int shortEdge = std::max(1, int(std::min(item.thumbW, item.thumbH)));
         const double need = scrubbing ? cellDevicePx * 0.25 : fast ? cellDevicePx * 0.5 : cellDevicePx * 0.85;
         int level = 0;
@@ -505,79 +789,152 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         return level;
     };
 
-    // 3. Build the geometry: one list of quads per texture, one for colours.
+    // 3. Build each layer's geometry: one list of quads per texture, one for
+    // colours. The main layer's wants go first.
     struct Quad { QRectF rect; QRectF uv; };
-    std::unordered_map<qint64, std::pair<QSGTexture *, std::vector<Quad>>> byTexture;
-    std::vector<std::pair<QRectF, quint32>> colours;
+    struct Built {
+        std::unordered_map<qint64, std::pair<QSGTexture *, std::vector<Quad>>> byTexture;
+        std::vector<std::pair<QRectF, quint32>> colours;
+    };
+    std::vector<Built> built(drawn.size());
     std::vector<quint64> wanted;
-    wanted.reserve(size_t(last - first) * 2);
     int unresolved = 0;
-
-    for (int i = first; i < last; ++i) {
-        QRectF rect = cellRect(i, layout);
-        if (m_transitionT < 1) {
-            const QRectF from = cellRect(i, m_transitionFrom);
-            // Cells that were far off screen just appear; flying in from
-            // thousands of pixels away looks wrong.
-            if (from.intersects(view.adjusted(-width(), -height(), width(), height()))) {
-                rect = QRectF(from.x() + (rect.x() - from.x()) * transition,
-                              from.y() + (rect.y() - from.y()) * transition,
-                              from.width() + (rect.width() - from.width()) * transition,
-                              from.height() + (rect.height() - from.height()) * transition);
+    for (size_t k = 0; k < drawn.size(); ++k) {
+        const Layer &l = drawn[k];
+        const Range &r = ranges[k];
+        const double cellDevicePx = (strideFor(l.columns) - gapFor(l.columns)) * l.scale * dpr;
+        // Small cells, and anything flying past too fast to see detail.
+        const bool mosaic = cellDevicePx < kMosaicBelowPx || scrubbing;
+        int lastWantedPage = -1;
+        for (int row = r.firstRow; row <= r.lastRow; ++row) {
+            for (int col = r.firstCol; col <= r.lastCol; ++col) {
+                const int i = row * l.columns + col;
+                if (i >= count())
+                    break;
+                const QRectF rect = cellRect(i, l);
+                if (!rect.intersects(view))
+                    continue;
+                const LibraryItem &item = m_library->at(i);
+                if (mosaic) {
+                    const int page = i / kMosaicCount;
+                    auto found = rs.pages.find(page);
+                    if (found != rs.pages.end()) {
+                        found->second.lastUsed = rs.frame;
+                        QSGTexture *texture = found->second.texture;
+                        // The tile, half a texel in from its edges so linear
+                        // filtering never reaches into the neighbours.
+                        const int j = i % kMosaicCount;
+                        const double side = kMosaicSide * kMosaicTile;
+                        const double inset = 0.5 / side;
+                        const QRectF uv((j % kMosaicSide) * kMosaicTile / side + inset,
+                                        (j / kMosaicSide) * kMosaicTile / side + inset,
+                                        kMosaicTile / side - 2 * inset, kMosaicTile / side - 2 * inset);
+                        auto &group = built[k].byTexture[texture->comparisonKey()];
+                        group.first = texture;
+                        group.second.push_back({rect, uv});
+                        continue;
+                    }
+                    if (page != lastWantedPage) {
+                        wanted.push_back(pageKey(page));
+                        lastWantedPage = page;
+                    }
+                    if (k == 0)
+                        unresolved += 1;
+                    // Until the page arrives: any thumbnail already here, or
+                    // the colour.
+                    QSGTexture *texture = nullptr;
+                    if (auto any = rs.cache.find(i); any != rs.cache.end())
+                        for (int lv = 3; lv >= 0 && !texture; --lv)
+                            texture = any->second.texture[lv];
+                    if (texture) {
+                        const QRectF crop = squareCrop(int(item.thumbW), int(item.thumbH));
+                        const QRectF sub = texture->normalizedTextureSubRect();
+                        auto &group = built[k].byTexture[texture->comparisonKey()];
+                        group.first = texture;
+                        group.second.push_back({rect, QRectF(sub.x() + crop.x() * sub.width(),
+                                                             sub.y() + crop.y() * sub.height(),
+                                                             crop.width() * sub.width(), crop.height() * sub.height())});
+                    } else {
+                        built[k].colours.emplace_back(rect, item.avgColor);
+                    }
+                    continue;
+                }
+                const int want = desiredLevel(item, cellDevicePx);
+                QSGTexture *texture = nullptr;
+                int have = -1;
+                auto found = rs.cache.find(i);
+                if (found != rs.cache.end()) {
+                    auto &entry = found->second;
+                    // The wanted level, else anything sharper, else anything.
+                    for (int lv = want; lv >= 0 && !texture; --lv)
+                        if (entry.texture[lv]) { texture = entry.texture[lv]; have = lv; }
+                    for (int lv = want + 1; lv < 4 && !texture; ++lv)
+                        if (entry.texture[lv]) { texture = entry.texture[lv]; have = lv; }
+                    entry.lastUsed = rs.frame;
+                }
+                if (have > want || have < 0) {
+                    if (k == 0)
+                        unresolved += 1;
+                    wanted.push_back(thumbKey(i, want));
+                }
+                if (texture) {
+                    const QRectF crop = squareCrop(int(item.thumbW), int(item.thumbH));
+                    const QRectF sub = texture->normalizedTextureSubRect();
+                    const QRectF uv(sub.x() + crop.x() * sub.width(), sub.y() + crop.y() * sub.height(),
+                                    crop.width() * sub.width(), crop.height() * sub.height());
+                    auto &group = built[k].byTexture[texture->comparisonKey()];
+                    group.first = texture;
+                    group.second.push_back({rect, uv});
+                } else {
+                    built[k].colours.emplace_back(rect, item.avgColor);
+                }
             }
-        }
-        if (!rect.intersects(view))
-            continue;
-
-        const LibraryItem &item = m_library->at(i);
-        const int want = desiredLevel(item);
-        QSGTexture *texture = nullptr;
-        int have = -1;
-        auto found = rs.cache.find(i);
-        if (found != rs.cache.end()) {
-            auto &entry = found->second;
-            // The wanted level, else anything sharper, else anything at all.
-            for (int l = want; l >= 0 && !texture; --l)
-                if (entry.texture[l]) { texture = entry.texture[l]; have = l; }
-            for (int l = want + 1; l < 4 && !texture; ++l)
-                if (entry.texture[l]) { texture = entry.texture[l]; have = l; }
-            entry.lastUsed = rs.frame;
-        }
-        if (have > want || have < 0) {
-            unresolved += 1;
-            wanted.push_back(thumbKey(i, want));
-        }
-        if (texture) {
-            const QRectF crop = squareCrop(int(item.thumbW), int(item.thumbH));
-            const QRectF sub = texture->normalizedTextureSubRect();
-            const QRectF uv(sub.x() + crop.x() * sub.width(), sub.y() + crop.y() * sub.height(),
-                            crop.width() * sub.width(), crop.height() * sub.height());
-            auto &group = byTexture[texture->comparisonKey()];
-            group.first = texture;
-            group.second.push_back({rect, uv});
-        } else {
-            colours.emplace_back(rect, item.avgColor);
         }
     }
 
-    // 4. Look ahead in the direction of travel, so rows arrive decoded.
-    if (!scrubbing) {
+    // 4. At rest, look ahead in the direction of travel, so rows arrive
+    // decoded.
+    const bool restMosaic = (s - gapFor(m_columns)) * dpr < kMosaicBelowPx || scrubbing;
+    if (!m_zoom.active && restMosaic) {
+        // Pages ahead in the direction of travel, and one behind.
+        const Range &r = ranges.front();
+        const int ahead = lookahead;
+        const bool down = m_speedRows >= 0;
+        const int fromRow = down ? r.lastRow + 1 : std::max(0, r.firstRow - ahead);
+        const int toRow = down ? r.lastRow + ahead : r.firstRow - 1;
+        const int lastPage = (count() - 1) / kMosaicCount;
+        auto wantPages = [&](int a, int b) {
+            for (int p = std::max(0, a); p <= std::min(lastPage, b); ++p)
+                if (!rs.pages.contains(p))
+                    wanted.push_back(pageKey(p));
+                else
+                    rs.pages[p].lastUsed = rs.frame;
+        };
+        wantPages(fromRow * m_columns / kMosaicCount, (toRow + 1) * m_columns / kMosaicCount);
+        if (down)
+            wantPages(r.firstRow * m_columns / kMosaicCount - 1, r.firstRow * m_columns / kMosaicCount - 1);
+        else
+            wantPages((r.lastRow + 1) * m_columns / kMosaicCount + 1, (r.lastRow + 1) * m_columns / kMosaicCount + 1);
+    }
+    if (!m_zoom.active && !scrubbing && !restMosaic) {
+        const Range &r = ranges.front();
+        const double cellDevicePx = (s - gapFor(m_columns)) * dpr;
         const int rowsAhead = int(std::ceil(rowsOnScreen * (fast ? 2.5 : 1.0)));
         const int rowsBehind = int(std::ceil(rowsOnScreen * 0.5));
         const bool down = m_speedRows >= 0;
         auto prefetchRows = [&](int fromRow, int toRow) {
-            for (int r = fromRow; r <= toRow; ++r) {
+            for (int row = fromRow; row <= toRow; ++row) {
                 for (int c = 0; c < m_columns; ++c) {
-                    const int i = r * m_columns + c;
+                    const int i = row * m_columns + c;
                     if (i < 0 || i >= count())
                         continue;
-                    const int want = desiredLevel(m_library->at(i));
+                    const int want = desiredLevel(m_library->at(i), cellDevicePx);
                     auto found = rs.cache.find(i);
                     if (found != rs.cache.end()) {
                         found->second.lastUsed = rs.frame;
                         bool good = false;
-                        for (int l = want; l >= 0; --l)
-                            good = good || found->second.texture[l];
+                        for (int lv = want; lv >= 0; --lv)
+                            good = good || found->second.texture[lv];
                         if (good)
                             continue;
                     }
@@ -586,21 +943,59 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             }
         };
         if (down) {
-            prefetchRows(lastRow + 1, lastRow + rowsAhead);
-            prefetchRows(firstRow - rowsBehind, firstRow - 1);
+            prefetchRows(r.lastRow + 1, r.lastRow + rowsAhead);
+            prefetchRows(r.firstRow - rowsBehind, r.firstRow - 1);
         } else {
-            prefetchRows(firstRow - rowsAhead, firstRow - 1);
-            prefetchRows(lastRow + 1, lastRow + rowsBehind);
+            prefetchRows(r.firstRow - rowsAhead, r.firstRow - 1);
+            prefetchRows(r.lastRow + 1, r.lastRow + rowsBehind);
         }
     }
     m_loader->setWanted(wanted);
 
-    // 5. Write the geometry.
+    // Does the base layer cover the window, across and (when the library
+    // is tall enough to) down?
     {
-        QSGGeometry *g = rs.placeholders->geometry();
-        g->allocate(int(colours.size() * 6));
+        const Layer &l = drawn.front();
+        const double left = l.at.x() - l.pin.x() * l.scale;
+        const double right = left + width() * l.scale;
+        double band = std::max(left, width() - right);
+        const double tall = (count() + l.columns - 1) / l.columns * strideFor(l.columns) * l.scale;
+        if (tall >= height()) {
+            const double top = l.at.y() - l.pin.y() * l.scale;
+            band = std::max({band, top, height() - (top + tall)});
+        }
+        if (band > 0.5) {
+            m_uncoveredFrames += 1;
+            m_uncoveredMax = std::max(m_uncoveredMax, band);
+        }
+    }
+
+    // Where the pinned photo (the last zoom's) is drawn, frame to frame.
+    if (m_zoom.startStride > 0) {
+        const Layer &l = drawn.front();
+        const QPointF p = l.at + (pinIn(l.columns) - l.pin) * l.scale;
+        // Height only: across, the photo sits in a different column in each
+        // of the two levels being blended, and cross-fades between them.
+        if (m_pinTracked)
+            m_pinJump = std::max(m_pinJump, std::abs(p.y() - m_lastPinOnScreen.y()));
+        m_lastPinOnScreen = p;
+        m_pinTracked = true;
+    }
+
+    // 5. Write the geometry into the two slots.
+    int batches = 0;
+    for (int k = 0; k < 2; ++k) {
+        GridRenderState::Slot &slot = rs.drawSlots[k];
+        static const Built empty;
+        const Built &b = size_t(k) < built.size() ? built[size_t(k)] : empty;
+        const double opacity = size_t(k) < drawn.size() ? drawn[size_t(k)].opacity : 0;
+        if (slot.opacity->opacity() != opacity)
+            slot.opacity->setOpacity(opacity);
+
+        QSGGeometry *g = slot.placeholders->geometry();
+        g->allocate(int(b.colours.size() * 6));
         auto *v = g->vertexDataAsColoredPoint2D();
-        for (const auto &[r, c] : colours) {
+        for (const auto &[r, c] : b.colours) {
             const uchar red = uchar(c >> 16), green = uchar(c >> 8), blue = uchar(c);
             const float x0 = float(r.left()), y0 = float(r.top()), x1 = float(r.right()), y1 = float(r.bottom());
             v[0].set(x0, y0, red, green, blue, 255);
@@ -611,55 +1006,58 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             v[5].set(x0, y1, red, green, blue, 255);
             v += 6;
         }
-        rs.placeholders->markDirty(QSGNode::DirtyGeometry);
-    }
+        slot.placeholders->markDirty(QSGNode::DirtyGeometry);
 
-    for (auto it = rs.groups.begin(); it != rs.groups.end();) {
-        if (!byTexture.contains(it->first)) {
-            // Nothing on this page this frame. The node goes, so it never
-            // points at a texture that may be evicted below.
-            root->removeChildNode(it->second);
-            delete it->second;
-            it = rs.groups.erase(it);
-        } else {
-            ++it;
+        for (auto it = slot.groups.begin(); it != slot.groups.end();) {
+            if (!b.byTexture.contains(it->first)) {
+                // Nothing on this page this frame. The node goes, so it never
+                // points at a texture that may be evicted below.
+                slot.opacity->removeChildNode(it->second);
+                delete it->second;
+                it = slot.groups.erase(it);
+            } else {
+                ++it;
+            }
         }
-    }
-    for (auto &[key, group] : byTexture) {
-        QSGGeometryNode *&node = rs.groups[key];
-        if (!node) {
-            node = new QSGGeometryNode;
-            auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
-            geometry->setDrawingMode(QSGGeometry::DrawTriangles);
-            node->setGeometry(geometry);
-            node->setFlag(QSGNode::OwnsGeometry);
-            auto *material = new QSGOpaqueTextureMaterial;
-            material->setFiltering(QSGTexture::Linear);
-            node->setMaterial(material);
-            node->setFlag(QSGNode::OwnsMaterial);
-            root->appendChildNode(node);
+        for (const auto &[key, group] : b.byTexture) {
+            QSGGeometryNode *&node = slot.groups[key];
+            if (!node) {
+                node = new QSGGeometryNode;
+                auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+                geometry->setDrawingMode(QSGGeometry::DrawTriangles);
+                node->setGeometry(geometry);
+                node->setFlag(QSGNode::OwnsGeometry);
+                // Not the opaque material: the faded layer needs opacity.
+                auto *material = new QSGTextureMaterial;
+                material->setFiltering(QSGTexture::Linear);
+                node->setMaterial(material);
+                node->setFlag(QSGNode::OwnsMaterial);
+                slot.opacity->appendChildNode(node);
+            }
+            auto *material = static_cast<QSGTextureMaterial *>(node->material());
+            // Any texture on the page binds the page; this one is in use this
+            // frame, so it cannot be evicted before the frame is drawn.
+            material->setTexture(group.first);
+            QSGGeometry *geometry = node->geometry();
+            geometry->allocate(int(group.second.size() * 6));
+            auto *tv = geometry->vertexDataAsTexturedPoint2D();
+            for (const Quad &q : group.second) {
+                const float x0 = float(q.rect.left()), y0 = float(q.rect.top());
+                const float x1 = float(q.rect.right()), y1 = float(q.rect.bottom());
+                const float u0 = float(q.uv.left()), v0 = float(q.uv.top());
+                const float u1 = float(q.uv.right()), v1 = float(q.uv.bottom());
+                tv[0].set(x0, y0, u0, v0);
+                tv[1].set(x1, y0, u1, v0);
+                tv[2].set(x0, y1, u0, v1);
+                tv[3].set(x1, y0, u1, v0);
+                tv[4].set(x1, y1, u1, v1);
+                tv[5].set(x0, y1, u0, v1);
+                tv += 6;
+            }
+            node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
         }
-        auto *material = static_cast<QSGOpaqueTextureMaterial *>(node->material());
-        // Any texture on the page binds the page; this one is in use this
-        // frame, so it cannot be evicted before the frame is drawn.
-        material->setTexture(group.first);
-        QSGGeometry *g = node->geometry();
-        g->allocate(int(group.second.size() * 6));
-        auto *v = g->vertexDataAsTexturedPoint2D();
-        for (const Quad &q : group.second) {
-            const float x0 = float(q.rect.left()), y0 = float(q.rect.top());
-            const float x1 = float(q.rect.right()), y1 = float(q.rect.bottom());
-            const float u0 = float(q.uv.left()), v0 = float(q.uv.top());
-            const float u1 = float(q.uv.right()), v1 = float(q.uv.bottom());
-            v[0].set(x0, y0, u0, v0);
-            v[1].set(x1, y0, u1, v0);
-            v[2].set(x0, y1, u0, v1);
-            v[3].set(x1, y0, u1, v0);
-            v[4].set(x1, y1, u1, v1);
-            v[5].set(x0, y1, u0, v1);
-            v += 6;
-        }
-        node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+        if (opacity > 0)
+            batches += int(b.byTexture.size()) + 1;
     }
 
     // 6. Keep texture memory under budget: drop what has not been on or
@@ -685,10 +1083,10 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         for (const auto &[used, index] : candidates) {
             evicted += 1;
             auto &entry = rs.cache[index];
-            for (int l = 0; l < 4; ++l) {
-                if (entry.texture[l]) {
-                    rs.bytes -= qint64(entry.size[l].width()) * entry.size[l].height() * 4;
-                    delete entry.texture[l];
+            for (int lv = 0; lv < 4; ++lv) {
+                if (entry.texture[lv]) {
+                    rs.bytes -= qint64(entry.size[lv].width()) * entry.size[lv].height() * 4;
+                    delete entry.texture[lv];
                     rs.textures -= 1;
                 }
             }
@@ -696,18 +1094,36 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         }
     }
 
+    // Pages: keep the most recently used, freeing a few a frame.
+    if (rs.pages.size() > kMaxPages) {
+        std::vector<std::pair<quint64, int>> candidates;
+        for (const auto &[page, p] : rs.pages)
+            if (p.lastUsed + 2 < rs.frame)
+                candidates.emplace_back(p.lastUsed, page);
+        const size_t n = std::min<size_t>({4, candidates.size(), rs.pages.size() - kMaxPages});
+        std::nth_element(candidates.begin(), candidates.begin() + long(n), candidates.end());
+        for (size_t i = 0; i < n; ++i) {
+            auto &p = rs.pages[candidates[i].second];
+            rs.bytes -= qint64(kMosaicSide * kMosaicTile) * kMosaicSide * kMosaicTile * 4;
+            delete p.texture;
+            rs.pages.erase(candidates[i].second);
+            evicted += 1;
+        }
+    }
+
     m_unresolved = unresolved;
     m_textureCount = rs.textures;
     m_textureBytes = rs.bytes;
     if (m_stats) {
-        const int cells = int(colours.size()) + [&] {
-            int n = 0;
-            for (auto &[k, g] : byTexture)
-                n += int(g.second.size());
-            return n;
-        }();
-        m_stats->frameBuilt(timer.nsecsElapsed(), cells, int(colours.size()), uploads, int(byTexture.size()) + 1,
-                            evicted, uploadNanos, evictTimer.nsecsElapsed());
+        int cells = 0, placeholders = 0;
+        for (const Built &b : built) {
+            placeholders += int(b.colours.size());
+            cells += int(b.colours.size());
+            for (const auto &[key, group] : b.byTexture)
+                cells += int(group.second.size());
+        }
+        m_stats->frameBuilt(timer.nsecsElapsed(), cells, placeholders, uploads, batches, evicted, uploadNanos,
+                            evictTimer.nsecsElapsed());
     }
     // Anything uploaded may have left more decoded thumbnails waiting behind
     // the frame's budget, and the loader only signals once until they are

@@ -76,21 +76,42 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
              }
              g->setEffectiveStride(strideAt(columns), centre());
          }},
-        {"scroll 15,000 px/s at 30 columns", 4.0,
-         [g] {
-             g->zoomStep(30 - g->columns());
-             g->setDriveVelocity(-15000);
-         },
-         {}},
-        {"zoom steps 8 <-> 14, animated", 5.0,
+        {"pinch at the newest 8 -> 40 -> 2 -> 8", 6.5, [g, stopped] { stopped(); g->scrollToEnd(); },
+         [g, strideAt](double, double t) {
+             // Around a point near the bottom, where the library ends.
+             const QPointF at(g->width() * 0.6, g->height() * 0.85);
+             auto lerpLog = [](double a, double b, double f) { return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f); };
+             double columns;
+             if (t < 2.0)
+                 columns = lerpLog(8, 40, t / 2.0);
+             else if (t < 4.5)
+                 columns = lerpLog(40, 2, (t - 2.0) / 2.5);
+             else if (t < 6.0)
+                 columns = lerpLog(2, 8, (t - 4.5) / 1.5);
+             else {
+                 g->endContinuousZoom();
+                 return;
+             }
+             g->setEffectiveStride(strideAt(columns), at);
+         }},
+        {"idle at 40 columns (fully out)", 3.0,
          [g, stopped] {
              stopped();
-             g->zoomStep(8 - g->columns());
+             g->setColumnsNow(40);
+         },
+         {}},
+        {"scroll 3,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-3000); }, {}},
+        {"scroll 15,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
+        {"zoom steps 8 -> 15 -> 8, animated", 5.0,
+         [g, stopped] {
+             stopped();
+             g->setColumnsNow(8);
          },
          [g](double before, double t) {
-             if (std::floor(t / 0.35) != std::floor(before / 0.35)) {
-                 const int step = int(t / 0.35);
-                 g->zoomStep(step % 12 < 6 ? +1 : -1);
+             // A level every 0.4 s, three out and three back in.
+             if (std::floor(t / 0.4) != std::floor(before / 0.4)) {
+                 const int step = int(t / 0.4);
+                 g->zoomStep(step % 6 < 3 ? +1 : -1);
              }
          }},
     };
@@ -113,6 +134,8 @@ void Bench::start() {
 }
 
 void Bench::beginPhase() {
+    m_grid->takePinJump();
+    m_grid->takeUncovered();
     m_t = 0;
     m_warm = false;
     m_jumpAt = -1;
@@ -154,6 +177,11 @@ void Bench::endPhase() {
         std::printf("%-40s slow frame %.1f ms: wait %.1f, sync %.2f (uploads %d in %.2f, evicted %d in %.2f), "
                     "render %.2f, swap %.1f; batches %d\n",
                     "", w.interval, w.wait, w.sync, w.uploads, w.upload, w.evicted, w.evict, w.render, w.swap, w.batches);
+    if (p.name.contains("pinch") || p.name.contains("zoom steps")) {
+        const auto [frames, band] = m_grid->takeUncovered();
+        std::printf("%-40s pinned photo moved up or down at most %.1f px in one frame; %d frames with an empty edge (widest %.0f px)\n",
+                    "", m_grid->takePinJump(), frames, band);
+    }
     if (qEnvironmentVariableIsSet("PINHOLE_TRACE") && s.intervalMax > 25)
         std::printf("%s", qPrintable(m_stats->aroundWorst(10, 3)));
     if (!m_jumpTimes.empty()) {

@@ -4,12 +4,24 @@ CONFIG += c++20 release
 TARGET = pinhole
 TEMPLATE = app
 
-LIBS += -lturbojpeg
+LIBS += -lturbojpeg -lwayland-client
+
+# The pointer-gestures protocol, for the touchpad hold gesture Qt does not
+# bind (see touchpadhold.h), generated from the system's protocol files.
+GESTURES_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml
+GENERATED = $$OUT_PWD/generated
+system(mkdir -p $$GENERATED && \
+    wayland-scanner client-header $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-client-protocol.h && \
+    wayland-scanner private-code $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-protocol.c)
+INCLUDEPATH += $$GENERATED
+SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c
 
 HEADERS += \
     src/library.h \
     src/thumbnailloader.h \
     src/photogrid.h \
+    src/scrollphysics.h \
+    src/touchpadhold.h \
     src/framestats.h \
     src/bench.h
 
@@ -18,6 +30,8 @@ SOURCES += \
     src/library.cpp \
     src/thumbnailloader.cpp \
     src/photogrid.cpp \
+    src/scrollphysics.cpp \
+    src/touchpadhold.cpp \
     src/framestats.cpp \
     src/bench.cpp
 

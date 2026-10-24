@@ -16,6 +16,7 @@
 #include "library.h"
 #include "photogrid.h"
 #include "thumbnailloader.h"
+#include "touchpadhold.h"
 
 #include <cstdio>
 
@@ -68,6 +69,8 @@ int main(int argc, char *argv[]) {
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     FrameStats stats;
     ThumbnailLoader loader(&library, parser.value("decoders").toInt());
+    // Before the window, so it outlives the grid that polls it.
+    TouchpadHold hold;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("bench", nullptr);
@@ -78,6 +81,7 @@ int main(int argc, char *argv[]) {
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     auto *grid = window->findChild<PhotoGrid *>("grid");
     grid->setSources(&library, &loader, &stats);
+    grid->setTouchpadHold(&hold);
     QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
                      Qt::DirectConnection);
     QObject::connect(window, &QQuickWindow::beforeRendering, window, [&stats] { stats.renderBegan(); },

@@ -17,8 +17,20 @@ class Library;
 // 1/4 and 1/8, which libjpeg-turbo produces while decoding at a fraction of
 // the cost.
 inline quint64 thumbKey(int index, int level) { return (quint64(index) << 2) | quint64(level); }
-inline int keyIndex(quint64 key) { return int(key >> 2); }
+inline int keyIndex(quint64 key) { return int((key & ~(quint64(1) << 63)) >> 2); }
 inline int keyLevel(quint64 key) { return int(key & 3); }
+
+// A mosaic page: 256 consecutive photos as 64 px squares, 16 by 16, in one
+// 1024 px image. When cells are this small, one page replaces 256 decodes
+// and 256 texture uploads, and on Asahi it is the count of uploads, not
+// their size, that stalls the GPU. Pages share the key space with
+// thumbnails, marked by the top bit.
+constexpr int kMosaicTile = 64;
+constexpr int kMosaicSide = 16;
+constexpr int kMosaicCount = kMosaicSide * kMosaicSide;
+inline quint64 pageKey(int page) { return (quint64(1) << 63) | quint64(page); }
+inline bool isPageKey(quint64 key) { return key >> 63; }
+inline int keyPage(quint64 key) { return int(key & ~(quint64(1) << 63)); }
 
 struct DecodedThumb {
     quint64 key;

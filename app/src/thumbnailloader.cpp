@@ -3,8 +3,10 @@
 #include "library.h"
 
 #include <QElapsedTimer>
+#include <QtEndian>
 
 #include <cstdio>
+#include <cstring>
 #include <turbojpeg.h>
 
 namespace {
@@ -40,6 +42,43 @@ QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<un
     if (tj3Decompress8(tj, buffer.data(), buffer.size(), image.bits(), int(image.bytesPerLine()), TJPF_RGBX) != 0)
         return {};
     return image;
+}
+
+// One mosaic page: each photo decoded at the smallest size that still
+// covers a tile, its centred square scaled to the tile. A photo that will
+// not decode keeps its average colour.
+QImage buildPage(tjhandle tj, const Library &library, int page, std::vector<unsigned char> &buffer) {
+    const int side = kMosaicSide * kMosaicTile;
+    QImage out(side, side, QImage::Format_RGBX8888);
+    out.fill(QColor(16, 16, 16));
+    for (int j = 0; j < kMosaicCount; ++j) {
+        const int index = page * kMosaicCount + j;
+        if (index >= library.count())
+            break;
+        const LibraryItem &item = library.at(index);
+        const int x = (j % kMosaicSide) * kMosaicTile;
+        const int y = (j / kMosaicSide) * kMosaicTile;
+        int level = 0;
+        const int shortEdge = std::min(item.thumbW, item.thumbH);
+        while (level < 3 && (shortEdge >> (level + 1)) >= kMosaicTile)
+            level += 1;
+        const QImage image = decodeJpeg(tj, item.thumbPath, level, buffer);
+        if (image.isNull()) {
+            const QRgb c = item.avgColor;
+            for (int row = 0; row < kMosaicTile; ++row) {
+                auto *line = reinterpret_cast<quint32 *>(out.scanLine(y + row)) + x;
+                std::fill(line, line + kMosaicTile, qToLittleEndian(0xff000000u | (qBlue(c) << 16) | (qGreen(c) << 8) | qRed(c)));
+            }
+            continue;
+        }
+        const int s = std::min(image.width(), image.height());
+        const QImage tile = image.copy((image.width() - s) / 2, (image.height() - s) / 2, s, s)
+                                .scaled(kMosaicTile, kMosaicTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                                .convertToFormat(QImage::Format_RGBX8888);
+        for (int row = 0; row < kMosaicTile; ++row)
+            std::memcpy(out.scanLine(y + row) + x * 4, tile.constScanLine(row), kMosaicTile * 4);
+    }
+    return out;
 }
 
 } // namespace
@@ -110,10 +149,12 @@ void ThumbnailLoader::run() {
         }
 
         timer.start();
-        const int index = keyIndex(key);
         QImage image;
-        if (index >= 0 && index < m_library->count())
+        if (isPageKey(key)) {
+            image = buildPage(tj, *m_library, keyPage(key), buffer);
+        } else if (const int index = keyIndex(key); index >= 0 && index < m_library->count()) {
             image = decodeJpeg(tj, m_library->at(index).thumbPath, keyLevel(key), buffer);
+        }
         m_decodeNanos += quint64(timer.nsecsElapsed());
         m_decoded += 1;
 

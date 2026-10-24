@@ -112,3 +112,37 @@ page cache:
   `?` help, the date scrubber, badges for video, Live Photo and favourites.
 - The animated zoom step is one glide at a time; a step during a glide
   starts from the old layout, not from where the cells are.
+
+## Input and zoom (second round)
+
+Tuned against recorded touchpad input (`PINHOLE_INPUT_LOG=<file>`) and a
+screen recording of Photos on an iPhone.
+
+- **Scrolling** (`app/src/scrollphysics.*`, plain C++): the content follows
+  the fingers with a Mac-like acceleration curve on top of Hyprland's
+  `scroll_factor` (base gain 1.3, `PINHOLE_SCROLL_GAIN` overrides), coasts
+  after a flick with AppKit's 0.998/ms deceleration, builds speed on repeated
+  flicks, and stretches and springs back at the ends. Releases under
+  300 px/s do not coast. `app/tests/scroll_replay.cpp` replays a recorded log
+  through it.
+- **Stopping a coast** with a resting finger uses libinput's hold gesture,
+  which Hyprland sends through the pointer-gestures protocol but Qt does not
+  bind; `app/src/touchpadhold.*` binds it on Qt's Wayland connection, on a
+  queue of its own. Clicks and tap-to-click stop it too.
+- **Zoom** has fixed levels (1, 2, 3, 4, 6, 8, 11, 15, 21, 29, 40 columns).
+  A pinch never reflows under the fingers: the two levels around the
+  current cell size are drawn scaled to it and cross-faded, the denser one
+  underneath because, scaled up, it always covers the window. The photo
+  between the fingers keeps its height; across, and near the library's ends,
+  each level is kept edge to edge, so no empty band ever opens. Release
+  settles on a level (pinch speed counts) in 0.3 s.
+- **Mosaic pages** (`thumbnailloader.*`): below 100 device px per cell, and
+  while scrubbing, cells come from pages of 256 photos as 64 px tiles in one
+  1024 px texture, built on the decoder threads. At 40 columns this cut
+  uploads from 23 to 0.2 per frame and decodes from ~2,500 to ~15 a second;
+  scrubbing the whole library went from 93% placeholders to 3%.
+
+Checked offscreen by the benchmark: the pinned photo moves 0 px vertically
+through a pinch sweep, and no frame leaves part of the window uncovered
+(also when pinching at the newest end). Not yet measured at 120 Hz on
+screen, and the new zoom has not been tried by hand.
