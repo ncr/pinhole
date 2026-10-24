@@ -1,0 +1,175 @@
+#include "bench.h"
+
+#include "framestats.h"
+#include "photogrid.h"
+#include "thumbnailloader.h"
+
+#include <QRandomGenerator>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+namespace {
+// The first quarter second of a phase settles the change of pace; it is not
+// measured.
+constexpr double kWarmup = 0.25;
+} // namespace
+
+Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObject *parent)
+    : QObject(parent), m_grid(grid), m_stats(stats), m_loader(loader) {
+    PhotoGrid *g = m_grid;
+    auto centre = [g] { return QPointF(g->width() / 2, g->height() / 2); };
+    auto stopped = [g] {
+        g->setDriveVelocity(0);
+        g->fling(0);
+    };
+    // The stride at a column count, for the zoom sweep.
+    auto strideAt = [g](double columns) { return g->width() / columns; };
+
+    m_phases = {
+        {"idle at the newest", 2.0, [g, stopped] { stopped(); g->scrollToEnd(); }, {}},
+        {"scroll 1,500 px/s", 4.0, [g] { g->setDriveVelocity(-1500); }, {}},
+        {"scroll 5,000 px/s", 4.0, [g] { g->setDriveVelocity(-5000); }, {}},
+        {"scroll 15,000 px/s", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
+        {"three flings", 6.0, [g, stopped] { stopped(); g->jumpToFraction(0.6); },
+         [g](double before, double t) {
+             // A strong flick every two seconds.
+             if (std::floor(t / 2) != std::floor(before / 2) || before == 0)
+                 g->fling(-30000);
+         }},
+        {"scrub the whole library in 5 s", 5.0,
+         [g, stopped] {
+             stopped();
+             g->scrollToEnd();
+             g->setDriveVelocity(-g->scrollRange() / 5.0);
+         },
+         {}},
+        {"random jumps", 8.0, [stopped] { stopped(); },
+         [g, this](double before, double t) {
+             if (m_jumpAt >= 0 && g->unresolvedVisible() == 0 && t - m_jumpAt > 1.0 / 60) {
+                 m_jumpTimes.push_back(t - m_jumpAt);
+                 m_jumpAt = -1;
+             }
+             if (std::floor(t / 0.8) != std::floor(before / 0.8) || before == 0) {
+                 if (m_jumpAt >= 0)
+                     m_jumpTimes.push_back(t - m_jumpAt); // never resolved: counts its whole slot
+                 g->jumpToFraction(QRandomGenerator::global()->generateDouble());
+                 m_jumpAt = t;
+             }
+         }},
+        {"pinch sweep 8 -> 30 -> 3 -> 8 columns", 6.5, [g, stopped] { stopped(); g->jumpToFraction(0.5); },
+         [g, centre, strideAt](double, double t) {
+             // Interpolate the column count logarithmically, the way a pinch
+             // feels: equal finger travel, equal ratio.
+             auto lerpLog = [](double a, double b, double f) { return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f); };
+             double columns;
+             if (t < 2.0)
+                 columns = lerpLog(8, 30, t / 2.0);
+             else if (t < 4.5)
+                 columns = lerpLog(30, 3, (t - 2.0) / 2.5);
+             else if (t < 6.0)
+                 columns = lerpLog(3, 8, (t - 4.5) / 1.5);
+             else {
+                 g->endContinuousZoom();
+                 return;
+             }
+             g->setEffectiveStride(strideAt(columns), centre());
+         }},
+        {"scroll 15,000 px/s at 30 columns", 4.0,
+         [g] {
+             g->zoomStep(30 - g->columns());
+             g->setDriveVelocity(-15000);
+         },
+         {}},
+        {"zoom steps 8 <-> 14, animated", 5.0,
+         [g, stopped] {
+             stopped();
+             g->zoomStep(8 - g->columns());
+         },
+         [g](double before, double t) {
+             if (std::floor(t / 0.35) != std::floor(before / 0.35)) {
+                 const int step = int(t / 0.35);
+                 g->zoomStep(step % 12 < 6 ? +1 : -1);
+             }
+         }},
+    };
+    // PINHOLE_BENCH_IDLE=<seconds>: only redraw the same frame, to see how
+    // often the system alone stalls a frame.
+    if (const int idle = qEnvironmentVariableIntValue("PINHOLE_BENCH_IDLE"); idle > 0)
+        m_phases = {{QStringLiteral("baseline: redraw, nothing changes"), double(idle), [g, stopped] { stopped(); }, {}}};
+}
+
+void Bench::start() {
+    m_running = true;
+    m_current = 0;
+    emit runningChanged();
+    std::printf("pinhole bench: %d items, window %.0fx%.0f logical\n", m_grid->count(), m_grid->width(),
+                m_grid->height());
+    std::printf("%-40s %6s %6s %6s %6s %6s %7s %7s %7s %6s %6s %6s %7s\n", "phase", "fps", "p50", "p95", "p99", "max",
+                "missed", "sync50", "sync99", "ph%", "upl/f", "batch", "dec/s");
+    std::fflush(stdout);
+    beginPhase();
+}
+
+void Bench::beginPhase() {
+    m_t = 0;
+    m_warm = false;
+    m_jumpAt = -1;
+    m_jumpTimes.clear();
+    const Phase &p = m_phases[m_current];
+    if (p.begin)
+        p.begin();
+    m_stats->reset();
+    m_decodedAtStart = m_loader->decodedCount();
+}
+
+void Bench::tick(qreal dt) {
+    if (!m_running)
+        return;
+    const double before = m_t;
+    m_t += dt;
+    const Phase &p = m_phases[m_current];
+    if (!m_warm && m_t >= kWarmup) {
+        m_warm = true;
+        m_stats->reset();
+        m_decodedAtStart = m_loader->decodedCount();
+    }
+    if (p.step)
+        p.step(before, m_t);
+    if (m_t >= p.seconds)
+        endPhase();
+}
+
+void Bench::endPhase() {
+    const Phase &p = m_phases[m_current];
+    const FrameStats::Summary s = m_stats->summary();
+    const double measured = std::max(1e-3, p.seconds - kWarmup);
+    std::printf("%-40s %6.0f %6.1f %6.1f %6.1f %6.1f %4d/%-3.0f%% %6.2f %6.2f %6.0f %6.1f %6.0f %7.0f\n",
+                p.name.toUtf8().constData(), s.frames / std::max(1e-3, s.seconds), s.intervalP50, s.intervalP95,
+                s.intervalP99, s.intervalMax, s.missed, s.frames ? 100.0 * s.missed / s.frames : 0, s.syncP50, s.syncP99,
+                s.placeholderShare * 100, s.uploadsPerFrame, s.batchesMax,
+                (m_loader->decodedCount() - m_decodedAtStart) / measured);
+    for (const auto &w : s.slowest)
+        std::printf("%-40s slow frame %.1f ms: wait %.1f, sync %.2f (uploads %d in %.2f, evicted %d in %.2f), "
+                    "render %.2f, swap %.1f; batches %d\n",
+                    "", w.interval, w.wait, w.sync, w.uploads, w.upload, w.evicted, w.evict, w.render, w.swap, w.batches);
+    if (qEnvironmentVariableIsSet("PINHOLE_TRACE") && s.intervalMax > 25)
+        std::printf("%s", qPrintable(m_stats->aroundWorst(10, 3)));
+    if (!m_jumpTimes.empty()) {
+        auto v = m_jumpTimes;
+        std::sort(v.begin(), v.end());
+        std::printf("%-40s %zu jumps; all visible cells sharp after p50 %.0f ms, max %.0f ms\n", "",
+                    v.size(), v[v.size() / 2] * 1000, v.back() * 1000);
+    }
+    std::fflush(stdout);
+    m_current += 1;
+    if (m_current < m_phases.size()) {
+        beginPhase();
+        return;
+    }
+    m_grid->setDriveVelocity(0);
+    m_running = false;
+    emit runningChanged();
+    emit finished();
+}

@@ -1,5 +1,5 @@
 target/
-/build/
+build/
 *.sqlite
 *.sqlite-*
 __pycache__/

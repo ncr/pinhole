@@ -31,7 +31,13 @@ pub fn open(path: &Path) -> Result<Connection> {
             subtype INTEGER,
             has_location INTEGER NOT NULL DEFAULT 0,
             is_video INTEGER NOT NULL DEFAULT 0,
-            is_live INTEGER NOT NULL DEFAULT 0
+            is_live INTEGER NOT NULL DEFAULT 0,
+            -- The local thumbnail, relative to the library directory, and
+            -- what the grid needs to draw it before it has decoded it.
+            thumb_path TEXT,
+            thumb_w INTEGER,
+            thumb_h INTEGER,
+            avg_color INTEGER
         );
         CREATE INDEX IF NOT EXISTS assets_by_date ON assets(asset_date);
         CREATE TABLE IF NOT EXISTS resources (
@@ -53,6 +59,14 @@ pub fn open(path: &Path) -> Result<Connection> {
         );
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
+    // Indexes made before the thumbnail columns existed get them added.
+    for column in ["thumb_path TEXT", "thumb_w INTEGER", "thumb_h INTEGER", "avg_color INTEGER"] {
+        match db.execute(&format!("ALTER TABLE assets ADD COLUMN {column}"), []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
     Ok(db)
 }
 

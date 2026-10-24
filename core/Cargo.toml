@@ -9,7 +9,9 @@ description = "Pinhole's core: iCloud Photos access, the local library index and
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
-rand = "0.8"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+rand = { version = "0.8", features = ["small_rng"] }
+rayon = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "gzip", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,3 +21,7 @@ url = "2"
 [[bin]]
 name = "pinhole-probe"
 path = "src/bin/probe.rs"
+
+[[bin]]
+name = "pinhole-fake"
+path = "src/bin/fake.rs"

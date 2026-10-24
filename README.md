@@ -7,8 +7,9 @@ thumbnails) and fetches everything else from iCloud only when it is looked at,
 dragged or exported, the way Photos on a Mac does with "Optimize Mac Storage".
 It never changes the library.
 
-Status: an API probe. There is no window yet. What it found is in
-[docs/api-findings.md](docs/api-findings.md).
+Status: two spikes. The iCloud API probe is in
+[docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
+synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
 
 ## Layout
 
@@ -17,6 +18,17 @@ auth/PROTOCOL.md          the sign-in provider protocol: JSON lines over stdio
 auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
 core/                     the Rust core: session, CloudKit client, index
 core/src/bin/probe.rs     pinhole-probe, which measures the API
+core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
+app/                      the window: Qt Quick, with the grid in C++
+```
+
+## Trying the grid
+
+```bash
+core/target/release/pinhole-fake --count 100000   # ~1 min, 6 GB in ~/.local/share/pinhole/fake
+app/bin/build
+app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms
+app/build/pinhole --bench    # scripted run, prints frame timing per phase
 ```
 
 The two boundaries that are meant to be swapped:
