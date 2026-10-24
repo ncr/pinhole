@@ -1,0 +1,240 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.10,<3.14"
+# dependencies = ["icloudpd @ git+https://github.com/icloud-photos-downloader/icloud_photos_downloader@v1.32.3"]
+# ///
+"""Pinhole's sign-in provider, built on the pyicloud module inside icloudpd.
+
+It speaks the protocol in ../PROTOCOL.md over stdin and stdout. Everything
+Apple-specific about signing in lives here, so a native provider can replace
+this file without the core noticing.
+"""
+
+import argparse
+import datetime
+import json
+import logging
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+from pyicloud_ipd.base import PyiCloudService
+from pyicloud_ipd.exceptions import (
+    PyiCloudConnectionErrorException,
+    PyiCloudException,
+    PyiCloudFailedLoginException,
+    PyiCloudServiceUnavailableException,
+)
+
+# Only these headers travel with the session; the rest of pyicloud's
+# request headers are about signing in.
+SESSION_HEADERS = ("Origin", "Referer", "User-Agent")
+
+
+class ProviderError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+class Provider:
+    def __init__(self, state_dir: Path):
+        self.state_dir = state_dir
+        self.cookie_dir = state_dir / "cookies"
+        self.account_file = state_dir / "account.json"
+        self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.cookie_dir.mkdir(mode=0o700, exist_ok=True)
+        # A sign-in waiting for its two-factor code. It only lives as long as
+        # this process, which is what the core expects: it runs sign_in and
+        # submit_code against the same provider.
+        self.pending = None
+
+    # Account bookkeeping
+
+    def apple_id(self):
+        try:
+            return json.loads(self.account_file.read_text())["apple_id"]
+        except (FileNotFoundError, KeyError, json.JSONDecodeError):
+            return None
+
+    def save_apple_id(self, apple_id):
+        tmp = self.account_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"apple_id": apple_id}))
+        os.chmod(tmp, 0o600)
+        tmp.replace(self.account_file)
+
+    def connect(self, apple_id, password=None):
+        # The constructor signs in by itself: the stored session token first,
+        # the password only when that fails. Calling authenticate() again
+        # would be a second sign-in in a row, which Apple answers with 503.
+        try:
+            api = PyiCloudService(
+                "com", apple_id, lambda: password, cookie_directory=str(self.cookie_dir)
+            )
+        except PyiCloudFailedLoginException:
+            raise ProviderError("wrong_password", "Apple refused the Apple ID or password")
+        except PyiCloudServiceUnavailableException:
+            # Apple's answer to too many sign-ins in a short time. Every new
+            # attempt stretches the wait, so say so instead of retrying.
+            raise ProviderError(
+                "rate_limited",
+                "Apple is not taking sign-ins for this account right now; "
+                "leave it for half an hour, then try once",
+            )
+        except PyiCloudConnectionErrorException:
+            raise ProviderError("unavailable", "Could not reach iCloud")
+        except PyiCloudException as e:
+            raise ProviderError("needs_sign_in", f"Apple did not accept the session: {e}")
+        # Without a password a rejected token leaves the service half-built,
+        # with no account data at all.
+        data = getattr(api, "data", None)
+        if not data or "webservices" not in data:
+            raise ProviderError("needs_sign_in", "The stored session is no longer valid")
+        return api
+
+    # Methods
+
+    def status(self, _params):
+        apple_id = self.apple_id()
+        if self.pending:
+            return {"state": "needs_code", "apple_id": apple_id}
+        if not apple_id:
+            return {"state": "signed_out"}
+        try:
+            api = self.connect(apple_id)
+        except ProviderError as e:
+            if e.code == "needs_sign_in":
+                return {"state": "signed_out", "apple_id": apple_id}
+            raise
+        state = "needs_code" if api.requires_2fa else "signed_in"
+        return {"state": state, "apple_id": apple_id}
+
+    def sign_in(self, params):
+        apple_id, password = params.get("apple_id"), params.get("password")
+        if not apple_id or not password:
+            raise ProviderError("bad_request", "sign_in needs apple_id and password")
+        api = self.connect(apple_id, password)
+        self.save_apple_id(apple_id)
+        if api.requires_2fa:
+            # Apple usually pushes a code on the sign-in itself; asking again
+            # sometimes answers 503, which must not look like a failed sign-in.
+            try:
+                api.trigger_push_notification()
+            except PyiCloudException as e:
+                logging.warning("push notification not sent: %s", e)
+            self.pending = api
+            return {"state": "needs_code"}
+        return {"state": "signed_in"}
+
+    def submit_code(self, params):
+        code = str(params.get("code", "")).strip()
+        if not self.pending:
+            raise ProviderError("bad_request", "no sign-in is waiting for a code")
+        if not (len(code) == 6 and code.isdigit()):
+            raise ProviderError("wrong_code", "The code should be six digits")
+        if not self.pending.validate_2fa_code(code):
+            raise ProviderError("wrong_code", "Apple did not accept that code")
+        self.pending.trust_session()
+        self.pending = None
+        return {"state": "signed_in"}
+
+    def session(self, _params):
+        apple_id = self.apple_id()
+        if not apple_id:
+            raise ProviderError("needs_sign_in", "No Apple ID is signed in")
+        api = self.connect(apple_id)
+        if api.requires_2fa:
+            raise ProviderError("needs_code", "Apple wants a two-factor code")
+        return {
+            "apple_id": apple_id,
+            "dsid": str(api.data["dsInfo"]["dsid"]),
+            "services": {
+                name: service["url"]
+                for name, service in api.data["webservices"].items()
+                if isinstance(service, dict) and "url" in service
+            },
+            "params": {k: str(v) for k, v in api.params.items()},
+            "headers": {k: api.session.headers[k] for k in SESSION_HEADERS if k in api.session.headers},
+            "cookies": [
+                {
+                    "name": c.name,
+                    "value": c.value,
+                    "domain": c.domain,
+                    "path": c.path,
+                    "secure": bool(c.secure),
+                    "expires": c.expires,
+                }
+                for c in api.session.cookies
+            ],
+            "validated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        }
+
+    def sign_out(self, _params):
+        shutil.rmtree(self.cookie_dir, ignore_errors=True)
+        self.cookie_dir.mkdir(mode=0o700, exist_ok=True)
+        self.account_file.unlink(missing_ok=True)
+        self.pending = None
+        return {"state": "signed_out"}
+
+    def import_icloudpd(self, params):
+        """Adopt a session icloudpd already signed in, so trying Pinhole needs
+        no second sign-in. The files are copied, not shared: two programs
+        rewriting one cookie jar would race."""
+        apple_id = params.get("apple_id")
+        source = Path(os.path.expanduser(params.get("cookie_dir", "~/.config/icloudpd")))
+        if not apple_id:
+            raise ProviderError("bad_request", "import_icloudpd needs apple_id")
+        # pyicloud names its files after the Apple ID with everything but
+        # word characters removed.
+        stem = re.sub(r"\W", "", apple_id)
+        copied = 0
+        for name in (stem, f"{stem}.session"):
+            if (source / name).is_file():
+                shutil.copy2(source / name, self.cookie_dir / name)
+                os.chmod(self.cookie_dir / name, 0o600)
+                copied += 1
+        if copied == 0:
+            raise ProviderError("needs_sign_in", f"No icloudpd session for {apple_id} in {source}")
+        self.save_apple_id(apple_id)
+        return {"copied": copied}
+
+
+METHODS = ("status", "sign_in", "submit_code", "session", "sign_out", "import_icloudpd")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    default_state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "pinhole/auth"
+    parser.add_argument("--state-dir", type=Path, default=default_state)
+    args = parser.parse_args()
+    logging.basicConfig(stream=sys.stderr, level=logging.WARNING, format="pinhole-auth: %(message)s")
+    os.umask(0o077)
+
+    provider = Provider(args.state_dir)
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        request_id = None
+        try:
+            request = json.loads(line)
+            request_id = request.get("id")
+            method = request.get("method")
+            if method not in METHODS:
+                raise ProviderError("bad_request", f"unknown method: {method}")
+            result = getattr(provider, method)(request.get("params") or {})
+            reply = {"id": request_id, "ok": True, "result": result}
+        except ProviderError as e:
+            reply = {"id": request_id, "ok": False, "error": {"code": e.code, "message": str(e)}}
+        except json.JSONDecodeError:
+            reply = {"id": None, "ok": False, "error": {"code": "bad_request", "message": "not JSON"}}
+        except Exception as e:  # noqa: BLE001 - the core needs an answer, not a dead pipe
+            logging.exception("unexpected error")
+            reply = {"id": request_id, "ok": False, "error": {"code": "unavailable", "message": str(e)}}
+        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,21 @@
+[package]
+name = "pinhole-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pinhole's core: iCloud Photos access, the local library index and the cache"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "gzip", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[[bin]]
+name = "pinhole-probe"
+path = "src/bin/probe.rs"
