@@ -57,8 +57,8 @@ public:
     // The source the settings name, as the service describes one (kind,
     // name, needs_sign_in, path); iCloud unless they name another.
     static QJsonObject configuredSource();
-    // That source's library in the folder: iCloud's library/, another's
-    // library-<kind>/ (docs/sources.md).
+    // That source's library in the folder, library/<kind>: library/icloud,
+    // library/folder (docs/sources.md).
     static QString library();
 
     bool loaded() const { return m_loaded; }

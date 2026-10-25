@@ -164,9 +164,9 @@ thumbnails arrive, every ten seconds.
 ```
 
 No `source` means iCloud, as before. Each source has its own library in
-the one folder Pinhole keeps everything in: iCloud's stays `library/`,
-a folder's is `library-folder/` (made again from scratch when the folder
-changes). Both share `cache/` and the one limit; moving the folder moves
+the one folder Pinhole keeps everything in, named by its kind:
+`library/icloud/` and `library/folder/` (made again from scratch when the
+folder changes). Both share `cache/` and the one limit; moving the folder moves
 both. The window's settings panel picks the source, and the service
 switches to it as it runs: windows are told the library moved, and read
 the new one.

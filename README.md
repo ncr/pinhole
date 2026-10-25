@@ -49,7 +49,7 @@ app/                      the window: Qt Quick, with the grid in C++
 On your own library (after `pinhole-sync sign-in`):
 
 ```bash
-core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library
+core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library/icloud
 app/bin/build
 app/build/pinhole            # ? lists every key and gesture; S toggles the frame stats
 app/build/pinhole --bench    # scripted run, prints frame timing per phase

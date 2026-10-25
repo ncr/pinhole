@@ -58,8 +58,7 @@ QJsonObject Storage::configuredSource() {
 }
 
 QString Storage::library() {
-    const QString kind = configuredSource().value("kind").toString();
-    return folder() + (kind == QLatin1String("icloud") ? QStringLiteral("/library") : "/library-" + kind);
+    return folder() + "/library/" + configuredSource().value("kind").toString();
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {

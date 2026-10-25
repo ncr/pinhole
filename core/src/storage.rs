@@ -1,8 +1,8 @@
 //! Where Pinhole keeps its files, and how much room they may take: one
 //! folder (`~/.local/share/pinhole` unless the window chose another) with
-//! the library in `library/` (the index and the thumbnails, always kept)
-//! and the photos fetched from the source in `cache/`, under one limit for the
-//! whole. Kept in Pinhole's settings, changed from the window while the
+//! each source's library in `library/<kind>/` (the index and the
+//! thumbnails, always kept) and the photos fetched from the source in
+//! `cache/`, under one limit for the whole. Kept in Pinhole's settings, changed from the window while the
 //! service runs: a lower limit frees space at once; a new folder gets
 //! everything moved there in the background, the library first, the photos
 //! still served from the old folder until each has arrived.
@@ -68,13 +68,10 @@ pub fn read_settings(path: &Path) -> Settings {
     }
 }
 
-/// A source's library in the folder Pinhole keeps everything in: iCloud's
-/// in `library/`, as it always was, any other's beside it under its kind.
+/// A source's library in the folder Pinhole keeps everything in, in
+/// `library/` under its kind: `library/icloud`, `library/folder`.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
-    match source.kind() {
-        "icloud" => location.join("library"),
-        kind => location.join(format!("library-{kind}")),
-    }
+    location.join("library").join(source.kind())
 }
 
 /// Where Pinhole keeps everything now.
@@ -273,17 +270,17 @@ impl Storage {
         std::fs::write(&probe, b"").with_context(|| format!("{} is not writable", folder.display()))?;
         let _ = std::fs::remove_file(&probe);
 
-        // The library in use, and any other source's beside it.
-        let library_moves = old_library.parent() == Some(from.as_path());
-        let new_library = folder.join(old_library.file_name().unwrap_or_default());
-        let others: Vec<PathBuf> = libraries_in(&from).into_iter().filter(|l| *l != old_library).collect();
-        if let Some(there) = libraries_in(&folder).first() {
-            return Err(anyhow!("{} already has a library ({})", folder.display(), there.display()));
+        // Every source's library, all in `library/`, the one in use among
+        // them, unless it was opened from elsewhere.
+        let (old_libraries, new_libraries) = (from.join("library"), folder.join("library"));
+        let library_moves = old_library.starts_with(&old_libraries);
+        let new_library = folder.join(old_library.strip_prefix(&from).unwrap_or(&old_library));
+        if new_libraries.exists() {
+            return Err(anyhow!("{} already has a library", folder.display()));
         }
         let new_cache = folder.join("cache");
         let total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum::<u64>()
-            + if library_moves { size_of(&old_library) } else { 0 }
-            + others.iter().map(|l| size_of(l)).sum::<u64>();
+            + if library_moves { size_of(&old_libraries) } else { 0 };
         {
             let mut state = self.state.lock().unwrap();
             state.location = folder.clone();
@@ -297,20 +294,11 @@ impl Storage {
         let this = self.clone();
         std::thread::spawn(move || {
             if library_moves {
-                if let Err(e) = this.move_library(&old_library, &new_library) {
-                    eprintln!("pinholed: the library stays in {}: {e:#}", old_library.display());
+                if let Err(e) = this.move_library(&old_libraries, &new_libraries, &new_library) {
+                    eprintln!("pinholed: the libraries stay in {}: {e:#}", old_libraries.display());
                 }
             }
             this.move_files(&old_cache, &new_cache);
-            // The libraries of sources not in use now, as they are.
-            for other in others {
-                let to = folder.join(other.file_name().unwrap_or_default());
-                let moved = std::fs::rename(&other, &to).is_ok()
-                    || (copy_tree(&other, &to, &this.moved).is_ok() && std::fs::remove_dir_all(&other).is_ok());
-                if !moved {
-                    eprintln!("pinholed: {} stays where it was", other.display());
-                }
-            }
             // The old folder goes too once nothing else is in it.
             let _ = std::fs::remove_dir(&from);
             let mut state = this.state.lock().unwrap();
@@ -363,11 +351,11 @@ impl Storage {
         })
     }
 
-    /// The library over, with nothing writing it meanwhile: renamed on one
-    /// disk, else copied beside its new place and renamed into it. Whoever
-    /// reads it is told, and the old copy goes a little later, once they
-    /// have let go of it.
-    fn move_library(&self, from: &Path, to: &Path) -> Result<()> {
+    /// The libraries over, with nothing writing them meanwhile: renamed on
+    /// one disk, else copied beside their new place and renamed into it.
+    /// Whoever reads the one in use (`library`, there now) is told, and the
+    /// old copy goes a little later, once they have let go of it.
+    fn move_library(&self, from: &Path, to: &Path, library: &Path) -> Result<()> {
         let _writing = self.library_lock.lock().unwrap();
         let bytes = size_of(from);
         let copied = if std::fs::rename(from, to).is_ok() {
@@ -375,23 +363,23 @@ impl Storage {
         } else {
             let part = to.with_extension("part");
             let _ = std::fs::remove_dir_all(&part);
-            copy_tree(from, &part, &self.moved).with_context(|| format!("copying the library to {}", to.display()))?;
+            copy_tree(from, &part, &self.moved).with_context(|| format!("copying the libraries to {}", to.display()))?;
             std::fs::rename(&part, to)?;
             true
         };
         if !copied {
             self.moved.fetch_add(bytes, Ordering::Relaxed);
         }
-        self.state.lock().unwrap().library = to.to_owned();
+        self.state.lock().unwrap().library = library.to_owned();
         self.library_generation.fetch_add(1, Ordering::Relaxed);
         if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
-            tell(to);
+            tell(library);
         }
         if copied {
             let old = from.to_owned();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(30));
-                if old.join("library.sqlite").exists() {
+                if old.ends_with("library") && old.is_dir() {
                     let _ = std::fs::remove_dir_all(&old);
                 }
                 // And the folder it was in, if that is empty now.
@@ -478,20 +466,6 @@ impl Storage {
     }
 }
 
-/// The libraries in the folder Pinhole keeps everything in: iCloud's
-/// `library` and the other sources' `library-<kind>` (`library_for`).
-fn libraries_in(location: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(location) else { return Vec::new() };
-    let mut found: Vec<PathBuf> = entries
-        .flatten()
-        .filter(|e| e.path().join("library.sqlite").exists())
-        .filter(|e| e.file_name().to_str().is_some_and(|n| n == "library" || n.starts_with("library-")))
-        .map(|e| e.path())
-        .collect();
-    found.sort();
-    found
-}
-
 /// The files under a folder, with when each was last used and its size;
 /// not ones still downloading.
 pub fn files_in(dir: &Path, out: &mut Vec<(SystemTime, u64, PathBuf)>) {
@@ -561,7 +535,7 @@ mod tests {
     fn storage_in(location: &Path, settings: &Path) -> Arc<Storage> {
         Arc::new(Storage::new(
             location.to_owned(),
-            location.join("library"),
+            location.join("library/icloud"),
             location.join("cache"),
             None,
             settings.to_owned(),
@@ -615,8 +589,8 @@ mod tests {
     fn a_new_folder_gets_the_library_and_the_photos_moved() {
         let dir = temp("move");
         let (from, to) = (dir.join("old/pinhole"), dir.join("new"));
-        file(&from.join("library/library.sqlite"), 50, 0);
-        file(&from.join("library/thumbs/aa/one.jpg"), 20, 0);
+        file(&from.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("library/icloud/thumbs/aa/one.jpg"), 20, 0);
         file(&from.join("cache/full/aa/one.jpg"), 100, 0);
         file(&from.join("cache/video/bb/two.mov"), 300, 0);
         let storage = storage_in(&from, &dir.join("settings.json"));
@@ -629,13 +603,13 @@ mod tests {
         assert!(storage.set_location(PathBuf::from("relative")).is_err());
         storage.set_location(to.clone()).unwrap();
         until_moved(&storage);
-        assert!(to.join("library/library.sqlite").exists());
-        assert!(to.join("library/thumbs/aa/one.jpg").exists());
+        assert!(to.join("library/icloud/library.sqlite").exists());
+        assert!(to.join("library/icloud/thumbs/aa/one.jpg").exists());
         assert!(to.join("cache/full/aa/one.jpg").exists());
         assert!(to.join("cache/video/bb/two.mov").exists());
         assert!(!from.exists());
-        assert_eq!(storage.library(), to.join("library"));
-        assert_eq!(*told.lock().unwrap(), Some(to.join("library")));
+        assert_eq!(storage.library(), to.join("library/icloud"));
+        assert_eq!(*told.lock().unwrap(), Some(to.join("library/icloud")));
         assert_eq!(storage.library_generation.load(Ordering::Relaxed), 1);
         assert_eq!(read_settings(&dir.join("settings.json")).location, Some(to));
     }
@@ -644,18 +618,18 @@ mod tests {
     fn a_move_takes_every_source_library_and_keeps_the_rest_of_the_settings() {
         let dir = temp("move-sources");
         let (from, to) = (dir.join("old"), dir.join("new"));
-        file(&from.join("library-folder/library.sqlite"), 50, 0);
-        file(&from.join("library/library.sqlite"), 70, 0);
-        file(&from.join("library/thumbs/aa/one.jpg"), 20, 0);
+        file(&from.join("library/folder/library.sqlite"), 50, 0);
+        file(&from.join("library/icloud/library.sqlite"), 70, 0);
+        file(&from.join("library/icloud/thumbs/aa/one.jpg"), 20, 0);
         let settings = dir.join("settings.json");
         std::fs::write(&settings, r#"{"source": {"kind": "folder", "path": "/photos"}}"#).unwrap();
         // The folder's library in use, iCloud's beside it.
-        let storage = Arc::new(Storage::new(from.clone(), from.join("library-folder"), from.join("cache"), None, settings.clone()));
+        let storage = Arc::new(Storage::new(from.clone(), from.join("library/folder"), from.join("cache"), None, settings.clone()));
         storage.set_location(to.clone()).unwrap();
         until_moved(&storage);
-        assert_eq!(storage.library(), to.join("library-folder"));
-        assert!(to.join("library-folder/library.sqlite").exists());
-        assert!(to.join("library/thumbs/aa/one.jpg").exists());
+        assert_eq!(storage.library(), to.join("library/folder"));
+        assert!(to.join("library/folder/library.sqlite").exists());
+        assert!(to.join("library/icloud/thumbs/aa/one.jpg").exists());
         assert!(!from.exists());
         let saved = read_settings(&settings);
         assert_eq!(saved.location, Some(to));

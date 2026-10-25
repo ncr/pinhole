@@ -107,8 +107,8 @@ command line.
 `set_source` changes where the photos come from, kept in the settings as
 `source` (`{"kind": "icloud"}` or `{"kind": "folder", "path": ...}`; none is
 iCloud). Each source has its own library in the one folder: iCloud's in
-`library/`, a folder's in `library-folder/`, made again from scratch when
-the folder changes. Every window hears the new `source`, then
+`library/icloud/`, a folder's in `library/folder/`, made again from scratch
+when the folder changes. Every window hears the new `source`, then
 `library_moved` with the library to read, then `library_changed` as it
 fills.
 
@@ -136,9 +136,9 @@ A cached file is answered with `path` alone.
 ## Storage
 
 Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
-the window chose another: the library in `library/` (`library.sqlite` and
-`thumbs/`, built by `pinhole-sync` or the service and kept by the service;
-another source's in `library-<kind>/`) and the photos fetched from the
+the window chose another: each source's library in `library/<kind>/`
+(`library.sqlite` and `thumbs/`, built by `pinhole-sync` or the service and
+kept by the service) and the photos fetched from the
 source in `cache/<kind>/`, named by the rendition's key (iCloud's checksum
 of the file), so a re-edited photo gets a new name and duplicates share
 one.
@@ -159,7 +159,7 @@ background: first the library, with syncing paused, renamed on one disk or
 copied across two, after which every window is told
 
 ```json
-{"event": "library_moved", "library": "/new/folder/library"}
+{"event": "library_moved", "library": "/new/folder/library/icloud"}
 ```
 
 and reads it from there (the old copy goes 30 seconds later); then the
