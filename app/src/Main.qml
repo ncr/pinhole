@@ -23,7 +23,6 @@ ApplicationWindow {
         accent: theme.accent
         background: win.color
         onActivated: (index, rect) => viewer.openAt(index, rect)
-        onMenuRequested: (index, pos) => { photoMenu.target = index; photoMenu.popup(grid, pos) }
     }
 
     // Every vsync while anything moves; the benchmark drives it too.
@@ -94,65 +93,6 @@ ApplicationWindow {
         objectName: "photoViewer"
         anchors.fill: parent
         grid: grid
-        onMenuRequested: (x, y) => { photoMenu.target = viewer.index; photoMenu.popup(photoViewer, x, y) }
-    }
-
-    // The right-click menu, in the grid and in the viewer: everything the
-    // keys do, for a mouse.
-    Menu {
-        id: photoMenu
-        objectName: "photoMenu"
-        // The photo right-clicked; what the menu acts on is win.chosenFor() it.
-        property int target: -1
-        readonly property bool any: viewer.open || target >= 0 || grid.selectionCount > 0
-        width: 280
-        // Drawn here rather than by the style, whose shadow some renderers
-        // skip: the same panel as the shortcuts.
-        background: Rectangle {
-            implicitWidth: 280
-            radius: Math.min(8, theme.radius)
-            color: "#f0161618"
-            border.color: theme.accent
-            border.width: 1
-        }
-        component Entry: MenuItem {
-            height: visible ? implicitHeight : 0
-        }
-        Entry {
-            visible: !viewer.open && photoMenu.target >= 0
-            text: qsTr("Open")
-            onTriggered: viewer.openAt(photoMenu.target, grid.rectOf(photoMenu.target))
-        }
-        Entry {
-            visible: viewer.open && viewer.live
-            text: qsTr("Play the Live Photo")
-            onTriggered: viewer.playLive()
-        }
-        Entry {
-            visible: photoMenu.any
-            text: qsTr("Copy")
-            onTriggered: outgoing.copy(win.chosenFor(photoMenu.target))
-        }
-        Entry {
-            visible: photoMenu.any
-            text: qsTr("Export originals")
-            onTriggered: outgoing.exportTo(win.chosenFor(photoMenu.target), false)
-        }
-        Entry {
-            visible: photoMenu.any
-            text: qsTr("Export as JPEG and MP4")
-            onTriggered: outgoing.exportTo(win.chosenFor(photoMenu.target), true)
-        }
-        Entry {
-            visible: !viewer.open
-            text: qsTr("Select all")
-            onTriggered: grid.selectAll()
-        }
-        Entry {
-            visible: viewer.open
-            text: qsTr("Back to the library")
-            onTriggered: photoViewer.closeViewer()
-        }
     }
 
     Text {
@@ -323,17 +263,6 @@ ApplicationWindow {
         if (grid.selectionCount > 0)
             return grid.selection()
         return [grid.currentIndex()]
-    }
-
-    // For the menu on `index`: the selection when it holds that photo (or
-    // the click was between photos), else that photo alone.
-    function chosenFor(index) {
-        if (viewer.open)
-            return [viewer.index]
-        const selection = grid.selection()
-        if (selection.length > 0 && (index < 0 || selection.indexOf(index) >= 0))
-            return selection
-        return index >= 0 ? [index] : []
     }
 
     function openCurrent() {

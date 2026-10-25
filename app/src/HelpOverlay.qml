@@ -14,7 +14,7 @@ Item {
     readonly property var sections: [
         { title: qsTr("Browsing"), keys: [
             [qsTr("Click"), qsTr("Open the photo")],
-            [qsTr("Two fingers"), qsTr("Scroll; flick to coast, rest a finger to stop")],
+            [qsTr("Two fingers"), qsTr("Scroll; flick to coast, rest a finger or tap to stop")],
             [qsTr("Wheel"), qsTr("Scroll")],
             [qsTr("Pinch"), qsTr("Zoom in and out")],
             [qsTr("Ctrl+wheel"), qsTr("Zoom one step at the pointer")],
@@ -33,7 +33,7 @@ Item {
         ] },
         { title: qsTr("Taking photos out"), keys: [
             [qsTr("Drag"), qsTr("Drop the selection into any app")],
-            [qsTr("Right-click"), qsTr("Open, copy, export")],
+            [qsTr("Copy  Export"), qsTr("The buttons above an open photo")],
             ["Ctrl+C", qsTr("Copy")],
             ["Ctrl+E", qsTr("Export originals")],
             ["Ctrl+Shift+E", qsTr("Export as JPEG and MP4")]

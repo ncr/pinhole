@@ -13,8 +13,6 @@ Item {
 
     required property var grid
     property double openedAt: 0
-    // Right-click: the window's photo menu.
-    signal menuRequested(real x, real y)
     readonly property bool shown: viewer.open || progress > 0
 
     visible: shown
@@ -231,10 +229,11 @@ Item {
         onPressed: mouse => {
             last = Qt.point(mouse.x, mouse.y)
             panned = false
+            // Any press is a touch first: a coasting zoomed photo stops (a
+            // two-finger tap, which arrives as the right button, does only that).
+            viewer.stopCoasting()
             if (mouse.button === Qt.BackButton)
                 root.closeViewer()
-            else if (mouse.button === Qt.RightButton)
-                root.menuRequested(mouse.x, mouse.y)
         }
         onClicked: mouse => {
             if (mouse.button !== Qt.LeftButton || panned)
@@ -325,6 +324,30 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: viewer.playLive()
+            }
+        }
+        // Out of the app, as buttons: no menu to find them in.
+        Repeater {
+            model: [
+                { label: qsTr("Copy"), act: () => outgoing.copy([viewer.index]) },
+                { label: qsTr("Export"), act: () => outgoing.exportTo([viewer.index], false) }
+            ]
+            delegate: Rectangle {
+                required property var modelData
+                anchors.verticalCenter: parent.verticalCenter
+                width: buttonLabel.implicitWidth + 22
+                height: buttonLabel.implicitHeight + 10
+                radius: height / 2
+                color: buttonHover.hovered ? "#e0303036" : "#a0202024"
+                Text {
+                    id: buttonLabel
+                    anchors.centerIn: parent
+                    text: parent.modelData.label
+                    color: "white"
+                    font.pixelSize: 12
+                }
+                HoverHandler { id: buttonHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: parent.modelData.act() }
             }
         }
         // Back to the library.

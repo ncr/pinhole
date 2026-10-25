@@ -54,6 +54,8 @@ public:
     void pan(double dx, double dy);
     // A finger came to rest on the touchpad: a coasting pan stops.
     void touch(double t);
+    // A press or tap: a coasting pan stops where it is.
+    void stopCoasting();
 
     void advance(double dtSeconds);
     bool animating() const;

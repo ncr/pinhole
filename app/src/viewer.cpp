@@ -215,6 +215,11 @@ void Viewer::touch(double timeMs) {
     emit motionChanged();
 }
 
+void Viewer::stopCoasting() {
+    m_motion.stopCoasting();
+    emit motionChanged();
+}
+
 void Viewer::panBy(qreal dx, qreal dy) {
     m_motion.pan(dx, dy);
     emit motionChanged();

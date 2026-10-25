@@ -14,6 +14,7 @@
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QElapsedTimer>
@@ -260,10 +261,15 @@ void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer) 
 
 namespace {
 
+// Synthetic events carry this clock, on the touchpad's: a press is judged
+// against when a coast began.
+quint64 eventClock = 100000;
+
 void mouse(QQuickWindow *window, QEvent::Type type, QPointF at, Qt::MouseButton button,
            Qt::KeyboardModifiers mods = Qt::NoModifier) {
     const Qt::MouseButtons held = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::MouseButtons(button);
     QMouseEvent event(type, at, window->mapToGlobal(at), button, held, mods);
+    event.setTimestamp(eventClock += 8);
     QGuiApplication::sendEvent(window, &event);
 }
 
@@ -310,12 +316,11 @@ void pinch(QQuickWindow *window, QPointF at, double scale) {
 // Two fingers moving `steps` times by `by` px, 8 ms apart, as a touchpad
 // on Wayland reports it: a begin with no movement, updates, an end.
 void swipe(QQuickWindow *window, QPointF at, QPoint by, int steps) {
-    static quint64 clock = 100000;
-    clock += 1000;
-    wheel(window, at, {}, {}, Qt::ScrollBegin, clock);
+    eventClock += 1000;
+    wheel(window, at, {}, {}, Qt::ScrollBegin, eventClock);
     for (int i = 0; i < steps; ++i)
-        wheel(window, at, by, by * 8, Qt::ScrollUpdate, clock += 8);
-    wheel(window, at, {}, {}, Qt::ScrollEnd, clock += 8);
+        wheel(window, at, by, by * 8, Qt::ScrollUpdate, eventClock += 8);
+    wheel(window, at, {}, {}, Qt::ScrollEnd, eventClock += 8);
 }
 
 } // namespace
@@ -336,19 +341,19 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     const QPointF middle(window->width() / 2.0, window->height() / 2.0);
     const QPointF right(window->width() - 40.0, window->height() / 2.0);
     const QPointF left(40.0, window->height() / 2.0);
-    auto menu = [window] { return window->findChild<QObject *>(QStringLiteral("photoMenu")); };
+    // No menu anywhere: a two-finger tap (the right button) is only a touch.
+    auto popups = [window] { return window->findChildren<QObject *>(QRegularExpression("Menu|Popup")).size(); };
     auto steps = std::make_shared<QList<Step>>(QList<Step>{
-        {"right-click opens the menu for that photo, selecting nothing",
+        {"a flick sets the grid coasting", [=] { swipe(window, middle, {0, 30}, 8); },
+         [=] { return grid->animating(); }, 100},
+        {"a two-finger tap stops it, and opens nothing", [=] { click(window, middle, Qt::RightButton); },
+         [=, &viewer] { return !grid->animating() && !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
+        {"a two-finger tap on a photo opens nothing",
          [=] {
              *start = grid->indexAt(middle.x(), middle.y());
              click(window, middle, Qt::RightButton);
          },
-         [=] {
-             return grid->selectionCount() == 0 && menu() && menu()->property("opened").toBool() &&
-                    menu()->property("target").toInt() == *start;
-         }},
-        {"the menu closes", [=] { QMetaObject::invokeMethod(menu(), "close"); },
-         [=] { return !menu()->property("visible").toBool(); }},
+         [=, &viewer] { return !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
         {"a click opens the photo, selecting nothing", [=] { click(window, middle); },
          [=, &viewer] { return viewer.isOpen() && viewer.index() == *start && grid->selectionCount() == 0; }, 900},
         {"clicking the right side shows the next", [=] { click(window, right); },
@@ -394,6 +399,17 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              *mark = viewer.property("panY").toDouble();
          },
          [=, &viewer] { return viewer.property("panY").toDouble() > *mark + 30; }, 250},
+        {"a flick down sets it coasting again", [=] { swipe(window, middle, {0, -14}, 8); },
+         [=, &viewer] {
+             *mark = viewer.property("panY").toDouble();
+             return true;
+         }, 30},
+        {"a two-finger tap stops the coast", [=] { click(window, middle, Qt::RightButton); },
+         [=, &viewer] {
+             // Where it stopped, or back at the edge it had passed.
+             const double y = viewer.property("panY").toDouble();
+             return std::abs(y - *mark) < 60 && viewer.isOpen();
+         }, 300},
         {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle); },
          [&viewer] { return viewer.isOpen() && viewer.property("zoom").toDouble() < 1.02; }, 900},
         {"clicking a thumbnail in the carousel shows that photo",
@@ -407,10 +423,11 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer] { return !viewer.isOpen(); }, 900},
         {"a click opens it again", [=] { click(window, grid->rectOf(*start + 5).center()); },
          [&viewer] { return viewer.isOpen(); }, 900},
-        {"right-click in the viewer opens the menu", [=] { click(window, middle, Qt::RightButton); },
-         [=] { return menu()->property("opened").toBool(); }},
-        {"the menu closes again", [=] { QMetaObject::invokeMethod(menu(), "close"); },
-         [=] { return !menu()->property("visible").toBool(); }},
+        {"a two-finger tap in the viewer neither closes nor steps", [=, &viewer] {
+             *mark = viewer.index();
+             click(window, middle, Qt::RightButton);
+         },
+         [=, &viewer] { return viewer.isOpen() && viewer.index() == int(*mark) && popups() == 0; }},
         {"the mouse's back button goes back to the library", [=] { click(window, middle, Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
         {"a double-click opens it and leaves it open", [=] { doubleClick(window, grid->rectOf(*start).center()); },

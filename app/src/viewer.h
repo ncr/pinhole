@@ -85,6 +85,8 @@ public:
     Q_INVOKABLE void panBy(qreal dx, qreal dy);
     // A finger came to rest on the touchpad (TouchpadHold): stop coasting.
     void touch(double timeMs);
+    // A press or tap of any kind: stop coasting.
+    Q_INVOKABLE void stopCoasting();
 
     // `from` is the photo's cell in the grid, where the opening grows from.
     Q_INVOKABLE void openAt(int index, QRectF from);

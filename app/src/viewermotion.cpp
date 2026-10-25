@@ -175,6 +175,16 @@ void ViewerMotion::touch(double t) {
     m_panY = m_panTargetY = m_panYPhysics.position();
 }
 
+void ViewerMotion::stopCoasting() {
+    if (!panCoasting())
+        return;
+    stopPanPhysics();
+    // Stopped past an edge, it still goes back within it.
+    m_panTargetX = m_panX;
+    m_panTargetY = m_panY;
+    clampPanTargets();
+}
+
 void ViewerMotion::stepped(int delta) {
     const double page = pageWidth();
     m_offset = std::clamp(m_offset + delta * page, -1.5 * page, 1.5 * page);

@@ -176,9 +176,6 @@ signals:
     void selectingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
-    // Right-click: the menu, at `pos`, for the photo there (-1 between
-    // photos); for the selection when that photo is in it.
-    void menuRequested(int index, QPointF pos);
     void libraryChanged();
     void columnsChanged();
     void animatingChanged();
