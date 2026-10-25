@@ -74,7 +74,8 @@ fn main() -> Result<()> {
         Cmd::All => (Some(4), Some(64)),
         Cmd::SignIn { .. } => unreachable!("handled above"),
         Cmd::Changes { dry_run } => {
-            let r = sync::apply_changes(&mut client, &mut conn, dry_run)?;
+            let report = sync::apply_changes(&mut client, &mut conn, dry_run)?;
+            let (records, skipped, r) = (report.records, report.skipped, report.changes);
             let name = |id: &String| -> String {
                 conn.query_row("SELECT filename FROM assets WHERE id = ?1", [id], |r| r.get::<_, Option<String>>(0))
                     .ok()
@@ -82,7 +83,7 @@ fn main() -> Result<()> {
                     .unwrap_or_else(|| id.clone())
             };
             println!("{}{} records: {} new, {} changed, {} removed, {} skipped",
-                if dry_run { "dry run: " } else { "" }, r.records, r.added.len(), r.updated.len(), r.removed.len(), r.skipped);
+                if dry_run { "dry run: " } else { "" }, records, r.added.len(), r.updated.len(), r.removed.len(), skipped);
             if !r.reasons.is_empty() {
                 println!("  changed, by what: {:?}", r.reasons);
             }

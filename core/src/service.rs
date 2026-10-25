@@ -216,19 +216,6 @@ impl Shared {
     }
 }
 
-fn renditions(kind: &str) -> Option<&'static [&'static str]> {
-    Some(match kind {
-        "medium" => &["JPEGMed", "JPEGFull", "JPEGLarge"],
-        // The photo as it looks now at full size: the edit when it has
-        // been edited (the asset's own renditions), else the original.
-        "full" => &["JPEGFull", "VidFull", "Original"],
-        "original" => &["Original"],
-        "video" => &["VidMed", "VidFull", "Original"],
-        "live" => &["OriginalVidCompl"],
-        _ => return None,
-    })
-}
-
 fn extension(file_type: &str) -> &'static str {
     match file_type {
         "public.jpeg" => "jpg",
@@ -252,6 +239,12 @@ fn touch(path: &Path) {
 
 pub fn run(config: Config) -> Result<()> {
     std::fs::create_dir_all(&config.cache)?;
+    // An index from an older Pinhole is brought up to date before anything
+    // reads it.
+    let index = config.library.join("library.sqlite");
+    if index.exists() {
+        crate::db::open(&index).context("opening the library")?;
+    }
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());
 
@@ -419,32 +412,27 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     let (Some(asset), Some(kind)) = (params["asset"].as_str(), params["kind"].as_str()) else {
         return reply.send(Err(("bad_request", "fetch needs asset and kind".into())));
     };
-    let Some(candidates) = renditions(kind) else {
+    if !matches!(kind, "medium" | "full" | "original" | "video" | "live") {
         return reply.send(Err(("bad_request", format!("unknown kind {kind}"))));
-    };
-
-    // The first of the candidate renditions this asset has.
-    let mut found = None;
-    for rendition in candidates {
-        let row = db.query_row(
-            "SELECT a.master_id, r.checksum, r.file_type, r.url, r.url_fetched_at FROM assets a
-             JOIN resources r ON r.asset_id = a.id AND r.kind = ?2 WHERE a.id = ?1",
-            params![asset, rendition],
-            |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?, r.get::<_, Option<i64>>(4)?))
-            },
-        );
-        if let Ok(row) = row {
-            found = Some((*rendition, row));
-            break;
-        }
     }
-    let Some((rendition, (master, checksum, file_type, url, fetched))) = found else {
+
+    // The rendition that serves this kind, as the catalog chose it.
+    let row = db.query_row(
+        "SELECT r.name, r.key, r.file_type, m.master_id, i.url, i.url_fetched_at FROM renditions r
+         LEFT JOIN icloud_assets m ON m.asset_id = r.asset_id
+         LEFT JOIN icloud_resources i ON i.asset_id = r.asset_id AND i.kind = r.name
+         WHERE r.asset_id = ?1 AND r.kind = ?2",
+        params![asset, kind],
+        |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<i64>>(5)?))
+        },
+    );
+    let Ok((rendition, name, file_type, master, url, fetched)) = row else {
         return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition"))));
     };
+    let master = master.unwrap_or_default();
     let file_type = file_type.unwrap_or_default();
-    let name = checksum.unwrap_or_else(|| format!("{asset}-{rendition}"));
     let relative = Path::new(kind).join(
         thumb_path(&name).replacen("thumbs/", "", 1).replace(".jpg", &format!(".{}", extension(&file_type))),
     );
@@ -478,7 +466,7 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     let job = Job {
         asset: asset.to_owned(),
         master,
-        rendition: rendition.to_owned(),
+        rendition,
         path,
         url: if fresh { url } else { None },
         retried: false,
@@ -585,7 +573,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                 if let Some(asset) = by_id.get(job.asset.as_str()) {
                     for r in &asset.resources {
                         let _ = db.execute(
-                            "UPDATE resources SET url = ?3, url_fetched_at = ?4 WHERE asset_id = ?1 AND kind = ?2",
+                            "UPDATE icloud_resources SET url = ?3, url_fetched_at = ?4 WHERE asset_id = ?1 AND kind = ?2",
                             params![job.asset, r.kind, r.url, now],
                         );
                     }
@@ -734,10 +722,9 @@ fn sync_round(shared: &Shared, client: &mut PhotosClient) -> Result<()> {
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
-    let mut db = Connection::open(library.join("library.sqlite"))?;
-    db.busy_timeout(Duration::from_secs(10))?;
+    let mut db = crate::db::open(&library.join("library.sqlite"))?;
     let (added, removed, visible) = match crate::sync::apply_changes(client, &mut db, false) {
-        Ok(r) => (r.added.len(), r.removed.len(), r.visible()),
+        Ok(r) => (r.changes.added.len(), r.changes.removed.len(), r.changes.visible()),
         Err(e) if e.downcast_ref::<crate::sync::TokenExpired>().is_some() => {
             eprintln!("pinholed: sync: {e}; walking the whole library");
             let r = crate::sync::walk(client, &mut db, 100, 4, false, &|_, _| {})?;

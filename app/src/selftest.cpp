@@ -105,8 +105,8 @@ static void playFirstFrame(const QUrl &source, const char *name, std::shared_ptr
 // how long each stage took to arrive and whether the files decode.
 void runViewerSelfTest(const Library &library, Viewer &viewer) {
     const QList<Case> cases = {
-        {"HEIC photo", "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.heic') AND NOT a.is_live"},
-        {"JPEG photo", "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.jpeg')"},
+        {"HEIC photo", "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.heic') AND NOT a.is_live"},
+        {"JPEG photo", "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.jpeg')"},
         {"video", "a.is_video AND a.duration < 60"},
         {"long video", "a.is_video AND a.duration > 300"},
         {"Live Photo", "a.is_live", true},
@@ -187,8 +187,8 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
 
 void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QString &folder) {
     const QList<int> picks = {
-        findIndex(library, "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.heic') AND NOT a.is_live"),
-        findIndex(library, "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.jpeg')"),
+        findIndex(library, "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.heic') AND NOT a.is_live"),
+        findIndex(library, "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.jpeg')"),
         findIndex(library, "a.is_video AND a.duration < 30"),
     };
     auto describe = [](const QStringList &files) {

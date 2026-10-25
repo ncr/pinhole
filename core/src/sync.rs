@@ -13,7 +13,8 @@ use serde_json::Value;
 
 use crate::auth::FixedSession;
 use crate::cloudkit::{Downloader, PhotosClient, Traffic, LIBRARY_COUNT};
-use crate::db;
+use crate::db::{self, Index};
+use crate::icloud::index::store;
 use crate::session::Session;
 use crate::icloud::records::{pair_records_with_leftovers, CloudAsset as Asset, ICloudSource, Page, PhotoSource};
 
@@ -54,6 +55,7 @@ pub fn walk(
 ) -> Result<WalkReport> {
     let total = client.count(LIBRARY_COUNT)?;
     db::set_meta(conn, "walk_started_at", &now_secs().to_string())?;
+    let mut index = Index::new(conn);
 
     let next = Arc::new(AtomicU64::new(0));
     let (tx, rx) = mpsc::channel::<Result<(u64, Page, Traffic)>>();
@@ -86,7 +88,6 @@ pub fn walk(
     drop(tx);
 
     let mut report = WalkReport { reported: total, ..Default::default() };
-    let mut seen: HashSet<String> = HashSet::new();
     let mut leftovers: Vec<Value> = Vec::new();
     let fetched_at = now_secs();
     let mut failure = None;
@@ -102,14 +103,13 @@ pub fn walk(
         // everything after it is "changed since the walk".
         if rank == 0 {
             if let Some(token) = &page.sync_token {
-                db::set_meta(conn, "walk_sync_token", token)?;
+                db::set_meta(index.conn, "change_token", token)?;
             }
         }
         if (page.assets.len() as u32) < per_page && rank + (per_page as u64) < total {
             report.short_pages += 1;
         }
-        db::upsert_assets(conn, &page.assets, Some(rank), fetched_at)?;
-        seen.extend(page.assets.iter().map(|a| a.id.clone()));
+        store(&mut index, &page.assets, Some(rank), fetched_at)?;
         leftovers.extend(page.leftovers);
         report.assets += page.assets.len() as u64;
         report.traffic.add(&t);
@@ -137,21 +137,13 @@ pub fn walk(
         repaired.extend(more);
         unpaired = rest;
     }
-    let repaired: Vec<Asset> = repaired.into_iter().filter(|a| !seen.contains(&a.id)).collect();
-    db::upsert_assets(conn, &repaired, None, fetched_at)?;
-    seen.extend(repaired.iter().map(|a| a.id.clone()));
+    let repaired: Vec<Asset> = repaired.into_iter().filter(|a| !index.seen.contains(&a.id)).collect();
+    store(&mut index, &repaired, None, fetched_at)?;
     report.repaired = repaired.len();
     report.unpaired = unpaired.len();
 
     // Gone from iCloud since the last walk.
-    let stale: Vec<String> = conn
-        .prepare("SELECT id FROM assets")?
-        .query_map([], |r| r.get::<_, String>(0))?
-        .filter_map(|r| r.ok())
-        .filter(|id| !seen.contains(id))
-        .collect();
-    db::remove_assets(conn, &stale)?;
-    report.removed = stale.len();
+    report.removed = index.remove_unseen()?;
 
     report.seconds = started.elapsed().as_secs_f64();
     db::set_meta(conn, "walk_done_at", &now_secs().to_string())?;
@@ -209,8 +201,9 @@ pub fn download_thumbs(
     let mut jobs: Vec<ThumbJob> = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT a.id, a.master_id, r.url, r.url_fetched_at, r.checksum FROM assets a
-             JOIN resources r ON r.asset_id = a.id AND r.kind = 'JPEGThumb'
+            "SELECT a.id, m.master_id, r.url, r.url_fetched_at, r.checksum FROM assets a
+             JOIN icloud_assets m ON m.asset_id = a.id
+             JOIN icloud_resources r ON r.asset_id = a.id AND r.kind = 'JPEGThumb'
              WHERE a.thumb_path IS NULL ORDER BY a.asset_date DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -463,43 +456,12 @@ mod tests {
 #[derive(Debug, Default)]
 pub struct ChangeReport {
     pub records: usize,
-    /// Assets the index did not have.
-    pub added: Vec<String>,
-    /// Assets it had, with something about them changed.
-    pub updated: Vec<String>,
-    /// For the changed ones, what changed as far as Pinhole cares: counts by
-    /// reason (favourite, edited, date, other).
-    pub reasons: std::collections::BTreeMap<&'static str, usize>,
-    /// Assets deleted, hidden or erased since.
-    pub removed: Vec<String>,
+    pub changes: db::Changes,
     /// Records that could not be made sense of (an asset whose master is gone).
     pub skipped: usize,
 }
 
-impl ChangeReport {
-    pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.updated.is_empty() && self.removed.is_empty()
-    }
-
-    /// Whether anything a window shows changed: Photos' own background work
-    /// touches many records in ways Pinhole does not draw ("other").
-    pub fn visible(&self) -> bool {
-        !self.added.is_empty() || !self.removed.is_empty() || self.reasons.iter().any(|(r, n)| *r != "other" && *n > 0)
-    }
-}
-
-/// The change feed said the token is no use any more: only a full walk
-/// brings the index back in step.
-#[derive(Debug)]
-pub struct TokenExpired(pub String);
-
-impl std::fmt::Display for TokenExpired {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "the change token is no longer accepted: {}", self.0)
-    }
-}
-
-impl std::error::Error for TokenExpired {}
+pub use crate::source::TokenExpired;
 
 /// Bring the index up to date from CloudKit's change feed, starting at the
 /// token the last walk or sync saved. New and changed assets are written
@@ -508,9 +470,7 @@ impl std::error::Error for TokenExpired {}
 /// the token included. Thumbnails are not fetched here: new assets have none
 /// yet, which `download_thumbs` then takes care of.
 pub fn apply_changes(client: &mut PhotosClient, conn: &mut Connection, dry_run: bool) -> Result<ChangeReport> {
-    let mut token = db::meta(conn, "sync_token")
-        .or_else(|| db::meta(conn, "walk_sync_token"))
-        .ok_or_else(|| anyhow!("no change token yet; walk the library first"))?;
+    let mut token = db::meta(conn, "change_token").ok_or_else(|| anyhow!("no change token yet; walk the library first"))?;
 
     let mut report = ChangeReport::default();
     let mut assets: HashMap<String, Value> = HashMap::new();
@@ -543,16 +503,16 @@ pub fn apply_changes(client: &mut PhotosClient, conn: &mut Connection, dry_run: 
         }
     }
 
-    let known = |id: &str| -> bool {
-        conn.query_row("SELECT 1 FROM assets WHERE id = ?1", [id], |_| Ok(())).is_ok()
+    let on_master = |conn: &Connection, master: &str| -> Result<Vec<String>> {
+        let mut stmt = conn.prepare_cached("SELECT asset_id FROM icloud_assets WHERE master_id = ?1")?;
+        let ids = stmt.query_map([master], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
+        Ok(ids)
     };
 
     // A master that changed alone: its assets need their own records again.
     let mut lonely_masters: Vec<String> = Vec::new();
     for master in masters.keys() {
-        let mut stmt = conn.prepare("SELECT id FROM assets WHERE master_id = ?1")?;
-        let ids: Vec<String> = stmt.query_map([master], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
-        for id in ids {
+        for id in on_master(conn, master)? {
             if !assets.contains_key(&id) {
                 lonely_masters.push(id);
             }
@@ -591,59 +551,24 @@ pub fn apply_changes(client: &mut PhotosClient, conn: &mut Connection, dry_run: 
     let records: Vec<Value> = assets.values().cloned().chain(masters.values().cloned()).collect();
     let (paired, leftovers) = pair_records_with_leftovers(&records, false);
     report.skipped = leftovers.iter().filter(|r| r["recordType"] == "CPLAsset").count();
-    let mut upserts: Vec<Asset> = Vec::new();
-    for asset in paired {
-        if asset.gone {
-            if known(&asset.id) {
-                report.removed.push(asset.id.clone());
-            }
-        } else {
-            if known(&asset.id) {
-                report.updated.push(asset.id.clone());
-                let (favorite, date, thumb): (bool, Option<i64>, Option<String>) = conn
-                    .query_row(
-                        "SELECT a.favorite, a.asset_date, r.checksum FROM assets a
-                         LEFT JOIN resources r ON r.asset_id = a.id AND r.kind = 'JPEGThumb' WHERE a.id = ?1",
-                        [&asset.id],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                    )
-                    .unwrap_or((false, None, None));
-                let new_thumb = asset.resource("JPEGThumb").and_then(|r| r.checksum.clone());
-                let reason = if favorite != asset.favorite {
-                    "favourite"
-                } else if thumb != new_thumb {
-                    "edited"
-                } else if date != asset.asset_date {
-                    "date"
-                } else {
-                    "other"
-                };
-                *report.reasons.entry(reason).or_default() += 1;
-            } else {
-                report.added.push(asset.id.clone());
-            }
-            upserts.push(asset);
-        }
-    }
-    // Deleted records: assets, and assets whose master went.
+    // Deleted records: assets, and assets whose master went; and assets
+    // now deleted, hidden or erased.
+    let mut removed: Vec<String> = paired.iter().filter(|a| a.gone).map(|a| a.id.clone()).collect();
     for name in &deleted {
-        if known(name) {
-            report.removed.push(name.clone());
-        }
-        let mut stmt = conn.prepare("SELECT id FROM assets WHERE master_id = ?1")?;
-        for id in stmt.query_map([name], |r| r.get::<_, String>(0))?.filter_map(|r| r.ok()) {
-            if !report.removed.contains(&id) {
-                report.removed.push(id);
-            }
-        }
+        removed.push(name.clone());
+        removed.extend(on_master(conn, name)?);
     }
+    let upserts: Vec<Asset> = paired.into_iter().filter(|a| !a.gone).collect();
 
+    let mut index = Index::new(conn);
+    index.dry_run = dry_run;
+    store(&mut index, &upserts, None, now_secs())?;
+    index.remove(&removed)?;
+    report.changes = std::mem::take(&mut index.changes);
     if !dry_run {
-        db::upsert_assets(conn, &upserts, None, now_secs())?;
-        db::remove_assets(conn, &report.removed)?;
-        db::set_meta(conn, "sync_token", &token)?;
+        db::set_meta(conn, "change_token", &token)?;
         db::set_meta(conn, "synced_at", &now_secs().to_string())?;
-        if report.visible() {
+        if report.changes.visible() {
             let version: i64 = db::meta(conn, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0) + 1;
             db::set_meta(conn, "library_version", &version.to_string())?;
         }

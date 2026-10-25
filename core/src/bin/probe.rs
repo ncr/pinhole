@@ -193,7 +193,7 @@ fn changes(client: &mut PhotosClient, db_path: &PathBuf, from_start: Option<u32>
     let conn = db::open(db_path)?;
     let (mut token, pages) = match from_start {
         Some(p) => (None, p),
-        None => (Some(db::meta(&conn, "walk_sync_token").ok_or_else(|| anyhow!("no walk_sync_token; run walk first"))?), u32::MAX),
+        None => (Some(db::meta(&conn, "change_token").ok_or_else(|| anyhow!("no change_token; run walk first"))?), u32::MAX),
     };
     let mut total_records = 0usize;
     for page in 0..pages {
@@ -237,11 +237,11 @@ fn stats(db_path: &PathBuf) -> Result<()> {
         date(q("SELECT min(asset_date) FROM assets WHERE asset_date > 0")?), date(q("SELECT max(asset_date) FROM assets")?));
 
     println!("\n{:<18} {:>7} {:>10} {:>9} {:>14}", "rendition", "assets", "total GB", "avg KB", "long edge p5/50/95");
-    let mut stmt = conn.prepare("SELECT kind, count(*), sum(size), avg(size) FROM resources GROUP BY kind ORDER BY sum(size) DESC")?;
+    let mut stmt = conn.prepare("SELECT kind, count(*), sum(size), avg(size) FROM icloud_resources GROUP BY kind ORDER BY sum(size) DESC")?;
     let rows: Vec<(String, i64, i64, f64)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), r.get::<_, Option<f64>>(3)?.unwrap_or(0.0))))?.collect::<Result<_, _>>()?;
     for (kind, n, sum, avg) in rows {
         let mut edges: Vec<i64> = conn
-            .prepare("SELECT max(coalesce(width,0), coalesce(height,0)) FROM resources WHERE kind = ?1")?
+            .prepare("SELECT max(coalesce(width,0), coalesce(height,0)) FROM icloud_resources WHERE kind = ?1")?
             .query_map([&kind], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         edges.sort_unstable();
@@ -250,7 +250,7 @@ fn stats(db_path: &PathBuf) -> Result<()> {
     }
 
     println!("\nfile types (originals):");
-    let mut stmt = conn.prepare("SELECT coalesce(file_type,'?'), count(*) FROM resources WHERE kind='Original' GROUP BY 1 ORDER BY 2 DESC LIMIT 12")?;
+    let mut stmt = conn.prepare("SELECT coalesce(file_type,'?'), count(*) FROM icloud_resources WHERE kind='Original' GROUP BY 1 ORDER BY 2 DESC LIMIT 12")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
         let (t, n) = row?;
         println!("  {n:>7}  {t}");
@@ -300,7 +300,7 @@ fn fresh_assets(client: &mut PhotosClient, ids: &[(String, String)]) -> Result<V
 /// Random (asset, master) record names matching an SQL filter on `assets a`.
 fn random_ids(conn: &Connection, filter: &str, n: usize) -> Result<Vec<(String, String)>> {
     let mut ids: Vec<(String, String)> = conn
-        .prepare(&format!("SELECT id, master_id FROM assets a WHERE {filter}"))?
+        .prepare(&format!("SELECT a.id, m.master_id FROM assets a JOIN icloud_assets m ON m.asset_id = a.id WHERE {filter}"))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
     ids.shuffle(&mut rand::thread_rng());
@@ -313,14 +313,14 @@ fn sample(client: &mut PhotosClient, db_path: &PathBuf, kind: &str, n: usize, th
 
     // Do stored URLs survive? Try the oldest one we have.
     if let Ok((url, fetched)) = conn.query_row(
-        "SELECT url, url_fetched_at FROM resources WHERE kind = ?1 AND url IS NOT NULL ORDER BY url_fetched_at LIMIT 1",
+        "SELECT url, url_fetched_at FROM icloud_resources WHERE kind = ?1 AND url IS NOT NULL ORDER BY url_fetched_at LIMIT 1",
         [kind], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
     ) {
         let status = client.downloader().fetch(&url, Some("bytes=0-0"), false).map(|r| r.status().as_u16()).unwrap_or(0);
         println!("stored URL fetched {} min ago answers {status}", (now_secs() - fetched) / 60);
     }
 
-    let ids = random_ids(&conn, &format!("EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = '{kind}')"), n)?;
+    let ids = random_ids(&conn, &format!("EXISTS (SELECT 1 FROM icloud_resources r WHERE r.asset_id = a.id AND r.kind = '{kind}')"), n)?;
     let started = Instant::now();
     let assets = fresh_assets(client, &ids)?;
     let jobs: Vec<(String, String, i64)> = assets

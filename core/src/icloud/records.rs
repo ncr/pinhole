@@ -9,6 +9,8 @@ use base64::Engine;
 use serde_json::Value;
 
 use crate::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use crate::icloud::index::CANDIDATES;
+use crate::source::{Asset, Kind, Rendition, Want};
 
 /// One rendition of an asset iCloud keeps: the original, the JPEG sizes
 /// and the video sizes. Download URLs are signed and short-lived, so they
@@ -66,6 +68,42 @@ impl CloudAsset {
 
     pub fn resource(&self, kind: &str) -> Option<&Resource> {
         self.resources.iter().find(|r| r.kind == kind)
+    }
+
+    /// As every source describes an asset, with the rendition that serves
+    /// each kind a window asks for (`index::CANDIDATES`).
+    pub fn neutral(&self) -> Asset {
+        let video = self.is_video();
+        let renditions = CANDIDATES
+            .iter()
+            .filter(|(want, _)| *want != Want::Video || video)
+            .filter_map(|(want, names)| {
+                let r = names.iter().find_map(|n| self.resource(n))?;
+                Some(Rendition {
+                    want: *want,
+                    name: r.kind.clone(),
+                    key: r.checksum.clone().unwrap_or_else(|| format!("{}-{}", self.id, r.kind)),
+                    width: r.width,
+                    height: r.height,
+                    size: r.size,
+                    file_type: r.file_type.clone(),
+                })
+            })
+            .collect();
+        Asset {
+            id: self.id.clone(),
+            filename: self.filename.clone(),
+            item_type: self.item_type.clone(),
+            taken: self.asset_date,
+            added: self.added_date,
+            kind: if video { Kind::Video } else if self.is_live() { Kind::Live } else { Kind::Photo },
+            favorite: self.favorite,
+            duration: self.duration,
+            orientation: self.orientation,
+            has_location: self.has_location,
+            size: self.resource("Original").and_then(|r| r.size),
+            renditions,
+        }
     }
 }
 

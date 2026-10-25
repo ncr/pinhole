@@ -71,15 +71,15 @@ fn main() -> Result<()> {
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO assets (id, rank, master_id, item_type, filename, asset_date, added_date, favorite,
+            "INSERT INTO assets (id, item_type, filename, asset_date, added_date, favorite,
                 duration, is_video, is_live, thumb_path, thumb_w, thumb_h, avg_color)
-             VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for (i, (s, (rel, color, _))) in specs.iter().zip(&colors).enumerate() {
             let item_type = if s.video.is_some() { "com.apple.quicktime-movie" } else { "public.heic" };
             let filename = format!("IMG_{:04}.{}", i % 10_000, if s.video.is_some() { "MOV" } else { "HEIC" });
             stmt.execute(params![
-                s.id, i as i64, item_type, filename, s.date_ms, s.favorite, s.video, s.video.is_some(), s.live,
+                s.id, item_type, filename, s.date_ms, s.favorite, s.video, s.video.is_some(), s.live,
                 rel, s.width, s.height, *color as i64,
             ])?;
         }
