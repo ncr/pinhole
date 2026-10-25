@@ -31,8 +31,12 @@ constexpr int kDefaultLevel = 5;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
 // A pinch passing from one level to the next cross-fades in this long, as
-// Photos on an iPhone does (3-4 frames at 30 fps in a recording of it).
-constexpr double kReflowSeconds = 0.12;
+// Photos on an iPhone does (3-4 frames at 30 fps in a recording of it),
+// a little longer here for the light morph to show.
+constexpr double kReflowSeconds = 0.15;
+// How far toward the other level's places photos glide while two levels
+// cross-fade: a light morph, not a full one.
+constexpr double kMorph = 0.35;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
@@ -457,11 +461,20 @@ void PhotoGrid::setScrubbing(bool scrubbing) {
 }
 
 QRectF PhotoGrid::cellRect(int index, const Layer &l) const {
-    const double s = strideFor(l.columns);
-    const double size = (s - gapFor(l.columns)) * l.scale;
-    const double x = (index % l.columns) * s;
-    const double y = (index / l.columns) * s;
-    return {l.at.x() + (x - l.pin.x()) * l.scale, l.at.y() + (y - l.pin.y()) * l.scale, size, size};
+    auto place = [this, index](int columns, double scale, QPointF pin, QPointF at) {
+        const double s = strideFor(columns);
+        const double size = (s - gapFor(columns)) * scale;
+        const double x = (index % columns) * s;
+        const double y = (index / columns) * s;
+        return QRectF(at.x() + (x - pin.x()) * scale, at.y() + (y - pin.y()) * scale, size, size);
+    };
+    const QRectF here = place(l.columns, l.scale, l.pin, l.at);
+    if (l.morph <= 0)
+        return here;
+    const QRectF there = place(l.toColumns, l.toScale, l.toPin, l.toAt);
+    const double m = l.morph;
+    return {lerp(here.x(), there.x(), m), lerp(here.y(), there.y(), m), lerp(here.width(), there.width(), m),
+            lerp(here.height(), there.height(), m)};
 }
 
 QPointF PhotoGrid::pinIn(int columns) const {
@@ -487,15 +500,16 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
         const int columns = kLevels[size_t(level)];
         const double scale = m_zoom.stride / strideFor(columns);
         const QPointF pin = pinIn(columns);
-        // Vertically the pinned photo stays under the fingers. Across, a
-        // level is kept where it covers the window: in another level the
-        // photo sits in a different column, and pinning it there would slide
-        // the whole grid sideways and open a dark band at one edge. A level
-        // scaled up keeps both edges outside the view; one scaled down (only
-        // ever the faded one on top) keeps them inside.
-        const double grid = width() * scale;
-        double left = m_zoom.at.x() - pin.x() * scale;
-        left = scale >= 1 ? std::clamp(left, width() - grid, 0.0) : std::clamp(left, 0.0, width() - grid);
+        // Vertically the pinned photo stays under the fingers. Across, every
+        // level spans the window and grows or shrinks about the fingers'
+        // x: photos left of them move left, those right of them right, and
+        // the grid never slides. (Holding the pinned photo under the fingers
+        // across as well cannot work: in each level it sits in another
+        // column, so the grid slid one way at each change of level and back
+        // as the zoom went on.) Scaled up, both edges stay outside the
+        // view; scaled down (only the faded one on top), inside.
+        const double fx = std::clamp(m_zoom.focusX, 0.0, width());
+        const double left = fx * (1 - scale);
         // Down the window the same, near the library's ends: a level tall
         // enough to fill the window is kept filling it, rather than holding
         // the pinned photo's height and showing empty space past the first or
@@ -510,6 +524,7 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
     // the denser is drawn whole underneath and the coarser faded over it:
     // its share over the rest blends just like two half-transparent layers,
     // without the background ever showing through.
+    // `a` is the level coming in, `aWeight` how far along; `b` going out.
     auto pair = [&](int a, double aWeight, int b) -> std::vector<Layer> {
         const bool aDenser = kLevels[size_t(a)] > kLevels[size_t(b)];
         const int dense = aDenser ? a : b, coarse = aDenser ? b : a;
@@ -518,7 +533,23 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
             return {layerFor(coarse, 1)};
         if (coarseWeight <= 0.001)
             return {layerFor(dense, 1)};
-        return {layerFor(dense, 1), layerFor(coarse, coarseWeight)};
+        std::vector<Layer> both{layerFor(dense, 1), layerFor(coarse, coarseWeight)};
+        // The light morph: the incoming level starts a little toward where
+        // the outgoing one has each photo and settles into its own places;
+        // the outgoing one leans a little toward the new places as it goes.
+        Layer &in = aDenser ? both[0] : both[1];
+        Layer &out = aDenser ? both[1] : both[0];
+        auto toward = [](Layer &l, const Layer &other, double m) {
+            l.morph = m;
+            l.toColumns = other.columns;
+            l.toScale = other.scale;
+            l.toPin = other.pin;
+            l.toAt = other.at;
+        };
+        const Layer inPlain = in, outPlain = out;
+        toward(in, outPlain, (1 - aWeight) * kMorph);
+        toward(out, inPlain, aWeight * kMorph);
+        return both;
     };
     if (m_zoom.settling) {
         // The cross-fade done in the first part of the settle: briefly two
@@ -581,6 +612,7 @@ void PhotoGrid::beginZoom(QPointF at) {
     m_zoom.at = l.at + (pinIn(l.columns) - l.pin) * l.scale;
     m_zoom.pinStart = m_zoom.at;
     m_zoom.fingerStart = at;
+    m_zoom.focusX = at.x();
     m_zoom.shown = levelForColumns(l.columns);
     m_zoom.fadeFrom = -1;
     m_zoom.fade = 1;
@@ -611,6 +643,7 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
+    m_zoom.focusX = at.x();
     const double now = m_clock.nsecsElapsed() / 1e9;
     m_zoom.samples.emplace_back(now, std::log(stride));
     while (m_zoom.samples.size() > 2 && now - m_zoom.samples.front().first > 0.1)
@@ -1039,6 +1072,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const double ls = strideFor(l.columns);
         const QPointF topLeft = l.pin + (view.topLeft() - l.at) / l.scale;
         const QPointF bottomRight = l.pin + (view.bottomRight() - l.at) / l.scale;
+        if (l.morph > 0) {
+            // Photos glide in from where the other level had them: a few
+            // rows beyond the view, and every column, may land inside it.
+            const int extra = int(std::ceil((bottomRight.y() - topLeft.y()) / ls * 0.4)) + 1;
+            ranges.push_back({std::max(0, int(std::floor(topLeft.y() / ls)) - extra),
+                              int(std::floor(bottomRight.y() / ls)) + extra, 0, l.columns - 1});
+            continue;
+        }
         ranges.push_back({std::max(0, int(std::floor(topLeft.y() / ls))), int(std::floor(bottomRight.y() / ls)),
                           std::clamp(int(std::floor(topLeft.x() / ls)), 0, l.columns - 1),
                           std::clamp(int(std::floor(bottomRight.x() / ls)), 0, l.columns - 1)});

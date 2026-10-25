@@ -200,6 +200,12 @@ private:
         QPointF pin;
         QPointF at;
         double opacity = 1;
+        // While two levels cross-fade, each photo is drawn this share of the
+        // way toward where the other level puts it: a light morph.
+        double morph = 0;
+        int toColumns = 0;
+        double toScale = 1;
+        QPointF toPin, toAt;
     };
     std::vector<Layer> layers() const;
     QRectF cellRect(int index, const Layer &layer) const;
@@ -267,6 +273,7 @@ private:
         QPointF fraction;      // where in it the fingers are, 0..1
         double stride = 0;     // cell size shown now
         QPointF at;            // where the pinned point is shown now
+        double focusX = 0;     // across, what the zoom grows about: the fingers
         QPointF pinStart, fingerStart; // both when the zoom began
         // A pinch: the cell size it began at and the scale since, which
         // `value` deltas add up to.
