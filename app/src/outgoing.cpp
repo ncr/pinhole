@@ -300,24 +300,51 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
                      const QString &folder, std::function<void(const QString &)> placed) {
     QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
 
+    // A hard link where the cache and the target share a disk (free and
+    // instant), a copy otherwise.
+    auto hand = [placed](const QString &from, const QString &out) {
+        if (::link(QFile::encodeName(from).constData(), QFile::encodeName(out).constData()) == 0 ||
+            QFile::copy(from, out))
+            placed(out);
+        else
+            placed({});
+    };
+
     if (compatible && type == QLatin1String("public.heic")) {
         const QString out = uniqueName(folder, QFileInfo(name).completeBaseName() + ".jpg");
+        // Converted once and kept in the cache beside the originals, named as
+        // the original is (by iCloud's checksum, so an edit converts anew);
+        // pinholed's size limit covers it like the rest.
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible";
+        const QString converted = dir + '/' + QFileInfo(source).completeBaseName() + ".jpg";
+        if (QFileInfo::exists(converted)) {
+            QFile file(converted);
+            if (file.open(QIODevice::ReadWrite))
+                file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime); // recently used
+            hand(converted, out);
+            return;
+        }
+        QDir().mkpath(dir);
+        // Written aside and renamed: two at once never clash, and a reader
+        // never sees half a file. (pinholed's eviction skips .part files.)
+        const QString part = converted + '.' + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".part";
         auto *magick = new QProcess(this);
-        connect(magick, &QProcess::finished, this, [magick, out, placed](int code, QProcess::ExitStatus status) {
-            magick->deleteLater();
-            placed(status == QProcess::NormalExit && code == 0 && QFileInfo::exists(out) ? out : QString());
-        });
-        magick->start(QStringLiteral("magick"), {source, QStringLiteral("-quality"), QStringLiteral("92"), out});
+        connect(magick, &QProcess::finished, this,
+                [magick, part, converted, out, hand, placed](int code, QProcess::ExitStatus status) {
+                    magick->deleteLater();
+                    if (status != QProcess::NormalExit || code != 0 || !QFileInfo::exists(part)) {
+                        QFile::remove(part);
+                        placed({});
+                        return;
+                    }
+                    QFile::remove(converted);
+                    QFile::rename(part, converted);
+                    hand(converted, out);
+                });
+        magick->start(QStringLiteral("magick"),
+                      {source, QStringLiteral("-quality"), QStringLiteral("92"), QStringLiteral("jpg:") + part});
         return;
     }
 
-    // As is: a hard link where the cache and the target share a disk (free
-    // and instant), a copy otherwise.
-    const QString out = uniqueName(folder, name);
-    if (::link(QFile::encodeName(source).constData(), QFile::encodeName(out).constData()) == 0 ||
-        QFile::copy(source, out)) {
-        placed(out);
-    } else {
-        placed({});
-    }
+    hand(source, uniqueName(folder, name));
 }
