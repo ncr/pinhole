@@ -1,6 +1,6 @@
 # Builds the package from this checkout: bin/install runs makepkg here.
 pkgname=pinhole
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc='A fast, on-demand iCloud Photos browser for Omarchy'
 arch=('x86_64' 'aarch64')

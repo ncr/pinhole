@@ -1,6 +1,6 @@
 [package]
 name = "pinhole-core"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "Pinhole's core: iCloud Photos access, the local library index and the cache"

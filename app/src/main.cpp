@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("pinhole");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion("1.0.0");
     app.setDesktopFileName("pinhole");
 
     // Where pinhole-sync builds the library. The synthetic one for working on
