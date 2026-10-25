@@ -23,3 +23,7 @@ class QQuickWindow;
 // person would (right-click, open, the sides, the wheel, a sideways swipe,
 // the back button, double-click) and report whether each did its job.
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library);
+
+// PINHOLE_SELFTEST=copytwice:<folder>: open a photo, click Copy, grab the
+// window; wait; click Copy again, grab again; report the button's phases.
+void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder);

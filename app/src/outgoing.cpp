@@ -6,6 +6,10 @@
 
 #include <QDateTime>
 #include <QClipboard>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QImageReader>
+#include <QFutureWatcher>
+#include <QBuffer>
 #include <QDir>
 #include <QDrag>
 #include <QEventLoop>
@@ -102,86 +106,6 @@ private:
     mutable QStringList m_files;
 };
 
-// The clipboard's promise, as on a Mac: copying is instant. The files are
-// prepared at once in the background and handed over when something
-// pastes; a paste before they are ready waits for them. One photo is also
-// an image, for pasting into chats.
-class PromisedClipboard : public QMimeData {
-public:
-    PromisedClipboard(Outgoing *outgoing, const QList<LibraryItem> &items) : m_state(std::make_shared<State>()) {
-        m_state->image = items.size() == 1 && !items.first().video;
-        // Kept apart from this object: the clipboard may replace it while
-        // the files are still on their way.
-        auto state = m_state;
-        outgoing->prepare(items, true, {}, [state, outgoing](const QStringList &files, int failed) {
-            state->files = files;
-            state->ready = true;
-            if (state->wait)
-                state->wait->quit();
-            if (files.isEmpty() || failed)
-                emit outgoing->copyFailed(int(files.size()), failed);
-        }, true);
-    }
-
-    QStringList formats() const override {
-        QStringList f{QStringLiteral("text/uri-list"), QStringLiteral("x-special/gnome-copied-files")};
-        if (m_state->image)
-            f.append(QStringLiteral("application/x-qt-image"));
-        return f;
-    }
-    bool hasFormat(const QString &mime) const override { return formats().contains(mime); }
-
-protected:
-    QVariant retrieveData(const QString &mime, QMetaType type) const override {
-        auto state = m_state;
-        if (!state->ready) {
-            // Qt's Wayland clipboard asks for the URL list as the data is
-            // set (to offer a portal transfer): never wait in there.
-            const bool bytes = type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString;
-            if (mime == QLatin1String("text/uri-list") && !bytes)
-                return QVariantList();
-            QEventLoop wait;
-            state->wait = &wait;
-            QTimer::singleShot(120000, &wait, &QEventLoop::quit);
-            wait.exec();
-            state->wait = nullptr;
-        }
-        QList<QUrl> urls;
-        for (const QString &f : state->files)
-            urls.append(QUrl::fromLocalFile(f));
-        if (mime == QLatin1String("application/x-qt-image"))
-            return state->files.isEmpty() ? QVariant() : QVariant(QImage(state->files.first()));
-        if (mime == QLatin1String("x-special/gnome-copied-files")) {
-            // File managers paste from this one.
-            QByteArray gnome = "copy";
-            for (const QUrl &u : urls)
-                gnome += '\n' + u.toEncoded();
-            return gnome;
-        }
-        if (mime != QLatin1String("text/uri-list"))
-            return {};
-        if (type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString) {
-            QByteArray text;
-            for (const QUrl &u : urls)
-                text += u.toEncoded() + "\r\n";
-            return text;
-        }
-        QVariantList list;
-        for (const QUrl &u : urls)
-            list.append(u);
-        return list;
-    }
-
-private:
-    struct State {
-        bool image = false;
-        bool ready = false;
-        QStringList files;
-        QEventLoop *wait = nullptr;
-    };
-    std::shared_ptr<State> m_state;
-};
-
 } // namespace
 
 QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
@@ -209,10 +133,74 @@ void Outgoing::copy(const QList<int> &indexes, bool quiet) {
     const QList<LibraryItem> items = snapshot(indexes);
     if (items.isEmpty())
         return;
-    QGuiApplication::clipboard()->setMimeData(new PromisedClipboard(this, items));
-    if (!quiet)
-        flash(tr("Copied %n photo(s)", "", int(items.size())));
+    // The button answers at once; the clipboard gets the files the moment
+    // they are ready (at once, once a photo's JPEG is made). Not a promise
+    // filled on demand: a clipboard manager (Omarchy's watches every copy)
+    // asks straight away, and waiting for the files inside that request
+    // stopped the window drawing until they came.
     emit copied(int(items.size()), 0);
+    prepare(items, true, {}, [this, quiet](const QStringList &files, int failed) {
+        if (files.isEmpty()) {
+            emit copyFailed(0, failed);
+            return;
+        }
+        // One photo is an image too, for pasting into chats: its JPEG as it
+        // is, and a PNG of at most 2560 px for what takes only that. Made
+        // here, away from the window's thread, as finished bytes: left to Qt,
+        // a request for PNG (Omarchy's clipboard history asks at once)
+        // encoded the full-size photo then and there, and the window stood
+        // still for seconds.
+        const QString single = files.size() == 1 ? files.first() : QString();
+        auto *watcher = new QFutureWatcher<std::pair<QByteArray, QByteArray>>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, files, failed, quiet] {
+            const auto [jpeg, png] = watcher->result();
+            watcher->deleteLater();
+            auto *mime = new QMimeData;
+            QList<QUrl> urls;
+            QByteArray gnome = "copy";
+            for (const QString &f : files) {
+                urls.append(QUrl::fromLocalFile(f));
+                gnome += '\n' + QUrl::fromLocalFile(f).toEncoded();
+            }
+            mime->setUrls(urls);
+            // File managers paste from this one.
+            mime->setData(QStringLiteral("x-special/gnome-copied-files"), gnome);
+            if (!jpeg.isEmpty())
+                mime->setData(QStringLiteral("image/jpeg"), jpeg);
+            if (!png.isEmpty())
+                mime->setData(QStringLiteral("image/png"), png);
+            QGuiApplication::clipboard()->setMimeData(mime);
+            if (failed)
+                emit copyFailed(int(files.size()), failed);
+            else if (!quiet)
+                flash(tr("Copied %n photo(s)", "", int(files.size())));
+        });
+        watcher->setFuture(QtConcurrent::run([single]() -> std::pair<QByteArray, QByteArray> {
+            if (single.isEmpty())
+                return {};
+            QImageReader reader(single);
+            reader.setAutoTransform(true);
+            if (!reader.canRead())
+                return {}; // a video
+            QByteArray jpeg;
+            if (reader.format() == "jpeg") {
+                QFile file(single);
+                if (file.open(QIODevice::ReadOnly))
+                    jpeg = file.readAll();
+            }
+            const QSize size = reader.size();
+            if (size.isValid() && (size.width() > 2560 || size.height() > 2560))
+                reader.setScaledSize(size.scaled(2560, 2560, Qt::KeepAspectRatio));
+            const QImage image = reader.read();
+            QByteArray png;
+            if (!image.isNull()) {
+                QBuffer buffer(&png);
+                buffer.open(QIODevice::WriteOnly);
+                image.save(&buffer, "PNG");
+            }
+            return {jpeg, png};
+        }));
+    }, quiet);
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {
@@ -286,7 +274,10 @@ void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const Q
         }
     };
     for (const LibraryItem &item : items) {
-        m_service->fetch(item.id, QStringLiteral("original"),
+        // The compatible form is the photo as it looks now (an edit, if it
+        // has one); originals are as taken, unedited, as Photos exports
+        // "unmodified originals".
+        m_service->fetch(item.id, compatible ? QStringLiteral("full") : QStringLiteral("original"),
                          [this, item, compatible, target, finishOne](bool ok, const QJsonObject &result, const QString &) {
                              if (!ok)
                                  return finishOne({});
@@ -299,6 +290,10 @@ void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const Q
 void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, bool compatible,
                      const QString &folder, std::function<void(const QString &)> placed) {
     QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
+    // An edit comes as a JPEG whatever the camera wrote: name it so.
+    if (type == QLatin1String("public.jpeg") && !name.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive) &&
+        !name.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive))
+        name = QFileInfo(name).completeBaseName() + QStringLiteral(".jpg");
 
     // A hard link where the cache and the target share a disk (free and
     // instant), a copy otherwise.

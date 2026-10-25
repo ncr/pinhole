@@ -212,9 +212,11 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
                 // Copying sets the clipboard once the file is ready.
                 QTimer::singleShot(8000, [&library, picks] {
                     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
-                    std::printf("selftest:   clipboard: %lld file(s), image %s, gnome-copied-files %s\n",
+                    std::printf("selftest:   clipboard: %lld file(s), image/png %s (%lld KB), image/jpeg %s, gnome-copied-files %s\n",
                                 mime ? qlonglong(mime->urls().size()) : 0LL,
-                                mime && mime->hasImage() ? "yes" : "no",
+                                mime && mime->hasFormat("image/png") ? "yes" : "no",
+                                mime ? qlonglong(mime->data("image/png").size() / 1024) : 0LL,
+                                mime && mime->hasFormat("image/jpeg") ? "yes" : "no",
                                 mime && mime->hasFormat("x-special/gnome-copied-files") ? "yes" : "no");
                     if (mime && !mime->urls().isEmpty())
                         std::printf("selftest:   first: %s (camera name %s)\n", qPrintable(mime->urls().first().fileName()),
@@ -575,4 +577,61 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         });
     };
     QTimer::singleShot(1200, window, [run] { (*run)(0); });
+}
+
+void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder) {
+    QTimer::singleShot(1500, window, [=, &viewer] {
+        const int index = grid->indexAt(grid->width() / 2, grid->height() / 2);
+        viewer.openAt(index, grid->rectOf(index));
+        auto phase = [window] {
+            QObject *b = window->findChild<QObject *>(QStringLiteral("viewerCopy"));
+            return b ? b->property("phase").toString() : QStringLiteral("?");
+        };
+        auto copyAndGrab = [=](int n) {
+            // PINHOLE_SELFTEST_NOCOPY: show the tick without copying anything.
+            if (qEnvironmentVariableIsSet("PINHOLE_SELFTEST_NOCOPY")) {
+                QObject *b = window->findChild<QObject *>(QStringLiteral("viewerCopy"));
+                b->setProperty("phase", "working");
+                QMetaObject::invokeMethod(qmlContext(window->contentItem())->contextProperty("outgoing").value<QObject *>(),
+                                          "copied", Q_ARG(int, 1), Q_ARG(int, 0));
+                std::printf("selftest: tick %d without a copy: %s\n", n, qPrintable(phase()));
+                return;
+            }
+            click(window, centreOf(window, "viewerCopy"));
+            std::printf("selftest: click %d: right after, %s\n", n, qPrintable(phase()));
+            QTimer::singleShot(150, window, [=] {
+                std::printf("selftest: click %d: 150 ms on, %s\n", n, qPrintable(phase()));
+                window->grabWindow().save(QStringLiteral("%1/copy-%2.png").arg(folder).arg(n));
+                std::fflush(stdout);
+            });
+        };
+        // Every change of the button's phase, with when.
+        auto *clock = new QElapsedTimer;
+        clock->start();
+        auto last = std::make_shared<QString>();
+        auto *watch = new QTimer(window);
+        QObject::connect(watch, &QTimer::timeout, window, [=] {
+            if (const QString p = phase(); p != *last) {
+                std::printf("selftest:   %5lld ms: %s\n", clock->elapsed(), qPrintable(p));
+                *last = p;
+            }
+        });
+        watch->start(5);
+        auto frames = std::make_shared<int>(0);
+        QObject::connect(window, &QQuickWindow::frameSwapped, window, [frames] { *frames += 1; }, Qt::QueuedConnection);
+        for (int ms : {1000, 1600, 2500, 3500, 4900})
+            QTimer::singleShot(ms, window, [=] {
+                std::printf("selftest:   %5d ms: %d frames so far\n", ms, *frames);
+            });
+        QTimer::singleShot(1500, window, [=] { copyAndGrab(1); });
+        QTimer::singleShot(5000, window, [=] {
+            std::printf("selftest: before click 2, %s\n", qPrintable(phase()));
+            copyAndGrab(2);
+        });
+        QTimer::singleShot(7000, window, [] {
+            std::printf("selftest: done\n");
+            std::fflush(stdout);
+            QCoreApplication::quit();
+        });
+    });
 }

@@ -208,6 +208,9 @@ impl Shared {
 fn renditions(kind: &str) -> Option<&'static [&'static str]> {
     Some(match kind {
         "medium" => &["JPEGMed", "JPEGFull", "JPEGLarge"],
+        // The photo as it looks now at full size: the edit when it has
+        // been edited (the asset's own renditions), else the original.
+        "full" => &["JPEGFull", "VidFull", "Original"],
         "original" => &["Original"],
         "video" => &["VidMed", "VidFull", "Original"],
         "live" => &["OriginalVidCompl"],

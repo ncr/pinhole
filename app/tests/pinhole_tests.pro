@@ -1,4 +1,4 @@
-QT += core gui quick testlib sql network dbus
+QT += core gui quick testlib sql network dbus concurrent
 CONFIG += c++20 testcase
 TARGET = pinhole_tests
 TEMPLATE = app

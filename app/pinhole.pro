@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 sql network multimedia dbus
+QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent
 
 CONFIG += c++20 release
 TARGET = pinhole

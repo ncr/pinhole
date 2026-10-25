@@ -335,10 +335,10 @@ void Viewer::request(int index, const QString &kind) {
         if (generation != m_generation)
             return;
         if (!ok) {
-            // No medium rendition (some old photos): go straight to the
-            // original. Anything else is reported, and what is shown stays.
+            // No medium rendition (some old photos): go straight to the full
+            // one. Anything else is reported, and what is shown stays.
             if (kind == QLatin1String("medium") && code == QLatin1String("not_found")) {
-                request(index, QStringLiteral("original"));
+                request(index, QStringLiteral("full"));
                 return;
             }
             if (kind != QLatin1String("live"))
@@ -359,13 +359,15 @@ void Viewer::request(int index, const QString &kind) {
             emit liveChanged();
         } else {
             m_image = providerUrl(path);
-            m_stage = kind;
+            // The last, sharpest stage: the photo as edited at full size (the
+            // unedited original only when there is no edit).
+            m_stage = kind == QLatin1String("full") ? QStringLiteral("original") : kind;
             if (kind == QLatin1String("medium"))
                 remember(index, path);
             emit imageChanged();
-            // The medium is on screen; the original follows.
+            // The medium is on screen; the full size follows.
             if (kind == QLatin1String("medium"))
-                request(index, QStringLiteral("original"));
+                request(index, QStringLiteral("full"));
         }
     }, kind == QLatin1String("video") || kind == QLatin1String("live"));
 }

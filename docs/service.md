@@ -36,7 +36,8 @@ order, since a cached file answers at once while a download takes a while.
 | kind | renditions tried |
 |---|---|
 | `medium` | JPEGMed, JPEGFull, JPEGLarge |
-| `original` | Original |
+| `full` | JPEGFull, VidFull, Original (the photo as it looks now: the edit, if it has one) |
+| `original` | Original (as taken, unedited) |
 | `video` | VidMed, VidFull, Original |
 | `live` | OriginalVidCompl (a Live Photo's motion) |
 

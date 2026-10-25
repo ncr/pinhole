@@ -19,6 +19,9 @@ Rectangle {
 
     width: label.implicitWidth + 22
     height: label.implicitHeight + 10
+    // Every press shows: the button gives a little under the finger.
+    scale: tap.pressed ? 0.92 : 1
+    Behavior on scale { NumberAnimation { duration: 80 } }
     radius: pill ? height / 2 : Math.min(6, theme.radius)
     color: hover.hovered && enabledHere && phase === "idle" ? hoverColor : idleColor
     opacity: !enabledHere ? 0.4 : phase === "working" ? 0.6 : 1
@@ -44,12 +47,22 @@ Rectangle {
         scale: 1
     }
 
+    // The tick pops in; how long it stays is the timer's (an animation's
+    // end can come late when the window draws few frames, and then the tick
+    // stayed up and a second click changed nothing).
     SequentialAnimation {
         id: pop
         NumberAnimation { target: tick; property: "scale"; from: 0.4; to: 1.25; duration: 140; easing.type: Easing.OutCubic }
         NumberAnimation { target: tick; property: "scale"; to: 1; duration: 120; easing.type: Easing.InOutQuad }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: button.phase = "idle" }
+    }
+    Timer {
+        id: shown
+        interval: 1400
+        onTriggered: {
+            pop.stop()
+            tick.scale = 1
+            button.phase = "idle"
+        }
     }
     SequentialAnimation {
         id: shake
@@ -69,6 +82,7 @@ Rectangle {
             if (files > 0) {
                 button.phase = "done"
                 pop.restart()
+                shown.restart()
             } else {
                 button.phase = "failed"
                 shake.restart()
@@ -78,13 +92,16 @@ Rectangle {
 
     HoverHandler { id: hover; cursorShape: button.enabledHere ? Qt.PointingHandCursor : Qt.ArrowCursor }
     TapHandler {
+        id: tap
         onTapped: {
             if (!button.enabledHere || button.phase === "working")
                 return
             const photos = button.photos()
             if (photos.length === 0)
                 return
+            // Again while the tick shows: it starts afresh.
             pop.stop()
+            shown.stop()
             button.phase = "working"
             outgoing.copy(photos, true)
         }

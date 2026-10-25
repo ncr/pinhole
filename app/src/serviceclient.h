@@ -20,7 +20,7 @@ public:
     ~ServiceClient() override;
 
     using Callback = std::function<void(bool ok, const QJsonObject &result, const QString &errorCode)>;
-    // `kind` as in docs/service.md: medium, original, video, live. With
+    // `kind` as in docs/service.md: medium, full, original, video, live. With
     // `stream`, a video is answered as soon as it starts downloading, with a
     // `stream` URL to play it from.
     void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false);
