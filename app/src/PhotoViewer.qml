@@ -464,8 +464,8 @@ Item {
         readonly property real cell: 38
         readonly property real thumb: 36
         // Where the row is, in photos: the shown one, plus how far the
-        // photos have slid toward the next.
-        readonly property real position: viewer.index - viewer.offset / viewer.pageWidth
+        // photos still have to slide (all the way, for a long step).
+        readonly property real position: viewer.index - viewer.stripOffset / viewer.pageWidth
         readonly property int slots: Math.ceil(width / cell) + 3
         readonly property int first: Math.floor(position - width / 2 / cell) - 1
         // The photo at a point of the strip.
@@ -534,7 +534,7 @@ Item {
             }
             onClicked: mouse => {
                 if (!scrubbed)
-                    viewer.jumpTo(Math.max(0, Math.min(viewer.count - 1, carousel.indexAt(mouse.x))))
+                    viewer.goTo(Math.max(0, Math.min(viewer.count - 1, carousel.indexAt(mouse.x))))
             }
         }
     }

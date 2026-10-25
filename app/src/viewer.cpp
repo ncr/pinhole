@@ -236,6 +236,10 @@ void Viewer::close() {
     emit motionChanged();
 }
 
+void Viewer::goTo(int index) {
+    step(index - m_index);
+}
+
 void Viewer::step(int delta) {
     const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
     if (next == m_index)

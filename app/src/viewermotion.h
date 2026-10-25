@@ -65,6 +65,9 @@ public:
     // photo coming in), the shown photo's zoom, and its centre's offset
     // from the window's centre.
     double offset() const { return m_offset; }
+    // The same for the carousel, which travels the whole way when a step
+    // goes further than the photos slide (they come from 1.5 pages out).
+    double stripOffset() const { return m_offset + m_stripExtra; }
     double zoom() const { return m_zoom; }
     double panX() const { return m_panX; }
     double panY() const { return m_panY; }
@@ -97,6 +100,9 @@ private:
     double m_rawAtBegin = 0; // where this gesture caught the row
     double m_offset = 0;
     double m_velocity = 0; // px/s, the row's, carried into the spring
+    // A long step: how much further the carousel has to travel than the
+    // photos, shrinking in proportion as they settle.
+    double m_stripExtra = 0, m_stripExtraStart = 0, m_offsetStart = 0;
     struct Sample {
         double t, x;
     };

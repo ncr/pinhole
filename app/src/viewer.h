@@ -33,6 +33,7 @@ class Viewer : public QObject {
     // How the photos lie (viewermotion.h): the row's offset, the shown
     // photo's zoom and pan, and whether any of it is moving.
     Q_PROPERTY(qreal offset READ offset NOTIFY motionChanged)
+    Q_PROPERTY(qreal stripOffset READ stripOffset NOTIFY motionChanged)
     Q_PROPERTY(qreal zoom READ zoom NOTIFY motionChanged)
     Q_PROPERTY(qreal panX READ panX NOTIFY motionChanged)
     Q_PROPERTY(qreal panY READ panY NOTIFY motionChanged)
@@ -61,6 +62,7 @@ public:
     QString title() const;
     QString message() const { return m_message; }
     qreal offset() const { return m_motion.offset(); }
+    qreal stripOffset() const { return m_motion.stripOffset(); }
     qreal zoom() const { return m_motion.zoom(); }
     qreal panX() const { return m_motion.panX(); }
     qreal panY() const { return m_motion.panY(); }
@@ -94,6 +96,8 @@ public:
     Q_INVOKABLE void step(int delta);
     // Straight to a photo, no slide (scrubbing the carousel).
     Q_INVOKABLE void jumpTo(int index);
+    // To a photo, sliding, the carousel with it (a tap on the carousel).
+    Q_INVOKABLE void goTo(int index);
     Q_INVOKABLE void playLive();
     // After the library was read again: follow the open photo to its new
     // position, or close if it is gone.

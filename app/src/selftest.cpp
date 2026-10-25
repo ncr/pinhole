@@ -412,8 +412,14 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          }, 300},
         {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle); },
          [&viewer] { return viewer.isOpen() && viewer.property("zoom").toDouble() < 1.02; }, 900},
-        {"clicking a thumbnail in the carousel shows that photo",
+        {"clicking a thumbnail in the carousel slides there, the strip too",
          [=] { click(window, QPointF(window->width() / 2.0 + 3 * 38, window->height() - 30.0)); },
+         [=, &viewer] {
+             return viewer.property("offset").toDouble() > 0 &&
+                    viewer.property("stripOffset").toDouble() > viewer.property("offset").toDouble();
+         }, 40},
+        {"clicking a thumbnail in the carousel shows that photo",
+         [] {},
          [=, &viewer] {
              if (viewer.index() != *start + 5)
                  std::printf("selftest:      (shows %d, wanted %d)\n", viewer.index() - *start, 5);

@@ -78,8 +78,9 @@ void ViewerMotion::begin(double t) {
         return;
     }
     m_gesture = Gesture::Undecided;
-    // A row still springing is caught where it is.
+    // A row still springing is caught where it is (the carousel too).
     m_raw = m_offset;
+    m_stripExtra = m_stripExtraStart = 0;
     m_rawAtBegin = m_raw;
     m_velocity = 0;
 }
@@ -187,8 +188,11 @@ void ViewerMotion::stopCoasting() {
 
 void ViewerMotion::stepped(int delta) {
     const double page = pageWidth();
+    const double whole = stripOffset() + delta * page;
     m_offset = std::clamp(m_offset + delta * page, -1.5 * page, 1.5 * page);
     m_raw = m_offset;
+    m_offsetStart = m_offset;
+    m_stripExtraStart = m_stripExtra = whole - m_offset;
     m_zoom = m_zoomTarget = 1;
     m_panX = m_panY = m_panTargetX = m_panTargetY = 0;
     m_holding = false;
@@ -197,6 +201,7 @@ void ViewerMotion::stepped(int delta) {
 
 void ViewerMotion::reset() {
     stopPanPhysics();
+    m_stripExtra = m_stripExtraStart = m_offsetStart = 0;
     m_gesture = Gesture::None;
     m_offset = m_raw = m_velocity = 0;
     m_zoom = m_zoomTarget = 1;
@@ -311,6 +316,7 @@ void ViewerMotion::advance(double dt) {
             m_velocity = 0;
         }
         m_raw = m_offset;
+        m_stripExtra = m_offsetStart != 0 ? m_stripExtraStart * m_offset / m_offsetStart : 0;
     }
     if (panCoasting() && !m_pinching) {
         // Coasting, or springing back from an edge, within the edges of the

@@ -252,6 +252,23 @@ private slots:
         QCOMPARE(swipe(m, 0.5, 4, 200), 0); // a nudge, not a page
     }
 
+    // A tap five photos along the carousel: the photos slide in from 1.5
+    // pages out, the carousel travels all five, and both land together.
+    void aLongStepSlidesThePhotosAndTheWholeCarousel() {
+        ViewerMotion m = viewerShowing();
+        m.stepped(5);
+        const double page = m.pageWidth();
+        QCOMPARE(m.offset(), 1.5 * page);
+        QCOMPARE(m.stripOffset(), 5 * page);
+        for (int i = 0; i < 12; ++i)
+            m.advance(1.0 / 120);
+        QVERIFY(m.offset() > 0 && m.offset() < 1.5 * page);
+        QVERIFY(std::abs(m.stripOffset() / m.offset() - 5 / 1.5) < 1e-6); // in step
+        settle(m);
+        QCOMPARE(m.offset(), 0.0);
+        QCOMPARE(m.stripOffset(), 0.0);
+    }
+
     void theLastPhotoStretchesInsteadOfPaging() {
         ViewerMotion m = viewerShowing(true, false);
         QCOMPARE(swipe(m, -10, 60), 0); // 1200 px of finger movement
