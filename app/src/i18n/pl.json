@@ -1,10 +1,5 @@
 {
-  "%n photo(s) selected": {
-    "one": "Zaznaczono %n zdjęcie",
-    "few": "Zaznaczono %n zdjęcia",
-    "many": "Zaznaczono %n zdjęć",
-    "other": "Zaznaczono %n zdjęcia"
-  },
+  "%1 selected": "Zaznaczono %1",
   "A screen up or down": "Ekran w górę lub w dół",
   "Back or ahead 10 seconds": "10 sekund wstecz lub naprzód",
   "Back to fitted": "Wróć do dopasowania",
@@ -16,7 +11,6 @@
   "Click  Space": "Klik  Spacja",
   "Click a side": "Klik z boku",
   "Click or drag to move through the library": "Kliknij lub przeciągnij, by przejść przez bibliotekę",
-  "Click photos to select them": "Klikaj zdjęcia, by je zaznaczyć",
   "Copied": "Skopiowano",
   "Copied %n photo(s)": {
     "one": "Skopiowano %n zdjęcie",
@@ -40,6 +34,8 @@
   "Done: stop selecting": "Gotowe: zakończ zaznaczanie",
   "Double-click": "Dwuklik",
   "Drag": "Przeciągnięcie",
+  "Drag  3 fingers": "Przeciągnij  3 palce",
+  "Drag a ticked one": "Przeciągnij zaznaczone",
   "Drop the selection into any app": "Upuść zaznaczenie w dowolnej aplikacji",
   "Esc  Mouse back": "Esc  Wstecz myszy",
   "Export": "Eksportuj",
@@ -59,8 +55,6 @@
     "other": "Wyeksportowano %n zdjęcia do %1"
   },
   "LIVE": "LIVE",
-  "Loading the full photo…": "Wczytuję pełne zdjęcie…",
-  "Loading video…": "Wczytuję wideo…",
   "Move around a zoomed photo; or two fingers, flick to coast": "Przesuwaj powiększone zdjęcie; lub dwoma palcami, machnij, by sunęło dalej",
   "Newest": "Najnowsze",
   "No photo library yet": "Nie ma jeszcze biblioteki zdjęć",
@@ -70,6 +64,7 @@
   "Oldest": "Najstarsze",
   "Open the photo": "Otwórz zdjęcie",
   "Open the photo under the pointer": "Otwórz zdjęcie pod wskaźnikiem",
+  "Originals": "Oryginały",
   "Pinch": "Szczypnięcie",
   "Pinch in": "Zsunięcie palców",
   "Play a Live Photo": "Odtwórz zdjęcie Live",
@@ -88,7 +83,7 @@
   "Scroll; flick to coast, rest a finger or tap to stop": "Przewijanie; machnij, by sunęło, połóż palec lub stuknij, by zatrzymać",
   "Seek: click or drag": "Przewiń: kliknij lub przeciągnij",
   "Select": "Zaznacz",
-  "Select all": "Zaznacz wszystko",
+  "Select photos": "Zaznacz zdjęcia",
   "Select: start choosing photos": "Zaznacz: zacznij wybierać zdjęcia",
   "Selecting": "Zaznaczanie",
   "Shift+click": "Shift+kliknięcie",
@@ -106,6 +101,7 @@
   "The Pinhole service is not running, so full-size photos and videos will not load.": "Usługa Pinhole nie działa, więc pełne zdjęcia i filmy się nie wczytają.",
   "The same, also for the photo under the pointer": "To samo, także dla zdjęcia pod wskaźnikiem",
   "Tick a range": "Zaznacz zakres",
+  "Tick every photo from where it starts to where it ends": "Zaznacz wszystkie zdjęcia od początku do końca przeciągnięcia",
   "Tick or untick a photo, while selecting": "Zaznacz lub odznacz zdjęcie podczas zaznaczania",
   "Two fingers": "Dwa palce",
   "Video bar": "Pasek filmu",

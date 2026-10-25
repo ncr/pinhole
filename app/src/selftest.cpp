@@ -572,8 +572,31 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return grid->atNewest() && grid->scrollFraction() > 0.999; }, 1800},
         {"S starts selecting", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return grid->selecting(); }},
-        {"A selects them all", [=] { key(window, Qt::Key_A, {}, QStringLiteral("a")); },
-         [=] { return grid->selectionCount() == grid->count(); }},
+        {"a drag across the photos ticks every one from start to end", [=] {
+             const int from = grid->indexAt(grid->width() * 0.2, grid->height() * 0.3);
+             const int to = grid->indexAt(grid->width() * 0.7, grid->height() * 0.6);
+             *mark = to - from + 1;
+             const QPointF a = grid->rectOf(from).center(), b = grid->rectOf(to).center();
+             mouse(window, QEvent::MouseButtonPress, a, Qt::LeftButton);
+             for (int i = 1; i <= 10; ++i)
+                 mouse(window, QEvent::MouseMove, a + (b - a) * (i / 10.0), Qt::LeftButton);
+             mouse(window, QEvent::MouseButtonRelease, b, Qt::LeftButton);
+         },
+         [=] { return grid->selecting() && grid->selectionCount() == int(*mark); }},
+        {"held at the top edge, the grid scrolls on and the ticks follow", [=] {
+             grid->clearSelection();
+             const QPointF a = grid->rectOf(grid->indexAt(grid->width() * 0.5, grid->height() * 0.7)).center();
+             mouse(window, QEvent::MouseButtonPress, a, Qt::LeftButton);
+             mouse(window, QEvent::MouseMove, a - QPointF(0, 20), Qt::LeftButton);
+             mouse(window, QEvent::MouseMove, QPointF(a.x(), 4), Qt::LeftButton);
+             QTimer::singleShot(700, window, [=] {
+                 mouse(window, QEvent::MouseButtonRelease, QPointF(a.x(), 4), Qt::LeftButton);
+             });
+         },
+         [=] {
+             const int onScreen = grid->columns() * int(grid->height() / grid->rectOf(0).height());
+             return grid->selectionCount() > onScreen && !grid->animating();
+         }, 1200},
         {"S again is Done", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return !grid->selecting() && grid->selectionCount() == 0; }},
         {"? shows the help", [=] { key(window, Qt::Key_Question, {}, QStringLiteral("?")); },

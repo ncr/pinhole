@@ -6,6 +6,7 @@
         <file alias="UiText.qml">UiText.qml</file>
         <file alias="Chip.qml">Chip.qml</file>
         <file alias="ShellButton.qml">ShellButton.qml</file>
+        <file alias="Spinner.qml">Spinner.qml</file>
         <file alias="keys.js">keys.js</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>

@@ -30,6 +30,8 @@ class Viewer : public QObject {
     Q_PROPERTY(bool favorite READ isFavorite NOTIFY indexChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
+    // The full photo, or the video, still on its way (and nothing wrong).
+    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     // How the photos lie (viewermotion.h): the row's offset, the shown
     // photo's zoom and pan, and whether any of it is moving.
     Q_PROPERTY(qreal offset READ offset NOTIFY motionChanged)
@@ -58,6 +60,7 @@ public:
     QUrl thumbnail() const;
     QUrl image() const { return m_image; }
     QString stage() const { return m_stage; }
+    bool loading() const;
     qreal aspect() const;
     bool isVideo() const;
     QUrl videoSource() const { return m_video; }
@@ -121,6 +124,7 @@ signals:
     void videoChanged();
     void liveChanged();
     void messageChanged();
+    void loadingChanged();
     void motionChanged();
     void imagesChanged();
     // Pinched closed: the window should animate the viewer away.

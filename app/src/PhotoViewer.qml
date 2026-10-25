@@ -295,17 +295,23 @@ Item {
         anchors.margins: 16
         spacing: 6
         opacity: root.progress * root.chrome
-        Chip {
-            // The date bright, the time after it muted.
-            readonly property var parts: viewer.title.split(" · ")
-            text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
-                                   : viewer.title
-            textColor: theme.brightForeground
+        Row {
+            spacing: 6
+            Chip {
+                // The date bright, the time after it muted.
+                readonly property var parts: viewer.title.split(" · ")
+                text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
+                                       : viewer.title
+                textColor: theme.brightForeground
+            }
+            // The full photo or the video still coming, after a second.
+            Spinner {
+                objectName: "loadingSpinner"
+                busy: viewer.loading
+            }
         }
         Chip {
-            text: viewer.message !== "" ? viewer.message
-                  : viewer.video ? ""
-                  : viewer.stage === "original" ? "" : qsTr("Loading the full photo…")
+            text: viewer.message
             visible: text !== ""
             textColor: theme.darkForeground
         }
@@ -347,7 +353,8 @@ Item {
             floating: true
             text: qsTr("Export")
             key: "E"
-            onTapped: outgoing.exportTo([viewer.index], false)
+            // As JPEG or MP4; Shift+E, the original.
+            onTapped: outgoing.exportTo([viewer.index], true)
         }
         // Back to the library.
         ShellButton {

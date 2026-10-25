@@ -147,6 +147,8 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: 16
+        // Above select mode's bar when the window is too narrow for both.
+        anchors.bottomMargin: selectBar.visible && selectBar.x < 16 + width + 8 ? 20 + selectBar.height + 8 : 16
         readonly property bool wanted: win.inGrid && grid.count > 0 && !grid.atNewest
         opacity: wanted ? 1 : 0
         visible: opacity > 0
@@ -175,8 +177,10 @@ ApplicationWindow {
     // The bar of select mode, as an Omarchy menu card: the theme's
     // background with a hairline in the text colour, the count in the
     // accent, rows lighting up under the pointer, and their keys beside them.
+    // Few words, and fewer when the window is narrow (`fit`).
     Rectangle {
         id: selectBar
+        objectName: "selectBar"
         visible: win.inGrid && grid.selecting
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -187,15 +191,49 @@ ApplicationWindow {
         color: theme.background
         border.color: theme.foreground
         border.width: 1
+
+        // How much it says, from 0, everything, to 4: "Export originals"
+        // becomes "Originals", then the keys go, then the count is only the
+        // number, then not there (the ticks show it). The first that fits.
+        readonly property int fit: {
+            const room = win.width - 32
+            for (let level = 0; level < 4; ++level)
+                if (widthAt(level) <= room)
+                    return level
+            return 4
+        }
+        readonly property bool hints: fit < 2
+        function countText(level) {
+            const n = grid.selectionCount
+            if (level >= 4)
+                return ""
+            if (level === 3)
+                return n === 0 ? "" : String(n)
+            return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
+        }
+        function originalsText(level) { return level === 0 ? qsTr("Export originals") : qsTr("Originals") }
+        // What the row is wide at a level, from its words: the count's
+        // padding, then each button's (see ShellButton.qml).
+        function widthAt(level) {
+            const pad = 2 * Math.round(theme.fontSize * 0.833)
+            const key = name => level < 2 ? barMetrics.advanceWidth("  " + name) : 0
+            const count = countText(level)
+            return 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize)
+                + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad
+                + barMetrics.advanceWidth(qsTr("Export")) + key("E") + pad
+                + barMetrics.advanceWidth(originalsText(level)) + key("⇧ E") + pad
+        }
+        FontMetrics { id: barMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+
         Row {
             id: barRow
             anchors.centerIn: parent
             UiText {
                 anchors.verticalCenter: parent.verticalCenter
+                visible: text !== ""
                 leftPadding: theme.fontSize
                 rightPadding: theme.fontSize
-                text: grid.selectionCount === 0 ? qsTr("Click photos to select them")
-                                                : qsTr("%n photo(s) selected", "", grid.selectionCount)
+                text: selectBar.countText(selectBar.fit)
                 color: theme.accent
             }
             CopyButton {
@@ -204,23 +242,26 @@ ApplicationWindow {
                 enabledHere: grid.selectionCount > 0
                 flat: true
                 key: "C"
+                hint: selectBar.hints ? "C" : ""
             }
-            Repeater {
-                model: [
-                    { label: qsTr("Export originals"), key: "E", act: () => outgoing.exportTo(grid.selection(), false) },
-                    { label: qsTr("Export as JPEG and MP4"), key: "Shift+E", act: () => outgoing.exportTo(grid.selection(), true) },
-                    { label: qsTr("Select all"), key: "A", act: () => grid.selectAll() }
-                ]
-                delegate: ShellButton {
-                    required property var modelData
-                    required property int index
-                    anchors.verticalCenter: parent.verticalCenter
-                    flat: true
-                    usable: grid.selectionCount > 0 || index === 2
-                    text: modelData.label
-                    key: modelData.key
-                    onTapped: modelData.act()
-                }
+            // As JPEG and MP4, what opens anywhere; the originals on Shift.
+            ShellButton {
+                anchors.verticalCenter: parent.verticalCenter
+                flat: true
+                usable: grid.selectionCount > 0
+                text: qsTr("Export")
+                key: "E"
+                hint: selectBar.hints ? "E" : ""
+                onTapped: outgoing.exportTo(grid.selection(), true)
+            }
+            ShellButton {
+                anchors.verticalCenter: parent.verticalCenter
+                flat: true
+                usable: grid.selectionCount > 0
+                text: selectBar.originalsText(selectBar.fit)
+                key: "Shift+E"
+                hint: selectBar.hints ? "⇧ E" : ""
+                onTapped: outgoing.exportTo(grid.selection(), false)
             }
         }
     }
@@ -254,8 +295,8 @@ ApplicationWindow {
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
 
     // Every button presses on its own key too, shown beside it, while it
-    // shows: Newest N, Select S, Copy C, Export E, as JPEG and MP4 ⇧E,
-    // Select all A, LIVE L, close Esc. The keys here are the rest.
+    // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,
+    // originals ⇧E, LIVE L, close Esc. The keys here are the rest.
 
     // The grid.
     Shortcut { enabled: win.inGrid; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
@@ -265,13 +306,12 @@ ApplicationWindow {
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
 
-    Shortcut { enabled: win.inGrid; sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; onActivated: grid.selectAll() }
     Shortcut { enabled: win.inGrid && grid.selecting; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
 
     // Out of the app, from the grid or the viewer.
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }
-    Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), false) }
-    Shortcut { sequence: "Ctrl+Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), true) }
+    Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), true) }
+    Shortcut { sequence: "Ctrl+Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), false) }
 
     // The viewer.
     Shortcut {
@@ -283,6 +323,8 @@ ApplicationWindow {
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
+    // The originals: the viewer's Export button is the JPEG.
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo([viewer.index], false) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }

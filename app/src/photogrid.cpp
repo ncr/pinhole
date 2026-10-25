@@ -292,16 +292,71 @@ void PhotoGrid::mousePressEvent(QMouseEvent *event) {
 }
 
 void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {
+    if (m_sweeping) {
+        m_sweepAt = event->position();
+        sweep();
+        // Within a band at the top or bottom the grid scrolls on, faster
+        // the nearer the edge (and past it).
+        const double band = std::min(80.0, height() / 6);
+        const double y = m_sweepAt.y();
+        const double depth = y < band ? -(band - y) / band : y > height() - band ? (y - (height() - band)) / band : 0;
+        setDriveVelocity(std::clamp(depth, -1.0, 1.0) * 2400);
+        return;
+    }
     if (m_dragged || m_pressIndex < 0 || !(event->buttons() & Qt::LeftButton))
         return;
     if ((event->position() - m_pressAt).manhattanLength() < 6)
         return;
     m_dragged = true;
+    // Selecting, a drag from a photo not ticked ticks the ones it crosses,
+    // as in Photos.
+    if (m_selecting && !m_selected.contains(m_pressIndex)) {
+        m_sweeping = true;
+        m_sweepBase = m_selected;
+        m_sweepAt = event->position();
+        sweep();
+        return;
+    }
     // A photo in the selection drags the selection; any other, itself.
     emit dragRequested(m_selected.contains(m_pressIndex) ? selection() : QList<int>{m_pressIndex});
 }
 
+void PhotoGrid::sweep() {
+    // The cell under the pointer, or off the photos (in a gap, past an
+    // edge, after the last) the nearest one.
+    const double s = stride();
+    const int rows = (count() + m_columns - 1) / m_columns;
+    const int column = std::clamp(int(m_sweepAt.x() / s), 0, m_columns - 1);
+    const int row = std::clamp(int(std::floor((m_scroll + m_sweepAt.y()) / s)), 0, rows - 1);
+    const int index = std::min(row * m_columns + column, count() - 1);
+    if (index < 0)
+        return;
+    std::set<int> selected = m_sweepBase;
+    for (int i = std::min(index, m_pressIndex); i <= std::max(index, m_pressIndex); ++i)
+        selected.insert(i);
+    m_selectionAnchor = index;
+    if (selected != m_selected) {
+        m_selected = std::move(selected);
+        emit selectionChanged();
+        update();
+    }
+}
+
+void PhotoGrid::endSweep() {
+    if (!m_sweeping)
+        return;
+    m_sweeping = false;
+    m_sweepBase.clear();
+    setDriveVelocity(0);
+}
+
+void PhotoGrid::mouseUngrabEvent() { endSweep(); }
+
 void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
+    if (m_sweeping) {
+        endSweep();
+        return;
+    }
     if (m_dragged || event->button() != Qt::LeftButton)
         return;
     const int index = m_pressIndex;
@@ -855,6 +910,8 @@ void PhotoGrid::advance(qreal dt) {
     const bool wasZooming = m_zoom.active;
     if (m_driveVelocity != 0) {
         setScroll(m_scroll + m_driveVelocity * dt);
+        if (m_sweeping)
+            sweep();
     } else if (m_physics.animating()) {
         if (m_hold)
             m_hold->poll();

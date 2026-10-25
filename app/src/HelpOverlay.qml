@@ -27,15 +27,15 @@ Item {
             ["S", qsTr("Select: start choosing photos")],
             [qsTr("Click"), qsTr("Tick or untick a photo, while selecting")],
             [qsTr("Shift+click"), qsTr("Tick a range")],
+            [qsTr("Drag  3 fingers"), qsTr("Tick every photo from where it starts to where it ends")],
             [qsTr("Ctrl+click"), qsTr("Start selecting with this photo")],
-            ["A  Ctrl A", qsTr("Select all")],
             ["S  Esc", qsTr("Done: stop selecting")]
         ] },
         { title: qsTr("Taking photos out"), keys: [
-            [qsTr("Drag"), qsTr("Drop the selection into any app")],
+            [qsTr("Drag a ticked one"), qsTr("Drop the selection into any app")],
             ["C", qsTr("Copy the open photo or the selection")],
-            ["E", qsTr("Export originals")],
-            ["⇧ E", qsTr("Export as JPEG and MP4")],
+            ["E", qsTr("Export as JPEG and MP4")],
+            ["⇧ E", qsTr("Export originals")],
             ["Ctrl C  Ctrl E", qsTr("The same, also for the photo under the pointer")]
         ] },
         { title: qsTr("Viewing"), keys: [

@@ -13,7 +13,16 @@
 #include <cmath>
 
 Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
-    : QObject(parent), m_library(library), m_service(service) {}
+    : QObject(parent), m_library(library), m_service(service) {
+    for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged})
+        connect(this, changed, this, &Viewer::loadingChanged);
+}
+
+bool Viewer::loading() const {
+    if (!m_open || !m_message.isEmpty())
+        return false;
+    return isVideo() ? m_video.isEmpty() : m_stage != QLatin1String("original");
+}
 
 QUrl Viewer::providerUrl(const QString &path) {
     return QUrl(QStringLiteral("image://photo/") + QString::fromUtf8(QUrl::toPercentEncoding(path)));
@@ -310,7 +319,6 @@ void Viewer::show(int index) {
     emit liveChanged();
 
     if (isVideo()) {
-        setMessage(tr("Loading video…"));
         request(index, QStringLiteral("video"));
     } else {
         request(index, QStringLiteral("medium"));

@@ -207,6 +207,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseUngrabEvent() override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void hoverMoveEvent(QHoverEvent *event) override;
     void hoverLeaveEvent(QHoverEvent *event) override;
@@ -261,6 +262,15 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_selecting = false;
+    // A drag across the photos in select mode (three fingers, with
+    // libinput's three-finger drag): every photo from where it started to
+    // where it is now ticks, on top of what was ticked before. Near the top
+    // or bottom of the view the grid scrolls on.
+    bool m_sweeping = false;
+    std::set<int> m_sweepBase;
+    QPointF m_sweepAt;
+    void sweep();
+    void endSweep();
     void updateDateLabel();
     QString m_dateLabel;
     // The press stopped the grid moving: its click opens nothing.
@@ -284,7 +294,7 @@ private:
     double m_scroll = 0;
 
     ScrollPhysics m_physics;
-    double m_driveVelocity = 0; // benchmark, px/s
+    double m_driveVelocity = 0; // the benchmark's, or a sweep's at an edge; px/s
 
     struct Zoom {
         bool active = false;   // pinching or settling

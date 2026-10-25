@@ -258,6 +258,30 @@ int main(int argc, char *argv[]) {
             });
         });
     }
+    // PINHOLE_SELFTEST=selectbar:<dir>: select mode's bar with three photos
+    // ticked, at window widths from wide to a phone's, as images in <dir>.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("selectbar:"))) {
+        QTimer::singleShot(1200, window, [window, grid, test] {
+            grid->setSelecting(true);
+            grid->selectAll();
+            grid->jumpToFraction(0.5); // away from the newest: the Newest button shows
+            auto widths = std::make_shared<QList<int>>(QList<int>{1400, 1000, 760, 560, 420, 360});
+            auto next = std::make_shared<std::function<void()>>();
+            *next = [window, grid, test, widths, next] {
+                if (widths->isEmpty()) {
+                    QCoreApplication::quit();
+                    return;
+                }
+                const int width = widths->takeFirst();
+                window->resize(width, 600);
+                QTimer::singleShot(300, window, [window, test, width, next] {
+                    window->grabWindow().copy(0, 440, width, 160).save(QStringLiteral("%1/bar-%2.png").arg(test.mid(10)).arg(width));
+                    (*next)();
+                });
+            };
+            (*next)();
+        });
+    }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
     // 7 columns out to 29 and in to 3, then two seconds of scrolling at 11
     // (where the label is a range of days), as frames of the top left in
