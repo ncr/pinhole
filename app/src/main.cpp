@@ -117,6 +117,8 @@ int main(int argc, char *argv[]) {
     window->installEventFilter(&viewer);
     grid->setSources(&library, &loader, &stats);
     grid->setTouchpadHold(&hold);
+    // A resting finger stops a zoomed photo coasting as well.
+    QObject::connect(&hold, &TouchpadHold::began, &viewer, [&viewer](quint32 time, quint32) { viewer.touch(time); });
     QObject::connect(grid, &PhotoGrid::dragRequested, &outgoing,
                      [&outgoing, grid](const QList<int> &indexes) { outgoing.drag(grid, indexes); });
 

@@ -1,13 +1,17 @@
 #pragma once
 
+#include "scrollphysics.h"
+
 #include <deque>
 
 // How the viewer moves, as in Photos: the photos lie side by side and the
 // row follows the fingers, a swipe that goes far or fast enough lands on the
 // next one with a spring and any other springs back, and the ends stretch.
 // A pinch zooms about the point between the fingers (moving the fingers
-// moves the photo too), two fingers pan a zoomed photo, a pinch below the
-// fitted size springs back, and one well below it means close.
+// moves the photo too), two fingers pan a zoomed photo the way the grid
+// scrolls (following the fingers, coasting after a flick, stretching at the
+// photo's edges, stopped by a resting finger), a pinch below the fitted
+// size springs back, and one well below it means close.
 //
 // Positions are window pixels, times milliseconds. Plain C++, so gestures
 // can be replayed through it in tests without a window.
@@ -48,6 +52,8 @@ public:
     void resetZoom();
     // Move a zoomed photo (a mouse drag).
     void pan(double dx, double dy);
+    // A finger came to rest on the touchpad: a coasting pan stops.
+    void touch(double t);
 
     void advance(double dtSeconds);
     bool animating() const;
@@ -70,6 +76,11 @@ private:
     // How far a row stretched past an end shows: a third, softening.
     double stretched(double raw) const;
     void clampPanTargets();
+    // The pan's physics take over from wherever the pan is now, within the
+    // edges the current zoom allows.
+    void panPhysicsFrom(bool keepMotion);
+    void stopPanPhysics();
+    bool panCoasting() const { return m_panXPhysics.animating() || m_panYPhysics.animating(); }
     double maxPanX(double zoom) const;
     double maxPanY(double zoom) const;
 
@@ -97,4 +108,7 @@ private:
     double m_pinchX = 0, m_pinchY = 0;
     // While a gesture or pinch holds the zoom and pan, they do not settle.
     bool m_holding = false;
+    // Two-finger panning of a zoomed photo, across and down: the grid's
+    // scrolling physics.
+    ScrollPhysics m_panXPhysics, m_panYPhysics;
 };

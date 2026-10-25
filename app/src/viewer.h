@@ -83,6 +83,8 @@ public:
     Q_INVOKABLE void zoomStep(int steps);
     Q_INVOKABLE void resetZoom();
     Q_INVOKABLE void panBy(qreal dx, qreal dy);
+    // A finger came to rest on the touchpad (TouchpadHold): stop coasting.
+    void touch(double timeMs);
 
     // `from` is the photo's cell in the grid, where the opening grows from.
     Q_INVOKABLE void openAt(int index, QRectF from);

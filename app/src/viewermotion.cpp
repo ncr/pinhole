@@ -11,7 +11,7 @@ namespace {
 // across most of the window, as on a Mac. Panning a zoomed photo follows
 // the fingers like scrolling.
 constexpr double kPageGain = 2.0;
-constexpr double kPanGain = 1.3;
+constexpr double kPanGain = 1.6; // on top of the scroll physics' own gain
 // Movement before a gesture is known to be sideways (paging) or not.
 constexpr double kDecideAfter = 8;
 // A release lands on the next photo past this share of the way, or when
@@ -69,10 +69,12 @@ void ViewerMotion::begin(double t) {
     m_lastMove = t;
     m_decideX = m_decideY = 0;
     if (zoomed()) {
-        // A zoomed photo pans; from wherever it is settling to.
+        // A zoomed photo pans, catching a coast that is still going.
         m_gesture = Gesture::Pan;
         m_holding = true;
-        m_zoom = m_zoomTarget;
+        panPhysicsFrom(true);
+        m_panXPhysics.begin(t);
+        m_panYPhysics.begin(t);
         return;
     }
     m_gesture = Gesture::Undecided;
@@ -106,10 +108,11 @@ void ViewerMotion::move(double t, double dx, double dy) {
         m_lastMove = t;
         return;
     case Gesture::Pan:
-        m_panX = std::clamp(m_panX + dx * kPanGain, -maxPanX(m_zoom), maxPanX(m_zoom));
-        m_panY = std::clamp(m_panY + dy * kPanGain, -maxPanY(m_zoom), maxPanY(m_zoom));
-        m_panTargetX = m_panX;
-        m_panTargetY = m_panY;
+        // Fingers moving right move the photo right.
+        m_panXPhysics.move(t, dx * kPanGain);
+        m_panYPhysics.move(t, dy * kPanGain);
+        m_panX = m_panTargetX = m_panXPhysics.position();
+        m_panY = m_panTargetY = m_panYPhysics.position();
         return;
     case Gesture::None:
     case Gesture::Ignore:
@@ -121,6 +124,9 @@ int ViewerMotion::end(double t) {
     const Gesture was = m_gesture;
     m_gesture = Gesture::None;
     if (was == Gesture::Pan) {
+        // Thrown, it coasts; past an edge it springs back (advance()).
+        m_panXPhysics.end(t);
+        m_panYPhysics.end(t);
         m_holding = m_pinching;
         return 0;
     }
@@ -148,6 +154,27 @@ int ViewerMotion::end(double t) {
     return 0;
 }
 
+void ViewerMotion::panPhysicsFrom(bool keepMotion) {
+    m_panXPhysics.setBounds(-maxPanX(m_zoom), maxPanX(m_zoom), m_width);
+    m_panYPhysics.setBounds(-maxPanY(m_zoom), maxPanY(m_zoom), m_height);
+    if (!(keepMotion && panCoasting())) {
+        m_panXPhysics.jumpTo(m_panX);
+        m_panYPhysics.jumpTo(m_panY);
+    }
+}
+
+void ViewerMotion::stopPanPhysics() {
+    m_panXPhysics.stop();
+    m_panYPhysics.stop();
+}
+
+void ViewerMotion::touch(double t) {
+    m_panXPhysics.touch(t);
+    m_panYPhysics.touch(t);
+    m_panX = m_panTargetX = m_panXPhysics.position();
+    m_panY = m_panTargetY = m_panYPhysics.position();
+}
+
 void ViewerMotion::stepped(int delta) {
     const double page = pageWidth();
     m_offset = std::clamp(m_offset + delta * page, -1.5 * page, 1.5 * page);
@@ -155,9 +182,11 @@ void ViewerMotion::stepped(int delta) {
     m_zoom = m_zoomTarget = 1;
     m_panX = m_panY = m_panTargetX = m_panTargetY = 0;
     m_holding = false;
+    stopPanPhysics();
 }
 
 void ViewerMotion::reset() {
+    stopPanPhysics();
     m_gesture = Gesture::None;
     m_offset = m_raw = m_velocity = 0;
     m_zoom = m_zoomTarget = 1;
@@ -167,6 +196,7 @@ void ViewerMotion::reset() {
 }
 
 void ViewerMotion::pinchBegin(double x, double y) {
+    stopPanPhysics();
     m_pinching = true;
     m_holding = true;
     m_gesture = Gesture::None;
@@ -222,6 +252,7 @@ bool ViewerMotion::pinchEnd() {
 }
 
 void ViewerMotion::zoomBy(double factor, double x, double y) {
+    stopPanPhysics();
     const double top = m_zoomable ? kMaxZoom : 1;
     const double target = std::clamp(m_zoomTarget * factor, 1.0, top);
     const double cx = m_width / 2 + m_panTargetX, cy = m_height / 2 + m_panTargetY;
@@ -235,6 +266,7 @@ void ViewerMotion::zoomBy(double factor, double x, double y) {
 }
 
 void ViewerMotion::resetZoom() {
+    stopPanPhysics();
     m_zoomTarget = 1;
     m_panTargetX = m_panTargetY = 0;
 }
@@ -242,6 +274,7 @@ void ViewerMotion::resetZoom() {
 void ViewerMotion::pan(double dx, double dy) {
     if (!zoomed())
         return;
+    stopPanPhysics();
     m_panX = std::clamp(m_panX + dx, -maxPanX(m_zoom), maxPanX(m_zoom));
     m_panY = std::clamp(m_panY + dy, -maxPanY(m_zoom), maxPanY(m_zoom));
     m_panTargetX = m_panX;
@@ -251,7 +284,7 @@ void ViewerMotion::pan(double dx, double dy) {
 bool ViewerMotion::animating() const {
     const bool row = m_gesture != Gesture::Page && (m_offset != 0 || m_velocity != 0);
     const bool zoom = !m_holding && (m_zoom != m_zoomTarget || m_panX != m_panTargetX || m_panY != m_panTargetY);
-    return row || zoom;
+    return row || zoom || panCoasting();
 }
 
 void ViewerMotion::advance(double dt) {
@@ -268,6 +301,16 @@ void ViewerMotion::advance(double dt) {
             m_velocity = 0;
         }
         m_raw = m_offset;
+    }
+    if (panCoasting() && !m_pinching) {
+        // Coasting, or springing back from an edge, within the edges of the
+        // zoom as it is now.
+        m_panXPhysics.setBounds(-maxPanX(m_zoom), maxPanX(m_zoom), m_width);
+        m_panYPhysics.setBounds(-maxPanY(m_zoom), maxPanY(m_zoom), m_height);
+        m_panXPhysics.step(dt);
+        m_panYPhysics.step(dt);
+        m_panX = m_panTargetX = m_panXPhysics.position();
+        m_panY = m_panTargetY = m_panYPhysics.position();
     }
     if (!m_holding) {
         const double f = 1 - std::exp(-kEase * dt);

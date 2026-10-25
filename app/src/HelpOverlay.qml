@@ -53,7 +53,7 @@ Item {
             [qsTr("Pinch"), qsTr("Zoom the photo at the fingers")],
             [qsTr("Ctrl+wheel"), qsTr("Zoom at the pointer")],
             ["+  −  0", qsTr("Zoom in, out, back to fitted")],
-            [qsTr("Drag"), qsTr("Move around a zoomed photo; or two fingers")],
+            [qsTr("Drag"), qsTr("Move around a zoomed photo; or two fingers, flick to coast")],
             [qsTr("Double-click"), qsTr("Back to fitted")]
         ] },
         { title: qsTr("Videos"), keys: [

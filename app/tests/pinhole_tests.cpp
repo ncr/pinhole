@@ -295,9 +295,49 @@ private slots:
         QCOMPARE(m.zoom(), 2.0);
         QCOMPARE(swipe(m, -50, 40), 0); // would page if not zoomed
         QCOMPARE(m.offset(), 0.0);
+        settle(m); // pulled past the edge: springs back to it
         // 2000 x 1500 in 1000 x 800: 500 px of room each way across.
         QCOMPARE(m.panX(), -500.0 * 1);
         QVERIFY(std::abs(m.panY()) <= 350);
+    }
+
+    // Zoomed in, a flick keeps the photo moving after the fingers lift,
+    // slowing down as the grid's scrolling does; a resting finger stops it.
+    void aZoomedFlickCoastsAndARestingFingerStopsIt() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(4, 500, 400); // 4000 x 3000: 1500 px of room each way across
+        settle(m);
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < 10; ++i)
+            m.move(t += 8, -6, 0);
+        m.end(t += 8);
+        const double lifted = m.panX();
+        for (int i = 0; i < 12; ++i)
+            m.advance(1.0 / 120);
+        QVERIFY(m.panX() < lifted - 20); // still going the same way
+        QVERIFY(m.animating());
+        m.touch(t + 100);
+        const double stopped = m.panX();
+        for (int i = 0; i < 60; ++i)
+            m.advance(1.0 / 120);
+        QCOMPARE(m.panX(), stopped);
+    }
+
+    void pullingAZoomedPhotoPastItsEdgeStretchesAndSpringsBack() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(2, 500, 400); // 500 px of room each way across
+        settle(m);
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < 120; ++i)
+            m.move(t += 16, -4, 0); // slow: no throw
+        // Pulled well over a thousand pixels past the edge, it gives a
+        // fraction of that: under 40% of the window.
+        QVERIFY2(m.panX() < -500 && m.panX() > -900, qPrintable(QString::number(m.panX())));
+        m.end(t + 200);
+        settle(m);
+        QCOMPARE(m.panX(), -500.0);
     }
 
     void whatGoesOutIsWhatWasChosenThroughAReload() {

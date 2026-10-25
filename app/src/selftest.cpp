@@ -388,6 +388,12 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              const double moved = std::abs(viewer.property("panX").toDouble()) + std::abs(viewer.property("panY").toDouble());
              return viewer.index() == *start + 2 && std::abs(viewer.property("offset").toDouble()) < 1 && moved > 50;
          }},
+        {"a flick on a zoomed photo coasts on after the fingers lift",
+         [=, &viewer] {
+             swipe(window, middle, {0, 14}, 8);
+             *mark = viewer.property("panY").toDouble();
+         },
+         [=, &viewer] { return viewer.property("panY").toDouble() > *mark + 30; }, 250},
         {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle); },
          [&viewer] { return viewer.isOpen() && viewer.property("zoom").toDouble() < 1.02; }, 900},
         {"clicking a thumbnail in the carousel shows that photo",
