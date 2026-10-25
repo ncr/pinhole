@@ -32,15 +32,60 @@
 #include "touchpadhold.h"
 
 #include <cstdio>
+#include <dlfcn.h>
 #include <functional>
 #include <memory>
 #include <thread>
 
+namespace {
+
+// A Vulkan driver that offers at least one GPU, asked of the Vulkan loader
+// itself. Its few calls are declared here by hand: Vulkan's headers are a
+// build dependency Pinhole does not otherwise need.
+bool vulkanUsable() {
+    void *vulkan = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!vulkan)
+        return false;
+    using Proc = void (*)();
+    struct InstanceInfo { // VkInstanceCreateInfo, asking for nothing
+        int type = 1;     // VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+        const void *next = nullptr;
+        unsigned flags = 0;
+        const void *application = nullptr;
+        unsigned layers = 0;
+        const char *const *layerNames = nullptr;
+        unsigned extensions = 0;
+        const char *const *extensionNames = nullptr;
+    } info;
+    using Create = int (*)(const InstanceInfo *, const void *, void **);
+    using Enumerate = int (*)(void *, unsigned *, void *);
+    using Destroy = void (*)(void *, const void *);
+    bool usable = false;
+    const auto proc = reinterpret_cast<Proc (*)(void *, const char *)>(dlsym(vulkan, "vkGetInstanceProcAddr"));
+    if (const auto create = proc ? reinterpret_cast<Create>(proc(nullptr, "vkCreateInstance")) : nullptr) {
+        void *instance = nullptr;
+        if (create(&info, nullptr, &instance) == 0) { // VK_SUCCESS
+            unsigned devices = 0;
+            const auto enumerate = reinterpret_cast<Enumerate>(proc(instance, "vkEnumeratePhysicalDevices"));
+            usable = enumerate && enumerate(instance, &devices, nullptr) == 0 && devices > 0;
+            if (const auto destroy = reinterpret_cast<Destroy>(proc(instance, "vkDestroyInstance")))
+                destroy(instance, nullptr);
+        }
+    }
+    dlclose(vulkan);
+    return usable;
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
     // On Asahi, Vulkan stalls far less than OpenGL when many small textures
     // are uploaded per frame: zoomed-out fast scrolling went from 96 to
-    // 119 fps and the worst frame from 385 to 66 ms.
-    if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND"))
+    // 119 fps and the worst frame from 385 to 66 ms. So Vulkan when there is
+    // a GPU to run it on; without one (an old GPU, a virtual machine, a
+    // driver missing), Qt's own choice, rather than a window that never
+    // draws. QSG_RHI_BACKEND still picks one by hand.
+    if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND") && vulkanUsable())
         qputenv("QSG_RHI_BACKEND", "vulkan");
     // Thumbnails share atlas pages; at the default size (half the screen,
     // rounded) a page holds only a dozen of them and a full screen would
@@ -50,7 +95,16 @@ int main(int argc, char *argv[]) {
     if (qEnvironmentVariableIsEmpty("QSG_ATLAS_HEIGHT"))
         qputenv("QSG_ATLAS_HEIGHT", "4096");
 
+    // Not GTK's platform theme, which Omarchy's environment asks for: it
+    // costs about 30 ms at start, and Pinhole draws everything itself (its
+    // type, colours and folder picker are Omarchy's, not GTK's). Programs it
+    // starts still get the desktop's setting.
+    const QByteArray platformTheme = qgetenv("QT_QPA_PLATFORMTHEME");
+    if (platformTheme.startsWith("gtk"))
+        qunsetenv("QT_QPA_PLATFORMTHEME");
     QGuiApplication app(argc, argv);
+    if (platformTheme.startsWith("gtk"))
+        qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
     app.setApplicationName("pinhole");
     app.setApplicationVersion("1.0.0");
     app.setDesktopFileName("pinhole");
@@ -86,13 +140,12 @@ int main(int argc, char *argv[]) {
     QString error;
     QElapsedTimer loadTimer;
     loadTimer.start();
-    // No library yet is not fatal: the window opens and says how to make
-    // one, and picks it up once it is there.
-    const bool haveLibrary = library.open(libraryDir, &error);
-    if (!haveLibrary)
-        std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
-    std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
-                 loadTimer.elapsed());
+    // Read while the window loads (both take some 50 ms): nothing touches
+    // the library until opening.join() below. No library yet is not fatal:
+    // the window opens and says how to make one, and picks it up once it is
+    // there.
+    bool haveLibrary = false;
+    std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     FrameStats stats;
@@ -101,7 +154,7 @@ int main(int argc, char *argv[]) {
     TouchpadHold hold;
 
     // Larger renditions come from pinholed.
-    ServiceClient service(library.dir());
+    ServiceClient service(QDir(libraryDir).absolutePath());
     // What to call the source until the service says.
     service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
@@ -113,14 +166,20 @@ int main(int argc, char *argv[]) {
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
-    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
+    engine.rootContext()->setContextProperty("libraryProblem", QString());
     engine.load(QUrl("qrc:/Main.qml"));
+    opening.join();
+    if (!haveLibrary)
+        std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
+    std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
+                 loadTimer.elapsed());
+    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     if (engine.rootObjects().isEmpty())
         return 1;
 
