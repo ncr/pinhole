@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
+        <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
     </qresource>
 </RCC>

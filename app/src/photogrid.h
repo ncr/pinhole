@@ -65,6 +65,15 @@ public:
     Q_INVOKABLE void scrollToEnd();
     Q_INVOKABLE void scrollPages(qreal pages);
 
+    // The photo at a point in the grid, or -1; the photo under the pointer,
+    // else the one in the middle of the view.
+    Q_INVOKABLE int indexAt(qreal x, qreal y) const;
+    Q_INVOKABLE int currentIndex() const;
+    // Where a photo's cell is on screen (it may be off it), and bringing it
+    // into view if it is not.
+    Q_INVOKABLE QRectF rectOf(int index) const;
+    Q_INVOKABLE void reveal(int index);
+
     // For the benchmark.
     void setDriveVelocity(double pixelsPerSecond);
     void fling(double pixelsPerSecond);
@@ -102,6 +111,8 @@ public:
     double scrollSpeedRows() const { return m_speedRows; }
 
 signals:
+    // Double-click on a photo: open it.
+    void activated(int index, QRectF rect);
     void libraryChanged();
     void columnsChanged();
     void animatingChanged();
@@ -113,6 +124,9 @@ protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void hoverMoveEvent(QHoverEvent *event) override;
+    void hoverLeaveEvent(QHoverEvent *event) override;
     bool event(QEvent *event) override;
     void itemChange(ItemChange change, const ItemChangeData &value) override;
     void releaseResources() override;
@@ -155,6 +169,7 @@ private:
     ThumbnailLoader *m_loader = nullptr;
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
+    QPointF m_hover{-1, -1};
     // When the current coast began; a touch from before it is old news.
     double m_coastFrom = 0;
 

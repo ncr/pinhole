@@ -142,6 +142,7 @@ PhotoGrid::PhotoGrid(QQuickItem *parent)
     m_columns = kLevels[size_t(m_level)];
     setFlag(ItemHasContents);
     setAcceptedMouseButtons(Qt::AllButtons);
+    setAcceptHoverEvents(true);
     setClip(true);
     m_clock.start();
     m_statsTimer.setInterval(250);
@@ -178,6 +179,48 @@ void PhotoGrid::touched(double timeMs, const char *) {
     m_scroll = m_physics.position();
     updateAnimating();
     update();
+}
+
+void PhotoGrid::mouseDoubleClickEvent(QMouseEvent *event) {
+    const int index = indexAt(event->position().x(), event->position().y());
+    if (index >= 0)
+        emit activated(index, rectOf(index));
+    event->accept();
+}
+
+void PhotoGrid::hoverMoveEvent(QHoverEvent *event) { m_hover = event->position(); }
+void PhotoGrid::hoverLeaveEvent(QHoverEvent *) { m_hover = QPointF(-1, -1); }
+
+int PhotoGrid::indexAt(qreal x, qreal y) const {
+    if (x < 0 || y < 0 || x >= width() || y >= height() || count() == 0)
+        return -1;
+    const double s = stride();
+    const int col = std::clamp(int(x / s), 0, m_columns - 1);
+    const int row = int((y + m_scroll) / s);
+    const int index = row * m_columns + col;
+    return index < count() ? index : -1;
+}
+
+int PhotoGrid::currentIndex() const {
+    if (m_hover.x() >= 0) {
+        if (const int i = indexAt(m_hover.x(), m_hover.y()); i >= 0)
+            return i;
+    }
+    const int middle = indexAt(width() / 2, height() / 2);
+    return middle >= 0 ? middle : count() - 1;
+}
+
+QRectF PhotoGrid::rectOf(int index) const {
+    return cellRect(index, Layer{m_columns, 1, QPointF(0, m_scroll), QPointF(0, 0), 1});
+}
+
+void PhotoGrid::reveal(int index) {
+    const QRectF r = rectOf(index);
+    if (r.top() >= 0 && r.bottom() <= height())
+        return;
+    // Into the middle of the view, as Photos does when a viewer closes on a
+    // photo that has scrolled away.
+    setScroll(m_scroll + r.center().y() - height() / 2);
 }
 
 void PhotoGrid::mousePressEvent(QMouseEvent *event) {

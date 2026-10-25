@@ -1,10 +1,10 @@
-QT += core gui qml quick quickcontrols2 sql network
+QT += core gui qml quick quickcontrols2 sql network multimedia
 
 CONFIG += c++20 release
 TARGET = pinhole
 TEMPLATE = app
 
-LIBS += -lturbojpeg -lwayland-client
+LIBS += -lturbojpeg -lwayland-client -lheif
 
 # The pointer-gestures protocol, for the touchpad hold gesture Qt does not
 # bind (see touchpadhold.h), generated from the system's protocol files.
@@ -23,6 +23,9 @@ HEADERS += \
     src/scrollphysics.h \
     src/touchpadhold.h \
     src/serviceclient.h \
+    src/photoprovider.h \
+    src/viewer.h \
+    src/selftest.h \
     src/framestats.h \
     src/bench.h
 
@@ -34,6 +37,9 @@ SOURCES += \
     src/scrollphysics.cpp \
     src/touchpadhold.cpp \
     src/serviceclient.cpp \
+    src/photoprovider.cpp \
+    src/viewer.cpp \
+    src/selftest.cpp \
     src/framestats.cpp \
     src/bench.cpp
 

@@ -1,0 +1,148 @@
+#include "viewer.h"
+
+#include "library.h"
+#include "serviceclient.h"
+
+#include <QDateTime>
+#include <QFile>
+#include <QLocale>
+
+Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
+    : QObject(parent), m_library(library), m_service(service) {}
+
+QUrl Viewer::providerUrl(const QString &path) {
+    return QUrl(QStringLiteral("image://photo/") + QString::fromUtf8(QUrl::toPercentEncoding(path)));
+}
+
+QUrl Viewer::thumbnail() const {
+    if (m_index < 0 || m_index >= m_library->count())
+        return {};
+    return QUrl::fromLocalFile(QFile::decodeName(m_library->at(m_index).thumbPath));
+}
+
+qreal Viewer::aspect() const {
+    if (m_index < 0 || m_index >= m_library->count())
+        return 1;
+    const LibraryItem &item = m_library->at(m_index);
+    return item.thumbH ? qreal(item.thumbW) / item.thumbH : 1;
+}
+
+bool Viewer::isVideo() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).video; }
+bool Viewer::isLive() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).live; }
+bool Viewer::isFavorite() const {
+    return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).favorite;
+}
+
+QString Viewer::title() const {
+    if (m_index < 0 || m_index >= m_library->count())
+        return {};
+    const QDateTime when = QDateTime::fromMSecsSinceEpoch(m_library->at(m_index).date);
+    return QLocale().toString(when, QLocale::LongFormat);
+}
+
+void Viewer::setMessage(const QString &message) {
+    if (message == m_message)
+        return;
+    m_message = message;
+    emit messageChanged();
+}
+
+void Viewer::openAt(int index, QRectF from) {
+    if (index < 0 || index >= m_library->count())
+        return;
+    m_origin = from;
+    show(index);
+    if (!m_open) {
+        m_open = true;
+        emit openChanged();
+    }
+}
+
+void Viewer::close() {
+    if (!m_open)
+        return;
+    m_open = false;
+    m_generation += 1; // anything still arriving is for a closed viewer
+    emit openChanged();
+}
+
+void Viewer::step(int delta) {
+    const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
+    if (next != m_index)
+        show(next);
+}
+
+void Viewer::show(int index) {
+    m_generation += 1;
+    m_index = index;
+    m_image = QUrl();
+    m_stage = QStringLiteral("thumbnail");
+    m_video = QUrl();
+    m_live = QUrl();
+    setMessage({});
+    emit indexChanged();
+    emit imageChanged();
+    emit videoChanged();
+    emit liveChanged();
+
+    if (isVideo()) {
+        setMessage(tr("Loading video…"));
+        request(index, QStringLiteral("video"));
+    } else {
+        request(index, QStringLiteral("medium"));
+    }
+    // The neighbours, so stepping through is instant.
+    for (int d : {1, -1}) {
+        const int n = index + d;
+        if (n >= 0 && n < m_library->count() && !m_library->at(n).video)
+            m_service->fetch(m_library->at(n).id, QStringLiteral("medium"), [](bool, const QJsonObject &, const QString &) {});
+    }
+}
+
+void Viewer::request(int index, const QString &kind) {
+    const int generation = m_generation;
+    m_service->fetch(m_library->at(index).id, kind, [this, generation, index, kind](bool ok, const QJsonObject &result,
+                                                                                    const QString &code) {
+        if (generation != m_generation)
+            return;
+        if (!ok) {
+            // No medium rendition (some old photos): go straight to the
+            // original. Anything else is reported, and what is shown stays.
+            if (kind == QLatin1String("medium") && code == QLatin1String("not_found")) {
+                request(index, QStringLiteral("original"));
+                return;
+            }
+            if (kind != QLatin1String("live"))
+                setMessage(code == QLatin1String("needs_sign_in") ? tr("Not signed in to iCloud")
+                                                                  : tr("Could not load from iCloud"));
+            return;
+        }
+        const QString path = result.value("path").toString();
+        if (kind == QLatin1String("video")) {
+            m_video = QUrl::fromLocalFile(path);
+            setMessage({});
+            emit videoChanged();
+        } else if (kind == QLatin1String("live")) {
+            m_live = QUrl::fromLocalFile(path);
+            emit liveChanged();
+        } else {
+            m_image = providerUrl(path);
+            m_stage = kind;
+            emit imageChanged();
+            // The medium is on screen; the original follows.
+            if (kind == QLatin1String("medium"))
+                request(index, QStringLiteral("original"));
+        }
+    });
+}
+
+void Viewer::playLive() {
+    if (!isLive())
+        return;
+    if (!m_live.isEmpty()) {
+        // Already here: nudge QML to play it again.
+        emit liveChanged();
+        return;
+    }
+    request(m_index, QStringLiteral("live"));
+}

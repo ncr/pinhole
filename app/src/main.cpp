@@ -18,7 +18,10 @@
 #include "framestats.h"
 #include "library.h"
 #include "photogrid.h"
+#include "photoprovider.h"
+#include "selftest.h"
 #include "serviceclient.h"
+#include "viewer.h"
 #include "thumbnailloader.h"
 #include "touchpadhold.h"
 
@@ -76,7 +79,13 @@ int main(int argc, char *argv[]) {
     // Before the window, so it outlives the grid that polls it.
     TouchpadHold hold;
 
+    // Larger renditions come from pinholed.
+    ServiceClient service;
+    Viewer viewer(&library, &service);
+
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
+    engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("bench", nullptr);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
@@ -87,9 +96,8 @@ int main(int argc, char *argv[]) {
     grid->setSources(&library, &loader, &stats);
     grid->setTouchpadHold(&hold);
 
-    // Larger renditions come from pinholed. Medium requests arrive from the
-    // render thread; the connection queues them onto this one.
-    ServiceClient service;
+    // Medium requests arrive from the render thread; the connection queues
+    // them onto this one.
     QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service, [&](const QList<int> &indexes) {
         for (int index : indexes) {
             service.fetch(library.at(index).id, QStringLiteral("medium"),
@@ -104,6 +112,8 @@ int main(int argc, char *argv[]) {
                               if (code != QLatin1String("not_found"))
                                   QTimer::singleShot(30000, &loader, [&loader, index] { loader.clearMedium(index); });
                           });
+
+
         }
     });
     QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
@@ -114,6 +124,9 @@ int main(int argc, char *argv[]) {
                      Qt::DirectConnection);
     QObject::connect(window, &QQuickWindow::frameSwapped, window, [&stats] { stats.frameSwapped(); },
                      Qt::DirectConnection);
+
+    if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
+        runViewerSelfTest(library, viewer);
 
     Bench bench(grid, &stats, &loader);
     if (parser.isSet("bench")) {

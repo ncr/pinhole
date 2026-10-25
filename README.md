@@ -31,7 +31,7 @@ On your own library (after adopting a session with `import_icloudpd`, below):
 ```bash
 core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library
 app/bin/build
-app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms
+app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms, double-click opens
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
 ```
 
@@ -42,6 +42,14 @@ When cells grow past what the 480 px thumbnails can fill, the window asks
 not running; it keeps a size-capped cache in `~/.cache/pinhole` and logs to
 `~/.local/state/pinhole/pinholed.log`. Its protocol is in
 [docs/service.md](docs/service.md).
+
+Double-click a photo, or press Space or Enter over it, to open it full
+window: the thumbnail at once, the medium rendition in about a second, then
+the original (HEIC through libheif). Left and Right step through, Escape or
+Space closes, Space plays and pauses a video, L plays a Live Photo's motion.
+`PINHOLE_SELFTEST=viewer app/build/pinhole` opens one of each kind and
+reports how long every stage took.
+
 Without a real library the window opens the synthetic one:
 
 ```bash
