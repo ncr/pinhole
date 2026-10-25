@@ -30,7 +30,7 @@ order, since a cached file answers at once while a download takes a while.
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
-| `set_source` | `kind` (`icloud` or `folder`), and a folder's `path` | the source, as the `source` event; see Sources |
+| `set_source` | `kind` (`icloud` or `folder`), and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event; see Sources |
 | `storage` | | where and how much: `location` (the one folder), `library`, `cache`, `limit_bytes`, `min_limit_bytes`, `default_limit_bytes`, `limit_set`, `used_bytes` (all of it), `kinds` (bytes of `library` and of each kind of photo), `freeing`, `moving` (`done_bytes`, `total_bytes`, or null) |
 | `set_storage` | `limit_bytes` and/or `location` (an absolute folder) | as `storage`, after the change (see Storage) |
 | `ping` | | `{}` |
@@ -71,8 +71,9 @@ already on disk. A window reads the index again.
 ```
 
 Where the photos come from, sent to a window as it connects and when it
-changes: `name` is what to call it ("iCloud", or the folder's name), and
-`needs_sign_in` whether it is one that can need signing in.
+changes: `name` is what to call it ("iCloud", or the folder's name),
+`needs_sign_in` whether it is one that can need signing in, and an iCloud
+source's `account` (its Apple ID) or a folder's `path`.
 
 ```json
 {"event": "health", "state": "offline"}
@@ -105,10 +106,11 @@ command line.
 ## Sources
 
 `set_source` changes where the photos come from, kept in the settings as
-`source` (`{"kind": "icloud"}` or `{"kind": "folder", "path": ...}`; none is
-iCloud). Each source has its own library in the one folder: iCloud's in
-`library/icloud/`, a folder's in `library/folder/`, made again from scratch
-when the folder changes. Every window hears the new `source`, then
+`source` (`{"kind": "icloud", "account": apple-id}` or `{"kind": "folder",
+"path": ...}`; none is iCloud). Each source has its own library in the one
+folder: `library/icloud/<apple-id>/`, `library/folder/home-me-Pictures/`.
+The service also switches when the settings change under it, as
+`pinhole-sync sign-in` does. Every window hears the new `source`, then
 `library_moved` with the library to read, then `library_changed` as it
 fills.
 
@@ -136,7 +138,7 @@ A cached file is answered with `path` alone.
 ## Storage
 
 Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
-the window chose another: each source's library in `library/<kind>/`
+the window chose another: each source's library in `library/<kind>/<name>/`
 (`library.sqlite` and `thumbs/`, built by `pinhole-sync` or the service and
 kept by the service) and the photos fetched from the
 source in `cache/<kind>/`, named by the rendition's key (iCloud's checksum
@@ -159,7 +161,7 @@ background: first the library, with syncing paused, renamed on one disk or
 copied across two, after which every window is told
 
 ```json
-{"event": "library_moved", "library": "/new/folder/library/icloud"}
+{"event": "library_moved", "library": "/new/folder/library/icloud/me@example.com"}
 ```
 
 and reads it from there (the old copy goes 30 seconds later); then the

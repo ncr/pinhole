@@ -217,6 +217,10 @@ pub trait Source: Send + Sync {
         self.kind().to_owned()
     }
 
+    /// The folder its library is in, under `library/<kind>/`: unique among
+    /// sources of its kind (an Apple ID, a folder's path).
+    fn library_name(&self) -> String;
+
     /// How often to look for changes.
     fn rounds_every(&self) -> Duration {
         Duration::from_secs(60)

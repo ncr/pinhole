@@ -28,20 +28,13 @@ pub struct SyncReport {
 }
 
 /// Make sure the index is this source's before anything is written to it:
-/// a new one becomes it, one from another folder is emptied for this one
-/// (with its thumbnails), and one from another source altogether is never
-/// touched. iCloud's 50,000 photos must not be listed away because a folder
-/// was pointed at their library.
+/// a new one becomes it, and one from another source is never touched.
+/// iCloud's 50,000 photos must not be listed away because a folder was
+/// pointed at their library.
 pub fn claim(source: &dyn Source, conn: &mut Connection, library: &Path) -> Result<()> {
     let id = source.id();
     match db::meta(conn, "source") {
         Some(owner) if owner == id => Ok(()),
-        Some(owner) if owner.starts_with("folder:") && id.starts_with("folder:") => {
-            eprintln!("pinholed: {} was {owner}; making it again for {id}", library.display());
-            conn.execute_batch("DELETE FROM assets; DELETE FROM meta WHERE key = 'change_token';")?;
-            let _ = std::fs::remove_dir_all(library.join("thumbs"));
-            db::set_meta(conn, "source", &id)
-        }
         None if conn.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0))? == 0 => {
             db::set_meta(conn, "source", &id)
         }
@@ -355,11 +348,19 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
 }
 
-/// A source from its settings entry: {"kind": "icloud"} or {"kind":
-/// "folder", "path": ...}; none is iCloud.
+/// A source from its settings entry: {"kind": "icloud", "account": apple
+/// id} or {"kind": "folder", "path": ...}. None is iCloud, and an iCloud
+/// one without an account is the only Apple ID signed in to, if there is
+/// just one.
 pub fn source_for(entry: Option<&serde_json::Value>, auth: PathBuf) -> Result<Arc<dyn Source>> {
     match entry.and_then(|e| e["kind"].as_str()).unwrap_or("icloud") {
-        "icloud" => Ok(Arc::new(crate::icloud::IcloudSource::new(auth))),
+        "icloud" => {
+            let account = entry.and_then(|e| e["account"].as_str()).map(str::to_owned).or_else(|| {
+                let accounts = crate::icloud::auth::accounts();
+                (accounts.len() == 1).then(|| accounts[0].clone())
+            });
+            Ok(Arc::new(crate::icloud::IcloudSource::new(auth, account)))
+        }
         "folder" => {
             let path = entry.and_then(|e| e["path"].as_str()).ok_or_else(|| anyhow!("a folder source needs a path"))?;
             if !Path::new(path).is_absolute() {
@@ -394,23 +395,22 @@ mod tests {
         let photos = FolderSource::new(PathBuf::from("/photos"));
         let others = FolderSource::new(PathBuf::from("/other"));
 
-        // A new library becomes the first source's.
+        // A new library becomes the first source's, and no other's.
         claim(&photos, &mut conn, &dir).unwrap();
         conn.execute("INSERT INTO assets (id, thumb_path) VALUES ('a.jpg', 'thumbs/x.jpg')", []).unwrap();
         claim(&photos, &mut conn, &dir).unwrap();
-        // Another folder's starts again from nothing.
-        claim(&others, &mut conn, &dir).unwrap();
-        assert_eq!(db::meta(&conn, "source").as_deref(), Some("folder:/other"));
-        assert_eq!(conn.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
-        assert!(!dir.join("thumbs").exists());
+        assert!(claim(&others, &mut conn, &dir).is_err());
+        assert_eq!(conn.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        conn.execute("DELETE FROM assets", []).unwrap();
         // iCloud's is never touched by a folder, nor one that says nothing
         // of where it came from.
-        db::set_meta(&conn, "source", "icloud").unwrap();
+        db::set_meta(&conn, "source", "icloud:me@example.com").unwrap();
         conn.execute("INSERT INTO assets (id) VALUES ('B5379A3C')", []).unwrap();
         assert!(claim(&photos, &mut conn, &dir).is_err());
         conn.execute("DELETE FROM meta WHERE key = 'source'", []).unwrap();
         assert!(claim(&photos, &mut conn, &dir).is_err());
         assert_eq!(conn.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert!(dir.join("thumbs").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -114,6 +114,9 @@ fn source_info(source: &dyn Source) -> Value {
     if let Some(path) = source.id().strip_prefix("folder:") {
         info["path"] = json!(path);
     }
+    if let Some(account) = source.id().strip_prefix("icloud:").filter(|a| !a.is_empty()) {
+        info["account"] = json!(account);
+    }
     info
 }
 
@@ -133,13 +136,23 @@ fn set_source(shared: &Arc<Shared>, params: &Value) -> Result<Value> {
             return Err(anyhow!("{path} is not a folder"));
         }
     }
+    if source.id() == "icloud:" {
+        return Err(anyhow!("no Apple ID is signed in to yet: pinhole-sync sign-in"));
+    }
     if source.id() == shared.source().id() {
         return Ok(source_info(&*source));
     }
+    crate::storage::update_settings(&shared.config.settings, |settings| settings["source"] = params.clone())?;
+    switch(shared, source.clone())?;
+    Ok(source_info(&*source))
+}
+
+/// Photos from `source` from now on: the library switched to its own (made
+/// if it has none yet), and every window told to read it.
+fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
     {
         // Not while a sync round writes the library.
         let _writing = shared.storage.library_lock.lock().unwrap();
-        crate::storage::update_settings(&shared.config.settings, |settings| settings["source"] = params.clone())?;
         *shared.source.write().unwrap() = source.clone();
         *shared.health.lock().unwrap() = Health::Fine;
         eprintln!("pinholed: photos from {} now", source.name());
@@ -155,7 +168,19 @@ fn set_source(shared: &Arc<Shared>, params: &Value) -> Result<Value> {
     if let Err(e) = source.start() {
         shared.failed(&e);
     }
-    Ok(source_info(&*source))
+    Ok(())
+}
+
+/// The source the settings name, if pinhole-sync changed it (signing in to
+/// an Apple ID makes it the source): switched to.
+fn follow_settings(shared: &Arc<Shared>) {
+    let settings = crate::storage::read_settings(&shared.config.settings);
+    let Ok(source) = crate::sync::source_for(settings.source.as_ref(), shared.config.auth.clone()) else { return };
+    if source.id() != shared.source().id() {
+        if let Err(e) = switch(shared, source) {
+            eprintln!("pinholed: switching source: {e:#}");
+        }
+    }
 }
 
 impl Shared {
@@ -625,6 +650,7 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
 /// draws did).
 fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
     loop {
+        follow_settings(&shared);
         match sync_round(&shared) {
             Ok(()) => shared.set_health(Health::Fine),
             Err(e) => {
@@ -645,6 +671,9 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
 
 fn sync_round(shared: &Shared) -> Result<()> {
     let source = shared.source();
+    // Nothing is made for a source not ready, such as an iCloud with no
+    // Apple ID signed in to yet.
+    source.start()?;
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();

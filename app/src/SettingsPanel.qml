@@ -79,7 +79,10 @@ Item {
     }
     Shortcut { enabled: root.shown && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
     Shortcut { enabled: root.shown && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
-    Shortcut { enabled: root.shown && storage.sourceKind !== "icloud"; sequence: "I"; context: Qt.ApplicationShortcut; onActivated: storage.useICloud() }
+    Shortcut {
+        enabled: root.shown && storage.accounts.length > 0; sequence: "I"; context: Qt.ApplicationShortcut
+        onActivated: storage.useICloud(storage.accounts[0])
+    }
     Shortcut { enabled: root.shown; sequence: "P"; context: Qt.ApplicationShortcut; onActivated: storage.chooseSourceFolder() }
 
     Rectangle {
@@ -143,34 +146,43 @@ Item {
                         text: qsTr("Photos from")
                         color: theme.darkForeground
                     }
-                    Item {
+                    UiText {
                         width: parent.width
-                        height: icloudButton.height
-                        UiText {
-                            width: parent.width - sourceButtons.width - theme.fontSize
-                            y: centredIn(parent.height)
-                            text: storage.sourceKind === "folder" ? storage.sourcePath : storage.sourceName
-                            color: theme.brightForeground
-                            elide: Text.ElideMiddle
-                        }
-                        Row {
-                            id: sourceButtons
-                            anchors.right: parent.right
-                            spacing: 6
+                        text: storage.sourceKind === "folder" ? storage.sourcePath
+                              : storage.sourceAccount !== "" ? storage.sourceName + " · " + storage.sourceAccount
+                              : storage.sourceName
+                        color: theme.brightForeground
+                        elide: Text.ElideMiddle
+                    }
+                    // One button to each Apple ID signed in to (named by it
+                    // when there are several), and one for a folder.
+                    Flow {
+                        width: parent.width
+                        spacing: 6
+                        Repeater {
+                            model: storage.accounts
                             ShellButton {
-                                id: icloudButton
-                                active: storage.sourceKind === "icloud"
-                                text: "iCloud"
-                                hint: "I"
-                                onTapped: storage.useICloud()
-                            }
-                            ShellButton {
-                                active: storage.sourceKind === "folder"
-                                text: qsTr("Folder")
-                                hint: "P"
-                                onTapped: storage.chooseSourceFolder()
+                                required property string modelData
+                                required property int index
+                                active: storage.sourceKind === "icloud" && storage.sourceAccount === modelData
+                                text: storage.accounts.length > 1 ? modelData : "iCloud"
+                                hint: index === 0 ? "I" : ""
+                                onTapped: storage.useICloud(modelData)
                             }
                         }
+                        ShellButton {
+                            active: storage.sourceKind === "folder"
+                            text: qsTr("Folder")
+                            hint: "P"
+                            onTapped: storage.chooseSourceFolder()
+                        }
+                    }
+                    UiText {
+                        visible: storage.accounts.length === 0
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        color: theme.darkForeground
+                        text: qsTr("To show photos from iCloud, run pinhole-sync sign-in in a terminal.")
                     }
                 }
 

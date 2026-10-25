@@ -48,17 +48,48 @@ QString Storage::folder() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/pinhole";
 }
 
+QStringList Storage::accounts() {
+    const QDir auth(QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/auth");
+    QStringList found;
+    for (const QString &name : auth.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        if (QFileInfo::exists(auth.filePath(name) + "/account.json"))
+            found.append(name);
+    return found;
+}
+
 QJsonObject Storage::configuredSource() {
     const QJsonObject source = settings().value("source").toObject();
     if (source.value("kind").toString() == QLatin1String("folder")) {
         const QString path = source.value("path").toString();
         return {{"kind", "folder"}, {"name", QFileInfo(path).fileName()}, {"path", path}, {"needs_sign_in", false}};
     }
-    return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}};
+    // The Apple ID named, else the only one signed in to.
+    QString account = source.value("account").toString();
+    if (const QStringList signedIn = accounts(); account.isEmpty() && signedIn.size() == 1)
+        account = signedIn.first();
+    QJsonObject icloud{{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}};
+    if (!account.isEmpty())
+        icloud.insert("account", account);
+    return icloud;
 }
 
 QString Storage::library() {
-    return folder() + "/library/" + configuredSource().value("kind").toString();
+    // As the service names it (storage::library_for): library/icloud/<apple
+    // id>, library/folder/home-me-Pictures.
+    const QJsonObject source = configuredSource();
+    const QString kind = source.value("kind").toString();
+    QString name = source.value("account").toString();
+    if (kind == QLatin1String("folder")) {
+        name = source.value("path").toString();
+        while (name.startsWith('/'))
+            name.remove(0, 1);
+        while (name.endsWith('/'))
+            name.chop(1);
+        name.replace('/', '-');
+        if (name.isEmpty())
+            name = QStringLiteral("root");
+    }
+    return folder() + "/library/" + kind + '/' + name;
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {
@@ -73,10 +104,11 @@ Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_s
 QString Storage::sourceKind() const { return m_service->source().value("kind").toString(); }
 QString Storage::sourceName() const { return m_service->sourceName(); }
 QString Storage::sourcePath() const { return withTilde(m_service->source().value("path").toString()); }
+QString Storage::sourceAccount() const { return m_service->source().value("account").toString(); }
 bool Storage::sourceNeedsSignIn() const { return m_service->source().value("needs_sign_in").toBool(); }
 
-void Storage::useICloud() {
-    setSource({{"kind", "icloud"}});
+void Storage::useICloud(const QString &account) {
+    setSource({{"kind", "icloud"}, {"account", account}});
 }
 
 void Storage::chooseSourceFolder() {

@@ -2,6 +2,7 @@
 
 #include <QJsonObject>
 #include <QObject>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantMap>
 
@@ -21,6 +22,10 @@ class Storage : public QObject {
     Q_PROPERTY(QString sourceKind READ sourceKind NOTIFY sourceChanged)
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY sourceChanged)
     Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY sourceChanged)
+    // An iCloud source's Apple ID; the Apple IDs signed in to on this
+    // computer (pinhole-sync sign-in), each with a library of its own.
+    Q_PROPERTY(QString sourceAccount READ sourceAccount NOTIFY sourceChanged)
+    Q_PROPERTY(QStringList accounts READ accounts NOTIFY sourceChanged)
     Q_PROPERTY(bool sourceNeedsSignIn READ sourceNeedsSignIn NOTIFY sourceChanged)
     // The folder, with ~ for the home folder.
     Q_PROPERTY(QString location READ location NOTIFY changed)
@@ -55,16 +60,19 @@ public:
     // (~/.config/pinhole/settings.json), else ~/.local/share/pinhole.
     static QString folder();
     // The source the settings name, as the service describes one (kind,
-    // name, needs_sign_in, path); iCloud unless they name another.
+    // name, needs_sign_in, path, account); iCloud unless they name another.
     static QJsonObject configuredSource();
-    // That source's library in the folder, library/<kind>: library/icloud,
-    // library/folder (docs/sources.md).
+    // That source's library in the folder, one to a source:
+    // library/icloud/<apple id>, library/folder/home-me-Pictures
+    // (docs/sources.md).
     static QString library();
+    static QStringList accounts();
 
     bool loaded() const { return m_loaded; }
     QString sourceKind() const;
     QString sourceName() const;
     QString sourcePath() const;
+    QString sourceAccount() const;
     bool sourceNeedsSignIn() const;
     QString location() const;
     double limit() const { return m_limit; }
@@ -89,8 +97,9 @@ public:
     Q_INVOKABLE void setLimit(double bytes);
     // The desktop's folder picker, then everything moved to the folder chosen.
     Q_INVOKABLE void chooseLocation();
-    // Photos from iCloud; from a folder chosen in the desktop's picker.
-    Q_INVOKABLE void useICloud();
+    // Photos from an Apple ID's iCloud; from a folder chosen in the
+    // desktop's picker.
+    Q_INVOKABLE void useICloud(const QString &account);
     Q_INVOKABLE void chooseSourceFolder();
     // Stops the service; the window starts the new one at once.
     Q_INVOKABLE void restartService();

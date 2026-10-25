@@ -112,6 +112,30 @@ impl Drop for ProcessProvider {
 /// The sign-in provider to run: $PINHOLE_AUTH, else the one in this
 /// checkout when running from core/target/release/, else `pinhole-auth` on
 /// PATH (as the package installs it).
+/// Where the provider keeps each account's session, one folder to an Apple
+/// ID: `~/.local/state/pinhole/auth/<apple-id>`.
+pub fn state_dir(apple_id: &str) -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"))
+        .join("pinhole/auth")
+        .join(apple_id)
+}
+
+/// The Apple IDs signed in to on this computer, whether or not their
+/// session is still good.
+pub fn accounts() -> Vec<String> {
+    let Some(dir) = state_dir("x").parent().map(PathBuf::from) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut accounts: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().join("account.json").exists())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    accounts.sort();
+    accounts
+}
+
 pub fn default_provider() -> PathBuf {
     if let Some(p) = std::env::var_os("PINHOLE_AUTH") {
         return PathBuf::from(p);

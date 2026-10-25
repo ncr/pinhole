@@ -1,6 +1,6 @@
 //! Where Pinhole keeps its files, and how much room they may take: one
 //! folder (`~/.local/share/pinhole` unless the window chose another) with
-//! each source's library in `library/<kind>/` (the index and the
+//! each source's library in `library/<kind>/<name>/` (the index and the
 //! thumbnails, always kept) and the photos fetched from the source in
 //! `cache/`, under one limit for the whole. Kept in Pinhole's settings, changed from the window while the
 //! service runs: a lower limit frees space at once; a new folder gets
@@ -68,10 +68,11 @@ pub fn read_settings(path: &Path) -> Settings {
     }
 }
 
-/// A source's library in the folder Pinhole keeps everything in, in
-/// `library/` under its kind: `library/icloud`, `library/folder`.
+/// A source's library in the folder Pinhole keeps everything in, one to a
+/// source, under its kind: `library/icloud/<apple-id>`,
+/// `library/folder/home-me-Pictures`.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
-    location.join("library").join(source.kind())
+    location.join("library").join(source.kind()).join(source.library_name())
 }
 
 /// Where Pinhole keeps everything now.

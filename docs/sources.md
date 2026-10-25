@@ -160,15 +160,29 @@ thumbnails arrive, every ten seconds.
 
 ```json
 {"source": {"kind": "folder", "path": "/home/me/Pictures"}}
-{"source": {"kind": "icloud"}}
+{"source": {"kind": "icloud", "account": "me@example.com"}}
 ```
 
-No `source` means iCloud, as before. Each source has its own library in
-the one folder Pinhole keeps everything in, named by its kind:
-`library/icloud/` and `library/folder/` (made again from scratch when the
-folder changes). Both share `cache/` and the one limit; moving the folder moves
-both. The window's settings panel picks the source, and the service
-switches to it as it runs: windows are told the library moved, and read
+No `source` means iCloud, and an iCloud source without an `account` is
+the only Apple ID signed in to, if there is just one.
+
+Every source has a library of its own in the one folder Pinhole keeps
+everything in, under its kind: `library/icloud/<apple-id>/` for each Apple
+ID, `library/folder/home-me-Pictures/` for each folder (its path, with
+dashes). Switching between them rebuilds nothing, and a library is only
+ever written by its own source (`sync::claim`). All of them share `cache/`
+(files named by their keys, which do not clash) and the one limit, and a
+move of the folder takes `library/` as a whole.
+
+Each Apple ID's session is kept apart too, in
+`~/.local/state/pinhole/auth/<apple-id>/` (the provider's `--state-dir`).
+`pinhole-sync sign-in` signs in to one and makes it the source; a running
+service sees the settings change and switches to it, listing its library
+if it has none yet.
+
+The window's settings panel picks the source: a button for each Apple ID
+signed in to, and one for a folder chosen in the desktop's picker. The
+service switches as it runs: windows are told the library moved, and read
 the new one.
 
 ## The window

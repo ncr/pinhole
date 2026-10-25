@@ -313,6 +313,12 @@ impl Source for FolderSource {
         format!("folder:{}", self.root.display())
     }
 
+    /// Its path, readable: /home/me/Pictures is home-me-Pictures.
+    fn library_name(&self) -> String {
+        let name = self.root.to_string_lossy().trim_matches('/').replace('/', "-");
+        if name.is_empty() { "root".into() } else { name }
+    }
+
     fn health(&self, error: &anyhow::Error) -> Health {
         if !self.root.is_dir() {
             return Health::Offline;

@@ -10,7 +10,7 @@ use std::time::Instant;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
-use pinhole_core::icloud::auth::ProcessProvider;
+use pinhole_core::icloud::{self, auth::ProcessProvider};
 use pinhole_core::{db, storage, sync};
 
 #[derive(Parser)]
@@ -153,21 +153,32 @@ fn ask(prompt: &str, hidden: bool) -> Result<String> {
     Ok(line.trim_end_matches(['\r', '\n']).to_owned())
 }
 
+/// Sign in to an Apple ID, its session kept apart from any other's, and
+/// show its photos from now on (the settings' source; a running service
+/// follows).
 fn sign_in(auth: PathBuf, from_icloudpd: Option<&str>) -> Result<()> {
-    let mut provider = ProcessProvider::spawn(auth, None)?;
-    if let Some(apple_id) = from_icloudpd {
+    let apple_id = match from_icloudpd {
+        Some(apple_id) => apple_id.to_owned(),
+        None => ask("Apple ID: ", false)?,
+    };
+    let mut provider = ProcessProvider::spawn(auth, Some(icloud::auth::state_dir(&apple_id)))?;
+    if from_icloudpd.is_some() {
         provider.call("import_icloudpd", serde_json::json!({"apple_id": apple_id}))?;
         let status = provider.call("status", serde_json::Value::Null)?;
-        println!("{}", if status["state"] == "signed_in" { "Signed in, with icloudpd's session." } else { "icloudpd's session is no longer valid; sign in without --from-icloudpd." });
-        return Ok(());
+        if status["state"] != "signed_in" {
+            bail!("icloudpd's session is no longer valid; sign in without --from-icloudpd");
+        }
+    } else {
+        let password = ask("Password: ", true)?;
+        let state = provider.call("sign_in", serde_json::json!({"apple_id": apple_id, "password": password}))?;
+        if state["state"] == "needs_code" {
+            let code = ask("The six-digit code Apple sent to your devices: ", false)?;
+            provider.call("submit_code", serde_json::json!({"code": code.trim()}))?;
+        }
     }
-    let apple_id = ask("Apple ID: ", false)?;
-    let password = ask("Password: ", true)?;
-    let state = provider.call("sign_in", serde_json::json!({"apple_id": apple_id, "password": password}))?;
-    if state["state"] == "needs_code" {
-        let code = ask("The six-digit code Apple sent to your devices: ", false)?;
-        provider.call("submit_code", serde_json::json!({"code": code.trim()}))?;
-    }
-    println!("Signed in as {apple_id}. Next: pinhole-sync all");
+    storage::update_settings(&storage::settings_path(), |settings| {
+        settings["source"] = serde_json::json!({"kind": "icloud", "account": apple_id});
+    })?;
+    println!("Signed in as {apple_id}; Pinhole shows its photos. Next: pinhole-sync all");
     Ok(())
 }

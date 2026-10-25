@@ -96,6 +96,7 @@
   "The Pinhole service running now is older than this window and has to be restarted.": "Działająca usługa Pinhole jest starsza niż to okno i trzeba ją uruchomić ponownie.",
   "The index and thumbnails always stay, so the limit is never under %1. Unless you choose one, it is %2.": "Indeks i miniatury zostają zawsze, więc limit nie spada poniżej %1. Jeśli go nie wybierzesz, wynosi %2.",
   "This removes %1 of the photos viewed longest ago from this computer. They stay in %2 and come back when you look at them.": "To usunie z tego komputera %1 zdjęć oglądanych najdawniej. Zostają w %2 i wrócą, gdy je otworzysz.",
+  "To show photos from iCloud, run pinhole-sync sign-in in a terminal.": "Aby pokazywać zdjęcia z iCloud, uruchom pinhole-sync sign-in w terminalu.",
   "Videos": "Filmy",
   "Where to keep photos": "Gdzie trzymać zdjęcia",
   "Zoom": "Powiększ"

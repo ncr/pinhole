@@ -36,6 +36,8 @@ const LOOKUPS_AT_ONCE: usize = 4;
 pub struct IcloudSource {
     /// The sign-in provider to run.
     auth: PathBuf,
+    /// The Apple ID whose library this is; none until one is signed in to.
+    account: Option<String>,
     /// Keep the records as iCloud sent them (pinhole-probe).
     pub keep_raw: bool,
     /// Pages of the list at once, and assets to a page, when walking it.
@@ -56,9 +58,10 @@ pub struct IcloudSource {
 }
 
 impl IcloudSource {
-    pub fn new(auth: PathBuf) -> Self {
+    pub fn new(auth: PathBuf, account: Option<String>) -> Self {
         IcloudSource {
             auth,
+            account,
             keep_raw: false,
             parallel: 4,
             per_page: 100,
@@ -73,8 +76,13 @@ impl IcloudSource {
     fn client<'a>(&self, slot: &'a Mutex<Option<PhotosClient>>) -> Result<MutexGuard<'a, Option<PhotosClient>>> {
         let mut client = slot.lock().unwrap();
         if client.is_none() {
-            let c = PhotosClient::new(Box::new(ProcessProvider::spawn(self.auth.clone(), None)?))?;
+            let Some(account) = &self.account else {
+                return Err(ProviderError { code: "needs_sign_in".into(), message: "no Apple ID signed in to".into() }.into());
+            };
+            let provider = ProcessProvider::spawn(self.auth.clone(), Some(auth::state_dir(account)))?;
+            let c = PhotosClient::new(Box::new(provider))?;
             if std::ptr::eq(slot, &self.links) {
+                eprintln!("pinholed: signed in as {}", c.session().apple_id);
                 *self.downloader.lock().unwrap() = c.downloader().unhurried().ok();
             }
             *client = Some(c);
@@ -143,6 +151,14 @@ impl Source for IcloudSource {
         "icloud"
     }
 
+    fn id(&self) -> String {
+        format!("icloud:{}", self.account.as_deref().unwrap_or(""))
+    }
+
+    fn library_name(&self) -> String {
+        self.account.clone().unwrap_or_default()
+    }
+
     fn needs_sign_in(&self) -> bool {
         true
     }
@@ -169,9 +185,7 @@ impl Source for IcloudSource {
     }
 
     fn start(&self) -> Result<()> {
-        let apple_id = self.with(&self.links, |client| Ok(client.session().apple_id.clone()))?;
-        eprintln!("pinholed: signed in as {apple_id}");
-        Ok(())
+        self.with(&self.links, |_| Ok(()))
     }
 
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
