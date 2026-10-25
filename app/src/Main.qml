@@ -144,9 +144,11 @@ ApplicationWindow {
             }
         }
         visible: message !== "" && grid.count > 0
-        anchors.left: parent.left
+        // Beside the Newest button when it shows.
+        anchors.left: newestButton.opacity > 0 ? newestButton.right : parent.left
+        anchors.leftMargin: newestButton.opacity > 0 ? 8 : 16
         anchors.bottom: parent.bottom
-        anchors.margins: 16
+        anchors.bottomMargin: 16
         // The sign-in and service problems in the theme's red; offline in
         // its muted text.
         text: (serviceHealth === "offline" ? "" : "● ") + message
@@ -156,11 +158,28 @@ ApplicationWindow {
         label.elide: Text.ElideRight
     }
 
+    // Back to the newest photos, whenever the grid is away from them.
+    ShellButton {
+        id: newestButton
+        objectName: "newestButton"
+        floating: true
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        readonly property bool wanted: win.inGrid && grid.count > 0 && !grid.atNewest
+        opacity: wanted ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        text: "↓ " + qsTr("Newest") + "  <font color=\"" + theme.darkForeground + "\">End</font>"
+        onTapped: grid.glideToNewest()
+    }
+
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
     ShellButton {
         id: selectButton
         objectName: "selectButton"
+        floating: true
         visible: win.inGrid && grid.count > 0
         anchors.top: parent.top
         anchors.right: parent.right
@@ -252,7 +271,7 @@ ApplicationWindow {
     Shortcut { enabled: win.inGrid; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
     Shortcut { enabled: win.inGrid; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
     Shortcut { enabled: win.inGrid; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
-    Shortcut { enabled: win.inGrid; sequence: "End"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToEnd() }
+    Shortcut { enabled: win.inGrid; sequence: "End"; context: Qt.ApplicationShortcut; onActivated: grid.glideToNewest() }
     Shortcut { enabled: win.inGrid; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }

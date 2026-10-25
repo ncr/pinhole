@@ -67,8 +67,9 @@ public:
     void end(double tMs);
     bool tracking() const { return m_tracking; }
 
-    // A mouse wheel notch or keyboard step: eased, never past the ends.
-    void nudge(double delta);
+    // A mouse wheel notch or keyboard step: eased, never past the ends,
+    // with this time constant (a notch's 80 ms by default; longer glides).
+    void nudge(double delta, double seconds = 0.08);
     // Set the position outright; all motion stops.
     void jumpTo(double position);
     // Start coasting at `velocity` px/s, as if just thrown.
@@ -97,6 +98,7 @@ private:
     double m_velocity = 0;      // px/s
     double m_unbounded = 0;     // where the fingers would have put it without the rubber band
     double m_easeRemaining = 0;
+    double m_easeSeconds = 0.08;
     double m_velocityAtBegin = 0;
     double m_caughtVelocity = 0;
     double m_caughtAt = -1e9;

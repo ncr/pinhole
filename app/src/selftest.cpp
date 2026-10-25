@@ -546,6 +546,16 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return at() < *mark - 5000 && at() > *mark - 12000; }, 1500},
         {"the video closes", [=] { click(window, middle(), Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
+        {"far from the newest photos, the Newest button shows", [=] { grid->jumpToFraction(0.3); },
+         [=] {
+             QObject *b = window->findChild<QObject *>(QStringLiteral("newestButton"));
+             return !grid->atNewest() && b && b->property("opacity").toDouble() > 0.9;
+         }},
+        {"tapping it glides back to them, and it goes", [=] { click(window, centreOf(window, "newestButton")); },
+         [=] {
+             QObject *b = window->findChild<QObject *>(QStringLiteral("newestButton"));
+             return grid->atNewest() && grid->scrollFraction() > 0.999 && b->property("opacity").toDouble() < 0.1;
+         }, 1500},
     });
     Viewer *viewerPtr = &viewer;
     auto failures = std::make_shared<int>(0);

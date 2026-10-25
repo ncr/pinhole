@@ -48,6 +48,8 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QString statsText READ statsText NOTIFY statsTextChanged)
     // How far down the library the view is, 0 at the oldest, 1 at the newest.
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
+    // Within half a screen of the newest photos.
+    Q_PROPERTY(bool atNewest READ atNewest NOTIFY scrolled)
     // The date labels on screen, for the window to draw at the top left:
     // [{label, top}]. Far out by year and month, sticky: the run the top of
     // the view is in (top far above), then each run that starts lower down.
@@ -123,6 +125,11 @@ public:
     // where each year begins, and whether a drag is under way (the grid then
     // draws from mosaic pages, as when scrolling very fast).
     qreal scrollFraction() const;
+    bool atNewest() const;
+    // Glide to the newest photos: from far off, a jump to a screen and a
+    // half before them and the rest eased, so the motion shows without
+    // racing through the whole library.
+    Q_INVOKABLE void glideToNewest();
     QVariantList dateHeaders() const { return m_dateHeaders; }
     Q_INVOKABLE void scrubTo(qreal fraction);
     Q_INVOKABLE qint64 dateAt(qreal fraction) const;

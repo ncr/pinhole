@@ -12,6 +12,9 @@ Rectangle {
     property var photos: function () { return [] }
     property bool enabledHere: true
     property bool flat: false
+    // Over the photos rather than on a surface of the app: backed with the
+    // theme's background, as the chips are, so it reads on any photo.
+    property bool floating: false
     property string hint: ""
 
     // idle, working, done, failed
@@ -90,6 +93,13 @@ Rectangle {
         }
     }
 
+    Rectangle {
+        anchors.fill: parent
+        z: -1
+        visible: button.floating
+        radius: parent.radius
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
+    }
     HoverHandler { id: hover; cursorShape: button.enabledHere ? Qt.PointingHandCursor : Qt.ArrowCursor }
     TapHandler {
         id: tap

@@ -62,6 +62,7 @@
   "Loading the full photo…": "Wczytuję pełne zdjęcie…",
   "Loading video…": "Wczytuję wideo…",
   "Move around a zoomed photo; or two fingers, flick to coast": "Przesuwaj powiększone zdjęcie; lub dwoma palcami, machnij, by sunęło dalej",
+  "Newest": "Najnowsze",
   "No photo library yet": "Nie ma jeszcze biblioteki zdjęć",
   "Not signed in to iCloud": "Nie zalogowano do iCloud",
   "Not signed in to iCloud. To sign in again, run pinhole-sync sign-in in a terminal.": "Brak zalogowania do iCloud. Aby zalogować się ponownie, uruchom pinhole-sync sign-in w terminalu.",

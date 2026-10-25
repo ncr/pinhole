@@ -9,6 +9,9 @@ Rectangle {
     property alias text: label.text
     property bool active: false
     property bool flat: false
+    // Over the photos rather than on a surface of the app: backed with the
+    // theme's background, as the chips are, so it reads on any photo.
+    property bool floating: false
     property bool usable: true
     signal tapped()
 
@@ -29,6 +32,13 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         y: centredIn(control.height)
         color: control.active ? theme.background : theme.foreground
+    }
+    Rectangle {
+        anchors.fill: parent
+        z: -1
+        visible: control.floating
+        radius: parent.radius
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
     }
     HoverHandler { id: hover; cursorShape: control.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
     TapHandler { id: tap; onTapped: if (control.usable) control.tapped() }

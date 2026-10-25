@@ -123,7 +123,8 @@ void ScrollPhysics::end(double tMs) {
         m_mode = Mode::Idle, m_velocity = 0;
 }
 
-void ScrollPhysics::nudge(double delta) {
+void ScrollPhysics::nudge(double delta, double seconds) {
+    m_easeSeconds = seconds;
     if (m_mode != Mode::Easing) {
         m_mode = Mode::Easing;
         m_velocity = 0;
@@ -197,8 +198,8 @@ bool ScrollPhysics::step(double dt) {
             break;
         }
         case Mode::Easing: {
-            // A wheel notch eases in over about 80 ms.
-            const double moved = m_easeRemaining * (1 - std::exp(-s / 0.08));
+            // A wheel notch eases in over about 80 ms; a glide, longer.
+            const double moved = m_easeRemaining * (1 - std::exp(-s / m_easeSeconds));
             m_position += moved;
             m_easeRemaining -= moved;
             if (std::abs(m_easeRemaining) < 0.5) {

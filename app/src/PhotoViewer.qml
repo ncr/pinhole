@@ -328,6 +328,7 @@ Item {
         ShellButton {
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
+            floating: true
             text: qsTr("LIVE") + "  <font color=\"" + theme.darkForeground + "\">L</font>"
             onTapped: viewer.playLive()
         }
@@ -335,17 +336,20 @@ Item {
         // with a tick on itself.
         CopyButton {
             objectName: "viewerCopy"
+            floating: true
             anchors.verticalCenter: parent.verticalCenter
             photos: () => [viewer.index]
         }
         ShellButton {
             anchors.verticalCenter: parent.verticalCenter
+            floating: true
             text: qsTr("Export")
             onTapped: outgoing.exportTo([viewer.index], false)
         }
         // Back to the library.
         ShellButton {
             anchors.verticalCenter: parent.verticalCenter
+            floating: true
             text: "✕"
             width: height
             onTapped: root.closeViewer()
@@ -422,6 +426,7 @@ Item {
             anchors.bottomMargin: 10
             text: (root.muted ? qsTr("Sound off") : qsTr("Sound on")) + "  <font color=\"" + theme.darkForeground + "\">M</font>"
             active: root.muted
+            floating: true
             onTapped: root.muted = !root.muted
         }
     }

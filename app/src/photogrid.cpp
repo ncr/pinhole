@@ -810,6 +810,18 @@ void PhotoGrid::scrollToStart() { setScroll(0); }
 
 void PhotoGrid::scrollToEnd() { setScroll(maxScroll(m_columns)); }
 
+bool PhotoGrid::atNewest() const { return maxScroll(m_columns) - m_scroll < height() * 0.5; }
+
+void PhotoGrid::glideToNewest() {
+    const double end = maxScroll(m_columns);
+    if (end - m_scroll > height() * 1.5)
+        setScroll(end - height() * 1.5);
+    syncBounds();
+    m_physics.jumpTo(m_scroll);
+    m_physics.nudge(end - m_scroll, 0.15); // settles in about half a second
+    updateAnimating();
+}
+
 void PhotoGrid::scrollPages(qreal pages) {
     syncBounds();
     m_physics.nudge(pages * height() * 0.9);
