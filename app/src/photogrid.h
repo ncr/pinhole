@@ -200,12 +200,6 @@ private:
         QPointF pin;
         QPointF at;
         double opacity = 1;
-        // While two levels cross-fade, each photo is drawn this share of the
-        // way toward where the other level puts it: a light morph.
-        double morph = 0;
-        int toColumns = 0;
-        double toScale = 1;
-        QPointF toPin, toAt;
     };
     std::vector<Layer> layers() const;
     QRectF cellRect(int index, const Layer &layer) const;
