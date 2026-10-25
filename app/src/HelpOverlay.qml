@@ -10,12 +10,14 @@ Item {
 
     property bool shown: false
 
+    // Touchpad and mouse side by side: each does everything.
     readonly property var sections: [
         { title: qsTr("Browsing"), keys: [
             [qsTr("Two fingers"), qsTr("Scroll; flick to coast, rest a finger to stop")],
+            [qsTr("Wheel"), qsTr("Scroll")],
             [qsTr("Pinch"), qsTr("Zoom in and out")],
+            [qsTr("Ctrl+wheel"), qsTr("Zoom one step at the pointer")],
             ["+  −", qsTr("Zoom one step")],
-            [qsTr("Ctrl+scroll"), qsTr("Zoom one step at the pointer")],
             ["Home  End", qsTr("Oldest, newest")],
             ["PgUp  PgDn", qsTr("A screen up or down")],
             [qsTr("Right edge"), qsTr("Drag the date scrubber")]
@@ -29,17 +31,22 @@ Item {
         ] },
         { title: qsTr("Taking photos out"), keys: [
             [qsTr("Drag"), qsTr("Drop the selection into any app")],
+            [qsTr("Right-click"), qsTr("Open, copy, export")],
             ["Ctrl+C", qsTr("Copy")],
             ["Ctrl+E", qsTr("Export originals")],
             ["Ctrl+Shift+E", qsTr("Export as JPEG and MP4")]
         ] },
         { title: qsTr("Viewing"), keys: [
-            [qsTr("Double-click"), qsTr("Open the photo")],
+            [qsTr("Double-click"), qsTr("Open the photo; again to go back")],
             ["Space  Enter", qsTr("Open the photo under the pointer")],
+            [qsTr("Click a side"), qsTr("Previous, next")],
+            [qsTr("Wheel"), qsTr("Previous, next")],
+            [qsTr("Swipe sideways"), qsTr("Previous, next, with two fingers")],
             ["←  →", qsTr("Previous, next")],
+            [qsTr("Click"), qsTr("Play or pause a video")],
             ["Space", qsTr("Play or pause a video; close a photo")],
             ["L", qsTr("Play a Live Photo")],
-            ["Esc", qsTr("Close")]
+            [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
         ] },
         { title: qsTr("Pinhole"), keys: [
             ["?", qsTr("Show or hide these keys")],
@@ -59,6 +66,30 @@ Item {
 
     // As many columns of 340 as fit, up to three.
     readonly property int columns: Math.max(1, Math.min(3, Math.floor((width - 96) / 372)))
+
+    // The sections in order, cut into columns as even in height as can be:
+    // every way of cutting them is tried, there being few.
+    readonly property var columnOf: {
+        const rows = sections.map(s => s.keys.length + 2)
+        let best = null, bestHeight = Infinity
+        const cut = (from, column, assigned, tallest) => {
+            if (column === columns - 1) {
+                const last = rows.slice(from).reduce((a, b) => a + b, 0)
+                const height = Math.max(tallest, last)
+                if (height < bestHeight) {
+                    bestHeight = height
+                    best = assigned.concat(rows.slice(from).map(() => column))
+                }
+                return
+            }
+            for (let to = from + 1; to <= rows.length - (columns - 1 - column); ++to) {
+                const height = rows.slice(from, to).reduce((a, b) => a + b, 0)
+                cut(to, column + 1, assigned.concat(rows.slice(from, to).map(() => column)), Math.max(tallest, height))
+            }
+        }
+        cut(0, 0, [], 0)
+        return best
+    }
 
     Rectangle {
         anchors.centerIn: parent
@@ -83,7 +114,7 @@ Item {
                     required property int index
                     spacing: 24
                     Repeater {
-                        model: root.sections.filter((s, i) => Math.floor(i * root.columns / root.sections.length) === column.index)
+                        model: root.sections.filter((s, i) => root.columnOf[i] === column.index)
                         delegate: Column {
                             required property var modelData
                             spacing: 6

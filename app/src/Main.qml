@@ -22,6 +22,7 @@ ApplicationWindow {
         focus: true
         accent: theme.accent
         onActivated: (index, rect) => viewer.openAt(index, rect)
+        onMenuRequested: (index, pos) => photoMenu.popup(grid, pos)
     }
 
     // Every vsync while anything moves; the benchmark drives it too.
@@ -91,6 +92,62 @@ ApplicationWindow {
         id: photoViewer
         anchors.fill: parent
         grid: grid
+        onMenuRequested: (x, y) => photoMenu.popup(photoViewer, x, y)
+    }
+
+    // The right-click menu, in the grid and in the viewer: everything the
+    // keys do, for a mouse.
+    Menu {
+        id: photoMenu
+        objectName: "photoMenu"
+        width: 280
+        // Drawn here rather than by the style, whose shadow some renderers
+        // skip: the same panel as the shortcuts.
+        background: Rectangle {
+            implicitWidth: 280
+            radius: Math.min(8, theme.radius)
+            color: "#f0161618"
+            border.color: theme.accent
+            border.width: 1
+        }
+        component Entry: MenuItem {
+            height: visible ? implicitHeight : 0
+        }
+        Entry {
+            visible: !viewer.open && grid.selectionCount === 1
+            text: qsTr("Open")
+            onTriggered: { const i = grid.selection()[0]; viewer.openAt(i, grid.rectOf(i)) }
+        }
+        Entry {
+            visible: viewer.open && viewer.live
+            text: qsTr("Play the Live Photo")
+            onTriggered: viewer.playLive()
+        }
+        Entry {
+            visible: viewer.open || grid.selectionCount > 0
+            text: qsTr("Copy")
+            onTriggered: outgoing.copy(win.chosen())
+        }
+        Entry {
+            visible: viewer.open || grid.selectionCount > 0
+            text: qsTr("Export originals")
+            onTriggered: outgoing.exportTo(win.chosen(), false)
+        }
+        Entry {
+            visible: viewer.open || grid.selectionCount > 0
+            text: qsTr("Export as JPEG and MP4")
+            onTriggered: outgoing.exportTo(win.chosen(), true)
+        }
+        Entry {
+            visible: !viewer.open
+            text: qsTr("Select all")
+            onTriggered: grid.selectAll()
+        }
+        Entry {
+            visible: viewer.open
+            text: qsTr("Back to the library")
+            onTriggered: photoViewer.closeViewer()
+        }
     }
 
     Text {
@@ -131,10 +188,14 @@ ApplicationWindow {
     readonly property bool inGrid: !photoViewer.shown && !help.shown
 
     // What Copy and Export act on: the selection, else the photo in view.
+    // What Copy and Export take: the photo on screen in the viewer, else the
+    // selection, else the photo under the pointer.
     function chosen() {
+        if (viewer.open)
+            return [viewer.index]
         if (grid.selectionCount > 0)
             return grid.selection()
-        return viewer.open ? [viewer.index] : [grid.currentIndex()]
+        return [grid.currentIndex()]
     }
 
     function openCurrent() {

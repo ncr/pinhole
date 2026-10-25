@@ -154,6 +154,9 @@ signals:
     void accentChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
+    // Right-click: the menu, at `pos`. A photo that was not selected is
+    // selected alone first, as in Files; `index` is -1 between photos.
+    void menuRequested(int index, QPointF pos);
     void libraryChanged();
     void columnsChanged();
     void animatingChanged();

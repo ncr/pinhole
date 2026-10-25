@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QProcess>
+#include <QQuickWindow>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
 #include <QVideoFrame>
@@ -252,4 +253,108 @@ void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer) 
             QCoreApplication::quit();
         });
     });
+}
+
+namespace {
+
+void mouse(QQuickWindow *window, QEvent::Type type, QPointF at, Qt::MouseButton button) {
+    const Qt::MouseButtons held = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::MouseButtons(button);
+    QMouseEvent event(type, at, window->mapToGlobal(at), button, held, Qt::NoModifier);
+    QGuiApplication::sendEvent(window, &event);
+}
+
+void click(QQuickWindow *window, QPointF at, Qt::MouseButton button = Qt::LeftButton) {
+    mouse(window, QEvent::MouseButtonPress, at, button);
+    mouse(window, QEvent::MouseButtonRelease, at, button);
+}
+
+void doubleClick(QQuickWindow *window, QPointF at) {
+    click(window, at);
+    mouse(window, QEvent::MouseButtonPress, at, Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonDblClick, at, Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonRelease, at, Qt::LeftButton);
+}
+
+void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle) {
+    QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, Qt::NoModifier,
+                      pixels.isNull() ? Qt::NoScrollPhase : Qt::ScrollUpdate, false);
+    QGuiApplication::sendEvent(window, &event);
+}
+
+} // namespace
+
+void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer) {
+    struct Step {
+        const char *what;
+        std::function<void()> act;
+        std::function<bool()> check;
+    };
+    auto start = std::make_shared<int>(-1);
+    const QPointF middle(window->width() / 2.0, window->height() / 2.0);
+    const QPointF right(window->width() - 40.0, window->height() / 2.0);
+    const QPointF left(40.0, window->height() / 2.0);
+    auto menu = [window] { return window->findChild<QObject *>(QStringLiteral("photoMenu")); };
+    auto steps = std::make_shared<QList<Step>>(QList<Step>{
+        {"right-click selects the photo and opens the menu",
+         [=] {
+             *start = grid->indexAt(middle.x(), middle.y());
+             click(window, middle, Qt::RightButton);
+         },
+         [=] { return grid->selection() == QList<int>{*start} && menu() && menu()->property("opened").toBool(); }},
+        {"the menu closes", [=] { QMetaObject::invokeMethod(menu(), "close"); },
+         [=] { return !menu()->property("visible").toBool(); }},
+        {"double-click opens the photo", [=] { doubleClick(window, middle); },
+         [&viewer, start] { return viewer.isOpen() && viewer.index() == *start; }},
+        {"clicking the right side shows the next", [=] { click(window, right); },
+         [&viewer, start] { return viewer.index() == *start + 1; }},
+        {"clicking the left side shows the previous", [=] { click(window, left); },
+         [&viewer, start] { return viewer.index() == *start; }},
+        {"a wheel notch down shows the next", [=] { wheel(window, middle, {}, {0, -120}); },
+         [&viewer, start] { return viewer.index() == *start + 1; }},
+        {"a sideways swipe shows the next, once",
+         [=] {
+             for (int i = 0; i < 12; ++i)
+                 wheel(window, middle, {-30, 2}, {-240, 16});
+         },
+         [&viewer, start] { return viewer.index() == *start + 2; }},
+        {"scrolling up and down with two fingers does nothing",
+         [=] {
+             for (int i = 0; i < 12; ++i)
+                 wheel(window, middle, {2, -30}, {16, -240});
+         },
+         [&viewer, start] { return viewer.index() == *start + 2; }},
+        {"right-click in the viewer opens the menu", [=] { click(window, middle, Qt::RightButton); },
+         [=] { return menu()->property("opened").toBool(); }},
+        {"the menu closes again", [=] { QMetaObject::invokeMethod(menu(), "close"); },
+         [=] { return !menu()->property("visible").toBool(); }},
+        {"the mouse's back button goes back to the library", [=] { click(window, middle, Qt::BackButton); },
+         [&viewer] { return !viewer.isOpen(); }},
+        {"double-click opens again", [=] { doubleClick(window, grid->rectOf(*start).center()); },
+         [&viewer] { return viewer.isOpen(); }},
+        {"double-click in the viewer goes back", [=] { doubleClick(window, middle); },
+         [&viewer] { return !viewer.isOpen(); }},
+    });
+    auto failures = std::make_shared<int>(0);
+    auto run = std::make_shared<std::function<void(int)>>();
+    *run = [=](int k) {
+        if (k >= steps->size()) {
+            std::printf("selftest: done, %d failed\n", *failures);
+            std::fflush(stdout);
+            QCoreApplication::exit(*failures ? 1 : 0);
+            return;
+        }
+        (*steps)[k].act();
+        // Long enough for the viewer's animations and the swipe's pause.
+        QTimer::singleShot(600, window, [=] {
+            const bool ok = (*steps)[k].check();
+            *failures += ok ? 0 : 1;
+            // PINHOLE_SELFTEST_DIR: the window after each step, to look at.
+            if (const QString dir = qEnvironmentVariable("PINHOLE_SELFTEST_DIR"); !dir.isEmpty())
+                window->grabWindow().save(QStringLiteral("%1/mouse-%2.png").arg(dir).arg(k + 1, 2, 10, QLatin1Char('0')));
+            std::printf("selftest: %-4s %s\n", ok ? "ok" : "FAIL", (*steps)[k].what);
+            std::fflush(stdout);
+            (*run)(k + 1);
+        });
+    };
+    QTimer::singleShot(1200, window, [run] { (*run)(0); });
 }

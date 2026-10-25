@@ -273,6 +273,17 @@ void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     m_pressIndex = indexAt(event->position().x(), event->position().y());
     m_dragged = false;
     event->accept();
+    if (event->button() == Qt::RightButton) {
+        const int index = m_pressIndex;
+        m_pressIndex = -1;
+        if (index >= 0 && !m_selected.contains(index)) {
+            m_selected = {index};
+            m_selectionAnchor = index;
+            emit selectionChanged();
+            update();
+        }
+        emit menuRequested(index, event->position());
+    }
 }
 
 void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {

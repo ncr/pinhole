@@ -17,3 +17,9 @@ class PhotoGrid;
 // PINHOLE_SELFTEST=reload: open a photo and select two, wait for the service
 // to announce a change, and check that all three followed their photos.
 void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer);
+
+class QQuickWindow;
+// PINHOLE_SELFTEST=mouse: drive the window with a mouse and a touchpad as a
+// person would (right-click, open, the sides, the wheel, a sideways swipe,
+// the back button, double-click) and report whether each did its job.
+void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer);

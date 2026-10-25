@@ -9,6 +9,8 @@ Item {
     id: root
 
     required property var grid
+    // Right-click: the window's photo menu.
+    signal menuRequested(real x, real y)
     readonly property bool shown: viewer.open || progress > 0
 
     visible: shown
@@ -139,6 +141,90 @@ Item {
         }
     }
 
+    // The mouse. The sides step to the previous and next photo; elsewhere a
+    // click plays or pauses a video and a double-click goes back to the
+    // library, as does the mouse's back button. The wheel steps through
+    // photos, and so does a sideways swipe with two fingers; scrolling up
+    // and down with them does nothing here.
+    MouseArea {
+        id: pointer
+        anchors.fill: parent
+        enabled: viewer.open
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.BackButton
+        readonly property real side: Math.min(160, width * 0.15)
+        function sideAt(x) { return x < side ? -1 : x > width - side ? 1 : 0 }
+        readonly property int hoveredSide: containsMouse ? sideAt(mouseX) : 0
+
+        onPressed: mouse => {
+            if (mouse.button === Qt.BackButton)
+                root.closeViewer()
+            else if (mouse.button === Qt.RightButton)
+                root.menuRequested(mouse.x, mouse.y)
+        }
+        onClicked: mouse => {
+            if (mouse.button !== Qt.LeftButton)
+                return
+            const s = sideAt(mouse.x)
+            if (s !== 0)
+                viewer.step(s)
+            else
+                root.togglePlay()
+        }
+        onDoubleClicked: mouse => {
+            const s = sideAt(mouse.x)
+            if (s !== 0)
+                viewer.step(s)
+            else
+                root.closeViewer()
+        }
+
+        property real swipe: 0
+        Timer { id: swiped; interval: 350 }
+        onWheel: wheel => {
+            if (wheel.pixelDelta.x === 0 && wheel.pixelDelta.y === 0) {
+                // A mouse wheel: a notch is a photo.
+                const notch = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                if (notch !== 0 && !swiped.running) {
+                    viewer.step(notch < 0 ? 1 : -1)
+                    swiped.restart()
+                }
+                return
+            }
+            if (Math.abs(wheel.pixelDelta.x) <= Math.abs(wheel.pixelDelta.y))
+                return
+            if (swiped.running) {
+                swipe = 0
+                swiped.restart() // the rest of the same swipe
+                return
+            }
+            swipe += wheel.pixelDelta.x
+            if (Math.abs(swipe) > 120) {
+                viewer.step(swipe < 0 ? 1 : -1)
+                swipe = 0
+                swiped.restart()
+            }
+        }
+    }
+
+    // The sides, while the pointer is over one.
+    Repeater {
+        model: [-1, 1]
+        delegate: Text {
+            required property int modelData
+            anchors.verticalCenter: parent.verticalCenter
+            x: modelData < 0 ? 24 : root.width - width - 24
+            text: modelData < 0 ? "‹" : "›"
+            color: "white"
+            font.pixelSize: 56
+            style: Text.Outline
+            styleColor: "#80000000"
+            readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < root.grid.count - 1
+            opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
+    }
+
     // What is shown, and what is still on its way.
     Column {
         anchors.left: parent.left
@@ -177,10 +263,27 @@ Item {
         }
         Text {
             visible: viewer.live
+            anchors.verticalCenter: parent.verticalCenter
             text: qsTr("LIVE  (L)")
             color: "white"
             font.pixelSize: 12
             font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: viewer.playLive()
+            }
+        }
+        // Back to the library.
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "✕"
+            color: closeHover.hovered ? theme.accent : "white"
+            font.pixelSize: 18
+            style: Text.Outline
+            styleColor: "#80000000"
+            HoverHandler { id: closeHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: root.closeViewer() }
         }
     }
 

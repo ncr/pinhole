@@ -37,7 +37,10 @@ QString Viewer::title() const {
     if (m_index < 0 || m_index >= m_library->count())
         return {};
     const QDateTime when = QDateTime::fromMSecsSinceEpoch(m_library->at(m_index).date);
-    return QLocale().toString(when, QLocale::LongFormat);
+    // "Saturday, 24 October 2026  16:16", in the locale's own words.
+    const QLocale locale;
+    return locale.toString(when.date(), QLocale::LongFormat) + QStringLiteral("  ") +
+           locale.toString(when.time(), QLocale::ShortFormat);
 }
 
 void Viewer::setMessage(const QString &message) {
