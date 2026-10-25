@@ -183,6 +183,47 @@ ApplicationWindow {
         }
     }
 
+    // When iCloud cannot be reached: what still works, and what to do. The
+    // photos on this computer always show.
+    Rectangle {
+        id: healthNotice
+        readonly property string text: {
+            switch (serviceHealth) {
+            case "needs_sign_in": return qsTr("Not signed in to iCloud. To sign in again, run pinhole-sync sign-in in a terminal.")
+            case "offline": return qsTr("Offline. Showing what is on this computer.")
+            case "failing": return qsTr("iCloud is not answering properly. Trying again every minute.")
+            case "no_service": return qsTr("The Pinhole service is not running, so full-size photos and videos will not load.")
+            default: return ""
+            }
+        }
+        visible: text !== "" && grid.count > 0
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        width: Math.min(parent.width - 32, healthText.implicitWidth + 40)
+        height: healthText.implicitHeight + 14
+        radius: Math.min(6, theme.radius)
+        color: "#e0202024"
+        Rectangle {
+            x: 12
+            anchors.verticalCenter: parent.verticalCenter
+            width: 8
+            height: 8
+            radius: 4
+            color: serviceHealth === "offline" ? "#9a9a9a" : "#e5a33d"
+        }
+        Text {
+            id: healthText
+            x: 28
+            width: parent.width - 40
+            anchors.verticalCenter: parent.verticalCenter
+            text: healthNotice.text
+            color: "white"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+        }
+    }
+
     HelpOverlay { id: help; objectName: "help" }
 
     readonly property bool inGrid: !photoViewer.shown && !help.shown

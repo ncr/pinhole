@@ -169,9 +169,14 @@ int main(int argc, char *argv[]) {
         viewer.libraryReloaded(moved);
         std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d)\n", library.count(), before);
     };
-    QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &) {
+    // How iCloud is doing, as the service sees it: fine, needs_sign_in,
+    // offline, failing, or no_service when there is no service to ask.
+    engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
+    QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed"))
             reloadLibrary();
+        else if (name == QLatin1String("health"))
+            engine.rootContext()->setContextProperty("serviceHealth", details.value("state").toString());
     });
     // New photos since the window last looked: ask now rather than within
     // the minute.
@@ -195,7 +200,9 @@ int main(int argc, char *argv[]) {
     // its layout (and each language's) without a screen.
     // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("shot:"))) {
-        QTimer::singleShot(1200, window, [window, test] {
+        // PINHOLE_SELFTEST_DELAY: how long to wait first, in ms.
+        const int delay = qEnvironmentVariableIsSet("PINHOLE_SELFTEST_DELAY") ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_DELAY") : 1200;
+        QTimer::singleShot(delay, window, [window, test] {
             window->grabWindow().save(test.mid(5));
             QCoreApplication::quit();
         });

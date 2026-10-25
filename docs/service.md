@@ -27,7 +27,7 @@ order, since a cached file answers at once while a download takes a while.
 | Method | Params | Result |
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
-| `status` | | `library`, `cache`, `cache_bytes`, `in_flight` |
+| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health` |
 | `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
 | `ping` | | `{}` |
 
@@ -52,6 +52,18 @@ window:
 The library index changed in a way a window draws (new, deleted, hidden,
 favourited, edited or re-dated photos); the thumbnails of new photos are
 already on disk. A window reads the index again.
+
+```json
+{"event": "health", "state": "offline"}
+```
+
+How the last exchange with iCloud went, sent when it changes and to a
+window as it connects (unless all is fine): `fine`, `needs_sign_in` (no
+session, or Apple rejected it; `pinhole-sync sign-in` fixes it), `offline`
+(the network or Apple's sign-in service is out of reach) or `failing`
+(iCloud answers with errors). A sync round, a lookup or a download that
+works sets it back. The window shows anything but `fine` in a corner, and
+`no_service` of its own when no service answers at all.
 
 ## Staying in sync
 

@@ -12,6 +12,8 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
     connect(&m_socket, &QLocalSocket::readyRead, this, &ServiceClient::readReplies);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
         m_attempts = 0;
+        // Fine until the service says otherwise, which it does at once.
+        emit announced(QStringLiteral("health"), QJsonObject{{"state", "fine"}});
         for (const QByteArray &line : std::as_const(m_unsent))
             m_socket.write(line);
         m_unsent.clear();
@@ -25,6 +27,8 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
         }
         if (m_attempts++ < 40)
             m_retry.start();
+        else
+            emit announced(QStringLiteral("health"), QJsonObject{{"state", "no_service"}});
     });
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         // The service went away: whatever was asked will not be answered.

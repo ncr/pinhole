@@ -89,9 +89,81 @@ struct Shared {
     streams: Arc<Streams>,
     /// The play URL of each video downloading now, by its cache path.
     playable: Mutex<HashMap<PathBuf, String>>,
+    /// Whether iCloud can be reached and the session is good.
+    health: Mutex<Health>,
+}
+
+/// What a window should tell the person about iCloud.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Health {
+    Fine,
+    /// No session, or Apple rejected it: `pinhole-sync sign-in`.
+    NeedsSignIn,
+    /// The network is down.
+    Offline,
+    /// iCloud answers, but with errors.
+    Failing,
+}
+
+impl Health {
+    fn name(self) -> &'static str {
+        match self {
+            Health::Fine => "fine",
+            Health::NeedsSignIn => "needs_sign_in",
+            Health::Offline => "offline",
+            Health::Failing => "failing",
+        }
+    }
+
+    /// What an error from the sign-in provider or iCloud says about the
+    /// connection.
+    fn of(error: &anyhow::Error) -> Health {
+        if let Some(p) = error.downcast_ref::<ProviderError>() {
+            return match p.code.as_str() {
+                "needs_sign_in" | "needs_code" | "wrong_code" => Health::NeedsSignIn,
+                _ => Health::Offline,
+            };
+        }
+        for cause in error.chain() {
+            if let Some(e) = cause.downcast_ref::<reqwest::Error>() {
+                if e.is_connect() || e.is_timeout() {
+                    return Health::Offline;
+                }
+            }
+        }
+        let text = format!("{error:#}");
+        if text.contains("answered 401") || text.contains("answered 421") || text.contains("answered 403") {
+            return Health::NeedsSignIn;
+        }
+        Health::Failing
+    }
+
+    fn event(self) -> Value {
+        json!({"event": "health", "state": self.name()})
+    }
 }
 
 impl Shared {
+    /// Note how the last exchange with iCloud went; windows hear of changes.
+    fn set_health(&self, health: Health) {
+        let mut current = self.health.lock().unwrap();
+        if *current == health {
+            return;
+        }
+        eprintln!("pinholed: iCloud: {}", health.name());
+        *current = health;
+        drop(current);
+        self.broadcast(health.event());
+    }
+
+    /// A download worked: the network is back, though that says nothing
+    /// about the session.
+    fn reached(&self) {
+        if matches!(*self.health.lock().unwrap(), Health::Offline | Health::Failing) {
+            self.set_health(Health::Fine);
+        }
+    }
+
     /// Send an event line to every window; ones that have gone are dropped.
     fn broadcast(&self, event: Value) {
         let line = format!("{event}\n");
@@ -183,6 +255,7 @@ pub fn run(config: Config) -> Result<()> {
         sync_now: Mutex::new(sync_tx),
         streams: Streams::start()?,
         playable: Mutex::new(HashMap::new()),
+        health: Mutex::new(Health::Fine),
     });
 
     {
@@ -235,6 +308,11 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
     shared.listeners.lock().unwrap().push(out.clone());
+    // A window that connects while something is wrong hears so at once.
+    let health = *shared.health.lock().unwrap();
+    if health != Health::Fine {
+        let _ = writeln!(out.lock().unwrap(), "{}", health.event());
+    }
     // Opened when first needed: before pinhole-sync has built the library
     // there is none, and the connection must stay up regardless.
     let mut db: Option<Connection> = None;
@@ -263,6 +341,7 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 "cache": shared.config.cache,
                 "cache_bytes": cache_size(&shared.config.cache),
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
+                "health": shared.health.lock().unwrap().name(),
             }))),
             Some("fetch") => {
                 if db.is_none() {
@@ -369,7 +448,8 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
             Some(c)
         }
         Err(e) => {
-            eprintln!("pinholed: not signed in yet: {e:#}");
+            eprintln!("pinholed: no session yet: {e:#}");
+            shared.set_health(Health::of(&e));
             None
         }
     };
@@ -393,7 +473,9 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                     client = Some(c);
                 }
                 Err(e) => {
-                    let code = if e.downcast_ref::<ProviderError>().is_some() { "needs_sign_in" } else { "unavailable" };
+                    let health = Health::of(&e);
+                    shared.set_health(health);
+                    let code = if health == Health::NeedsSignIn { "needs_sign_in" } else { "unavailable" };
                     for job in batch {
                         shared.finish(&job.path, Err((code, format!("{e:#}"))));
                     }
@@ -401,7 +483,6 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                 }
             }
         }
-        let client = client.as_mut().expect("client");
 
         let (ready, stale): (Vec<Job>, Vec<Job>) = batch.into_iter().partition(|j| j.url.is_some());
         for job in ready {
@@ -411,9 +492,18 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
             continue;
         }
         let names: Vec<&str> = stale.iter().flat_map(|j| [j.asset.as_str(), j.master.as_str()]).collect();
-        let records = match client.lookup(&names) {
-            Ok(r) => r["records"].as_array().cloned().unwrap_or_default(),
+        let records = match client.as_mut().expect("client").lookup(&names) {
+            Ok(r) => {
+                shared.set_health(Health::Fine);
+                r["records"].as_array().cloned().unwrap_or_default()
+            }
             Err(e) => {
+                let health = Health::of(&e);
+                shared.set_health(health);
+                // A rejected session is asked for again next time.
+                if health == Health::NeedsSignIn {
+                    client = None;
+                }
                 for job in stale {
                     shared.finish(&job.path, Err(("unavailable", format!("looking up links: {e:#}"))));
                 }
@@ -467,7 +557,10 @@ fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
             continue;
         };
         match download(&shared, &downloader, &job) {
-            Ok(()) => shared.finish(&job.path, Ok(())),
+            Ok(()) => {
+                shared.reached();
+                shared.finish(&job.path, Ok(()))
+            }
             // An expired link: look it up again, once.
             Err(Fetch::Expired) if !job.retried => {
                 let mut again = job.clone();
@@ -592,12 +685,24 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         if client.is_none() {
             match ProcessProvider::spawn(shared.config.auth.clone(), None).and_then(|p| PhotosClient::new(Box::new(p))) {
                 Ok(c) => client = Some(c),
-                Err(e) => eprintln!("pinholed: sync: not signed in: {e:#}"),
+                Err(e) => {
+                    eprintln!("pinholed: sync: no session: {e:#}");
+                    shared.set_health(Health::of(&e));
+                }
             }
         }
         if let Some(c) = client.as_mut() {
-            if let Err(e) = sync_round(&shared, c) {
-                eprintln!("pinholed: sync: {e:#}");
+            match sync_round(&shared, c) {
+                Ok(()) => shared.set_health(Health::Fine),
+                Err(e) => {
+                    eprintln!("pinholed: sync: {e:#}");
+                    let health = Health::of(&e);
+                    shared.set_health(health);
+                    // A rejected session is asked for again next round.
+                    if health == Health::NeedsSignIn {
+                        client = None;
+                    }
+                }
             }
         }
         // Until the next round, or a window asking for one now.

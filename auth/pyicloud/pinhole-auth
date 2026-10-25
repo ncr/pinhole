@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10,<3.14"
-# dependencies = ["icloudpd @ git+https://github.com/icloud-photos-downloader/icloud_photos_downloader@v1.32.3"]
+# dependencies = ["icloudpd @ git+https://github.com/icloud-photos-downloader/icloud_photos_downloader@879c561240d993d748ddb4546f935090502b16d3"]  # v1.32.3: a commit, so uv needs no network once it has it
 # ///
 """Pinhole's sign-in provider, built on the pyicloud module inside icloudpd.
 
