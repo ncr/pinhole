@@ -259,7 +259,10 @@ int main(int argc, char *argv[]) {
     // scrubber held halfway down, as an image.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("scrubber:"))) {
         QTimer::singleShot(1200, window, [window, grid, test] {
-            grid->setColumnsNow(29);
+            // PINHOLE_SELFTEST_COLUMNS: another level (23 shows the month too).
+            grid->setColumnsNow(qEnvironmentVariableIsSet("PINHOLE_SELFTEST_COLUMNS")
+                                    ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_COLUMNS")
+                                    : 29);
             const QPointF at(window->width() - 30.0, window->height() / 2.0);
             QTimer::singleShot(400, window, [window, at] {
                 QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton,

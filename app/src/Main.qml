@@ -85,9 +85,35 @@ ApplicationWindow {
 
     // Only zoomed all the way out (the two last levels), where a year is a
     // swipe or two away; closer in, scrolling is the way.
+    readonly property bool zoomedOut: win.inGrid && grid.columns >= 23 && grid.count > 0
     DateScrubber {
         grid: grid
-        visible: win.inGrid && grid.columns >= 23
+        visible: win.zoomedOut
+    }
+
+    // There too, as in Photos: which month the top of the view is in (only
+    // the year, all the way out), staying put while the grid scrolls under.
+    Rectangle {
+        id: dateBadge
+        objectName: "dateBadge"
+        visible: win.zoomedOut
+        x: 16
+        y: 16
+        width: badgeText.implicitWidth + 26
+        height: badgeText.implicitHeight + 12
+        radius: height / 2
+        color: "#d0101012"
+        Text {
+            id: badgeText
+            anchors.centerIn: parent
+            text: {
+                const when = new Date(grid.dateAt(grid.scrollFraction))
+                return Qt.locale().toString(when, grid.columns >= 29 ? "yyyy" : "MMMM yyyy")
+            }
+            color: "white"
+            font.pixelSize: 15
+            font.weight: Font.DemiBold
+        }
     }
 
     PhotoViewer {

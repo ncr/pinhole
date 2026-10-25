@@ -81,24 +81,37 @@ Item {
         }
     }
 
-    // Where the view is now.
-    Rectangle {
-        id: thumb
-        anchors.right: band.left
-        anchors.rightMargin: 4
-        width: 5
-        height: 36
-        radius: 2.5
-        color: theme.accent
-        y: root.trackTop + root.grid.scrollFraction * root.trackHeight - height / 2
+    // Where the view is now: a line across the band with a knob at its
+    // edge, the thing to grab.
+    Item {
+        id: pointer
+        anchors.left: band.left
+        anchors.right: band.right
+        y: root.trackTop + root.grid.scrollFraction * root.trackHeight
+        Rectangle {
+            anchors.verticalCenter: parent.top
+            width: parent.width
+            height: 2
+            color: theme.accent
+        }
+        Rectangle {
+            anchors.verticalCenter: parent.top
+            x: -width / 2
+            width: 16
+            height: 16
+            radius: 8
+            color: theme.accent
+            border.color: "white"
+            border.width: 2
+        }
     }
 
-    // The month and year at the thumb, while dragging.
+    // The month and year at the pointer, while dragging.
     Rectangle {
         visible: drag.pressed
-        anchors.right: thumb.left
-        anchors.rightMargin: 10
-        y: thumb.y + thumb.height / 2 - height / 2
+        anchors.right: band.left
+        anchors.rightMargin: 16
+        y: pointer.y - height / 2
         width: dateLabel.implicitWidth + 24
         height: dateLabel.implicitHeight + 12
         radius: height / 2
