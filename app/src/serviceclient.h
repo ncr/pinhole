@@ -28,6 +28,9 @@ public:
     // Any other method of docs/service.md, such as storage and set_storage.
     void call(const QString &method, const QJsonObject &params, Callback done);
 
+    // The library moved: a service this client starts from now on serves it there.
+    void setLibrary(const QString &library) { m_library = library; }
+
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
     // Ask the service to look for changes in iCloud now.
     void sync();

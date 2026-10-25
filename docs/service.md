@@ -18,7 +18,7 @@ order, since a cached file answers at once while a download takes a while.
 
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}
-{"id": 7, "ok": true, "result": {"path": "/home/me/.cache/pinhole/medium/3f/AWx...jpg", "type": "public.jpeg", "rendition": "JPEGMed", "cached": false}}
+{"id": 7, "ok": true, "result": {"path": "/home/me/.local/share/pinhole/cache/medium/3f/AWx...jpg", "type": "public.jpeg", "rendition": "JPEGMed", "cached": false}}
 {"id": 8, "ok": false, "error": {"code": "unavailable", "message": "..."}}
 ```
 
@@ -29,8 +29,8 @@ order, since a cached file answers at once while a download takes a while.
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health` |
 | `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
-| `storage` | | the cache: `cache` (its folder), `cap_bytes`, `min_cap_bytes`, `used_bytes`, `kinds` (bytes of each kind), `library`, `library_bytes`, `freeing`, `moving` (`from`, `done_bytes`, `total_bytes`, or null) |
-| `set_storage` | `cap_bytes` and/or `cache` (an absolute folder) | as `storage`, after the change (see Cache) |
+| `storage` | | where and how much: `location` (the one folder), `library`, `cache`, `limit_bytes`, `min_limit_bytes`, `default_limit_bytes`, `limit_set`, `used_bytes` (all of it), `kinds` (bytes of `library` and of each kind of photo), `freeing`, `moving` (`done_bytes`, `total_bytes`, or null) |
+| `set_storage` | `limit_bytes` and/or `location` (an absolute folder) | as `storage`, after the change (see Storage) |
 | `ping` | | `{}` |
 
 `kind` picks the rendition, the first one the asset has:
@@ -100,24 +100,39 @@ A cached file is answered with `path` alone.
 | `unavailable` | iCloud or the network failed; trying again later may work |
 | `bad_request` | unknown method or missing params |
 
-## Cache
+## Storage
 
-Files land in `~/.cache/pinhole/<kind>/`, named by iCloud's checksum of the
-file, so a re-edited photo gets a new name and duplicates share one. A hit
-refreshes the file's modification time; past the size limit (10 GB by
-default) the least recently used files go, every two minutes, down to nine
-tenths of it.
+Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
+the window chose another: the library in `library/` (`library.sqlite` and
+`thumbs/`, built by `pinhole-sync` and kept by the service) and the photos
+fetched from iCloud in `cache/<kind>/`, named by iCloud's checksum of the
+file, so a re-edited photo gets a new name and duplicates share one.
+
+One limit covers the whole folder. The library always stays, so the limit
+is never under the library and 1 GB for photos; unless set it is the
+library and 10 GB, and at least 20 GB. A hit refreshes a photo's
+modification time; past what the limit leaves for photos, the least
+recently used go, every two minutes, down to nine tenths of it.
 
 The window's settings panel changes the folder and the limit with
 `set_storage`; the service keeps them in `~/.config/pinhole/settings.json`
-(`cache`, `cache_bytes`) and reads them as it starts. `--cache` and
-`PINHOLE_CACHE_GB` override them. A limit is at least 1 GB. A lower one
-than the cache holds frees space at once, down to the limit itself. A new
-folder takes new files at once while the cached ones move over in the
-background (renamed on one disk, copied across two, keeping when each was
-last used); until a file has moved it is served from the old folder. The
-old folders go once empty. A folder inside the cache's, or the other way
-round, is refused, as is one that cannot be written.
+(`location`, `limit_bytes`) and reads them as it starts, as `pinhole-sync`
+does to find the library. `--library` and `--cache` override them. A lower
+limit than is kept frees space at once, down to the limit itself. A new
+folder takes new photos at once and everything moves over in the
+background: first the library, with syncing paused, renamed on one disk or
+copied across two, after which every window is told
+
+```json
+{"event": "library_moved", "library": "/new/folder/library"}
+```
+
+and reads it from there (the old copy goes 30 seconds later); then the
+photos, each served from the old folder until it has moved, keeping when it
+was last used. The old folders go once empty. A folder inside the current
+one, or the other way round, is refused, as is one that cannot be written
+or already has a library. Photos in `~/.cache/pinhole`, where the cache
+was before it moved in with the library, move in as the service starts.
 
 ## Links
 

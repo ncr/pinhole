@@ -7,23 +7,27 @@
 class ServiceClient;
 class PortalFolderPicker;
 
-// Where the service keeps the photos it fetches, and how much: the
-// settings panel's side of the service's storage and set_storage
-// (docs/service.md), with the free space on that disk.
+// Where Pinhole keeps everything (the library and the photos fetched from
+// iCloud, in one folder) and how much room it may take: the settings
+// panel's side of the service's storage and set_storage (docs/service.md),
+// with the free space on that disk.
 class Storage : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool loaded READ loaded NOTIFY changed)
-    // The cache's folder, with ~ for the home folder.
+    // The folder, with ~ for the home folder.
     Q_PROPERTY(QString location READ location NOTIFY changed)
+    // The limit for all of it; the least it can be (the library always
+    // fits); the one it is unless set.
     Q_PROPERTY(double limit READ limit NOTIFY changed)
     Q_PROPERTY(double minLimit READ minLimit NOTIFY changed)
+    Q_PROPERTY(double defaultLimit READ defaultLimit NOTIFY changed)
+    Q_PROPERTY(bool limitSet READ limitSet NOTIFY changed)
     Q_PROPERTY(double used READ used NOTIFY changed)
-    // Bytes of each kind of file: medium, full, original, video, live.
+    // Bytes of each part: library (the index and thumbnails), and of the
+    // photos medium, full, original, video, live.
     Q_PROPERTY(QVariantMap kinds READ kinds NOTIFY changed)
-    // Free on the disk the cache is on.
+    // Free on the disk the folder is on.
     Q_PROPERTY(double free READ free NOTIFY changed)
-    Q_PROPERTY(QString library READ library NOTIFY changed)
-    Q_PROPERTY(double libraryBytes READ libraryBytes NOTIFY changed)
     Q_PROPERTY(bool freeing READ freeing NOTIFY changed)
     Q_PROPERTY(bool moving READ moving NOTIFY changed)
     Q_PROPERTY(double moved READ moved NOTIFY changed)
@@ -39,15 +43,19 @@ class Storage : public QObject {
 public:
     explicit Storage(ServiceClient *service, QObject *parent = nullptr);
 
+    // The folder Pinhole keeps everything in, as the service's settings say
+    // (~/.config/pinhole/settings.json), else ~/.local/share/pinhole.
+    static QString folder();
+
     bool loaded() const { return m_loaded; }
     QString location() const;
     double limit() const { return m_limit; }
     double minLimit() const { return m_minLimit; }
+    double defaultLimit() const { return m_defaultLimit; }
+    bool limitSet() const { return m_limitSet; }
     double used() const { return m_used; }
     QVariantMap kinds() const { return m_kinds; }
     double free() const { return m_free; }
-    QString library() const;
-    double libraryBytes() const { return m_libraryBytes; }
     bool freeing() const { return m_freeing; }
     bool moving() const { return m_moving; }
     double moved() const { return m_moved; }
@@ -61,7 +69,7 @@ public:
     // A new limit, in bytes. Below what is kept, the files viewed longest
     // ago go now (the panel asks first).
     Q_INVOKABLE void setLimit(double bytes);
-    // The desktop's folder picker, then the files moved to the folder chosen.
+    // The desktop's folder picker, then everything moved to the folder chosen.
     Q_INVOKABLE void chooseLocation();
     // Stops the service; the window starts the new one at once.
     Q_INVOKABLE void restartService();
@@ -83,8 +91,9 @@ private:
     // after the service answers.
     qint64 m_followUntil = 0;
     bool m_loaded = false;
-    QString m_location, m_library, m_error;
-    double m_limit = 0, m_minLimit = 0, m_used = 0, m_free = 0, m_libraryBytes = 0, m_moved = 0, m_moveTotal = 0;
+    QString m_location, m_error;
+    double m_limit = 0, m_minLimit = 0, m_defaultLimit = 0, m_used = 0, m_free = 0, m_moved = 0, m_moveTotal = 0;
+    bool m_limitSet = false;
     QVariantMap m_kinds;
     bool m_freeing = false, m_moving = false, m_watching = false, m_outdated = false;
 };

@@ -35,18 +35,24 @@ fn env_dir(var: &str, fallback: &str) -> PathBuf {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    // The cache's folder and limit: as given, else as the window last set
-    // them (the settings), else ~/.cache/pinhole and 10 GB.
+    // Everything in one folder (storage.rs): as the window last set it in
+    // the settings, else ~/.local/share/pinhole; the library and the cache
+    // in it unless given.
     let settings = storage::settings_path();
-    let (saved_cache, saved_cap) = storage::read_settings(&settings);
-    let cap = std::env::var("PINHOLE_CACHE_GB").ok().and_then(|v| v.parse::<u64>().ok()).map(|gb| gb << 30);
+    let saved = storage::read_settings(&settings);
+    let location = saved.location.unwrap_or_else(storage::default_location);
+    let cache_given = cli.cache.is_some();
     service::run(Config {
-        library: cli.library.unwrap_or_else(|| env_dir("XDG_DATA_HOME", ".local/share").join("pinhole/library")),
-        cache: cli.cache.or(saved_cache).unwrap_or_else(|| env_dir("XDG_CACHE_HOME", ".cache").join("pinhole")),
+        library: cli.library.unwrap_or_else(|| location.join("library")),
+        cache: cli.cache.unwrap_or_else(|| location.join("cache")),
+        location,
         socket: cli.socket.unwrap_or_else(|| env_dir("XDG_RUNTIME_DIR", ".cache").join("pinhole.sock")),
         auth: cli.auth.unwrap_or_else(pinhole_core::auth::default_provider),
-        cache_cap: cap.or(saved_cap).unwrap_or(storage::DEFAULT_CAP),
+        limit: saved.limit,
         settings,
+        // Photos still where the cache was before it moved in with the
+        // library come over.
+        adopt: (!cache_given).then(storage::old_cache),
         downloads: cli.downloads,
         sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60),
     })

@@ -1,9 +1,10 @@
 import QtQuick
 
-// Pinhole's settings, on the gear button or ",": where the photos it
-// fetches from iCloud are kept, how much room they take, and how much they
-// may. As an Omarchy panel: a scrim, a card with a hairline, keys beside
-// what they press.
+// Pinhole's settings, on the gear button or ",": the one folder it keeps
+// everything in (the library, and the photos fetched from iCloud), how much
+// room that takes and how much it may; the library always fits. As an
+// Omarchy panel: a scrim, a card with a hairline, keys beside what they
+// press.
 Item {
     id: root
     anchors.fill: parent
@@ -25,15 +26,17 @@ Item {
     readonly property bool confirming: pending >= 0 && pending < storage.used
     readonly property double removing: Math.max(0, storage.used - chosen)
 
-    // The limits to step through: round sizes from the smallest the
-    // service allows to what this disk could hold, and the one set now.
+    // The limits to step through: the least (the library and a little room
+    // for photos), round sizes up to what this disk could hold, the default
+    // and the one set now.
     readonly property var steps: {
         const gb = 1024 * 1024 * 1024
         const most = Math.max(storage.limit, storage.used + storage.free)
-        const list = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
-            .map(n => n * gb).filter(b => b >= storage.minLimit && b <= most)
-        if (storage.limit > 0 && list.indexOf(storage.limit) < 0)
-            list.push(storage.limit)
+        const list = [5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+            .map(n => n * gb).filter(b => b > storage.minLimit && b <= most)
+        for (const b of [storage.minLimit, storage.defaultLimit, storage.limit])
+            if (b > 0 && list.indexOf(b) < 0)
+                list.push(b)
         return list.sort((a, b) => a - b)
     }
     function step(direction) {
@@ -59,6 +62,7 @@ Item {
     Timer { id: settle; interval: 600; onTriggered: if (!root.confirming) root.confirm() }
 
     readonly property var kindNames: ({
+        "library": qsTr("Index and thumbnails"),
         "full": qsTr("Full size"),
         "medium": qsTr("Previews"),
         "video": qsTr("Videos"),
@@ -134,7 +138,7 @@ Item {
                     width: parent.width
                     spacing: 4
                     UiText {
-                        text: qsTr("Photos from iCloud are kept in")
+                        text: qsTr("Pinhole keeps its library and photos in")
                         color: theme.darkForeground
                     }
                     Item {
@@ -201,7 +205,7 @@ Item {
                         color: theme.darkForeground
                         text: {
                             const parts = []
-                            for (const kind of ["full", "medium", "video", "original", "live"]) {
+                            for (const kind of ["library", "full", "medium", "video", "original", "live"]) {
                                 const bytes = storage.kinds[kind] || 0
                                 if (bytes > 0)
                                     // Kept on one line each.
@@ -295,7 +299,7 @@ Item {
                     UiText {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("Moving the photos to the new folder: %1 of %2")
+                        text: qsTr("Moving everything to the new folder: %1 of %2")
                               .arg(storage.size(storage.moved)).arg(storage.size(storage.moveTotal))
                     }
                     Item {
@@ -329,14 +333,14 @@ Item {
                     onTapped: storage.restartService()
                 }
 
-                // The library itself: not in the limit, and not moved.
+                // What the limit can and cannot do.
                 UiText {
                     visible: storage.loaded
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: theme.darkForeground
-                    text: qsTr("The library's index and thumbnails take %1 more, in %2.")
-                          .arg(storage.size(storage.libraryBytes)).arg(storage.library)
+                    text: qsTr("The index and thumbnails always stay, so the limit is never under %1. Unless you choose one, it is %2.")
+                          .arg(storage.size(storage.minLimit)).arg(storage.size(storage.defaultLimit))
                 }
             }
         }

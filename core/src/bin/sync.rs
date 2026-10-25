@@ -58,9 +58,8 @@ enum Cmd {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let library = cli.library.unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share/pinhole/library")
-    });
+    // In the folder the window keeps everything in (storage.rs).
+    let library = cli.library.unwrap_or_else(|| pinhole_core::storage::location().join("library"));
     let auth = cli.auth.unwrap_or_else(pinhole_core::auth::default_provider);
     if let Cmd::SignIn { from_icloudpd } = &cli.command {
         return sign_in(auth, from_icloudpd.as_deref());

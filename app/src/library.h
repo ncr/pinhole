@@ -29,7 +29,10 @@ public:
     QString dir() const { return m_dir; }
     // Take another library's items (a fresh read of the same index). Only
     // while nothing else reads this one: see ThumbnailLoader::reload.
-    void swap(Library &other) { m_items.swap(other.m_items); }
+    void swap(Library &other) {
+        m_items.swap(other.m_items);
+        m_dir.swap(other.m_dir);
+    }
 
 private:
     QString m_dir;

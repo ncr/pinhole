@@ -5,7 +5,10 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QStandardPaths>
 #include <QJsonObject>
 #include <QLocale>
 #include <QProcess>
@@ -30,13 +33,22 @@ QStorageInfo diskOf(QString path) {
 
 } // namespace
 
+QString Storage::folder() {
+    QFile settings(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/settings.json");
+    if (settings.open(QIODevice::ReadOnly)) {
+        if (const QString location = QJsonDocument::fromJson(settings.readAll()).object().value("location").toString();
+            !location.isEmpty())
+            return location;
+    }
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/pinhole";
+}
+
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {
     m_poll.setInterval(1000);
     connect(&m_poll, &QTimer::timeout, this, &Storage::refresh);
 }
 
 QString Storage::location() const { return withTilde(m_location); }
-QString Storage::library() const { return withTilde(m_library); }
 
 void Storage::setWatching(bool watching) {
     if (watching == m_watching)
@@ -62,7 +74,7 @@ void Storage::refresh() {
 
 void Storage::setLimit(double bytes) {
     m_error.clear();
-    m_service->call(QStringLiteral("set_storage"), {{"cap_bytes", qint64(bytes)}},
+    m_service->call(QStringLiteral("set_storage"), {{"limit_bytes", qint64(bytes)}},
                     [this](bool ok, const QJsonObject &result, const QString &code) {
                         if (ok)
                             take(result);
@@ -91,7 +103,7 @@ void Storage::moveTo(const QString &chosen) {
     if (!dir.isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden) &&
         QFileInfo(folder).fileName().compare(QStringLiteral("pinhole"), Qt::CaseInsensitive) != 0)
         folder += QStringLiteral("/pinhole");
-    // On another disk the files are copied: there must be room for them.
+    // On another disk everything is copied: there must be room for it.
     const QStorageInfo there = diskOf(folder);
     if (there.device() != diskOf(m_location).device() && double(there.bytesAvailable()) < m_used) {
         m_error = tr("Not enough room there: %1 needed, %2 free.").arg(size(m_used), size(double(there.bytesAvailable())));
@@ -99,7 +111,7 @@ void Storage::moveTo(const QString &chosen) {
         return;
     }
     m_error.clear();
-    m_service->call(QStringLiteral("set_storage"), {{"cache", folder}},
+    m_service->call(QStringLiteral("set_storage"), {{"location", folder}},
                     [this](bool ok, const QJsonObject &result, const QString &code) {
                         if (ok)
                             take(result);
@@ -113,13 +125,13 @@ void Storage::moveTo(const QString &chosen) {
 void Storage::take(const QJsonObject &report) {
     m_loaded = true;
     m_outdated = false;
-    m_location = report.value("cache").toString();
-    m_limit = report.value("cap_bytes").toDouble();
-    m_minLimit = report.value("min_cap_bytes").toDouble();
+    m_location = report.value("location").toString();
+    m_limit = report.value("limit_bytes").toDouble();
+    m_minLimit = report.value("min_limit_bytes").toDouble();
+    m_defaultLimit = report.value("default_limit_bytes").toDouble();
+    m_limitSet = report.value("limit_set").toBool();
     m_used = report.value("used_bytes").toDouble();
     m_kinds = report.value("kinds").toObject().toVariantMap();
-    m_library = report.value("library").toString();
-    m_libraryBytes = report.value("library_bytes").toDouble();
     m_freeing = report.value("freeing").toBool();
     const QJsonObject moving = report.value("moving").toObject();
     m_moving = !moving.isEmpty();

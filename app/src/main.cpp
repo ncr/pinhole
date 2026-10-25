@@ -54,10 +54,10 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("1.0.0");
     app.setDesktopFileName("pinhole");
 
-    // Where pinhole-sync builds the library. The synthetic one for working on
-    // the grid (pinhole-fake) is opened with --library.
-    const QString defaultLibrary =
-        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/pinhole/library";
+    // Where pinhole-sync builds the library: in the folder Pinhole keeps
+    // everything in. The synthetic one for working on the grid
+    // (pinhole-fake) is opened with --library.
+    const QString defaultLibrary = Storage::folder() + "/library";
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -80,12 +80,14 @@ int main(int argc, char *argv[]) {
     Theme theme(qEnvironmentVariable("PINHOLE_THEME_DIR"));
 
     Library library;
+    // Where the library is read from; it changes if the service moves it.
+    QString libraryDir = parser.value("library");
     QString error;
     QElapsedTimer loadTimer;
     loadTimer.start();
     // No library yet is not fatal: the window opens and says how to make
     // one, and picks it up once it is there.
-    const bool haveLibrary = library.open(parser.value("library"), &error);
+    const bool haveLibrary = library.open(libraryDir, &error);
     if (!haveLibrary)
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
     std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
@@ -174,12 +176,13 @@ int main(int argc, char *argv[]) {
         reloading = true;
         if (reader.joinable())
             reader.join();
-        reader = std::thread([&library, window, &reloadAgain, &reloading, &reloadLibrary, &loader, grid, &viewer] {
+        reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &loader, grid,
+                              &viewer] {
             QElapsedTimer took;
             took.start();
             auto fresh = std::make_shared<Library>();
             QString error;
-            if (!fresh->open(library.dir(), &error)) {
+            if (!fresh->open(dir, &error)) {
                 std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
                 QMetaObject::invokeMethod(window, [&reloading] { reloading = false; }, Qt::QueuedConnection);
                 return;
@@ -217,8 +220,14 @@ int main(int argc, char *argv[]) {
     // How iCloud is doing, as the service sees it: fine, needs_sign_in,
     // offline, failing, or no_service when there is no service to ask.
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
-        if (name == QLatin1String("library_changed"))
+        if (name == QLatin1String("library_changed")) {
             reloadLibrary();
+        } else if (name == QLatin1String("library_moved")) {
+            // Read from its new place from now on (the old one goes soon).
+            libraryDir = details.value("library").toString();
+            service.setLibrary(libraryDir);
+            reloadLibrary();
+        }
         else if (name == QLatin1String("health"))
             engine.rootContext()->setContextProperty("serviceHealth", details.value("state").toString());
     });
@@ -231,7 +240,7 @@ int main(int argc, char *argv[]) {
     QTimer waitForLibrary;
     if (!haveLibrary) {
         QObject::connect(&waitForLibrary, &QTimer::timeout, &waitForLibrary, [&] {
-            if (!QFile::exists(library.dir() + "/library.sqlite"))
+            if (!QFile::exists(libraryDir + "/library.sqlite"))
                 return;
             waitForLibrary.stop();
             engine.rootContext()->setContextProperty("libraryProblem", QString());

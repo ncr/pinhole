@@ -29,14 +29,19 @@ const BATCH_WINDOW: Duration = Duration::from_millis(25);
 const BATCH_MAX: usize = 100;
 
 pub struct Config {
+    /// The folder everything is kept in (storage.rs), and in it, unless
+    /// given otherwise, the library and the cache.
+    pub location: PathBuf,
     pub library: PathBuf,
     pub cache: PathBuf,
     pub socket: PathBuf,
     pub auth: PathBuf,
-    pub cache_cap: u64,
-    /// Where the cache's folder and limit are kept when the window changes
-    /// them (storage.rs).
+    /// The limit for all of it, if one was set.
+    pub limit: Option<u64>,
+    /// Where the location and limit are kept when the window changes them.
     pub settings: PathBuf,
+    /// A folder of photos from before (the old cache) to move in.
+    pub adopt: Option<PathBuf>,
     pub downloads: usize,
     /// Seconds between rounds of following iCloud's change feed.
     pub sync_every: u64,
@@ -253,7 +258,13 @@ pub fn run(config: Config) -> Result<()> {
     let (lookup_tx, lookup_rx) = mpsc::channel::<Job>();
     let (sync_tx, sync_rx) = mpsc::channel::<()>();
     let (download_tx, download_rx) = mpsc::channel::<Job>();
-    let storage = Arc::new(Storage::new(config.cache.clone(), config.cache_cap, config.settings.clone()));
+    let storage = Arc::new(Storage::new(
+        config.location.clone(),
+        config.library.clone(),
+        config.cache.clone(),
+        config.limit,
+        config.settings.clone(),
+    ));
     let shared = Arc::new(Shared {
         config,
         storage,
@@ -281,6 +292,18 @@ pub fn run(config: Config) -> Result<()> {
     {
         let storage = shared.storage.clone();
         std::thread::spawn(move || storage.evict_loop());
+    }
+    {
+        if let Some(old) = shared.config.adopt.clone() {
+            shared.storage.adopt(old);
+        }
+        // Every window reads the library from its new place.
+        let weak = Arc::downgrade(&shared);
+        shared.storage.on_library_moved(move |library| {
+            if let Some(shared) = weak.upgrade() {
+                shared.broadcast(json!({"event": "library_moved", "library": library}));
+            }
+        });
     }
     {
         let shared = shared.clone();
@@ -326,7 +349,9 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     }
     // Opened when first needed: before pinhole-sync has built the library
     // there is none, and the connection must stay up regardless.
+    // Opened again once the library has moved.
     let mut db: Option<Connection> = None;
+    let mut db_generation = shared.storage.library_generation.load(Ordering::Relaxed);
     for line in BufReader::new(stream).lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -348,31 +373,33 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 reply.send(Ok(json!({})))
             }
             Some("status") => reply.send(Ok(json!({
-                "library": shared.config.library,
+                "library": shared.storage.library(),
                 "cache": shared.storage.cache(),
-                "cache_bytes": shared.storage.report(&shared.config.library)["used_bytes"],
+                "cache_bytes": shared.storage.report()["used_bytes"],
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
                 "health": shared.health.lock().unwrap().name(),
             }))),
-            Some("storage") => reply.send(Ok(shared.storage.report(&shared.config.library))),
+            Some("storage") => reply.send(Ok(shared.storage.report())),
             Some("set_storage") => {
                 let params = &request["params"];
                 let mut result = Ok(());
-                if let Some(cap) = params["cap_bytes"].as_u64() {
-                    result = shared.storage.set_cap(cap);
+                if let Some(limit) = params["limit_bytes"].as_u64() {
+                    result = shared.storage.set_limit(limit);
                 }
-                if let (Ok(()), Some(cache)) = (&result, params["cache"].as_str()) {
-                    result = shared.storage.set_cache(PathBuf::from(cache));
+                if let (Ok(()), Some(location)) = (&result, params["location"].as_str()) {
+                    result = shared.storage.set_location(PathBuf::from(location));
                 }
                 match result {
-                    Ok(()) => reply.send(Ok(shared.storage.report(&shared.config.library))),
+                    Ok(()) => reply.send(Ok(shared.storage.report())),
                     Err(e) => reply.send(Err(("bad_request", format!("{e:#}")))),
                 }
             }
             Some("fetch") => {
-                if db.is_none() {
+                let generation = shared.storage.library_generation.load(Ordering::Relaxed);
+                if db.is_none() || generation != db_generation {
+                    db_generation = generation;
                     db = Connection::open_with_flags(
-                        shared.config.library.join("library.sqlite"),
+                        shared.storage.library().join("library.sqlite"),
                         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
                     )
                     .ok();
@@ -480,6 +507,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
         }
     };
     let mut db: Option<Connection> = None;
+    let mut db_generation = 0;
     while let Ok(first) = rx.recv() {
         std::thread::sleep(BATCH_WINDOW);
         let mut batch = vec![first];
@@ -541,8 +569,10 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
 
         // Fresh links go back into the index, so the next request for any
         // rendition of these assets needs no lookup.
-        if db.is_none() {
-            db = db_for_writing(&shared.config.library);
+        let generation = shared.storage.library_generation.load(Ordering::Relaxed);
+        if db.is_none() || generation != db_generation {
+            db_generation = generation;
+            db = db_for_writing(&shared.storage.library());
         }
         let now = now_secs();
         for mut job in stale {
@@ -701,7 +731,10 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
 }
 
 fn sync_round(shared: &Shared, client: &mut PhotosClient) -> Result<()> {
-    let mut db = Connection::open(shared.config.library.join("library.sqlite"))?;
+    // Not while the library moves.
+    let _writing = shared.storage.library_lock.lock().unwrap();
+    let library = shared.storage.library();
+    let mut db = Connection::open(library.join("library.sqlite"))?;
     db.busy_timeout(Duration::from_secs(10))?;
     let (added, removed, visible) = match crate::sync::apply_changes(client, &mut db, false) {
         Ok(r) => (r.added.len(), r.removed.len(), r.visible()),
@@ -716,7 +749,7 @@ fn sync_round(shared: &Shared, client: &mut PhotosClient) -> Result<()> {
         return Ok(());
     }
     if added > 0 {
-        crate::sync::download_thumbs(client, &mut db, &shared.config.library, 16, &|_, _| {})?;
+        crate::sync::download_thumbs(client, &mut db, &library, 16, &|_, _| {})?;
     }
     let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
     eprintln!("pinholed: sync: library version {version}: {added} new, {removed} removed");
