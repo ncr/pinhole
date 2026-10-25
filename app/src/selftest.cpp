@@ -197,10 +197,10 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
     };
     QTimer::singleShot(500, [&outgoing, picks, folder, describe, &library] {
         std::printf("selftest: originals\n");
-        outgoing.prepare(picks, false, folder + "/originals", [&outgoing, picks, folder, describe, &library](const QStringList &files, int failed) {
+        outgoing.prepare(outgoing.snapshot(picks), false, folder + "/originals", [&outgoing, picks, folder, describe, &library](const QStringList &files, int failed) {
             describe(files);
             std::printf("selftest:   %d failed\nselftest: compatible\n", failed);
-            outgoing.prepare(picks, true, folder + "/compatible", [&outgoing, picks, describe, &library](const QStringList &files, int failed) {
+            outgoing.prepare(outgoing.snapshot(picks), true, folder + "/compatible", [&outgoing, picks, describe, &library](const QStringList &files, int failed) {
                 describe(files);
                 std::printf("selftest:   %d failed\nselftest: copy\n", failed);
                 outgoing.copy({picks.first()});

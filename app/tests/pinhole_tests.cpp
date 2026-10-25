@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include "library.h"
+#include "outgoing.h"
 #include "scrollphysics.h"
 #include "theme.h"
 #include "translator.h"
@@ -31,6 +32,27 @@ private:
     static void settle(ScrollPhysics &p) {
         for (int i = 0; i < 2000 && p.animating(); ++i)
             p.step(1.0 / 120);
+    }
+
+    // A library in `dir` holding `rows` (id, date) and nothing else of note.
+    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows) {
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "make");
+            db.setDatabaseName(dir + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TABLE assets (id TEXT, thumb_path TEXT, avg_color INTEGER, thumb_w INTEGER, thumb_h INTEGER,"
+                           " duration REAL, asset_date INTEGER, is_video INTEGER, is_live INTEGER, favorite INTEGER, filename TEXT)"));
+            for (const auto &[id, date] : rows) {
+                q.prepare("INSERT INTO assets VALUES (?, '', 0, 1, 1, 0, ?, 0, 0, 0, ?)");
+                q.addBindValue(QString::fromUtf8(id));
+                q.addBindValue(date);
+                q.addBindValue(QString::fromUtf8(id) + ".HEIC");
+                QVERIFY(q.exec());
+            }
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("make");
     }
 
     static void write(const QString &path, const QByteArray &contents) {
@@ -161,6 +183,28 @@ private slots:
         QCOMPARE(library.at(1).filename, QString("B.HEIC"));
         QVERIFY(library.at(1).favorite);
         QVERIFY(library.at(1).thumbPath.endsWith("/thumbs/b.jpg"));
+    }
+
+    // A copy, export or drag waits (for downloads, the folder picker, the
+    // drop); a new photo arriving meanwhile moves every position along. What
+    // it hands out must still be the photos that were chosen.
+    void whatGoesOutIsWhatWasChosenThroughAReload() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir before, after;
+        makeLibrary(before.path(), {{"a", 1000}, {"b", 2000}});
+        makeLibrary(after.path(), {{"new", 500}, {"a", 1000}, {"b", 2000}});
+        Library library, reloaded;
+        QString error;
+        QVERIFY(library.open(before.path(), &error));
+        QVERIFY(reloaded.open(after.path(), &error));
+
+        Outgoing outgoing(&library, nullptr);
+        const QList<LibraryItem> chosen = outgoing.snapshot({1, 7});
+        QCOMPARE(chosen.size(), 1); // a position past the end is left out
+        library.swap(reloaded);
+        QCOMPARE(library.at(1).id, QByteArray("a"));
+        QCOMPARE(chosen.first().id, QByteArray("b"));
+        QCOMPARE(chosen.first().filename, QString("b.HEIC"));
     }
 };
 

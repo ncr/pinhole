@@ -1,12 +1,13 @@
 #pragma once
 
+#include "library.h"
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
 
 #include <functional>
 
-class Library;
 class ServiceClient;
 
 // Files for photos leaving the app: dragged out, copied, exported. Each
@@ -21,9 +22,13 @@ public:
     Outgoing(const Library *library, ServiceClient *service, QObject *parent = nullptr);
 
     using Done = std::function<void(const QStringList &files, int failed)>;
+    // The photos at these positions, as they are now. Everything that waits
+    // (a download, the folder picker, a drag) carries these rather than
+    // positions, which a library reload in the meantime would move.
+    QList<LibraryItem> snapshot(const QList<int> &indexes) const;
     // Prepare the files, into `folder` (a staging folder if empty); `done`
     // gets them once all have arrived or failed.
-    void prepare(const QList<int> &indexes, bool compatible, const QString &folder, Done done);
+    void prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done);
 
     // What the window shows while files are on their way: "Preparing 3
     // photos…", "Exported 12 photos", and so on.
@@ -47,7 +52,7 @@ signals:
 
 private:
     void flash(const QString &status);
-    void place(const QString &source, const QString &type, int index, bool compatible, const QString &folder,
+    void place(const QString &source, const QString &type, const LibraryItem &item, bool compatible, const QString &folder,
                std::function<void(const QString &)> placed);
     static QString uniqueName(const QString &folder, const QString &name);
 

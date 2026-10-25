@@ -48,7 +48,7 @@ namespace {
 // the list itself is produced when asked for, waiting for the files.
 class PromisedFiles : public QMimeData {
 public:
-    PromisedFiles(Outgoing *outgoing, QList<int> indexes) : m_outgoing(outgoing), m_indexes(std::move(indexes)) {}
+    PromisedFiles(Outgoing *outgoing, QList<LibraryItem> items) : m_outgoing(outgoing), m_items(std::move(items)) {}
 
     QStringList formats() const override { return {QStringLiteral("text/uri-list")}; }
     bool hasFormat(const QString &mime) const override { return mime == QLatin1String("text/uri-list"); }
@@ -60,7 +60,7 @@ protected:
         if (!m_ready) {
             QEventLoop wait;
             QTimer::singleShot(120000, &wait, &QEventLoop::quit);
-            m_outgoing->prepare(m_indexes, true, {}, [this, &wait](const QStringList &files, int) {
+            m_outgoing->prepare(m_items, true, {}, [this, &wait](const QStringList &files, int) {
                 m_files = files;
                 wait.quit();
             });
@@ -84,28 +84,39 @@ protected:
 
 private:
     Outgoing *m_outgoing;
-    QList<int> m_indexes;
+    QList<LibraryItem> m_items;
     mutable bool m_ready = false;
     mutable QStringList m_files;
 };
 
 } // namespace
 
+QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
+    QList<LibraryItem> items;
+    for (int index : indexes) {
+        if (index >= 0 && index < m_library->count())
+            items.append(m_library->at(index));
+    }
+    return items;
+}
+
 void Outgoing::drag(QObject *source, const QList<int> &indexes) {
-    if (indexes.isEmpty())
+    const QList<LibraryItem> items = snapshot(indexes);
+    if (items.isEmpty())
         return;
     auto *drag = new QDrag(source);
-    drag->setMimeData(new PromisedFiles(this, indexes));
-    const QImage thumb(QFile::decodeName(m_library->at(indexes.first()).thumbPath));
+    drag->setMimeData(new PromisedFiles(this, items));
+    const QImage thumb(QFile::decodeName(items.first().thumbPath));
     if (!thumb.isNull())
         drag->setPixmap(QPixmap::fromImage(thumb.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
     drag->exec(Qt::CopyAction);
 }
 
 void Outgoing::copy(const QList<int> &indexes) {
-    if (indexes.isEmpty())
+    const QList<LibraryItem> items = snapshot(indexes);
+    if (items.isEmpty())
         return;
-    prepare(indexes, true, {}, [this](const QStringList &files, int failed) {
+    prepare(items, true, {}, [this](const QStringList &files, int failed) {
         if (files.isEmpty()) {
             flash(tr("Could not get the photos from iCloud"));
             return;
@@ -132,19 +143,20 @@ void Outgoing::copy(const QList<int> &indexes) {
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {
-    if (indexes.isEmpty())
+    const QList<LibraryItem> items = snapshot(indexes);
+    if (items.isEmpty())
         return;
     auto *picker = new PortalFolderPicker(this);
-    connect(picker, &PortalFolderPicker::picked, this, [this, picker, indexes, compatible](const QString &folder) {
+    connect(picker, &PortalFolderPicker::picked, this, [this, picker, items, compatible](const QString &folder) {
         picker->deleteLater();
         if (folder.isEmpty())
             return;
-        prepare(indexes, compatible, folder, [this, folder](const QStringList &files, int failed) {
+        prepare(items, compatible, folder, [this, folder](const QStringList &files, int failed) {
             flash(failed ? tr("Exported %1, %2 failed").arg(files.size()).arg(failed)
                          : tr("Exported %n photo(s) to %1", "", int(files.size())).arg(QDir(folder).dirName()));
         });
     });
-    picker->pick(tr("Export %n photo(s) to", "", int(indexes.size())));
+    picker->pick(tr("Export %n photo(s) to", "", int(items.size())));
 }
 
 void Outgoing::setStatus(const QString &status) {
@@ -166,7 +178,7 @@ QString Outgoing::uniqueName(const QString &folder, const QString &name) {
     return candidate;
 }
 
-void Outgoing::prepare(const QList<int> &indexes, bool compatible, const QString &folder, Done done) {
+void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done) {
     QString target = folder;
     if (target.isEmpty()) {
         // A fresh staging folder per request: dropped files must not be
@@ -181,12 +193,12 @@ void Outgoing::prepare(const QList<int> &indexes, bool compatible, const QString
         QStringList files;
         Done done;
     };
-    auto state = std::make_shared<State>(State{int(indexes.size()), 0, {}, std::move(done)});
-    if (indexes.isEmpty()) {
+    auto state = std::make_shared<State>(State{int(items.size()), 0, {}, std::move(done)});
+    if (items.isEmpty()) {
         state->done({}, 0);
         return;
     }
-    setStatus(indexes.size() == 1 ? tr("Preparing the photo…") : tr("Preparing %n photos…", "", int(indexes.size())));
+    setStatus(items.size() == 1 ? tr("Preparing the photo…") : tr("Preparing %n photos…", "", int(items.size())));
     auto finishOne = [this, state](const QString &file) {
         if (file.isEmpty())
             state->failed += 1;
@@ -197,25 +209,19 @@ void Outgoing::prepare(const QList<int> &indexes, bool compatible, const QString
             state->done(state->files, state->failed);
         }
     };
-    for (int index : indexes) {
-        if (index < 0 || index >= m_library->count()) {
-            finishOne({});
-            continue;
-        }
-        const LibraryItem &item = m_library->at(index);
+    for (const LibraryItem &item : items) {
         m_service->fetch(item.id, QStringLiteral("original"),
-                         [this, index, compatible, target, finishOne](bool ok, const QJsonObject &result, const QString &) {
+                         [this, item, compatible, target, finishOne](bool ok, const QJsonObject &result, const QString &) {
                              if (!ok)
                                  return finishOne({});
-                             place(result.value("path").toString(), result.value("type").toString(), index, compatible,
+                             place(result.value("path").toString(), result.value("type").toString(), item, compatible,
                                    target, finishOne);
                          });
     }
 }
 
-void Outgoing::place(const QString &source, const QString &type, int index, bool compatible, const QString &folder,
-                     std::function<void(const QString &)> placed) {
-    const LibraryItem &item = m_library->at(index);
+void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, bool compatible,
+                     const QString &folder, std::function<void(const QString &)> placed) {
     QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
 
     if (compatible && type == QLatin1String("public.heic")) {
