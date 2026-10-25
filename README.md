@@ -50,6 +50,12 @@ Space closes, Space plays and pauses a video, L plays a Live Photo's motion.
 `PINHOLE_SELFTEST=viewer app/build/pinhole` opens one of each kind and
 reports how long every stage took.
 
+Click selects (Ctrl-click adds, Shift-click a range, Ctrl+A all). Drag
+photos out to any app; Ctrl+C copies them; Ctrl+E exports the originals and
+Ctrl+Shift+E a compatible form (HEIC as JPEG, keeping the date, place and
+camera details) to a folder chosen in the desktop's own picker. Originals
+come from iCloud as they are needed.
+
 Without a real library the window opens the synthetic one:
 
 ```bash

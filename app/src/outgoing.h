@@ -1,0 +1,57 @@
+#pragma once
+
+#include <QObject>
+#include <QString>
+#include <QStringList>
+
+#include <functional>
+
+class Library;
+class ServiceClient;
+
+// Files for photos leaving the app: dragged out, copied, exported. Each
+// photo's original comes from pinholed and gets its camera filename; in the
+// "compatible" form a HEIC becomes a JPEG (ImageMagick, which keeps the date,
+// place and camera details), since much that accepts a dropped photo does not
+// read HEIC. Videos always go as they are.
+class Outgoing : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+public:
+    Outgoing(const Library *library, ServiceClient *service, QObject *parent = nullptr);
+
+    using Done = std::function<void(const QStringList &files, int failed)>;
+    // Prepare the files, into `folder` (a staging folder if empty); `done`
+    // gets them once all have arrived or failed.
+    void prepare(const QList<int> &indexes, bool compatible, const QString &folder, Done done);
+
+    // What the window shows while files are on their way: "Preparing 3
+    // photos…", "Exported 12 photos", and so on.
+    QString status() const { return m_status; }
+    void setStatus(const QString &status);
+
+    static QString stagingFolder();
+
+    // Drag these photos out of `source` (compatible form). The drag starts at
+    // once; the files are handed over when the drop target asks for them,
+    // waiting for any still downloading, like a file promise on a Mac.
+    void drag(QObject *source, const QList<int> &indexes);
+    // Put these photos on the clipboard (compatible form), as files, and for
+    // a single photo as an image too, so pasting into a chat works.
+    Q_INVOKABLE void copy(const QList<int> &indexes);
+    // Ask for a folder (the desktop's own picker) and export into it.
+    Q_INVOKABLE void exportTo(const QList<int> &indexes, bool compatible);
+
+signals:
+    void statusChanged();
+
+private:
+    void flash(const QString &status);
+    void place(const QString &source, const QString &type, int index, bool compatible, const QString &folder,
+               std::function<void(const QString &)> placed);
+    static QString uniqueName(const QString &folder, const QString &name);
+
+    const Library *m_library;
+    ServiceClient *m_service;
+    QString m_status;
+};

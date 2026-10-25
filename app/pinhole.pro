@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 sql network multimedia
+QT += core gui qml quick quickcontrols2 sql network multimedia dbus
 
 CONFIG += c++20 release
 TARGET = pinhole
@@ -25,6 +25,8 @@ HEADERS += \
     src/serviceclient.h \
     src/photoprovider.h \
     src/viewer.h \
+    src/outgoing.h \
+    src/portal.h \
     src/selftest.h \
     src/framestats.h \
     src/bench.h
@@ -39,6 +41,8 @@ SOURCES += \
     src/serviceclient.cpp \
     src/photoprovider.cpp \
     src/viewer.cpp \
+    src/outgoing.cpp \
+    src/portal.cpp \
     src/selftest.cpp \
     src/framestats.cpp \
     src/bench.cpp

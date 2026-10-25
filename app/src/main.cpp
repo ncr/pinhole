@@ -18,6 +18,7 @@
 #include "framestats.h"
 #include "library.h"
 #include "photogrid.h"
+#include "outgoing.h"
 #include "photoprovider.h"
 #include "selftest.h"
 #include "serviceclient.h"
@@ -82,10 +83,12 @@ int main(int argc, char *argv[]) {
     // Larger renditions come from pinholed.
     ServiceClient service;
     Viewer viewer(&library, &service);
+    Outgoing outgoing(&library, &service);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
     engine.rootContext()->setContextProperty("viewer", &viewer);
+    engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("bench", nullptr);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
@@ -95,6 +98,8 @@ int main(int argc, char *argv[]) {
     auto *grid = window->findChild<PhotoGrid *>("grid");
     grid->setSources(&library, &loader, &stats);
     grid->setTouchpadHold(&hold);
+    QObject::connect(grid, &PhotoGrid::dragRequested, &outgoing,
+                     [&outgoing, grid](const QList<int> &indexes) { outgoing.drag(grid, indexes); });
 
     // Medium requests arrive from the render thread; the connection queues
     // them onto this one.
@@ -127,6 +132,8 @@ int main(int argc, char *argv[]) {
 
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
+    if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("outgoing"))
+        runOutgoingSelfTest(library, outgoing, qEnvironmentVariable("PINHOLE_SELFTEST_DIR"));
 
     Bench bench(grid, &stats, &loader);
     if (parser.isSet("bench")) {

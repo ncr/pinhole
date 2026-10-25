@@ -116,6 +116,9 @@ struct GridRenderState {
     };
     Slot drawSlots[2];
 
+    // Borders around selected photos, one node on top of everything.
+    QSGGeometryNode *selection = nullptr;
+
     double lastScroll = 0;
     qint64 lastFrameAt = 0;
 
@@ -227,7 +230,70 @@ void PhotoGrid::reveal(int index) {
 void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     // A click, or a tap with tap-to-click, is a touch too.
     touched(double(event->timestamp()), "click");
+    m_pressAt = event->position();
+    m_pressIndex = indexAt(event->position().x(), event->position().y());
+    m_dragged = false;
     event->accept();
+}
+
+void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {
+    if (m_dragged || m_pressIndex < 0 || !(event->buttons() & Qt::LeftButton))
+        return;
+    if ((event->position() - m_pressAt).manhattanLength() < 6)
+        return;
+    m_dragged = true;
+    // Dragging an unselected photo drags that photo alone.
+    if (!m_selected.contains(m_pressIndex)) {
+        m_selected = {m_pressIndex};
+        m_selectionAnchor = m_pressIndex;
+        emit selectionChanged();
+        update();
+    }
+    emit dragRequested(selection());
+}
+
+void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
+    if (m_dragged || event->button() != Qt::LeftButton)
+        return;
+    const int index = m_pressIndex;
+    const auto mods = event->modifiers();
+    if (index < 0) {
+        if (!(mods & (Qt::ControlModifier | Qt::ShiftModifier)))
+            clearSelection();
+        return;
+    }
+    if (mods & Qt::ShiftModifier && m_selectionAnchor >= 0) {
+        for (int i = std::min(index, m_selectionAnchor); i <= std::max(index, m_selectionAnchor); ++i)
+            m_selected.insert(i);
+    } else if (mods & Qt::ControlModifier) {
+        if (!m_selected.erase(index))
+            m_selected.insert(index);
+        m_selectionAnchor = index;
+    } else {
+        m_selected = {index};
+        m_selectionAnchor = index;
+    }
+    emit selectionChanged();
+    update();
+}
+
+QList<int> PhotoGrid::selection() const { return QList<int>(m_selected.begin(), m_selected.end()); }
+
+void PhotoGrid::selectAll() {
+    m_selected.clear();
+    for (int i = 0; i < count(); ++i)
+        m_selected.insert(m_selected.end(), i);
+    emit selectionChanged();
+    update();
+}
+
+void PhotoGrid::clearSelection() {
+    if (m_selected.empty())
+        return;
+    m_selected.clear();
+    m_selectionAnchor = -1;
+    emit selectionChanged();
+    update();
 }
 
 int PhotoGrid::count() const { return m_library ? m_library->count() : 0; }
@@ -736,6 +802,7 @@ void PhotoGrid::invalidateSceneGraph() {
     m_render->dropAll();
     for (auto &slot : m_render->drawSlots)
         slot = {};
+    m_render->selection = nullptr;
 }
 
 void PhotoGrid::releaseResources() {
@@ -765,6 +832,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             slot.opacity->appendChildNode(slot.placeholders);
             root->appendChildNode(slot.opacity);
         }
+        rs.selection = new QSGGeometryNode;
+        auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
+        geometry->setDrawingMode(QSGGeometry::DrawTriangles);
+        rs.selection->setGeometry(geometry);
+        rs.selection->setFlag(QSGNode::OwnsGeometry);
+        rs.selection->setMaterial(new QSGVertexColorMaterial);
+        rs.selection->setFlag(QSGNode::OwnsMaterial);
+        root->appendChildNode(rs.selection);
     }
     if (!m_library || !m_loader || width() <= 0 || count() == 0)
         return root;
@@ -1213,6 +1288,40 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         }
         if (opacity > 0)
             batches += int(b.byTexture.size()) + 1;
+    }
+
+    // The selection: a border inside each selected cell of the main layer.
+    {
+        std::vector<QRectF> frames;
+        if (!m_selected.empty()) {
+            const Layer &l = drawn.front();
+            const Range &r = ranges.front();
+            const int from = r.firstRow * l.columns, to = std::min(count(), (r.lastRow + 1) * l.columns);
+            for (auto it = m_selected.lower_bound(from); it != m_selected.end() && *it < to; ++it)
+                frames.push_back(cellRect(*it, l));
+        }
+        QSGGeometry *g = rs.selection->geometry();
+        g->allocate(int(frames.size() * 24));
+        auto *v = g->vertexDataAsColoredPoint2D();
+        const float w = 3;
+        auto quad = [&](float x0, float y0, float x1, float y1) {
+            // Omarchy's default accent.
+            v[0].set(x0, y0, 255, 214, 10, 255);
+            v[1].set(x1, y0, 255, 214, 10, 255);
+            v[2].set(x0, y1, 255, 214, 10, 255);
+            v[3].set(x1, y0, 255, 214, 10, 255);
+            v[4].set(x1, y1, 255, 214, 10, 255);
+            v[5].set(x0, y1, 255, 214, 10, 255);
+            v += 6;
+        };
+        for (const QRectF &f : frames) {
+            const float x0 = float(f.left()), y0 = float(f.top()), x1 = float(f.right()), y1 = float(f.bottom());
+            quad(x0, y0, x1, y0 + w);
+            quad(x0, y1 - w, x1, y1);
+            quad(x0, y0 + w, x0 + w, y1 - w);
+            quad(x1 - w, y0 + w, x1, y1 - w);
+        }
+        rs.selection->markDirty(QSGNode::DirtyGeometry);
     }
 
     // 6. Keep texture memory under budget: drop what has not been on or

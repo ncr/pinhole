@@ -1,10 +1,16 @@
 #include "selftest.h"
 
 #include "library.h"
+#include "outgoing.h"
 #include "photoprovider.h"
 #include "viewer.h"
 
+#include <QClipboard>
 #include <QCoreApplication>
+#include <QFileInfo>
+#include <QGuiApplication>
+#include <QMimeData>
+#include <QProcess>
 #include <QElapsedTimer>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -125,4 +131,48 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         viewer.openAt(index, QRectF(0, 0, 100, 100));
     };
     QTimer::singleShot(500, [next] { (*next)(0); });
+}
+
+void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QString &folder) {
+    const QList<int> picks = {
+        findIndex(library, "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.heic') AND NOT a.is_live"),
+        findIndex(library, "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.jpeg')"),
+        findIndex(library, "a.is_video AND a.duration < 30"),
+    };
+    auto describe = [](const QStringList &files) {
+        for (const QString &f : files) {
+            QProcess identify;
+            identify.start("magick", {"identify", "-format", "%m %wx%h, taken %[EXIF:DateTimeOriginal]", f + "[0]"});
+            identify.waitForFinished(20000);
+            const QString what = QString::fromUtf8(identify.readAllStandardOutput()).trimmed();
+            std::printf("selftest:   %-28s %8lld KB  %s\n", qPrintable(QFileInfo(f).fileName()), QFileInfo(f).size() / 1024,
+                        qPrintable(what.isEmpty() ? QStringLiteral("(video)") : what));
+        }
+    };
+    QTimer::singleShot(500, [&outgoing, picks, folder, describe, &library] {
+        std::printf("selftest: originals\n");
+        outgoing.prepare(picks, false, folder + "/originals", [&outgoing, picks, folder, describe, &library](const QStringList &files, int failed) {
+            describe(files);
+            std::printf("selftest:   %d failed\nselftest: compatible\n", failed);
+            outgoing.prepare(picks, true, folder + "/compatible", [&outgoing, picks, describe, &library](const QStringList &files, int failed) {
+                describe(files);
+                std::printf("selftest:   %d failed\nselftest: copy\n", failed);
+                outgoing.copy({picks.first()});
+                // Copying sets the clipboard once the file is ready.
+                QTimer::singleShot(8000, [&library, picks] {
+                    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+                    std::printf("selftest:   clipboard: %lld file(s), image %s, gnome-copied-files %s\n",
+                                mime ? qlonglong(mime->urls().size()) : 0LL,
+                                mime && mime->hasImage() ? "yes" : "no",
+                                mime && mime->hasFormat("x-special/gnome-copied-files") ? "yes" : "no");
+                    if (mime && !mime->urls().isEmpty())
+                        std::printf("selftest:   first: %s (camera name %s)\n", qPrintable(mime->urls().first().fileName()),
+                                    qPrintable(library.at(picks.first()).filename));
+                    std::printf("selftest: done\n");
+                    std::fflush(stdout);
+                    QCoreApplication::quit();
+                });
+            });
+        });
+    });
 }

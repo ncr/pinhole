@@ -23,7 +23,7 @@ bool Library::open(const QString &dir, QString *error) {
         }
         QSqlQuery q(db);
         q.setForwardOnly(true);
-        if (!q.exec("SELECT thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, favorite, id "
+        if (!q.exec("SELECT thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, favorite, id, filename "
                     "FROM assets ORDER BY asset_date, id")) {
             *error = q.lastError().text();
             return false;
@@ -45,6 +45,7 @@ bool Library::open(const QString &dir, QString *error) {
             item.live = q.value(7).toBool();
             item.favorite = q.value(8).toBool();
             item.id = q.value(9).toString().toUtf8();
+            item.filename = q.value(10).toString();
             m_items.push_back(std::move(item));
         }
     }

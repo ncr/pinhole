@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <memory>
+#include <set>
 
 #include "scrollphysics.h"
 
@@ -42,6 +43,7 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QString statsText READ statsText NOTIFY statsTextChanged)
     // How far down the library the view is, 0 at the oldest, 1 at the newest.
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
+    Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -75,6 +77,13 @@ public:
     // into view if it is not.
     Q_INVOKABLE QRectF rectOf(int index) const;
     Q_INVOKABLE void reveal(int index);
+
+    // Selection, as in Photos: click, Ctrl-click to add or remove,
+    // Shift-click for a range.
+    int selectionCount() const { return int(m_selected.size()); }
+    Q_INVOKABLE QList<int> selection() const;
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void clearSelection();
 
     // The date scrubber: jump anywhere, the capture date (ms) at a position,
     // where each year begins, and whether a drag is under way (the grid then
@@ -125,6 +134,9 @@ signals:
     // Double-click on a photo: open it.
     void activated(int index, QRectF rect);
     void scrolled();
+    void selectionChanged();
+    // The pointer moved far enough from a press on a photo: drag these out.
+    void dragRequested(const QList<int> &indexes);
     void libraryChanged();
     void columnsChanged();
     void animatingChanged();
@@ -136,6 +148,8 @@ protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void hoverMoveEvent(QHoverEvent *event) override;
     void hoverLeaveEvent(QHoverEvent *event) override;
@@ -182,6 +196,11 @@ private:
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
     QPointF m_hover{-1, -1};
+    std::set<int> m_selected;
+    int m_selectionAnchor = -1;
+    QPointF m_pressAt;
+    int m_pressIndex = -1;
+    bool m_dragged = false;
     bool m_scrubbing = false;
     qreal m_lastFraction = -1;
     void notifyScrolled();

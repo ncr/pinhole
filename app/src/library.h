@@ -9,6 +9,7 @@
 struct LibraryItem {
     QByteArray id;        // the asset record name, as pinholed knows it
     QByteArray thumbPath; // absolute, ready for fopen
+    QString filename;     // as it was on the camera: IMG_1234.HEIC
     quint32 avgColor = 0x303030;
     quint16 thumbW = 0;
     quint16 thumbH = 0;
