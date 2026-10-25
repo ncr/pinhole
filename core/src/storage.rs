@@ -1,7 +1,7 @@
 //! Where Pinhole keeps its files, and how much room they may take: one
 //! folder (`~/.local/share/pinhole` unless the window chose another) with
 //! the library in `library/` (the index and the thumbnails, always kept)
-//! and the photos fetched from iCloud in `cache/`, under one limit for the
+//! and the photos fetched from the source in `cache/`, under one limit for the
 //! whole. Kept in Pinhole's settings, changed from the window while the
 //! service runs: a lower limit frees space at once; a new folder gets
 //! everything moved there in the background, the library first, the photos
@@ -49,22 +49,55 @@ pub fn old_cache() -> PathBuf {
     std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".cache")).join("pinhole")
 }
 
-/// What the settings say, either part missing.
+/// What the settings say, any part missing.
 #[derive(Default, Debug, PartialEq)]
 pub struct Settings {
     pub location: Option<PathBuf>,
     pub limit: Option<u64>,
+    /// Where the photos come from (docs/sources.md); none is iCloud.
+    pub source: Option<Value>,
 }
 
 pub fn read_settings(path: &Path) -> Settings {
     let Ok(text) = std::fs::read_to_string(path) else { return Settings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return Settings::default() };
-    Settings { location: v["location"].as_str().map(PathBuf::from), limit: v["limit_bytes"].as_u64() }
+    Settings {
+        location: v["location"].as_str().map(PathBuf::from),
+        limit: v["limit_bytes"].as_u64(),
+        source: v.get("source").filter(|s| s.is_object()).cloned(),
+    }
+}
+
+/// A source's library in the folder Pinhole keeps everything in: iCloud's
+/// in `library/`, as it always was, any other's beside it under its kind.
+pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
+    match source.kind() {
+        "icloud" => location.join("library"),
+        kind => location.join(format!("library-{kind}")),
+    }
 }
 
 /// Where Pinhole keeps everything now.
 pub fn location() -> PathBuf {
     read_settings(&settings_path()).location.unwrap_or_else(default_location)
+}
+
+/// Change the settings file, keeping whatever else is in it, written
+/// aside and renamed so a reader never sees half of it.
+pub fn update_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<()> {
+    let mut settings = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    change(&mut settings);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let part = path.with_extension("json.part");
+    std::fs::write(&part, serde_json::to_vec_pretty(&settings)?)?;
+    std::fs::rename(&part, path)?;
+    Ok(())
 }
 
 pub fn round_up_to_gb(bytes: u64) -> u64 {
@@ -298,17 +331,13 @@ impl Storage {
             let s = self.state.lock().unwrap();
             (s.location.clone(), s.limit)
         };
-        if let Some(dir) = self.settings.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let mut settings = json!({"location": location});
-        if let Some(limit) = limit {
-            settings["limit_bytes"] = json!(limit);
-        }
-        let part = self.settings.with_extension("json.part");
-        std::fs::write(&part, serde_json::to_vec_pretty(&settings)?)?;
-        std::fs::rename(&part, &self.settings)?;
-        Ok(())
+        update_settings(&self.settings, |settings| {
+            settings["location"] = json!(location);
+            match limit {
+                Some(limit) => settings["limit_bytes"] = json!(limit),
+                None => drop(settings.as_object_mut().and_then(|s| s.remove("limit_bytes"))),
+            }
+        })
     }
 
     /// The library over, with nothing writing it meanwhile: renamed on one
@@ -537,7 +566,7 @@ mod tests {
         let storage = storage_in(&location, &dir.join("settings.json"));
         storage.set_limit(1).unwrap();
         // Kept at the least there can be, in the settings with the folder.
-        assert_eq!(read_settings(&dir.join("settings.json")), Settings { location: Some(location), limit: Some(GB) });
+        assert_eq!(read_settings(&dir.join("settings.json")), Settings { location: Some(location), limit: Some(GB), source: None });
         // What the eviction thread does when asked, at a test's size.
         storage.free(1300, 1300);
         assert!(!cache.join("full/aa/old.jpg").exists());

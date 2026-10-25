@@ -6,7 +6,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 
-use crate::session::Session;
+use crate::icloud::session::Session;
 
 /// Where sessions come from. The core asks again whenever iCloud rejects the
 /// one it has.

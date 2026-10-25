@@ -193,10 +193,11 @@ impl std::fmt::Display for TokenExpired {
 
 impl std::error::Error for TokenExpired {}
 
-/// What listing the library found, beyond the assets themselves.
+/// What listing the library or following its changes came to, beyond the
+/// assets themselves.
 #[derive(Debug, Default)]
 pub struct Listing {
-    /// Where `changes` picks up from.
+    /// Where `changes` picks up from next.
     pub token: Option<String>,
     /// A line about how it went, for pinhole-sync to print.
     pub summary: String,
@@ -229,10 +230,10 @@ pub trait Source: Send + Sync {
     /// Assets the index had that were not put are removed afterwards.
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing>;
 
-    /// What changed since `token`, put into and removed from `index`;
-    /// returns the token to pick up from next time. `TokenExpired` when the
-    /// token is no use any more.
-    fn changes(&self, index: &mut Index, token: &str) -> Result<String>;
+    /// What changed since `token`, put into and removed from `index`, and
+    /// the token to pick up from next time. `TokenExpired` when the token
+    /// is no use any more.
+    fn changes(&self, index: &mut Index, token: &str) -> Result<Listing>;
 
     /// The fetch: the file itself, when it is on this computer and is
     /// served as it is, not copied into the cache.

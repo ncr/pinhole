@@ -1,5 +1,7 @@
 //! pinholed: hands the window local files for any rendition of a photo,
-//! from its cache or from iCloud. See docs/service.md.
+//! from its cache or from the source, and keeps the library in step with
+//! the source. It talks to the source only through the Source trait. See
+//! docs/service.md and docs/sources.md.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -7,24 +9,20 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Value};
 
-use crate::auth::{ProcessProvider, ProviderError};
-use crate::cloudkit::{Downloader, PhotosClient};
-use crate::icloud::records::pair_records_with_leftovers;
+use crate::source::{FetchError, Health, Source, Stored, Ticket, Want};
 use crate::storage::Storage;
 use crate::stream::Streams;
-use crate::sync::{now_secs, thumb_path};
+use crate::sync::thumb_path;
 
-/// A link younger than this is used as is; older ones are looked up again.
-const URL_FRESH_SECS: i64 = 20 * 60;
 /// How long the lookup thread waits for more requests to batch with the
-/// first, and how many assets one lookup may carry.
+/// first, and how many it hands the source at once.
 const BATCH_WINDOW: Duration = Duration::from_millis(25);
 const BATCH_MAX: usize = 100;
 
@@ -35,7 +33,8 @@ pub struct Config {
     pub library: PathBuf,
     pub cache: PathBuf,
     pub socket: PathBuf,
-    pub auth: PathBuf,
+    /// Where the photos come from.
+    pub source: Arc<dyn Source>,
     /// The limit for all of it, if one was set.
     pub limit: Option<u64>,
     /// Where the location and limit are kept when the window changes them.
@@ -43,7 +42,7 @@ pub struct Config {
     /// A folder of photos from before (the old cache) to move in.
     pub adopt: Option<PathBuf>,
     pub downloads: usize,
-    /// Seconds between rounds of following iCloud's change feed.
+    /// Seconds between rounds of following the source's changes.
     pub sync_every: u64,
 }
 
@@ -72,18 +71,16 @@ impl Reply {
 /// One file to bring into the cache.
 #[derive(Clone)]
 struct Job {
-    asset: String,
-    master: String,
-    rendition: String,
+    stored: Stored,
     path: PathBuf,
-    url: Option<String>,
+    /// Once the source has got it ready.
+    ticket: Option<Ticket>,
     retried: bool,
-    /// A video: readable over HTTP while it downloads.
-    streamable: bool,
 }
 
 struct Shared {
     config: Config,
+    source: RwLock<Arc<dyn Source>>,
     /// The cache's folder and limit, as they are now.
     storage: Arc<Storage>,
     lookups: Mutex<mpsc::Sender<Job>>,
@@ -92,7 +89,6 @@ struct Shared {
     /// same file joins the first instead of downloading it again.
     waiting: Mutex<HashMap<PathBuf, (Value, Vec<Reply>)>>,
     in_flight: AtomicUsize,
-    downloader: Mutex<Option<Downloader>>,
     /// Every connected window, to tell when the library changed.
     listeners: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
     /// Wakes the sync thread before its next round is due.
@@ -100,71 +96,38 @@ struct Shared {
     streams: Arc<Streams>,
     /// The play URL of each video downloading now, by its cache path.
     playable: Mutex<HashMap<PathBuf, String>>,
-    /// Whether iCloud can be reached and the session is good.
+    /// Whether the source can be reached (and the session is good).
     health: Mutex<Health>,
 }
 
-/// What a window should tell the person about iCloud.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Health {
-    Fine,
-    /// No session, or Apple rejected it: `pinhole-sync sign-in`.
-    NeedsSignIn,
-    /// The network is down.
-    Offline,
-    /// iCloud answers, but with errors.
-    Failing,
-}
-
-impl Health {
-    fn name(self) -> &'static str {
-        match self {
-            Health::Fine => "fine",
-            Health::NeedsSignIn => "needs_sign_in",
-            Health::Offline => "offline",
-            Health::Failing => "failing",
-        }
-    }
-
-    /// What an error from the sign-in provider or iCloud says about the
-    /// connection.
-    fn of(error: &anyhow::Error) -> Health {
-        if let Some(p) = error.downcast_ref::<ProviderError>() {
-            return match p.code.as_str() {
-                "needs_sign_in" | "needs_code" | "wrong_code" => Health::NeedsSignIn,
-                _ => Health::Offline,
-            };
-        }
-        for cause in error.chain() {
-            if let Some(e) = cause.downcast_ref::<reqwest::Error>() {
-                if e.is_connect() || e.is_timeout() {
-                    return Health::Offline;
-                }
-            }
-        }
-        let text = format!("{error:#}");
-        if text.contains("answered 401") || text.contains("answered 421") || text.contains("answered 403") {
-            return Health::NeedsSignIn;
-        }
-        Health::Failing
-    }
-
-    fn event(self) -> Value {
-        json!({"event": "health", "state": self.name()})
-    }
+fn health_event(health: Health) -> Value {
+    json!({"event": "health", "state": health.name()})
 }
 
 impl Shared {
-    /// Note how the last exchange with iCloud went; windows hear of changes.
+    fn source(&self) -> Arc<dyn Source> {
+        self.source.read().unwrap().clone()
+    }
+
+    /// Note how the last exchange with the source went; windows hear of
+    /// changes.
     fn set_health(&self, health: Health) {
         let mut current = self.health.lock().unwrap();
         if *current == health {
             return;
         }
-        eprintln!("pinholed: iCloud: {}", health.name());
+        eprintln!("pinholed: {}: {}", self.source().name(), health.name());
         *current = health;
         drop(current);
-        self.broadcast(health.event());
+        self.broadcast(health_event(health));
+    }
+
+    /// What an error from the source says, noted; the error code a request
+    /// it failed is answered with.
+    fn failed(&self, error: &anyhow::Error) -> &'static str {
+        let health = self.source().health(error);
+        self.set_health(health);
+        if health == Health::NeedsSignIn { "needs_sign_in" } else { "unavailable" }
     }
 
     /// A download worked: the network is back, though that says nothing
@@ -245,6 +208,7 @@ pub fn run(config: Config) -> Result<()> {
     if index.exists() {
         crate::db::open(&index).context("opening the library")?;
     }
+    eprintln!("pinholed: photos from {}", config.source.name());
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());
 
@@ -259,13 +223,13 @@ pub fn run(config: Config) -> Result<()> {
         config.settings.clone(),
     ));
     let shared = Arc::new(Shared {
+        source: RwLock::new(config.source.clone()),
         config,
         storage,
         lookups: Mutex::new(lookup_tx),
         downloads: Mutex::new(download_tx),
         waiting: Mutex::new(HashMap::new()),
         in_flight: AtomicUsize::new(0),
-        downloader: Mutex::new(None),
         listeners: Mutex::new(Vec::new()),
         sync_now: Mutex::new(sync_tx),
         streams: Streams::start()?,
@@ -338,7 +302,7 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     // A window that connects while something is wrong hears so at once.
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
-        let _ = writeln!(out.lock().unwrap(), "{}", health.event());
+        let _ = writeln!(out.lock().unwrap(), "{}", health_event(health));
     }
     // Opened when first needed: before pinhole-sync has built the library
     // there is none, and the connection must stay up regardless.
@@ -412,29 +376,30 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     let (Some(asset), Some(kind)) = (params["asset"].as_str(), params["kind"].as_str()) else {
         return reply.send(Err(("bad_request", "fetch needs asset and kind".into())));
     };
-    if !matches!(kind, "medium" | "full" | "original" | "video" | "live") {
+    let Some(want) = Want::parse(kind).filter(|w| *w != Want::Thumb) else {
         return reply.send(Err(("bad_request", format!("unknown kind {kind}"))));
-    }
+    };
 
     // The rendition that serves this kind, as the catalog chose it.
     let row = db.query_row(
-        "SELECT r.name, r.key, r.file_type, m.master_id, i.url, i.url_fetched_at FROM renditions r
-         LEFT JOIN icloud_assets m ON m.asset_id = r.asset_id
-         LEFT JOIN icloud_resources i ON i.asset_id = r.asset_id AND i.kind = r.name
-         WHERE r.asset_id = ?1 AND r.kind = ?2",
+        "SELECT name, key, coalesce(file_type, '') FROM renditions WHERE asset_id = ?1 AND kind = ?2",
         params![asset, kind],
-        |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?,
-                r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<i64>>(5)?))
-        },
+        |r| Ok(Stored { asset: asset.to_owned(), want, name: r.get(0)?, key: r.get(1)?, file_type: r.get(2)? }),
     );
-    let Ok((rendition, name, file_type, master, url, fetched)) = row else {
+    let Ok(stored) = row else {
         return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition"))));
     };
-    let master = master.unwrap_or_default();
-    let file_type = file_type.unwrap_or_default();
+    let (rendition, file_type) = (stored.name.clone(), stored.file_type.clone());
+    // On this computer already: served as it is.
+    if let Some(path) = shared.source().local(&stored) {
+        return reply.send(if path.exists() {
+            Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true}))
+        } else {
+            Err(("not_found", format!("{} is not there", path.display())))
+        });
+    }
     let relative = Path::new(kind).join(
-        thumb_path(&name).replacen("thumbs/", "", 1).replace(".jpg", &format!(".{}", extension(&file_type))),
+        thumb_path(&stored.key).replacen("thumbs/", "", 1).replace(".jpg", &format!(".{}", extension(&file_type))),
     );
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
@@ -443,7 +408,6 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     let path = shared.storage.cache().join(&relative);
     let info = json!({"path": path, "type": file_type, "rendition": rendition, "cached": true});
 
-    let streamable = matches!(kind, "video" | "live");
     let mut waiting = shared.waiting.lock().unwrap();
     if let Some((info, replies)) = waiting.get_mut(&path) {
         match shared.playable.lock().unwrap().get(&path) {
@@ -462,38 +426,19 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     shared.in_flight.fetch_add(1, Ordering::Relaxed);
     drop(waiting);
 
-    let fresh = fetched.is_some_and(|t| now_secs() - t < URL_FRESH_SECS);
-    let job = Job {
-        asset: asset.to_owned(),
-        master,
-        rendition,
-        path,
-        url: if fresh { url } else { None },
-        retried: false,
-        streamable,
-    };
-    let _ = shared.lookups.lock().unwrap().send(job);
+    let _ = shared.lookups.lock().unwrap().send(Job { stored, path, ticket: None, retried: false });
 }
 
-/// Owns the iCloud client. Gathers requests for a moment, looks up fresh
-/// links for all that need one in one go, and passes them to the downloads.
+/// Gathers requests for a moment and has the source get them all ready in
+/// one go (iCloud looks their links up together), then passes them to the
+/// downloads.
 fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
-    // Signed in at start: the provider takes a few seconds to check the
+    // Ready at start: iCloud's provider takes a few seconds to check the
     // session, which the first request should not have to wait for.
-    let mut client: Option<PhotosClient> = match ProcessProvider::spawn(shared.config.auth.clone(), None)
-        .and_then(|p| PhotosClient::new(Box::new(p)))
-    {
-        Ok(c) => {
-            *shared.downloader.lock().unwrap() = c.downloader().unhurried().ok();
-            eprintln!("pinholed: signed in as {}", c.session().apple_id);
-            Some(c)
-        }
-        Err(e) => {
-            eprintln!("pinholed: no session yet: {e:#}");
-            shared.set_health(Health::of(&e));
-            None
-        }
-    };
+    if let Err(e) = shared.source().start() {
+        eprintln!("pinholed: {} is not ready yet: {e:#}", shared.source().name());
+        shared.failed(&e);
+    }
     let mut db: Option<Connection> = None;
     let mut db_generation = 0;
     while let Ok(first) = rx.recv() {
@@ -505,136 +450,79 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                 Err(_) => break,
             }
         }
-
-        if client.is_none() {
-            match ProcessProvider::spawn(shared.config.auth.clone(), None)
-                .and_then(|p| PhotosClient::new(Box::new(p)))
-            {
-                Ok(c) => {
-                    *shared.downloader.lock().unwrap() = c.downloader().unhurried().ok();
-                    client = Some(c);
-                }
-                Err(e) => {
-                    let health = Health::of(&e);
-                    shared.set_health(health);
-                    let code = if health == Health::NeedsSignIn { "needs_sign_in" } else { "unavailable" };
-                    for job in batch {
-                        shared.finish(&job.path, Err((code, format!("{e:#}"))));
-                    }
-                    continue;
-                }
+        // The source may keep what it learns in the index (iCloud its fresh
+        // links), so the next request needs no lookup.
+        let generation = shared.storage.library_generation.load(Ordering::Relaxed);
+        if db.is_none() || generation != db_generation {
+            db_generation = generation;
+            db = crate::db::open(&shared.storage.library().join("library.sqlite")).ok();
+        }
+        let Some(db) = &db else {
+            for job in batch {
+                shared.finish(&job.path, Err(("not_found", "there is no library yet".into())));
             }
-        }
-
-        let (ready, stale): (Vec<Job>, Vec<Job>) = batch.into_iter().partition(|j| j.url.is_some());
-        for job in ready {
-            let _ = shared.downloads.lock().unwrap().send(job);
-        }
-        if stale.is_empty() {
             continue;
-        }
-        let names: Vec<&str> = stale.iter().flat_map(|j| [j.asset.as_str(), j.master.as_str()]).collect();
-        let records = match client.as_mut().expect("client").lookup(&names) {
-            Ok(r) => {
-                shared.set_health(Health::Fine);
-                r["records"].as_array().cloned().unwrap_or_default()
-            }
+        };
+        let stored: Vec<Stored> = batch.iter().map(|j| j.stored.clone()).collect();
+        let tickets = match shared.source().prepare(db, &stored) {
+            Ok(t) => t,
             Err(e) => {
-                let health = Health::of(&e);
-                shared.set_health(health);
-                // A rejected session is asked for again next time.
-                if health == Health::NeedsSignIn {
-                    client = None;
-                }
-                for job in stale {
-                    shared.finish(&job.path, Err(("unavailable", format!("looking up links: {e:#}"))));
+                let code = shared.failed(&e);
+                for job in batch {
+                    shared.finish(&job.path, Err((code, format!("{e:#}"))));
                 }
                 continue;
             }
         };
-        let (assets, _) = pair_records_with_leftovers(&records, false);
-        let by_id: HashMap<&str, &crate::icloud::records::CloudAsset> = assets.iter().map(|a| (a.id.as_str(), a)).collect();
-
-        // Fresh links go back into the index, so the next request for any
-        // rendition of these assets needs no lookup.
-        let generation = shared.storage.library_generation.load(Ordering::Relaxed);
-        if db.is_none() || generation != db_generation {
-            db_generation = generation;
-            db = db_for_writing(&shared.storage.library());
-        }
-        let now = now_secs();
-        for mut job in stale {
-            let url = by_id.get(job.asset.as_str()).and_then(|a| a.resource(&job.rendition)).and_then(|r| r.url.clone());
-            let Some(url) = url else {
-                shared.finish(&job.path, Err(("not_found", format!("iCloud has no {} for {}", job.rendition, job.asset))));
-                continue;
-            };
-            if let Some(db) = &db {
-                if let Some(asset) = by_id.get(job.asset.as_str()) {
-                    for r in &asset.resources {
-                        let _ = db.execute(
-                            "UPDATE icloud_resources SET url = ?3, url_fetched_at = ?4 WHERE asset_id = ?1 AND kind = ?2",
-                            params![job.asset, r.kind, r.url, now],
-                        );
-                    }
+        shared.set_health(Health::Fine);
+        for (mut job, ticket) in batch.into_iter().zip(tickets) {
+            match ticket {
+                Ok(ticket) => {
+                    job.ticket = Some(ticket);
+                    let _ = shared.downloads.lock().unwrap().send(job);
                 }
+                Err(FetchError::Failed(e)) => {
+                    let code = shared.failed(&e);
+                    shared.finish(&job.path, Err((code, format!("{e:#}"))))
+                }
+                Err(e) => shared.finish(&job.path, Err(("not_found", e.to_string()))),
             }
-            job.url = Some(url);
-            let _ = shared.downloads.lock().unwrap().send(job);
         }
     }
-}
-
-fn db_for_writing(library: &Path) -> Option<Connection> {
-    let db = Connection::open(library.join("library.sqlite")).ok()?;
-    let _ = db.busy_timeout(Duration::from_secs(5));
-    Some(db)
 }
 
 fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
     loop {
         let job = { rx.lock().unwrap().recv() };
         let Ok(job) = job else { return };
-        let downloader = shared.downloader.lock().unwrap().clone();
-        let Some(downloader) = downloader else {
-            shared.finish(&job.path, Err(("unavailable", "no iCloud session".into())));
-            continue;
-        };
-        match download(&shared, &downloader, &job) {
+        match download(&shared, &job) {
             Ok(()) => {
                 shared.reached();
                 shared.finish(&job.path, Ok(()))
             }
-            // An expired link: look it up again, once.
-            Err(Fetch::Expired) if !job.retried => {
+            // A stale ticket (an expired link): got ready again, once.
+            Err(FetchError::Expired) if !job.retried => {
                 let mut again = job.clone();
-                again.url = None;
+                again.ticket = None;
                 again.retried = true;
                 let _ = shared.lookups.lock().unwrap().send(again);
             }
-            Err(Fetch::Expired) => shared.finish(&job.path, Err(("unavailable", "the download link kept expiring".into()))),
-            Err(Fetch::Failed(e)) => shared.finish(&job.path, Err(("unavailable", e))),
+            Err(FetchError::Expired) => shared.finish(&job.path, Err(("unavailable", "the download link kept expiring".into()))),
+            Err(FetchError::NotFound(e)) => shared.finish(&job.path, Err(("not_found", e))),
+            Err(FetchError::Failed(e)) => {
+                let code = shared.failed(&e);
+                shared.finish(&job.path, Err((code, format!("{e:#}"))))
+            }
         }
     }
 }
 
-enum Fetch {
-    Expired,
-    Failed(String),
-}
-
-fn download(shared: &Shared, downloader: &Downloader, job: &Job) -> std::result::Result<(), Fetch> {
-    let url = job.url.as_deref().ok_or_else(|| Fetch::Failed("no link".into()))?;
-    let mut response = downloader.fetch(url, None, false).map_err(|e| Fetch::Failed(e.to_string()))?;
-    let status = response.status();
-    if matches!(status.as_u16(), 401 | 403 | 404 | 410) {
-        return Err(Fetch::Expired);
-    }
-    if !status.is_success() {
-        return Err(Fetch::Failed(format!("HTTP {status}")));
-    }
+fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
+    let source = shared.source();
+    let ticket = job.ticket.clone().ok_or_else(|| FetchError::Failed(anyhow!("not got ready")))?;
+    let mut body = source.open(&ticket, None)?;
     if let Some(dir) = job.path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| Fetch::Failed(e.to_string()))?;
+        std::fs::create_dir_all(dir).map_err(|e| FetchError::Failed(e.into()))?;
     }
     // Written beside the target and renamed: a reader never sees half a file.
     let part = job.path.with_extension("part");
@@ -642,21 +530,18 @@ fn download(shared: &Shared, downloader: &Downloader, job: &Job) -> std::result:
     let result = (|| -> std::io::Result<()> {
         // Readable too: a stream serves from this same handle.
         let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&part)?;
-        if job.streamable {
-            let file_type = shared.waiting.lock().unwrap().get(&job.path).map(|w| w.0["type"].as_str().unwrap_or("").to_owned());
-            let (url, s) = shared.streams.add(
-                file.try_clone()?,
-                response.content_length(),
-                &file_type.unwrap_or_default(),
-                job.url.clone().unwrap_or_default(),
-                downloader.clone(),
-            );
+        if job.stored.want.streamable() {
+            let (source, ticket) = (source.clone(), ticket.clone());
+            let ranged: crate::stream::Ranged = Box::new(move |start, end| {
+                source.open(&ticket, Some((start, end))).map(|b| b.reader).map_err(|e| anyhow!("{e}"))
+            });
+            let (url, s) = shared.streams.add(file.try_clone()?, body.length, &job.stored.file_type, ranged);
             shared.started(&job.path, &url);
             stream = Some(s);
         }
         let mut buf = vec![0u8; 256 << 10];
         loop {
-            let n = response.read(&mut buf)?;
+            let n = body.reader.read(&mut buf)?;
             if n == 0 {
                 break;
             }
@@ -673,39 +558,23 @@ fn download(shared: &Shared, downloader: &Downloader, job: &Job) -> std::result:
     }
     if let Err(e) = result {
         let _ = std::fs::remove_file(&part);
-        return Err(Fetch::Failed(e.to_string()));
+        return Err(FetchError::Failed(e.into()));
     }
     Ok(())
 }
 
-/// Follows iCloud's change feed: every `sync_every` seconds, or when a
-/// window asks, it applies what changed, fetches thumbnails for anything new,
+/// Follows the source's changes: every `sync_every` seconds, or when a
+/// window asks, it applies what changed (listing the whole library when
+/// there is nothing to follow from yet), makes thumbnails for anything new,
 /// and tells every window that the library changed (only when something it
-/// draws did). A change token iCloud no longer accepts means a full walk.
+/// draws did).
 fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
-    let mut client: Option<PhotosClient> = None;
     loop {
-        if client.is_none() {
-            match ProcessProvider::spawn(shared.config.auth.clone(), None).and_then(|p| PhotosClient::new(Box::new(p))) {
-                Ok(c) => client = Some(c),
-                Err(e) => {
-                    eprintln!("pinholed: sync: no session: {e:#}");
-                    shared.set_health(Health::of(&e));
-                }
-            }
-        }
-        if let Some(c) = client.as_mut() {
-            match sync_round(&shared, c) {
-                Ok(()) => shared.set_health(Health::Fine),
-                Err(e) => {
-                    eprintln!("pinholed: sync: {e:#}");
-                    let health = Health::of(&e);
-                    shared.set_health(health);
-                    // A rejected session is asked for again next round.
-                    if health == Health::NeedsSignIn {
-                        client = None;
-                    }
-                }
+        match sync_round(&shared) {
+            Ok(()) => shared.set_health(Health::Fine),
+            Err(e) => {
+                eprintln!("pinholed: sync: {e:#}");
+                shared.failed(&e);
             }
         }
         // Until the next round, or a window asking for one now.
@@ -718,25 +587,20 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
     }
 }
 
-fn sync_round(shared: &Shared, client: &mut PhotosClient) -> Result<()> {
+fn sync_round(shared: &Shared) -> Result<()> {
+    let source = shared.source();
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
+    std::fs::create_dir_all(&library)?;
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
-    let (added, removed, visible) = match crate::sync::apply_changes(client, &mut db, false) {
-        Ok(r) => (r.changes.added.len(), r.changes.removed.len(), r.changes.visible()),
-        Err(e) if e.downcast_ref::<crate::sync::TokenExpired>().is_some() => {
-            eprintln!("pinholed: sync: {e}; walking the whole library");
-            let r = crate::sync::walk(client, &mut db, 100, 4, false, &|_, _| {})?;
-            (r.assets as usize, r.removed, true)
-        }
-        Err(e) => return Err(e),
-    };
-    if !visible {
+    let report = crate::sync::catch_up(source.as_ref(), &mut db)?;
+    let (added, removed) = (report.changes.added.len(), report.changes.removed.len());
+    if !report.changes.visible() {
         return Ok(());
     }
     if added > 0 {
-        crate::sync::download_thumbs(client, &mut db, &library, 16, &|_, _| {})?;
+        crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|_, _| {})?;
     }
     let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
     eprintln!("pinholed: sync: library version {version}: {added} new, {removed} removed");

@@ -10,8 +10,8 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::auth::SessionProvider;
-use crate::session::Session;
+use crate::icloud::auth::SessionProvider;
+use crate::icloud::session::Session;
 
 pub const PRIMARY_ZONE: &str = "PrimarySync";
 
@@ -263,15 +263,6 @@ impl Downloader {
     pub fn unhurried(&self) -> Result<Downloader> {
         let http = Client::builder().connect_timeout(Duration::from_secs(30)).timeout(None).gzip(true).build()?;
         Ok(Downloader { http, session: self.session.clone() })
-    }
-
-    #[cfg(test)]
-    pub fn for_tests() -> Downloader {
-        let session: Session = serde_json::from_value(serde_json::json!({
-            "apple_id": "", "dsid": "", "services": {}, "params": {}, "headers": {}, "cookies": [], "validated_at": ""
-        }))
-        .unwrap();
-        Downloader { http: Client::new(), session }
     }
 
     /// GET a resource download URL, optionally with a byte range and with or

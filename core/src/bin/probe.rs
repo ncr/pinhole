@@ -11,9 +11,9 @@ use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rusqlite::Connection;
 
-use pinhole_core::auth::ProcessProvider;
-use pinhole_core::cloudkit::{PhotosClient, LIBRARY_COUNT};
-use pinhole_core::{db, sync};
+use pinhole_core::icloud::auth::ProcessProvider;
+use pinhole_core::icloud::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use pinhole_core::db;
 use pinhole_core::icloud::records::{pair_records, CloudAsset as Asset};
 
 #[derive(Parser)]
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     if let Some(dir) = db_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let provider = Box::new(ProcessProvider::spawn(cli.auth.clone().unwrap_or_else(pinhole_core::auth::default_provider), None)?);
+    let provider = Box::new(ProcessProvider::spawn(cli.auth.clone().unwrap_or_else(pinhole_core::icloud::auth::default_provider), None)?);
     let mut client = PhotosClient::new(provider)?;
 
     match cli.command {
@@ -173,17 +173,22 @@ fn page_size(client: &mut PhotosClient) -> Result<()> {
 
 fn walk(mut client: PhotosClient, db_path: &PathBuf, per_page: u32, raw: bool, parallel: usize) -> Result<()> {
     let mut conn = db::open(db_path)?;
-    let report = sync::walk(&mut client, &mut conn, per_page, parallel, raw, &|done, total| {
+    let mut index = db::Index::new(&mut conn);
+    let report = pinhole_core::icloud::walk::walk(&mut client, &mut index, per_page, parallel, raw, &|done, total| {
         if done % 4000 < per_page as u64 {
             eprintln!("{done:>7}/{total}");
         }
     })?;
+    let removed = index.remove_unseen()?;
+    if let Some(token) = &report.token {
+        db::set_meta(&conn, "change_token", token)?;
+    }
     let t = &report.traffic;
     println!("walked {} assets in {:.1}s ({:.0}/s) with {parallel} in flight; iCloud reports {}",
         report.assets, report.seconds, report.assets as f64 / report.seconds, report.reported);
     println!("requests {}  avg {:.0} ms  received {:.1} MB  retries {}  short pages {}",
         t.requests, t.time.as_millis() as f64 / t.requests.max(1) as f64, t.bytes as f64 / 1e6, t.retries, report.short_pages);
-    println!("split pairs repaired {}, still unpaired {}, removed {}", report.repaired, report.unpaired, report.removed);
+    println!("split pairs repaired {}, still unpaired {}, removed {}", report.repaired, report.unpaired, removed);
     let indexed: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
     println!("index now holds {indexed} assets");
     Ok(())

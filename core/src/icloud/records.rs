@@ -8,7 +8,7 @@ use anyhow::Result;
 use base64::Engine;
 use serde_json::Value;
 
-use crate::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use crate::icloud::cloudkit::PhotosClient;
 use crate::icloud::index::CANDIDATES;
 use crate::source::{Asset, Kind, Rendition, Want};
 
@@ -107,14 +107,6 @@ impl CloudAsset {
     }
 }
 
-pub trait PhotoSource {
-    /// Number of assets in the library.
-    fn count(&mut self) -> Result<u64>;
-    /// Assets from `start` on, oldest first, at most `limit` of them, plus
-    /// the change token iCloud reported with the page.
-    fn page(&mut self, start: u64, limit: u32) -> Result<Page>;
-}
-
 pub struct Page {
     pub assets: Vec<CloudAsset>,
     pub sync_token: Option<String>,
@@ -123,7 +115,7 @@ pub struct Page {
     pub records: usize,
     /// Records whose other half was not on this page. A page holds 200
     /// records, and an asset and its master can fall on either side of the
-    /// boundary; `sync::walk` pairs these up afterwards.
+    /// boundary; `walk::walk` pairs these up afterwards.
     pub leftovers: Vec<Value>,
 }
 
@@ -133,17 +125,16 @@ const RESOURCE_KINDS: &[&str] = &[
     "VidFull", "VidMed", "VidSmall",
 ];
 
-pub struct ICloudSource {
+/// Reads the library list a page at a time.
+pub struct Pager {
     pub client: PhotosClient,
     pub keep_raw: bool,
 }
 
-impl PhotoSource for ICloudSource {
-    fn count(&mut self) -> Result<u64> {
-        self.client.count(LIBRARY_COUNT)
-    }
-
-    fn page(&mut self, start: u64, limit: u32) -> Result<Page> {
+impl Pager {
+    /// Assets from `start` on, oldest first, at most `limit` of them, plus
+    /// the change token iCloud reported with the page.
+    pub fn page(&mut self, start: u64, limit: u32) -> Result<Page> {
         let response = self.client.list_page(start, limit * 2)?;
         let records = response["records"].as_array().cloned().unwrap_or_default();
         let (assets, leftovers) = pair_records_with_leftovers(&records, self.keep_raw);

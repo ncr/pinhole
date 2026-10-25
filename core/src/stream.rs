@@ -1,12 +1,12 @@
 //! Plays videos while they download. pinholed writes a video into its cache
 //! as usual, and meanwhile serves the part already written over HTTP on the
 //! loopback, so a player can start at once. A seek far past what has arrived
-//! (a QuickTime file that keeps its index at the end, say) is fetched from
-//! iCloud directly for that range; the download carries on regardless.
+//! (a QuickTime file that keeps its index at the end, say) is read from the
+//! source directly for that range; the download carries on regardless.
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Condvar, Mutex};
@@ -15,10 +15,11 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use rand::RngCore;
 
-use crate::cloudkit::Downloader;
+/// Reads bytes `start..=end` of the file from its source.
+pub type Ranged = Box<dyn Fn(u64, u64) -> Result<Box<dyn Read + Send>> + Send + Sync>;
 
 /// A read this far past the download waits for it rather than going to
-/// iCloud.
+/// the source.
 const AHEAD: u64 = 4 << 20;
 /// A stream nobody has read for this long is forgotten.
 const IDLE: Duration = Duration::from_secs(3600);
@@ -35,8 +36,7 @@ pub struct Stream {
     file: File,
     total: Option<u64>,
     content_type: &'static str,
-    url: String,
-    downloader: Downloader,
+    ranged: Ranged,
     progress: Mutex<(u64, State)>,
     grew: Condvar,
     used: Mutex<Instant>,
@@ -84,7 +84,7 @@ impl Streams {
     /// Make a file being downloaded readable. `file` is a handle on the part
     /// file, which keeps working after it is renamed into the cache. Returns
     /// the URL to play it from.
-    pub fn add(&self, file: File, total: Option<u64>, file_type: &str, url: String, downloader: Downloader) -> (String, Arc<Stream>) {
+    pub fn add(&self, file: File, total: Option<u64>, file_type: &str, ranged: Ranged) -> (String, Arc<Stream>) {
         let mut bytes = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut bytes);
         let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -92,8 +92,7 @@ impl Streams {
             file,
             total,
             content_type: content_type(file_type),
-            url,
-            downloader,
+            ranged,
             progress: Mutex::new((0, State::Running)),
             grew: Condvar::new(),
             used: Mutex::new(Instant::now()),
@@ -135,7 +134,7 @@ impl Streams {
         *stream.used.lock().unwrap() = Instant::now();
 
         let Some(total) = stream.total else {
-            // No length from iCloud: the whole file, start to end, unseekable.
+            // No length from the source: the whole file, start to end, unseekable.
             respond(&mut out, "200 OK", &[("Content-Type", stream.content_type.into())])?;
             return if method == "GET" { copy_growing(&stream, 0, u64::MAX, &mut out) } else { Ok(()) };
         };
@@ -158,9 +157,9 @@ impl Streams {
 
         let (have, state) = *stream.progress.lock().unwrap();
         if state == State::Running && start > have + AHEAD {
-            // Far ahead of the download: from iCloud, for this range only.
-            let response = stream.downloader.fetch(&stream.url, Some(&format!("bytes={start}-{end}")), false);
-            let Some(mut response) = response.ok().filter(|r| r.status().as_u16() == 206) else {
+            // Far ahead of the download: from the source, for this range
+            // only.
+            let Ok(mut response) = (stream.ranged)(start, end) else {
                 return respond(&mut out, "502 Bad Gateway", &[]);
             };
             respond(&mut out, status, &headers)?;
@@ -245,7 +244,6 @@ fn content_type(file_type: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
 
     #[test]
     fn ranges() {
@@ -264,8 +262,8 @@ mod tests {
         let path = dir.join("v.part");
         let mut writer = File::options().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
         let streams = Streams::start().unwrap();
-        let downloader = Downloader::for_tests();
-        let (url, stream) = streams.add(writer.try_clone().unwrap(), Some(10), "public.mpeg-4", String::new(), downloader);
+        let ranged: Ranged = Box::new(|_, _| Err(anyhow::anyhow!("not in this test")));
+        let (url, stream) = streams.add(writer.try_clone().unwrap(), Some(10), "public.mpeg-4", ranged);
 
         let port_and_token = url.trim_start_matches("http://127.0.0.1:").to_owned();
         let (port, token) = port_and_token.split_once('/').unwrap();

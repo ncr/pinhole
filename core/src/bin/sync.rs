@@ -1,4 +1,5 @@
-//! pinhole-sync: bring the local library up to date with iCloud. The index
+//! pinhole-sync: bring the local library up to date with its source (the
+//! one the settings name, iCloud unless they name another). The index
 //! first (every asset's metadata), then the thumbnails the grid shows. Both
 //! steps pick up where they left off and only fetch what is missing.
 
@@ -6,16 +7,15 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
-use pinhole_core::auth::ProcessProvider;
-use pinhole_core::cloudkit::PhotosClient;
-use pinhole_core::{db, sync};
+use pinhole_core::icloud::auth::ProcessProvider;
+use pinhole_core::{db, storage, sync};
 
 #[derive(Parser)]
 struct Cli {
-    /// The sign-in provider to run (see auth/PROTOCOL.md).
+    /// The sign-in provider to run, for iCloud (see auth/PROTOCOL.md).
     #[arg(long)]
     auth: Option<PathBuf>,
     /// The library directory: library.sqlite and thumbs/.
@@ -28,11 +28,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Read every asset's metadata into the index.
-    Index {
-        #[arg(long, default_value_t = 4)]
-        parallel: usize,
-    },
-    /// Download the thumbnails the index does not have yet.
+    Index,
+    /// Make the thumbnails the index does not have yet.
     Thumbs {
         #[arg(long, default_value_t = 64)]
         parallel: usize,
@@ -47,8 +44,8 @@ enum Cmd {
         #[arg(long, value_name = "APPLE_ID")]
         from_icloudpd: Option<String>,
     },
-    /// Apply what changed in iCloud since the last walk or sync, then fetch
-    /// thumbnails for anything new.
+    /// Apply what changed in the source since the last listing or sync,
+    /// then make thumbnails for anything new.
     Changes {
         /// Only report what would change.
         #[arg(long)]
@@ -58,32 +55,38 @@ enum Cmd {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    // In the folder the window keeps everything in (storage.rs).
-    let library = cli.library.unwrap_or_else(|| pinhole_core::storage::location().join("library"));
-    let auth = cli.auth.unwrap_or_else(pinhole_core::auth::default_provider);
+    let auth = cli.auth.unwrap_or_else(pinhole_core::icloud::auth::default_provider);
+    let settings = storage::read_settings(&storage::settings_path());
+    let source = sync::source_for(settings.source.as_ref(), auth.clone())?;
     if let Cmd::SignIn { from_icloudpd } = &cli.command {
+        if !source.needs_sign_in() {
+            bail!("{} needs no signing in", source.name());
+        }
         return sign_in(auth, from_icloudpd.as_deref());
     }
+    // In the folder the window keeps everything in (storage.rs), the
+    // source's own library.
+    let library = cli.library.unwrap_or_else(|| storage::library_for(&storage::location(), source.as_ref()));
     std::fs::create_dir_all(&library)?;
     let mut conn = db::open(&library.join("library.sqlite"))?;
-    let mut client = PhotosClient::new(Box::new(ProcessProvider::spawn(auth, None)?))?;
+    let source = source.as_ref();
 
     let (index, thumbs) = match cli.command {
-        Cmd::Index { parallel } => (Some(parallel), None),
-        Cmd::Thumbs { parallel } => (None, Some(parallel)),
-        Cmd::All => (Some(4), Some(64)),
+        Cmd::Index => (true, None),
+        Cmd::Thumbs { parallel } => (false, Some(parallel)),
+        Cmd::All => (true, Some(64)),
         Cmd::SignIn { .. } => unreachable!("handled above"),
         Cmd::Changes { dry_run } => {
-            let report = sync::apply_changes(&mut client, &mut conn, dry_run)?;
-            let (records, skipped, r) = (report.records, report.skipped, report.changes);
+            let report = sync::follow(source, &mut conn, dry_run)?;
+            let r = &report.changes;
             let name = |id: &String| -> String {
                 conn.query_row("SELECT filename FROM assets WHERE id = ?1", [id], |r| r.get::<_, Option<String>>(0))
                     .ok()
                     .flatten()
                     .unwrap_or_else(|| id.clone())
             };
-            println!("{}{} records: {} new, {} changed, {} removed, {} skipped",
-                if dry_run { "dry run: " } else { "" }, records, r.added.len(), r.updated.len(), r.removed.len(), skipped);
+            println!("{}{}: {} new, {} changed, {} removed",
+                if dry_run { "dry run: " } else { "" }, report.summary, r.added.len(), r.updated.len(), r.removed.len());
             if !r.reasons.is_empty() {
                 println!("  changed, by what: {:?}", r.reasons);
             }
@@ -96,35 +99,35 @@ fn main() -> Result<()> {
             if dry_run || r.added.is_empty() {
                 return Ok(());
             }
-            (None, Some(16))
+            (false, Some(16))
         }
     };
 
-    if let Some(parallel) = index {
+    if index {
         let shown = AtomicUsize::new(0);
-        let r = sync::walk(&mut client, &mut conn, 100, parallel, false, &|done, total| {
+        let r = sync::list(source, &mut conn, &|done, total| {
             // A line every 5,000 assets.
             let bucket = (done / 5000) as usize;
             if shown.swap(bucket, Ordering::Relaxed) != bucket {
                 eprintln!("index {done:>7}/{total}");
             }
         })?;
-        println!("index: {} assets in {:.0}s; {} split pairs repaired, {} unpaired, {} removed; iCloud reports {}",
-            r.assets + r.repaired as u64, r.seconds, r.repaired, r.unpaired, r.removed, r.reported);
+        let total: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
+        println!("index: {total} assets from {} in {:.0}s; {} new, {} removed; {}",
+            source.name(), r.seconds, r.changes.added.len(), r.changes.removed.len(), r.summary);
     }
 
     if let Some(parallel) = thumbs {
         let started = Instant::now();
         let shown = AtomicUsize::new(0);
-        let r = sync::download_thumbs(&mut client, &mut conn, &library, parallel, &|done, total| {
+        let r = sync::make_thumbs(source, &mut conn, &library, parallel, &|done, total| {
             let bucket = done / 5000;
             if shown.swap(bucket, Ordering::Relaxed) != bucket {
                 eprintln!("thumbs {done:>7}/{total}  {:.0}/s", done as f64 / started.elapsed().as_secs_f64());
             }
         })?;
-        println!("thumbs: {} of {} downloaded in {:.0}s ({:.0}/s, {:.2} GB); {} links refreshed, {} failed",
-            r.downloaded, r.wanted, r.seconds, r.downloaded as f64 / r.seconds.max(1e-3), r.bytes as f64 / 1e9,
-            r.refreshed, r.failed);
+        println!("thumbs: {} of {} made in {:.0}s ({:.0}/s, {:.2} GB fetched); {} failed",
+            r.made, r.wanted, r.seconds, r.made as f64 / r.seconds.max(1e-3), r.bytes as f64 / 1e9, r.failed);
     }
 
     let (total, with_thumbs): (i64, i64) = conn.query_row(
