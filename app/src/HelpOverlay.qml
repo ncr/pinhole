@@ -45,6 +45,7 @@ Item {
             ["←  →", qsTr("Previous, next")],
             [qsTr("Carousel"), qsTr("Click or drag to move through the library")],
             [qsTr("Double-click"), qsTr("Back to the library")],
+            [qsTr("Swipe up or down"), qsTr("Back to the library, with two fingers")],
             [qsTr("Pinch in"), qsTr("Back to the library")],
             [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
         ] },

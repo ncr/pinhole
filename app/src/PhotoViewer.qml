@@ -27,6 +27,10 @@ Item {
     // The carousel's band along the bottom; photos fit the area above it.
     readonly property real stripHeight: 60
     readonly property real areaHeight: Math.max(1, height - stripHeight)
+    // Dragged up or down to close: how far along, 0 to 1, and what the
+    // background and controls keep of their opacity meanwhile.
+    readonly property real dismissed: Math.min(1, Math.abs(viewer.dismiss) / Math.max(1, areaHeight * 0.5))
+    readonly property real chrome: 1 - dismissed
     readonly property real fitWidth: Math.min(width, areaHeight * viewer.aspect)
     readonly property real fitHeight: fitWidth / Math.max(0.01, viewer.aspect)
     onWidthChanged: viewer.setViewport(width, areaHeight)
@@ -92,7 +96,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "black"
-        opacity: root.progress
+        opacity: root.progress * root.chrome
     }
 
     // The photos beside the shown one, two each side, where the row puts
@@ -110,6 +114,7 @@ Item {
             x: centre - width / 2
             y: (root.areaHeight - height) / 2
             visible: root.progress === 1 && at >= 0 && at < viewer.count && x < root.width && x + width > 0
+            opacity: root.chrome
             Image {
                 anchors.fill: parent
                 source: parent.visible ? viewer.thumbnailAt(parent.at) : ""
@@ -132,7 +137,9 @@ Item {
         readonly property real targetWidth: root.fitWidth * viewer.zoom
         readonly property real targetHeight: root.fitHeight * viewer.zoom
         x: root.lerp(root.cell.x, root.width / 2 + viewer.offset + viewer.panX - targetWidth / 2, root.progress)
-        y: root.lerp(root.cell.y, root.areaHeight / 2 + viewer.panY - targetHeight / 2, root.progress)
+        y: root.lerp(root.cell.y, root.areaHeight / 2 + viewer.panY + viewer.dismiss - targetHeight / 2, root.progress)
+        // Shrinking a little as it is dragged away, as in Photos.
+        scale: 1 - 0.25 * root.dismissed * root.progress
         width: root.lerp(root.cell.width, targetWidth, root.progress)
         height: root.lerp(root.cell.height, targetHeight, root.progress)
         clip: true
@@ -289,7 +296,7 @@ Item {
         anchors.top: parent.top
         anchors.margins: 16
         spacing: 4
-        opacity: root.progress
+        opacity: root.progress * root.chrome
         Text {
             text: viewer.title
             color: "white"
@@ -312,7 +319,7 @@ Item {
         anchors.top: parent.top
         anchors.margins: 16
         spacing: 8
-        opacity: root.progress
+        opacity: root.progress * root.chrome
         Text {
             visible: viewer.favorite
             text: "♥"
@@ -378,7 +385,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: carousel.top
         height: 56
-        opacity: root.progress
+        opacity: root.progress * root.chrome
         readonly property bool active: seekHover.hovered || seekArea.pressed
         HoverHandler { id: seekHover }
 
@@ -463,7 +470,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: root.stripHeight
-        opacity: root.progress
+        opacity: root.progress * root.chrome
         visible: root.progress > 0
         clip: true
         readonly property real cell: 38

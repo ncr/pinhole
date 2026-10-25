@@ -37,6 +37,8 @@ class Viewer : public QObject {
     Q_PROPERTY(qreal zoom READ zoom NOTIFY motionChanged)
     Q_PROPERTY(qreal panX READ panX NOTIFY motionChanged)
     Q_PROPERTY(qreal panY READ panY NOTIFY motionChanged)
+    // Dragged up or down to close: how far.
+    Q_PROPERTY(qreal dismiss READ dismiss NOTIFY motionChanged)
     Q_PROPERTY(qreal pageWidth READ pageWidth NOTIFY motionChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY motionChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
@@ -69,6 +71,7 @@ public:
     qreal zoom() const { return m_motion.zoom(); }
     qreal panX() const { return m_motion.panX(); }
     qreal panY() const { return m_motion.panY(); }
+    qreal dismiss() const { return m_motion.dismiss(); }
     qreal pageWidth() const { return m_motion.pageWidth(); }
     bool animating() const { return m_motion.animating(); }
     bool zoomed() const { return m_motion.zoomed(); }

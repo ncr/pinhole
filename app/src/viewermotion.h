@@ -3,6 +3,7 @@
 #include "scrollphysics.h"
 
 #include <deque>
+#include <utility>
 
 // How the viewer moves, as in Photos: the photos lie side by side and the
 // row follows the fingers, a swipe that goes far or fast enough lands on the
@@ -77,12 +78,16 @@ public:
     double panX() const { return m_panX; }
     double panY() const { return m_panY; }
     double pageWidth() const { return m_width + kGap; }
+    // A vertical swipe on an unzoomed photo drags it up or down (this far),
+    // to close the viewer; takeClose() says once when it should.
+    double dismiss() const { return m_dismiss; }
+    bool takeClose() { return std::exchange(m_close, false); }
 
     // The most a photo zooms, relative to fitted.
     static constexpr double kMaxZoom = 8;
 
 private:
-    enum class Gesture { None, Undecided, Page, Pan, Ignore };
+    enum class Gesture { None, Undecided, Page, Pan, Dismiss };
     // How far a row stretched past an end shows: a third, softening.
     double stretched(double raw) const;
     void clampPanTargets();
@@ -113,6 +118,9 @@ private:
     };
     std::deque<Sample> m_samples;
     double m_lastMove = 0;
+    double m_dismiss = 0, m_dismissVelocity = 0;
+    std::deque<Sample> m_dismissSamples;
+    bool m_close = false;
 
     double m_zoom = 1, m_zoomTarget = 1;
     double m_panX = 0, m_panY = 0, m_panTargetX = 0, m_panTargetY = 0;

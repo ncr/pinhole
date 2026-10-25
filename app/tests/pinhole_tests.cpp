@@ -285,6 +285,56 @@ private slots:
         QCOMPARE(m.stripOffset(), 0.0);
     }
 
+    // Fingers moving `perEvent` px up or down every 8 ms, `events` times,
+    // lifted `pause` ms after the last.
+    static void swipeDown(ViewerMotion &m, double perEvent, int events, double pause = 8) {
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < events; ++i)
+            m.move(t += 8, 0, perEvent);
+        QCOMPARE(m.end(t + pause), 0);
+    }
+
+    void aSmallDragDownSpringsBack() {
+        ViewerMotion m = viewerShowing();
+        swipeDown(m, 2, 10, 200); // 32 px, then still
+        QVERIFY(m.dismiss() > 0);
+        QVERIFY(!m.takeClose());
+        settle(m);
+        QCOMPARE(m.dismiss(), 0.0);
+    }
+
+    void aLongDragOrAFlickUpOrDownCloses() {
+        ViewerMotion far = viewerShowing();
+        swipeDown(far, 3, 40, 200); // 192 px of 800, then still
+        QVERIFY(far.takeClose());
+        ViewerMotion flick = viewerShowing();
+        swipeDown(flick, -5, 6); // short, fast, upward
+        QVERIFY(flick.takeClose());
+    }
+
+    void aFlickBackTowardTheMiddleDoesNotClose() {
+        ViewerMotion m = viewerShowing();
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < 10; ++i)
+            m.move(t += 8, 0, 4); // down 64 px
+        for (int i = 0; i < 4; ++i)
+            m.move(t += 8, 0, -5); // and quickly back up
+        m.end(t += 8);
+        QVERIFY(!m.takeClose());
+    }
+
+    void aZoomedPhotoPansUpAndDownInstead() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(3, 500, 400);
+        settle(m);
+        swipeDown(m, 3, 40, 200);
+        QCOMPARE(m.dismiss(), 0.0);
+        QVERIFY(!m.takeClose());
+        QVERIFY(m.panY() > 50);
+    }
+
     void theLastPhotoStretchesInsteadOfPaging() {
         ViewerMotion m = viewerShowing(true, false);
         QCOMPARE(swipe(m, -10, 60), 0); // 1200 px of finger movement

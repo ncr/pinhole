@@ -24,6 +24,11 @@ constexpr double kSpring = 14;
 constexpr double kEase = 16;
 // Pinched below this share of fitted on release: close.
 constexpr double kCloseBelow = 0.7;
+// Swiped up or down: the photo follows like this, and closing takes a drag
+// past this share of the window's height, or a flick this fast (px/s).
+constexpr double kDismissGain = 1.6;
+constexpr double kDismissShare = 0.12;
+constexpr double kDismissSpeed = 700;
 
 // A zoomed photo's coast is short: UIKit's "fast" deceleration, which
 // image viewers use, about a fifth of the scrolling coast's distance and
@@ -106,7 +111,13 @@ void ViewerMotion::move(double t, double dx, double dy) {
             m_gesture = Gesture::Page;
             dx = m_decideX;
         } else {
-            m_gesture = Gesture::Ignore;
+            // Up or down: dragging the photo away, to close.
+            m_gesture = Gesture::Dismiss;
+            m_dismissSamples.clear();
+            m_dismissVelocity = 0;
+            dy = m_decideY;
+            m_dismiss += dy * kDismissGain;
+            m_dismissSamples.push_back({t, m_dismiss});
             return;
         }
         [[fallthrough]];
@@ -125,8 +136,14 @@ void ViewerMotion::move(double t, double dx, double dy) {
         m_panX = m_panTargetX = m_panXPhysics.position();
         m_panY = m_panTargetY = m_panYPhysics.position();
         return;
+    case Gesture::Dismiss:
+        m_dismiss += dy * kDismissGain;
+        m_dismissSamples.push_back({t, m_dismiss});
+        while (m_dismissSamples.size() > 2 && t - m_dismissSamples.front().t > 100)
+            m_dismissSamples.pop_front();
+        m_lastMove = t;
+        return;
     case Gesture::None:
-    case Gesture::Ignore:
         return;
     }
 }
@@ -134,6 +151,22 @@ void ViewerMotion::move(double t, double dx, double dy) {
 int ViewerMotion::end(double t) {
     const Gesture was = m_gesture;
     m_gesture = Gesture::None;
+    if (was == Gesture::Dismiss) {
+        double v = 0;
+        if (m_dismissSamples.size() >= 2 && t - m_lastMove < 60) {
+            const Sample &a = m_dismissSamples.front(), &b = m_dismissSamples.back();
+            if (b.t > a.t)
+                v = (b.x - a.x) / (b.t - a.t) * 1000;
+        }
+        // Far enough, or flicked on the way out (not back): close. Else it
+        // springs back (advance()).
+        const bool outward = (m_dismiss > 0 && v > 0) || (m_dismiss < 0 && v < 0);
+        if (std::abs(m_dismiss) > kDismissShare * m_height || (outward && std::abs(v) > kDismissSpeed))
+            m_close = true;
+        else
+            m_dismissVelocity = v;
+        return 0;
+    }
     if (was == Gesture::Pan) {
         // Thrown, it coasts; past an edge it springs back (advance()).
         m_panXPhysics.end(t);
@@ -214,6 +247,8 @@ void ViewerMotion::stepped(int delta, int rowDelta) {
 
 void ViewerMotion::reset() {
     stopPanPhysics();
+    m_dismiss = m_dismissVelocity = 0;
+    m_close = false;
     m_stripExtra = m_stripExtraStart = m_offsetStart = 0;
     m_gesture = Gesture::None;
     m_offset = m_raw = m_velocity = 0;
@@ -311,8 +346,9 @@ void ViewerMotion::pan(double dx, double dy) {
 
 bool ViewerMotion::animating() const {
     const bool row = m_gesture != Gesture::Page && (m_offset != 0 || m_velocity != 0);
+    const bool dismiss = m_gesture != Gesture::Dismiss && !m_close && m_dismiss != 0;
     const bool zoom = !m_holding && (m_zoom != m_zoomTarget || m_panX != m_panTargetX || m_panY != m_panTargetY);
-    return row || zoom || panCoasting();
+    return row || zoom || dismiss || panCoasting();
 }
 
 void ViewerMotion::advance(double dt) {
@@ -330,6 +366,18 @@ void ViewerMotion::advance(double dt) {
         }
         m_raw = m_offset;
         m_stripExtra = m_offsetStart != 0 ? m_stripExtraStart * m_offset / m_offsetStart : 0;
+    }
+    // Let go short of closing: back into place, as the row springs.
+    if (m_gesture != Gesture::Dismiss && !m_close && m_dismiss != 0) {
+        const double before = m_dismiss;
+        const double a = -kSpring * kSpring * m_dismiss - 2 * kSpring * m_dismissVelocity;
+        m_dismissVelocity += a * dt;
+        m_dismiss += m_dismissVelocity * dt;
+        if ((before > 0 && m_dismiss < 0) || (before < 0 && m_dismiss > 0) ||
+            (std::abs(m_dismiss) < 0.5 && std::abs(m_dismissVelocity) < 20)) {
+            m_dismiss = 0;
+            m_dismissVelocity = 0;
+        }
     }
     if (panCoasting() && !m_pinching) {
         // Coasting, or springing back from an edge, within the edges of the

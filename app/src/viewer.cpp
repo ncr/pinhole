@@ -137,6 +137,8 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     case Qt::ScrollEnd:
         if (const int delta = m_motion.end(t))
             step(delta);
+        if (m_motion.takeClose())
+            emit closeRequested();
         break;
     }
     emit motionChanged();
