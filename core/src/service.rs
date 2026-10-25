@@ -2,7 +2,7 @@
 //! from its cache or from iCloud. See docs/service.md.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use crate::auth::{ProcessProvider, ProviderError};
 use crate::cloudkit::{Downloader, PhotosClient};
 use crate::source::pair_records_with_leftovers;
+use crate::stream::Streams;
 use crate::sync::{now_secs, thumb_path};
 
 /// A link younger than this is used as is; older ones are looked up again.
@@ -42,6 +43,8 @@ pub struct Config {
 struct Reply {
     id: Value,
     out: Arc<Mutex<UnixStream>>,
+    /// Answer as soon as the download starts, with a URL that plays it.
+    stream: bool,
 }
 
 impl Reply {
@@ -66,6 +69,8 @@ struct Job {
     path: PathBuf,
     url: Option<String>,
     retried: bool,
+    /// A video: readable over HTTP while it downloads.
+    streamable: bool,
 }
 
 struct Shared {
@@ -81,6 +86,9 @@ struct Shared {
     listeners: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
     /// Wakes the sync thread before its next round is due.
     sync_now: Mutex<mpsc::Sender<()>>,
+    streams: Arc<Streams>,
+    /// The play URL of each video downloading now, by its cache path.
+    playable: Mutex<HashMap<PathBuf, String>>,
 }
 
 impl Shared {
@@ -95,7 +103,25 @@ impl Shared {
 }
 
 impl Shared {
+    /// A video started downloading: those who asked to stream it get its
+    /// play URL now; the rest wait for the file.
+    fn started(&self, path: &Path, url: &str) {
+        self.playable.lock().unwrap().insert(path.to_owned(), url.to_owned());
+        let mut waiting = self.waiting.lock().unwrap();
+        let Some((info, replies)) = waiting.get_mut(path) else { return };
+        let mut info = info.clone();
+        info["stream"] = json!(url);
+        for reply in std::mem::take(replies) {
+            if reply.stream {
+                reply.send(Ok(info.clone()));
+            } else {
+                replies.push(reply);
+            }
+        }
+    }
+
     fn finish(&self, path: &Path, result: std::result::Result<(), (&str, String)>) {
+        self.playable.lock().unwrap().remove(path);
         let Some((info, replies)) = self.waiting.lock().unwrap().remove(path) else { return };
         self.in_flight.fetch_sub(1, Ordering::Relaxed);
         for reply in replies {
@@ -155,6 +181,8 @@ pub fn run(config: Config) -> Result<()> {
         downloader: Mutex::new(None),
         listeners: Mutex::new(Vec::new()),
         sync_now: Mutex::new(sync_tx),
+        streams: Streams::start()?,
+        playable: Mutex::new(HashMap::new()),
     });
 
     {
@@ -218,11 +246,12 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
         let request: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(_) => {
-                Reply { id: Value::Null, out: out.clone() }.send(Err(("bad_request", "not JSON".into())));
+                Reply { id: Value::Null, out: out.clone(), stream: false }.send(Err(("bad_request", "not JSON".into())));
                 continue;
             }
         };
-        let reply = Reply { id: request["id"].clone(), out: out.clone() };
+        let stream = request["params"]["stream"].as_bool() == Some(true);
+        let reply = Reply { id: request["id"].clone(), out: out.clone(), stream };
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
             Some("sync") => {
@@ -294,9 +323,17 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
         return reply.send(Ok(info));
     }
 
+    let streamable = matches!(kind, "video" | "live");
     let mut waiting = shared.waiting.lock().unwrap();
-    if let Some((_, replies)) = waiting.get_mut(&path) {
-        replies.push(reply);
+    if let Some((info, replies)) = waiting.get_mut(&path) {
+        match shared.playable.lock().unwrap().get(&path) {
+            Some(url) if reply.stream => {
+                let mut info = info.clone();
+                info["stream"] = json!(url);
+                reply.send(Ok(info));
+            }
+            _ => replies.push(reply),
+        }
         return;
     }
     let mut info = info;
@@ -313,6 +350,7 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
         path,
         url: if fresh { url } else { None },
         retried: false,
+        streamable,
     };
     let _ = shared.lookups.lock().unwrap().send(job);
 }
@@ -326,7 +364,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
         .and_then(|p| PhotosClient::new(Box::new(p)))
     {
         Ok(c) => {
-            *shared.downloader.lock().unwrap() = Some(c.downloader());
+            *shared.downloader.lock().unwrap() = c.downloader().unhurried().ok();
             eprintln!("pinholed: signed in as {}", c.session().apple_id);
             Some(c)
         }
@@ -351,7 +389,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                 .and_then(|p| PhotosClient::new(Box::new(p)))
             {
                 Ok(c) => {
-                    *shared.downloader.lock().unwrap() = Some(c.downloader());
+                    *shared.downloader.lock().unwrap() = c.downloader().unhurried().ok();
                     client = Some(c);
                 }
                 Err(e) => {
@@ -428,7 +466,7 @@ fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
             shared.finish(&job.path, Err(("unavailable", "no iCloud session".into())));
             continue;
         };
-        match download(&downloader, &job) {
+        match download(&shared, &downloader, &job) {
             Ok(()) => shared.finish(&job.path, Ok(())),
             // An expired link: look it up again, once.
             Err(Fetch::Expired) if !job.retried => {
@@ -448,7 +486,7 @@ enum Fetch {
     Failed(String),
 }
 
-fn download(downloader: &Downloader, job: &Job) -> std::result::Result<(), Fetch> {
+fn download(shared: &Shared, downloader: &Downloader, job: &Job) -> std::result::Result<(), Fetch> {
     let url = job.url.as_deref().ok_or_else(|| Fetch::Failed("no link".into()))?;
     let mut response = downloader.fetch(url, None, false).map_err(|e| Fetch::Failed(e.to_string()))?;
     let status = response.status();
@@ -463,12 +501,39 @@ fn download(downloader: &Downloader, job: &Job) -> std::result::Result<(), Fetch
     }
     // Written beside the target and renamed: a reader never sees half a file.
     let part = job.path.with_extension("part");
+    let mut stream = None;
     let result = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&part)?;
-        std::io::copy(&mut response, &mut file)?;
+        // Readable too: a stream serves from this same handle.
+        let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&part)?;
+        if job.streamable {
+            let file_type = shared.waiting.lock().unwrap().get(&job.path).map(|w| w.0["type"].as_str().unwrap_or("").to_owned());
+            let (url, s) = shared.streams.add(
+                file.try_clone()?,
+                response.content_length(),
+                &file_type.unwrap_or_default(),
+                job.url.clone().unwrap_or_default(),
+                downloader.clone(),
+            );
+            shared.started(&job.path, &url);
+            stream = Some(s);
+        }
+        let mut buf = vec![0u8; 256 << 10];
+        loop {
+            let n = response.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])?;
+            if let Some(s) = &stream {
+                s.advance(n as u64);
+            }
+        }
         file.sync_data()?;
         std::fs::rename(&part, &job.path)
     })();
+    if let Some(s) = &stream {
+        s.finish(result.is_ok());
+    }
     if let Err(e) = result {
         let _ = std::fs::remove_file(&part);
         return Err(Fetch::Failed(e.to_string()));

@@ -13,6 +13,9 @@
 #include <QMimeData>
 #include <QProcess>
 #include <QElapsedTimer>
+#include <QMediaPlayer>
+#include <QVideoFrame>
+#include <QVideoSink>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTimer>
@@ -51,6 +54,46 @@ struct Case {
 
 } // namespace
 
+// Plays `source` as the viewer would and reports when the first frame is
+// decoded, then the same after seeking to the middle.
+static void playFirstFrame(const QUrl &source, const char *name, std::shared_ptr<QElapsedTimer> clock,
+                           std::function<void()> done) {
+    auto *player = new QMediaPlayer;
+    auto *sink = new QVideoSink(player);
+    player->setVideoSink(sink);
+    auto seeked = std::make_shared<bool>(false);
+    auto seekClock = std::make_shared<QElapsedTimer>();
+    QObject::connect(sink, &QVideoSink::videoFrameChanged, player, [=](const QVideoFrame &frame) {
+        if (!frame.isValid())
+            return;
+        if (!*seeked) {
+            std::printf("selftest: %-11s first frame %dx%d after %5lld ms\n", name, frame.width(), frame.height(),
+                        clock->elapsed());
+            std::fflush(stdout);
+            *seeked = true;
+            seekClock->start();
+            player->setPosition(player->duration() / 2);
+            return;
+        }
+        if (frame.startTime() / 1000 < player->duration() / 2 - 1000)
+            return; // still a frame from before the seek
+        std::printf("selftest: %-11s frame at %llds after seeking, %lld ms\n", name,
+                    (long long)(frame.startTime() / 1000000), seekClock->elapsed());
+        std::fflush(stdout);
+        player->stop();
+        player->deleteLater();
+        done();
+    });
+    QObject::connect(player, &QMediaPlayer::errorOccurred, player, [=](QMediaPlayer::Error, const QString &message) {
+        std::printf("selftest: %-11s does not play: %s\n", name, qPrintable(message));
+        std::fflush(stdout);
+        player->deleteLater();
+        done();
+    });
+    player->setSource(source);
+    player->play();
+}
+
 // Opens each kind of asset in the viewer, as a person would, and reports
 // how long each stage took to arrive and whether the files decode.
 void runViewerSelfTest(const Library &library, Viewer &viewer) {
@@ -58,6 +101,7 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         {"HEIC photo", "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.heic') AND NOT a.is_live"},
         {"JPEG photo", "EXISTS (SELECT 1 FROM resources r WHERE r.asset_id = a.id AND r.kind = 'Original' AND r.file_type = 'public.jpeg')"},
         {"video", "a.is_video AND a.duration < 60"},
+        {"long video", "a.is_video AND a.duration > 300"},
         {"Live Photo", "a.is_live", true},
     };
     auto next = std::make_shared<std::function<void(int)>>();
@@ -106,11 +150,11 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
                     finish();
             }
         }));
-        connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, finish] {
+        connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, clock, finish] {
             if (viewer.videoSource().isEmpty())
                 return;
-            report(c.name, "video", QString());
-            finish();
+            report(c.name, viewer.videoSource().isLocalFile() ? "file" : "stream", QString());
+            playFirstFrame(viewer.videoSource(), c.name, clock, finish);
         }));
         connections->append(QObject::connect(&viewer, &Viewer::liveChanged, &viewer, [&viewer, c, report, finish] {
             if (viewer.liveSource().isEmpty())

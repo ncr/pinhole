@@ -26,7 +26,7 @@ order, since a cached file answers at once while a download takes a while.
 
 | Method | Params | Result |
 |---|---|---|
-| `fetch` | `asset` (the asset record name, the index's `id`), `kind` | the local file: `path`, `type` (a UTI), `rendition`, `cached` |
+| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight` |
 | `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
 | `ping` | | `{}` |
@@ -63,6 +63,18 @@ removed. Photos' own background work changes many records in ways Pinhole
 does not draw; those are written but announce nothing. If iCloud no longer
 accepts the token, the service walks the whole library again.
 `pinhole-sync changes [--dry-run]` does the same from the command line.
+
+## Streaming
+
+A video or a Live Photo's motion asked for with `"stream": true` is answered
+as soon as its download starts, with `stream`: an HTTP URL on the loopback
+that plays it while it arrives (`path` is where it will be once complete).
+The URL carries a random token and serves byte ranges, so a player can seek:
+a range at most 4 MB past what has arrived waits for the download; one
+further on (such as a QuickTime index at the end of the file) is fetched
+from iCloud for that range alone. The download carries on into the cache
+either way, and the URL keeps working for an hour after it was last read.
+A cached file is answered with `path` alone.
 
 ## Errors
 

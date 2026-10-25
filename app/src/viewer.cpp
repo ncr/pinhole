@@ -118,12 +118,15 @@ void Viewer::request(int index, const QString &kind) {
             return;
         }
         const QString path = result.value("path").toString();
+        // A video still downloading plays from the service as it arrives.
+        const QString stream = result.value("stream").toString();
+        const QUrl playable = stream.isEmpty() ? QUrl::fromLocalFile(path) : QUrl(stream);
         if (kind == QLatin1String("video")) {
-            m_video = QUrl::fromLocalFile(path);
+            m_video = playable;
             setMessage({});
             emit videoChanged();
         } else if (kind == QLatin1String("live")) {
-            m_live = QUrl::fromLocalFile(path);
+            m_live = playable;
             emit liveChanged();
         } else {
             m_image = providerUrl(path);
@@ -133,7 +136,7 @@ void Viewer::request(int index, const QString &kind) {
             if (kind == QLatin1String("medium"))
                 request(index, QStringLiteral("original"));
         }
-    });
+    }, kind == QLatin1String("video") || kind == QLatin1String("live"));
 }
 
 void Viewer::playLive() {

@@ -17,10 +17,13 @@ public:
     // `library` is the directory the window shows; a service this client
     // starts serves that one.
     explicit ServiceClient(const QString &library, QObject *parent = nullptr);
+    ~ServiceClient() override;
 
     using Callback = std::function<void(bool ok, const QJsonObject &result, const QString &errorCode)>;
-    // `kind` as in docs/service.md: medium, original, video, live.
-    void fetch(const QByteArray &asset, const QString &kind, Callback done);
+    // `kind` as in docs/service.md: medium, original, video, live. With
+    // `stream`, a video is answered as soon as it starts downloading, with a
+    // `stream` URL to play it from.
+    void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false);
 
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
     // Ask the service to look for changes in iCloud now.

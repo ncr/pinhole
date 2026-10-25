@@ -40,6 +40,12 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
     connectNow();
 }
 
+ServiceClient::~ServiceClient() {
+    // The socket closes as it is destroyed; whoever was waiting is gone by
+    // then and must not be called.
+    disconnect(&m_socket, nullptr, this, nullptr);
+}
+
 QString ServiceClient::socketPath() {
     if (const QString path = qEnvironmentVariable("PINHOLE_SOCKET"); !path.isEmpty())
         return path;
@@ -83,12 +89,13 @@ void ServiceClient::startService() {
     process.startDetached();
 }
 
-void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback done) {
+void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream) {
     const qint64 id = m_nextId++;
     m_waiting.insert(id, std::move(done));
-    send(QJsonObject{{"id", id},
-                     {"method", "fetch"},
-                     {"params", QJsonObject{{"asset", QString::fromUtf8(asset)}, {"kind", kind}}}});
+    QJsonObject params{{"asset", QString::fromUtf8(asset)}, {"kind", kind}};
+    if (stream)
+        params.insert("stream", true);
+    send(QJsonObject{{"id", id}, {"method", "fetch"}, {"params", params}});
 }
 
 void ServiceClient::sync() {

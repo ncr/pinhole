@@ -12,4 +12,5 @@ pub mod db;
 pub mod service;
 pub mod session;
 pub mod source;
+pub mod stream;
 pub mod sync;

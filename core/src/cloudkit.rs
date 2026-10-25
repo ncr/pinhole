@@ -258,6 +258,22 @@ impl Downloader {
         Ok(Downloader { http: builder.build()?, session: self.session.clone() })
     }
 
+    /// The same session with no deadline for the whole download, only for
+    /// connecting: a long video takes minutes.
+    pub fn unhurried(&self) -> Result<Downloader> {
+        let http = Client::builder().connect_timeout(Duration::from_secs(30)).timeout(None).gzip(true).build()?;
+        Ok(Downloader { http, session: self.session.clone() })
+    }
+
+    #[cfg(test)]
+    pub fn for_tests() -> Downloader {
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "apple_id": "", "dsid": "", "services": {}, "params": {}, "headers": {}, "cookies": [], "validated_at": ""
+        }))
+        .unwrap();
+        Downloader { http: Client::new(), session }
+    }
+
     /// GET a resource download URL, optionally with a byte range and with or
     /// without the session cookies.
     pub fn fetch(&self, url: &str, range: Option<&str>, with_cookies: bool) -> Result<Response> {
