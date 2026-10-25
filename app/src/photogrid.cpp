@@ -24,15 +24,21 @@
 
 namespace {
 
-// The zoom levels, as column counts. Neighbours are about 1.4x apart: close
-// enough that a cross-fade between two of them reads as one motion.
-constexpr std::array<int, 11> kLevels = {1, 2, 3, 4, 6, 8, 11, 15, 21, 29, 40};
-constexpr int kDefaultLevel = 5;
+// The zoom levels, as column counts. Neighbours are 1.25-2x apart: close
+// enough that a cross-fade between two of them reads as one motion. Every
+// step is an even number of columns, so that two neighbouring levels grown
+// about the window's middle (or an edge) have their columns on the same
+// lines at every size: at a change of level the cells hold still and only
+// the photos in them cross-fade. (A step of 1 or 3 columns allows that
+// only about the edges.)
+constexpr std::array<int, 10> kLevels = {2, 4, 6, 8, 10, 14, 18, 24, 30, 40};
+constexpr int kDefaultLevel = 3;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
-// A pinch passing from one level to the next cross-fades in this long, as
-// Photos on an iPhone does (3-4 frames at 30 fps in a recording of it).
-constexpr double kReflowSeconds = 0.12;
+// A pinch passing from one level to the next cross-fades the photos in
+// their cells in this long: a little gentler than Photos on an iPhone (3-4
+// frames at 30 fps in a recording of it).
+constexpr double kReflowSeconds = 0.25;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
@@ -488,15 +494,15 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
         const double scale = m_zoom.stride / strideFor(columns);
         const QPointF pin = pinIn(columns);
         // Vertically the pinned photo stays under the fingers. Across, every
-        // level spans the window and grows or shrinks about the fingers'
-        // x: photos left of them move left, those right of them right, and
-        // the grid never slides. (Holding the pinned photo under the fingers
-        // across as well cannot work: in each level it sits in another
-        // column, so the grid slid one way at each change of level and back
-        // as the zoom went on.) Scaled up, both edges stay outside the
-        // view; scaled down (only the faded one on top), inside.
-        const double fx = std::clamp(m_zoom.focusX, 0.0, width());
-        const double left = fx * (1 - scale);
+        // level spans the window and grows or shrinks about the window's
+        // middle, or the edge the fingers are near (beginZoom()): photos on
+        // either side move outward, the grid never slides, and since every
+        // step between levels is an even number of columns, neighbouring
+        // levels have their columns on the same lines at every size.
+        // (Holding the pinned photo under the fingers across as well cannot
+        // work: in each level it sits in another column.) Scaled up, both
+        // edges stay outside the view; scaled down, inside.
+        const double left = m_zoom.focusX * (1 - scale);
         // Down the window the same, near the library's ends: a level tall
         // enough to fill the window is kept filling it, rather than holding
         // the pinned photo's height and showing empty space past the first or
@@ -551,6 +557,7 @@ int PhotoGrid::pinchLevel(double stride) const {
 }
 
 void PhotoGrid::beginZoom(QPointF at) {
+    const bool continuing = m_zoom.active;
     m_physics.stop();
     m_driveVelocity = 0;
     // Find the photo under `at` in whatever is shown now (a settle that is
@@ -582,8 +589,12 @@ void PhotoGrid::beginZoom(QPointF at) {
     m_zoom.at = l.at + (pinIn(l.columns) - l.pin) * l.scale;
     m_zoom.pinStart = m_zoom.at;
     m_zoom.fingerStart = at;
-    m_zoom.focusX = at.x();
     m_zoom.shown = levelForColumns(l.columns);
+    // What the zoom grows about across: the middle, or an edge when the
+    // fingers are near it; kept by a settle that is taken over, which is
+    // still drawn about its own.
+    if (!continuing)
+        m_zoom.focusX = at.x() < width() * 0.2 ? 0 : at.x() > width() * 0.8 ? width() : width() / 2;
     m_zoom.fadeFrom = -1;
     m_zoom.fade = 1;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
@@ -613,7 +624,6 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
-    m_zoom.focusX = at.x();
     const double now = m_clock.nsecsElapsed() / 1e9;
     m_zoom.samples.emplace_back(now, std::log(stride));
     while (m_zoom.samples.size() > 2 && now - m_zoom.samples.front().first > 0.1)
@@ -1356,6 +1366,19 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             m_uncoveredFrames += 1;
             m_uncoveredMax = std::max(m_uncoveredMax, band);
         }
+    }
+
+    // Two levels cross-fading: how far apart are their column lines?
+    if (drawn.size() == 2) {
+        const double cell = strideFor(drawn[0].columns) * drawn[0].scale;
+        auto apart = [cell](double a, double b) {
+            const double d = std::fmod(std::abs(a - b), cell);
+            return std::min(d, cell - d);
+        };
+        const QPointF o0 = drawn[0].at - drawn[0].pin * drawn[0].scale, o1 = drawn[1].at - drawn[1].pin * drawn[1].scale;
+        m_fadeFrames += 1;
+        m_columnOffsetMax = std::max(m_columnOffsetMax, apart(o0.x(), o1.x()));
+        m_rowOffsetMax = std::max(m_rowOffsetMax, apart(o0.y(), o1.y()));
     }
 
     // Where the pinned photo (the last zoom's) is drawn, frame to frame.

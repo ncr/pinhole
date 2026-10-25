@@ -126,7 +126,7 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
          {}},
         {"scroll 3,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-3000); }, {}},
         {"scroll 15,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
-        {"zoom steps 8 -> 15 -> 8, animated", 5.0,
+        {"zoom steps 8 -> 18 -> 8, animated", 5.0,
          [g, stopped] {
              stopped();
              g->setColumnsNow(8);
@@ -165,6 +165,7 @@ void Bench::start() {
 void Bench::beginPhase() {
     m_grid->takePinJump();
     m_grid->takeUncovered();
+    m_grid->takeCellOffset();
     m_t = 0;
     m_warm = false;
     m_jumpAt = -1;
@@ -221,6 +222,9 @@ void Bench::endPhase() {
         const auto [frames, band] = m_grid->takeUncovered();
         std::printf("%-40s pinned photo moved up or down at most %.1f px in one frame; %d frames with an empty edge (widest %.0f px)\n",
                     "", m_grid->takePinJump(), frames, band);
+        const auto [fading, columns, rows] = m_grid->takeCellOffset();
+        std::printf("%-40s %d frames cross-fading two levels; their cells at most %.1f px apart across, %.1f px down\n",
+                    "", fading, columns, rows);
     }
     if (qEnvironmentVariableIsSet("PINHOLE_TRACE") && s.intervalMax > 25)
         std::printf("%s", qPrintable(m_stats->aroundWorst(10, 3)));

@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <set>
+#include <tuple>
 
 #include "scrollphysics.h"
 
@@ -155,6 +156,14 @@ public:
         m_uncoveredMax = 0;
         return r;
     }
+    // While two levels cross-fade: frames since the last call, and how far
+    // apart their column and row lines were at most (0: the cells coincide).
+    std::tuple<int, double, double> takeCellOffset() {
+        const auto r = std::make_tuple(m_fadeFrames, m_columnOffsetMax, m_rowOffsetMax);
+        m_fadeFrames = 0;
+        m_columnOffsetMax = m_rowOffsetMax = 0;
+        return r;
+    }
     double scrollSpeedRows() const { return m_speedRows; }
 
 signals:
@@ -253,7 +262,7 @@ private:
 
     // Layout and motion, GUI thread (read by the render thread while the
     // GUI thread is blocked in sync).
-    int m_level = 5;
+    int m_level = 3; // 8 columns, kDefaultLevel
     int m_columns = 8;
     double m_scroll = 0;
 
@@ -267,7 +276,9 @@ private:
         QPointF fraction;      // where in it the fingers are, 0..1
         double stride = 0;     // cell size shown now
         QPointF at;            // where the pinned point is shown now
-        double focusX = 0;     // across, what the zoom grows about: the fingers
+        // Across, what every level grows about: the window's middle or an
+        // edge, for the whole zoom.
+        double focusX = 0;
         QPointF pinStart, fingerStart; // both when the zoom began
         // A pinch: the cell size it began at and the scale since, which
         // `value` deltas add up to.
@@ -304,6 +315,9 @@ private:
     double m_pinJump = 0;
     int m_uncoveredFrames = 0;
     double m_uncoveredMax = 0;
+    int m_fadeFrames = 0;
+    double m_columnOffsetMax = 0;
+    double m_rowOffsetMax = 0;
     std::atomic<int> m_unresolved{0};
     std::atomic<int> m_mediumNeeded{0};
     std::atomic<int> m_mediumShown{0};
