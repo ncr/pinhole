@@ -17,6 +17,8 @@
 // can be replayed through it in tests without a window.
 class ViewerMotion {
 public:
+    ViewerMotion();
+
     // The gap between photos side by side.
     static constexpr double kGap = 24;
 

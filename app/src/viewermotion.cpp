@@ -25,7 +25,17 @@ constexpr double kEase = 16;
 // Pinched below this share of fitted on release: close.
 constexpr double kCloseBelow = 0.7;
 
+// A zoomed photo's coast is short: UIKit's "fast" deceleration, which
+// image viewers use, about a fifth of the scrolling coast's distance and
+// over in half a second, not the grid's long AppKit glide.
+constexpr double kPanDecayPerMs = 0.99;
+
 } // namespace
+
+ViewerMotion::ViewerMotion() {
+    m_panXPhysics.params().decayPerMs = kPanDecayPerMs;
+    m_panYPhysics.params().decayPerMs = kPanDecayPerMs;
+}
 
 void ViewerMotion::setViewport(double width, double height) {
     m_width = std::max(1.0, width);

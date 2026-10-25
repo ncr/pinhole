@@ -357,6 +357,39 @@ private slots:
         QCOMPARE(m.panX(), stopped);
     }
 
+    // The same flick coasts a zoomed photo a short way, and is over in
+    // about half a second; the grid coasts several times as far.
+    void aZoomedPhotoCoastsShortCompared() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(8, 500, 400); // plenty of room
+        settle(m);
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < 10; ++i)
+            m.move(t += 8, -6, 0);
+        m.end(t += 8);
+        const double lifted = m.panX();
+        int frames = 0;
+        for (; frames < 600 && m.animating(); ++frames)
+            m.advance(1.0 / 120);
+        const double photoCoast = lifted - m.panX();
+
+        ScrollPhysics grid;
+        grid.setBounds(-1e9, 1e9, 800);
+        double g = 1000;
+        grid.begin(g);
+        for (int i = 0; i < 10; ++i)
+            grid.move(g += 8, -6 * 1.6); // the pan's extra gain, to compare like with like
+        grid.end(g += 8);
+        const double gridLifted = grid.position();
+        while (grid.step(1.0 / 120)) {}
+        const double gridCoast = gridLifted - grid.position();
+
+        QVERIFY2(frames < 80, qPrintable(QString::number(frames))); // under ~0.65 s
+        QVERIFY2(photoCoast > 20 && photoCoast < gridCoast / 3,
+                 qPrintable(QStringLiteral("%1 vs %2").arg(photoCoast).arg(gridCoast)));
+    }
+
     void pullingAZoomedPhotoPastItsEdgeStretchesAndSpringsBack() {
         ViewerMotion m = viewerShowing();
         m.zoomBy(2, 500, 400); // 500 px of room each way across

@@ -48,10 +48,11 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QString statsText READ statsText NOTIFY statsTextChanged)
     // How far down the library the view is, 0 at the oldest, 1 at the newest.
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
-    // The date headers on screen, for the window to draw sticky at the top
-    // left: [{label, top}], the first the run the top of the view is in
-    // (top far above), then each run that starts lower down, by the year
-    // (zoomed far out), month, or day (close in). Empty while zooming.
+    // The date labels on screen, for the window to draw at the top left:
+    // [{label, top}]. Far out by year and month, sticky: the run the top of
+    // the view is in (top far above), then each run that starts lower down.
+    // Closer in, one label: the days on screen, or the date at the top.
+    // Empty while zooming.
     Q_PROPERTY(QVariantList dateHeaders READ dateHeaders NOTIFY dateHeadersChanged)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // The selection's border: the Omarchy theme's accent.
