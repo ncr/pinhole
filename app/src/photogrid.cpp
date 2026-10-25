@@ -6,6 +6,7 @@
 #include "touchpadhold.h"
 
 #include <QDateTime>
+#include <QLocale>
 #include <QFile>
 #include <QInputDevice>
 #include <QNativeGestureEvent>
@@ -400,7 +401,57 @@ void PhotoGrid::setScroll(double y) {
     notifyScrolled();
 }
 
+void PhotoGrid::updateDateHeaders() {
+    QVariantList headers;
+    if (!m_zoom.active && m_library && count() > 0 && height() > 0) {
+        // Far out a run is a year, in the middle a month, close in a day.
+        enum Unit { Year, Month, Day };
+        const Unit unit = m_columns >= 23 ? Year : m_columns >= 9 ? Month : Day;
+        const double s = stride();
+        const int rows = (count() + m_columns - 1) / m_columns;
+        const int first = std::clamp(int(m_scroll / s), 0, rows - 1);
+        const int last = std::clamp(int((m_scroll + height()) / s), 0, rows - 1);
+        // A row belongs to the date of its first photo: the grid has no gaps
+        // between runs, so a run's header starts with the row it starts in.
+        auto dateOfRow = [this](int row) {
+            return QDateTime::fromMSecsSinceEpoch(m_library->at(row * m_columns).date).date();
+        };
+        auto key = [unit](QDate d) {
+            return unit == Year ? qint64(d.year()) : unit == Month ? qint64(d.year()) * 12 + d.month() : d.toJulianDay();
+        };
+        auto label = [unit](QDate d) {
+            const QLocale locale;
+            if (unit == Year)
+                return QString::number(d.year());
+            if (unit == Month) {
+                // The month on its own (Polish "październik", not the
+                // "października" of a full date), capitalised as a heading.
+                QString month = locale.standaloneMonthName(d.month());
+                if (!month.isEmpty())
+                    month[0] = month[0].toUpper();
+                return month + ' ' + QString::number(d.year());
+            }
+            return locale.toString(d, QStringLiteral("d MMMM yyyy"));
+        };
+        QDate date = dateOfRow(first);
+        qint64 current = key(date);
+        headers.append(QVariantMap{{"label", label(date)}, {"top", -1e9}});
+        for (int row = first + 1; row <= last && headers.size() < 8; ++row) {
+            date = dateOfRow(row);
+            if (const qint64 k = key(date); k != current) {
+                headers.append(QVariantMap{{"label", label(date)}, {"top", row * s - m_scroll}});
+                current = k;
+            }
+        }
+    }
+    if (headers != m_dateHeaders) {
+        m_dateHeaders = headers;
+        emit dateHeadersChanged();
+    }
+}
+
 void PhotoGrid::notifyScrolled() {
+    updateDateHeaders();
     const qreal f = scrollFraction();
     if (std::abs(f - m_lastFraction) > 1e-6) {
         m_lastFraction = f;
@@ -592,6 +643,7 @@ void PhotoGrid::beginZoom(QPointF at) {
     if (!continuing)
         m_zoom.focusX = at.x() < width() * 0.2 ? 0 : at.x() > width() * 0.8 ? width() : width() / 2;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
+    updateDateHeaders(); // out of the way while zooming
     updateAnimating();
 }
 

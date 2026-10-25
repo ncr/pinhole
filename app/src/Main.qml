@@ -83,36 +83,45 @@ ApplicationWindow {
         }
     }
 
-    // Only zoomed all the way out (the two last levels), where a year is a
-    // swipe or two away; closer in, scrolling is the way.
-    readonly property bool zoomedOut: win.inGrid && grid.columns >= 23 && grid.count > 0
-    DateScrubber {
-        grid: grid
-        visible: win.zoomedOut
-    }
-
-    // There too, as in Photos: which month the top of the view is in (only
-    // the year, all the way out), staying put while the grid scrolls under.
-    Rectangle {
-        id: dateBadge
-        objectName: "dateBadge"
-        visible: win.zoomedOut
-        x: 16
-        y: 16
-        width: badgeText.implicitWidth + 26
-        height: badgeText.implicitHeight + 12
-        radius: height / 2
-        color: "#d0101012"
-        Text {
-            id: badgeText
-            anchors.centerIn: parent
-            text: {
-                const when = new Date(grid.dateAt(grid.scrollFraction))
-                return Qt.locale().toString(when, grid.columns >= 29 ? "yyyy" : "MMMM yyyy")
+    // Date headers at the top left, sticky as in HTML or Photos: each run of
+    // photos from the same year, month or day (by zoom level, the grid's
+    // dateHeaders) has one where it starts; the current one stays at the top
+    // until the next comes up and pushes it out.
+    Item {
+        id: dateHeaders
+        objectName: "dateHeaders"
+        anchors.fill: parent
+        visible: win.inGrid && grid.count > 0
+        clip: true
+        Repeater {
+            model: 8
+            delegate: Rectangle {
+                required property int index
+                readonly property var header: index < grid.dateHeaders.length ? grid.dateHeaders[index] : null
+                readonly property var next: index + 1 < grid.dateHeaders.length ? grid.dateHeaders[index + 1] : null
+                visible: header !== null
+                x: 16
+                // Where its run starts (the first one: at the top), and never
+                // lower than where the next one would push it out from.
+                y: {
+                    if (!header)
+                        return 0
+                    const own = Math.max(16, header.top + 16)
+                    return next ? Math.min(own, next.top + 16 - height - 8) : own
+                }
+                width: headerLabel.implicitWidth + 26
+                height: headerLabel.implicitHeight + 12
+                radius: height / 2
+                color: "#d0101012"
+                Text {
+                    id: headerLabel
+                    anchors.centerIn: parent
+                    text: parent.header ? parent.header.label : ""
+                    color: "white"
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                }
             }
-            color: "white"
-            font.pixelSize: 15
-            font.weight: Font.DemiBold
         }
     }
 

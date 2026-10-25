@@ -48,7 +48,7 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
              g->setDriveVelocity(-g->scrollRange() / 5.0);
          },
          {}},
-        {"drag the date scrubber, newest to oldest", 4.5,
+        {"jump through the library by position, newest to oldest", 4.5,
          [g, stopped] {
              stopped();
              g->setScrubbing(true);

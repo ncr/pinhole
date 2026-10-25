@@ -48,6 +48,11 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QString statsText READ statsText NOTIFY statsTextChanged)
     // How far down the library the view is, 0 at the oldest, 1 at the newest.
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
+    // The date headers on screen, for the window to draw sticky at the top
+    // left: [{label, top}], the first the run the top of the view is in
+    // (top far above), then each run that starts lower down, by the year
+    // (zoomed far out), month, or day (close in). Empty while zooming.
+    Q_PROPERTY(QVariantList dateHeaders READ dateHeaders NOTIFY dateHeadersChanged)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // The selection's border: the Omarchy theme's accent.
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
@@ -117,6 +122,7 @@ public:
     // where each year begins, and whether a drag is under way (the grid then
     // draws from mosaic pages, as when scrolling very fast).
     qreal scrollFraction() const;
+    QVariantList dateHeaders() const { return m_dateHeaders; }
     Q_INVOKABLE void scrubTo(qreal fraction);
     Q_INVOKABLE qint64 dateAt(qreal fraction) const;
     Q_INVOKABLE QVariantList yearMarks() const;
@@ -174,6 +180,7 @@ signals:
     void accentChanged();
     void backgroundChanged();
     void selectingChanged();
+    void dateHeadersChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
     void libraryChanged();
@@ -241,6 +248,8 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_selecting = false;
+    void updateDateHeaders();
+    QVariantList m_dateHeaders;
     // The press stopped the grid moving: its click opens nothing.
     bool m_pressStopped = false;
     bool m_scrubbing = false;

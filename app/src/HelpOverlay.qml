@@ -20,8 +20,7 @@ Item {
             [qsTr("Ctrl+wheel"), qsTr("Zoom one step at the pointer")],
             ["+  −", qsTr("Zoom one step")],
             ["Home  End", qsTr("Oldest, newest")],
-            ["PgUp  PgDn", qsTr("A screen up or down")],
-            [qsTr("Right edge"), qsTr("Zoomed all the way out: drag the date scrubber")]
+            ["PgUp  PgDn", qsTr("A screen up or down")]
         ] },
         { title: qsTr("Selecting"), keys: [
             [qsTr("Select"), qsTr("The button at the top: start choosing photos")],

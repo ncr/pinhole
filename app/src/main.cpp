@@ -255,26 +255,28 @@ int main(int argc, char *argv[]) {
             });
         });
     }
-    // PINHOLE_SELFTEST=scrubber:<file>: zoomed all the way out, the date
-    // scrubber held halfway down, as an image.
-    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("scrubber:"))) {
+    // PINHOLE_SELFTEST=dates:<file>: the sticky date headers as an image, at
+    // PINHOLE_SELFTEST_COLUMNS (29 by default), scrolled to where the next
+    // header has just started pushing the current one out.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("dates:"))) {
         QTimer::singleShot(1200, window, [window, grid, test] {
-            // PINHOLE_SELFTEST_COLUMNS: another level (23 shows the month too).
             grid->setColumnsNow(qEnvironmentVariableIsSet("PINHOLE_SELFTEST_COLUMNS")
                                     ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_COLUMNS")
                                     : 29);
-            const QPointF at(window->width() - 30.0, window->height() / 2.0);
-            QTimer::singleShot(400, window, [window, at] {
-                QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton,
-                                  Qt::NoModifier);
-                QGuiApplication::sendEvent(window, &press);
-            });
-            QTimer::singleShot(1500, window, [window, test, at] {
-                window->grabWindow().save(test.mid(9));
-                QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton,
-                                    Qt::NoModifier);
-                QGuiApplication::sendEvent(window, &release);
-                QCoreApplication::quit();
+            // PINHOLE_SELFTEST_FRACTION: where in the library (0.5 by default).
+            grid->jumpToFraction(qEnvironmentVariableIsSet("PINHOLE_SELFTEST_FRACTION")
+                                     ? qEnvironmentVariable("PINHOLE_SELFTEST_FRACTION").toDouble()
+                                     : 0.5);
+            QTimer::singleShot(300, window, [window, grid, test] {
+                const QVariantList headers = grid->dateHeaders();
+                if (headers.size() > 1) {
+                    const double top = headers[1].toMap().value("top").toDouble();
+                    grid->jumpToFraction(grid->scrollFraction() + (top - 30) / grid->scrollRange());
+                }
+                QTimer::singleShot(300, window, [window, test] {
+                    window->grabWindow().save(test.mid(6));
+                    QCoreApplication::quit();
+                });
             });
         });
     }
