@@ -3,6 +3,9 @@
         <file alias="Main.qml">Main.qml</file>
         <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
         <file alias="CopyButton.qml">CopyButton.qml</file>
+        <file alias="UiText.qml">UiText.qml</file>
+        <file alias="Chip.qml">Chip.qml</file>
+        <file alias="ShellButton.qml">ShellButton.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/pl.json">i18n/pl.json</file>

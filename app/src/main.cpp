@@ -74,7 +74,9 @@ int main(int argc, char *argv[]) {
     // language without changing the desktop's.
     Translator translator(qEnvironmentVariable("PINHOLE_LANGUAGE_FILE"));
     app.installTranslator(&translator);
-    Theme theme;
+    // PINHOLE_THEME_DIR: another Omarchy "current" folder (one holding
+    // theme/colors.toml), to see a theme without switching the desktop's.
+    Theme theme(qEnvironmentVariable("PINHOLE_THEME_DIR"));
 
     Library library;
     QString error;
@@ -108,6 +110,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("bench", nullptr);
+    // How iCloud is doing (set again as the service says): see below.
+    engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
@@ -209,7 +213,6 @@ int main(int argc, char *argv[]) {
     });
     // How iCloud is doing, as the service sees it: fine, needs_sign_in,
     // offline, failing, or no_service when there is no service to ask.
-    engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed"))
             reloadLibrary();

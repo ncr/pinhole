@@ -2,49 +2,49 @@ import QtQuick
 
 // A Copy button that answers on itself, as touch apps do, rather than in a
 // line of text somewhere else: dimmed while the photos are fetched, then a
-// tick for a moment, or a shake if nothing could be copied.
+// tick for a moment, or a shake if nothing could be copied. Drawn as an
+// Omarchy control (see ShellButton.qml); `flat` for a row in a bar, `hint` for
+// its keys beside it.
 Rectangle {
     id: button
 
     // The photos to copy, asked for when pressed.
     property var photos: function () { return [] }
     property bool enabledHere: true
-    property color idleColor: "#a0202024"
-    property color hoverColor: "#e0303036"
-    property real fontSize: 12
-    property bool pill: true
+    property bool flat: false
+    property string hint: ""
 
     // idle, working, done, failed
     property string phase: "idle"
 
-    width: label.implicitWidth + 22
-    height: label.implicitHeight + 10
-    // Every press shows: the button gives a little under the finger.
-    scale: tap.pressed ? 0.92 : 1
-    Behavior on scale { NumberAnimation { duration: 80 } }
-    radius: pill ? height / 2 : Math.min(6, theme.radius)
-    color: hover.hovered && enabledHere && phase === "idle" ? hoverColor : idleColor
+    readonly property color ink: theme.foreground
+    width: Math.max(label.implicitWidth, tick.implicitWidth) + 2 * Math.round(theme.fontSize * 0.833)
+    height: Math.round(theme.fontSize * 2.333)
+    radius: Math.min(4, theme.radius)
+    color: Qt.rgba(ink.r, ink.g, ink.b, tap.pressed ? 0.22 : hover.hovered && enabledHere ? 0.08 : flat ? 0 : 0.04)
+    border.width: 1
+    border.color: Qt.rgba(ink.r, ink.g, ink.b, hover.hovered && enabledHere ? 0.25 : flat ? 0 : 0.4)
     opacity: !enabledHere ? 0.4 : phase === "working" ? 0.6 : 1
+    // Every press shows: the button gives a little under the finger.
+    scale: tap.pressed ? 0.94 : 1
+    Behavior on scale { NumberAnimation { duration: 80 } }
 
-    Text {
+    UiText {
         id: label
-        anchors.centerIn: parent
-        text: qsTr("Copy")
-        color: "white"
-        font.pixelSize: button.fontSize
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: centredIn(button.height)
+        text: qsTr("Copy") + (button.hint ? "  <font color=\"" + theme.darkForeground + "\">" + button.hint + "</font>" : "")
         opacity: button.phase === "done" ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 90 } }
     }
     // The tick, in the label's place.
-    Text {
+    UiText {
         id: tick
-        anchors.centerIn: parent
-        text: "✓"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: centredIn(button.height)
+        text: "✓ " + qsTr("Copied")
         color: theme.accent
-        font.pixelSize: button.fontSize + 5
-        font.bold: true
         opacity: button.phase === "done" ? 1 : 0
-        scale: 1
     }
 
     // The tick pops in; how long it stays is the timer's (an animation's
@@ -52,7 +52,7 @@ Rectangle {
     // stayed up and a second click changed nothing).
     SequentialAnimation {
         id: pop
-        NumberAnimation { target: tick; property: "scale"; from: 0.4; to: 1.25; duration: 140; easing.type: Easing.OutCubic }
+        NumberAnimation { target: tick; property: "scale"; from: 0.6; to: 1.12; duration: 140; easing.type: Easing.OutCubic }
         NumberAnimation { target: tick; property: "scale"; to: 1; duration: 120; easing.type: Easing.InOutQuad }
     }
     Timer {

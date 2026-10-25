@@ -29,7 +29,7 @@ Item {
     readonly property real areaHeight: Math.max(1, height - stripHeight)
     // Dragged up or down to close: how far along, 0 to 1, and what the
     // background and controls keep of their opacity meanwhile.
-    readonly property real dismissed: Math.min(1, Math.abs(viewer.dismiss) / Math.max(1, areaHeight * 0.5))
+    readonly property real dismissed: Math.min(1, Math.abs(viewer.dismiss) / Math.max(1, height * 0.45))
     readonly property real chrome: 1 - dismissed
     readonly property real fitWidth: Math.min(width, areaHeight * viewer.aspect)
     readonly property real fitHeight: fitWidth / Math.max(0.01, viewer.aspect)
@@ -95,7 +95,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "black"
+        color: theme.darkerBackground
         opacity: root.progress * root.chrome
     }
 
@@ -275,14 +275,12 @@ Item {
     // The sides, while the pointer is over one.
     Repeater {
         model: [-1, 1]
-        delegate: Text {
+        delegate: Chip {
             required property int modelData
             x: modelData < 0 ? 24 : root.width - width - 24
             text: modelData < 0 ? "‹" : "›"
-            color: "white"
-            font.pixelSize: 56
-            style: Text.Outline
-            styleColor: "#80000000"
+            label.font.pixelSize: theme.fontSize * 2
+            width: height
             readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < root.grid.count - 1
             opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
             y: (root.areaHeight - height) / 2
@@ -295,22 +293,21 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 16
-        spacing: 4
+        spacing: 6
         opacity: root.progress * root.chrome
-        Text {
-            text: viewer.title
-            color: "white"
-            font.pixelSize: 15
-            style: Text.Outline
-            styleColor: "#80000000"
+        Chip {
+            // The date bright, the time after it muted.
+            readonly property var parts: viewer.title.split(" · ")
+            text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
+                                   : viewer.title
+            textColor: theme.brightForeground
         }
-        Text {
+        Chip {
             text: viewer.message !== "" ? viewer.message
                   : viewer.video ? ""
                   : viewer.stage === "original" ? "" : qsTr("Loading the full photo…")
             visible: text !== ""
-            color: "#c0ffffff"
-            font.pixelSize: 12
+            textColor: theme.darkForeground
         }
     }
 
@@ -318,26 +315,21 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 16
-        spacing: 8
+        spacing: 6
         opacity: root.progress * root.chrome
-        Text {
+        UiText {
             visible: viewer.favorite
+            anchors.verticalCenter: parent.verticalCenter
+            rightPadding: 4
             text: "♥"
-            color: "white"
-            font.pixelSize: 16
+            color: theme.accent
+            font.pixelSize: Math.round(theme.fontSize * 1.333)
         }
-        Text {
+        ShellButton {
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("LIVE  (L)")
-            color: "white"
-            font.pixelSize: 12
-            font.bold: true
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: viewer.playLive()
-            }
+            text: qsTr("LIVE") + "  <font color=\"" + theme.darkForeground + "\">L</font>"
+            onTapped: viewer.playLive()
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers
         // with a tick on itself.
@@ -346,32 +338,17 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             photos: () => [viewer.index]
         }
-        Rectangle {
+        ShellButton {
             anchors.verticalCenter: parent.verticalCenter
-            width: exportLabel.implicitWidth + 22
-            height: exportLabel.implicitHeight + 10
-            radius: height / 2
-            color: exportHover.hovered ? "#e0303036" : "#a0202024"
-            Text {
-                id: exportLabel
-                anchors.centerIn: parent
-                text: qsTr("Export")
-                color: "white"
-                font.pixelSize: 12
-            }
-            HoverHandler { id: exportHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: outgoing.exportTo([viewer.index], false) }
+            text: qsTr("Export")
+            onTapped: outgoing.exportTo([viewer.index], false)
         }
         // Back to the library.
-        Text {
+        ShellButton {
             anchors.verticalCenter: parent.verticalCenter
             text: "✕"
-            color: closeHover.hovered ? theme.accent : "white"
-            font.pixelSize: 18
-            style: Text.Outline
-            styleColor: "#80000000"
-            HoverHandler { id: closeHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.closeViewer() }
+            width: height
+            onTapped: root.closeViewer()
         }
     }
 
@@ -396,11 +373,11 @@ Item {
             anchors.bottom: parent.bottom
             height: seekBar.active ? 6 : 3
             Behavior on height { NumberAnimation { duration: 100 } }
-            color: seekBar.active ? "#50ffffff" : "transparent"
+            color: seekBar.active ? Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.3) : "transparent"
             Rectangle {
                 height: parent.height
                 width: parent.width * (videoPlayer.duration > 0 ? videoPlayer.position / videoPlayer.duration : 0)
-                color: seekBar.active ? theme.accent : "white"
+                color: seekBar.active ? theme.accent : theme.foreground
                 opacity: 0.85
             }
         }
@@ -429,32 +406,23 @@ Item {
             onPositionChanged: mouse => { if (pressed) seekTo(mouse.x) }
         }
 
-        Text {
+        Chip {
             visible: seekBar.active || videoPlayer.playbackState !== MediaPlayer.PlayingState
             anchors.left: parent.left
             anchors.leftMargin: 16
             anchors.bottom: track.top
             anchors.bottomMargin: 10
             text: root.clock(videoPlayer.position) + " / " + root.clock(videoPlayer.duration)
-            color: "white"
-            font.pixelSize: 12
-            font.family: "monospace"
-            style: Text.Outline
-            styleColor: "#80000000"
         }
-        Text {
+        ShellButton {
             visible: seekBar.active || root.muted
             anchors.right: parent.right
             anchors.rightMargin: 16
             anchors.bottom: track.top
             anchors.bottomMargin: 10
-            text: root.muted ? qsTr("Sound off  (M)") : qsTr("Sound on  (M)")
-            color: muteHover.hovered ? theme.accent : "white"
-            font.pixelSize: 12
-            style: Text.Outline
-            styleColor: "#80000000"
-            HoverHandler { id: muteHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.muted = !root.muted }
+            text: (root.muted ? qsTr("Sound off") : qsTr("Sound on")) + "  <font color=\"" + theme.darkForeground + "\">M</font>"
+            active: root.muted
+            onTapped: root.muted = !root.muted
         }
     }
 
@@ -485,10 +453,16 @@ Item {
         // The middle, where the shown photo sits: thumbnails grow as they
         // pass it, and the marker stays there while they slide under it.
         readonly property real middle: width / 2
-        // Its own band: a zoomed photo passes under it.
+        // Its own band, the theme's dark background with a hairline above:
+        // a zoomed photo passes under it.
         Rectangle {
             anchors.fill: parent
-            color: "black"
+            color: theme.darkBackground
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.15)
+            }
         }
 
         Repeater {
@@ -516,6 +490,13 @@ Item {
                     sourceSize: Qt.size(72, 72)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
+                    // As Omarchy's image picker draws the ones not chosen.
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.28)
+                    }
                 }
             }
         }
@@ -527,8 +508,8 @@ Item {
             height: width
             z: 2
             color: "transparent"
-            border.color: "white"
-            border.width: 1.5
+            border.color: theme.accent
+            border.width: 2
         }
 
         MouseArea {

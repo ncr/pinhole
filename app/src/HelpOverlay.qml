@@ -70,17 +70,19 @@ Item {
         ] }
     ]
 
+    // As Omarchy's menus: a scrim of the theme's background at half, and a
+    // card of it with a hairline in the text colour.
     Rectangle {
         anchors.fill: parent
-        color: "#c0000000"
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
     }
     MouseArea {
         anchors.fill: parent
         onClicked: root.shown = false
     }
 
-    // As many columns of 340 as fit, up to three.
-    readonly property int columns: Math.max(1, Math.min(3, Math.floor((width - 96) / 372)))
+    // As many columns of 380 as fit, up to three.
+    readonly property int columns: Math.max(1, Math.min(3, Math.floor((width - 96) / 412)))
 
     // The sections in order, cut into columns as even in height as can be:
     // every way of cutting them is tried, there being few.
@@ -110,9 +112,9 @@ Item {
         anchors.centerIn: parent
         width: content.implicitWidth + 48
         height: Math.min(parent.height - 48, content.implicitHeight + 48)
-        radius: Math.min(10, theme.radius)
-        color: "#f0161618"
-        border.color: theme.accent
+        radius: Math.min(4, theme.radius)
+        color: theme.background
+        border.color: theme.foreground
         border.width: 1
         clip: true
 
@@ -133,12 +135,11 @@ Item {
                         delegate: Column {
                             required property var modelData
                             spacing: 6
-                            width: 340
-                            Text {
+                            width: 380
+                            UiText {
                                 text: parent.modelData.title
                                 color: theme.accent
-                                font.pixelSize: 14
-                                font.bold: true
+                                font.pixelSize: Math.round(theme.fontSize * 1.167)
                                 bottomPadding: 4
                             }
                             Repeater {
@@ -146,20 +147,17 @@ Item {
                                 delegate: Row {
                                     required property var modelData
                                     spacing: 12
-                                    Text {
-                                        width: 140
+                                    UiText {
+                                        width: 150
                                         text: parent.modelData[0]
-                                        color: "white"
-                                        font.pixelSize: 12
-                                        font.family: "monospace"
+                                        color: theme.brightForeground
                                         horizontalAlignment: Text.AlignRight
                                         elide: Text.ElideLeft
                                     }
-                                    Text {
-                                        width: 188
+                                    UiText {
+                                        width: 218
                                         text: parent.modelData[1]
-                                        color: "#d0ffffff"
-                                        font.pixelSize: 12
+                                        color: theme.foreground
                                         wrapMode: Text.WordWrap
                                     }
                                 }

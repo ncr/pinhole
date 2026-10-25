@@ -9,9 +9,11 @@ ApplicationWindow {
     height: 900
     visible: true
     title: "Pinhole"
-    color: "#0e0e10"
+    // Everything takes the Omarchy theme's colours (theme.*, colors.toml),
+    // live: a light theme makes a light Pinhole.
+    color: theme.background
 
-    Material.theme: Material.Dark
+    Material.theme: theme.light ? Material.Light : Material.Dark
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
@@ -39,45 +41,32 @@ ApplicationWindow {
     Column {
         anchors.centerIn: parent
         visible: grid.count === 0
-        spacing: 12
+        spacing: theme.fontSize
         width: Math.min(parent.width - 48, 520)
-        Text {
+        UiText {
             width: parent.width
             text: qsTr("No photo library yet")
-            color: "white"
-            font.pixelSize: 20
+            color: theme.brightForeground
+            font.pixelSize: Math.round(theme.fontSize * 1.333)
             horizontalAlignment: Text.AlignHCenter
         }
-        Text {
+        UiText {
             width: parent.width
             text: qsTr("Sign in to iCloud and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.")
-            color: "#c0ffffff"
-            font.pixelSize: 13
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
         }
-        Rectangle {
+        Chip {
             anchors.horizontalCenter: parent.horizontalCenter
-            width: commands.implicitWidth + 32
-            height: commands.implicitHeight + 16
-            radius: Math.min(6, theme.radius)
-            color: "#202024"
-            Text {
-                id: commands
-                anchors.centerIn: parent
-                text: "pinhole-sync sign-in\npinhole-sync all"
-                color: theme.accent
-                font.family: "monospace"
-                font.pixelSize: 14
-                lineHeight: 1.4
-            }
+            text: "pinhole-sync sign-in\npinhole-sync all"
+            textColor: theme.accent
+            label.lineHeight: 1.4
         }
-        Text {
+        UiText {
             width: parent.width
             visible: libraryProblem !== ""
             text: libraryProblem
-            color: "#80ffffff"
-            font.pixelSize: 11
+            color: theme.darkForeground
             wrapMode: Text.WrapAnywhere
             horizontalAlignment: Text.AlignHCenter
         }
@@ -95,7 +84,7 @@ ApplicationWindow {
         clip: true
         Repeater {
             model: 8
-            delegate: Rectangle {
+            delegate: Chip {
                 required property int index
                 readonly property var header: index < grid.dateHeaders.length ? grid.dateHeaders[index] : null
                 readonly property var next: index + 1 < grid.dateHeaders.length ? grid.dateHeaders[index + 1] : null
@@ -109,18 +98,9 @@ ApplicationWindow {
                     const own = Math.max(16, header.top + 16)
                     return next ? Math.min(own, next.top + 16 - height - 8) : own
                 }
-                width: headerLabel.implicitWidth + 26
-                height: headerLabel.implicitHeight + 12
-                radius: height / 2
-                color: "#d0101012"
-                Text {
-                    id: headerLabel
-                    anchors.centerIn: parent
-                    text: parent.header ? parent.header.label : ""
-                    color: "white"
-                    font.pixelSize: 15
-                    font.weight: Font.DemiBold
-                }
+                text: header ? header.label : ""
+                textColor: theme.brightForeground
+                label.font.pixelSize: Math.round(theme.fontSize * 1.167)
             }
         }
     }
@@ -132,44 +112,29 @@ ApplicationWindow {
         grid: grid
     }
 
-    Text {
+    Chip {
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         anchors.margins: 12
         visible: grid.statsVisible
         text: grid.statsText
-        color: "white"
-        font.family: "monospace"
-        font.pixelSize: 12
-        style: Text.Outline
-        styleColor: "black"
-        horizontalAlignment: Text.AlignRight
+        label.horizontalAlignment: Text.AlignRight
     }
 
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
-    Rectangle {
+    Chip {
         visible: outgoing.status !== ""
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: grid.selecting ? 72 : 24
-        width: statusText.implicitWidth + 24
-        height: statusText.implicitHeight + 12
-        radius: Math.min(6, theme.radius)
-        color: "#e0202024"
-        Text {
-            id: statusText
-            anchors.centerIn: parent
-            text: outgoing.status
-            color: "white"
-            font.pixelSize: 13
-        }
+        text: outgoing.status
     }
 
     // When iCloud cannot be reached: what still works, and what to do. The
     // photos on this computer always show.
-    Rectangle {
+    Chip {
         id: healthNotice
-        readonly property string text: {
+        readonly property string message: {
             switch (serviceHealth) {
             case "needs_sign_in": return qsTr("Not signed in to iCloud. To sign in again, run pinhole-sync sign-in in a terminal.")
             case "offline": return qsTr("Offline. Showing what is on this computer.")
@@ -178,119 +143,80 @@ ApplicationWindow {
             default: return ""
             }
         }
-        visible: text !== "" && grid.count > 0
+        visible: message !== "" && grid.count > 0
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: 16
-        width: Math.min(parent.width - 32, healthText.implicitWidth + 40)
-        height: healthText.implicitHeight + 14
-        radius: Math.min(6, theme.radius)
-        color: "#e0202024"
-        Rectangle {
-            x: 12
-            anchors.verticalCenter: parent.verticalCenter
-            width: 8
-            height: 8
-            radius: 4
-            color: serviceHealth === "offline" ? "#9a9a9a" : "#e5a33d"
-        }
-        Text {
-            id: healthText
-            x: 28
-            width: parent.width - 40
-            anchors.verticalCenter: parent.verticalCenter
-            text: healthNotice.text
-            color: "white"
-            font.pixelSize: 12
-            elide: Text.ElideRight
-        }
+        // The sign-in and service problems in the theme's red; offline in
+        // its muted text.
+        text: (serviceHealth === "offline" ? "" : "● ") + message
+        textColor: serviceHealth === "offline" ? theme.darkForeground : theme.red
+        width: Math.min(parent.width - 32, label.implicitWidth + 2 * theme.fontSize)
+        label.width: width - 2 * theme.fontSize
+        label.elide: Text.ElideRight
     }
 
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
-    Rectangle {
+    ShellButton {
         id: selectButton
         objectName: "selectButton"
         visible: win.inGrid && grid.count > 0
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.topMargin: 16
-        anchors.rightMargin: 24
-        width: selectLabel.implicitWidth + 28
-        height: selectLabel.implicitHeight + 12
-        radius: height / 2
-        color: grid.selecting ? theme.accent : (selectHover.hovered ? "#e0303036" : "#c0202024")
-        Text {
-            id: selectLabel
-            anchors.centerIn: parent
-            text: grid.selecting ? qsTr("Done") : qsTr("Select")
-            color: grid.selecting ? "black" : "white"
-            font.pixelSize: 13
-            font.bold: grid.selecting
-        }
-        HoverHandler { id: selectHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: grid.selecting = !grid.selecting }
+        anchors.margins: 16
+        text: grid.selecting ? qsTr("Done") : qsTr("Select")
+        active: grid.selecting
+        onTapped: grid.selecting = !grid.selecting
     }
 
+    // The bar of select mode, as an Omarchy menu card: the theme's
+    // background with a hairline in the text colour, the count in the
+    // accent, rows lighting up under the pointer, and their keys beside them.
     Rectangle {
         id: selectBar
         visible: win.inGrid && grid.selecting
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
-        width: barRow.implicitWidth + 24
-        height: 40
-        radius: Math.min(10, theme.radius)
-        color: "#f0161618"
-        border.color: theme.accent
+        width: barRow.implicitWidth + 2
+        height: barRow.implicitHeight + 2
+        radius: Math.min(4, theme.radius)
+        color: theme.background
+        border.color: theme.foreground
         border.width: 1
         Row {
             id: barRow
             anchors.centerIn: parent
-            spacing: 6
-            Text {
+            UiText {
                 anchors.verticalCenter: parent.verticalCenter
-                rightPadding: 10
+                leftPadding: theme.fontSize
+                rightPadding: theme.fontSize
                 text: grid.selectionCount === 0 ? qsTr("Click photos to select them")
                                                 : qsTr("%n photo(s) selected", "", grid.selectionCount)
-                color: "white"
-                font.pixelSize: 13
+                color: theme.accent
             }
             CopyButton {
                 anchors.verticalCenter: parent.verticalCenter
                 photos: () => grid.selection()
                 enabledHere: grid.selectionCount > 0
-                pill: false
-                height: 28
-                fontSize: 13
-                idleColor: "transparent"
-                hoverColor: "#40ffffff"
+                flat: true
+                hint: "ctrl c"
             }
             Repeater {
                 model: [
-                    { label: qsTr("Export originals"), act: () => outgoing.exportTo(grid.selection(), false) },
-                    { label: qsTr("Export as JPEG and MP4"), act: () => outgoing.exportTo(grid.selection(), true) },
-                    { label: qsTr("Select all"), act: () => grid.selectAll() }
+                    { label: qsTr("Export originals"), keys: "ctrl e", act: () => outgoing.exportTo(grid.selection(), false) },
+                    { label: qsTr("Export as JPEG and MP4"), keys: "ctrl ⇧ e", act: () => outgoing.exportTo(grid.selection(), true) },
+                    { label: qsTr("Select all"), keys: "ctrl a", act: () => grid.selectAll() }
                 ]
-                delegate: Rectangle {
+                delegate: ShellButton {
                     required property var modelData
-                    readonly property bool usable: grid.selectionCount > 0 || index === 2
                     required property int index
                     anchors.verticalCenter: parent.verticalCenter
-                    width: actionLabel.implicitWidth + 20
-                    height: 28
-                    radius: Math.min(6, theme.radius)
-                    color: actionHover.hovered && usable ? "#40ffffff" : "transparent"
-                    opacity: usable ? 1 : 0.4
-                    Text {
-                        id: actionLabel
-                        anchors.centerIn: parent
-                        text: parent.modelData.label
-                        color: "white"
-                        font.pixelSize: 13
-                    }
-                    HoverHandler { id: actionHover; cursorShape: parent.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                    TapHandler { onTapped: if (parent.usable) parent.modelData.act() }
+                    flat: true
+                    usable: grid.selectionCount > 0 || index === 2
+                    text: modelData.label + "  <font color=\"" + theme.darkForeground + "\">" + modelData.keys + "</font>"
+                    onTapped: modelData.act()
                 }
             }
         }

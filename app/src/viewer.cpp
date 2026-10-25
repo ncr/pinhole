@@ -42,10 +42,14 @@ QString Viewer::title() const {
     if (m_index < 0 || m_index >= m_library->count())
         return {};
     const QDateTime when = QDateTime::fromMSecsSinceEpoch(m_library->at(m_index).date);
-    // "Saturday, 24 October 2026  16:16", in the locale's own words.
+    // "Saturday, 24 October 2026 · 16:16", in the locale's own words; the
+    // window shows the time after the dot muted. Locales put a narrow
+    // no-break space before AM/PM, which the monospace face draws with no
+    // width at all ("1:12PM"): an ordinary space instead.
     const QLocale locale;
-    return locale.toString(when.date(), QLocale::LongFormat) + QStringLiteral("  ") +
-           locale.toString(when.time(), QLocale::ShortFormat);
+    QString time = locale.toString(when.time(), QLocale::ShortFormat);
+    time.replace(QChar(0x202F), QLatin1Char(' ')).replace(QChar(0x00A0), QLatin1Char(' '));
+    return locale.toString(when.date(), QLocale::LongFormat) + QStringLiteral(" · ") + time;
 }
 
 void Viewer::setMessage(const QString &message) {

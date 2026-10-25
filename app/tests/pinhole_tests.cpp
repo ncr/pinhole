@@ -137,6 +137,28 @@ private slots:
         QCOMPARE(theme.accent(), QString("#7aa2f7"));
     }
 
+    // Every colour of colors.toml, the mode, and in-between shades a theme
+    // leaves out made from its background and foreground.
+    void themeReadsEveryColourAndTheMode() {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        write(dir.path() + "/theme/colors.toml",
+              "mode = \"light\"\naccent = \"#205EA6\"\nbackground = \"#FFFCF0\"\nforeground = \"#100F0F\"\n"
+              "dark_foreground = \"#878580\"\n");
+        write(dir.path() + "/theme/shell.toml", "[font]\nbase-size = 14\n");
+        Theme theme(dir.path());
+        QVERIFY(theme.light());
+        QCOMPARE(theme.background(), QColor("#FFFCF0"));
+        QCOMPARE(theme.foreground(), QColor("#100F0F"));
+        QCOMPARE(theme.darkForeground(), QColor("#878580"));
+        QCOMPARE(theme.fontSize(), 14);
+        // Not in the file: between background and foreground, near the
+        // background, and on the light side for a light theme's darker one.
+        QVERIFY(theme.lighterBackground() != theme.background());
+        QVERIFY(theme.lighterBackground().lightnessF() > 0.8);
+        QVERIFY(theme.darkBackground().lightnessF() > 0.8);
+    }
+
     void polishHasItsThreePluralForms() {
         QTemporaryDir dir;
         write(dir.path() + "/language", "pl\n");

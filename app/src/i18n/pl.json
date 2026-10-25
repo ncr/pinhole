@@ -17,6 +17,7 @@
   "Click a side": "Klik z boku",
   "Click or drag to move through the library": "Kliknij lub przeciągnij, by przejść przez bibliotekę",
   "Click photos to select them": "Klikaj zdjęcia, by je zaznaczyć",
+  "Copied": "Skopiowano",
   "Copied %n photo(s)": {
     "one": "Skopiowano %n zdjęcie",
     "few": "Skopiowano %n zdjęcia",
@@ -57,6 +58,7 @@
     "many": "Wyeksportowano %n zdjęć do %1",
     "other": "Wyeksportowano %n zdjęcia do %1"
   },
+  "LIVE": "LIVE",
   "Loading the full photo…": "Wczytuję pełne zdjęcie…",
   "Loading video…": "Wczytuję wideo…",
   "Move around a zoomed photo; or two fingers, flick to coast": "Przesuwaj powiększone zdjęcie; lub dwoma palcami, machnij, by sunęło dalej",
@@ -91,8 +93,8 @@
   "Show or hide the frame statistics": "Pokaż lub ukryj statystyki klatek",
   "Show or hide these keys": "Pokaż lub ukryj te skróty",
   "Sign in to iCloud and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.": "Zaloguj się do iCloud i zbuduj ją w terminalu. Dla 50 000 zdjęć trwa to około dziesięciu minut, a Pinhole otworzy ją, gdy tylko będzie gotowa.",
-  "Sound off  (M)": "Dźwięk wył.  (M)",
-  "Sound on  (M)": "Dźwięk wł.  (M)",
+  "Sound off": "Dźwięk wył.",
+  "Sound on": "Dźwięk wł.",
   "Sound on or off": "Włącz lub wyłącz dźwięk",
   "Start selecting with this photo": "Zacznij zaznaczanie od tego zdjęcia",
   "Stop selecting": "Zakończ zaznaczanie",

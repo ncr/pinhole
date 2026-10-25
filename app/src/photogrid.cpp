@@ -1619,10 +1619,10 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             for (auto it = m_selected.lower_bound(from); it != m_selected.end() && *it < to; ++it)
                 frames.push_back(cellRect(*it, l));
         }
-        // Each: a border, and a check badge in the bottom right corner as
-        // on an iPhone: a white ring, the accent inside, a white tick.
-        constexpr int kSegments = 16;
-        constexpr int kPerCell = 24 + 2 * kSegments * 3 + 12;
+        // Each: a border, and a check badge in the bottom right corner, square
+        // as Omarchy draws things: the accent, with a tick in the background
+        // colour.
+        constexpr int kPerCell = 24 + 6 + 12;
         QSGGeometry *g = rs.selection->geometry();
         g->allocate(int(frames.size() * kPerCell));
         auto *v = g->vertexDataAsColoredPoint2D();
@@ -1637,27 +1637,19 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             v[5].set(x0, y1, r, gr, b, 255);
             v += 6;
         };
-        auto disc = [&](float cx, float cy, float radius, uchar dr, uchar dg, uchar db) {
-            for (int i = 0; i < kSegments; ++i) {
-                const double a0 = 2 * M_PI * i / kSegments, a1 = 2 * M_PI * (i + 1) / kSegments;
-                v[0].set(cx, cy, dr, dg, db, 255);
-                v[1].set(cx + radius * float(std::cos(a0)), cy + radius * float(std::sin(a0)), dr, dg, db, 255);
-                v[2].set(cx + radius * float(std::cos(a1)), cy + radius * float(std::sin(a1)), dr, dg, db, 255);
-                v += 3;
-            }
-        };
-        // A stroke from p to q, `t` thick, in white.
+        const uchar tr = uchar(m_background.red()), tg = uchar(m_background.green()), tb = uchar(m_background.blue());
+        // A stroke from p to q, `t` thick, in the background colour.
         auto stroke = [&](QPointF p, QPointF q, double t) {
             const QPointF d = q - p;
             const double len = std::max(1e-6, std::hypot(d.x(), d.y()));
             const QPointF n(-d.y() / len * t / 2, d.x() / len * t / 2);
             const QPointF a = p + n, b2 = p - n, c = q + n, e = q - n;
-            v[0].set(float(a.x()), float(a.y()), 255, 255, 255, 255);
-            v[1].set(float(b2.x()), float(b2.y()), 255, 255, 255, 255);
-            v[2].set(float(c.x()), float(c.y()), 255, 255, 255, 255);
-            v[3].set(float(b2.x()), float(b2.y()), 255, 255, 255, 255);
-            v[4].set(float(e.x()), float(e.y()), 255, 255, 255, 255);
-            v[5].set(float(c.x()), float(c.y()), 255, 255, 255, 255);
+            v[0].set(float(a.x()), float(a.y()), tr, tg, tb, 255);
+            v[1].set(float(b2.x()), float(b2.y()), tr, tg, tb, 255);
+            v[2].set(float(c.x()), float(c.y()), tr, tg, tb, 255);
+            v[3].set(float(b2.x()), float(b2.y()), tr, tg, tb, 255);
+            v[4].set(float(e.x()), float(e.y()), tr, tg, tb, 255);
+            v[5].set(float(c.x()), float(c.y()), tr, tg, tb, 255);
             v += 6;
         };
         for (const QRectF &f : frames) {
@@ -1666,10 +1658,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             quad(x0, y1 - w, x1, y1);
             quad(x0, y0 + w, x0 + w, y1 - w);
             quad(x1 - w, y0 + w, x1, y1 - w);
-            const double radius = std::clamp(f.width() * 0.1, 6.0, 11.0);
+            const double radius = std::clamp(f.width() * 0.09, 6.0, 10.0);
             const double cx = f.right() - radius - 6, cy = f.bottom() - radius - 6;
-            disc(float(cx), float(cy), float(radius + 1.5), 255, 255, 255);
-            disc(float(cx), float(cy), float(radius), r, gr, b);
+            quad(float(cx - radius), float(cy - radius), float(cx + radius), float(cy + radius));
             const double t = std::max(1.5, radius * 0.22);
             stroke({cx - radius * 0.45, cy + radius * 0.02}, {cx - radius * 0.1, cy + radius * 0.38}, t);
             stroke({cx - radius * 0.1, cy + radius * 0.38}, {cx + radius * 0.48, cy - radius * 0.35}, t);
