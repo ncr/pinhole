@@ -889,6 +889,20 @@ void PhotoGrid::scrollPages(qreal pages) {
     updateAnimating();
 }
 
+void PhotoGrid::scrollByKey(int direction, bool fast) {
+    syncBounds();
+    const double now = m_clock.nsecsElapsed() / 1e9;
+    const double since = now - m_lastKeyScroll;
+    m_lastKeyScroll = now;
+    // A fresh press steps; the key's repeats, coming every few hundredths
+    // of a second while it is held, add up to a steady speed, which the
+    // easing smooths into a glide.
+    const double step = since > 0.12 || since < 0 ? (fast ? height() * 0.5 : stride())
+                                                    : (fast ? 4500.0 : 1400.0) * since;
+    m_physics.nudge(direction * step, 0.15);
+    updateAnimating();
+}
+
 void PhotoGrid::setDriveVelocity(double v) {
     m_driveVelocity = v;
     m_physics.jumpTo(m_scroll);

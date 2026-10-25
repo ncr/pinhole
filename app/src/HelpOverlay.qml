@@ -16,6 +16,8 @@ Item {
             [qsTr("Click"), qsTr("Open the photo")],
             [qsTr("Two fingers"), qsTr("Scroll; flick to coast, rest a finger or tap to stop")],
             [qsTr("Wheel"), qsTr("Scroll")],
+            ["↑  ↓", qsTr("A row up or down; hold to glide")],
+            ["⇧ ↑  ↓", qsTr("Faster")],
             [qsTr("Pinch"), qsTr("Zoom in and out")],
             [qsTr("Ctrl+wheel"), qsTr("Zoom one step at the pointer")],
             ["+  −", qsTr("Zoom one step")],
@@ -65,7 +67,7 @@ Item {
             ["M", qsTr("Sound on or off")]
         ] },
         { title: qsTr("Pinhole"), keys: [
-            ["?", qsTr("Show or hide these keys")],
+            ["?", qsTr("Show or hide these keys; or the ? button")],
             ["F", qsTr("Show or hide the frame statistics")],
             ["Q", qsTr("Quit")]
         ] }

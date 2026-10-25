@@ -1,5 +1,6 @@
 {
   "%1 selected": "Zaznaczono %1",
+  "A row up or down; hold to glide": "Rząd w górę lub w dół; przytrzymaj, by płynąć",
   "A screen up or down": "Ekran w górę lub w dół",
   "Back or ahead 10 seconds": "10 sekund wstecz lub naprzód",
   "Back to fitted": "Wróć do dopasowania",
@@ -46,6 +47,7 @@
     "other": "Eksportuj %n zdjęcia do"
   },
   "Export as JPEG and MP4": "Eksportuj jako JPEG i MP4",
+  "Export original": "Eksportuj oryginał",
   "Export originals": "Eksportuj oryginały",
   "Exported %1, %2 failed": "Wyeksportowano %1, nie udało się %2",
   "Exported %n photo(s) to %1": {
@@ -54,7 +56,8 @@
     "many": "Wyeksportowano %n zdjęć do %1",
     "other": "Wyeksportowano %n zdjęcia do %1"
   },
-  "LIVE": "LIVE",
+  "Faster": "Szybciej",
+  "Live": "Live",
   "Move around a zoomed photo; or two fingers, flick to coast": "Przesuwaj powiększone zdjęcie; lub dwoma palcami, machnij, by sunęło dalej",
   "Newest": "Najnowsze",
   "No photo library yet": "Nie ma jeszcze biblioteki zdjęć",
@@ -64,6 +67,7 @@
   "Oldest": "Najstarsze",
   "Open the photo": "Otwórz zdjęcie",
   "Open the photo under the pointer": "Otwórz zdjęcie pod wskaźnikiem",
+  "Original": "Oryginał",
   "Originals": "Oryginały",
   "Pinch": "Szczypnięcie",
   "Pinch in": "Zsunięcie palców",
@@ -88,7 +92,7 @@
   "Selecting": "Zaznaczanie",
   "Shift+click": "Shift+kliknięcie",
   "Show or hide the frame statistics": "Pokaż lub ukryj statystyki klatek",
-  "Show or hide these keys": "Pokaż lub ukryj te skróty",
+  "Show or hide these keys; or the ? button": "Pokaż lub ukryj te klawisze; albo przycisk ?",
   "Sign in to iCloud and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.": "Zaloguj się do iCloud i zbuduj ją w terminalu. Dla 50 000 zdjęć trwa to około dziesięciu minut, a Pinhole otworzy ją, gdy tylko będzie gotowa.",
   "Sound off": "Dźwięk wył.",
   "Sound on": "Dźwięk wł.",

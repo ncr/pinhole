@@ -158,6 +158,25 @@ ApplicationWindow {
         onTapped: grid.glideToNewest()
     }
 
+    // Every key, on ? or this.
+    ShellButton {
+        id: helpButton
+        objectName: "helpButton"
+        floating: true
+        visible: win.inGrid && grid.count > 0
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        // Above select mode's bar when the window is too narrow for both.
+        anchors.bottomMargin: selectBar.visible && selectBar.x + selectBar.width > win.width - 16 - width - 8
+                              ? 20 + selectBar.height + 8 : 16
+        text: "?"
+        width: height
+        // The window's key: it also puts the help away.
+        hint: ""
+        onTapped: help.shown = true
+    }
+
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
     ShellButton {
@@ -196,7 +215,8 @@ ApplicationWindow {
         // becomes "Originals", then the keys go, then the count is only the
         // number, then not there (the ticks show it). The first that fits.
         readonly property int fit: {
-            const room = win.width - 32
+            // Clear of the ? button, on both sides as it is centred.
+            const room = win.width - 2 * (16 + helpButton.width + 8)
             for (let level = 0; level < 4; ++level)
                 if (widthAt(level) <= room)
                     return level
@@ -296,12 +316,18 @@ ApplicationWindow {
 
     // Every button presses on its own key too, shown beside it, while it
     // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,
-    // originals ⇧E, LIVE L, close Esc. The keys here are the rest.
+    // originals ⇧E, Live L, close Esc. The keys here are the rest.
 
     // The grid.
     Shortcut { enabled: win.inGrid; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
     Shortcut { enabled: win.inGrid; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
     Shortcut { enabled: win.inGrid; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
+    // Up and down a row, held a steady glide; with Shift a half screen,
+    // held faster.
+    Shortcut { enabled: win.inGrid; sequence: "Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, false) }
+    Shortcut { enabled: win.inGrid; sequence: "Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, false) }
+    Shortcut { enabled: win.inGrid; sequence: "Shift+Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, true) }
+    Shortcut { enabled: win.inGrid; sequence: "Shift+Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, true) }
     Shortcut { enabled: win.inGrid; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
@@ -323,8 +349,6 @@ ApplicationWindow {
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
-    // The originals: the viewer's Export button is the JPEG.
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo([viewer.index], false) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }

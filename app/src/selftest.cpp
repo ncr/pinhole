@@ -570,6 +570,20 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              QTimer::singleShot(300, window, [=] { key(window, Qt::Key_N, {}, QStringLiteral("n")); });
          },
          [=] { return grid->atNewest() && grid->scrollFraction() > 0.999; }, 1800},
+        {"Down scrolls a row", [=] {
+             grid->jumpToFraction(0.5);
+             *mark = grid->scrollFraction() * grid->scrollRange();
+             QTimer::singleShot(100, window, [=] { key(window, Qt::Key_Down); });
+         },
+         [=] {
+             const double moved = grid->scrollFraction() * grid->scrollRange() - *mark;
+             return std::abs(moved - grid->rectOf(1).left() + grid->rectOf(0).left()) < 2;
+         }, 1200},
+        {"Shift+Up half a screen back", [=] {
+             *mark = grid->scrollFraction() * grid->scrollRange();
+             key(window, Qt::Key_Up, Qt::ShiftModifier);
+         },
+         [=] { return std::abs(*mark - grid->scrollFraction() * grid->scrollRange() - grid->height() * 0.5) < 2; }, 1200},
         {"S starts selecting", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return grid->selecting(); }},
         {"a drag across the photos ticks every one from start to end", [=] {
@@ -604,6 +618,10 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         {"with the help up, the buttons' keys rest", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return !grid->selecting(); }},
         {"Esc puts the help away", [=] { key(window, Qt::Key_Escape); },
+         [=] { return !window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
+        {"the ? button in the corner shows it", [=] { click(window, centreOf(window, "helpButton")); },
+         [=] { return window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
+        {"and Esc again puts it away", [=] { key(window, Qt::Key_Escape); },
          [=] { return !window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
         {"a photo open, Esc on its close button closes it", [=, &viewer] {
              const int index = grid->indexAt(grid->width() / 2, grid->height() / 2);

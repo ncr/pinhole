@@ -335,7 +335,7 @@ Item {
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
             floating: true
-            text: qsTr("LIVE")
+            text: qsTr("Live")
             key: "L"
             onTapped: viewer.playLive()
         }
@@ -348,13 +348,20 @@ Item {
             photos: () => [viewer.index]
             key: "C"
         }
+        // As JPEG or MP4, what opens anywhere; the original on Shift.
         ShellButton {
             anchors.verticalCenter: parent.verticalCenter
             floating: true
             text: qsTr("Export")
             key: "E"
-            // As JPEG or MP4; Shift+E, the original.
             onTapped: outgoing.exportTo([viewer.index], true)
+        }
+        ShellButton {
+            anchors.verticalCenter: parent.verticalCenter
+            floating: true
+            text: root.width > 900 ? qsTr("Export original") : qsTr("Original")
+            key: "Shift+E"
+            onTapped: outgoing.exportTo([viewer.index], false)
         }
         // Back to the library.
         ShellButton {

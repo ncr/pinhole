@@ -101,6 +101,9 @@ public:
     Q_INVOKABLE void scrollToStart();
     Q_INVOKABLE void scrollToEnd();
     Q_INVOKABLE void scrollPages(qreal pages);
+    // An arrow key, pressed or repeating while held: a row (fast, half a
+    // screen), then while held a steady glide.
+    Q_INVOKABLE void scrollByKey(int direction, bool fast);
 
     // The photo at a point in the grid, or -1; the photo under the pointer,
     // else the one in the middle of the view.
@@ -294,6 +297,7 @@ private:
     double m_scroll = 0;
 
     ScrollPhysics m_physics;
+    double m_lastKeyScroll = -1; // s, on m_clock
     double m_driveVelocity = 0; // the benchmark's, or a sweep's at an edge; px/s
 
     struct Zoom {
