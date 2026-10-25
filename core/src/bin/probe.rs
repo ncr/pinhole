@@ -19,8 +19,8 @@ use pinhole_core::source::{pair_records, Asset};
 #[derive(Parser)]
 struct Cli {
     /// The sign-in provider to run (see auth/PROTOCOL.md).
-    #[arg(long, default_value = "auth/pyicloud/pinhole-auth")]
-    auth: PathBuf,
+    #[arg(long)]
+    auth: Option<PathBuf>,
     /// The SQLite index the probe writes.
     #[arg(long)]
     db: Option<PathBuf>,
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     if let Some(dir) = db_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let provider = Box::new(ProcessProvider::spawn(cli.auth.clone(), None)?);
+    let provider = Box::new(ProcessProvider::spawn(cli.auth.clone().unwrap_or_else(pinhole_core::auth::default_provider), None)?);
     let mut client = PhotosClient::new(provider)?;
 
     match cli.command {

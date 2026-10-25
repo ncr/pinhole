@@ -7,7 +7,20 @@ thumbnails) and fetches everything else from iCloud only when it is looked at,
 dragged or exported, the way Photos on a Mac does with "Optimize Mac Storage".
 It never changes the library.
 
-Status: two spikes. The iCloud API probe is in
+## Install
+
+```bash
+bin/install                  # builds the package and installs it (asks for your password)
+pinhole-sync sign-in         # Apple ID, password, two-factor code; or --from-icloudpd <apple-id>
+pinhole-sync all             # the index (~5 min) and every thumbnail (~6 min)
+```
+
+Then open Pinhole from the launcher. Without a library it says what to do
+and opens the library as soon as it is there. `?` lists every shortcut.
+
+## Development
+
+Status: two spikes grown into an app. The iCloud API probe is in
 [docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
 synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
 
@@ -26,13 +39,14 @@ app/                      the window: Qt Quick, with the grid in C++
 
 ## Trying the grid
 
-On your own library (after adopting a session with `import_icloudpd`, below):
+On your own library (after `pinhole-sync sign-in`):
 
 ```bash
 core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library
 app/bin/build
 app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms, double-click opens
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
+app/bin/test                 # unit tests: scroll physics, translations, theme, library
 ```
 
 `pinhole-sync` only fetches what is missing, so running it again is quick.

@@ -11,6 +11,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QThread>
 #include <QUrl>
 
@@ -49,11 +50,10 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("0.1.0");
     app.setDesktopFileName("pinhole");
 
-    // The real library once pinhole-sync has made one, the synthetic one
-    // otherwise.
-    const QString data = QDir::homePath() + "/.local/share/pinhole/";
+    // Where pinhole-sync builds the library. The synthetic one for working on
+    // the grid (pinhole-fake) is opened with --library.
     const QString defaultLibrary =
-        QFile::exists(data + "library/library.sqlite") ? data + "library" : data + "fake";
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/pinhole/library";
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -77,10 +77,11 @@ int main(int argc, char *argv[]) {
     QString error;
     QElapsedTimer loadTimer;
     loadTimer.start();
-    if (!library.open(parser.value("library"), &error)) {
+    // No library yet is not fatal: the window opens and says how to make
+    // one, and picks it up once it is there.
+    const bool haveLibrary = library.open(parser.value("library"), &error);
+    if (!haveLibrary)
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
-        return 1;
-    }
     std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
                  loadTimer.elapsed());
 
@@ -100,6 +101,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
+    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("bench", nullptr);
@@ -175,8 +177,29 @@ int main(int argc, char *argv[]) {
     // the minute.
     service.sync();
 
+    // Without a library, look for one every few seconds: pinhole-sync may be
+    // building it right now.
+    QTimer waitForLibrary;
+    if (!haveLibrary) {
+        QObject::connect(&waitForLibrary, &QTimer::timeout, &waitForLibrary, [&] {
+            if (!QFile::exists(library.dir() + "/library.sqlite"))
+                return;
+            waitForLibrary.stop();
+            engine.rootContext()->setContextProperty("libraryProblem", QString());
+            reloadLibrary();
+        });
+        waitForLibrary.start(5000);
+    }
+
     // PINHOLE_SELFTEST=help:<file>: the shortcut overlay as an image, to check
     // its layout (and each language's) without a screen.
+    // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("shot:"))) {
+        QTimer::singleShot(1200, window, [window, test] {
+            window->grabWindow().save(test.mid(5));
+            QCoreApplication::quit();
+        });
+    }
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("help:"))) {
         QTimer::singleShot(800, window, [window, test] {
             if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))

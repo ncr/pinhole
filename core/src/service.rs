@@ -207,10 +207,9 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
     shared.listeners.lock().unwrap().push(out.clone());
-    let db = Connection::open_with_flags(
-        shared.config.library.join("library.sqlite"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
+    // Opened when first needed: before pinhole-sync has built the library
+    // there is none, and the connection must stay up regardless.
+    let mut db: Option<Connection> = None;
     for line in BufReader::new(stream).lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -236,7 +235,19 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 "cache_bytes": cache_size(&shared.config.cache),
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
             }))),
-            Some("fetch") => fetch(&shared, &db, &request["params"], reply),
+            Some("fetch") => {
+                if db.is_none() {
+                    db = Connection::open_with_flags(
+                        shared.config.library.join("library.sqlite"),
+                        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    )
+                    .ok();
+                }
+                match &db {
+                    Some(db) => fetch(&shared, db, &request["params"], reply),
+                    None => reply.send(Err(("not_found", "there is no library yet".into()))),
+                }
+            }
             other => reply.send(Err(("bad_request", format!("unknown method {other:?}")))),
         }
     }

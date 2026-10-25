@@ -31,6 +31,15 @@ order, since a cached file answers at once while a download takes a while.
 | `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
 | `ping` | | `{}` |
 
+`kind` picks the rendition, the first one the asset has:
+
+| kind | renditions tried |
+|---|---|
+| `medium` | JPEGMed, JPEGFull, JPEGLarge |
+| `original` | Original |
+| `video` | VidMed, VidFull, Original |
+| `live` | OriginalVidCompl (a Live Photo's motion) |
+
 ## Events
 
 Lines without an `id` are the service's own news, sent to every connected
@@ -54,15 +63,6 @@ removed. Photos' own background work changes many records in ways Pinhole
 does not draw; those are written but announce nothing. If iCloud no longer
 accepts the token, the service walks the whole library again.
 `pinhole-sync changes [--dry-run]` does the same from the command line.
-
-`kind` picks the rendition, the first one the asset has:
-
-| kind | renditions tried |
-|---|---|
-| `medium` | JPEGMed, JPEGFull, JPEGLarge |
-| `original` | Original |
-| `video` | VidMed, VidFull, Original |
-| `live` | OriginalVidCompl (a Live Photo's motion) |
 
 ## Errors
 

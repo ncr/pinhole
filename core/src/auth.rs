@@ -108,3 +108,19 @@ impl Drop for ProcessProvider {
         let _ = self.child.wait();
     }
 }
+
+/// The sign-in provider to run: $PINHOLE_AUTH, else the one in this
+/// checkout when running from core/target/release/, else `pinhole-auth` on
+/// PATH (as the package installs it).
+pub fn default_provider() -> PathBuf {
+    if let Some(p) = std::env::var_os("PINHOLE_AUTH") {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let checkout = exe.ancestors().nth(4).map(|root| root.join("auth/pyicloud/pinhole-auth"));
+        if let Some(p) = checkout.filter(|p| p.exists()) {
+            return p;
+        }
+    }
+    PathBuf::from("pinhole-auth")
+}

@@ -3,3 +3,6 @@ build/
 *.sqlite
 *.sqlite-*
 __pycache__/
+/pkgbuild/pkg/
+/pkgbuild/src/
+*.pkg.tar.*

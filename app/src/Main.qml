@@ -34,6 +34,54 @@ ApplicationWindow {
         }
     }
 
+    // First run: no library yet.
+    Column {
+        anchors.centerIn: parent
+        visible: grid.count === 0
+        spacing: 12
+        width: Math.min(parent.width - 48, 520)
+        Text {
+            width: parent.width
+            text: qsTr("No photo library yet")
+            color: "white"
+            font.pixelSize: 20
+            horizontalAlignment: Text.AlignHCenter
+        }
+        Text {
+            width: parent.width
+            text: qsTr("Sign in to iCloud and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.")
+            color: "#c0ffffff"
+            font.pixelSize: 13
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: commands.implicitWidth + 32
+            height: commands.implicitHeight + 16
+            radius: Math.min(6, theme.radius)
+            color: "#202024"
+            Text {
+                id: commands
+                anchors.centerIn: parent
+                text: "pinhole-sync sign-in\npinhole-sync all"
+                color: theme.accent
+                font.family: "monospace"
+                font.pixelSize: 14
+                lineHeight: 1.4
+            }
+        }
+        Text {
+            width: parent.width
+            visible: libraryProblem !== ""
+            text: libraryProblem
+            color: "#80ffffff"
+            font.pixelSize: 11
+            wrapMode: Text.WrapAnywhere
+            horizontalAlignment: Text.AlignHCenter
+        }
+    }
+
     DateScrubber {
         grid: grid
         visible: win.inGrid

@@ -263,7 +263,7 @@ private:
     QElapsedTimer m_clock;
 
     bool m_animating = false;
-    bool m_statsVisible = true;
+    bool m_statsVisible = false;
     QString m_statsText;
     QTimer m_statsTimer;
 

@@ -16,8 +16,8 @@ use pinhole_core::{db, sync};
 #[derive(Parser)]
 struct Cli {
     /// The sign-in provider to run (see auth/PROTOCOL.md).
-    #[arg(long, default_value = "auth/pyicloud/pinhole-auth")]
-    auth: PathBuf,
+    #[arg(long)]
+    auth: Option<PathBuf>,
     /// The library directory: library.sqlite and thumbs/.
     #[arg(long)]
     library: Option<PathBuf>,
@@ -39,6 +39,14 @@ enum Cmd {
     },
     /// Index, then thumbnails.
     All,
+    /// Sign in to iCloud: Apple ID, password and the two-factor code, asked
+    /// for here. The provider keeps the session; the password is not stored.
+    SignIn {
+        /// Take over the session icloudpd already has for this Apple ID
+        /// instead (copied from ~/.config/icloudpd).
+        #[arg(long, value_name = "APPLE_ID")]
+        from_icloudpd: Option<String>,
+    },
     /// Apply what changed in iCloud since the last walk or sync, then fetch
     /// thumbnails for anything new.
     Changes {
@@ -53,14 +61,19 @@ fn main() -> Result<()> {
     let library = cli.library.unwrap_or_else(|| {
         PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share/pinhole/library")
     });
+    let auth = cli.auth.unwrap_or_else(pinhole_core::auth::default_provider);
+    if let Cmd::SignIn { from_icloudpd } = &cli.command {
+        return sign_in(auth, from_icloudpd.as_deref());
+    }
     std::fs::create_dir_all(&library)?;
     let mut conn = db::open(&library.join("library.sqlite"))?;
-    let mut client = PhotosClient::new(Box::new(ProcessProvider::spawn(cli.auth, None)?))?;
+    let mut client = PhotosClient::new(Box::new(ProcessProvider::spawn(auth, None)?))?;
 
     let (index, thumbs) = match cli.command {
         Cmd::Index { parallel } => (Some(parallel), None),
         Cmd::Thumbs { parallel } => (None, Some(parallel)),
         Cmd::All => (Some(4), Some(64)),
+        Cmd::SignIn { .. } => unreachable!("handled above"),
         Cmd::Changes { dry_run } => {
             let r = sync::apply_changes(&mut client, &mut conn, dry_run)?;
             let name = |id: &String| -> String {
@@ -117,5 +130,40 @@ fn main() -> Result<()> {
     let (total, with_thumbs): (i64, i64) = conn.query_row(
         "SELECT count(*), count(thumb_path) FROM assets", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
     println!("library {}: {total} assets, {with_thumbs} with thumbnails", library.display());
+    Ok(())
+}
+
+fn ask(prompt: &str, hidden: bool) -> Result<String> {
+    use std::io::Write;
+    eprint!("{prompt}");
+    std::io::stderr().flush()?;
+    // Not echoed: the terminal's echo is off while the password is typed.
+    let restore = hidden && std::process::Command::new("stty").arg("-echo").status().is_ok_and(|s| s.success());
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if restore {
+        let _ = std::process::Command::new("stty").arg("echo").status();
+        eprintln!();
+    }
+    read?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+fn sign_in(auth: PathBuf, from_icloudpd: Option<&str>) -> Result<()> {
+    let mut provider = ProcessProvider::spawn(auth, None)?;
+    if let Some(apple_id) = from_icloudpd {
+        provider.call("import_icloudpd", serde_json::json!({"apple_id": apple_id}))?;
+        let status = provider.call("status", serde_json::Value::Null)?;
+        println!("{}", if status["state"] == "signed_in" { "Signed in, with icloudpd's session." } else { "icloudpd's session is no longer valid; sign in without --from-icloudpd." });
+        return Ok(());
+    }
+    let apple_id = ask("Apple ID: ", false)?;
+    let password = ask("Password: ", true)?;
+    let state = provider.call("sign_in", serde_json::json!({"apple_id": apple_id, "password": password}))?;
+    if state["state"] == "needs_code" {
+        let code = ask("The six-digit code Apple sent to your devices: ", false)?;
+        provider.call("submit_code", serde_json::json!({"code": code.trim()}))?;
+    }
+    println!("Signed in as {apple_id}. Next: pinhole-sync all");
     Ok(())
 }

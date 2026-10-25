@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Pinhole
+Name[pl]=Pinhole
+Comment=Browse your iCloud Photos library
+Comment[pl]=Przeglądaj bibliotekę Zdjęć iCloud
+Exec=pinhole
+Icon=pinhole
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+Keywords=photos;icloud;pictures;gallery;
+StartupWMClass=pinhole
