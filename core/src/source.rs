@@ -1,248 +1,250 @@
-//! What the rest of Pinhole asks for photos. iCloud is one implementation;
-//! a synthetic library for tests and stress runs is the other one to come.
+//! What the rest of Pinhole asks for photos, whoever keeps them: iCloud, or
+//! a folder on this computer. A source has a catalog, which says what is in
+//! the library and what changed, and a fetch, which gets a photo's files.
+//! See docs/sources.md.
 
-use std::collections::HashMap;
+use std::io::Read;
+use std::path::PathBuf;
 
 use anyhow::Result;
-use base64::Engine;
-use serde_json::Value;
 
-use crate::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use crate::db::Index;
 
-/// One rendition of an asset iCloud keeps: the original, the JPEG sizes
-/// and the video sizes. Download URLs are signed and short-lived, so they
-/// are fetched fresh when needed rather than relied on later.
-#[derive(Debug, Clone)]
-pub struct Resource {
-    /// The CloudKit field prefix without "res": Original, JPEGThumb, VidMed...
-    pub kind: String,
+/// What an asset is, as the window draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Photo,
+    Video,
+    /// A photo with a few seconds of motion.
+    Live,
+}
+
+/// The files a window can ask for, whatever the source calls them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Want {
+    /// About 480 px on the long edge, kept in the library.
+    Thumb,
+    /// About 2048 px.
+    Medium,
+    /// The photo as it looks now at full size: the edit, if it has one.
+    Full,
+    /// As taken, unedited.
+    Original,
+    /// A video to play.
+    Video,
+    /// A Live Photo's motion.
+    Live,
+}
+
+impl Want {
+    pub const ALL: [Want; 6] = [Want::Thumb, Want::Medium, Want::Full, Want::Original, Want::Video, Want::Live];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Want::Thumb => "thumb",
+            Want::Medium => "medium",
+            Want::Full => "full",
+            Want::Original => "original",
+            Want::Video => "video",
+            Want::Live => "live",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Want> {
+        Want::ALL.into_iter().find(|w| w.name() == name)
+    }
+
+    /// Played while it downloads, when a window asks to stream it.
+    pub fn streamable(self) -> bool {
+        matches!(self, Want::Video | Want::Live)
+    }
+}
+
+/// One file of an asset, for one of the kinds a window asks for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rendition {
+    pub want: Want,
+    /// The source's own name for it: iCloud's JPEGMed, a folder's file.
+    pub name: String,
+    /// Names the file in the cache and the thumbnails, and changes when
+    /// the file does: iCloud's checksum, a hash of a folder file's path,
+    /// size and time.
+    pub key: String,
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub size: Option<i64>,
+    /// A UTI: public.jpeg, public.heic, com.apple.quicktime-movie...
     pub file_type: Option<String>,
-    pub checksum: Option<String>,
-    pub url: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+/// One photo or video in the library, as every source describes it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Asset {
-    /// The CPLAsset record name: one per photo in the library.
+    /// The source's id for it, unique in the library and stable as long as
+    /// the asset is there.
     pub id: String,
-    /// The CPLMaster record name: the original file. A duplicated photo is
-    /// a second asset on the same master, so masters can be shared.
-    pub master_id: String,
-    pub change_tag: Option<String>,
-    pub item_type: Option<String>,
     pub filename: Option<String>,
-    /// Capture time and upload time, milliseconds since the epoch.
-    pub asset_date: Option<i64>,
-    pub added_date: Option<i64>,
+    /// The original's UTI.
+    pub item_type: Option<String>,
+    /// When it was taken and when it came into the library, milliseconds
+    /// since the epoch.
+    pub taken: Option<i64>,
+    pub added: Option<i64>,
+    pub kind: Kind,
     pub favorite: bool,
+    /// A video's, in seconds.
     pub duration: Option<f64>,
+    /// EXIF's, 1 to 8.
     pub orientation: Option<i64>,
-    pub subtype: Option<i64>,
     pub has_location: bool,
-    /// In Recently Deleted, hidden, or erased: not shown in the library.
-    pub gone: bool,
-    pub resources: Vec<Resource>,
-    /// The two records as iCloud sent them, for inspecting fields during
-    /// the probe.
-    pub raw: Option<(Value, Value)>,
+    /// The original's, in bytes.
+    pub size: Option<i64>,
+    pub renditions: Vec<Rendition>,
 }
 
 impl Asset {
-    pub fn is_video(&self) -> bool {
-        match self.item_type.as_deref() {
-            Some(t) => t.contains("movie") || t.contains("mpeg") || t.contains("video"),
-            // A Live Photo has a video half too, but it is a photo.
-            None => !self.is_live() && self.resources.iter().any(|r| r.kind.starts_with("Vid")),
+    pub fn rendition(&self, want: Want) -> Option<&Rendition> {
+        self.renditions.iter().find(|r| r.want == want)
+    }
+}
+
+/// A rendition as the index keeps it, enough to fetch it by.
+#[derive(Debug, Clone)]
+pub struct Stored {
+    pub asset: String,
+    pub want: Want,
+    pub name: String,
+    pub key: String,
+    pub file_type: String,
+}
+
+/// What a source needs to read one rendition: for iCloud a download link,
+/// good for a while; for a folder, the file.
+#[derive(Debug, Clone)]
+pub struct Ticket(pub String);
+
+/// A rendition being read.
+pub struct Body {
+    pub reader: Box<dyn Read + Send>,
+    /// In bytes, when the source knows.
+    pub length: Option<u64>,
+}
+
+#[derive(Debug)]
+pub enum FetchError {
+    /// The ticket has gone stale (an expired link): prepare it again.
+    Expired,
+    /// The source has no such file.
+    NotFound(String),
+    /// Anything else; `Source::health` tells what it says about the
+    /// connection.
+    Failed(anyhow::Error),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::Expired => write!(f, "the link expired"),
+            FetchError::NotFound(what) => write!(f, "{what}"),
+            FetchError::Failed(e) => write!(f, "{e:#}"),
         }
     }
+}
 
-    pub fn is_live(&self) -> bool {
-        self.resources.iter().any(|r| r.kind == "OriginalVidCompl")
-    }
-
-    pub fn resource(&self, kind: &str) -> Option<&Resource> {
-        self.resources.iter().find(|r| r.kind == kind)
+impl From<anyhow::Error> for FetchError {
+    fn from(e: anyhow::Error) -> Self {
+        FetchError::Failed(e)
     }
 }
 
-pub trait PhotoSource {
-    /// Number of assets in the library.
-    fn count(&mut self) -> Result<u64>;
-    /// Assets from `start` on, oldest first, at most `limit` of them, plus
-    /// the change token iCloud reported with the page.
-    fn page(&mut self, start: u64, limit: u32) -> Result<Page>;
+/// What a window should tell the person about the source.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Health {
+    Fine,
+    /// No session, or it was rejected: sign in again.
+    NeedsSignIn,
+    /// Out of reach: the network, or a disk that is not mounted.
+    Offline,
+    /// It answers, but with errors.
+    Failing,
 }
 
-pub struct Page {
-    pub assets: Vec<Asset>,
-    pub sync_token: Option<String>,
-    /// Records iCloud returned, before pairing; tells a short page from the
-    /// end of the library.
-    pub records: usize,
-    /// Records whose other half was not on this page. A page holds 200
-    /// records, and an asset and its master can fall on either side of the
-    /// boundary; `sync::walk` pairs these up afterwards.
-    pub leftovers: Vec<Value>,
-}
-
-const RESOURCE_KINDS: &[&str] = &[
-    "Original", "OriginalAlt", "OriginalVidCompl",
-    "JPEGFull", "JPEGLarge", "JPEGMed", "JPEGThumb",
-    "VidFull", "VidMed", "VidSmall",
-];
-
-pub struct ICloudSource {
-    pub client: PhotosClient,
-    pub keep_raw: bool,
-}
-
-impl PhotoSource for ICloudSource {
-    fn count(&mut self) -> Result<u64> {
-        self.client.count(LIBRARY_COUNT)
-    }
-
-    fn page(&mut self, start: u64, limit: u32) -> Result<Page> {
-        let response = self.client.list_page(start, limit * 2)?;
-        let records = response["records"].as_array().cloned().unwrap_or_default();
-        let (assets, leftovers) = pair_records_with_leftovers(&records, self.keep_raw);
-        Ok(Page {
-            records: records.len(),
-            assets,
-            leftovers,
-            sync_token: response["syncToken"].as_str().map(str::to_owned),
-        })
-    }
-}
-
-/// Turn CPLAsset + CPLMaster records into assets, in the order the masters
-/// came. An asset without its master (or the other way round) is dropped.
-pub fn pair_records(records: &[Value], keep_raw: bool) -> Vec<Asset> {
-    pair_records_with_leftovers(records, keep_raw).0
-}
-
-/// Like `pair_records`, also returning the records left without a partner.
-/// Pairing goes from each asset to its master, in the order the assets
-/// came: several assets can share one master.
-pub fn pair_records_with_leftovers(records: &[Value], keep_raw: bool) -> (Vec<Asset>, Vec<Value>) {
-    let mut masters: HashMap<&str, (&Value, bool)> = HashMap::new();
-    for r in records.iter().filter(|r| r["recordType"] == "CPLMaster") {
-        if let Some(name) = r["recordName"].as_str() {
-            masters.insert(name, (r, false));
+impl Health {
+    pub fn name(self) -> &'static str {
+        match self {
+            Health::Fine => "fine",
+            Health::NeedsSignIn => "needs_sign_in",
+            Health::Offline => "offline",
+            Health::Failing => "failing",
         }
     }
-    let mut assets = Vec::new();
-    let mut leftovers = Vec::new();
-    for asset in records.iter().filter(|r| r["recordType"] == "CPLAsset") {
-        let master = asset["fields"]["masterRef"]["value"]["recordName"].as_str().and_then(|m| masters.get_mut(m));
-        match master {
-            Some((master, used)) => {
-                *used = true;
-                assets.push(build_asset(asset, master, keep_raw));
-            }
-            None => leftovers.push(asset.clone()),
-        }
-    }
-    leftovers.extend(masters.into_values().filter(|(_, used)| !used).map(|(m, _)| m.clone()));
-    (assets, leftovers)
 }
 
-fn build_asset(asset: &Value, master: &Value, keep_raw: bool) -> Asset {
-    let af = &asset["fields"];
-    let mf = &master["fields"];
-    // An edited photo keeps its renditions on the asset record; the master
-    // holds the original. The asset's copy wins, as on icloud.com.
-    let field = |name: &str| -> Option<&Value> {
-        af.get(name).filter(|v| !v.is_null()).or_else(|| mf.get(name).filter(|v| !v.is_null()))
-    };
-    let value = |name: &str| field(name).map(|f| &f["value"]);
+/// The change token is no use any more: only listing everything again
+/// brings the index back in step.
+#[derive(Debug)]
+pub struct TokenExpired(pub String);
 
-    let resources = RESOURCE_KINDS
-        .iter()
-        .filter_map(|kind| {
-            let res = value(&format!("res{kind}Res"))?;
-            Some(Resource {
-                kind: (*kind).to_owned(),
-                width: value(&format!("res{kind}Width")).and_then(Value::as_i64),
-                height: value(&format!("res{kind}Height")).and_then(Value::as_i64),
-                size: res["size"].as_i64(),
-                file_type: value(&format!("res{kind}FileType")).and_then(Value::as_str).map(str::to_owned),
-                checksum: res["fileChecksum"].as_str().map(str::to_owned),
-                url: res["downloadURL"].as_str().map(str::to_owned),
-            })
-        })
-        .collect();
-
-    Asset {
-        id: asset["recordName"].as_str().unwrap_or_default().to_owned(),
-        master_id: master["recordName"].as_str().unwrap_or_default().to_owned(),
-        change_tag: asset["recordChangeTag"].as_str().map(str::to_owned),
-        item_type: mf["itemType"]["value"].as_str().map(str::to_owned),
-        filename: decode_filename(&mf["filenameEnc"]),
-        asset_date: af["assetDate"]["value"].as_i64(),
-        added_date: af["addedDate"]["value"].as_i64(),
-        favorite: af["isFavorite"]["value"].as_i64() == Some(1),
-        // iCloud keeps durations in milliseconds.
-        duration: af["duration"]["value"].as_f64().or_else(|| mf["duration"]["value"].as_f64()).map(|ms| ms / 1000.0),
-        orientation: af["orientation"]["value"].as_i64().or_else(|| mf["originalOrientation"]["value"].as_i64()),
-        subtype: af["assetSubtypeV2"]["value"].as_i64().or_else(|| af["assetSubtype"]["value"].as_i64()),
-        has_location: !af["locationEnc"].is_null() || !af["locationV2Enc"].is_null(),
-        gone: ["isDeleted", "isHidden", "isExpunged"].iter().any(|f| af[*f]["value"].as_i64() == Some(1)),
-        resources,
-        raw: keep_raw.then(|| (asset.clone(), master.clone())),
+impl std::fmt::Display for TokenExpired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the change token is no longer accepted: {}", self.0)
     }
 }
 
-fn decode_filename(field: &Value) -> Option<String> {
-    let raw = field["value"].as_str()?;
-    match field["type"].as_str() {
-        Some("STRING") => Some(raw.to_owned()),
-        _ => base64::engine::general_purpose::STANDARD
-            .decode(raw)
-            .ok()
-            .and_then(|b| String::from_utf8(b).ok()),
-    }
+impl std::error::Error for TokenExpired {}
+
+/// What listing the library found, beyond the assets themselves.
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// Where `changes` picks up from.
+    pub token: Option<String>,
+    /// A line about how it went, for pinhole-sync to print.
+    pub summary: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
+pub trait Source: Send + Sync {
+    /// "iCloud", or the folder's name: what the window calls it.
+    fn name(&self) -> String;
 
-    fn asset(name: &str, master: &str) -> Value {
-        json!({"recordName": name, "recordType": "CPLAsset",
-               "fields": {"masterRef": {"value": {"recordName": master}}, "assetDate": {"value": 1}}})
+    /// "icloud" or "folder", as the settings name it.
+    fn kind(&self) -> &'static str;
+
+    /// Whether it needs signing in (pinhole-sync sign-in).
+    fn needs_sign_in(&self) -> bool {
+        false
     }
 
-    fn master(name: &str) -> Value {
-        json!({"recordName": name, "recordType": "CPLMaster", "fields": {"itemType": {"value": "public.jpeg"}}})
+    /// What an error from this source says about reaching it.
+    fn health(&self, _error: &anyhow::Error) -> Health {
+        Health::Failing
     }
 
-    #[test]
-    fn halves_split_across_pages_pair_up_later() {
-        // Page one ends with an asset whose master starts page two.
-        let page1 = [master("m1"), asset("a1", "m1"), asset("a2", "m2")];
-        let page2 = [master("m2"), master("m3"), asset("a3", "m3")];
-        let (assets1, left1) = pair_records_with_leftovers(&page1, false);
-        let (assets2, left2) = pair_records_with_leftovers(&page2, false);
-        assert_eq!(assets1.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["a1"]);
-        assert_eq!(assets2.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["a3"]);
-        let leftovers: Vec<Value> = left1.into_iter().chain(left2).collect();
-        let (repaired, rest) = pair_records_with_leftovers(&leftovers, false);
-        assert_eq!(repaired.len(), 1);
-        assert_eq!(repaired[0].id, "a2");
-        assert_eq!(repaired[0].master_id, "m2");
-        assert!(rest.is_empty());
+    /// Get ready to answer, so the first request need not wait (iCloud
+    /// checks its session, which takes a few seconds).
+    fn start(&self) -> Result<()> {
+        Ok(())
     }
 
-    #[test]
-    fn duplicates_sharing_a_master_are_both_kept() {
-        let page = [master("m1"), asset("a1", "m1"), asset("a1-copy", "m1")];
-        let (assets, leftovers) = pair_records_with_leftovers(&page, false);
-        assert_eq!(assets.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["a1", "a1-copy"]);
-        assert!(assets.iter().all(|a| a.master_id == "m1"));
-        assert!(leftovers.is_empty());
+    /// The catalog: every asset there is, put into `index` as they come.
+    /// Assets the index had that were not put are removed afterwards.
+    fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing>;
+
+    /// What changed since `token`, put into and removed from `index`;
+    /// returns the token to pick up from next time. `TokenExpired` when the
+    /// token is no use any more.
+    fn changes(&self, index: &mut Index, token: &str) -> Result<String>;
+
+    /// The fetch: the file itself, when it is on this computer and is
+    /// served as it is, not copied into the cache.
+    fn local(&self, _rendition: &Stored) -> Option<PathBuf> {
+        None
     }
+
+    /// Get these renditions ready to read, as many at once as the source
+    /// can: one ticket each, in order. `index` is the library's, for what
+    /// the source keeps there. An error for all of them is the outer one.
+    fn prepare(&self, index: &rusqlite::Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>>;
+
+    /// Start reading one rendition: all of it, or bytes `start..=end`.
+    fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError>;
 }

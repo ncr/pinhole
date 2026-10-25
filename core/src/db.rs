@@ -7,7 +7,7 @@ use std::path::Path;
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use crate::source::Asset;
+use crate::icloud::records::CloudAsset as Asset;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
@@ -144,4 +144,10 @@ pub fn remove_assets(db: &mut Connection, ids: &[String]) -> Result<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+/// The index as a source's catalog writes it: assets put and removed, and
+/// the source's own tables beside them.
+pub struct Index<'a> {
+    pub conn: &'a mut Connection,
 }

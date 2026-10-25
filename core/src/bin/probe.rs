@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use pinhole_core::auth::ProcessProvider;
 use pinhole_core::cloudkit::{PhotosClient, LIBRARY_COUNT};
 use pinhole_core::{db, sync};
-use pinhole_core::source::{pair_records, Asset};
+use pinhole_core::icloud::records::{pair_records, CloudAsset as Asset};
 
 #[derive(Parser)]
 struct Cli {

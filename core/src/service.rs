@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use crate::auth::{ProcessProvider, ProviderError};
 use crate::cloudkit::{Downloader, PhotosClient};
-use crate::source::pair_records_with_leftovers;
+use crate::icloud::records::pair_records_with_leftovers;
 use crate::storage::Storage;
 use crate::stream::Streams;
 use crate::sync::{now_secs, thumb_path};
@@ -565,7 +565,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
             }
         };
         let (assets, _) = pair_records_with_leftovers(&records, false);
-        let by_id: HashMap<&str, &crate::source::Asset> = assets.iter().map(|a| (a.id.as_str(), a)).collect();
+        let by_id: HashMap<&str, &crate::icloud::records::CloudAsset> = assets.iter().map(|a| (a.id.as_str(), a)).collect();
 
         // Fresh links go back into the index, so the next request for any
         // rendition of these assets needs no lookup.

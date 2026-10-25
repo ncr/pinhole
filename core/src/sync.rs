@@ -15,7 +15,7 @@ use crate::auth::FixedSession;
 use crate::cloudkit::{Downloader, PhotosClient, Traffic, LIBRARY_COUNT};
 use crate::db;
 use crate::session::Session;
-use crate::source::{pair_records_with_leftovers, Asset, ICloudSource, Page, PhotoSource};
+use crate::icloud::records::{pair_records_with_leftovers, CloudAsset as Asset, ICloudSource, Page, PhotoSource};
 
 /// Download URLs stop working somewhere under 35 minutes; older than this
 /// they are looked up again before use.
