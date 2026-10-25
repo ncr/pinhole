@@ -57,6 +57,14 @@ protected:
     QVariant retrieveData(const QString &mime, QMetaType type) const override {
         if (mime != QLatin1String("text/uri-list"))
             return {};
+        // The files are made when a drop target asks for the bytes. Asking
+        // for the URL list is something else: Qt's Wayland drag does it as
+        // the drag starts (to offer a portal file transfer), and waiting for
+        // downloads in there freed this object under Qt and crashed. That
+        // gets nothing until the files exist.
+        const bool bytes = type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString;
+        if (!m_ready && !bytes)
+            return QVariantList();
         if (!m_ready) {
             QEventLoop wait;
             QTimer::singleShot(120000, &wait, &QEventLoop::quit);

@@ -114,6 +114,7 @@ int main(int argc, char *argv[]) {
 
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     auto *grid = window->findChild<PhotoGrid *>("grid");
+    window->installEventFilter(&viewer);
     grid->setSources(&library, &loader, &stats);
     grid->setTouchpadHold(&hold);
     QObject::connect(grid, &PhotoGrid::dragRequested, &outgoing,

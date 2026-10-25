@@ -275,10 +275,22 @@ void doubleClick(QQuickWindow *window, QPointF at) {
     mouse(window, QEvent::MouseButtonRelease, at, Qt::LeftButton);
 }
 
-void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle) {
-    QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, Qt::NoModifier,
-                      pixels.isNull() ? Qt::NoScrollPhase : Qt::ScrollUpdate, false);
+void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle,
+           Qt::ScrollPhase phase = Qt::NoScrollPhase, quint64 time = 0) {
+    QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, Qt::NoModifier, phase, false);
+    event.setTimestamp(time);
     QGuiApplication::sendEvent(window, &event);
+}
+
+// Two fingers moving `steps` times by `by` px, 8 ms apart, as a touchpad
+// on Wayland reports it: a begin with no movement, updates, an end.
+void swipe(QQuickWindow *window, QPointF at, QPoint by, int steps) {
+    static quint64 clock = 100000;
+    clock += 1000;
+    wheel(window, at, {}, {}, Qt::ScrollBegin, clock);
+    for (int i = 0; i < steps; ++i)
+        wheel(window, at, by, by * 8, Qt::ScrollUpdate, clock += 8);
+    wheel(window, at, {}, {}, Qt::ScrollEnd, clock += 8);
 }
 
 } // namespace
@@ -317,17 +329,18 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer, start] { return viewer.index() == *start; }},
         {"a wheel notch down shows the next", [=] { wheel(window, middle, {}, {0, -120}); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"a sideways swipe shows the next, once",
-         [=] {
-             for (int i = 0; i < 12; ++i)
-                 wheel(window, middle, {-30, 2}, {-240, 16});
-         },
+        {"a long swipe to the left shows the next, once", [=] { swipe(window, middle, {-12, 2}, 30); },
          [&viewer, start] { return viewer.index() == *start + 2; }},
-        {"scrolling up and down with two fingers does nothing",
-         [=] {
-             for (int i = 0; i < 12; ++i)
-                 wheel(window, middle, {2, -30}, {16, -240});
+        {"two short swipes to the right show two before", [=] {
+             swipe(window, middle, {8, -1}, 8);
+             swipe(window, middle, {8, 1}, 8);
          },
+         [&viewer, start] { return viewer.index() == *start; }},
+        {"a swipe left again shows the next", [=] { swipe(window, middle, {-10, 0}, 10); },
+         [&viewer, start] { return viewer.index() == *start + 1; }},
+        {"scrolling up and down with two fingers does nothing", [=] { swipe(window, middle, {2, -15}, 30); },
+         [&viewer, start] { return viewer.index() == *start + 1; }},
+        {"a slightly slanted swipe still counts", [=] { swipe(window, middle, {-10, 5}, 10); },
          [&viewer, start] { return viewer.index() == *start + 2; }},
         {"right-click in the viewer opens the menu", [=] { click(window, middle, Qt::RightButton); },
          [=] { return menu()->property("opened").toBool(); }},

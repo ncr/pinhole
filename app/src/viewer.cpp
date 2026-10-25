@@ -1,11 +1,15 @@
 #include "viewer.h"
 
 #include "library.h"
+#include "photogrid.h"
 #include "serviceclient.h"
 
 #include <QDateTime>
 #include <QFile>
 #include <QLocale>
+#include <QWheelEvent>
+
+#include <cmath>
 
 Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {}
@@ -59,6 +63,45 @@ void Viewer::openAt(int index, QRectF from) {
         m_open = true;
         emit openChanged();
     }
+}
+
+bool Viewer::eventFilter(QObject *, QEvent *event) {
+    if (event->type() != QEvent::Wheel || !m_open)
+        return false;
+    auto *wheel = static_cast<QWheelEvent *>(event);
+    const QPoint px = wheel->pixelDelta();
+    const QPoint angle = wheel->angleDelta();
+    logInput(QStringLiteral("viewer wheel phase=%1 pixel=%2,%3 angle=%4,%5 inverted=%6 ts=%7")
+                 .arg(int(wheel->phase())).arg(px.x()).arg(px.y()).arg(angle.x()).arg(angle.y())
+                 .arg(wheel->inverted()).arg(wheel->timestamp()));
+    if (wheel->modifiers() & Qt::ControlModifier)
+        return true;
+
+    if (wheel->phase() == Qt::NoScrollPhase && px.isNull()) {
+        // A mouse wheel: a notch (120) is a photo, down for the next.
+        m_notches += (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
+        for (; m_notches <= -1; m_notches += 1)
+            step(1);
+        for (; m_notches >= 1; m_notches -= 1)
+            step(-1);
+        return true;
+    }
+
+    // A touchpad: one step per swipe, once it has gone far enough and
+    // mostly sideways. Fingers moving left bring the next photo, as on a
+    // Mac. Without phases, a pause of 300 ms starts a new swipe.
+    const quint64 t = wheel->timestamp();
+    if (wheel->phase() == Qt::ScrollBegin || t - m_lastWheel > 300) {
+        m_swipe = QPointF();
+        m_swiped = false;
+    }
+    m_lastWheel = t;
+    m_swipe += px.isNull() ? QPointF(angle) / 8.0 : QPointF(px);
+    if (!m_swiped && std::abs(m_swipe.x()) > 40 && std::abs(m_swipe.x()) > 1.5 * std::abs(m_swipe.y())) {
+        m_swiped = true;
+        step(m_swipe.x() < 0 ? 1 : -1);
+    }
+    return true;
 }
 
 void Viewer::close() {

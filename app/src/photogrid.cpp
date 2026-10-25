@@ -70,7 +70,7 @@ QRectF squareCrop(int w, int h) {
 
 // PINHOLE_INPUT_LOG=<file>: every scroll and gesture event as it arrives,
 // for tuning scrolling against what the touchpad really sends.
-static void logInput(const QString &line) {
+void logInput(const QString &line) {
     static QFile *file = [] {
         const QString path = qEnvironmentVariable("PINHOLE_INPUT_LOG");
         if (path.isEmpty())

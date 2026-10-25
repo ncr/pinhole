@@ -63,6 +63,11 @@ signals:
     void liveChanged();
     void messageChanged();
 
+protected:
+    // Installed on the window: while the viewer is open, the wheel and the
+    // touchpad step through photos, and nothing behind it scrolls.
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void show(int index);
     void request(int index, const QString &kind);
@@ -82,4 +87,11 @@ private:
     QUrl m_video;
     QUrl m_live;
     QString m_message;
+    // The touchpad gesture under way: how far it has gone, and whether it
+    // has stepped already (one swipe, one photo).
+    QPointF m_swipe;
+    bool m_swiped = false;
+    quint64 m_lastWheel = 0;
+    // Mouse wheel notches not yet used; high-resolution wheels send parts.
+    double m_notches = 0;
 };

@@ -35,6 +35,9 @@ struct GridRenderState;
 // current zoom are both drawn, scaled to it around that photo, and
 // cross-faded by how far the pinch has gone between them. On release the
 // grid settles on one level, scale, alignment and fade animating together.
+// PINHOLE_INPUT_LOG=<file>: append a line about an input event there.
+void logInput(const QString &line);
+
 class PhotoGrid : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY libraryChanged)

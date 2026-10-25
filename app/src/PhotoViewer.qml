@@ -143,9 +143,8 @@ Item {
 
     // The mouse. The sides step to the previous and next photo; elsewhere a
     // click plays or pauses a video and a double-click goes back to the
-    // library, as does the mouse's back button. The wheel steps through
-    // photos, and so does a sideways swipe with two fingers; scrolling up
-    // and down with them does nothing here.
+    // library, as does the mouse's back button. The wheel and sideways
+    // swipes are the Viewer's own (viewer.cpp), as the window's events.
     MouseArea {
         id: pointer
         anchors.fill: parent
@@ -177,33 +176,6 @@ Item {
                 viewer.step(s)
             else
                 root.closeViewer()
-        }
-
-        property real swipe: 0
-        Timer { id: swiped; interval: 350 }
-        onWheel: wheel => {
-            if (wheel.pixelDelta.x === 0 && wheel.pixelDelta.y === 0) {
-                // A mouse wheel: a notch is a photo.
-                const notch = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
-                if (notch !== 0 && !swiped.running) {
-                    viewer.step(notch < 0 ? 1 : -1)
-                    swiped.restart()
-                }
-                return
-            }
-            if (Math.abs(wheel.pixelDelta.x) <= Math.abs(wheel.pixelDelta.y))
-                return
-            if (swiped.running) {
-                swipe = 0
-                swiped.restart() // the rest of the same swipe
-                return
-            }
-            swipe += wheel.pixelDelta.x
-            if (Math.abs(swipe) > 120) {
-                viewer.step(swipe < 0 ? 1 : -1)
-                swipe = 0
-                swiped.restart()
-            }
         }
     }
 
