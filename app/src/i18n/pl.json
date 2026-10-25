@@ -38,7 +38,6 @@
   "Done  Esc": "Gotowe  Esc",
   "Double-click": "Dwuklik",
   "Drag": "Przeciągnięcie",
-  "Drag the date scrubber": "Przeciągnij suwak dat",
   "Drop the selection into any app": "Upuść zaznaczenie w dowolnej aplikacji",
   "Esc  Mouse back": "Esc  Wstecz myszy",
   "Export": "Eksportuj",
@@ -115,6 +114,7 @@
   "Zoom one step": "Przybliż lub oddal o krok",
   "Zoom one step at the pointer": "Przybliż lub oddal o krok przy wskaźniku",
   "Zoom the photo at the fingers": "Powiększ zdjęcie w miejscu palców",
+  "Zoomed all the way out: drag the date scrubber": "Po pełnym oddaleniu: przeciągnij suwak dat",
   "Zooming in": "Powiększanie",
   "iCloud is not answering properly. Trying again every minute.": "iCloud nie odpowiada poprawnie. Kolejna próba co minutę."
 }

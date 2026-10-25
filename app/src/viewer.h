@@ -41,6 +41,9 @@ class Viewer : public QObject {
     Q_PROPERTY(bool animating READ animating NOTIFY motionChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
     Q_PROPERTY(int count READ count NOTIFY indexChanged)
+    // During a far jump (goTo()), the photo sliding out beside the new one;
+    // -1 otherwise. Which photo shows at each place in the row: beside().
+    Q_PROPERTY(int jumpFrom READ jumpFrom NOTIFY motionChanged)
     // Bumped when a sharper image of some photo arrives (imageFor()).
     Q_PROPERTY(int revision READ revision NOTIFY imagesChanged)
 
@@ -71,6 +74,11 @@ public:
     bool zoomed() const { return m_motion.zoomed(); }
     int count() const;
     int revision() const { return m_revision; }
+    int jumpFrom() const { return m_jumpFrom; }
+    // The photo at place `k` of the row (0: the shown one), -1 for none:
+    // the neighbours, except during a far jump, where the photo it came
+    // from sits next to it and nothing further.
+    Q_INVOKABLE int beside(int k) const;
 
     // The best image of any photo at hand now: its medium rendition once
     // fetched, else its thumbnail. For the photos beside the shown one.
@@ -150,4 +158,6 @@ private:
     // Medium renditions fetched, by photo, while the viewer is open.
     QHash<QByteArray, QString> m_mediums;
     int m_revision = 0;
+    int m_jumpFrom = -1;
+    int m_jumpSide = 0;
 };

@@ -257,7 +257,7 @@ private:
 
     // Layout and motion, GUI thread (read by the render thread while the
     // GUI thread is blocked in sync).
-    int m_level = 3; // 8 columns, kDefaultLevel
+    int m_level = 3; // 7 columns, kDefaultLevel
     int m_columns = 8;
     double m_scroll = 0;
 

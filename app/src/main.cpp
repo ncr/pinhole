@@ -255,6 +255,26 @@ int main(int argc, char *argv[]) {
             });
         });
     }
+    // PINHOLE_SELFTEST=scrubber:<file>: zoomed all the way out, the date
+    // scrubber held halfway down, as an image.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("scrubber:"))) {
+        QTimer::singleShot(1200, window, [window, grid, test] {
+            grid->setColumnsNow(29);
+            const QPointF at(window->width() - 30.0, window->height() / 2.0);
+            QTimer::singleShot(400, window, [window, at] {
+                QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton,
+                                  Qt::NoModifier);
+                QGuiApplication::sendEvent(window, &press);
+            });
+            QTimer::singleShot(1500, window, [window, test, at] {
+                window->grabWindow().save(test.mid(9));
+                QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton,
+                                    Qt::NoModifier);
+                QGuiApplication::sendEvent(window, &release);
+                QCoreApplication::quit();
+            });
+        });
+    }
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))

@@ -269,6 +269,22 @@ private slots:
         QCOMPARE(m.stripOffset(), 0.0);
     }
 
+    // A far tap: the photos slide one page, as between neighbours; the
+    // carousel travels all five, and both land together.
+    void aFarTapSlidesOnePageAndTheWholeCarousel() {
+        ViewerMotion m = viewerShowing();
+        m.stepped(5, 1);
+        const double page = m.pageWidth();
+        QCOMPARE(m.offset(), page);
+        QCOMPARE(m.stripOffset(), 5 * page);
+        for (int i = 0; i < 12; ++i)
+            m.advance(1.0 / 120);
+        QVERIFY(std::abs(m.stripOffset() / m.offset() - 5.0) < 1e-6);
+        settle(m);
+        QCOMPARE(m.offset(), 0.0);
+        QCOMPARE(m.stripOffset(), 0.0);
+    }
+
     void theLastPhotoStretchesInsteadOfPaging() {
         ViewerMotion m = viewerShowing(true, false);
         QCOMPARE(swipe(m, -10, 60), 0); // 1200 px of finger movement

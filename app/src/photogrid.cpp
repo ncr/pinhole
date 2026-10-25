@@ -24,14 +24,15 @@
 
 namespace {
 
-// The zoom levels, as column counts. Neighbours are 1.25-2x apart: close
-// enough that a cross-fade between two of them reads as one motion. Every
-// step is an even number of columns, so that two neighbouring levels grown
-// about the window's middle (or an edge) have their columns on the same
-// lines at every size: at a change of level the cells hold still and only
-// the photos in them cross-fade. (A step of 1 or 3 columns allows that
-// only about the edges.)
-constexpr std::array<int, 10> kLevels = {2, 4, 6, 8, 10, 14, 18, 24, 30, 40};
+// The zoom levels, as column counts, from one photo across (a feed) out to
+// 29. Neighbours are 1.25-3x apart: close enough that a cross-fade between
+// two of them reads as one motion. Every step is an even number of columns
+// (so every count is odd, as in Photos on an iPhone), so that two
+// neighbouring levels grown about the window's middle (or an edge) have
+// their columns on the same lines at every size: at a change of level the
+// cells hold still and only the photos in them cross-fade. (A step of 1 or
+// 3 columns allows that only about the edges.)
+constexpr std::array<int, 9> kLevels = {1, 3, 5, 7, 9, 13, 17, 23, 29};
 constexpr int kDefaultLevel = 3;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
@@ -808,12 +809,12 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
     // The begin and end come with no movement in them, and each arrives
     // twice, so they are recognised by phase, and repeats ignored.
     const double t = double(event->timestamp());
-    // Zoomed out, the same swipe carries further: √(columns / 8), so 8
-    // columns (where it was tuned) is unchanged and 40 is 2.2x. Measured
-    // from Photos on an iPhone zoomed all the way out: a swipe there moves
-    // about a screen, some 2,300 photos; here at 40 columns it moved half
-    // a screen, a thousand.
-    const double density = std::sqrt(std::max(1.0, m_columns / 8.0));
+    // Zoomed out, the same swipe carries further: √(columns / 7), so the
+    // default 7 columns (about where it was tuned) is unchanged and 29 is
+    // 2x. Measured from Photos on an iPhone zoomed all the way out: a swipe
+    // there moves about a screen, some 2,300 photos; here, unscaled, half a
+    // screen.
+    const double density = std::sqrt(std::max(1.0, m_columns / double(kLevels[kDefaultLevel])));
     const double dy = -event->pixelDelta().y() * density;
     switch (event->phase()) {
     case Qt::ScrollBegin:

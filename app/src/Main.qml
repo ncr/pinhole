@@ -83,9 +83,11 @@ ApplicationWindow {
         }
     }
 
+    // Only zoomed all the way out (the two last levels), where a year is a
+    // swipe or two away; closer in, scrolling is the way.
     DateScrubber {
         grid: grid
-        visible: win.inGrid
+        visible: win.inGrid && grid.columns >= 23
     }
 
     PhotoViewer {

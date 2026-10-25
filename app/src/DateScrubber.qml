@@ -3,13 +3,14 @@ import QtQuick
 // The date scrubber along the right edge, as in Photos: it shows up while
 // the grid moves or the pointer is near the edge, marks where each year
 // begins, and dragging it jumps through the library with the month and year
-// under the pointer.
+// under the pointer. On a dark band of its own, so the years read over any
+// photos.
 Item {
     id: root
 
     required property var grid
 
-    width: 72
+    width: 84
     anchors.top: parent.top
     anchors.bottom: parent.bottom
     anchors.right: parent.right
@@ -19,6 +20,7 @@ Item {
 
     function refreshMarks() { marks = grid.yearMarks() }
     Component.onCompleted: refreshMarks()
+    onVisibleChanged: if (visible) refreshMarks()
     Connections {
         target: root.grid
         function onColumnsChanged() { root.refreshMarks() }
@@ -33,68 +35,83 @@ Item {
 
     HoverHandler { id: hover }
 
-    readonly property real trackTop: 16
-    readonly property real trackHeight: height - 32
+    // Below the Select button at the top right.
+    readonly property real trackTop: 74
+    readonly property real trackHeight: height - trackTop - 26
 
-    // Year marks, with labels where they do not crowd each other.
+    // The band the years sit on.
+    Rectangle {
+        id: band
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.topMargin: 58
+        anchors.bottomMargin: 10
+        width: 60
+        radius: Math.min(10, theme.radius + 4)
+        color: "#d0101012"
+    }
+
+    // The year each mark begins, where it does not crowd the one above.
     Repeater {
         model: root.marks
-        delegate: Item {
+        delegate: Text {
             required property var modelData
             required property int index
             readonly property real at: root.trackTop + modelData.fraction * root.trackHeight
-            readonly property real previous: index > 0 ? root.trackTop + root.marks[index - 1].fraction * root.trackHeight : -100
-            y: at
-            width: root.width
-            Rectangle {
-                anchors.right: parent.right
-                anchors.rightMargin: 4
-                width: 6
-                height: 1
-                color: "#80ffffff"
+            // Shown unless within 22 px of the last one shown above it.
+            readonly property bool room: {
+                let last = -100
+                for (let i = 0; i < index; ++i) {
+                    const y = root.trackTop + root.marks[i].fraction * root.trackHeight
+                    if (y - last >= 22)
+                        last = y
+                }
+                return at - last >= 22
             }
-            Text {
-                visible: parent.at - parent.previous > 16
-                anchors.right: parent.right
-                anchors.rightMargin: 14
-                anchors.verticalCenter: parent.top
-                text: parent.modelData.year
-                color: "#b0ffffff"
-                font.pixelSize: 10
-                style: Text.Outline
-                styleColor: "#a0000000"
-            }
+            visible: room
+            anchors.right: band.right
+            anchors.rightMargin: 12
+            y: at - height / 2
+            text: modelData.year
+            color: "white"
+            font.pixelSize: 13
+            font.weight: Font.DemiBold
         }
     }
 
     // Where the view is now.
     Rectangle {
         id: thumb
-        anchors.right: parent.right
-        anchors.rightMargin: 2
-        width: 4
-        height: 28
-        radius: 2
+        anchors.right: band.left
+        anchors.rightMargin: 4
+        width: 5
+        height: 36
+        radius: 2.5
         color: theme.accent
         y: root.trackTop + root.grid.scrollFraction * root.trackHeight - height / 2
     }
 
-    // The date at the thumb, while dragging.
+    // The month and year at the thumb, while dragging.
     Rectangle {
         visible: drag.pressed
         anchors.right: thumb.left
-        anchors.rightMargin: 8
+        anchors.rightMargin: 10
         y: thumb.y + thumb.height / 2 - height / 2
-        width: dateLabel.implicitWidth + 16
-        height: dateLabel.implicitHeight + 8
-        radius: Math.min(4, theme.radius)
-        color: "#e0202024"
+        width: dateLabel.implicitWidth + 24
+        height: dateLabel.implicitHeight + 12
+        radius: height / 2
+        color: "#f0161618"
+        border.color: theme.accent
+        border.width: 1
         Text {
             id: dateLabel
             anchors.centerIn: parent
             text: Qt.locale().toString(new Date(root.grid.dateAt(root.grid.scrollFraction)), "MMMM yyyy")
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: 15
+            font.weight: Font.DemiBold
         }
     }
 

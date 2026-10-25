@@ -186,10 +186,10 @@ void ViewerMotion::stopCoasting() {
     clampPanTargets();
 }
 
-void ViewerMotion::stepped(int delta) {
+void ViewerMotion::stepped(int delta, int rowDelta) {
     const double page = pageWidth();
     const double whole = stripOffset() + delta * page;
-    m_offset = std::clamp(m_offset + delta * page, -1.5 * page, 1.5 * page);
+    m_offset = std::clamp(m_offset + rowDelta * page, -1.5 * page, 1.5 * page);
     m_raw = m_offset;
     m_offsetStart = m_offset;
     m_stripExtraStart = m_stripExtra = whole - m_offset;

@@ -129,7 +129,7 @@ screen recording of Photos on an iPhone.
   which Hyprland sends through the pointer-gestures protocol but Qt does not
   bind; `app/src/touchpadhold.*` binds it on Qt's Wayland connection, on a
   queue of its own. Clicks and tap-to-click stop it too.
-- **Zoom** has fixed levels (2, 4, 6, 8, 10, 14, 18, 24, 30, 40 columns; every step even, so neighbouring levels share column lines when grown about the middle or an edge).
+- **Zoom** has fixed levels (1, 3, 5, 7, 9, 13, 17, 23, 29 columns: one photo across like a feed, out to 29; every step even, so neighbouring levels share column lines when grown about the middle or an edge).
   A pinch never reflows under the fingers: the two levels around the
   current cell size are drawn scaled to it and cross-faded, the denser one
   underneath because, scaled up, it always covers the window. The photo

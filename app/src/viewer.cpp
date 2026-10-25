@@ -60,6 +60,7 @@ void Viewer::openAt(int index, QRectF from) {
         return;
     m_origin = from;
     m_motion.reset();
+    m_jumpFrom = -1;
     show(index);
     if (!m_open) {
         m_open = true;
@@ -126,6 +127,7 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     switch (wheel->phase()) {
     case Qt::ScrollBegin:
         m_motion.begin(t);
+        m_jumpFrom = -1; // caught mid-slide: the true neighbours again
         break;
     case Qt::ScrollUpdate:
     case Qt::ScrollMomentum:
@@ -190,6 +192,9 @@ void Viewer::setViewport(qreal width, qreal height) {
 
 void Viewer::advance(qreal seconds) {
     m_motion.advance(seconds);
+    // A far jump's slide is over: back to the true neighbours.
+    if (m_jumpFrom >= 0 && m_motion.offset() == 0)
+        m_jumpFrom = -1;
     emit motionChanged();
 }
 
@@ -231,13 +236,37 @@ void Viewer::close() {
     m_open = false;
     m_generation += 1; // anything still arriving is for a closed viewer
     m_motion.reset();
+    m_jumpFrom = -1;
     m_mediums.clear();
     emit openChanged();
     emit motionChanged();
 }
 
 void Viewer::goTo(int index) {
-    step(index - m_index);
+    index = std::clamp(index, 0, m_library->count() - 1);
+    const int delta = index - m_index;
+    if (std::abs(delta) <= 1) {
+        step(delta);
+        return;
+    }
+    // Far: as if it were the next (or previous) photo, so only these two
+    // slide; the carousel travels the whole way.
+    const int side = delta > 0 ? 1 : -1;
+    m_jumpFrom = m_index;
+    m_jumpSide = side;
+    m_motion.stepped(delta, side);
+    show(index);
+    emit motionChanged();
+}
+
+int Viewer::beside(int k) const {
+    if (m_jumpFrom >= 0 && k != 0) {
+        if (k == -m_jumpSide)
+            return m_jumpFrom;
+        return -1;
+    }
+    const int i = m_index + k;
+    return i >= 0 && i < m_library->count() ? i : -1;
 }
 
 void Viewer::step(int delta) {
@@ -245,6 +274,7 @@ void Viewer::step(int delta) {
     if (next == m_index)
         return;
     // The new photo slides in from where it lay beside the old one.
+    m_jumpFrom = -1;
     m_motion.stepped(next - m_index);
     show(next);
     emit motionChanged();
@@ -254,6 +284,7 @@ void Viewer::jumpTo(int index) {
     if (index < 0 || index >= m_library->count() || index == m_index)
         return;
     m_motion.reset();
+    m_jumpFrom = -1;
     show(index);
     emit motionChanged();
 }
@@ -355,6 +386,7 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     if (now >= 0) {
         // The same photo: nothing on screen changes, only its position.
         m_index = now;
+        m_jumpFrom = -1;
         return;
     }
     m_index = -1;

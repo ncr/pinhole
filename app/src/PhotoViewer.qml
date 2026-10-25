@@ -93,12 +93,13 @@ Item {
     }
 
     // The photos beside the shown one, two each side, where the row puts
-    // them: each its best image at hand (medium once fetched).
+    // them: each its best image at hand (medium once fetched). During a far
+    // jump, only the photo it came from, beside it (Viewer.beside()).
     Repeater {
         model: [-2, -1, 1, 2]
         delegate: Item {
             required property int modelData
-            readonly property int at: viewer.index + modelData
+            readonly property int at: (viewer.index, viewer.jumpFrom, viewer.beside(modelData))
             readonly property real aspect: viewer.aspectAt(at)
             readonly property real centre: root.width / 2 + modelData * viewer.pageWidth + viewer.offset
             width: Math.min(root.width, root.areaHeight * aspect)
@@ -470,6 +471,9 @@ Item {
         readonly property int first: Math.floor(position - width / 2 / cell) - 1
         // The photo at a point of the strip.
         function indexAt(x) { return Math.round(position + (x - width / 2) / cell) }
+        // The middle, where the shown photo sits: thumbnails grow as they
+        // pass it, and the marker stays there while they slide under it.
+        readonly property real middle: width / 2
         // Its own band: a zoomed photo passes under it.
         Rectangle {
             anchors.fill: parent
@@ -485,30 +489,35 @@ Item {
                     const n = carousel.slots
                     return carousel.first + ((index - carousel.first) % n + n) % n
                 }
-                readonly property bool current: photo === viewer.index
+                // 1 at the middle, 0 a cell or more away.
+                readonly property real nearness: Math.max(0, 1 - Math.abs(x + width / 2 - carousel.middle) / carousel.cell)
                 visible: photo >= 0 && photo < viewer.count
                 x: carousel.width / 2 + (photo - carousel.position) * carousel.cell - carousel.cell / 2
                 width: carousel.cell
                 height: carousel.height
-                z: current ? 1 : 0
+                z: nearness
                 Image {
                     anchors.centerIn: parent
                     width: carousel.thumb
                     height: carousel.thumb
-                    scale: parent.current ? 1.2 : 1
+                    scale: 1 + 0.2 * parent.nearness
                     source: parent.visible ? viewer.thumbnailAt(parent.photo) : ""
                     sourceSize: Qt.size(72, 72)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "transparent"
-                        border.color: "white"
-                        border.width: 1.5
-                        visible: parent.parent.current
-                    }
                 }
             }
+        }
+
+        Rectangle {
+            x: carousel.middle - width / 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: carousel.thumb * 1.2 + 3
+            height: width
+            z: 2
+            color: "transparent"
+            border.color: "white"
+            border.width: 1.5
         }
 
         MouseArea {

@@ -35,8 +35,11 @@ public:
     int end(double t);
 
     // The photo changed by `delta` (a swipe, a key, a click): the new one
-    // slides in from that side. Zoom goes back to fitted.
-    void stepped(int delta);
+    // slides in from that side, the row sliding `rowDelta` photos (by
+    // default all of them); the carousel travels all `delta`. Zoom goes
+    // back to fitted.
+    void stepped(int delta, int rowDelta);
+    void stepped(int delta) { stepped(delta, delta); }
     // Opening, closing: everything at rest, fitted.
     void reset();
 

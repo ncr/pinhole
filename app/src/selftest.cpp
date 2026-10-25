@@ -415,8 +415,13 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         {"clicking a thumbnail in the carousel slides there, the strip too",
          [=] { click(window, QPointF(window->width() / 2.0 + 3 * 38, window->height() - 30.0)); },
          [=, &viewer] {
+             // Only the two photos slide: the one it came from sits beside the
+             // new one, the strip travels the rest of the way.
+             int left = -2;
+             QMetaObject::invokeMethod(&viewer, "beside", Q_RETURN_ARG(int, left), Q_ARG(int, -1));
              return viewer.property("offset").toDouble() > 0 &&
-                    viewer.property("stripOffset").toDouble() > viewer.property("offset").toDouble();
+                    viewer.property("stripOffset").toDouble() > viewer.property("offset").toDouble() &&
+                    left == *start + 2;
          }, 40},
         {"clicking a thumbnail in the carousel shows that photo",
          [] {},

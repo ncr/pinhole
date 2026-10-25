@@ -21,7 +21,7 @@ Item {
             ["+  −", qsTr("Zoom one step")],
             ["Home  End", qsTr("Oldest, newest")],
             ["PgUp  PgDn", qsTr("A screen up or down")],
-            [qsTr("Right edge"), qsTr("Drag the date scrubber")]
+            [qsTr("Right edge"), qsTr("Zoomed all the way out: drag the date scrubber")]
         ] },
         { title: qsTr("Selecting"), keys: [
             [qsTr("Select"), qsTr("The button at the top: start choosing photos")],

@@ -75,61 +75,61 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
                  m_jumpAt = t;
              }
          }},
-        {"pinch sweep 8 -> 30 -> 3 -> 8 columns", 6.5, [g, stopped] { stopped(); g->jumpToFraction(0.5); },
+        {"pinch sweep 7 -> 29 -> 3 -> 7 columns", 6.5, [g, stopped] { stopped(); g->jumpToFraction(0.5); },
          [g, centre, strideAt](double, double t) {
              // Interpolate the column count logarithmically, the way a pinch
              // feels: equal finger travel, equal ratio.
              auto lerpLog = [](double a, double b, double f) { return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f); };
              double columns;
              if (t < 2.0)
-                 columns = lerpLog(8, 30, t / 2.0);
+                 columns = lerpLog(7, 29, t / 2.0);
              else if (t < 4.5)
-                 columns = lerpLog(30, 3, (t - 2.0) / 2.5);
+                 columns = lerpLog(29, 3, (t - 2.0) / 2.5);
              else if (t < 6.0)
-                 columns = lerpLog(3, 8, (t - 4.5) / 1.5);
+                 columns = lerpLog(3, 7, (t - 4.5) / 1.5);
              else {
                  g->endContinuousZoom();
                  return;
              }
              g->setEffectiveStride(strideAt(columns), centre());
          }},
-        {"pinch at the newest 8 -> 40 -> 2 -> 8", 6.5, [g, stopped] { stopped(); g->scrollToEnd(); },
+        {"pinch at the newest 7 -> 29 -> 1 -> 7", 6.5, [g, stopped] { stopped(); g->scrollToEnd(); },
          [g, strideAt](double, double t) {
              // Around a point near the bottom, where the library ends.
              const QPointF at(g->width() * 0.6, g->height() * 0.85);
              auto lerpLog = [](double a, double b, double f) { return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f); };
              double columns;
              if (t < 2.0)
-                 columns = lerpLog(8, 40, t / 2.0);
+                 columns = lerpLog(7, 29, t / 2.0);
              else if (t < 4.5)
-                 columns = lerpLog(40, 2, (t - 2.0) / 2.5);
+                 columns = lerpLog(29, 1, (t - 2.0) / 2.5);
              else if (t < 6.0)
-                 columns = lerpLog(2, 8, (t - 4.5) / 1.5);
+                 columns = lerpLog(1, 7, (t - 4.5) / 1.5);
              else {
                  g->endContinuousZoom();
                  return;
              }
              g->setEffectiveStride(strideAt(columns), at);
          }},
-        {"idle at 2 columns (sharp photos load)", 8.0,
+        {"idle at 1 column (sharp photos load)", 8.0,
          [g, stopped] {
              stopped();
-             g->setColumnsNow(2);
+             g->setColumnsNow(1);
              g->jumpToFraction(0.97);
          },
          {}},
-        {"idle at 40 columns (fully out)", 3.0,
+        {"idle at 29 columns (fully out)", 3.0,
          [g, stopped] {
              stopped();
-             g->setColumnsNow(40);
+             g->setColumnsNow(29);
          },
          {}},
-        {"scroll 3,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-3000); }, {}},
-        {"scroll 15,000 px/s at 40 columns", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
-        {"zoom steps 8 -> 18 -> 8, animated", 5.0,
+        {"scroll 3,000 px/s at 29 columns", 4.0, [g] { g->setDriveVelocity(-3000); }, {}},
+        {"scroll 15,000 px/s at 29 columns", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
+        {"zoom steps 7 -> 17 -> 7, animated", 5.0,
          [g, stopped] {
              stopped();
-             g->setColumnsNow(8);
+             g->setColumnsNow(7);
          },
          [g](double before, double t) {
              // A level every 0.4 s, three out and three back in.
