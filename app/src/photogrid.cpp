@@ -316,6 +316,14 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
     update();
 }
 
+void PhotoGrid::setAccent(const QColor &accent) {
+    if (accent == m_accent)
+        return;
+    m_accent = accent;
+    emit accentChanged();
+    update();
+}
+
 QList<int> PhotoGrid::selection() const { return QList<int>(m_selected.begin(), m_selected.end()); }
 
 void PhotoGrid::selectAll() {
@@ -1385,14 +1393,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         g->allocate(int(frames.size() * 24));
         auto *v = g->vertexDataAsColoredPoint2D();
         const float w = 3;
+        const uchar r = uchar(m_accent.red()), gr = uchar(m_accent.green()), b = uchar(m_accent.blue());
         auto quad = [&](float x0, float y0, float x1, float y1) {
-            // Omarchy's default accent.
-            v[0].set(x0, y0, 255, 214, 10, 255);
-            v[1].set(x1, y0, 255, 214, 10, 255);
-            v[2].set(x0, y1, 255, 214, 10, 255);
-            v[3].set(x1, y0, 255, 214, 10, 255);
-            v[4].set(x1, y1, 255, 214, 10, 255);
-            v[5].set(x0, y1, 255, 214, 10, 255);
+            v[0].set(x0, y0, r, gr, b, 255);
+            v[1].set(x1, y0, r, gr, b, 255);
+            v[2].set(x0, y1, r, gr, b, 255);
+            v[3].set(x1, y0, r, gr, b, 255);
+            v[4].set(x1, y1, r, gr, b, 255);
+            v[5].set(x0, y1, r, gr, b, 255);
             v += 6;
         };
         for (const QRectF &f : frames) {

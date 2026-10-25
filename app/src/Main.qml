@@ -12,12 +12,15 @@ ApplicationWindow {
     color: "#0e0e10"
 
     Material.theme: Material.Dark
+    Material.accent: theme.accent
+    Material.roundedScale: theme.radius
 
     PhotoGrid {
         id: grid
         objectName: "grid"
         anchors.fill: parent
         focus: true
+        accent: theme.accent
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
 
@@ -64,7 +67,7 @@ ApplicationWindow {
         anchors.bottomMargin: 24
         width: statusText.implicitWidth + 24
         height: statusText.implicitHeight + 12
-        radius: 6
+        radius: Math.min(6, theme.radius)
         color: "#e0202024"
         Text {
             id: statusText
@@ -75,7 +78,9 @@ ApplicationWindow {
         }
     }
 
-    readonly property bool inGrid: !photoViewer.shown
+    HelpOverlay { id: help; objectName: "help" }
+
+    readonly property bool inGrid: !photoViewer.shown && !help.shown
 
     // What Copy and Export act on: the selection, else the photo in view.
     function chosen() {
@@ -91,6 +96,8 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
+    Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
     Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
 
     // The grid.
@@ -102,22 +109,22 @@ ApplicationWindow {
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
 
-    Shortcut { enabled: win.inGrid; sequence: StandardKey.SelectAll; context: Qt.ApplicationShortcut; onActivated: grid.selectAll() }
+    Shortcut { enabled: win.inGrid; sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; onActivated: grid.selectAll() }
     Shortcut { enabled: win.inGrid && grid.selectionCount > 0; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.clearSelection() }
 
     // Out of the app, from the grid or the viewer.
-    Shortcut { sequence: StandardKey.Copy; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }
+    Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }
     Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), false) }
     Shortcut { sequence: "Ctrl+Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), true) }
 
     // The viewer.
-    Shortcut { enabled: !win.inGrid; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: photoViewer.closeViewer() }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: photoViewer.closeViewer() }
     Shortcut {
-        enabled: !win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
+        enabled: photoViewer.shown && !help.shown; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
         // Space plays and pauses a video; on a photo it closes, like Quick Look.
         onActivated: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
     }
-    Shortcut { enabled: !win.inGrid; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
-    Shortcut { enabled: !win.inGrid; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
-    Shortcut { enabled: !win.inGrid; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: viewer.playLive() }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: viewer.playLive() }
 }

@@ -28,6 +28,8 @@ HEADERS += \
     src/outgoing.h \
     src/portal.h \
     src/selftest.h \
+    src/theme.h \
+    src/translator.h \
     src/framestats.h \
     src/bench.h
 
@@ -44,6 +46,8 @@ SOURCES += \
     src/outgoing.cpp \
     src/portal.cpp \
     src/selftest.cpp \
+    src/theme.cpp \
+    src/translator.cpp \
     src/framestats.cpp \
     src/bench.cpp
 

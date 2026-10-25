@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QElapsedTimer>
 #include <QPointF>
 #include <QQuickItem>
@@ -44,6 +45,8 @@ class PhotoGrid : public QQuickItem {
     // How far down the library the view is, 0 at the oldest, 1 at the newest.
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
+    // The selection's border: the Omarchy theme's accent.
+    Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -92,6 +95,8 @@ public:
     // Selection, as in Photos: click, Ctrl-click to add or remove,
     // Shift-click for a range.
     int selectionCount() const { return int(m_selected.size()); }
+    QColor accent() const { return m_accent; }
+    void setAccent(const QColor &accent);
     Q_INVOKABLE QList<int> selection() const;
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearSelection();
@@ -146,6 +151,7 @@ signals:
     void activated(int index, QRectF rect);
     void scrolled();
     void selectionChanged();
+    void accentChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
     void libraryChanged();
@@ -213,6 +219,7 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_scrubbing = false;
+    QColor m_accent{0xff, 0xd6, 0x0a};
     Anchor m_reloadAnchor{-1, 0, true};
     // Position moves for the render thread to apply to its texture cache.
     std::shared_ptr<std::vector<int>> m_pendingMoves;

@@ -23,7 +23,9 @@
 #include "selftest.h"
 #include "serviceclient.h"
 #include "viewer.h"
+#include "theme.h"
 #include "thumbnailloader.h"
+#include "translator.h"
 #include "touchpadhold.h"
 
 #include <cstdio>
@@ -63,6 +65,14 @@ int main(int argc, char *argv[]) {
 
     QQuickStyle::setStyle("Material");
 
+    // Installed before anything is translated, and every qsTr() binding is
+    // re-evaluated when the Omarchy language changes.
+    // PINHOLE_LANGUAGE_FILE: another file than Omarchy's, for trying a
+    // language without changing the desktop's.
+    Translator translator(qEnvironmentVariable("PINHOLE_LANGUAGE_FILE"));
+    app.installTranslator(&translator);
+    Theme theme;
+
     Library library;
     QString error;
     QElapsedTimer loadTimer;
@@ -87,6 +97,9 @@ int main(int argc, char *argv[]) {
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
+    QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
+    engine.rootContext()->setContextProperty("translator", &translator);
+    engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("bench", nullptr);
@@ -162,6 +175,18 @@ int main(int argc, char *argv[]) {
     // the minute.
     service.sync();
 
+    // PINHOLE_SELFTEST=help:<file>: the shortcut overlay as an image, to check
+    // its layout (and each language's) without a screen.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("help:"))) {
+        QTimer::singleShot(800, window, [window, test] {
+            if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
+                help->setProperty("shown", true);
+            QTimer::singleShot(400, window, [window, test] {
+                window->grabWindow().save(test.mid(5));
+                QCoreApplication::quit();
+            });
+        });
+    }
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

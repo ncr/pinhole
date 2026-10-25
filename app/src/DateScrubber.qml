@@ -75,7 +75,7 @@ Item {
         width: 4
         height: 28
         radius: 2
-        color: "white"
+        color: theme.accent
         y: root.trackTop + root.grid.scrollFraction * root.trackHeight - height / 2
     }
 
@@ -87,7 +87,7 @@ Item {
         y: thumb.y + thumb.height / 2 - height / 2
         width: dateLabel.implicitWidth + 16
         height: dateLabel.implicitHeight + 8
-        radius: 4
+        radius: Math.min(4, theme.radius)
         color: "#e0202024"
         Text {
             id: dateLabel

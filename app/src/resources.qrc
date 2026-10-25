@@ -3,5 +3,8 @@
         <file alias="Main.qml">Main.qml</file>
         <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
         <file alias="DateScrubber.qml">DateScrubber.qml</file>
+        <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="i18n/en.json">i18n/en.json</file>
+        <file alias="i18n/pl.json">i18n/pl.json</file>
     </qresource>
 </RCC>
