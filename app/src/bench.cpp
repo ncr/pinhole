@@ -126,16 +126,16 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
          {}},
         {"scroll 3,000 px/s at 29 columns", 4.0, [g] { g->setDriveVelocity(-3000); }, {}},
         {"scroll 15,000 px/s at 29 columns", 4.0, [g] { g->setDriveVelocity(-15000); }, {}},
-        {"zoom steps 7 -> 17 -> 7, animated", 5.0,
+        {"zoom steps 7 -> 29 -> 7, animated", 5.0,
          [g, stopped] {
              stopped();
              g->setColumnsNow(7);
          },
          [g](double before, double t) {
-             // A level every 0.4 s, three out and three back in.
+             // A level every 0.4 s, two out and two back in.
              if (std::floor(t / 0.4) != std::floor(before / 0.4)) {
                  const int step = int(t / 0.4);
-                 g->zoomStep(step % 6 < 3 ? +1 : -1);
+                 g->zoomStep(step % 4 < 2 ? +1 : -1);
              }
          }},
     };

@@ -323,7 +323,7 @@ int main(int argc, char *argv[]) {
         });
     }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
-    // 7 columns out to 29 and in to 3, then two seconds of scrolling at 11
+    // 7 columns out to 29 and in to 3, then two seconds of scrolling at 7
     // (where the label is a range of days), as frames of the top left in
     // <dir>, with the label of each on the output.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("zoomdates:"))) {
@@ -344,7 +344,7 @@ int main(int argc, char *argv[]) {
                 // Then scrolling up through the days, the label changing as
                 // it goes.
                 else if (t >= 4.6 && t < 4.65)
-                    grid->setColumnsNow(11), grid->jumpToFraction(0.97), grid->setDriveVelocity(-6000);
+                    grid->setColumnsNow(7), grid->jumpToFraction(0.97), grid->setDriveVelocity(-6000);
                 else if (t >= 6.6 && t < 6.65)
                     grid->setDriveVelocity(0);
                 else if (t > 7.0) {

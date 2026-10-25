@@ -584,6 +584,38 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              key(window, Qt::Key_Up, Qt::ShiftModifier);
          },
          [=] { return std::abs(*mark - grid->scrollFraction() * grid->scrollRange() - grid->height() * 0.5) < 2; }, 1200},
+        {"Shift+Down held gathers speed", [=] {
+             grid->jumpToFraction(0.1);
+             auto *times = new QList<double>;
+             auto *held = new QElapsedTimer;
+             held->start();
+             auto *repeat = new QTimer(window);
+             QObject::connect(repeat, &QTimer::timeout, window, [=] {
+                 const double t = held->nsecsElapsed() / 1e9;
+                 const bool first = times->isEmpty();
+                 QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                     window, QEvent::KeyPress, Qt::Key_Down, Qt::ShiftModifier, {}, !first);
+                 times->append(t);
+                 const double at = grid->scrollFraction() * grid->scrollRange();
+                 // Where it was a second in, and at the end.
+                 if (std::abs(t - 1.0) < 0.02 || (t > 1.0 && *mark < 0))
+                     *mark = at;
+                 if (t > 3.2) {
+                     repeat->stop();
+                     QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                         window, QEvent::KeyRelease, Qt::Key_Down, Qt::ShiftModifier);
+                     std::printf("selftest: held a second in at %.0f, at the end %.0f\n", *mark, at);
+                 }
+             });
+             *mark = -1;
+             repeat->start(40);
+         },
+         [=] {
+             // Speeding up: the last 2.2 s went much further than 2.2 s at
+             // the starting speed (2,500 px/s).
+             const double at = grid->scrollFraction() * grid->scrollRange();
+             return *mark > 0 && at - *mark > 2.2 * 2500 * 1.6;
+         }, 3800},
         {"S starts selecting", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return grid->selecting(); }},
         {"a drag across the photos ticks every one from start to end", [=] {

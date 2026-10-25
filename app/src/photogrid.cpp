@@ -26,15 +26,15 @@
 namespace {
 
 // The zoom levels, as column counts, from one photo across (a feed) out to
-// 29. Neighbours are 1.25-3x apart: close enough that a cross-fade between
-// two of them reads as one motion. Every step is an even number of columns
+// 29, few of them: neighbours are about 2-3x apart, still close enough that
+// a cross-fade between two of them reads as one motion. Every step is an even number of columns
 // (so every count is odd, as in Photos on an iPhone), so that two
 // neighbouring levels grown about the window's middle (or an edge) have
 // their columns on the same lines at every size: at a change of level the
 // cells hold still and only the photos in them cross-fade. (A step of 1 or
 // 3 columns allows that only about the edges.)
-constexpr std::array<int, 9> kLevels = {1, 3, 5, 7, 9, 13, 17, 23, 29};
-constexpr int kDefaultLevel = 3;
+constexpr std::array<int, 5> kLevels = {1, 3, 7, 13, 29};
+constexpr int kDefaultLevel = 2;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
 // The cross-fade from one level to the next once a pinch passes the point
@@ -896,9 +896,17 @@ void PhotoGrid::scrollByKey(int direction, bool fast) {
     m_lastKeyScroll = now;
     // A fresh press steps; the key's repeats, coming every few hundredths
     // of a second while it is held, add up to a steady speed, which the
-    // easing smooths into a glide.
-    const double step = since > 0.12 || since < 0 ? (fast ? height() * 0.5 : stride())
-                                                    : (fast ? 4500.0 : 1400.0) * since;
+    // easing smooths into a glide. With Shift the glide gathers speed the
+    // longer the key is held, for crossing years.
+    const bool fresh = since > 0.12 || since < 0;
+    if (fresh)
+        m_keyHeldSince = now;
+    double speed = 1400;
+    if (fast) {
+        const double t = std::clamp((now - m_keyHeldSince - 0.4) / 2.5, 0.0, 1.0);
+        speed = 2500 + (16000 - 2500) * t * t * (3 - 2 * t);
+    }
+    const double step = fresh ? (fast ? height() * 0.5 : stride()) : speed * since;
     m_physics.nudge(direction * step, 0.15);
     updateAnimating();
 }
