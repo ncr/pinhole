@@ -283,6 +283,38 @@ int main(int argc, char *argv[]) {
             });
         });
     }
+    // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
+    // 7 columns out to 29 and in to 3, as frames of the top left in <dir>,
+    // with the label of each on the output.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("zoomdates:"))) {
+        QTimer::singleShot(1200, window, [window, grid, test] {
+            grid->setColumnsNow(7);
+            grid->jumpToFraction(0.5);
+            auto *timer = new QTimer(window);
+            auto *frame = new int(0);
+            QObject::connect(timer, &QTimer::timeout, window, [window, grid, test, timer, frame] {
+                const double t = *frame * 0.05;
+                auto lerpLog = [](double a, double b, double f) { return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f); };
+                if (t < 2.0)
+                    grid->setEffectiveStride(grid->width() / lerpLog(7, 29, t / 2.0), QPointF(grid->width() / 2, grid->height() / 2));
+                else if (t < 4.0)
+                    grid->setEffectiveStride(grid->width() / lerpLog(29, 3, (t - 2.0) / 2.0), QPointF(grid->width() / 2, grid->height() / 2));
+                else if (t < 4.05)
+                    grid->endContinuousZoom();
+                else if (t > 4.6) {
+                    timer->stop();
+                    QCoreApplication::quit();
+                }
+                const QVariantList headers = grid->dateHeaders();
+                std::printf("%03d %s %s\n", *frame, grid->zooming() ? "zooming" : "still  ",
+                            headers.isEmpty() ? "-" : qPrintable(headers[0].toMap().value("label").toString()));
+                std::fflush(stdout);
+                window->grabWindow().copy(0, 0, 420, 70).save(QStringLiteral("%1/%2.png").arg(test.mid(10)).arg(*frame, 3, 10, QLatin1Char('0')));
+                ++*frame;
+            });
+            timer->start(50);
+        });
+    }
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("copytwice:")))

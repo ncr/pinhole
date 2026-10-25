@@ -54,8 +54,11 @@ class PhotoGrid : public QQuickItem {
     // [{label, top}]. Far out by year and month, sticky: the run the top of
     // the view is in (top far above), then each run that starts lower down.
     // Closer in, one label: the days on screen, or the date at the top.
-    // Empty while zooming.
+    // While zooming, one label in the form of the level shown.
     Q_PROPERTY(QVariantList dateHeaders READ dateHeaders NOTIFY dateHeadersChanged)
+    // A pinch or zoom step is moving the grid between levels (the date
+    // label morphs meanwhile).
+    Q_PROPERTY(bool zooming READ zooming NOTIFY zoomingChanged)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // The selection's border: the Omarchy theme's accent.
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
@@ -126,6 +129,7 @@ public:
     // draws from mosaic pages, as when scrolling very fast).
     qreal scrollFraction() const;
     bool atNewest() const;
+    bool zooming() const { return m_zoom.active; }
     // Glide to the newest photos: from far off, a jump to a screen and a
     // half before them and the rest eased, so the motion shows without
     // racing through the whole library.
@@ -189,6 +193,7 @@ signals:
     void backgroundChanged();
     void selectingChanged();
     void dateHeadersChanged();
+    void zoomingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
     void libraryChanged();

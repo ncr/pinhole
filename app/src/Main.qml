@@ -99,6 +99,7 @@ ApplicationWindow {
                     return next ? Math.min(own, next.top + 16 - height - 8) : own
                 }
                 text: header ? header.label : ""
+                morphing: grid.zooming
                 textColor: theme.brightForeground
                 label.font.pixelSize: Math.round(theme.fontSize * 1.167)
             }

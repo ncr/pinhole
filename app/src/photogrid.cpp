@@ -406,20 +406,38 @@ void PhotoGrid::setScroll(double y) {
 
 void PhotoGrid::updateDateHeaders() {
     QVariantList headers;
-    if (!m_zoom.active && m_library && count() > 0 && height() > 0) {
+    if (m_library && count() > 0 && height() > 0) {
+        // The rows on screen, in content coordinates of their level: the
+        // grid's, or while a zoom moves, the layer drawn underneath.
+        int columns = m_columns;
+        double rowStride = stride(), contentTop = m_scroll, contentBottom = m_scroll + height();
+        // The format follows this level: the grid's, or the one a zoom
+        // shows or is landing on.
+        int formatColumns = m_columns;
+        if (m_zoom.active) {
+            const Layer l = layers().front();
+            columns = l.columns;
+            rowStride = strideFor(l.columns);
+            contentTop = l.pin.y() + (0 - l.at.y()) / l.scale;
+            contentBottom = l.pin.y() + (height() - l.at.y()) / l.scale;
+            formatColumns = kLevels[size_t(m_zoom.settling ? m_zoom.target : m_zoom.shown)];
+        }
         // Far out the year, then the month (both sticky, a header to each
         // run), then the range of days on screen, then, close in, the date.
+        // While zooming, one label, not sticky; it changes form as the
+        // levels do (the window morphs it).
         enum Unit { Year, Month, DayRange, Day };
-        const Unit unit = m_columns >= 23 ? Year : m_columns >= 13 ? Month : m_columns >= 7 ? DayRange : Day;
-        const double s = stride();
-        const int rows = (count() + m_columns - 1) / m_columns;
-        const int first = std::clamp(int(m_scroll / s), 0, rows - 1);
-        const int last = std::clamp(int((m_scroll + height()) / s), 0, rows - 1);
+        const Unit unit = formatColumns >= 23 ? Year : formatColumns >= 13 ? Month : formatColumns >= 7 ? DayRange : Day;
+        const bool sticky = !m_zoom.active && (unit == Year || unit == Month);
+        const double s = rowStride;
+        const int rows = (count() + columns - 1) / columns;
+        const int first = std::clamp(int(std::floor(contentTop / s)), 0, rows - 1);
+        const int last = std::clamp(int(std::floor(contentBottom / s)), 0, rows - 1);
         const QLocale locale;
         auto dateOf = [this](int index) { return QDateTime::fromMSecsSinceEpoch(m_library->at(index).date).date(); };
         // A row belongs to the date of its first photo: the grid has no gaps
         // between runs, so a run's header starts with the row it starts in.
-        auto dateOfRow = [&](int row) { return dateOf(row * m_columns); };
+        auto dateOfRow = [&](int row) { return dateOf(row * columns); };
 
         if (unit == Day || unit == DayRange) {
             // One label, not sticky: the date at the top, or the days the
@@ -427,7 +445,7 @@ void PhotoGrid::updateDateHeaders() {
             const QDate from = dateOfRow(first);
             QString label = locale.toString(from, QStringLiteral("d MMMM yyyy"));
             if (unit == DayRange) {
-                const QDate to = dateOf(std::min(count() - 1, (last + 1) * m_columns - 1));
+                const QDate to = dateOf(std::min(count() - 1, (last + 1) * columns - 1));
                 if (to != from) {
                     if (to.year() != from.year())
                         label = locale.toString(from, QStringLiteral("d MMMM yyyy")) + QStringLiteral(" – ") +
@@ -456,7 +474,7 @@ void PhotoGrid::updateDateHeaders() {
             QDate date = dateOfRow(first);
             int current = key(date);
             headers.append(QVariantMap{{"label", label(date)}, {"top", -1e9}});
-            for (int row = first + 1; row <= last && headers.size() < 8; ++row) {
+            for (int row = first + 1; sticky && row <= last && headers.size() < 8; ++row) {
                 date = dateOfRow(row);
                 if (const int k = key(date); k != current) {
                     headers.append(QVariantMap{{"label", label(date)}, {"top", row * s - m_scroll}});
@@ -681,8 +699,9 @@ void PhotoGrid::beginZoom(QPointF at) {
     if (!continuing)
         m_zoom.focusX = at.x() < width() * 0.2 ? 0 : at.x() > width() * 0.8 ? width() : width() / 2;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
-    updateDateHeaders(); // out of the way while zooming
+    updateDateHeaders(); // one label now, in the shown level's form
     updateAnimating();
+    emit zoomingChanged();
 }
 
 void PhotoGrid::zoomTo(double stride, QPointF at) {
@@ -713,6 +732,7 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
+    updateDateHeaders();
     const double now = m_clock.nsecsElapsed() / 1e9;
     m_zoom.samples.emplace_back(now, std::log(stride));
     while (m_zoom.samples.size() > 2 && now - m_zoom.samples.front().first > 0.1)
@@ -846,6 +866,7 @@ void PhotoGrid::jumpToFraction(double f) { setScroll(std::clamp(f, 0.0, 1.0) * m
 
 void PhotoGrid::advance(qreal dt) {
     dt = std::clamp(dt, 0.0, 0.05);
+    const bool wasZooming = m_zoom.active;
     if (m_driveVelocity != 0) {
         setScroll(m_scroll + m_driveVelocity * dt);
     } else if (m_physics.animating()) {
@@ -876,6 +897,9 @@ void PhotoGrid::advance(qreal dt) {
     updateAnimating();
     update();
     notifyScrolled();
+    // After the headers: a label the landing changes still morphs.
+    if (wasZooming != m_zoom.active)
+        emit zoomingChanged();
 }
 
 void PhotoGrid::updateAnimating() {
