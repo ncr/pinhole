@@ -14,7 +14,8 @@
 
 Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     : QObject(parent),
-      m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory) {
+      m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory),
+      m_userShell(directory.isEmpty() ? QDir::homePath() + "/.config/omarchy/shell.toml" : directory + "/config/shell.toml") {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
@@ -143,7 +144,8 @@ void Theme::reload() {
     while (!QFileInfo::exists(ancestor) && ancestor != "/")
         ancestor = QFileInfo(ancestor).absolutePath();
     QStringList candidates{ancestor, QFileInfo(ancestor).absolutePath(), m_directory,
-                           m_directory + "/theme", m_directory + "/theme/colors.toml"};
+                           m_directory + "/theme", m_directory + "/theme/colors.toml",
+                           QFileInfo(m_userShell).absolutePath(), m_userShell};
     candidates.removeDuplicates();
     for (const auto &path : candidates)
         if (QFileInfo::exists(path))
@@ -152,14 +154,19 @@ void Theme::reload() {
     const auto accent = readAccent(m_directory + "/theme/colors.toml");
     bool light = false;
     const auto colors = readColors(m_directory + "/theme/colors.toml", &light);
-    // The type scale's base size, from Omarchy's shell tokens.
+    // The type scale's base size, Omarchy's text size: the one set in its
+    // settings, else the theme's shell tokens.
     int fontSize = 12;
-    QFile shell(m_directory + "/theme/shell.toml");
-    if (shell.open(QIODevice::ReadOnly)) {
+    for (const QString &path : {m_userShell, m_directory + "/theme/shell.toml"}) {
+        QFile shell(path);
+        if (!shell.open(QIODevice::ReadOnly))
+            continue;
         const auto match = QRegularExpression(R"re(^\s*base-size\s*=\s*(\d+))re", QRegularExpression::MultilineOption)
                                .match(QString::fromUtf8(shell.readAll()));
-        if (match.hasMatch())
+        if (match.hasMatch()) {
             fontSize = std::clamp(match.captured(1).toInt(), 8, 32);
+            break;
+        }
     }
     if (accent != m_accent || colors != m_colors || light != m_light || fontSize != m_fontSize) {
         m_accent = accent;

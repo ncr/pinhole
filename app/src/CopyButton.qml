@@ -1,4 +1,5 @@
 import QtQuick
+import "keys.js" as KeyNames
 
 // A Copy button that answers on itself, as touch apps do, rather than in a
 // line of text somewhere else: dimmed while the photos are fetched, then a
@@ -15,7 +16,10 @@ Rectangle {
     // Over the photos rather than on a surface of the app: backed with the
     // theme's background, as the chips are, so it reads on any photo.
     property bool floating: false
-    property string hint: ""
+    // A key that presses it while it shows, beside the label (see
+    // ShellButton.qml).
+    property string key
+    property string hint: KeyNames.nameOf(key)
 
     // idle, working, done, failed
     property string phase: "idle"
@@ -101,19 +105,25 @@ Rectangle {
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
     }
     HoverHandler { id: hover; cursorShape: button.enabledHere ? Qt.PointingHandCursor : Qt.ArrowCursor }
-    TapHandler {
-        id: tap
-        onTapped: {
-            if (!button.enabledHere || button.phase === "working")
-                return
-            const photos = button.photos()
-            if (photos.length === 0)
-                return
-            // Again while the tick shows: it starts afresh.
-            pop.stop()
-            shown.stop()
-            button.phase = "working"
-            outgoing.copy(photos, true)
-        }
+    TapHandler { id: tap; onTapped: button.copy() }
+    // Not while the window has its keys for something over it (the help).
+    readonly property bool keysFree: Window.window === null || Window.window.buttonKeys !== false
+    Shortcut {
+        enabled: button.key !== "" && button.visible && button.enabledHere && button.keysFree
+        sequence: button.key
+        context: Qt.ApplicationShortcut
+        onActivated: button.copy()
+    }
+    function copy() {
+        if (!button.enabledHere || button.phase === "working")
+            return
+        const photos = button.photos()
+        if (photos.length === 0)
+            return
+        // Again while the tick shows: it starts afresh.
+        pop.stop()
+        shown.stop()
+        button.phase = "working"
+        outgoing.copy(photos, true)
     }
 }

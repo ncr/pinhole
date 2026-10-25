@@ -19,23 +19,24 @@ Item {
             [qsTr("Pinch"), qsTr("Zoom in and out")],
             [qsTr("Ctrl+wheel"), qsTr("Zoom one step at the pointer")],
             ["+  −", qsTr("Zoom one step")],
-            ["Home  End", qsTr("Oldest, newest")],
+            ["Home", qsTr("Oldest")],
+            ["N", qsTr("Newest")],
             ["PgUp  PgDn", qsTr("A screen up or down")]
         ] },
         { title: qsTr("Selecting"), keys: [
-            [qsTr("Select"), qsTr("The button at the top: start choosing photos")],
+            ["S", qsTr("Select: start choosing photos")],
             [qsTr("Click"), qsTr("Tick or untick a photo, while selecting")],
             [qsTr("Shift+click"), qsTr("Tick a range")],
             [qsTr("Ctrl+click"), qsTr("Start selecting with this photo")],
-            ["Ctrl+A", qsTr("Select all")],
-            [qsTr("Done  Esc"), qsTr("Stop selecting")]
+            ["A  Ctrl A", qsTr("Select all")],
+            ["S  Esc", qsTr("Done: stop selecting")]
         ] },
         { title: qsTr("Taking photos out"), keys: [
             [qsTr("Drag"), qsTr("Drop the selection into any app")],
-            [qsTr("Copy  Export"), qsTr("The buttons above an open photo")],
-            ["Ctrl+C", qsTr("Copy")],
-            ["Ctrl+E", qsTr("Export originals")],
-            ["Ctrl+Shift+E", qsTr("Export as JPEG and MP4")]
+            ["C", qsTr("Copy the open photo or the selection")],
+            ["E", qsTr("Export originals")],
+            ["⇧ E", qsTr("Export as JPEG and MP4")],
+            ["Ctrl C  Ctrl E", qsTr("The same, also for the photo under the pointer")]
         ] },
         { title: qsTr("Viewing"), keys: [
             ["Space  Enter", qsTr("Open the photo under the pointer")],
@@ -47,7 +48,8 @@ Item {
             [qsTr("Double-click"), qsTr("Back to the library")],
             [qsTr("Swipe up or down"), qsTr("Back to the library, with two fingers")],
             [qsTr("Pinch in"), qsTr("Back to the library")],
-            [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
+            [qsTr("Esc  Mouse back"), qsTr("Back to the library")],
+            ["L", qsTr("Play a Live Photo")]
         ] },
         { title: qsTr("Zooming in"), keys: [
             [qsTr("Pinch"), qsTr("Zoom the photo at the fingers")],
@@ -60,12 +62,11 @@ Item {
             [qsTr("Click  Space"), qsTr("Play or pause")],
             [qsTr("Video bar"), qsTr("Seek: click or drag")],
             ["Shift+←  →", qsTr("Back or ahead 10 seconds")],
-            ["M", qsTr("Sound on or off")],
-            ["L", qsTr("Play a Live Photo")]
+            ["M", qsTr("Sound on or off")]
         ] },
         { title: qsTr("Pinhole"), keys: [
             ["?", qsTr("Show or hide these keys")],
-            ["S", qsTr("Show or hide the frame statistics")],
+            ["F", qsTr("Show or hide the frame statistics")],
             ["Q", qsTr("Quit")]
         ] }
     ]

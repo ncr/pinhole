@@ -159,6 +159,23 @@ private slots:
         QVERIFY(theme.darkBackground().lightnessF() > 0.8);
     }
 
+    // The text size set in Omarchy's settings wins over the theme's, and a
+    // change to it shows without a restart.
+    void themeTakesTheTextSizeFromOmarchysSettings() {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        QDir(dir.path()).mkpath("config");
+        write(dir.path() + "/theme/colors.toml", "accent = \"#7aa2f7\"\n");
+        write(dir.path() + "/theme/shell.toml", "[font]\n# base-size = 20\nbase-size = 12\n");
+        write(dir.path() + "/config/shell.toml", "[font]\nbase-size = 16\n");
+        Theme theme(dir.path());
+        QCOMPARE(theme.fontSize(), 16);
+        write(dir.path() + "/config/shell.toml", "[font]\nbase-size = 18\n");
+        QTRY_COMPARE(theme.fontSize(), 18);
+        QFile::remove(dir.path() + "/config/shell.toml");
+        QTRY_COMPARE(theme.fontSize(), 12);
+    }
+
     void polishHasItsThreePluralForms() {
         QTemporaryDir dir;
         write(dir.path() + "/language", "pl\n");

@@ -1,12 +1,19 @@
 import QtQuick
+import "keys.js" as KeyNames
 
 // A button as Omarchy's shell draws one (shell.toml's controls): a faint fill
 // and a hairline in the text colour, both stronger under the pointer and
 // when pressed. `active` is the chosen state, filled with the accent.
 // `flat` drops the hairline at rest, for rows inside a bar or menu.
+//
+// Its key beside the label, as Omarchy's menus show theirs: `key` presses
+// it while it shows (a sequence: "C", "Shift+E", "Escape"); `hint` only
+// shows one, for a key the window handles itself.
 Rectangle {
     id: control
-    property alias text: label.text
+    property string text
+    property string key
+    property string hint: KeyNames.nameOf(key)
     property bool active: false
     property bool flat: false
     // Over the photos rather than on a surface of the app: backed with the
@@ -32,6 +39,20 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         y: centredIn(control.height)
         color: control.active ? theme.background : theme.foreground
+        // The key quieter than the label: the theme's dark text, or on the
+        // accent, the background let through.
+        readonly property color hintColor: control.active
+            ? Qt.tint(theme.accent, Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.6))
+            : theme.darkForeground
+        text: control.text + (control.hint !== "" ? "  <font color=\"" + hintColor + "\">" + control.hint + "</font>" : "")
+    }
+    // Not while the window has its keys for something over it (the help).
+    readonly property bool keysFree: Window.window === null || Window.window.buttonKeys !== false
+    Shortcut {
+        enabled: control.key !== "" && control.visible && control.usable && control.keysFree
+        sequence: control.key
+        context: Qt.ApplicationShortcut
+        onActivated: control.tapped()
     }
     Rectangle {
         anchors.fill: parent

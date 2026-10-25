@@ -329,7 +329,8 @@ Item {
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
             floating: true
-            text: qsTr("LIVE") + "  <font color=\"" + theme.darkForeground + "\">L</font>"
+            text: qsTr("LIVE")
+            key: "L"
             onTapped: viewer.playLive()
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers
@@ -339,11 +340,13 @@ Item {
             floating: true
             anchors.verticalCenter: parent.verticalCenter
             photos: () => [viewer.index]
+            key: "C"
         }
         ShellButton {
             anchors.verticalCenter: parent.verticalCenter
             floating: true
             text: qsTr("Export")
+            key: "E"
             onTapped: outgoing.exportTo([viewer.index], false)
         }
         // Back to the library.
@@ -351,7 +354,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             floating: true
             text: "✕"
-            width: height
+            key: "Escape"
             onTapped: root.closeViewer()
         }
     }
@@ -424,7 +427,9 @@ Item {
             anchors.rightMargin: 16
             anchors.bottom: track.top
             anchors.bottomMargin: 10
-            text: (root.muted ? qsTr("Sound off") : qsTr("Sound on")) + "  <font color=\"" + theme.darkForeground + "\">M</font>"
+            text: root.muted ? qsTr("Sound off") : qsTr("Sound on")
+            // The window's key: it works with the button hidden.
+            hint: "M"
             active: root.muted
             floating: true
             onTapped: root.muted = !root.muted

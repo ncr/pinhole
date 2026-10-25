@@ -18,6 +18,7 @@
 #include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <qpa/qwindowsysteminterface.h>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
 #include <QVideoFrame>
@@ -280,6 +281,13 @@ void click(QQuickWindow *window, QPointF at, Qt::MouseButton button = Qt::LeftBu
            Qt::KeyboardModifiers mods = Qt::NoModifier) {
     mouse(window, QEvent::MouseButtonPress, at, button, mods);
     mouse(window, QEvent::MouseButtonRelease, at, button, mods);
+}
+
+// A key pressed and let go, as the window system brings it: shortcuts
+// first, as typed.
+void key(QQuickWindow *window, int code, Qt::KeyboardModifiers mods = Qt::NoModifier, const QString &text = {}) {
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, code, mods, text);
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, code, mods, text);
 }
 
 // The centre of a named item, in the window.
@@ -556,6 +564,30 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              QObject *b = window->findChild<QObject *>(QStringLiteral("newestButton"));
              return grid->atNewest() && grid->scrollFraction() > 0.999 && b->property("opacity").toDouble() < 0.1;
          }, 1500},
+        // The buttons' keys.
+        {"away again, N glides back to the newest", [=] {
+             grid->jumpToFraction(0.3);
+             QTimer::singleShot(300, window, [=] { key(window, Qt::Key_N, {}, QStringLiteral("n")); });
+         },
+         [=] { return grid->atNewest() && grid->scrollFraction() > 0.999; }, 1800},
+        {"S starts selecting", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
+         [=] { return grid->selecting(); }},
+        {"A selects them all", [=] { key(window, Qt::Key_A, {}, QStringLiteral("a")); },
+         [=] { return grid->selectionCount() == grid->count(); }},
+        {"S again is Done", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
+         [=] { return !grid->selecting() && grid->selectionCount() == 0; }},
+        {"? shows the help", [=] { key(window, Qt::Key_Question, {}, QStringLiteral("?")); },
+         [=] { return window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
+        {"with the help up, the buttons' keys rest", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
+         [=] { return !grid->selecting(); }},
+        {"Esc puts the help away", [=] { key(window, Qt::Key_Escape); },
+         [=] { return !window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
+        {"a photo open, Esc on its close button closes it", [=, &viewer] {
+             const int index = grid->indexAt(grid->width() / 2, grid->height() / 2);
+             viewer.openAt(index, grid->rectOf(index));
+             QTimer::singleShot(600, window, [=] { key(window, Qt::Key_Escape); });
+         },
+         [&viewer] { return !viewer.isOpen(); }, 1200},
     });
     Viewer *viewerPtr = &viewer;
     auto failures = std::make_shared<int>(0);

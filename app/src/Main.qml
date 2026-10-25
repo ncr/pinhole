@@ -84,7 +84,6 @@ ApplicationWindow {
         morphing: true
         centred: false
         textColor: theme.brightForeground
-        label.font.pixelSize: Math.round(theme.fontSize * 1.167)
     }
 
     PhotoViewer {
@@ -152,7 +151,8 @@ ApplicationWindow {
         opacity: wanted ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
-        text: "↓ " + qsTr("Newest") + "  <font color=\"" + theme.darkForeground + "\">End</font>"
+        text: "↓ " + qsTr("Newest")
+        key: "N"
         onTapped: grid.glideToNewest()
     }
 
@@ -167,6 +167,7 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.margins: 16
         text: grid.selecting ? qsTr("Done") : qsTr("Select")
+        key: "S"
         active: grid.selecting
         onTapped: grid.selecting = !grid.selecting
     }
@@ -202,13 +203,13 @@ ApplicationWindow {
                 photos: () => grid.selection()
                 enabledHere: grid.selectionCount > 0
                 flat: true
-                hint: "ctrl c"
+                key: "C"
             }
             Repeater {
                 model: [
-                    { label: qsTr("Export originals"), keys: "ctrl e", act: () => outgoing.exportTo(grid.selection(), false) },
-                    { label: qsTr("Export as JPEG and MP4"), keys: "ctrl ⇧ e", act: () => outgoing.exportTo(grid.selection(), true) },
-                    { label: qsTr("Select all"), keys: "ctrl a", act: () => grid.selectAll() }
+                    { label: qsTr("Export originals"), key: "E", act: () => outgoing.exportTo(grid.selection(), false) },
+                    { label: qsTr("Export as JPEG and MP4"), key: "Shift+E", act: () => outgoing.exportTo(grid.selection(), true) },
+                    { label: qsTr("Select all"), key: "A", act: () => grid.selectAll() }
                 ]
                 delegate: ShellButton {
                     required property var modelData
@@ -216,7 +217,8 @@ ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     flat: true
                     usable: grid.selectionCount > 0 || index === 2
-                    text: modelData.label + "  <font color=\"" + theme.darkForeground + "\">" + modelData.keys + "</font>"
+                    text: modelData.label
+                    key: modelData.key
                     onTapped: modelData.act()
                 }
             }
@@ -226,6 +228,8 @@ ApplicationWindow {
     HelpOverlay { id: help; objectName: "help" }
 
     readonly property bool inGrid: !photoViewer.shown && !help.shown
+    // The buttons' own keys (ShellButton.qml), but for while the help is up.
+    readonly property bool buttonKeys: !help.shown
 
     // What Copy and Export act on: the selection, else the photo in view.
     // What Copy and Export take: the photo on screen in the viewer, else the
@@ -247,13 +251,16 @@ ApplicationWindow {
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
+    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
+
+    // Every button presses on its own key too, shown beside it, while it
+    // shows: Newest N, Select S, Copy C, Export E, as JPEG and MP4 ⇧E,
+    // Select all A, LIVE L, close Esc. The keys here are the rest.
 
     // The grid.
     Shortcut { enabled: win.inGrid; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
     Shortcut { enabled: win.inGrid; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
     Shortcut { enabled: win.inGrid; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
-    Shortcut { enabled: win.inGrid; sequence: "End"; context: Qt.ApplicationShortcut; onActivated: grid.glideToNewest() }
     Shortcut { enabled: win.inGrid; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
@@ -267,7 +274,6 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), true) }
 
     // The viewer.
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: photoViewer.closeViewer() }
     Shortcut {
         enabled: photoViewer.shown && !help.shown; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
         // Space plays and pauses a video; on a photo it closes, like Quick Look.
@@ -275,7 +281,6 @@ ApplicationWindow {
     }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: viewer.playLive() }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }

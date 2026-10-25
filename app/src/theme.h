@@ -63,6 +63,8 @@ private:
     void refreshRounding();
 
     QString m_directory;
+    // Omarchy's personal shell settings (its text size), over the theme's.
+    QString m_userShell;
     QString m_accent = "#FFD60A";
     QHash<QString, QColor> m_colors;
     bool m_light = false;
