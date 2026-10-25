@@ -35,10 +35,6 @@ constexpr std::array<int, 10> kLevels = {2, 4, 6, 8, 10, 14, 18, 24, 30, 40};
 constexpr int kDefaultLevel = 3;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
-// A pinch passing from one level to the next cross-fades the photos in
-// their cells in this long: a little gentler than Photos on an iPhone (3-4
-// frames at 30 fps in a recording of it).
-constexpr double kReflowSeconds = 0.25;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
@@ -521,39 +517,40 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
         const bool aDenser = kLevels[size_t(a)] > kLevels[size_t(b)];
         const int dense = aDenser ? a : b, coarse = aDenser ? b : a;
         const double coarseWeight = aDenser ? 1 - aWeight : aWeight;
-        if (coarseWeight >= 0.999)
-            return {layerFor(coarse, 1)};
+        // Alone only once it covers the window: just short of its own size,
+        // the coarser level is a little narrower than the window.
+        if (const Layer c = layerFor(coarse, 1); coarseWeight >= 0.999 && c.scale >= 1)
+            return {c};
         if (coarseWeight <= 0.001)
             return {layerFor(dense, 1)};
         return {layerFor(dense, 1), layerFor(coarse, coarseWeight)};
     };
     if (m_zoom.settling) {
-        // The cross-fade done in the first part of the settle: briefly two
-        // layouts at once, then one moving into place.
-        const double w = lerp(m_zoom.fromWeight, 1, easeOut(std::min(1.0, m_zoom.t / 0.4)));
+        const double w = lerp(m_zoom.fromWeight, 1, easeOut(m_zoom.t));
         if (m_zoom.partner == m_zoom.target)
             return {layerFor(m_zoom.target, 1)};
         return pair(m_zoom.target, w, m_zoom.partner);
     }
 
-    // Pinching: one level, scaled; while the level changes, the old one
-    // fading out over a tenth of a second (pinchLevel(), advance()).
-    if (m_zoom.fade < 1 && m_zoom.fadeFrom >= 0 && m_zoom.fadeFrom != m_zoom.shown)
-        return pair(m_zoom.shown, easeOut(m_zoom.fade), m_zoom.fadeFrom);
-    return {layerFor(m_zoom.shown, 1)};
-}
-
-int PhotoGrid::pinchLevel(double stride) const {
-    // The denser of the two levels whose cell sizes are either side of
-    // `stride`: drawn scaled up, it always covers the window. Strides shrink
-    // as the column count grows.
+    // Pinching: the two levels whose cell sizes are either side of the
+    // current one. Their cells coincide (kLevels), so blending them changes
+    // only the photos in the cells: gradually, all the way from one level's
+    // own size to the other's, and gently at both ends, the same zooming in
+    // as out. Strides shrink as the column count grows.
     const int last = levelCount() - 1;
-    if (stride >= strideFor(kLevels.front()))
-        return 0;
-    int level = 1;
-    while (level < last && stride < strideFor(kLevels[size_t(level)]))
-        level += 1;
-    return level;
+    if (m_zoom.stride >= strideFor(kLevels.front()))
+        return {layerFor(0, 1)};
+    if (m_zoom.stride <= strideFor(kLevels.back()))
+        return {layerFor(last, 1)};
+    int coarse = 0;
+    while (coarse < last - 1 && m_zoom.stride < strideFor(kLevels[size_t(coarse + 1)]))
+        coarse += 1;
+    const int dense = coarse + 1;
+    const double sDense = strideFor(kLevels[size_t(dense)]);
+    const double sCoarse = strideFor(kLevels[size_t(coarse)]);
+    // How far from the denser level's size to the coarser's, as a ratio.
+    const double t = std::clamp(std::log(m_zoom.stride / sDense) / std::log(sCoarse / sDense), 0.0, 1.0);
+    return pair(coarse, t * t * (3 - 2 * t), dense);
 }
 
 void PhotoGrid::beginZoom(QPointF at) {
@@ -589,14 +586,11 @@ void PhotoGrid::beginZoom(QPointF at) {
     m_zoom.at = l.at + (pinIn(l.columns) - l.pin) * l.scale;
     m_zoom.pinStart = m_zoom.at;
     m_zoom.fingerStart = at;
-    m_zoom.shown = levelForColumns(l.columns);
     // What the zoom grows about across: the middle, or an edge when the
     // fingers are near it; kept by a settle that is taken over, which is
     // still drawn about its own.
     if (!continuing)
         m_zoom.focusX = at.x() < width() * 0.2 ? 0 : at.x() > width() * 0.8 ? width() : width() / 2;
-    m_zoom.fadeFrom = -1;
-    m_zoom.fade = 1;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
     updateAnimating();
 }
@@ -613,15 +607,6 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     else if (stride > coarsest)
         stride = coarsest * std::pow(stride / coarsest, 0.3);
     m_zoom.stride = stride;
-    // Past a level's own cell size the grid reflows to the next one, as in
-    // Photos: one quick cross-fade, however slowly the fingers move, rather
-    // than the two levels blended all the way between them.
-    if (const int level = pinchLevel(stride); level != m_zoom.shown) {
-        m_zoom.fadeFrom = m_zoom.shown;
-        m_zoom.shown = level;
-        m_zoom.fade = 0;
-        updateAnimating();
-    }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
     const double now = m_clock.nsecsElapsed() / 1e9;
@@ -753,8 +738,6 @@ void PhotoGrid::advance(qreal dt) {
         m_physics.step(dt);
         m_scroll = m_physics.position();
     }
-    if (m_zoom.active && !m_zoom.settling && m_zoom.fade < 1)
-        m_zoom.fade = std::min(1.0, m_zoom.fade + dt / kReflowSeconds);
     if (m_zoom.active && m_zoom.settling) {
         m_zoom.t = std::min(1.0, m_zoom.t + dt / kSettleSeconds);
         const double e = easeOut(m_zoom.t);
@@ -779,7 +762,7 @@ void PhotoGrid::advance(qreal dt) {
 
 void PhotoGrid::updateAnimating() {
     const bool animating = m_driveVelocity != 0 || m_physics.animating() ||
-                           (m_zoom.active && (m_zoom.settling || m_zoom.fade < 1));
+                           (m_zoom.active && m_zoom.settling);
     if (animating != m_animating) {
         m_animating = animating;
         emit animatingChanged();
