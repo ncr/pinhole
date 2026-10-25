@@ -229,6 +229,8 @@ private:
 
     // Zoom
     int levelForColumns(int columns) const;
+    // The level whose own cell size is nearest `stride`, as a ratio.
+    int nearestLevel(double stride) const;
     // Pin the photo under `at` (view coordinates) and start zooming around it.
     void beginZoom(QPointF at);
     // The cell size the zoom shows now, and where the pinned photo sits.
@@ -296,6 +298,11 @@ private:
         double fromStride = 0, toStride = 0;
         QPointF fromAt, toAt;
         double fromWeight = 0; // target level's share when settling began
+        // Pinching: the level shown (the nearest to the cell size), the one
+        // it took over from, and how far the cross-fade between them is.
+        int shown = 0;
+        int fadeFrom = -1;
+        double fade = 1;
         double toScroll = 0;
         double t = 1;
     } m_zoom;
