@@ -94,7 +94,16 @@ int main(int argc, char *argv[]) {
     if (qEnvironmentVariableIsEmpty("QSG_ATLAS_HEIGHT"))
         qputenv("QSG_ATLAS_HEIGHT", "4096");
 
+    // Not GTK's platform theme, which Omarchy's environment asks for: it
+    // costs about 30 ms at start, and Pinhole draws everything itself (its
+    // type, colours and folder picker are Omarchy's, not GTK's). Programs it
+    // starts still get the desktop's setting.
+    const QByteArray platformTheme = qgetenv("QT_QPA_PLATFORMTHEME");
+    if (platformTheme.startsWith("gtk"))
+        qunsetenv("QT_QPA_PLATFORMTHEME");
     QGuiApplication app(argc, argv);
+    if (platformTheme.startsWith("gtk"))
+        qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
     app.setApplicationName("pinhole");
     app.setApplicationVersion("1.0.0");
     app.setDesktopFileName("pinhole");
@@ -130,13 +139,12 @@ int main(int argc, char *argv[]) {
     QString error;
     QElapsedTimer loadTimer;
     loadTimer.start();
-    // No library yet is not fatal: the window opens and says how to make
-    // one, and picks it up once it is there.
-    const bool haveLibrary = library.open(libraryDir, &error);
-    if (!haveLibrary)
-        std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
-    std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
-                 loadTimer.elapsed());
+    // Read while the window loads (both take some 50 ms): nothing touches
+    // the library until opening.join() below. No library yet is not fatal:
+    // the window opens and says how to make one, and picks it up once it is
+    // there.
+    bool haveLibrary = false;
+    std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     FrameStats stats;
@@ -145,7 +153,7 @@ int main(int argc, char *argv[]) {
     TouchpadHold hold;
 
     // Larger renditions come from pinholed.
-    ServiceClient service(library.dir());
+    ServiceClient service(QDir(libraryDir).absolutePath());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
     Storage storage(&service);
@@ -155,14 +163,20 @@ int main(int argc, char *argv[]) {
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
-    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // How iCloud is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
+    engine.rootContext()->setContextProperty("libraryProblem", QString());
     engine.load(QUrl("qrc:/Main.qml"));
+    opening.join();
+    if (!haveLibrary)
+        std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
+    std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
+                 loadTimer.elapsed());
+    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     if (engine.rootObjects().isEmpty())
         return 1;
 
