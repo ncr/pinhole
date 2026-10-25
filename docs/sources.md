@@ -79,7 +79,7 @@ assets          id, filename, item_type, asset_date, added_date, favorite,
                 size, thumb_path, thumb_w, thumb_h, avg_color
 renditions      asset_id, kind (thumb|medium|full|original|video|live),
                 name, key, width, height, size, file_type
-meta            key, value: change_token, library_version, source, schema
+meta            key, value: change_token, library_version, source
 
 icloud_assets   asset_id, master_id, change_tag, rank, subtype
 icloud_resources  asset_id, kind (Original, JPEGMed, ...), width, height,
@@ -94,11 +94,6 @@ its tables, so the core never names them.
 
 A rendition's `key` is what its cached file and thumbnail are named by.
 For iCloud it is the file's checksum.
-
-An index written by other code (another `schema` in `meta`, or none) is
-neither read nor written: opening it says to remove it and build the
-library again. Its thumbnails are named by the same keys, so a rebuild
-finds them on disk and fetches none.
 
 ## The service and pinhole-sync
 

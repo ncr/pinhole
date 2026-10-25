@@ -6,27 +6,16 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::source::{Asset, Kind};
-
-/// The schema this code reads and writes; `meta.schema`.
-pub const SCHEMA: i64 = 2;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.pragma_update(None, "synchronous", "NORMAL")?;
     db.busy_timeout(std::time::Duration::from_secs(10))?;
-    // One made by other code is not read, nor written: it is made again.
-    let made = db.query_row("SELECT 1 FROM sqlite_master WHERE name = 'assets'", [], |_| Ok(())).optional()?.is_some();
-    if made && meta(&db, "schema") != Some(SCHEMA.to_string()) {
-        return Err(anyhow!(
-            "{} is from another version of Pinhole; remove it and build the library again (pinhole-sync all)",
-            path.display()
-        ));
-    }
     create(&db)?;
     Ok(db)
 }
@@ -76,7 +65,6 @@ fn create(db: &Connection) -> Result<()> {
         END;
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
-    db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?1)", [SCHEMA.to_string()])?;
     Ok(())
 }
 
@@ -270,21 +258,6 @@ mod tests {
                 width: None, height: None, size: None, file_type: Some("public.jpeg".into()),
             }],
         }
-    }
-
-    #[test]
-    fn an_index_from_other_code_is_left_alone() {
-        let dir = temp("other");
-        let path = dir.join("library.sqlite");
-        Connection::open(&path).unwrap()
-            .execute_batch("CREATE TABLE assets (id TEXT PRIMARY KEY, master_id TEXT NOT NULL);
-                            INSERT INTO assets VALUES ('a', 'm');").unwrap();
-        let error = open(&path).err().expect("refused").to_string();
-        assert!(error.contains("pinhole-sync all"), "{error}");
-        let tables: i64 = Connection::open(&path).unwrap()
-            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table'", [], |r| r.get(0)).unwrap();
-        assert_eq!(tables, 1);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
