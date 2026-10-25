@@ -144,5 +144,28 @@ screen recording of Photos on an iPhone.
 
 Checked offscreen by the benchmark: the pinned photo moves 0 px vertically
 through a pinch sweep, and no frame leaves part of the window uncovered
-(also when pinching at the newest end). Not yet measured at 120 Hz on
-screen, and the new zoom has not been tried by hand.
+(also when pinching at the newest end).
+
+## On screen at 120 Hz, with everything (2026-10-25)
+
+`pinhole --bench` on the 100,000-item fake library, 845×1058 beside another
+window, after the scrubber, viewer, streaming and sync were in:
+
+| Phase | fps | p99 ms | max ms |
+|---|---|---|---|
+| Scroll 1,500 / 5,000 / 15,000 px/s | 120 | 9.1–9.2 | 10.9–25.7 |
+| Three flings | 120 | 9.2 | 11.1 |
+| Scrub the whole library in 5 s | 120 | 9.5 | 10.9 |
+| Drag the date scrubber | 120 | 10.0 | 10.8 |
+| Random jumps (sharp after 50 ms) | 120 | 9.4 | 19.8 |
+| Pinch sweep 8 → 30 → 3 → 8 | 119 | 11.8 | 30.1 |
+| Pinch at the newest 8 → 40 → 2 → 8 | 120 | 9.8 | 14.0 |
+| Idle at 40 columns | 120 | 9.1 | 11.0 |
+| Scroll 15,000 px/s at 40 columns | 117 | 12.5 | 33.8 |
+| Zoom steps 8 → 15 → 8 | 118 | 10.9 | 33.2 |
+
+The first run found zoom steps at 86 fps with three 140 ms stalls: the
+scrubber's year marks converted every photo's date on each column change.
+They are now found by halving the sorted dates. A library reload (a new
+photo synced in) took 139 ms on the window's thread; reading the index now
+happens on a thread of its own and the window stops for 12–55 ms to swap.

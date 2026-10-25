@@ -30,6 +30,9 @@
 #include "touchpadhold.h"
 
 #include <cstdio>
+#include <functional>
+#include <memory>
+#include <thread>
 
 int main(int argc, char *argv[]) {
     // On Asahi, Vulkan stalls far less than OpenGL when many small textures
@@ -148,27 +151,59 @@ int main(int argc, char *argv[]) {
     // The service found changes in iCloud: read the library again, swap it in
     // with the decoders idle, and let everything that holds positions follow
     // its photos.
-    auto reloadLibrary = [&] {
-        Library fresh;
-        QString error;
-        if (!fresh.open(library.dir(), &error)) {
-            std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
+    // Reading the index and matching old positions to new takes ~100 ms at
+    // 100,000 photos, so it happens on a thread of its own; the window only
+    // stops for the swap. A change announced meanwhile reloads once more.
+    std::thread reader;
+    bool reloading = false, reloadAgain = false;
+    std::function<void()> reloadLibrary = [&] {
+        if (reloading) {
+            reloadAgain = true;
             return;
         }
-        QHash<QByteArray, int> positions;
-        positions.reserve(fresh.count());
-        for (int i = 0; i < fresh.count(); ++i)
-            positions.insert(fresh.at(i).id, i);
-        std::vector<int> moved(size_t(library.count()), -1);
-        for (int i = 0; i < library.count(); ++i)
-            moved[size_t(i)] = positions.value(library.at(i).id, -1);
-        const int before = library.count();
-        grid->rememberAnchor();
-        loader.reload([&] { library.swap(fresh); });
-        grid->libraryReloaded(moved);
-        viewer.libraryReloaded(moved);
-        std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d)\n", library.count(), before);
+        reloading = true;
+        if (reader.joinable())
+            reader.join();
+        reader = std::thread([&library, window, &reloadAgain, &reloading, &reloadLibrary, &loader, grid, &viewer] {
+            QElapsedTimer took;
+            took.start();
+            auto fresh = std::make_shared<Library>();
+            QString error;
+            if (!fresh->open(library.dir(), &error)) {
+                std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
+                QMetaObject::invokeMethod(window, [&reloading] { reloading = false; }, Qt::QueuedConnection);
+                return;
+            }
+            // Only the window's thread swaps the library, and not before
+            // this hands over, so reading the old one here is safe.
+            QHash<QByteArray, int> positions;
+            positions.reserve(fresh->count());
+            for (int i = 0; i < fresh->count(); ++i)
+                positions.insert(fresh->at(i).id, i);
+            std::vector<int> moved(size_t(library.count()), -1);
+            for (int i = 0; i < library.count(); ++i)
+                moved[size_t(i)] = positions.value(library.at(i).id, -1);
+            const qint64 read = took.elapsed();
+            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &loader, &viewer] {
+                QElapsedTimer swapping;
+                swapping.start();
+                const int before = library.count();
+                grid->rememberAnchor();
+                loader.reload([&] { library.swap(*fresh); });
+                grid->libraryReloaded(moved);
+                viewer.libraryReloaded(moved);
+                std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
+                             library.count(), before, read, swapping.elapsed());
+                reloading = false;
+                if (std::exchange(reloadAgain, false))
+                    reloadLibrary();
+            }, Qt::QueuedConnection);
+        });
     };
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&reader] {
+        if (reader.joinable())
+            reader.join();
+    });
     // How iCloud is doing, as the service sees it: fine, needs_sign_in,
     // offline, failing, or no_service when there is no service to ask.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
