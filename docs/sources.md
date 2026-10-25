@@ -57,8 +57,16 @@ thumbnail pass reads `thumb` renditions the same way, so iCloud's are
 downloaded and a folder's are made from the photo.
 
 A source also says its name ("iCloud", or the folder's), whether it needs
-signing in, and what an error means for the connection: `needs_sign_in`,
-`offline` or `failing`, the health the window has always been told.
+signing in, how often to look for changes (a minute; a folder ten seconds),
+and what an error means for the connection: `needs_sign_in`, `offline` or
+`failing`, the health the window has always been told.
+
+A source's `id` ("icloud", or "folder:" and the path) is written into the
+library it fills, and the core never lets another source write there
+(`sync::claim`): a folder pointed at iCloud's library by mistake must not
+list 50,000 photos away. A library of another folder is emptied and made
+again; one from another source, or one that says nothing of where it came
+from (pinhole-fake's), is left alone.
 
 ## The index
 
@@ -162,7 +170,14 @@ made with ImageMagick, and a video's from a frame by ffmpeg.
 Following changes is a fresh look at the folder each round, compared with
 the index by path, size and modification time. A folder is not on a
 network, so this is quick (a stat of every file) and needs no change token
-beyond the time of the last look.
+beyond the time of the last look. A folder that is not there (a disk not
+mounted) is an error, `offline`, never an empty library.
+
+Making thumbnails is the slow part: a JPEG takes about 40 ms, but a 12 MP
+HEIC about a CPU-second to decode, in ImageMagick or vips alike. ~/Pictures
+(625 assets, mostly HEIC) took 41 s on 12 cores; a folder of 50,000 HEICs
+would take an hour or so in the background. Windows see the photos as their
+thumbnails arrive, every ten seconds.
 
 ## Choosing a source
 

@@ -50,13 +50,18 @@ ApplicationWindow {
             font.pixelSize: Math.round(theme.fontSize * 1.333)
             horizontalAlignment: Text.AlignHCenter
         }
+        // iCloud is signed in to and built in a terminal; a folder the
+        // service reads on its own.
         UiText {
             width: parent.width
-            text: qsTr("Sign in to iCloud and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.")
+            text: storage.sourceNeedsSignIn
+                  ? qsTr("Sign in to %1 and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.").arg(storage.sourceName)
+                  : qsTr("Pinhole is looking through %1. Photos show here as soon as they are found.").arg(storage.sourceName)
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
         }
         Chip {
+            visible: storage.sourceNeedsSignIn
             anchors.horizontalCenter: parent.horizontalCenter
             text: "pinhole-sync sign-in\npinhole-sync all"
             textColor: theme.accent
@@ -111,15 +116,18 @@ ApplicationWindow {
         text: outgoing.status
     }
 
-    // When iCloud cannot be reached: what still works, and what to do. The
-    // photos on this computer always show.
+    // When the source cannot be reached: what still works, and what to do.
+    // The photos on this computer always show.
     Chip {
         id: healthNotice
         readonly property string message: {
             switch (serviceHealth) {
-            case "needs_sign_in": return qsTr("Not signed in to iCloud. To sign in again, run pinhole-sync sign-in in a terminal.")
-            case "offline": return qsTr("Offline. Showing what is on this computer.")
-            case "failing": return qsTr("iCloud is not answering properly. Trying again every minute.")
+            case "needs_sign_in": return qsTr("Not signed in to %1. To sign in again, run pinhole-sync sign-in in a terminal.").arg(storage.sourceName)
+            // Out of reach: the network for a source that needs signing in,
+            // the disk for a folder.
+            case "offline": return storage.sourceNeedsSignIn ? qsTr("Offline. Showing what is on this computer.")
+                                                             : qsTr("%1 is not there. Is its disk connected?").arg(storage.sourceName)
+            case "failing": return qsTr("%1 is not answering properly. Trying again shortly.").arg(storage.sourceName)
             case "no_service": return qsTr("The Pinhole service is not running, so full-size photos and videos will not load.")
             default: return ""
             }

@@ -145,7 +145,11 @@ fn set_source(shared: &Arc<Shared>, params: &Value) -> Result<Value> {
         eprintln!("pinholed: photos from {} now", source.name());
         shared.broadcast(source_event(&*source));
         shared.broadcast(health_event(Health::Fine));
-        shared.storage.switch_library(crate::storage::library_for(&shared.storage.location(), &*source));
+        // There before windows are told to read it, if only empty.
+        let library = crate::storage::library_for(&shared.storage.location(), &*source);
+        std::fs::create_dir_all(&library)?;
+        crate::db::open(&library.join("library.sqlite"))?;
+        shared.storage.switch_library(library);
     }
     let _ = shared.sync_now.lock().unwrap().send(());
     if let Err(e) = source.start() {
@@ -658,11 +662,24 @@ fn sync_round(shared: &Shared) -> Result<()> {
     if !report.changes.visible() {
         return Ok(());
     }
-    if added > 0 {
-        crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|_, _| {})?;
-    }
     let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let announce = |added: usize, removed: usize| {
+        shared.broadcast(json!({"event": "library_changed", "version": version, "added": added, "removed": removed}));
+    };
+    if added > 0 {
+        // Many thumbnails to make (a new folder's, which take a while
+        // each): windows see the photos as they come, every ten seconds.
+        let last = Mutex::new(std::time::Instant::now());
+        let many = added > 500;
+        crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|_, _| {
+            let mut last = last.lock().unwrap();
+            if many && last.elapsed() > Duration::from_secs(10) {
+                *last = std::time::Instant::now();
+                announce(0, 0);
+            }
+        })?;
+    }
     eprintln!("pinholed: sync: library version {version}: {added} new, {removed} removed");
-    shared.broadcast(json!({"event": "library_changed", "version": version, "added": added, "removed": removed}));
+    announce(added, removed);
     Ok(())
 }

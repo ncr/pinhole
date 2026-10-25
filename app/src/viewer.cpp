@@ -354,8 +354,8 @@ void Viewer::request(int index, const QString &kind) {
                 return;
             }
             if (kind != QLatin1String("live"))
-                setMessage(code == QLatin1String("needs_sign_in") ? tr("Not signed in to iCloud")
-                                                                  : tr("Could not load from iCloud"));
+                setMessage(code == QLatin1String("needs_sign_in") ? tr("Not signed in to %1").arg(m_service->sourceName())
+                                                                  : tr("Could not load from %1").arg(m_service->sourceName()));
             return;
         }
         const QString path = result.value("path").toString();

@@ -1,10 +1,10 @@
 import QtQuick
 
-// Pinhole's settings, on the gear button or ",": the one folder it keeps
-// everything in (the library, and the photos fetched from iCloud), how much
-// room that takes and how much it may; the library always fits. As an
-// Omarchy panel: a scrim, a card with a hairline, keys beside what they
-// press.
+// Pinhole's settings, on the gear button or ",": where the photos come from
+// (iCloud, or a folder on this computer), the one folder it keeps everything
+// in (the library, and the photos fetched from the source), how much room
+// that takes and how much it may; the library always fits. As an Omarchy
+// panel: a scrim, a card with a hairline, keys beside what they press.
 Item {
     id: root
     anchors.fill: parent
@@ -79,6 +79,8 @@ Item {
     }
     Shortcut { enabled: root.shown && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
     Shortcut { enabled: root.shown && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
+    Shortcut { enabled: root.shown && storage.sourceKind !== "icloud"; sequence: "I"; context: Qt.ApplicationShortcut; onActivated: storage.useICloud() }
+    Shortcut { enabled: root.shown; sequence: "P"; context: Qt.ApplicationShortcut; onActivated: storage.chooseSourceFolder() }
 
     Rectangle {
         anchors.fill: parent
@@ -119,7 +121,7 @@ Item {
                     height: close.height
                     UiText {
                         y: centredIn(parent.height)
-                        text: qsTr("Storage")
+                        text: qsTr("Settings")
                         color: theme.accent
                     }
                     ShellButton {
@@ -129,6 +131,46 @@ Item {
                         text: "✕"
                         hint: "Esc"
                         onTapped: root.shown = false
+                    }
+                }
+
+                // Where the photos come from: iCloud, or a folder, each on a
+                // button of its own; the one in use is lit.
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    UiText {
+                        text: qsTr("Photos from")
+                        color: theme.darkForeground
+                    }
+                    Item {
+                        width: parent.width
+                        height: icloudButton.height
+                        UiText {
+                            width: parent.width - sourceButtons.width - theme.fontSize
+                            y: centredIn(parent.height)
+                            text: storage.sourceKind === "folder" ? storage.sourcePath : storage.sourceName
+                            color: theme.brightForeground
+                            elide: Text.ElideMiddle
+                        }
+                        Row {
+                            id: sourceButtons
+                            anchors.right: parent.right
+                            spacing: 6
+                            ShellButton {
+                                id: icloudButton
+                                active: storage.sourceKind === "icloud"
+                                text: "iCloud"
+                                hint: "I"
+                                onTapped: storage.useICloud()
+                            }
+                            ShellButton {
+                                active: storage.sourceKind === "folder"
+                                text: qsTr("Folder")
+                                hint: "P"
+                                onTapped: storage.chooseSourceFolder()
+                            }
+                        }
                     }
                 }
 
@@ -263,8 +305,8 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap
                         color: theme.red
-                        text: qsTr("This removes %1 of the photos viewed longest ago from this computer. They stay in iCloud and download again when you look at them.")
-                              .arg(storage.size(root.removing))
+                        text: qsTr("This removes %1 of the photos viewed longest ago from this computer. They stay in %2 and come back when you look at them.")
+                              .arg(storage.size(root.removing)).arg(storage.sourceName)
                     }
                     Row {
                         spacing: 6

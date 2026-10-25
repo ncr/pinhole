@@ -32,7 +32,7 @@ Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *pare
     : QObject(parent), m_library(library), m_service(service) {
     // A copy is promised at once; should the files then not come, say so.
     connect(this, &Outgoing::copyFailed, this, [this](int files, int) {
-        flash(files == 0 ? tr("Could not get the photos from iCloud")
+        flash(files == 0 ? tr("Could not get the photos from %1").arg(m_service->sourceName())
                          : tr("Copied %n, some could not be fetched", "", files));
     });
     // Staged files from earlier days have long been dropped wherever they
@@ -308,7 +308,7 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
     if (compatible && type == QLatin1String("public.heic")) {
         const QString out = uniqueName(folder, QFileInfo(name).completeBaseName() + ".jpg");
         // Converted once and kept in the cache beside the originals, named as
-        // the original is (by iCloud's checksum, so an edit converts anew);
+        // the original is (by its key, iCloud's checksum, so an edit converts anew);
         // pinholed's size limit covers it like the rest.
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible";
         const QString converted = dir + '/' + QFileInfo(source).completeBaseName() + ".jpg";

@@ -33,19 +33,73 @@ QStorageInfo diskOf(QString path) {
 
 } // namespace
 
+namespace {
+
+QJsonObject settings() {
+    QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/settings.json");
+    return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+}
+
+} // namespace
+
 QString Storage::folder() {
-    QFile settings(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/settings.json");
-    if (settings.open(QIODevice::ReadOnly)) {
-        if (const QString location = QJsonDocument::fromJson(settings.readAll()).object().value("location").toString();
-            !location.isEmpty())
-            return location;
-    }
+    if (const QString location = settings().value("location").toString(); !location.isEmpty())
+        return location;
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/pinhole";
+}
+
+QJsonObject Storage::configuredSource() {
+    const QJsonObject source = settings().value("source").toObject();
+    if (source.value("kind").toString() == QLatin1String("folder")) {
+        const QString path = source.value("path").toString();
+        return {{"kind", "folder"}, {"name", QFileInfo(path).fileName()}, {"path", path}, {"needs_sign_in", false}};
+    }
+    return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}};
+}
+
+QString Storage::library() {
+    const QString kind = configuredSource().value("kind").toString();
+    return folder() + (kind == QLatin1String("icloud") ? QStringLiteral("/library") : "/library-" + kind);
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {
     m_poll.setInterval(1000);
     connect(&m_poll, &QTimer::timeout, this, &Storage::refresh);
+    connect(m_service, &ServiceClient::announced, this, [this](const QString &name, const QJsonObject &) {
+        if (name == QLatin1String("source"))
+            emit sourceChanged();
+    });
+}
+
+QString Storage::sourceKind() const { return m_service->source().value("kind").toString(); }
+QString Storage::sourceName() const { return m_service->sourceName(); }
+QString Storage::sourcePath() const { return withTilde(m_service->source().value("path").toString()); }
+bool Storage::sourceNeedsSignIn() const { return m_service->source().value("needs_sign_in").toBool(); }
+
+void Storage::useICloud() {
+    setSource({{"kind", "icloud"}});
+}
+
+void Storage::chooseSourceFolder() {
+    auto *picker = new PortalFolderPicker(this);
+    connect(picker, &PortalFolderPicker::picked, this, [this, picker](const QString &folder) {
+        picker->deleteLater();
+        if (!folder.isEmpty())
+            setSource({{"kind", "folder"}, {"path", QDir::cleanPath(folder)}});
+    });
+    picker->pick(tr("Show photos from"));
+}
+
+void Storage::setSource(const QJsonObject &source) {
+    m_error.clear();
+    emit changed();
+    m_service->call(QStringLiteral("set_source"), source, [this](bool ok, const QJsonObject &, const QString &code) {
+        if (!ok) {
+            m_error = code == QLatin1String("bad_request") ? tr("Photos cannot be shown from there.")
+                                                           : tr("The Pinhole service is not answering.");
+            emit changed();
+        }
+    });
 }
 
 QString Storage::location() const { return withTilde(m_location); }

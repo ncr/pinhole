@@ -1,11 +1,18 @@
 # Pinhole
 
-A fast, on-demand iCloud Photos browser for Omarchy. Working name.
+A fast photo browser for Omarchy: iCloud Photos on demand, or a folder of
+photos on this computer. Working name.
 
 Pinhole keeps an index of the whole library on disk (metadata and small
 thumbnails) and fetches everything else from iCloud only when it is looked at,
 dragged or exported, the way Photos on a Mac does with "Optimize Mac Storage".
 It never changes the library.
+
+A folder works too: in the settings (the gear button, or `,`), Photos from →
+Folder. Pinhole indexes it and makes the thumbnails in the background, shows
+its photos and videos as they are (an iPhone's `IMG_1234.HEIC` with
+`IMG_1234.MOV` beside it is a Live Photo), and follows changes to it. How
+sources fit in is in [docs/sources.md](docs/sources.md).
 
 ## Install
 

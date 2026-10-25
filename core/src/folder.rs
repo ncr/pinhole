@@ -276,14 +276,22 @@ impl FolderSource {
                 let first = frame("1").context("running ffmpeg")?;
                 if first.stdout.is_empty() { frame("0").context("running ffmpeg")? } else { first }
             }
-            _ => Command::new("magick")
-                // Decoding a JPEG at a fraction of its size is much quicker.
-                .args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)])
-                .arg(format!("{}[0]", path.display()))
-                .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
-                .stdin(Stdio::null())
-                .output()
-                .context("running magick")?,
+            _ => {
+                let mut magick = Command::new("magick");
+                // Decoding a big JPEG at a fraction of its size is much
+                // quicker. Only a big one: the hint lets the decoder enlarge
+                // a small one too.
+                let big = image::image_dimensions(&path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
+                if big {
+                    magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
+                }
+                magick
+                    .arg(format!("{}[0]", path.display()))
+                    .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
+                    .stdin(Stdio::null())
+                    .output()
+                    .context("running magick")?
+            }
         };
         if output.stdout.is_empty() {
             return Err(anyhow!("could not make an image of {rel}: {}", String::from_utf8_lossy(&output.stderr).trim()));

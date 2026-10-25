@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QJsonObject>
 #include <QObject>
 #include <QTimer>
 #include <QVariantMap>
@@ -7,13 +8,20 @@
 class ServiceClient;
 class PortalFolderPicker;
 
-// Where Pinhole keeps everything (the library and the photos fetched from
-// iCloud, in one folder) and how much room it may take: the settings
-// panel's side of the service's storage and set_storage (docs/service.md),
-// with the free space on that disk.
+// Where the photos come from (iCloud, or a folder on this computer), where
+// Pinhole keeps everything (the library and the photos fetched from the
+// source, in one folder) and how much room it may take: the settings
+// panel's side of the service's source, storage, set_source and
+// set_storage (docs/service.md), with the free space on that disk.
 class Storage : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool loaded READ loaded NOTIFY changed)
+    // The source: "icloud" or "folder"; what to call it; a folder's path,
+    // with ~ for the home folder; whether it is one that needs signing in.
+    Q_PROPERTY(QString sourceKind READ sourceKind NOTIFY sourceChanged)
+    Q_PROPERTY(QString sourceName READ sourceName NOTIFY sourceChanged)
+    Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY sourceChanged)
+    Q_PROPERTY(bool sourceNeedsSignIn READ sourceNeedsSignIn NOTIFY sourceChanged)
     // The folder, with ~ for the home folder.
     Q_PROPERTY(QString location READ location NOTIFY changed)
     // The limit for all of it; the least it can be (the library always
@@ -46,8 +54,18 @@ public:
     // The folder Pinhole keeps everything in, as the service's settings say
     // (~/.config/pinhole/settings.json), else ~/.local/share/pinhole.
     static QString folder();
+    // The source the settings name, as the service describes one (kind,
+    // name, needs_sign_in, path); iCloud unless they name another.
+    static QJsonObject configuredSource();
+    // That source's library in the folder: iCloud's library/, another's
+    // library-<kind>/ (docs/sources.md).
+    static QString library();
 
     bool loaded() const { return m_loaded; }
+    QString sourceKind() const;
+    QString sourceName() const;
+    QString sourcePath() const;
+    bool sourceNeedsSignIn() const;
     QString location() const;
     double limit() const { return m_limit; }
     double minLimit() const { return m_minLimit; }
@@ -71,6 +89,9 @@ public:
     Q_INVOKABLE void setLimit(double bytes);
     // The desktop's folder picker, then everything moved to the folder chosen.
     Q_INVOKABLE void chooseLocation();
+    // Photos from iCloud; from a folder chosen in the desktop's picker.
+    Q_INVOKABLE void useICloud();
+    Q_INVOKABLE void chooseSourceFolder();
     // Stops the service; the window starts the new one at once.
     Q_INVOKABLE void restartService();
     // Bytes as people read them: "6.2 GB".
@@ -78,12 +99,14 @@ public:
 
 signals:
     void changed();
+    void sourceChanged();
     void watchingChanged();
 
 private:
     void take(const QJsonObject &report);
     void failed(const QString &code, const QString &message);
     void moveTo(const QString &folder);
+    void setSource(const QJsonObject &source);
 
     ServiceClient *m_service;
     QTimer m_poll;

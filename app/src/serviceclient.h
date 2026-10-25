@@ -31,8 +31,15 @@ public:
     // The library moved: a service this client starts from now on serves it there.
     void setLibrary(const QString &library) { m_library = library; }
 
+    // Where the photos come from, as the service last said (its "source"
+    // event: kind, name, needs_sign_in, path), else as the settings say.
+    QJsonObject source() const { return m_source; }
+    void setSource(const QJsonObject &source) { m_source = source; }
+    // "iCloud", or a folder's name: what to call it in messages.
+    QString sourceName() const { return m_source.value("name").toString(); }
+
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
-    // Ask the service to look for changes in iCloud now.
+    // Ask the service to look for changes in the source now.
     void sync();
 
 signals:
@@ -47,6 +54,7 @@ private:
     static QString socketPath();
 
     QString m_library;
+    QJsonObject m_source;
     QLocalSocket m_socket;
     QTimer m_retry;
     int m_attempts = 0;

@@ -124,6 +124,8 @@ void ServiceClient::readReplies() {
     while (m_socket.canReadLine()) {
         const QJsonObject reply = QJsonDocument::fromJson(m_socket.readLine()).object();
         if (reply.contains("event")) {
+            if (reply.value("event").toString() == QLatin1String("source"))
+                m_source = reply;
             emit announced(reply.value("event").toString(), reply);
             continue;
         }

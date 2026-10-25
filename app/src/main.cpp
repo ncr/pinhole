@@ -1,4 +1,5 @@
-// pinhole — a fast, on-demand iCloud Photos browser for Omarchy.
+// pinhole — a fast photo browser for Omarchy: iCloud Photos on demand, or a
+// folder of photos on this computer.
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -54,10 +55,10 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("1.0.0");
     app.setDesktopFileName("pinhole");
 
-    // Where pinhole-sync builds the library: in the folder Pinhole keeps
-    // everything in. The synthetic one for working on the grid
-    // (pinhole-fake) is opened with --library.
-    const QString defaultLibrary = Storage::folder() + "/library";
+    // Where the source's library is: in the folder Pinhole keeps everything
+    // in, iCloud's or a folder's as the settings say. The synthetic one for
+    // working on the grid (pinhole-fake) is opened with --library.
+    const QString defaultLibrary = Storage::library();
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -101,6 +102,8 @@ int main(int argc, char *argv[]) {
 
     // Larger renditions come from pinholed.
     ServiceClient service(library.dir());
+    // What to call the source until the service says.
+    service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
     Storage storage(&service);
@@ -115,7 +118,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("bench", nullptr);
-    // How iCloud is doing (set again as the service says): see below.
+    // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
@@ -160,7 +163,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(window, &QQuickWindow::frameSwapped, window, [&stats] { stats.frameSwapped(); },
                      Qt::DirectConnection);
 
-    // The service found changes in iCloud: read the library again, swap it in
+    // The service found changes in the source: read the library again, swap it in
     // with the decoders idle, and let everything that holds positions follow
     // its photos.
     // Reading the index and matching old positions to new takes ~100 ms at
@@ -217,7 +220,7 @@ int main(int argc, char *argv[]) {
         if (reader.joinable())
             reader.join();
     });
-    // How iCloud is doing, as the service sees it: fine, needs_sign_in,
+    // How the source is doing, as the service sees it: fine, needs_sign_in,
     // offline, failing, or no_service when there is no service to ask.
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed")) {

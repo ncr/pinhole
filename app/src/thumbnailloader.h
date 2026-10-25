@@ -22,7 +22,7 @@ inline quint64 thumbKey(int index, int level) { return (quint64(index) << 2) | q
 inline int keyIndex(quint64 key) { return int((key & ~(quint64(3) << 62)) >> 2); }
 inline int keyLevel(quint64 key) { return int(key & 3); }
 
-// The medium rendition (2048 px, from iCloud through pinholed) at a decode
+// The medium rendition (2048 px, from the source through pinholed) at a decode
 // level, for cells too big for the 480 px thumbnail. Marked by bit 62.
 inline quint64 mediumKey(int index, int level) { return (quint64(1) << 62) | thumbKey(index, level); }
 inline bool isMediumKey(quint64 key) { return (key >> 62) == 1; }
