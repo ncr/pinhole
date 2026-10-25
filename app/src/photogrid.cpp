@@ -5,6 +5,7 @@
 #include "thumbnailloader.h"
 #include "touchpadhold.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QInputDevice>
 #include <QNativeGestureEvent>
@@ -259,6 +260,53 @@ void PhotoGrid::setScroll(double y) {
     m_scroll = std::clamp(y, 0.0, maxScroll(m_columns));
     m_physics.jumpTo(m_scroll);
     updateAnimating();
+    update();
+    notifyScrolled();
+}
+
+void PhotoGrid::notifyScrolled() {
+    const qreal f = scrollFraction();
+    if (std::abs(f - m_lastFraction) > 1e-6) {
+        m_lastFraction = f;
+        emit scrolled();
+    }
+}
+
+qreal PhotoGrid::scrollFraction() const {
+    const double max = maxScroll(m_columns);
+    return max > 0 ? std::clamp(m_scroll / max, 0.0, 1.0) : 1.0;
+}
+
+void PhotoGrid::scrubTo(qreal fraction) { setScroll(std::clamp(fraction, 0.0, 1.0) * maxScroll(m_columns)); }
+
+qint64 PhotoGrid::dateAt(qreal fraction) const {
+    if (count() == 0)
+        return 0;
+    // The photo at the top of the view when scrolled there.
+    const double y = std::clamp(fraction, 0.0, 1.0) * maxScroll(m_columns);
+    const int index = std::clamp(int(y / stride()) * m_columns, 0, count() - 1);
+    return m_library->at(index).date;
+}
+
+QVariantList PhotoGrid::yearMarks() const {
+    QVariantList marks;
+    const double max = maxScroll(m_columns);
+    if (count() == 0 || max <= 0)
+        return marks;
+    int year = -1;
+    for (int i = 0; i < count(); ++i) {
+        const int y = QDateTime::fromMSecsSinceEpoch(m_library->at(i).date).date().year();
+        if (y != year) {
+            year = y;
+            const double top = (i / m_columns) * stride();
+            marks.append(QVariantMap{{"year", y}, {"fraction", std::clamp(top / max, 0.0, 1.0)}});
+        }
+    }
+    return marks;
+}
+
+void PhotoGrid::setScrubbing(bool scrubbing) {
+    m_scrubbing = scrubbing;
     update();
 }
 
@@ -549,6 +597,7 @@ void PhotoGrid::advance(qreal dt) {
     }
     updateAnimating();
     update();
+    notifyScrolled();
 }
 
 void PhotoGrid::updateAnimating() {
@@ -634,6 +683,7 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
     m_scroll = m_physics.position();
     updateAnimating();
     update();
+    notifyScrolled();
     event->accept();
 }
 
@@ -733,8 +783,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const double rows = (m_scroll - rs.lastScroll) / s;
         // A jump (scrubber, Home, End) is not motion: nothing is moving once
         // it lands, so it should not be decoded as if it were.
+        // (A scrubber drag is a run of jumps, and it is motion.)
         const bool jumped = std::abs(rows) > rowsOnScreen && m_driveVelocity == 0 && !m_physics.animating() &&
-                            !m_physics.tracking();
+                            !m_physics.tracking() && !m_scrubbing;
         m_speedRows = jumped ? 0 : m_speedRows * 0.7 + rows / dt * 0.3;
     }
     rs.lastFrameAt = now;
@@ -742,7 +793,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     const double speed = std::abs(m_speedRows);
     // Faster than about three screens a second nobody sees detail, and the
     // decoders could not keep up anyway: coarse previews only.
-    const bool scrubbing = speed > rowsOnScreen * 3;
+    const bool scrubbing = m_scrubbing || speed > rowsOnScreen * 3;
     const bool fast = speed > rowsOnScreen * 0.75;
     // How far ahead to fetch, in rows: a screen and a half, or half a
     // second of travel when that is more. A mosaic page takes about 0.1 s

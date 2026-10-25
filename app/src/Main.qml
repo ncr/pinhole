@@ -31,6 +31,11 @@ ApplicationWindow {
         }
     }
 
+    DateScrubber {
+        grid: grid
+        visible: win.inGrid
+    }
+
     PhotoViewer {
         id: photoViewer
         anchors.fill: parent

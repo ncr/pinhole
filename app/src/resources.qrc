@@ -2,5 +2,6 @@
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
         <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
+        <file alias="DateScrubber.qml">DateScrubber.qml</file>
     </qresource>
 </RCC>

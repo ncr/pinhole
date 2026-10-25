@@ -40,6 +40,8 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)
     Q_PROPERTY(bool statsVisible READ statsVisible WRITE setStatsVisible NOTIFY statsVisibleChanged)
     Q_PROPERTY(QString statsText READ statsText NOTIFY statsTextChanged)
+    // How far down the library the view is, 0 at the oldest, 1 at the newest.
+    Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -73,6 +75,15 @@ public:
     // into view if it is not.
     Q_INVOKABLE QRectF rectOf(int index) const;
     Q_INVOKABLE void reveal(int index);
+
+    // The date scrubber: jump anywhere, the capture date (ms) at a position,
+    // where each year begins, and whether a drag is under way (the grid then
+    // draws from mosaic pages, as when scrolling very fast).
+    qreal scrollFraction() const;
+    Q_INVOKABLE void scrubTo(qreal fraction);
+    Q_INVOKABLE qint64 dateAt(qreal fraction) const;
+    Q_INVOKABLE QVariantList yearMarks() const;
+    Q_INVOKABLE void setScrubbing(bool scrubbing);
 
     // For the benchmark.
     void setDriveVelocity(double pixelsPerSecond);
@@ -113,6 +124,7 @@ public:
 signals:
     // Double-click on a photo: open it.
     void activated(int index, QRectF rect);
+    void scrolled();
     void libraryChanged();
     void columnsChanged();
     void animatingChanged();
@@ -170,6 +182,9 @@ private:
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
     QPointF m_hover{-1, -1};
+    bool m_scrubbing = false;
+    qreal m_lastFraction = -1;
+    void notifyScrolled();
     // When the current coast began; a touch from before it is old news.
     double m_coastFrom = 0;
 

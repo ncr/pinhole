@@ -4,6 +4,7 @@
 #include "photogrid.h"
 #include "thumbnailloader.h"
 
+#include <QDateTime>
 #include <QRandomGenerator>
 
 #include <algorithm>
@@ -45,6 +46,20 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
              g->setDriveVelocity(-g->scrollRange() / 5.0);
          },
          {}},
+        {"drag the date scrubber, newest to oldest", 4.5,
+         [g, stopped] {
+             stopped();
+             g->setScrubbing(true);
+             const QVariantList marks = g->yearMarks();
+             std::printf("%-40s %lld year marks; at 0.25 the scrubber says %s, at 0.75 %s\n", "", qlonglong(marks.size()),
+                         qPrintable(QDateTime::fromMSecsSinceEpoch(g->dateAt(0.25)).toString("MMMM yyyy")),
+                         qPrintable(QDateTime::fromMSecsSinceEpoch(g->dateAt(0.75)).toString("MMMM yyyy")));
+         },
+         [g](double, double t) {
+             g->scrubTo(1 - std::min(1.0, t / 4.0));
+             if (t >= 4.4)
+                 g->setScrubbing(false);
+         }},
         {"random jumps", 8.0, [stopped] { stopped(); },
          [g, this](double before, double t) {
              if (m_jumpAt >= 0 && g->unresolvedVisible() == 0 && t - m_jumpAt > 1.0 / 60) {
