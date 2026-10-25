@@ -12,7 +12,7 @@ pub mod records;
 pub mod session;
 pub mod walk;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -49,6 +49,10 @@ pub struct IcloudSource {
     /// The links client's session, for downloads on any thread, without a
     /// deadline for the whole download: a long video takes minutes.
     downloader: Mutex<Option<Downloader>>,
+    /// Links that answered as expired, sooner than links usually do: never
+    /// handed out again, however fresh the index says they are, so a retry
+    /// looks the asset up.
+    expired: Mutex<HashSet<String>>,
 }
 
 impl IcloudSource {
@@ -61,6 +65,7 @@ impl IcloudSource {
             catalog: Mutex::new(None),
             links: Mutex::new(None),
             downloader: Mutex::new(None),
+            expired: Mutex::new(HashSet::new()),
         }
     }
 
@@ -193,6 +198,7 @@ impl Source for IcloudSource {
     fn prepare(&self, index: &Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
         // A link in the index younger than 20 minutes is used as is.
         let now = now_secs();
+        let expired = self.expired.lock().unwrap().clone();
         let mut tickets: Vec<Option<Result<Ticket, FetchError>>> = Vec::with_capacity(wanted.len());
         let mut stale: Vec<(String, String)> = Vec::new();
         for w in wanted {
@@ -206,7 +212,9 @@ impl Source for IcloudSource {
                 )
                 .optional()?;
             match row {
-                Some((_, Some(url), Some(at))) if now - at < URL_FRESH_SECS => tickets.push(Some(Ok(Ticket(url)))),
+                Some((_, Some(url), Some(at))) if now - at < URL_FRESH_SECS && !expired.contains(&url) => {
+                    tickets.push(Some(Ok(Ticket(url))))
+                }
                 Some((master, _, _)) => {
                     if !stale.iter().any(|(a, _)| *a == w.asset) {
                         stale.push((w.asset.clone(), master));
@@ -266,6 +274,11 @@ impl Source for IcloudSource {
         let response = downloader.fetch(&ticket.0, range_header.as_deref(), false)?;
         let status = response.status();
         if matches!(status.as_u16(), 401 | 403 | 404 | 410) {
+            let mut expired = self.expired.lock().unwrap();
+            if expired.len() > 10_000 {
+                expired.clear();
+            }
+            expired.insert(ticket.0.clone());
             return Err(FetchError::Expired);
         }
         if !status.is_success() || (range.is_some() && status.as_u16() != 206) {
