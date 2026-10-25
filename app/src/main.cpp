@@ -31,15 +31,60 @@
 #include "touchpadhold.h"
 
 #include <cstdio>
+#include <dlfcn.h>
 #include <functional>
 #include <memory>
 #include <thread>
 
+namespace {
+
+// A Vulkan driver that offers at least one GPU, asked of the Vulkan loader
+// itself. Its few calls are declared here by hand: Vulkan's headers are a
+// build dependency Pinhole does not otherwise need.
+bool vulkanUsable() {
+    void *vulkan = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!vulkan)
+        return false;
+    using Proc = void (*)();
+    struct InstanceInfo { // VkInstanceCreateInfo, asking for nothing
+        int type = 1;     // VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+        const void *next = nullptr;
+        unsigned flags = 0;
+        const void *application = nullptr;
+        unsigned layers = 0;
+        const char *const *layerNames = nullptr;
+        unsigned extensions = 0;
+        const char *const *extensionNames = nullptr;
+    } info;
+    using Create = int (*)(const InstanceInfo *, const void *, void **);
+    using Enumerate = int (*)(void *, unsigned *, void *);
+    using Destroy = void (*)(void *, const void *);
+    bool usable = false;
+    const auto proc = reinterpret_cast<Proc (*)(void *, const char *)>(dlsym(vulkan, "vkGetInstanceProcAddr"));
+    if (const auto create = proc ? reinterpret_cast<Create>(proc(nullptr, "vkCreateInstance")) : nullptr) {
+        void *instance = nullptr;
+        if (create(&info, nullptr, &instance) == 0) { // VK_SUCCESS
+            unsigned devices = 0;
+            const auto enumerate = reinterpret_cast<Enumerate>(proc(instance, "vkEnumeratePhysicalDevices"));
+            usable = enumerate && enumerate(instance, &devices, nullptr) == 0 && devices > 0;
+            if (const auto destroy = reinterpret_cast<Destroy>(proc(instance, "vkDestroyInstance")))
+                destroy(instance, nullptr);
+        }
+    }
+    dlclose(vulkan);
+    return usable;
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
     // On Asahi, Vulkan stalls far less than OpenGL when many small textures
     // are uploaded per frame: zoomed-out fast scrolling went from 96 to
-    // 119 fps and the worst frame from 385 to 66 ms.
-    if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND"))
+    // 119 fps and the worst frame from 385 to 66 ms. So Vulkan when there is
+    // a GPU to run it on; without one (an old GPU, a virtual machine, a
+    // driver missing), Qt's own choice, rather than a window that never
+    // draws. QSG_RHI_BACKEND still picks one by hand.
+    if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND") && vulkanUsable())
         qputenv("QSG_RHI_BACKEND", "vulkan");
     // Thumbnails share atlas pages; at the default size (half the screen,
     // rounded) a page holds only a dozen of them and a full screen would
