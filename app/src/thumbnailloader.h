@@ -8,6 +8,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -17,8 +18,13 @@ class Library;
 // 1/4 and 1/8, which libjpeg-turbo produces while decoding at a fraction of
 // the cost.
 inline quint64 thumbKey(int index, int level) { return (quint64(index) << 2) | quint64(level); }
-inline int keyIndex(quint64 key) { return int((key & ~(quint64(1) << 63)) >> 2); }
+inline int keyIndex(quint64 key) { return int((key & ~(quint64(3) << 62)) >> 2); }
 inline int keyLevel(quint64 key) { return int(key & 3); }
+
+// The medium rendition (2048 px, from iCloud through pinholed) at a decode
+// level, for cells too big for the 480 px thumbnail. Marked by bit 62.
+inline quint64 mediumKey(int index, int level) { return (quint64(1) << 62) | thumbKey(index, level); }
+inline bool isMediumKey(quint64 key) { return (key >> 62) == 1; }
 
 // A mosaic page: 256 consecutive photos as 64 px squares, 16 by 16, in one
 // 1024 px image. When cells are this small, one page replaces 256 decodes
@@ -50,6 +56,13 @@ public:
     // Everything decoded since the last call, up to `max`. Any thread.
     std::vector<DecodedThumb> takeReady(size_t max);
 
+    // Where a photo's medium rendition is on disk, once pinholed has it, or
+    // that it has none. Main thread.
+    void setMediumPath(int index, const QByteArray &path);
+    void setMediumUnavailable(int index);
+    // Forget about a photo's medium rendition, so it is asked for again.
+    void clearMedium(int index);
+
     int threads() const { return int(m_threads.size()); }
     quint64 decodedCount() const { return m_decoded.load(); }
     quint64 decodeNanos() const { return m_decodeNanos.load(); }
@@ -58,6 +71,9 @@ public:
 signals:
     // Emitted from a worker thread, at most once until takeReady().
     void ready();
+    // Medium renditions wanted whose files are not known yet: ask pinholed.
+    // Emitted from the render thread.
+    void mediumNeeded(const QList<int> &indexes);
 
 private:
     void run();
@@ -72,6 +88,9 @@ private:
     // every frame.
     std::unordered_set<quint64> m_failed;
     std::vector<DecodedThumb> m_ready;
+    std::unordered_map<int, QByteArray> m_mediumPaths;
+    std::unordered_set<int> m_mediumAsked;
+    std::unordered_set<int> m_mediumMissing;
     bool m_stop = false;
     std::vector<std::thread> m_threads;
     std::atomic<bool> m_signalPending{false};

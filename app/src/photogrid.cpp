@@ -89,6 +89,10 @@ struct GridRenderState {
     struct Entry {
         QSGTexture *texture[4] = {};
         QSize size[4];
+        // The medium rendition, for cells bigger than the thumbnail.
+        QSGTexture *medium = nullptr;
+        QSize mediumSize;
+        int mediumLevel = 4;
         quint64 lastUsed = 0;
     };
     std::unordered_map<int, Entry> cache;
@@ -115,9 +119,11 @@ struct GridRenderState {
     qint64 lastFrameAt = 0;
 
     void dropAll() {
-        for (auto &[index, entry] : cache)
+        for (auto &[index, entry] : cache) {
             for (QSGTexture *t : entry.texture)
                 delete t;
+            delete entry.medium;
+        }
         cache.clear();
         for (auto &[index, page] : pages)
             delete page.texture;
@@ -761,6 +767,24 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             if (!kept(index))
                 continue;
             auto &entry = rs.cache[index];
+            if (isMediumKey(d.key)) {
+                if (entry.medium) {
+                    rs.bytes -= qint64(entry.mediumSize.width()) * entry.mediumSize.height() * 4;
+                    delete entry.medium;
+                    rs.textures -= 1;
+                }
+                entry.medium = window()->createTextureFromImage(d.image, QQuickWindow::TextureCanUseAtlas);
+                entry.medium->setFiltering(QSGTexture::Linear);
+                entry.mediumSize = d.image.size();
+                entry.mediumLevel = keyLevel(d.key);
+                entry.lastUsed = rs.frame;
+                const qint64 bytes = qint64(d.image.width()) * d.image.height() * 4;
+                rs.bytes += bytes;
+                rs.textures += 1;
+                uploads += 1;
+                uploadBytes += bytes;
+                continue;
+            }
             const int level = keyLevel(d.key);
             if (entry.texture[level]) {
                 rs.bytes -= qint64(entry.size[level].width()) * entry.size[level].height() * 4;
@@ -798,6 +822,11 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     };
     std::vector<Built> built(drawn.size());
     std::vector<quint64> wanted;
+    // Medium renditions come after every thumbnail: they sharpen what is
+    // already there.
+    std::vector<quint64> wantedMedium;
+    const bool settled = !m_zoom.active && !fast && !scrubbing;
+    int mediumNeeded = 0, mediumShown = 0;
     int unresolved = 0;
     for (size_t k = 0; k < drawn.size(); ++k) {
         const Layer &l = drawn[k];
@@ -863,6 +892,37 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 QSGTexture *texture = nullptr;
                 int have = -1;
                 auto found = rs.cache.find(i);
+
+                // Bigger than the thumbnail can fill without blur: the
+                // medium rendition (2048 px on the long side, same shape),
+                // at the smallest decode level that still covers the cell.
+                const int shortEdge = std::max(1, int(std::min(item.thumbW, item.thumbH)));
+                const double need = cellDevicePx * 0.85;
+                if (need > shortEdge * 1.35) {
+                    if (k == 0)
+                        mediumNeeded += 1;
+                    const int longEdge = std::max(1, int(std::max(item.thumbW, item.thumbH)));
+                    const int mediumShort = 2048 * shortEdge / longEdge;
+                    int level = 0;
+                    while (level < 3 && (mediumShort >> (level + 1)) >= need)
+                        level += 1;
+                    QSGTexture *medium = found != rs.cache.end() ? found->second.medium : nullptr;
+                    if (settled && k == 0 && (!medium || found->second.mediumLevel > level))
+                        wantedMedium.push_back(mediumKey(i, level));
+                    if (medium) {
+                        if (k == 0)
+                            mediumShown += 1;
+                        found->second.lastUsed = rs.frame;
+                        const QRectF crop = squareCrop(int(item.thumbW), int(item.thumbH));
+                        const QRectF sub = medium->normalizedTextureSubRect();
+                        auto &group = built[k].byTexture[medium->comparisonKey()];
+                        group.first = medium;
+                        group.second.push_back({rect, QRectF(sub.x() + crop.x() * sub.width(),
+                                                             sub.y() + crop.y() * sub.height(),
+                                                             crop.width() * sub.width(), crop.height() * sub.height())});
+                        continue;
+                    }
+                }
                 if (found != rs.cache.end()) {
                     auto &entry = found->second;
                     // The wanted level, else anything sharper, else anything.
@@ -950,6 +1010,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             prefetchRows(r.lastRow + 1, r.lastRow + rowsBehind);
         }
     }
+    wanted.insert(wanted.end(), wantedMedium.begin(), wantedMedium.end());
     m_loader->setWanted(wanted);
 
     // Does the base layer cover the window, across and (when the library
@@ -1090,6 +1151,11 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                     rs.textures -= 1;
                 }
             }
+            if (entry.medium) {
+                rs.bytes -= qint64(entry.mediumSize.width()) * entry.mediumSize.height() * 4;
+                delete entry.medium;
+                rs.textures -= 1;
+            }
             rs.cache.erase(index);
         }
     }
@@ -1112,6 +1178,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     }
 
     m_unresolved = unresolved;
+    m_mediumNeeded = mediumNeeded;
+    m_mediumShown = mediumShown;
     m_textureCount = rs.textures;
     m_textureBytes = rs.bytes;
     if (m_stats) {

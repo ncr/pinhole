@@ -80,6 +80,9 @@ public:
     double stride() const;
     double scrollRange() const { return maxScroll(m_columns); }
     int unresolvedVisible() const { return m_unresolved.load(); }
+    // Cells on screen that want a sharper rendition than the thumbnail, and
+    // how many of those already show it.
+    std::pair<int, int> mediumOnScreen() const { return {m_mediumNeeded.load(), m_mediumShown.load()}; }
     // The largest vertical move of the pinned photo between two frames
     // since the last call, in pixels: how a zoom is checked for jumps.
     double takePinJump() {
@@ -202,6 +205,8 @@ private:
     int m_uncoveredFrames = 0;
     double m_uncoveredMax = 0;
     std::atomic<int> m_unresolved{0};
+    std::atomic<int> m_mediumNeeded{0};
+    std::atomic<int> m_mediumShown{0};
     std::atomic<int> m_textureCount{0};
     std::atomic<qint64> m_textureBytes{0};
 

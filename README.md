@@ -19,6 +19,7 @@ auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from iclo
 core/                     the Rust core: session, CloudKit client, index
 core/src/bin/probe.rs     pinhole-probe, which measures the API
 core/src/bin/sync.rs      pinhole-sync, which builds the local library
+core/src/bin/daemon.rs    pinholed, the background service: larger renditions on demand
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 app/                      the window: Qt Quick, with the grid in C++
 ```
@@ -35,6 +36,12 @@ app/build/pinhole --bench    # scripted run, prints frame timing per phase
 ```
 
 `pinhole-sync` only fetches what is missing, so running it again is quick.
+
+When cells grow past what the 480 px thumbnails can fill, the window asks
+`pinholed` for the 2048 px rendition. The window starts the service if it is
+not running; it keeps a size-capped cache in `~/.cache/pinhole` and logs to
+`~/.local/state/pinhole/pinholed.log`. Its protocol is in
+[docs/service.md](docs/service.md).
 Without a real library the window opens the synthetic one:
 
 ```bash

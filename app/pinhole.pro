@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 sql
+QT += core gui qml quick quickcontrols2 sql network
 
 CONFIG += c++20 release
 TARGET = pinhole
@@ -22,6 +22,7 @@ HEADERS += \
     src/photogrid.h \
     src/scrollphysics.h \
     src/touchpadhold.h \
+    src/serviceclient.h \
     src/framestats.h \
     src/bench.h
 
@@ -32,6 +33,7 @@ SOURCES += \
     src/photogrid.cpp \
     src/scrollphysics.cpp \
     src/touchpadhold.cpp \
+    src/serviceclient.cpp \
     src/framestats.cpp \
     src/bench.cpp
 

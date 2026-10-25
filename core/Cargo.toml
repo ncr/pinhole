@@ -23,6 +23,10 @@ name = "pinhole-probe"
 path = "src/bin/probe.rs"
 
 [[bin]]
+name = "pinholed"
+path = "src/bin/daemon.rs"
+
+[[bin]]
 name = "pinhole-sync"
 path = "src/bin/sync.rs"
 

@@ -94,6 +94,13 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
              }
              g->setEffectiveStride(strideAt(columns), at);
          }},
+        {"idle at 2 columns (sharp photos load)", 8.0,
+         [g, stopped] {
+             stopped();
+             g->setColumnsNow(2);
+             g->jumpToFraction(0.97);
+         },
+         {}},
         {"idle at 40 columns (fully out)", 3.0,
          [g, stopped] {
              stopped();
@@ -177,6 +184,10 @@ void Bench::endPhase() {
         std::printf("%-40s slow frame %.1f ms: wait %.1f, sync %.2f (uploads %d in %.2f, evicted %d in %.2f), "
                     "render %.2f, swap %.1f; batches %d\n",
                     "", w.interval, w.wait, w.sync, w.uploads, w.upload, w.evicted, w.evict, w.render, w.swap, w.batches);
+    if (p.name.contains("sharp")) {
+        const auto [needed, shown] = m_grid->mediumOnScreen();
+        std::printf("%-40s %d of %d cells on screen show the medium rendition\n", "", shown, needed);
+    }
     if (p.name.contains("pinch") || p.name.contains("zoom steps")) {
         const auto [frames, band] = m_grid->takeUncovered();
         std::printf("%-40s pinned photo moved up or down at most %.1f px in one frame; %d frames with an empty edge (widest %.0f px)\n",

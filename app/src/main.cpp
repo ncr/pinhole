@@ -3,6 +3,9 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QJsonObject>
+#include <QTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -15,6 +18,7 @@
 #include "framestats.h"
 #include "library.h"
 #include "photogrid.h"
+#include "serviceclient.h"
 #include "thumbnailloader.h"
 #include "touchpadhold.h"
 
@@ -82,6 +86,26 @@ int main(int argc, char *argv[]) {
     auto *grid = window->findChild<PhotoGrid *>("grid");
     grid->setSources(&library, &loader, &stats);
     grid->setTouchpadHold(&hold);
+
+    // Larger renditions come from pinholed. Medium requests arrive from the
+    // render thread; the connection queues them onto this one.
+    ServiceClient service;
+    QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service, [&](const QList<int> &indexes) {
+        for (int index : indexes) {
+            service.fetch(library.at(index).id, QStringLiteral("medium"),
+                          [&loader, grid, index](bool ok, const QJsonObject &result, const QString &code) {
+                              if (ok) {
+                                  loader.setMediumPath(index, QFile::encodeName(result.value("path").toString()));
+                                  grid->update();
+                                  return;
+                              }
+                              loader.setMediumUnavailable(index);
+                              // Missing for good, or only for now: try again later.
+                              if (code != QLatin1String("not_found"))
+                                  QTimer::singleShot(30000, &loader, [&loader, index] { loader.clearMedium(index); });
+                          });
+        }
+    });
     QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
                      Qt::DirectConnection);
     QObject::connect(window, &QQuickWindow::beforeRendering, window, [&stats] { stats.renderBegan(); },

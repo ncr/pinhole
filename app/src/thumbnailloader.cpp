@@ -100,15 +100,46 @@ ThumbnailLoader::~ThumbnailLoader() {
 }
 
 void ThumbnailLoader::setWanted(const std::vector<quint64> &keys) {
+    QList<int> ask;
     {
         std::lock_guard lock(m_mutex);
         m_queue.clear();
         for (quint64 key : keys) {
+            if (isMediumKey(key)) {
+                // A medium rendition decodes once its file is here; until
+                // then pinholed is asked for it, once.
+                const int index = keyIndex(key);
+                if (m_mediumMissing.contains(index))
+                    continue;
+                if (!m_mediumPaths.contains(index)) {
+                    if (m_mediumAsked.insert(index).second)
+                        ask.append(index);
+                    continue;
+                }
+            }
             if (!m_inFlight.contains(key) && !m_readyKeys.contains(key) && !m_failed.contains(key))
                 m_queue.push_back(key);
         }
     }
     m_wake.notify_all();
+    if (!ask.isEmpty())
+        emit mediumNeeded(ask);
+}
+
+void ThumbnailLoader::setMediumPath(int index, const QByteArray &path) {
+    std::lock_guard lock(m_mutex);
+    m_mediumPaths[index] = path;
+}
+
+void ThumbnailLoader::setMediumUnavailable(int index) {
+    std::lock_guard lock(m_mutex);
+    m_mediumMissing.insert(index);
+}
+
+void ThumbnailLoader::clearMedium(int index) {
+    std::lock_guard lock(m_mutex);
+    m_mediumMissing.erase(index);
+    m_mediumAsked.erase(index);
 }
 
 std::vector<DecodedThumb> ThumbnailLoader::takeReady(size_t max) {
@@ -152,6 +183,13 @@ void ThumbnailLoader::run() {
         QImage image;
         if (isPageKey(key)) {
             image = buildPage(tj, *m_library, keyPage(key), buffer);
+        } else if (isMediumKey(key)) {
+            QByteArray path;
+            {
+                std::lock_guard lock(m_mutex);
+                path = m_mediumPaths[keyIndex(key)];
+            }
+            image = decodeJpeg(tj, path, keyLevel(key), buffer);
         } else if (const int index = keyIndex(key); index >= 0 && index < m_library->count()) {
             image = decodeJpeg(tj, m_library->at(index).thumbPath, keyLevel(key), buffer);
         }

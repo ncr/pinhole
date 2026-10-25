@@ -7,6 +7,7 @@
 // One asset as the grid sees it. Kept small: the whole library sits in
 // memory, oldest first, and the grid addresses it by position.
 struct LibraryItem {
+    QByteArray id;        // the asset record name, as pinholed knows it
     QByteArray thumbPath; // absolute, ready for fopen
     quint32 avgColor = 0x303030;
     quint16 thumbW = 0;
