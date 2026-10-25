@@ -155,8 +155,9 @@ void Storage::restartService() {
 }
 
 QString Storage::size(double bytes) const {
-    // A decimal under 10 GB, unless the size is whole (the limits are).
+    // A decimal from 1 GB to 10 GB, unless the size is whole (the limits
+    // are); none in MB, where it is noise.
     const double gb = bytes / double(1 << 30);
-    const int decimals = gb < 10 && gb != std::floor(gb) ? 1 : 0;
+    const int decimals = gb >= 1 && gb < 10 && gb != std::floor(gb) ? 1 : 0;
     return QLocale().formattedDataSize(qint64(bytes), decimals, QLocale::DataSizeTraditionalFormat);
 }

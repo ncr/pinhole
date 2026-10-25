@@ -288,9 +288,10 @@ int main(int argc, char *argv[]) {
             (*next)();
         });
     }
-    // PINHOLE_SELFTEST=settings:<dir>: the settings panel as it opens, with a
-    // limit below what is kept stepped to, and once that is confirmed, as
-    // images in <dir>. Meant for a service on a scratch cache.
+    // PINHOLE_SELFTEST=settings:<dir>: the settings panel as it opens, as an
+    // image in <dir>. With PINHOLE_SELFTEST_LOWER=1 also with the limit
+    // stepped two down, and once that is confirmed: it removes photos, so
+    // only for a service on a scratch cache.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("settings:"))) {
         QTimer::singleShot(1200, window, [window, test] {
             QObject *panel = window->findChild<QObject *>(QStringLiteral("settings"));
@@ -298,6 +299,10 @@ int main(int argc, char *argv[]) {
             panel->setProperty("shown", true);
             QTimer::singleShot(1000, window, [=] {
                 window->grabWindow().save(dir + "/1-open.png");
+                if (qEnvironmentVariable("PINHOLE_SELFTEST_LOWER") != QLatin1String("1")) {
+                    QCoreApplication::quit();
+                    return;
+                }
                 QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));
                 QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));
                 QTimer::singleShot(800, window, [=] {

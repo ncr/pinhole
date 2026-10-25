@@ -204,7 +204,8 @@ Item {
                             for (const kind of ["full", "medium", "video", "original", "live"]) {
                                 const bytes = storage.kinds[kind] || 0
                                 if (bytes > 0)
-                                    parts.push(root.kindNames[kind] + " " + storage.size(bytes))
+                                    // Kept on one line each.
+                                    parts.push((root.kindNames[kind] + " " + storage.size(bytes)).replace(/ /g, "\u00a0"))
                             }
                             return parts.join(" · ")
                         }
