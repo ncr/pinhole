@@ -1,5 +1,8 @@
 #pragma once
 
+#include "viewermotion.h"
+
+#include <QHash>
 #include <QObject>
 #include <QRectF>
 #include <QUrl>
@@ -27,6 +30,18 @@ class Viewer : public QObject {
     Q_PROPERTY(bool favorite READ isFavorite NOTIFY indexChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
+    // How the photos lie (viewermotion.h): the row's offset, the shown
+    // photo's zoom and pan, and whether any of it is moving.
+    Q_PROPERTY(qreal offset READ offset NOTIFY motionChanged)
+    Q_PROPERTY(qreal zoom READ zoom NOTIFY motionChanged)
+    Q_PROPERTY(qreal panX READ panX NOTIFY motionChanged)
+    Q_PROPERTY(qreal panY READ panY NOTIFY motionChanged)
+    Q_PROPERTY(qreal pageWidth READ pageWidth NOTIFY motionChanged)
+    Q_PROPERTY(bool animating READ animating NOTIFY motionChanged)
+    Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
+    Q_PROPERTY(int count READ count NOTIFY indexChanged)
+    // Bumped when a sharper image of some photo arrives (imageFor()).
+    Q_PROPERTY(int revision READ revision NOTIFY imagesChanged)
 
 public:
     Viewer(const Library *library, ServiceClient *service, QObject *parent = nullptr);
@@ -45,11 +60,36 @@ public:
     bool isFavorite() const;
     QString title() const;
     QString message() const { return m_message; }
+    qreal offset() const { return m_motion.offset(); }
+    qreal zoom() const { return m_motion.zoom(); }
+    qreal panX() const { return m_motion.panX(); }
+    qreal panY() const { return m_motion.panY(); }
+    qreal pageWidth() const { return m_motion.pageWidth(); }
+    bool animating() const { return m_motion.animating(); }
+    bool zoomed() const { return m_motion.zoomed(); }
+    int count() const;
+    int revision() const { return m_revision; }
+
+    // The best image of any photo at hand now: its medium rendition once
+    // fetched, else its thumbnail. For the photos beside the shown one.
+    Q_INVOKABLE QUrl imageFor(int index) const;
+    Q_INVOKABLE QUrl thumbnailAt(int index) const;
+    Q_INVOKABLE qreal aspectAt(int index) const;
+    // The area photos are fitted to: the window above the carousel.
+    Q_INVOKABLE void setViewport(qreal width, qreal height);
+    Q_INVOKABLE void advance(qreal seconds);
+    // Zoom about a point of the viewport, or its centre by steps (keys).
+    Q_INVOKABLE void zoomBy(qreal factor, qreal x, qreal y);
+    Q_INVOKABLE void zoomStep(int steps);
+    Q_INVOKABLE void resetZoom();
+    Q_INVOKABLE void panBy(qreal dx, qreal dy);
 
     // `from` is the photo's cell in the grid, where the opening grows from.
     Q_INVOKABLE void openAt(int index, QRectF from);
     Q_INVOKABLE void close();
     Q_INVOKABLE void step(int delta);
+    // Straight to a photo, no slide (scrubbing the carousel).
+    Q_INVOKABLE void jumpTo(int index);
     Q_INVOKABLE void playLive();
     // After the library was read again: follow the open photo to its new
     // position, or close if it is gone.
@@ -62,6 +102,10 @@ signals:
     void videoChanged();
     void liveChanged();
     void messageChanged();
+    void motionChanged();
+    void imagesChanged();
+    // Pinched closed: the window should animate the viewer away.
+    void closeRequested();
 
 protected:
     // Installed on the window: while the viewer is open, the wheel and the
@@ -72,6 +116,8 @@ private:
     void show(int index);
     void request(int index, const QString &kind);
     void setMessage(const QString &message);
+    void fitPhoto();
+    void remember(int index, const QString &mediumPath);
     static QUrl providerUrl(const QString &path);
 
     const Library *m_library;
@@ -87,11 +133,13 @@ private:
     QUrl m_video;
     QUrl m_live;
     QString m_message;
-    // The touchpad gesture under way: how far it has gone, and whether it
-    // has stepped already (one swipe, one photo).
-    QPointF m_swipe;
-    bool m_swiped = false;
-    quint64 m_lastWheel = 0;
+    ViewerMotion m_motion;
+    QSizeF m_viewport{1, 1};
     // Mouse wheel notches not yet used; high-resolution wheels send parts.
     double m_notches = 0;
+    // The pinch's scale so far: 1 + the sum of Qt's per-event changes.
+    double m_pinchScale = 1;
+    // Medium renditions fetched, by photo, while the viewer is open.
+    QHash<QByteArray, QString> m_mediums;
+    int m_revision = 0;
 };

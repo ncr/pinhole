@@ -2,9 +2,12 @@ import QtQuick
 import QtQuick.Window
 import QtMultimedia
 
-// The full-window view of one photo or video. It grows out of the photo's
-// cell in the grid and shrinks back into it; the square crop of the cell
-// relaxes into the whole photo as it grows.
+// The full-window view of one photo or video, as in Photos. It grows out of
+// the photo's cell in the grid and shrinks back into it; the square crop of
+// the cell relaxes into the whole photo as it grows. The photos lie side by
+// side and follow the fingers; a pinch zooms one; the carousel along the
+// bottom shows where in the library it is. The motion itself is the
+// Viewer's (viewermotion.h); this draws it.
 Item {
     id: root
 
@@ -20,8 +23,19 @@ Item {
     // Where it grows from and shrinks back to.
     property rect cell: Qt.rect(0, 0, 0, 0)
 
-    readonly property real fitWidth: Math.min(width, height * viewer.aspect)
+    // The carousel's band along the bottom; photos fit the area above it.
+    readonly property real stripHeight: 60
+    readonly property real areaHeight: Math.max(1, height - stripHeight)
+    readonly property real fitWidth: Math.min(width, areaHeight * viewer.aspect)
     readonly property real fitHeight: fitWidth / Math.max(0.01, viewer.aspect)
+    onWidthChanged: viewer.setViewport(width, areaHeight)
+    onAreaHeightChanged: viewer.setViewport(width, areaHeight)
+    Component.onCompleted: viewer.setViewport(width, areaHeight)
+
+    FrameAnimation {
+        running: viewer.open && viewer.animating
+        onTriggered: viewer.advance(frameTime)
+    }
 
     function lerp(a, b, t) { return a + (b - a) * t }
 
@@ -44,17 +58,16 @@ Item {
             }
         }
         function onIndexChanged() {
-            mediumImage.source = ""
             originalImage.source = ""
+            detailImage.source = ""
             liveOutput.visible = false
             livePlayer.stop()
         }
         function onImageChanged() {
-            if (viewer.stage === "medium")
-                mediumImage.source = viewer.image
-            else if (viewer.stage === "original")
+            if (viewer.stage === "original")
                 originalImage.source = viewer.image
         }
+        function onCloseRequested() { root.closeViewer() }
         function onLiveChanged() {
             if (viewer.liveSource.toString() !== "") {
                 livePlayer.source = viewer.liveSource
@@ -81,12 +94,45 @@ Item {
         opacity: root.progress
     }
 
+    // The photos beside the shown one, two each side, where the row puts
+    // them: each its best image at hand (medium once fetched).
+    Repeater {
+        model: [-2, -1, 1, 2]
+        delegate: Item {
+            required property int modelData
+            readonly property int at: viewer.index + modelData
+            readonly property real aspect: viewer.aspectAt(at)
+            readonly property real centre: root.width / 2 + modelData * viewer.pageWidth + viewer.offset
+            width: Math.min(root.width, root.areaHeight * aspect)
+            height: width / Math.max(0.01, aspect)
+            x: centre - width / 2
+            y: (root.areaHeight - height) / 2
+            visible: root.progress === 1 && at >= 0 && at < viewer.count && x < root.width && x + width > 0
+            Image {
+                anchors.fill: parent
+                source: parent.visible ? viewer.thumbnailAt(parent.at) : ""
+                fillMode: Image.PreserveAspectCrop
+            }
+            Image {
+                anchors.fill: parent
+                source: parent.visible ? (viewer.revision, viewer.imageFor(parent.at)) : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+            }
+        }
+    }
+
     Item {
         id: frame
-        x: root.lerp(root.cell.x, (root.width - root.fitWidth) / 2, root.progress)
-        y: root.lerp(root.cell.y, (root.height - root.fitHeight) / 2, root.progress)
-        width: root.lerp(root.cell.width, root.fitWidth, root.progress)
-        height: root.lerp(root.cell.height, root.fitHeight, root.progress)
+        // Fitted, zoomed and panned, where the row puts it; growing from
+        // the grid's cell while opening.
+        readonly property real targetWidth: root.fitWidth * viewer.zoom
+        readonly property real targetHeight: root.fitHeight * viewer.zoom
+        x: root.lerp(root.cell.x, root.width / 2 + viewer.offset + viewer.panX - targetWidth / 2, root.progress)
+        y: root.lerp(root.cell.y, root.areaHeight / 2 + viewer.panY - targetHeight / 2, root.progress)
+        width: root.lerp(root.cell.width, targetWidth, root.progress)
+        height: root.lerp(root.cell.height, targetHeight, root.progress)
         clip: true
 
         // Sharpest last: each one covers the one below once it has loaded.
@@ -97,14 +143,15 @@ Item {
             asynchronous: false
             smooth: true
         }
+        // The medium rendition: the same image the photo had beside this
+        // one, so stepping onto it shows it sharp at once.
         Image {
             id: mediumImage
             anchors.fill: parent
+            source: (viewer.revision, viewer.imageFor(viewer.index))
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
-            opacity: status === Image.Ready ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
         }
         Image {
             id: originalImage
@@ -114,6 +161,19 @@ Item {
             sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
+        // Zoomed in: the original at its full size, decoded once it is
+        // wanted, so detail holds up close.
+        Image {
+            id: detailImage
+            anchors.fill: parent
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            mipmap: true
+            opacity: status === Image.Ready ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+            readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
+            onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
 
         MediaPlayer {
@@ -154,17 +214,30 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.BackButton
         readonly property real side: Math.min(160, width * 0.15)
-        function sideAt(x) { return x < side ? -1 : x > width - side ? 1 : 0 }
+        // Zoomed, the sides are part of the photo, and dragging pans it.
+        function sideAt(x) { return viewer.zoomed ? 0 : x < side ? -1 : x > width - side ? 1 : 0 }
+        property point last
+        property bool panned: false
+        onPositionChanged: mouse => {
+            if (!(mouse.buttons & Qt.LeftButton) || !viewer.zoomed)
+                return
+            viewer.panBy(mouse.x - last.x, mouse.y - last.y)
+            if (Math.abs(mouse.x - last.x) + Math.abs(mouse.y - last.y) > 0)
+                panned = true
+            last = Qt.point(mouse.x, mouse.y)
+        }
         readonly property int hoveredSide: containsMouse ? sideAt(mouseX) : 0
 
         onPressed: mouse => {
+            last = Qt.point(mouse.x, mouse.y)
+            panned = false
             if (mouse.button === Qt.BackButton)
                 root.closeViewer()
             else if (mouse.button === Qt.RightButton)
                 root.menuRequested(mouse.x, mouse.y)
         }
         onClicked: mouse => {
-            if (mouse.button !== Qt.LeftButton)
+            if (mouse.button !== Qt.LeftButton || panned)
                 return
             const s = sideAt(mouse.x)
             if (s !== 0)
@@ -180,6 +253,8 @@ Item {
             const s = sideAt(mouse.x)
             if (s !== 0)
                 viewer.step(s)
+            else if (viewer.zoomed)
+                viewer.resetZoom()
             else
                 root.closeViewer()
         }
@@ -190,7 +265,6 @@ Item {
         model: [-1, 1]
         delegate: Text {
             required property int modelData
-            anchors.verticalCenter: parent.verticalCenter
             x: modelData < 0 ? 24 : root.width - width - 24
             text: modelData < 0 ? "‹" : "›"
             color: "white"
@@ -199,6 +273,7 @@ Item {
             styleColor: "#80000000"
             readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < root.grid.count - 1
             opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
+            y: (root.areaHeight - height) / 2
             Behavior on opacity { NumberAnimation { duration: 120 } }
         }
     }
@@ -273,7 +348,7 @@ Item {
         visible: viewer.video && videoPlayer.duration > 0
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.bottom: carousel.top
         height: 56
         opacity: root.progress
         readonly property bool active: seekHover.hovered || seekArea.pressed
@@ -345,6 +420,99 @@ Item {
             styleColor: "#80000000"
             HoverHandler { id: muteHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.muted = !root.muted }
+        }
+    }
+
+    // The carousel: the library's thumbnails in a row under the photo, the
+    // shown one in the middle, sliding along as the photos do. Dragging it
+    // scrubs through the library; clicking one shows it. Drawn directly: a
+    // fixed set of slots, each keeping its photo until it scrolls off, so
+    // sliding reloads nothing.
+    Item {
+        id: carousel
+        objectName: "carousel"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: root.stripHeight
+        opacity: root.progress
+        visible: root.progress > 0
+        clip: true
+        readonly property real cell: 38
+        readonly property real thumb: 36
+        // Where the row is, in photos: the shown one, plus how far the
+        // photos have slid toward the next.
+        readonly property real position: viewer.index - viewer.offset / viewer.pageWidth
+        readonly property int slots: Math.ceil(width / cell) + 3
+        readonly property int first: Math.floor(position - width / 2 / cell) - 1
+        // The photo at a point of the strip.
+        function indexAt(x) { return Math.round(position + (x - width / 2) / cell) }
+        // Its own band: a zoomed photo passes under it.
+        Rectangle {
+            anchors.fill: parent
+            color: "black"
+        }
+
+        Repeater {
+            model: carousel.slots
+            delegate: Item {
+                required property int index
+                // The photo in [first, first + slots) that falls to this slot.
+                readonly property int photo: {
+                    const n = carousel.slots
+                    return carousel.first + ((index - carousel.first) % n + n) % n
+                }
+                readonly property bool current: photo === viewer.index
+                visible: photo >= 0 && photo < viewer.count
+                x: carousel.width / 2 + (photo - carousel.position) * carousel.cell - carousel.cell / 2
+                width: carousel.cell
+                height: carousel.height
+                z: current ? 1 : 0
+                Image {
+                    anchors.centerIn: parent
+                    width: carousel.thumb
+                    height: carousel.thumb
+                    scale: parent.current ? 1.2 : 1
+                    source: parent.visible ? viewer.thumbnailAt(parent.photo) : ""
+                    sourceSize: Qt.size(72, 72)
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: "white"
+                        border.width: 1.5
+                        visible: parent.parent.current
+                    }
+                }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: viewer.open
+            preventStealing: true
+            property real pressX: 0
+            property int pressIndex: 0
+            property bool scrubbed: false
+            onPressed: mouse => {
+                pressX = mouse.x
+                pressIndex = viewer.index
+                scrubbed = false
+            }
+            onPositionChanged: mouse => {
+                if (!pressed)
+                    return
+                if (Math.abs(mouse.x - pressX) > 4)
+                    scrubbed = true
+                if (scrubbed)
+                    viewer.jumpTo(Math.max(0, Math.min(viewer.count - 1,
+                        pressIndex - Math.round((mouse.x - pressX) / carousel.cell))))
+            }
+            onClicked: mouse => {
+                if (!scrubbed)
+                    viewer.jumpTo(Math.max(0, Math.min(viewer.count - 1, carousel.indexAt(mouse.x))))
+            }
         }
     }
 

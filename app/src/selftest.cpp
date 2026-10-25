@@ -11,6 +11,8 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QMimeData>
+#include <QNativeGestureEvent>
+#include <QPointingDevice>
 #include <QProcess>
 #include <QQuickWindow>
 #include <QElapsedTimer>
@@ -282,6 +284,20 @@ void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle,
     QGuiApplication::sendEvent(window, &event);
 }
 
+// A pinch to `scale` (from 1) at `at`, as the touchpad reports it: begin,
+// changes in scale, end.
+void pinch(QQuickWindow *window, QPointF at, double scale) {
+    auto send = [&](Qt::NativeGestureType type, double value) {
+        QNativeGestureEvent event(type, QPointingDevice::primaryPointingDevice(), 2, at, at, window->mapToGlobal(at),
+                                  value, QPointF());
+        QGuiApplication::sendEvent(window, &event);
+    };
+    send(Qt::BeginNativeGesture, 0);
+    for (int i = 0; i < 10; ++i)
+        send(Qt::ZoomNativeGesture, (scale - 1) / 10);
+    send(Qt::EndNativeGesture, 0);
+}
+
 // Two fingers moving `steps` times by `by` px, 8 ms apart, as a touchpad
 // on Wayland reports it: a begin with no movement, updates, an end.
 void swipe(QQuickWindow *window, QPointF at, QPoint by, int steps) {
@@ -345,6 +361,37 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer, start] { return viewer.index() == *start + 1; }},
         {"a slightly slanted swipe still counts", [=] { swipe(window, middle, {-10, 5}, 10); },
          [&viewer, start] { return viewer.index() == *start + 2; }},
+        {"mid-swipe the photo follows the fingers",
+         [=] {
+             wheel(window, middle, {}, {}, Qt::ScrollBegin, 900000);
+             for (int i = 0; i < 5; ++i)
+                 wheel(window, middle, {-10, 0}, {-80, 0}, Qt::ScrollUpdate, 900000 + 8 * (i + 1));
+         },
+         [&viewer] { return viewer.property("offset").toDouble() < -80; }, 100},
+        {"stopping before lifting springs back to the same photo",
+         [=] { wheel(window, middle, {}, {}, Qt::ScrollEnd, 900400); },
+         [&viewer, start] { return viewer.index() == *start + 2 && std::abs(viewer.property("offset").toDouble()) < 1; }, 900},
+        {"a pinch zooms in", [=] { pinch(window, middle, 2.0); },
+         [&viewer] { return std::abs(viewer.property("zoom").toDouble() - 2.0) < 0.05; }},
+        {"zoomed, a swipe pans instead of paging", [=] { swipe(window, middle, {-6, -6}, 20); },
+         [&viewer, start] {
+             // Across or down, as far as the zoomed photo has room to move.
+             const double moved = std::abs(viewer.property("panX").toDouble()) + std::abs(viewer.property("panY").toDouble());
+             return viewer.index() == *start + 2 && std::abs(viewer.property("offset").toDouble()) < 1 && moved > 50;
+         }},
+        {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle); },
+         [&viewer] { return viewer.isOpen() && viewer.property("zoom").toDouble() < 1.02; }, 900},
+        {"clicking a thumbnail in the carousel shows that photo",
+         [=] { click(window, QPointF(window->width() / 2.0 + 3 * 38, window->height() - 30.0)); },
+         [=, &viewer] {
+             if (viewer.index() != *start + 5)
+                 std::printf("selftest:      (shows %d, wanted %d)\n", viewer.index() - *start, 5);
+             return viewer.index() == *start + 5;
+         }},
+        {"pinching closed goes back to the library", [=] { pinch(window, middle, 0.5); },
+         [&viewer] { return !viewer.isOpen(); }, 900},
+        {"a click opens it again", [=] { click(window, grid->rectOf(*start + 5).center()); },
+         [&viewer] { return viewer.isOpen(); }, 900},
         {"right-click in the viewer opens the menu", [=] { click(window, middle, Qt::RightButton); },
          [=] { return menu()->property("opened").toBool(); }},
         {"the menu closes again", [=] { QMetaObject::invokeMethod(menu(), "close"); },
@@ -358,7 +405,8 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         {"a video opens and plays", [=, &viewer] { viewer.openAt(clip, grid->rectOf(clip)); },
          [=] { return clip >= 0 && length() > 0 && at() > 0; }, 6000},
         {"clicking three quarters along the bottom seeks there",
-         [=] { click(window, QPointF(window->width() * 0.75, window->height() - 8.0)); },
+         // The bar runs along the top of the carousel.
+         [=] { click(window, QPointF(window->width() * 0.75, window->height() - 60.0 - 8.0)); },
          [=] {
              *mark = at();
              return std::abs(*mark / length() - 0.75) < 0.03;

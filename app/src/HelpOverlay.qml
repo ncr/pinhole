@@ -37,19 +37,29 @@ Item {
             ["Ctrl+Shift+E", qsTr("Export as JPEG and MP4")]
         ] },
         { title: qsTr("Viewing"), keys: [
-            [qsTr("Double-click"), qsTr("Back to the library")],
             ["Space  Enter", qsTr("Open the photo under the pointer")],
+            [qsTr("Swipe sideways"), qsTr("Previous, next: the photo follows two fingers")],
             [qsTr("Click a side"), qsTr("Previous, next")],
             [qsTr("Wheel"), qsTr("Previous, next")],
-            [qsTr("Swipe sideways"), qsTr("Previous, next, with two fingers")],
             ["←  →", qsTr("Previous, next")],
-            [qsTr("Click"), qsTr("Play or pause a video")],
-            ["Space", qsTr("Play or pause a video; close a photo")],
-            [qsTr("Bottom edge"), qsTr("Seek in a video")],
+            [qsTr("Carousel"), qsTr("Click or drag to move through the library")],
+            [qsTr("Double-click"), qsTr("Back to the library")],
+            [qsTr("Pinch in"), qsTr("Back to the library")],
+            [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
+        ] },
+        { title: qsTr("Zooming in"), keys: [
+            [qsTr("Pinch"), qsTr("Zoom the photo at the fingers")],
+            [qsTr("Ctrl+wheel"), qsTr("Zoom at the pointer")],
+            ["+  −  0", qsTr("Zoom in, out, back to fitted")],
+            [qsTr("Drag"), qsTr("Move around a zoomed photo; or two fingers")],
+            [qsTr("Double-click"), qsTr("Back to fitted")]
+        ] },
+        { title: qsTr("Videos"), keys: [
+            [qsTr("Click  Space"), qsTr("Play or pause")],
+            [qsTr("Video bar"), qsTr("Seek: click or drag")],
             ["Shift+←  →", qsTr("Back or ahead 10 seconds")],
             ["M", qsTr("Sound on or off")],
-            ["L", qsTr("Play a Live Photo")],
-            [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
+            ["L", qsTr("Play a Live Photo")]
         ] },
         { title: qsTr("Pinhole"), keys: [
             ["?", qsTr("Show or hide these keys")],

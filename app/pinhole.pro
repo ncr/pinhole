@@ -25,6 +25,7 @@ HEADERS += \
     src/serviceclient.h \
     src/photoprovider.h \
     src/viewer.h \
+    src/viewermotion.h \
     src/outgoing.h \
     src/portal.h \
     src/selftest.h \
@@ -43,6 +44,7 @@ SOURCES += \
     src/serviceclient.cpp \
     src/photoprovider.cpp \
     src/viewer.cpp \
+    src/viewermotion.cpp \
     src/outgoing.cpp \
     src/portal.cpp \
     src/selftest.cpp \

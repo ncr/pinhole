@@ -10,6 +10,7 @@
 #include "scrollphysics.h"
 #include "theme.h"
 #include "translator.h"
+#include "viewermotion.h"
 
 class PinholeTests : public QObject {
     Q_OBJECT
@@ -188,6 +189,117 @@ private slots:
     // A copy, export or drag waits (for downloads, the folder picker, the
     // drop); a new photo arriving meanwhile moves every position along. What
     // it hands out must still be the photos that were chosen.
+    // A viewer 1000 x 800 showing a 4:3 photo fitted to it, with photos on
+    // both sides unless said otherwise.
+    static ViewerMotion viewerShowing(bool before = true, bool after = true) {
+        ViewerMotion m;
+        m.setViewport(1000, 800);
+        m.setPhoto(1000, 750, true);
+        m.setNeighbours(before, after);
+        return m;
+    }
+
+    // Fingers moving `perEvent` px sideways every 8 ms, `events` times; then
+    // lifted `pause` ms after the last.
+    static int swipe(ViewerMotion &m, double perEvent, int events, double pause = 8) {
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < events; ++i)
+            m.move(t += 8, perEvent, 0);
+        return m.end(t + pause);
+    }
+
+    static void settle(ViewerMotion &m) {
+        for (int i = 0; i < 600 && m.animating(); ++i)
+            m.advance(1.0 / 120);
+    }
+
+    void aShortSlowSwipeSpringsBack() {
+        ViewerMotion m = viewerShowing();
+        QCOMPARE(swipe(m, -2, 20, 200), 0); // 80 px of 1024, then a pause
+        QVERIFY(m.offset() < 0);
+        settle(m);
+        QCOMPARE(m.offset(), 0.0);
+    }
+
+    void aLongSwipeOrAFlickLandsOnTheNext() {
+        ViewerMotion m = viewerShowing();
+        QCOMPARE(swipe(m, -4, 50, 200), 1); // 400 px: past three tenths
+        ViewerMotion flick = viewerShowing();
+        QCOMPARE(swipe(flick, -6, 8), 1); // short but fast
+        // The next photo slides in from the right and settles, never
+        // passing its place.
+        m.stepped(1);
+        QVERIFY(m.offset() > 0);
+        double lowest = m.offset();
+        for (int i = 0; i < 600 && m.animating(); ++i) {
+            m.advance(1.0 / 120);
+            lowest = std::min(lowest, m.offset());
+        }
+        QCOMPARE(m.offset(), 0.0);
+        QVERIFY(lowest >= 0);
+    }
+
+    // In Photos, swiping again while the last photo is still sliding in
+    // pages on: the second swipe is judged by its own direction.
+    void aSecondSwipeWhileSlidingPagesOn() {
+        ViewerMotion m = viewerShowing();
+        QCOMPARE(swipe(m, 6, 10), -1);
+        m.stepped(-1); // the previous photo now slides in from the left
+        m.advance(1.0 / 120);
+        QVERIFY(m.offset() < -m.pageWidth() / 2);
+        QCOMPARE(swipe(m, 6, 10), -1);
+        QCOMPARE(swipe(m, 0.5, 4, 200), 0); // a nudge, not a page
+    }
+
+    void theLastPhotoStretchesInsteadOfPaging() {
+        ViewerMotion m = viewerShowing(true, false);
+        QCOMPARE(swipe(m, -10, 60), 0); // 1200 px of finger movement
+        QVERIFY(m.offset() < 0 && m.offset() > -m.pageWidth() / 2);
+    }
+
+    void aPinchKeepsThePointBetweenTheFingers() {
+        ViewerMotion m = viewerShowing();
+        // The point under (700, 300), as a share of the photo, before and after.
+        auto share = [&m](double x, double y) {
+            const double w = 1000 * m.zoom(), h = 750 * m.zoom();
+            const double left = 500 + m.panX() - w / 2, top = 400 + m.panY() - h / 2;
+            return QPointF((x - left) / w, (y - top) / h);
+        };
+        const QPointF before = share(700, 300);
+        m.pinchBegin(700, 300);
+        m.pinch(2.5, 700, 300);
+        const QPointF after = share(700, 300);
+        QVERIFY(std::abs(before.x() - after.x()) < 1e-9 && std::abs(before.y() - after.y()) < 1e-9);
+        QVERIFY(!m.pinchEnd());
+        QCOMPARE(m.zoom(), 2.5);
+        QVERIFY(m.zoomed());
+    }
+
+    void pinchingInSpringsBackOrCloses() {
+        ViewerMotion m = viewerShowing();
+        m.pinchBegin(500, 400);
+        m.pinch(0.85, 500, 400);
+        QVERIFY(!m.pinchEnd());
+        settle(m);
+        QCOMPARE(m.zoom(), 1.0);
+        m.pinchBegin(500, 400);
+        m.pinch(0.5, 500, 400);
+        QVERIFY(m.pinchEnd()); // close
+    }
+
+    void aZoomedPhotoPansWithinItsEdgesAndDoesNotPage() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(2, 500, 400);
+        settle(m);
+        QCOMPARE(m.zoom(), 2.0);
+        QCOMPARE(swipe(m, -50, 40), 0); // would page if not zoomed
+        QCOMPARE(m.offset(), 0.0);
+        // 2000 x 1500 in 1000 x 800: 500 px of room each way across.
+        QCOMPARE(m.panX(), -500.0 * 1);
+        QVERIFY(std::abs(m.panY()) <= 350);
+    }
+
     void whatGoesOutIsWhatWasChosenThroughAReload() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir before, after;

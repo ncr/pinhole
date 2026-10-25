@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QLocale>
+#include <QNativeGestureEvent>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -58,6 +59,7 @@ void Viewer::openAt(int index, QRectF from) {
     if (index < 0 || index >= m_library->count())
         return;
     m_origin = from;
+    m_motion.reset();
     show(index);
     if (!m_open) {
         m_open = true;
@@ -66,7 +68,34 @@ void Viewer::openAt(int index, QRectF from) {
 }
 
 bool Viewer::eventFilter(QObject *, QEvent *event) {
-    if (event->type() != QEvent::Wheel || !m_open)
+    if (!m_open)
+        return false;
+    if (event->type() == QEvent::NativeGesture) {
+        auto *g = static_cast<QNativeGestureEvent *>(event);
+        logInput(QStringLiteral("viewer gesture type=%1 value=%2 pos=%3,%4")
+                     .arg(int(g->gestureType())).arg(g->value()).arg(g->position().x()).arg(g->position().y()));
+        switch (g->gestureType()) {
+        case Qt::BeginNativeGesture:
+            m_pinchScale = 1;
+            m_motion.pinchBegin(g->position().x(), g->position().y());
+            break;
+        case Qt::ZoomNativeGesture:
+            // Each event's value is the change since the last; summed, not
+            // multiplied (multiplying compounds, see the grid).
+            m_pinchScale = std::max(0.05, m_pinchScale + g->value());
+            m_motion.pinch(m_pinchScale, g->position().x(), g->position().y());
+            break;
+        case Qt::EndNativeGesture:
+            if (m_motion.pinchEnd())
+                emit closeRequested();
+            break;
+        default:
+            break;
+        }
+        emit motionChanged();
+        return true;
+    }
+    if (event->type() != QEvent::Wheel)
         return false;
     auto *wheel = static_cast<QWheelEvent *>(event);
     const QPoint px = wheel->pixelDelta();
@@ -74,9 +103,14 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     logInput(QStringLiteral("viewer wheel phase=%1 pixel=%2,%3 angle=%4,%5 inverted=%6 ts=%7")
                  .arg(int(wheel->phase())).arg(px.x()).arg(px.y()).arg(angle.x()).arg(angle.y())
                  .arg(wheel->inverted()).arg(wheel->timestamp()));
-    if (wheel->modifiers() & Qt::ControlModifier)
+    if (wheel->modifiers() & Qt::ControlModifier) {
+        // Ctrl+wheel zooms at the pointer, a notch a quarter.
+        const double notches = (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
+        if (notches != 0)
+            m_motion.zoomBy(std::pow(1.25, notches), wheel->position().x(), wheel->position().y());
+        emit motionChanged();
         return true;
-
+    }
     if (wheel->phase() == Qt::NoScrollPhase && px.isNull()) {
         // A mouse wheel: a notch (120) is a photo, down for the next.
         m_notches += (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
@@ -86,22 +120,97 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
             step(-1);
         return true;
     }
-
-    // A touchpad: one step per swipe, once it has gone far enough and
-    // mostly sideways. Fingers moving left bring the next photo, as on a
-    // Mac. Without phases, a pause of 300 ms starts a new swipe.
-    const quint64 t = wheel->timestamp();
-    if (wheel->phase() == Qt::ScrollBegin || t - m_lastWheel > 300) {
-        m_swipe = QPointF();
-        m_swiped = false;
+    // A touchpad: the photos follow the fingers (viewermotion.h).
+    const double t = double(wheel->timestamp());
+    const QPointF d = px.isNull() ? QPointF(angle) / 8.0 : QPointF(px);
+    switch (wheel->phase()) {
+    case Qt::ScrollBegin:
+        m_motion.begin(t);
+        break;
+    case Qt::ScrollUpdate:
+    case Qt::ScrollMomentum:
+    case Qt::NoScrollPhase:
+        m_motion.move(t, d.x(), d.y());
+        break;
+    case Qt::ScrollEnd:
+        if (const int delta = m_motion.end(t))
+            step(delta);
+        break;
     }
-    m_lastWheel = t;
-    m_swipe += px.isNull() ? QPointF(angle) / 8.0 : QPointF(px);
-    if (!m_swiped && std::abs(m_swipe.x()) > 40 && std::abs(m_swipe.x()) > 1.5 * std::abs(m_swipe.y())) {
-        m_swiped = true;
-        step(m_swipe.x() < 0 ? 1 : -1);
-    }
+    emit motionChanged();
     return true;
+}
+
+int Viewer::count() const { return m_library->count(); }
+
+QUrl Viewer::thumbnailAt(int index) const {
+    if (index < 0 || index >= m_library->count())
+        return {};
+    return QUrl::fromLocalFile(QFile::decodeName(m_library->at(index).thumbPath));
+}
+
+QUrl Viewer::imageFor(int index) const {
+    if (index < 0 || index >= m_library->count())
+        return {};
+    const auto found = m_mediums.find(m_library->at(index).id);
+    return found != m_mediums.end() ? providerUrl(*found) : thumbnailAt(index);
+}
+
+qreal Viewer::aspectAt(int index) const {
+    if (index < 0 || index >= m_library->count())
+        return 1;
+    const LibraryItem &item = m_library->at(index);
+    return item.thumbH ? qreal(item.thumbW) / item.thumbH : 1;
+}
+
+void Viewer::remember(int index, const QString &mediumPath) {
+    if (index < 0 || index >= m_library->count())
+        return;
+    const QByteArray id = m_library->at(index).id;
+    if (m_mediums.value(id) == mediumPath)
+        return;
+    m_mediums.insert(id, mediumPath);
+    m_revision += 1;
+    emit imagesChanged();
+}
+
+void Viewer::fitPhoto() {
+    const double a = aspect();
+    const double w = std::min(m_viewport.width(), m_viewport.height() * a);
+    m_motion.setPhoto(w, w / std::max(0.01, a), !isVideo());
+    m_motion.setNeighbours(m_index > 0, m_index < m_library->count() - 1);
+}
+
+void Viewer::setViewport(qreal width, qreal height) {
+    m_viewport = QSizeF(std::max<qreal>(1, width), std::max<qreal>(1, height));
+    m_motion.setViewport(m_viewport.width(), m_viewport.height());
+    fitPhoto();
+    emit motionChanged();
+}
+
+void Viewer::advance(qreal seconds) {
+    m_motion.advance(seconds);
+    emit motionChanged();
+}
+
+void Viewer::zoomBy(qreal factor, qreal x, qreal y) {
+    m_motion.zoomBy(factor, x, y);
+    emit motionChanged();
+}
+
+void Viewer::zoomStep(int steps) {
+    m_motion.zoomBy(std::pow(1.6, steps), m_viewport.width() / 2, m_viewport.height() / 2);
+    emit motionChanged();
+}
+
+void Viewer::resetZoom() {
+    m_motion.resetZoom();
+    emit motionChanged();
+}
+
+void Viewer::panBy(qreal dx, qreal dy) {
+    m_motion.pan(dx, dy);
+    emit motionChanged();
 }
 
 void Viewer::close() {
@@ -109,13 +218,28 @@ void Viewer::close() {
         return;
     m_open = false;
     m_generation += 1; // anything still arriving is for a closed viewer
+    m_motion.reset();
+    m_mediums.clear();
     emit openChanged();
+    emit motionChanged();
 }
 
 void Viewer::step(int delta) {
     const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
-    if (next != m_index)
-        show(next);
+    if (next == m_index)
+        return;
+    // The new photo slides in from where it lay beside the old one.
+    m_motion.stepped(next - m_index);
+    show(next);
+    emit motionChanged();
+}
+
+void Viewer::jumpTo(int index) {
+    if (index < 0 || index >= m_library->count() || index == m_index)
+        return;
+    m_motion.reset();
+    show(index);
+    emit motionChanged();
 }
 
 void Viewer::show(int index) {
@@ -126,6 +250,7 @@ void Viewer::show(int index) {
     m_video = QUrl();
     m_live = QUrl();
     setMessage({});
+    fitPhoto();
     emit indexChanged();
     emit imageChanged();
     emit videoChanged();
@@ -137,11 +262,20 @@ void Viewer::show(int index) {
     } else {
         request(index, QStringLiteral("medium"));
     }
-    // The neighbours, so stepping through is instant.
-    for (int d : {1, -1}) {
+    // The neighbours, two each side: they show beside it while swiping.
+    for (int d : {1, -1, 2, -2}) {
         const int n = index + d;
-        if (n >= 0 && n < m_library->count() && !m_library->at(n).video)
-            m_service->fetch(m_library->at(n).id, QStringLiteral("medium"), [](bool, const QJsonObject &, const QString &) {});
+        if (n < 0 || n >= m_library->count() || m_library->at(n).video || m_mediums.contains(m_library->at(n).id))
+            continue;
+        const QByteArray id = m_library->at(n).id;
+        m_service->fetch(id, QStringLiteral("medium"), [this, id](bool ok, const QJsonObject &result, const QString &) {
+            if (!ok || !m_open)
+                return;
+            // Found again by its id: the library may have been reloaded.
+            for (int i : {m_index - 2, m_index - 1, m_index + 1, m_index + 2})
+                if (i >= 0 && i < m_library->count() && m_library->at(i).id == id)
+                    remember(i, result.value("path").toString());
+        });
     }
 }
 
@@ -177,6 +311,8 @@ void Viewer::request(int index, const QString &kind) {
         } else {
             m_image = providerUrl(path);
             m_stage = kind;
+            if (kind == QLatin1String("medium"))
+                remember(index, path);
             emit imageChanged();
             // The medium is on screen; the original follows.
             if (kind == QLatin1String("medium"))
