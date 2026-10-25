@@ -45,6 +45,9 @@ Item {
             ["←  →", qsTr("Previous, next")],
             [qsTr("Click"), qsTr("Play or pause a video")],
             ["Space", qsTr("Play or pause a video; close a photo")],
+            [qsTr("Bottom edge"), qsTr("Seek in a video")],
+            ["Shift+←  →", qsTr("Back or ahead 10 seconds")],
+            ["M", qsTr("Sound on or off")],
             ["L", qsTr("Play a Live Photo")],
             [qsTr("Esc  Mouse back"), qsTr("Back to the library")]
         ] },

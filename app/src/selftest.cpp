@@ -283,12 +283,18 @@ void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle) {
 
 } // namespace
 
-void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer) {
+void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library) {
     struct Step {
         const char *what;
         std::function<void()> act;
         std::function<bool()> check;
+        int wait = 600; // long enough for the viewer's animations and the swipe's pause
     };
+    auto video = [window] { return window->findChild<QObject *>(QStringLiteral("photoViewer")); };
+    auto at = [video] { return video()->property("videoPosition").toDouble(); };
+    auto length = [video] { return video()->property("videoDuration").toDouble(); };
+    const int clip = findIndex(library, "a.is_video AND a.duration BETWEEN 40 AND 300");
+    auto mark = std::make_shared<double>(0);
     auto start = std::make_shared<int>(-1);
     const QPointF middle(window->width() / 2.0, window->height() / 2.0);
     const QPointF right(window->width() - 40.0, window->height() / 2.0);
@@ -333,6 +339,19 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer) {
          [&viewer] { return viewer.isOpen(); }},
         {"double-click in the viewer goes back", [=] { doubleClick(window, middle); },
          [&viewer] { return !viewer.isOpen(); }},
+        {"a video opens and plays", [=, &viewer] { viewer.openAt(clip, grid->rectOf(clip)); },
+         [=] { return clip >= 0 && length() > 0 && at() > 0; }, 6000},
+        {"clicking three quarters along the bottom seeks there",
+         [=] { click(window, QPointF(window->width() * 0.75, window->height() - 8.0)); },
+         [=] {
+             *mark = at();
+             return std::abs(*mark / length() - 0.75) < 0.03;
+         }, 1500},
+        {"Shift+Left goes back ten seconds",
+         [=] { QMetaObject::invokeMethod(video(), "skip", Q_ARG(QVariant, -10)); },
+         [=] { return at() < *mark - 5000 && at() > *mark - 12000; }, 1500},
+        {"the video closes", [=] { click(window, middle, Qt::BackButton); },
+         [&viewer] { return !viewer.isOpen(); }},
     });
     auto failures = std::make_shared<int>(0);
     auto run = std::make_shared<std::function<void(int)>>();
@@ -344,8 +363,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer) {
             return;
         }
         (*steps)[k].act();
-        // Long enough for the viewer's animations and the swipe's pause.
-        QTimer::singleShot(600, window, [=] {
+        QTimer::singleShot((*steps)[k].wait, window, [=] {
             const bool ok = (*steps)[k].check();
             *failures += ok ? 0 : 1;
             // PINHOLE_SELFTEST_DIR: the window after each step, to look at.

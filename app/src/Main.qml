@@ -90,6 +90,7 @@ ApplicationWindow {
 
     PhotoViewer {
         id: photoViewer
+        objectName: "photoViewer"
         anchors.fill: parent
         grid: grid
         onMenuRequested: (x, y) => photoMenu.popup(photoViewer, x, y)
@@ -277,4 +278,7 @@ ApplicationWindow {
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: viewer.playLive() }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
+    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
 }

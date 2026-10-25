@@ -220,7 +220,7 @@ int main(int argc, char *argv[]) {
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
-        runMouseSelfTest(window, grid, viewer);
+        runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))
         runReloadSelfTest(library, grid, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("outgoing"))

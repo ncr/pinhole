@@ -118,7 +118,7 @@ Item {
             id: videoPlayer
             source: viewer.video ? viewer.videoSource : ""
             videoOutput: videoOutput
-            audioOutput: AudioOutput {}
+            audioOutput: AudioOutput { muted: root.muted }
             onSourceChanged: if (source.toString() !== "" && viewer.open) play()
         }
         VideoOutput {
@@ -287,15 +287,108 @@ Item {
         }
     }
 
-    // A video's progress, along the bottom.
-    Rectangle {
+    // A video's progress along the bottom. Over it, the pointer gets a
+    // thicker bar to click or drag through the video, the time, and the
+    // sound switch.
+    Item {
+        id: seekBar
         visible: viewer.video && videoPlayer.duration > 0
         anchors.left: parent.left
+        anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 3
-        width: parent.width * (videoPlayer.duration > 0 ? videoPlayer.position / videoPlayer.duration : 0)
-        color: "white"
-        opacity: 0.8 * root.progress
+        height: 56
+        opacity: root.progress
+        readonly property bool active: seekHover.hovered || seekArea.pressed
+        HoverHandler { id: seekHover }
+
+        Rectangle {
+            id: track
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: seekBar.active ? 6 : 3
+            Behavior on height { NumberAnimation { duration: 100 } }
+            color: seekBar.active ? "#50ffffff" : "transparent"
+            Rectangle {
+                height: parent.height
+                width: parent.width * (videoPlayer.duration > 0 ? videoPlayer.position / videoPlayer.duration : 0)
+                color: seekBar.active ? theme.accent : "white"
+                opacity: 0.85
+            }
+        }
+
+        MouseArea {
+            id: seekArea
+            anchors.fill: parent
+            preventStealing: true
+            // Seeks while dragging go out at most every 80 ms: a video still
+            // downloading answers each with a new request.
+            property real wanted: -1
+            function seekTo(x) {
+                wanted = Math.max(0, Math.min(1, x / width)) * videoPlayer.duration
+                if (!seekThrottle.running) {
+                    videoPlayer.setPosition(wanted)
+                    wanted = -1
+                    seekThrottle.start()
+                }
+            }
+            Timer {
+                id: seekThrottle
+                interval: 80
+                onTriggered: if (seekArea.wanted >= 0) { videoPlayer.setPosition(seekArea.wanted); seekArea.wanted = -1 }
+            }
+            onPressed: mouse => seekTo(mouse.x)
+            onPositionChanged: mouse => { if (pressed) seekTo(mouse.x) }
+        }
+
+        Text {
+            visible: seekBar.active || videoPlayer.playbackState !== MediaPlayer.PlayingState
+            anchors.left: parent.left
+            anchors.leftMargin: 16
+            anchors.bottom: track.top
+            anchors.bottomMargin: 10
+            text: root.clock(videoPlayer.position) + " / " + root.clock(videoPlayer.duration)
+            color: "white"
+            font.pixelSize: 12
+            font.family: "monospace"
+            style: Text.Outline
+            styleColor: "#80000000"
+        }
+        Text {
+            visible: seekBar.active || root.muted
+            anchors.right: parent.right
+            anchors.rightMargin: 16
+            anchors.bottom: track.top
+            anchors.bottomMargin: 10
+            text: root.muted ? qsTr("Sound off  (M)") : qsTr("Sound on  (M)")
+            color: muteHover.hovered ? theme.accent : "white"
+            font.pixelSize: 12
+            style: Text.Outline
+            styleColor: "#80000000"
+            HoverHandler { id: muteHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: root.muted = !root.muted }
+        }
+    }
+
+    // Sound stays off from one video to the next until turned on again.
+    property bool muted: false
+    readonly property real videoPosition: videoPlayer.position
+    readonly property real videoDuration: videoPlayer.duration
+
+    // 75000 → "1:15", 3725000 → "1:02:05".
+    function clock(ms) {
+        const s = Math.floor(ms / 1000)
+        const two = n => (n < 10 ? "0" : "") + n
+        return s >= 3600 ? Math.floor(s / 3600) + ":" + two(Math.floor(s / 60) % 60) + ":" + two(s % 60)
+                         : Math.floor(s / 60) + ":" + two(s % 60)
+    }
+
+    // Back or ahead in a video; false when there is no video to move in.
+    function skip(seconds) {
+        if (!viewer.video || videoPlayer.duration <= 0)
+            return false
+        videoPlayer.setPosition(Math.max(0, Math.min(videoPlayer.duration - 100, videoPlayer.position + seconds * 1000)))
+        return true
     }
 
     function togglePlay() {
