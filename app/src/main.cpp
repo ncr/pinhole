@@ -284,8 +284,8 @@ int main(int argc, char *argv[]) {
         });
     }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
-    // 7 columns out to 29 and in to 3, as frames of the top left in <dir>,
-    // with the label of each on the output.
+    // 7 columns out to 29 and in to 3, then two seconds of scrolling, as
+    // frames of the top left in <dir>, with the label of each on the output.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("zoomdates:"))) {
         QTimer::singleShot(1200, window, [window, grid, test] {
             grid->setColumnsNow(7);
@@ -301,12 +301,18 @@ int main(int argc, char *argv[]) {
                     grid->setEffectiveStride(grid->width() / lerpLog(29, 3, (t - 2.0) / 2.0), QPointF(grid->width() / 2, grid->height() / 2));
                 else if (t < 4.05)
                     grid->endContinuousZoom();
-                else if (t > 4.6) {
+                // Then scrolling up through the days, the label changing as
+                // it goes.
+                else if (t >= 4.6 && t < 4.65)
+                    grid->jumpToFraction(0.97), grid->setDriveVelocity(-6000);
+                else if (t >= 6.6 && t < 6.65)
+                    grid->setDriveVelocity(0);
+                else if (t > 7.0) {
                     timer->stop();
                     QCoreApplication::quit();
                 }
                 const QVariantList headers = grid->dateHeaders();
-                std::printf("%03d %s %s\n", *frame, grid->zooming() ? "zooming" : "still  ",
+                std::printf("%03d %s %.4f %s\n", *frame, grid->zooming() ? "zooming" : "still  ", grid->scrollFraction(),
                             headers.isEmpty() ? "-" : qPrintable(headers[0].toMap().value("label").toString()));
                 std::fflush(stdout);
                 window->grabWindow().copy(0, 0, 420, 70).save(QStringLiteral("%1/%2.png").arg(test.mid(10)).arg(*frame, 3, 10, QLatin1Char('0')));

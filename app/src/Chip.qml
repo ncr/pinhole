@@ -9,8 +9,13 @@ Rectangle {
     property alias label: label
     property color textColor: theme.foreground
     // While true, a new text cross-fades with the old and the chip's width
-    // eases to fit it, as the grid's levels cross-fade while zooming.
+    // eases to fit it. A text that comes while one is changing waits for
+    // it, the latest one then following: changes faster than that show at
+    // that pace rather than each restarting the fade, which flickered.
     property bool morphing: false
+    // The text inside, centred; or from the left, the chip's right edge
+    // moving as it changes.
+    property bool centred: true
 
     // Omarchy's control metrics (shell.toml: control-height 28 and
     // control-padding-x 10 at a base size of 12), with the type scale.
@@ -26,14 +31,24 @@ Rectangle {
         NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
     }
 
+    // What the label shows: the text, or on its way to it.
     property string shownText
-    onTextChanged: {
-        if (chip.morphing && shownText !== "" && text !== "") {
-            leaving.text = shownText
-            morph.restart()
-        }
+    function change() {
+        leaving.text = shownText
         shownText = text
+        morph.restart()
     }
+    onTextChanged: {
+        if (!chip.morphing || shownText === "" || text === "") {
+            morph.stop()
+            label.opacity = 1
+            leaving.opacity = 0
+            shownText = text
+        } else if (!morph.running) {
+            change()
+        }
+    }
+    Component.onCompleted: shownText = text
 
     readonly property int padding: Math.round(theme.fontSize * 0.833)
 
@@ -48,13 +63,11 @@ Rectangle {
 
         UiText {
             id: label
-            // Morphing, both texts start at the left, where the chip does,
-            // and its right edge moves.
-            anchors.horizontalCenter: chip.morphing ? undefined : parent.horizontalCenter
-            x: chip.padding - parent.x
+            // On whole pixels, so the type stays crisp.
+            x: chip.centred ? Math.round((parent.width - implicitWidth) / 2) : chip.padding - parent.x
             y: centredIn(chip.height) - parent.y
             color: chip.textColor
-            text: chip.text
+            text: chip.shownText
         }
         // The text going, in the same place and type.
         UiText {
@@ -75,6 +88,10 @@ Rectangle {
             PropertyAction { target: label; property: "opacity"; value: 0 }
             PauseAnimation { duration: 60 }
             NumberAnimation { target: label; property: "opacity"; to: 1; duration: 150; easing.type: Easing.OutQuad }
+        }
+        onFinished: {
+            if (chip.shownText !== chip.text)
+                chip.change()
         }
     }
 }

@@ -51,7 +51,7 @@ class PhotoGrid : public QQuickItem {
     // Within half a screen of the newest photos.
     Q_PROPERTY(bool atNewest READ atNewest NOTIFY scrolled)
     // The date labels on screen, for the window to draw at the top left:
-    // [{label, top}]. Far out by year and month, sticky: the run the top of
+    // [{label, top, sticky}]. Far out by year and month, sticky: the run the top of
     // the view is in (top far above), then each run that starts lower down.
     // Closer in, one label: the days on screen, or the date at the top.
     // While zooming, one label in the form of the level shown.

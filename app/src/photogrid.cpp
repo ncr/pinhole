@@ -415,12 +415,19 @@ void PhotoGrid::updateDateHeaders() {
         // shows or is landing on.
         int formatColumns = m_columns;
         if (m_zoom.active) {
-            const Layer l = layers().front();
+            formatColumns = kLevels[size_t(m_zoom.settling ? m_zoom.target : m_zoom.shown)];
+            // The rows of that level too, where it is drawn: the layer
+            // underneath changes as the pair cross-fading does, and the
+            // label read from it flickered between two answers.
+            const std::vector<Layer> drawn = layers();
+            Layer l = drawn.front();
+            for (const Layer &layer : drawn)
+                if (layer.columns == formatColumns)
+                    l = layer;
             columns = l.columns;
             rowStride = strideFor(l.columns);
             contentTop = l.pin.y() + (0 - l.at.y()) / l.scale;
             contentBottom = l.pin.y() + (height() - l.at.y()) / l.scale;
-            formatColumns = kLevels[size_t(m_zoom.settling ? m_zoom.target : m_zoom.shown)];
         }
         // Far out the year, then the month (both sticky, a header to each
         // run), then the range of days on screen, then, close in, the date.
@@ -473,11 +480,11 @@ void PhotoGrid::updateDateHeaders() {
             };
             QDate date = dateOfRow(first);
             int current = key(date);
-            headers.append(QVariantMap{{"label", label(date)}, {"top", -1e9}});
+            headers.append(QVariantMap{{"label", label(date)}, {"top", -1e9}, {"sticky", sticky}});
             for (int row = first + 1; sticky && row <= last && headers.size() < 8; ++row) {
                 date = dateOfRow(row);
                 if (const int k = key(date); k != current) {
-                    headers.append(QVariantMap{{"label", label(date)}, {"top", row * s - m_scroll}});
+                    headers.append(QVariantMap{{"label", label(date)}, {"top", row * s - m_scroll}, {"sticky", true}});
                     current = k;
                 }
             }

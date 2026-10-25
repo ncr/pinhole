@@ -99,7 +99,10 @@ ApplicationWindow {
                     return next ? Math.min(own, next.top + 16 - height - 8) : own
                 }
                 text: header ? header.label : ""
-                morphing: grid.zooming
+                // Every change morphs, but where a sticky header takes over
+                // from the one it pushed out: that one has gone already.
+                morphing: grid.zooming || (header !== null && !header.sticky)
+                centred: false
                 textColor: theme.brightForeground
                 label.font.pixelSize: Math.round(theme.fontSize * 1.167)
             }
