@@ -256,12 +256,6 @@ fn touch(path: &Path) {
 
 pub fn run(config: Config) -> Result<()> {
     std::fs::create_dir_all(&config.cache)?;
-    // An index from an older Pinhole is brought up to date before anything
-    // reads it.
-    let index = config.library.join("library.sqlite");
-    if index.exists() {
-        crate::db::open(&index).context("opening the library")?;
-    }
     eprintln!("pinholed: photos from {}", config.source.name());
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());

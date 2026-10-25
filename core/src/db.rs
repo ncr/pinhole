@@ -6,26 +6,26 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::source::{Asset, Kind};
 
-/// The schema this code reads and writes; `meta.schema`. An index without
-/// one is from before sources, iCloud's, and is migrated as it is opened.
+/// The schema this code reads and writes; `meta.schema`.
 pub const SCHEMA: i64 = 2;
 
 pub fn open(path: &Path) -> Result<Connection> {
-    let mut db = Connection::open(path)?;
+    let db = Connection::open(path)?;
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.pragma_update(None, "synchronous", "NORMAL")?;
     db.busy_timeout(std::time::Duration::from_secs(10))?;
-    let old = db
-        .query_row("SELECT 1 FROM pragma_table_info('assets') WHERE name = 'master_id'", [], |_| Ok(()))
-        .optional()?
-        .is_some();
-    if old {
-        migrate(&mut db, path)?;
+    // One made by other code is not read, nor written: it is made again.
+    let made = db.query_row("SELECT 1 FROM sqlite_master WHERE name = 'assets'", [], |_| Ok(())).optional()?.is_some();
+    if made && meta(&db, "schema") != Some(SCHEMA.to_string()) {
+        return Err(anyhow!(
+            "{} is from another version of Pinhole; remove it and build the library again (pinhole-sync all)",
+            path.display()
+        ));
     }
     create(&db)?;
     Ok(db)
@@ -77,51 +77,6 @@ fn create(db: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
     db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?1)", [SCHEMA.to_string()])?;
-    Ok(())
-}
-
-/// An index from before sources (iCloud's, the only one there was) to
-/// this schema, in place: a copy is saved beside it first, then one
-/// transaction moves what only iCloud means into iCloud's tables and
-/// fills `renditions`. The window's columns are left as they were.
-fn migrate(db: &mut Connection, path: &Path) -> Result<()> {
-    let backup = path.with_file_name("library.v1.sqlite");
-    if !backup.exists() {
-        // Whole even with a write-ahead log beside it, and an earlier copy
-        // is never overwritten.
-        let part = path.with_file_name("library.v1.sqlite.part");
-        let _ = std::fs::remove_file(&part);
-        db.execute("VACUUM INTO ?1", [part.to_string_lossy()])?;
-        std::fs::rename(&part, &backup)?;
-    }
-    // Indexes made before the thumbnail columns existed get them first.
-    for column in ["thumb_path TEXT", "thumb_w INTEGER", "thumb_h INTEGER", "avg_color INTEGER"] {
-        match db.execute(&format!("ALTER TABLE assets ADD COLUMN {column}"), []) {
-            Ok(_) => {}
-            Err(e) if e.to_string().contains("duplicate column") => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
-    let tx = db.transaction()?;
-    // `renditions` and the rest, beside the old `assets`.
-    create(&tx)?;
-    crate::icloud::index::migrate_from_v1(&tx)?;
-    tx.execute_batch(
-        "ALTER TABLE assets ADD COLUMN size INTEGER;
-        UPDATE assets SET size = (SELECT size FROM renditions WHERE asset_id = assets.id AND kind = 'original');
-        ALTER TABLE assets DROP COLUMN rank;
-        ALTER TABLE assets DROP COLUMN master_id;
-        ALTER TABLE assets DROP COLUMN change_tag;
-        ALTER TABLE assets DROP COLUMN subtype;
-        INSERT OR REPLACE INTO meta(key, value)
-            SELECT 'change_token', coalesce((SELECT value FROM meta WHERE key = 'sync_token'),
-                                            (SELECT value FROM meta WHERE key = 'walk_sync_token'))
-            WHERE EXISTS (SELECT 1 FROM meta WHERE key IN ('sync_token', 'walk_sync_token'));
-        DELETE FROM meta WHERE key IN ('sync_token', 'walk_sync_token');
-        INSERT OR REPLACE INTO meta(key, value) VALUES ('source', 'icloud');",
-    )?;
-    tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema', ?1)", [SCHEMA.to_string()])?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -317,81 +272,18 @@ mod tests {
         }
     }
 
-    /// The schema as it was before sources, with one photo (edited, so its
-    /// full size is JPEGFull), one video and one Live Photo.
-    const V1: &str = "
-        CREATE TABLE assets (id TEXT PRIMARY KEY, rank INTEGER, master_id TEXT NOT NULL, change_tag TEXT,
-            item_type TEXT, filename TEXT, asset_date INTEGER, added_date INTEGER,
-            favorite INTEGER NOT NULL DEFAULT 0, duration REAL, orientation INTEGER, subtype INTEGER,
-            has_location INTEGER NOT NULL DEFAULT 0, is_video INTEGER NOT NULL DEFAULT 0,
-            is_live INTEGER NOT NULL DEFAULT 0, thumb_path TEXT, thumb_w INTEGER, thumb_h INTEGER, avg_color INTEGER);
-        CREATE INDEX assets_by_date ON assets(asset_date);
-        CREATE TABLE resources (asset_id TEXT NOT NULL, kind TEXT NOT NULL, width INTEGER, height INTEGER,
-            size INTEGER, file_type TEXT, checksum TEXT, url TEXT, url_fetched_at INTEGER,
-            PRIMARY KEY (asset_id, kind)) WITHOUT ROWID;
-        CREATE TABLE raw_records (asset_id TEXT PRIMARY KEY, asset_json TEXT NOT NULL, master_json TEXT NOT NULL);
-        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO assets VALUES ('p', 0, 'mp', 'tp', 'public.heic', 'IMG_1.HEIC', 100, 200, 1, NULL, 6, 0, 1, 0, 0, 'thumbs/aa/c1.jpg', 480, 360, 123);
-        INSERT INTO assets VALUES ('v', 1, 'mv', 'tv', 'com.apple.quicktime-movie', 'IMG_2.MOV', 300, 400, 0, 12.5, 1, 0, 0, 1, 0, NULL, NULL, NULL, NULL);
-        INSERT INTO assets VALUES ('l', 2, 'ml', 'tl', 'public.heic', 'IMG_3.HEIC', 500, 600, 0, NULL, 1, 2, 0, 0, 1, NULL, NULL, NULL, NULL);
-        INSERT INTO resources VALUES ('p', 'Original', 4032, 3024, 2000000, 'public.heic', 'c0', 'https://o', 50);
-        INSERT INTO resources VALUES ('p', 'JPEGFull', 4032, 3024, 900000, 'public.jpeg', 'c2', NULL, NULL);
-        INSERT INTO resources VALUES ('p', 'JPEGMed', 2048, 1536, 300000, 'public.jpeg', 'c3', NULL, NULL);
-        INSERT INTO resources VALUES ('p', 'JPEGThumb', 480, 360, 30000, 'public.jpeg', 'c1', NULL, NULL);
-        INSERT INTO resources VALUES ('v', 'Original', 1920, 1080, 9000000, 'com.apple.quicktime-movie', 'c4', NULL, NULL);
-        INSERT INTO resources VALUES ('v', 'VidMed', 1280, 720, 3000000, 'com.apple.quicktime-movie', NULL, NULL, NULL);
-        INSERT INTO resources VALUES ('l', 'Original', 4032, 3024, 2500000, 'public.heic', 'c5', NULL, NULL);
-        INSERT INTO resources VALUES ('l', 'OriginalVidCompl', 1440, 1080, 3000000, 'com.apple.quicktime-movie', 'c6', NULL, NULL);
-        INSERT INTO resources VALUES ('l', 'JPEGLarge', 1600, 1200, 400000, 'public.jpeg', 'c7', NULL, NULL);
-        INSERT INTO meta VALUES ('walk_sync_token', 'old'), ('sync_token', 'newer'), ('library_version', '6');";
-
     #[test]
-    fn an_index_from_before_sources_is_migrated_in_place() {
-        let dir = temp("migrate");
+    fn an_index_from_other_code_is_left_alone() {
+        let dir = temp("other");
         let path = dir.join("library.sqlite");
-        Connection::open(&path).unwrap().execute_batch(V1).unwrap();
-        let conn = open(&path).unwrap();
-        assert!(dir.join("library.v1.sqlite").exists());
-
-        let renditions: Vec<String> = conn
-            .prepare("SELECT asset_id || ' ' || kind || ' ' || name || ' ' || key FROM renditions ORDER BY 1").unwrap()
-            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
-        assert_eq!(renditions, [
-            "l full Original c5", "l live OriginalVidCompl c6", "l medium JPEGLarge c7", "l original Original c5",
-            "p full JPEGFull c2", "p medium JPEGMed c3", "p original Original c0", "p thumb JPEGThumb c1",
-            "v full Original c4", "v original Original c4", "v video VidMed v-VidMed",
-        ]);
-        // The window's columns as they were, iCloud's in its own table.
-        let (thumb, favorite, size): (String, bool, i64) = conn
-            .query_row("SELECT thumb_path, favorite, size FROM assets WHERE id = 'p'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .unwrap();
-        assert_eq!((thumb.as_str(), favorite, size), ("thumbs/aa/c1.jpg", true, 2_000_000));
-        let gone: i64 = conn
-            .query_row("SELECT count(*) FROM pragma_table_info('assets') WHERE name IN ('rank', 'master_id', 'change_tag', 'subtype')", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(gone, 0);
-        let (master, rank, url): (String, i64, String) = conn
-            .query_row("SELECT m.master_id, m.rank, r.url FROM icloud_assets m
-                        JOIN icloud_resources r ON r.asset_id = m.asset_id AND r.kind = 'Original' WHERE m.asset_id = 'p'",
-                       [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .unwrap();
-        assert_eq!((master.as_str(), rank, url.as_str()), ("mp", 0, "https://o"));
-        assert_eq!(meta(&conn, "change_token").as_deref(), Some("newer"));
-        assert_eq!(meta(&conn, "sync_token"), None);
-        assert_eq!(meta(&conn, "source").as_deref(), Some("icloud"));
-        assert_eq!(meta(&conn, "schema"), Some(SCHEMA.to_string()));
-        assert_eq!(meta(&conn, "library_version").as_deref(), Some("6"));
-
-        // Removing an asset takes iCloud's rows with it.
-        drop(conn);
-        let mut conn = open(&path).unwrap();
-        Index::new(&mut conn).remove(&["p".into()]).unwrap();
-        let left: i64 = conn
-            .query_row("SELECT (SELECT count(*) FROM icloud_assets WHERE asset_id = 'p')
-                              + (SELECT count(*) FROM icloud_resources WHERE asset_id = 'p')
-                              + (SELECT count(*) FROM renditions WHERE asset_id = 'p')", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(left, 0);
+        Connection::open(&path).unwrap()
+            .execute_batch("CREATE TABLE assets (id TEXT PRIMARY KEY, master_id TEXT NOT NULL);
+                            INSERT INTO assets VALUES ('a', 'm');").unwrap();
+        let error = open(&path).err().expect("refused").to_string();
+        assert!(error.contains("pinhole-sync all"), "{error}");
+        let tables: i64 = Connection::open(&path).unwrap()
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table'", [], |r| r.get(0)).unwrap();
+        assert_eq!(tables, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

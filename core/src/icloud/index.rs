@@ -4,7 +4,7 @@
 //! records as iCloud sent them.
 
 use anyhow::Result;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection};
 
 use crate::db::Index;
 use crate::icloud::records::CloudAsset;
@@ -62,39 +62,6 @@ pub fn create(db: &Connection) -> Result<()> {
             DELETE FROM icloud_records WHERE asset_id = old.id;
         END;",
     )?;
-    Ok(())
-}
-
-/// From an index from before sources: its iCloud columns and tables into
-/// iCloud's own, and `renditions` chosen as the service chose them. The
-/// caller drops the old columns afterwards.
-pub fn migrate_from_v1(tx: &Transaction) -> Result<()> {
-    tx.execute_batch(
-        "ALTER TABLE resources RENAME TO icloud_resources;
-        ALTER TABLE raw_records RENAME TO icloud_records;",
-    )?;
-    create(tx)?;
-    tx.execute(
-        "INSERT INTO icloud_assets (asset_id, master_id, change_tag, rank, subtype)
-         SELECT id, master_id, change_tag, rank, subtype FROM assets",
-        [],
-    )?;
-    for (want, names) in CANDIDATES {
-        let order = format!(",{},", names.join(","));
-        let only_videos = if *want == Want::Video { "AND a.is_video" } else { "" };
-        tx.execute(
-            &format!(
-                "INSERT INTO renditions (asset_id, kind, name, key, width, height, size, file_type)
-                 SELECT r.asset_id, ?1, r.kind, coalesce(r.checksum, r.asset_id || '-' || r.kind),
-                        r.width, r.height, r.size, r.file_type
-                 FROM icloud_resources r JOIN assets a ON a.id = r.asset_id
-                 WHERE r.kind = (SELECT c.kind FROM icloud_resources c
-                                 WHERE c.asset_id = r.asset_id AND instr(?2, ',' || c.kind || ',') > 0
-                                 ORDER BY instr(?2, ',' || c.kind || ',') LIMIT 1) {only_videos}"
-            ),
-            params![want.name(), order],
-        )?;
-    }
     Ok(())
 }
 

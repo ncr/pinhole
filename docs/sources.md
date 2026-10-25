@@ -70,8 +70,8 @@ from (pinhole-fake's), is left alone.
 
 ## The index
 
-The window's columns in `assets` stay as they are, so the window reads an
-old and a new library alike. What only iCloud means moves out:
+`assets` keeps only what every source has, the columns the window reads
+among them. What only iCloud means is in iCloud's own tables:
 
 ```text
 assets          id, filename, item_type, asset_date, added_date, favorite,
@@ -93,32 +93,12 @@ renditions and the source's rows too, by triggers the source sets up with
 its tables, so the core never names them.
 
 A rendition's `key` is what its cached file and thumbnail are named by.
-For iCloud it is the file's checksum, as the cache has always used, so the
-photos already in the cache stay where they are and are found again.
+For iCloud it is the file's checksum.
 
-### Migrating
-
-An index from before (no `schema` in `meta`) is migrated in place as it is
-opened, in one transaction, after a copy of it is saved beside it as
-`library.v1.sqlite` (with `VACUUM INTO`, so it is whole even while the
-service has it open):
-
-1. `resources` becomes `icloud_resources` and `raw_records` becomes
-   `icloud_records`, as they are.
-2. `icloud_assets` is filled from `assets` (`master_id`, `change_tag`,
-   `rank`, `subtype`).
-3. `renditions` is filled from `icloud_resources`, choosing for each kind
-   what the service chose so far (`medium`: JPEGMed, else JPEGFull, else
-   JPEGLarge; `full`: JPEGFull, VidFull, Original; `video`: VidMed, VidFull,
-   Original; `original`: Original; `live`: OriginalVidCompl; `thumb`:
-   JPEGThumb), keyed by the checksum, else by `<asset>-<name>` as before.
-4. Those columns are dropped from `assets`, and `size` is added (the
-   original's).
-5. `sync_token` (else `walk_sync_token`) becomes `change_token`; `source`
-   becomes `icloud`; `schema` becomes 2.
-
-Nothing the window shows changes, and no thumbnail moves. The copy stays
-until it is removed by hand; it is how to go back to an older Pinhole.
+An index written by other code (another `schema` in `meta`, or none) is
+neither read nor written: opening it says to remove it and build the
+library again. Its thumbnails are named by the same keys, so a rebuild
+finds them on disk and fetches none.
 
 ## The service and pinhole-sync
 
