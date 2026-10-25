@@ -339,85 +339,99 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     const int clip = findIndex(library, "a.is_video AND a.duration BETWEEN 40 AND 300");
     auto mark = std::make_shared<double>(0);
     auto start = std::make_shared<int>(-1);
-    const QPointF middle(window->width() / 2.0, window->height() / 2.0);
-    const QPointF right(window->width() - 40.0, window->height() / 2.0);
-    const QPointF left(40.0, window->height() / 2.0);
+    // The grid's size, which is the content's: tiled on screen, the window
+    // (and its root item) can still report the size it asked for while the
+    // compositor gave it another.
+    // Worked out at each use: the compositor may size the window after the
+    // test has begun.
+    auto middle = [grid] { return QPointF(grid->width() / 2.0, grid->height() / 2.0); };
+    auto atRight = [grid] { return QPointF(grid->width() - 40.0, grid->height() / 2.0); };
+    auto atLeft = [grid] { return QPointF(40.0, grid->height() / 2.0); };
+    auto w = [grid] { return grid->width(); };
+    auto h = [grid] { return grid->height(); };
     // No menu anywhere: a two-finger tap (the right button) is only a touch.
     auto popups = [window] { return window->findChildren<QObject *>(QRegularExpression("Menu|Popup")).size(); };
     // Copy's tick seen, and anything in the status line meanwhile.
     auto ticked = std::make_shared<bool>(false);
     auto bottomLine = std::make_shared<bool>(false);
     auto steps = std::make_shared<QList<Step>>(QList<Step>{
-        {"a flick sets the grid coasting", [=] { swipe(window, middle, {0, 30}, 8); },
+        {"a flick sets the grid coasting", [=] { swipe(window, middle(), {0, 30}, 8); },
          [=] { return grid->animating(); }, 100},
-        {"a two-finger tap stops it, and opens nothing", [=] { click(window, middle, Qt::RightButton); },
+        {"a two-finger tap stops it, and opens nothing", [=] { click(window, middle(), Qt::RightButton); },
          [=, &viewer] { return !grid->animating() && !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
         {"a two-finger tap on a photo opens nothing",
          [=] {
-             *start = grid->indexAt(middle.x(), middle.y());
-             click(window, middle, Qt::RightButton);
+             *start = grid->indexAt(middle().x(), middle().y());
+             click(window, middle(), Qt::RightButton);
          },
          [=, &viewer] { return !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
-        {"a click opens the photo, selecting nothing", [=] { click(window, middle); },
+        {"a click opens the photo, selecting nothing", [=] { click(window, middle()); },
          [=, &viewer] { return viewer.isOpen() && viewer.index() == *start && grid->selectionCount() == 0; }, 900},
-        {"clicking the right side shows the next", [=] { click(window, right); },
+        {"clicking the right side shows the next", [=] { click(window, atRight()); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"clicking the left side shows the previous", [=] { click(window, left); },
+        {"clicking the left side shows the previous", [=] { click(window, atLeft()); },
          [&viewer, start] { return viewer.index() == *start; }},
-        {"a wheel notch down shows the next", [=] { wheel(window, middle, {}, {0, -120}); },
+        {"a wheel notch down shows the next", [=] { wheel(window, middle(), {}, {0, -120}); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"a long swipe to the left shows the next, once", [=] { swipe(window, middle, {-12, 2}, 30); },
+        {"a long swipe to the left shows the next, once", [=] { swipe(window, middle(), {-12, 2}, 30); },
          [&viewer, start] { return viewer.index() == *start + 2; }},
         {"two short swipes to the right show two before", [=] {
-             swipe(window, middle, {8, -1}, 8);
-             swipe(window, middle, {8, 1}, 8);
+             swipe(window, middle(), {8, -1}, 8);
+             swipe(window, middle(), {8, 1}, 8);
          },
          [&viewer, start] { return viewer.index() == *start; }},
-        {"a swipe left again shows the next", [=] { swipe(window, middle, {-10, 0}, 10); },
+        {"a swipe left again shows the next", [=] { swipe(window, middle(), {-10, 0}, 10); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"scrolling up and down with two fingers does nothing", [=] { swipe(window, middle, {2, -15}, 30); },
+        {"scrolling up and down with two fingers does nothing", [=] { swipe(window, middle(), {2, -15}, 30); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"a slightly slanted swipe still counts", [=] { swipe(window, middle, {-10, 5}, 10); },
+        {"a slightly slanted swipe still counts", [=] { swipe(window, middle(), {-10, 5}, 10); },
          [&viewer, start] { return viewer.index() == *start + 2; }},
         {"mid-swipe the photo follows the fingers",
          [=] {
-             wheel(window, middle, {}, {}, Qt::ScrollBegin, 900000);
+             wheel(window, middle(), {}, {}, Qt::ScrollBegin, 900000);
              for (int i = 0; i < 5; ++i)
-                 wheel(window, middle, {-10, 0}, {-80, 0}, Qt::ScrollUpdate, 900000 + 8 * (i + 1));
+                 wheel(window, middle(), {-10, 0}, {-80, 0}, Qt::ScrollUpdate, 900000 + 8 * (i + 1));
          },
          [&viewer] { return viewer.property("offset").toDouble() < -80; }, 100},
         {"stopping before lifting springs back to the same photo",
-         [=] { wheel(window, middle, {}, {}, Qt::ScrollEnd, 900400); },
+         [=] { wheel(window, middle(), {}, {}, Qt::ScrollEnd, 900400); },
          [&viewer, start] { return viewer.index() == *start + 2 && std::abs(viewer.property("offset").toDouble()) < 1; }, 900},
-        {"a pinch zooms in", [=] { pinch(window, middle, 2.0); },
+        {"a pinch zooms in", [=] { pinch(window, middle(), 2.0); },
          [&viewer] { return std::abs(viewer.property("zoom").toDouble() - 2.0) < 0.05; }},
-        {"zoomed, a swipe pans instead of paging", [=] { swipe(window, middle, {-6, -6}, 20); },
+        {"zoomed, a swipe pans instead of paging", [=] { swipe(window, middle(), {-6, -6}, 20); },
          [&viewer, start] {
              // Across or down, as far as the zoomed photo has room to move.
              const double moved = std::abs(viewer.property("panX").toDouble()) + std::abs(viewer.property("panY").toDouble());
              return viewer.index() == *start + 2 && std::abs(viewer.property("offset").toDouble()) < 1 && moved > 50;
          }},
+        {"zoomed to 3x in the middle, room to coast either way",
+         [=, &viewer] {
+             QMetaObject::invokeMethod(&viewer, "resetZoom");
+             QMetaObject::invokeMethod(&viewer, "zoomBy", Q_ARG(qreal, 3.0), Q_ARG(qreal, w() / 2), Q_ARG(qreal, (h() - 60) / 2)); // the photo area, above the carousel
+         },
+         [&viewer] {
+             const double zoom = viewer.property("zoom").toDouble(), y = viewer.property("panY").toDouble();
+             if (std::abs(zoom - 3) >= 0.05 || std::abs(y) >= 2)
+                 std::printf("selftest:      (zoom %.3f, pan %.1f,%.1f)\n", zoom, viewer.property("panX").toDouble(), y);
+             return std::abs(zoom - 3) < 0.05 && std::abs(y) < 2;
+         }, 800},
         {"a flick on a zoomed photo coasts on after the fingers lift",
          [=, &viewer] {
-             swipe(window, middle, {0, 14}, 8);
+             swipe(window, middle(), {0, 3}, 6); // gentle: it stays well inside the photo's edges
              *mark = viewer.property("panY").toDouble();
          },
          [=, &viewer] { return viewer.property("panY").toDouble() > *mark + 30; }, 250},
-        {"a flick down sets it coasting again", [=] { swipe(window, middle, {0, -14}, 8); },
+        {"a flick back sets it coasting again", [=] { swipe(window, middle(), {0, -3}, 6); },
          [=, &viewer] {
              *mark = viewer.property("panY").toDouble();
              return true;
          }, 30},
-        {"a two-finger tap stops the coast", [=] { click(window, middle, Qt::RightButton); },
-         [=, &viewer] {
-             // Where it stopped, or back at the edge it had passed.
-             const double y = viewer.property("panY").toDouble();
-             return std::abs(y - *mark) < 60 && viewer.isOpen();
-         }, 300},
-        {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle); },
+        {"a two-finger tap stops the coast", [=] { click(window, middle(), Qt::RightButton); },
+         [=, &viewer] { return std::abs(viewer.property("panY").toDouble() - *mark) < 25 && viewer.isOpen(); }, 300},
+        {"a double-click zoomed goes back to fitted", [=] { doubleClick(window, middle()); },
          [&viewer] { return viewer.isOpen() && viewer.property("zoom").toDouble() < 1.02; }, 900},
         {"clicking a thumbnail in the carousel slides there, the strip too",
-         [=] { click(window, QPointF(window->width() / 2.0 + 3 * 38, window->height() - 30.0)); },
+         [=] { click(window, QPointF(w() / 2.0 + 3 * 38, h() - 30.0)); },
          [=, &viewer] {
              // Only the two photos slide: the one it came from sits beside the
              // new one, the strip travels the rest of the way.
@@ -434,7 +448,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
                  std::printf("selftest:      (shows %d, wanted %d)\n", viewer.index() - *start, 5);
              return viewer.index() == *start + 5;
          }},
-        {"pinching closed goes back to the library", [=] { pinch(window, middle, 0.5); },
+        {"pinching closed goes back to the library", [=] { pinch(window, middle(), 0.5); },
          [&viewer] { return !viewer.isOpen(); }, 900},
         {"a click opens it again", [=] { click(window, grid->rectOf(*start + 5).center()); },
          [&viewer] { return viewer.isOpen(); }, 900},
@@ -487,14 +501,14 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [] { return true; }, 7000},
         {"a two-finger tap in the viewer neither closes nor steps", [=, &viewer] {
              *mark = viewer.index();
-             click(window, middle, Qt::RightButton);
+             click(window, middle(), Qt::RightButton);
          },
          [=, &viewer] { return viewer.isOpen() && viewer.index() == int(*mark) && popups() == 0; }},
-        {"the mouse's back button goes back to the library", [=] { click(window, middle, Qt::BackButton); },
+        {"the mouse's back button goes back to the library", [=] { click(window, middle(), Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
         {"a double-click opens it and leaves it open", [=] { doubleClick(window, grid->rectOf(*start).center()); },
          [&viewer] { return viewer.isOpen(); }, 900},
-        {"double-click in the viewer goes back", [=] { doubleClick(window, middle); },
+        {"double-click in the viewer goes back", [=] { doubleClick(window, middle()); },
          [&viewer] { return !viewer.isOpen(); }},
         {"the Select button enters select mode", [=] { click(window, centreOf(window, "selectButton")); },
          [=, &viewer] { return grid->selecting() && !viewer.isOpen(); }},
@@ -516,7 +530,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return clip >= 0 && length() > 0 && at() > 0; }, 6000},
         {"clicking three quarters along the bottom seeks there",
          // The bar runs along the top of the carousel.
-         [=] { click(window, QPointF(window->width() * 0.75, window->height() - 60.0 - 8.0)); },
+         [=] { click(window, QPointF(w() * 0.75, h() - 60.0 - 8.0)); },
          [=] {
              *mark = at();
              return std::abs(*mark / length() - 0.75) < 0.03;
@@ -524,7 +538,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         {"Shift+Left goes back ten seconds",
          [=] { QMetaObject::invokeMethod(video(), "skip", Q_ARG(QVariant, -10)); },
          [=] { return at() < *mark - 5000 && at() > *mark - 12000; }, 1500},
-        {"the video closes", [=] { click(window, middle, Qt::BackButton); },
+        {"the video closes", [=] { click(window, middle(), Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
     });
     Viewer *viewerPtr = &viewer;

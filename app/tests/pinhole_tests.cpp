@@ -373,6 +373,25 @@ private slots:
         QCOMPARE(m.panX(), -500.0);
     }
 
+    // Pulled past the edge and let go, then zoomed by keys before it had
+    // sprung back: the zoom decides where it goes, not the old edge.
+    void aZoomTakesOverFromASpringBack() {
+        ViewerMotion m = viewerShowing();
+        m.zoomBy(2, 500, 400);
+        settle(m);
+        double t = 1000;
+        m.begin(t);
+        for (int i = 0; i < 120; ++i)
+            m.move(t += 16, -4, 0); // past the left edge
+        m.end(t + 200);
+        m.advance(1.0 / 120); // springing back
+        m.resetZoom();
+        m.zoomBy(3, 500, 400);
+        settle(m);
+        QCOMPARE(m.zoom(), 3.0);
+        QCOMPARE(m.panX(), 0.0);
+    }
+
     void whatGoesOutIsWhatWasChosenThroughAReload() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir before, after;

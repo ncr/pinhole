@@ -165,8 +165,11 @@ void ViewerMotion::panPhysicsFrom(bool keepMotion) {
 }
 
 void ViewerMotion::stopPanPhysics() {
-    m_panXPhysics.stop();
-    m_panYPhysics.stop();
+    // Everything stops, a spring back from an edge included (ScrollPhysics
+    // stop() keeps that one going): what takes over (a zoom, a pinch, the
+    // easing to the edges) brings the photo within them itself.
+    m_panXPhysics.jumpTo(m_panX);
+    m_panYPhysics.jumpTo(m_panY);
 }
 
 void ViewerMotion::touch(double t) {
