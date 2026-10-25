@@ -50,6 +50,8 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // The selection's border: the Omarchy theme's accent.
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
+    // The window's colour, showing between the cells.
+    Q_PROPERTY(QColor background MEMBER m_background NOTIFY backgroundChanged)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -150,15 +152,16 @@ public:
     double scrollSpeedRows() const { return m_speedRows; }
 
 signals:
-    // Double-click on a photo: open it.
+    // A click or tap on a photo: open it.
     void activated(int index, QRectF rect);
     void scrolled();
     void selectionChanged();
     void accentChanged();
+    void backgroundChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
-    // Right-click: the menu, at `pos`. A photo that was not selected is
-    // selected alone first, as in Files; `index` is -1 between photos.
+    // Right-click: the menu, at `pos`, for the photo there (-1 between
+    // photos); for the selection when that photo is in it.
     void menuRequested(int index, QPointF pos);
     void libraryChanged();
     void columnsChanged();
@@ -224,8 +227,12 @@ private:
     QPointF m_pressAt;
     int m_pressIndex = -1;
     bool m_dragged = false;
+    // The press stopped the grid moving: its click opens nothing.
+    bool m_pressStopped = false;
     bool m_scrubbing = false;
     QColor m_accent{0xff, 0xd6, 0x0a};
+    // What shows between the cells, for their rounded corners.
+    QColor m_background{0x0e, 0x0e, 0x10};
     Anchor m_reloadAnchor{-1, 0, true};
     // Position moves for the render thread to apply to its texture cache.
     std::shared_ptr<std::vector<int>> m_pendingMoves;

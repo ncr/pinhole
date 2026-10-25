@@ -9,6 +9,7 @@ Item {
     id: root
 
     required property var grid
+    property double openedAt: 0
     // Right-click: the window's photo menu.
     signal menuRequested(real x, real y)
     readonly property bool shown: viewer.open || progress > 0
@@ -36,6 +37,7 @@ Item {
         target: viewer
         function onOpenChanged() {
             if (viewer.open) {
+                root.openedAt = Date.now()
                 root.cell = viewer.origin
                 closing.stop()
                 opening.start()
@@ -171,6 +173,10 @@ Item {
                 root.togglePlay()
         }
         onDoubleClicked: mouse => {
+            // The second click of a double-click that opened the photo
+            // (a single click opens) must not close it again.
+            if (Date.now() - root.openedAt < 600)
+                return
             const s = sideAt(mouse.x)
             if (s !== 0)
                 viewer.step(s)

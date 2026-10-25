@@ -23,8 +23,8 @@ Item {
             [qsTr("Right edge"), qsTr("Drag the date scrubber")]
         ] },
         { title: qsTr("Selecting"), keys: [
-            [qsTr("Click"), qsTr("Select a photo")],
-            [qsTr("Ctrl+click"), qsTr("Add or remove one")],
+            [qsTr("Click"), qsTr("Open the photo")],
+            [qsTr("Ctrl+click"), qsTr("Select several: add or remove one")],
             [qsTr("Shift+click"), qsTr("Select a range")],
             ["Ctrl+A", qsTr("Select all")],
             ["Esc", qsTr("Clear the selection")]
@@ -37,7 +37,7 @@ Item {
             ["Ctrl+Shift+E", qsTr("Export as JPEG and MP4")]
         ] },
         { title: qsTr("Viewing"), keys: [
-            [qsTr("Double-click"), qsTr("Open the photo; again to go back")],
+            [qsTr("Double-click"), qsTr("Back to the library")],
             ["Space  Enter", qsTr("Open the photo under the pointer")],
             [qsTr("Click a side"), qsTr("Previous, next")],
             [qsTr("Wheel"), qsTr("Previous, next")],

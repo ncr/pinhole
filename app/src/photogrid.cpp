@@ -113,6 +113,9 @@ struct GridRenderState {
         QSGOpacityNode *opacity = nullptr;
         QSGGeometryNode *placeholders = nullptr;
         std::unordered_map<qint64, QSGGeometryNode *> groups;
+        // The cells' rounded corners: the background drawn over each
+        // corner outside its arc, above the photos of the same layer.
+        QSGGeometryNode *corners = nullptr;
     };
     Slot drawSlots[2];
 
@@ -225,9 +228,7 @@ void PhotoGrid::touched(double timeMs, const char *) {
 }
 
 void PhotoGrid::mouseDoubleClickEvent(QMouseEvent *event) {
-    const int index = indexAt(event->position().x(), event->position().y());
-    if (index >= 0)
-        emit activated(index, rectOf(index));
+    // The first click opened the photo already.
     event->accept();
 }
 
@@ -268,6 +269,7 @@ void PhotoGrid::reveal(int index) {
 
 void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     // A click, or a tap with tap-to-click, is a touch too.
+    m_pressStopped = m_physics.animating() || m_zoom.active;
     touched(double(event->timestamp()), "click");
     m_pressAt = event->position();
     m_pressIndex = indexAt(event->position().x(), event->position().y());
@@ -276,12 +278,6 @@ void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::RightButton) {
         const int index = m_pressIndex;
         m_pressIndex = -1;
-        if (index >= 0 && !m_selected.contains(index)) {
-            m_selected = {index};
-            m_selectionAnchor = index;
-            emit selectionChanged();
-            update();
-        }
         emit menuRequested(index, event->position());
     }
 }
@@ -292,14 +288,8 @@ void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {
     if ((event->position() - m_pressAt).manhattanLength() < 6)
         return;
     m_dragged = true;
-    // Dragging an unselected photo drags that photo alone.
-    if (!m_selected.contains(m_pressIndex)) {
-        m_selected = {m_pressIndex};
-        m_selectionAnchor = m_pressIndex;
-        emit selectionChanged();
-        update();
-    }
-    emit dragRequested(selection());
+    // A photo in the selection drags the selection; any other, itself.
+    emit dragRequested(m_selected.contains(m_pressIndex) ? selection() : QList<int>{m_pressIndex});
 }
 
 void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
@@ -312,16 +302,24 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
             clearSelection();
         return;
     }
-    if (mods & Qt::ShiftModifier && m_selectionAnchor >= 0) {
-        for (int i = std::min(index, m_selectionAnchor); i <= std::max(index, m_selectionAnchor); ++i)
+    // Ctrl and Shift gather several photos, to copy, export or drag
+    // together; only then is anything marked as selected.
+    if (mods & Qt::ShiftModifier) {
+        const int anchor = m_selectionAnchor >= 0 ? m_selectionAnchor : index;
+        for (int i = std::min(index, anchor); i <= std::max(index, anchor); ++i)
             m_selected.insert(i);
+        m_selectionAnchor = index;
     } else if (mods & Qt::ControlModifier) {
         if (!m_selected.erase(index))
             m_selected.insert(index);
         m_selectionAnchor = index;
     } else {
-        m_selected = {index};
-        m_selectionAnchor = index;
+        // A click or a tap opens the photo, as in Photos; one that only
+        // stopped the grid coasting does not.
+        clearSelection();
+        if (!m_pressStopped)
+            emit activated(index, rectOf(index));
+        return;
     }
     emit selectionChanged();
     update();
@@ -900,6 +898,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             slot.placeholders->setMaterial(new QSGVertexColorMaterial);
             slot.placeholders->setFlag(QSGNode::OwnsMaterial);
             slot.opacity->appendChildNode(slot.placeholders);
+            slot.corners = new QSGGeometryNode;
+            auto *cornerGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
+            cornerGeometry->setDrawingMode(QSGGeometry::DrawTriangles);
+            slot.corners->setGeometry(cornerGeometry);
+            slot.corners->setFlag(QSGNode::OwnsGeometry);
+            slot.corners->setMaterial(new QSGVertexColorMaterial);
+            slot.corners->setFlag(QSGNode::OwnsMaterial);
+            slot.opacity->appendChildNode(slot.corners);
             root->appendChildNode(slot.opacity);
         }
         rs.selection = new QSGGeometryNode;
@@ -1324,6 +1330,53 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         m_pinTracked = true;
     }
 
+    // Rounded corners, a little, as in Photos: over each corner of a cell,
+    // the background outside a quarter circle. The radius grows with the
+    // cell up to 5 px; on cells too small to see it, none.
+    const QColor bg = m_background;
+    const uchar bgr = uchar(bg.red()), bgg = uchar(bg.green()), bgb = uchar(bg.blue());
+    auto writeCorners = [&](QSGGeometryNode *node, const Built &b) {
+        std::vector<QRectF> cells;
+        cells.reserve(b.colours.size());
+        for (const auto &[r, c] : b.colours)
+            cells.push_back(r);
+        for (const auto &[key, group] : b.byTexture)
+            for (const Quad &q : group.second)
+                cells.push_back(q.rect);
+        const double side = cells.empty() ? 0 : cells.front().width();
+        const double radius = std::min(5.0, side * 0.04);
+        QSGGeometry *g = node->geometry();
+        if (radius < 1.5) {
+            g->allocate(0);
+            node->markDirty(QSGNode::DirtyGeometry);
+            return;
+        }
+        const int segments = radius >= 3 ? 4 : 2;
+        g->allocate(int(cells.size()) * 4 * segments * 3);
+        auto *v = g->vertexDataAsColoredPoint2D();
+        static constexpr double kQuarter = M_PI / 2;
+        for (const QRectF &r : cells) {
+            // Each corner, and the centre of its arc.
+            const QPointF corners[4] = {r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft()};
+            const QPointF centres[4] = {r.topLeft() + QPointF(radius, radius), r.topRight() + QPointF(-radius, radius),
+                                        r.bottomRight() + QPointF(-radius, -radius),
+                                        r.bottomLeft() + QPointF(radius, -radius)};
+            for (int c = 0; c < 4; ++c) {
+                const double start = M_PI + c * kQuarter; // top left's arc runs from 180° to 270°
+                for (int i = 0; i < segments; ++i) {
+                    const double a0 = start + kQuarter * i / segments, a1 = start + kQuarter * (i + 1) / segments;
+                    v[0].set(float(corners[c].x()), float(corners[c].y()), bgr, bgg, bgb, 255);
+                    v[1].set(float(centres[c].x() + radius * std::cos(a0)), float(centres[c].y() + radius * std::sin(a0)),
+                             bgr, bgg, bgb, 255);
+                    v[2].set(float(centres[c].x() + radius * std::cos(a1)), float(centres[c].y() + radius * std::sin(a1)),
+                             bgr, bgg, bgb, 255);
+                    v += 3;
+                }
+            }
+        }
+        node->markDirty(QSGNode::DirtyGeometry);
+    };
+
     // 5. Write the geometry into the two slots.
     int batches = 0;
     for (int k = 0; k < 2; ++k) {
@@ -1374,7 +1427,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 material->setFiltering(QSGTexture::Linear);
                 node->setMaterial(material);
                 node->setFlag(QSGNode::OwnsMaterial);
-                slot.opacity->appendChildNode(node);
+                // Under the corners, which round it.
+                slot.opacity->insertChildNodeBefore(node, slot.corners);
             }
             auto *material = static_cast<QSGTextureMaterial *>(node->material());
             // Any texture on the page binds the page; this one is in use this
@@ -1398,8 +1452,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             }
             node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
         }
+        writeCorners(slot.corners, b);
         if (opacity > 0)
-            batches += int(b.byTexture.size()) + 1;
+            batches += int(b.byTexture.size()) + 2;
     }
 
     // The selection: a border inside each selected cell of the main layer.

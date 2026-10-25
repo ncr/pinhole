@@ -313,16 +313,19 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     const QPointF left(40.0, window->height() / 2.0);
     auto menu = [window] { return window->findChild<QObject *>(QStringLiteral("photoMenu")); };
     auto steps = std::make_shared<QList<Step>>(QList<Step>{
-        {"right-click selects the photo and opens the menu",
+        {"right-click opens the menu for that photo, selecting nothing",
          [=] {
              *start = grid->indexAt(middle.x(), middle.y());
              click(window, middle, Qt::RightButton);
          },
-         [=] { return grid->selection() == QList<int>{*start} && menu() && menu()->property("opened").toBool(); }},
+         [=] {
+             return grid->selectionCount() == 0 && menu() && menu()->property("opened").toBool() &&
+                    menu()->property("target").toInt() == *start;
+         }},
         {"the menu closes", [=] { QMetaObject::invokeMethod(menu(), "close"); },
          [=] { return !menu()->property("visible").toBool(); }},
-        {"double-click opens the photo", [=] { doubleClick(window, middle); },
-         [&viewer, start] { return viewer.isOpen() && viewer.index() == *start; }},
+        {"a click opens the photo, selecting nothing", [=] { click(window, middle); },
+         [=, &viewer] { return viewer.isOpen() && viewer.index() == *start && grid->selectionCount() == 0; }, 900},
         {"clicking the right side shows the next", [=] { click(window, right); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
         {"clicking the left side shows the previous", [=] { click(window, left); },
@@ -348,8 +351,8 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return !menu()->property("visible").toBool(); }},
         {"the mouse's back button goes back to the library", [=] { click(window, middle, Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
-        {"double-click opens again", [=] { doubleClick(window, grid->rectOf(*start).center()); },
-         [&viewer] { return viewer.isOpen(); }},
+        {"a double-click opens it and leaves it open", [=] { doubleClick(window, grid->rectOf(*start).center()); },
+         [&viewer] { return viewer.isOpen(); }, 900},
         {"double-click in the viewer goes back", [=] { doubleClick(window, middle); },
          [&viewer] { return !viewer.isOpen(); }},
         {"a video opens and plays", [=, &viewer] { viewer.openAt(clip, grid->rectOf(clip)); },
