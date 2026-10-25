@@ -102,6 +102,12 @@ void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback
     send(QJsonObject{{"id", id}, {"method", "fetch"}, {"params", params}});
 }
 
+void ServiceClient::call(const QString &method, const QJsonObject &params, Callback done) {
+    const qint64 id = m_nextId++;
+    m_waiting.insert(id, std::move(done));
+    send(QJsonObject{{"id", id}, {"method", method}, {"params", params}});
+}
+
 void ServiceClient::sync() {
     send(QJsonObject{{"id", m_nextId++}, {"method", "sync"}});
 }

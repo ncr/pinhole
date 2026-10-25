@@ -29,6 +29,8 @@ order, since a cached file answers at once while a download takes a while.
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health` |
 | `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
+| `storage` | | the cache: `cache` (its folder), `cap_bytes`, `min_cap_bytes`, `used_bytes`, `kinds` (bytes of each kind), `library`, `library_bytes`, `freeing`, `moving` (`from`, `done_bytes`, `total_bytes`, or null) |
+| `set_storage` | `cap_bytes` and/or `cache` (an absolute folder) | as `storage`, after the change (see Cache) |
 | `ping` | | `{}` |
 
 `kind` picks the rendition, the first one the asset has:
@@ -102,8 +104,20 @@ A cached file is answered with `path` alone.
 
 Files land in `~/.cache/pinhole/<kind>/`, named by iCloud's checksum of the
 file, so a re-edited photo gets a new name and duplicates share one. A hit
-refreshes the file's modification time; past the size limit
-(`PINHOLE_CACHE_GB`, 10 by default) the least recently used files go.
+refreshes the file's modification time; past the size limit (10 GB by
+default) the least recently used files go, every two minutes, down to nine
+tenths of it.
+
+The window's settings panel changes the folder and the limit with
+`set_storage`; the service keeps them in `~/.config/pinhole/settings.json`
+(`cache`, `cache_bytes`) and reads them as it starts. `--cache` and
+`PINHOLE_CACHE_GB` override them. A limit is at least 1 GB. A lower one
+than the cache holds frees space at once, down to the limit itself. A new
+folder takes new files at once while the cached ones move over in the
+background (renamed on one disk, copied across two, keeping when each was
+last used); until a file has moved it is served from the old folder. The
+old folders go once empty. A folder inside the cache's, or the other way
+round, is refused, as is one that cannot be written.
 
 ## Links
 

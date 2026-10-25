@@ -168,7 +168,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.margins: 16
         // Above select mode's bar when the window is too narrow for both.
-        anchors.bottomMargin: selectBar.visible && selectBar.x + selectBar.width > win.width - 16 - width - 8
+        anchors.bottomMargin: selectBar.visible && selectBar.x + selectBar.width > win.width - win.cornerWidth
                               ? 20 + selectBar.height + 8 : 16
         text: "?"
         width: height
@@ -176,6 +176,23 @@ ApplicationWindow {
         hint: ""
         onTapped: help.shown = true
     }
+
+    // The settings, beside it: where photos are kept and how much.
+    ShellButton {
+        id: settingsButton
+        objectName: "settingsButton"
+        floating: true
+        visible: helpButton.visible
+        anchors.right: helpButton.left
+        anchors.rightMargin: 6
+        anchors.bottom: helpButton.bottom
+        // A cog, from the Nerd Font Omarchy's type is.
+        text: "\uf013"
+        width: height
+        onTapped: settings.shown = true
+    }
+    // What the two corner buttons take of the bottom right.
+    readonly property real cornerWidth: 16 + helpButton.width + 6 + settingsButton.width + 8
 
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
@@ -215,8 +232,8 @@ ApplicationWindow {
         // becomes "Originals", then the keys go, then the count is only the
         // number, then not there (the ticks show it). The first that fits.
         readonly property int fit: {
-            // Clear of the ? button, on both sides as it is centred.
-            const room = win.width - 2 * (16 + helpButton.width + 8)
+            // Clear of the corner buttons, on both sides as it is centred.
+            const room = win.width - 2 * win.cornerWidth
             for (let level = 0; level < 4; ++level)
                 if (widthAt(level) <= room)
                     return level
@@ -287,10 +304,11 @@ ApplicationWindow {
     }
 
     HelpOverlay { id: help; objectName: "help" }
+    SettingsPanel { id: settings; objectName: "settings" }
 
-    readonly property bool inGrid: !photoViewer.shown && !help.shown
-    // The buttons' own keys (ShellButton.qml), but for while the help is up.
-    readonly property bool buttonKeys: !help.shown
+    readonly property bool inGrid: !photoViewer.shown && !help.shown && !settings.shown
+    // The buttons' own keys (ShellButton.qml), but for while a panel is up.
+    readonly property bool buttonKeys: !help.shown && !settings.shown
 
     // What Copy and Export act on: the selection, else the photo in view.
     // What Copy and Export take: the photo on screen in the viewer, else the
@@ -310,9 +328,10 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
+    Shortcut { enabled: !settings.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
+    Shortcut { enabled: win.inGrid; sequence: ","; context: Qt.ApplicationShortcut; onActivated: settings.shown = true }
 
     // Every button presses on its own key too, shown beside it, while it
     // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,

@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use crate::auth::{ProcessProvider, ProviderError};
 use crate::cloudkit::{Downloader, PhotosClient};
 use crate::source::pair_records_with_leftovers;
+use crate::storage::Storage;
 use crate::stream::Streams;
 use crate::sync::{now_secs, thumb_path};
 
@@ -33,6 +34,9 @@ pub struct Config {
     pub socket: PathBuf,
     pub auth: PathBuf,
     pub cache_cap: u64,
+    /// Where the cache's folder and limit are kept when the window changes
+    /// them (storage.rs).
+    pub settings: PathBuf,
     pub downloads: usize,
     /// Seconds between rounds of following iCloud's change feed.
     pub sync_every: u64,
@@ -75,6 +79,8 @@ struct Job {
 
 struct Shared {
     config: Config,
+    /// The cache's folder and limit, as they are now.
+    storage: Arc<Storage>,
     lookups: Mutex<mpsc::Sender<Job>>,
     downloads: Mutex<mpsc::Sender<Job>>,
     /// Requests waiting on each file being fetched: a second request for the
@@ -247,8 +253,10 @@ pub fn run(config: Config) -> Result<()> {
     let (lookup_tx, lookup_rx) = mpsc::channel::<Job>();
     let (sync_tx, sync_rx) = mpsc::channel::<()>();
     let (download_tx, download_rx) = mpsc::channel::<Job>();
+    let storage = Arc::new(Storage::new(config.cache.clone(), config.cache_cap, config.settings.clone()));
     let shared = Arc::new(Shared {
         config,
+        storage,
         lookups: Mutex::new(lookup_tx),
         downloads: Mutex::new(download_tx),
         waiting: Mutex::new(HashMap::new()),
@@ -271,8 +279,8 @@ pub fn run(config: Config) -> Result<()> {
         std::thread::spawn(move || download_loop(shared, rx));
     }
     {
-        let shared = shared.clone();
-        std::thread::spawn(move || evict_loop(shared));
+        let storage = shared.storage.clone();
+        std::thread::spawn(move || storage.evict_loop());
     }
     {
         let shared = shared.clone();
@@ -341,11 +349,26 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
             }
             Some("status") => reply.send(Ok(json!({
                 "library": shared.config.library,
-                "cache": shared.config.cache,
-                "cache_bytes": cache_size(&shared.config.cache),
+                "cache": shared.storage.cache(),
+                "cache_bytes": shared.storage.report(&shared.config.library)["used_bytes"],
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
                 "health": shared.health.lock().unwrap().name(),
             }))),
+            Some("storage") => reply.send(Ok(shared.storage.report(&shared.config.library))),
+            Some("set_storage") => {
+                let params = &request["params"];
+                let mut result = Ok(());
+                if let Some(cap) = params["cap_bytes"].as_u64() {
+                    result = shared.storage.set_cap(cap);
+                }
+                if let (Ok(()), Some(cache)) = (&result, params["cache"].as_str()) {
+                    result = shared.storage.set_cache(PathBuf::from(cache));
+                }
+                match result {
+                    Ok(()) => reply.send(Ok(shared.storage.report(&shared.config.library))),
+                    Err(e) => reply.send(Err(("bad_request", format!("{e:#}")))),
+                }
+            }
             Some("fetch") => {
                 if db.is_none() {
                     db = Connection::open_with_flags(
@@ -395,15 +418,15 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     };
     let file_type = file_type.unwrap_or_default();
     let name = checksum.unwrap_or_else(|| format!("{asset}-{rendition}"));
-    let path = shared.config.cache.join(kind).join(
+    let relative = Path::new(kind).join(
         thumb_path(&name).replacen("thumbs/", "", 1).replace(".jpg", &format!(".{}", extension(&file_type))),
     );
-    let info = json!({"path": path, "type": file_type, "rendition": rendition, "cached": true});
-
-    if path.exists() {
+    if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
-        return reply.send(Ok(info));
+        return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true})));
     }
+    let path = shared.storage.cache().join(&relative);
+    let info = json!({"path": path, "type": file_type, "rendition": rendition, "cached": true});
 
     let streamable = matches!(kind, "video" | "live");
     let mut waiting = shared.waiting.lock().unwrap();
@@ -635,47 +658,6 @@ fn download(shared: &Shared, downloader: &Downloader, job: &Job) -> std::result:
         return Err(Fetch::Failed(e.to_string()));
     }
     Ok(())
-}
-
-fn cache_files(dir: &Path, out: &mut Vec<(SystemTime, u64, PathBuf)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            cache_files(&path, out);
-        } else if path.extension().is_none_or(|e| e != "part") {
-            out.push((meta.modified().unwrap_or(SystemTime::UNIX_EPOCH), meta.len(), path));
-        }
-    }
-}
-
-fn cache_size(dir: &Path) -> u64 {
-    let mut files = Vec::new();
-    cache_files(dir, &mut files);
-    files.iter().map(|f| f.1).sum()
-}
-
-/// Every two minutes: past the size limit, the least recently used files go
-/// until the cache is back under nine tenths of it.
-fn evict_loop(shared: Arc<Shared>) {
-    loop {
-        let mut files = Vec::new();
-        cache_files(&shared.config.cache, &mut files);
-        let mut total: u64 = files.iter().map(|f| f.1).sum();
-        if total > shared.config.cache_cap {
-            files.sort();
-            for (_, size, path) in files {
-                if total <= shared.config.cache_cap / 10 * 9 {
-                    break;
-                }
-                if std::fs::remove_file(&path).is_ok() {
-                    total -= size;
-                }
-            }
-        }
-        std::thread::sleep(Duration::from_secs(120));
-    }
 }
 
 /// Follows iCloud's change feed: every `sync_every` seconds, or when a

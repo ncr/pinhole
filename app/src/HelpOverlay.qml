@@ -35,6 +35,7 @@ Item {
         ] },
         { title: "Pinhole", keys: [
             ["?", qsTr("Keys")],
+            [",", qsTr("Settings")],
             ["Q", qsTr("Quit")]
         ] }
     ]

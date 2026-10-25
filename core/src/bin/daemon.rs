@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use pinhole_core::service::{self, Config};
+use pinhole_core::storage;
 
 #[derive(Parser)]
 struct Cli {
@@ -34,13 +35,18 @@ fn env_dir(var: &str, fallback: &str) -> PathBuf {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let cap_gb: u64 = std::env::var("PINHOLE_CACHE_GB").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    // The cache's folder and limit: as given, else as the window last set
+    // them (the settings), else ~/.cache/pinhole and 10 GB.
+    let settings = storage::settings_path();
+    let (saved_cache, saved_cap) = storage::read_settings(&settings);
+    let cap = std::env::var("PINHOLE_CACHE_GB").ok().and_then(|v| v.parse::<u64>().ok()).map(|gb| gb << 30);
     service::run(Config {
         library: cli.library.unwrap_or_else(|| env_dir("XDG_DATA_HOME", ".local/share").join("pinhole/library")),
-        cache: cli.cache.unwrap_or_else(|| env_dir("XDG_CACHE_HOME", ".cache").join("pinhole")),
+        cache: cli.cache.or(saved_cache).unwrap_or_else(|| env_dir("XDG_CACHE_HOME", ".cache").join("pinhole")),
         socket: cli.socket.unwrap_or_else(|| env_dir("XDG_RUNTIME_DIR", ".cache").join("pinhole.sock")),
         auth: cli.auth.unwrap_or_else(pinhole_core::auth::default_provider),
-        cache_cap: cap_gb << 30,
+        cache_cap: cap.or(saved_cap).unwrap_or(storage::DEFAULT_CAP),
+        settings,
         downloads: cli.downloads,
         sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60),
     })

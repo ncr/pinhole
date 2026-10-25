@@ -23,6 +23,7 @@
 #include "photoprovider.h"
 #include "selftest.h"
 #include "serviceclient.h"
+#include "storage.h"
 #include "viewer.h"
 #include "theme.h"
 #include "thumbnailloader.h"
@@ -100,6 +101,7 @@ int main(int argc, char *argv[]) {
     ServiceClient service(library.dir());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
+    Storage storage(&service);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
@@ -109,6 +111,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
+    engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // How iCloud is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
@@ -283,6 +286,29 @@ int main(int argc, char *argv[]) {
                 });
             };
             (*next)();
+        });
+    }
+    // PINHOLE_SELFTEST=settings:<dir>: the settings panel as it opens, with a
+    // limit below what is kept stepped to, and once that is confirmed, as
+    // images in <dir>. Meant for a service on a scratch cache.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("settings:"))) {
+        QTimer::singleShot(1200, window, [window, test] {
+            QObject *panel = window->findChild<QObject *>(QStringLiteral("settings"));
+            const QString dir = test.mid(9);
+            panel->setProperty("shown", true);
+            QTimer::singleShot(1000, window, [=] {
+                window->grabWindow().save(dir + "/1-open.png");
+                QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));
+                QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));
+                QTimer::singleShot(800, window, [=] {
+                    window->grabWindow().save(dir + "/2-lower.png");
+                    QMetaObject::invokeMethod(panel, "confirm");
+                    QTimer::singleShot(2500, window, [=] {
+                        window->grabWindow().save(dir + "/3-freed.png");
+                        QCoreApplication::quit();
+                    });
+                });
+            });
         });
     }
     // PINHOLE_SELFTEST=zoomfast:<dir>: a quick pinch from 3 columns all the

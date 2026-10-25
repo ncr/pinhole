@@ -61,7 +61,8 @@ new, deleted and edited photos appear within a minute, without a restart.
 
 When cells grow past what the 480 px thumbnails can fill, the window asks
 `pinholed` for the 2048 px rendition. The window starts the service if it is
-not running; it keeps a size-capped cache in `~/.cache/pinhole` and logs to
+not running; it keeps a size-capped cache in `~/.cache/pinhole` (the folder
+and the limit can be changed with the gear button, or `,`) and logs to
 `~/.local/state/pinhole/pinholed.log`. Its protocol is in
 [docs/service.md](docs/service.md).
 

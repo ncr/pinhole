@@ -25,6 +25,9 @@ public:
     // `stream` URL to play it from.
     void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false);
 
+    // Any other method of docs/service.md, such as storage and set_storage.
+    void call(const QString &method, const QJsonObject &params, Callback done);
+
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
     // Ask the service to look for changes in iCloud now.
     void sync();
