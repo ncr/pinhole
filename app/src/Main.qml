@@ -174,7 +174,7 @@ ApplicationWindow {
         visible: outgoing.status !== ""
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
+        anchors.bottomMargin: grid.selecting ? 72 : 24
         width: statusText.implicitWidth + 24
         height: statusText.implicitHeight + 12
         radius: Math.min(6, theme.radius)
@@ -229,6 +229,87 @@ ApplicationWindow {
         }
     }
 
+    // Select mode, as in Photos on an iPhone: a button to enter it, and
+    // while in it a bar with what is selected and what to do with it.
+    Rectangle {
+        id: selectButton
+        objectName: "selectButton"
+        visible: win.inGrid && grid.count > 0
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 16
+        anchors.rightMargin: 24
+        width: selectLabel.implicitWidth + 28
+        height: selectLabel.implicitHeight + 12
+        radius: height / 2
+        color: grid.selecting ? theme.accent : (selectHover.hovered ? "#e0303036" : "#c0202024")
+        Text {
+            id: selectLabel
+            anchors.centerIn: parent
+            text: grid.selecting ? qsTr("Done") : qsTr("Select")
+            color: grid.selecting ? "black" : "white"
+            font.pixelSize: 13
+            font.bold: grid.selecting
+        }
+        HoverHandler { id: selectHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: grid.selecting = !grid.selecting }
+    }
+
+    Rectangle {
+        id: selectBar
+        visible: win.inGrid && grid.selecting
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 20
+        width: barRow.implicitWidth + 24
+        height: 40
+        radius: Math.min(10, theme.radius)
+        color: "#f0161618"
+        border.color: theme.accent
+        border.width: 1
+        Row {
+            id: barRow
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                rightPadding: 10
+                text: grid.selectionCount === 0 ? qsTr("Click photos to select them")
+                                                : qsTr("%n photo(s) selected", "", grid.selectionCount)
+                color: "white"
+                font.pixelSize: 13
+            }
+            Repeater {
+                model: [
+                    { label: qsTr("Copy"), act: () => outgoing.copy(grid.selection()) },
+                    { label: qsTr("Export originals"), act: () => outgoing.exportTo(grid.selection(), false) },
+                    { label: qsTr("Export as JPEG and MP4"), act: () => outgoing.exportTo(grid.selection(), true) },
+                    { label: qsTr("Select all"), act: () => grid.selectAll() }
+                ]
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property bool usable: grid.selectionCount > 0 || index === 3
+                    required property int index
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: actionLabel.implicitWidth + 20
+                    height: 28
+                    radius: Math.min(6, theme.radius)
+                    color: actionHover.hovered && usable ? "#40ffffff" : "transparent"
+                    opacity: usable ? 1 : 0.4
+                    Text {
+                        id: actionLabel
+                        anchors.centerIn: parent
+                        text: parent.modelData.label
+                        color: "white"
+                        font.pixelSize: 13
+                    }
+                    HoverHandler { id: actionHover; cursorShape: parent.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                    TapHandler { onTapped: if (parent.usable) parent.modelData.act() }
+                }
+            }
+        }
+    }
+
     HelpOverlay { id: help; objectName: "help" }
 
     readonly property bool inGrid: !photoViewer.shown && !help.shown
@@ -276,7 +357,7 @@ ApplicationWindow {
     Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
 
     Shortcut { enabled: win.inGrid; sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; onActivated: grid.selectAll() }
-    Shortcut { enabled: win.inGrid && grid.selectionCount > 0; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.clearSelection() }
+    Shortcut { enabled: win.inGrid && grid.selecting; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
 
     // Out of the app, from the grid or the viewer.
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }

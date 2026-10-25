@@ -50,6 +50,10 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // The selection's border: the Omarchy theme's accent.
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
+    // Select mode, entered on purpose (the Select button, Ctrl+A, a Ctrl or
+    // Shift click): clicks tick photos instead of opening them. Leaving it
+    // clears the selection.
+    Q_PROPERTY(bool selecting READ selecting WRITE setSelecting NOTIFY selectingChanged)
     // The window's colour, showing between the cells.
     Q_PROPERTY(QColor background MEMBER m_background NOTIFY backgroundChanged)
 
@@ -100,6 +104,8 @@ public:
     // Selection, as in Photos: click, Ctrl-click to add or remove,
     // Shift-click for a range.
     int selectionCount() const { return int(m_selected.size()); }
+    bool selecting() const { return m_selecting; }
+    void setSelecting(bool selecting);
     QColor accent() const { return m_accent; }
     void setAccent(const QColor &accent);
     Q_INVOKABLE QList<int> selection() const;
@@ -158,6 +164,7 @@ signals:
     void selectionChanged();
     void accentChanged();
     void backgroundChanged();
+    void selectingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
     // Right-click: the menu, at `pos`, for the photo there (-1 between
@@ -227,6 +234,7 @@ private:
     QPointF m_pressAt;
     int m_pressIndex = -1;
     bool m_dragged = false;
+    bool m_selecting = false;
     // The press stopped the grid moving: its click opens nothing.
     bool m_pressStopped = false;
     bool m_scrubbing = false;

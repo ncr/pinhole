@@ -3,5 +3,6 @@
   "Copied %n photo(s)": { "one": "Copied %n photo", "other": "Copied %n photos" },
   "Copied %n, some could not be fetched": { "one": "Copied %n; some could not be fetched", "other": "Copied %n; some could not be fetched" },
   "Exported %n photo(s) to %1": { "one": "Exported %n photo to %1", "other": "Exported %n photos to %1" },
-  "Export %n photo(s) to": { "one": "Export %n photo to", "other": "Export %n photos to" }
+  "Export %n photo(s) to": { "one": "Export %n photo to", "other": "Export %n photos to" },
+  "%n photo(s) selected": { "one": "%n photo selected", "other": "%n photos selected" }
 }

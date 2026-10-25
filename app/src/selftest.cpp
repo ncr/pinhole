@@ -14,6 +14,7 @@
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
 #include <QProcess>
+#include <QQuickItem>
 #include <QQuickWindow>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
@@ -259,15 +260,23 @@ void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer) 
 
 namespace {
 
-void mouse(QQuickWindow *window, QEvent::Type type, QPointF at, Qt::MouseButton button) {
+void mouse(QQuickWindow *window, QEvent::Type type, QPointF at, Qt::MouseButton button,
+           Qt::KeyboardModifiers mods = Qt::NoModifier) {
     const Qt::MouseButtons held = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::MouseButtons(button);
-    QMouseEvent event(type, at, window->mapToGlobal(at), button, held, Qt::NoModifier);
+    QMouseEvent event(type, at, window->mapToGlobal(at), button, held, mods);
     QGuiApplication::sendEvent(window, &event);
 }
 
-void click(QQuickWindow *window, QPointF at, Qt::MouseButton button = Qt::LeftButton) {
-    mouse(window, QEvent::MouseButtonPress, at, button);
-    mouse(window, QEvent::MouseButtonRelease, at, button);
+void click(QQuickWindow *window, QPointF at, Qt::MouseButton button = Qt::LeftButton,
+           Qt::KeyboardModifiers mods = Qt::NoModifier) {
+    mouse(window, QEvent::MouseButtonPress, at, button, mods);
+    mouse(window, QEvent::MouseButtonRelease, at, button, mods);
+}
+
+// The centre of a named item, in the window.
+QPointF centreOf(QQuickWindow *window, const char *name) {
+    auto *item = window->findChild<QQuickItem *>(QString::fromLatin1(name));
+    return item ? item->mapToScene(QPointF(item->width() / 2, item->height() / 2)) : QPointF(-1, -1);
 }
 
 void doubleClick(QQuickWindow *window, QPointF at) {
@@ -402,6 +411,22 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer] { return viewer.isOpen(); }, 900},
         {"double-click in the viewer goes back", [=] { doubleClick(window, middle); },
          [&viewer] { return !viewer.isOpen(); }},
+        {"the Select button enters select mode", [=] { click(window, centreOf(window, "selectButton")); },
+         [=, &viewer] { return grid->selecting() && !viewer.isOpen(); }},
+        {"in select mode a click ticks a photo instead of opening it",
+         [=] { click(window, grid->rectOf(*start).center()); },
+         [=, &viewer] { return !viewer.isOpen() && grid->selection() == QList<int>{*start}; }},
+        {"Shift+click ticks the range", [=] { click(window, grid->rectOf(*start - 3).center(), Qt::LeftButton, Qt::ShiftModifier); },
+         [=] { return grid->selectionCount() == 4; }},
+        {"clicking a ticked photo unticks it", [=] { click(window, grid->rectOf(*start - 1).center()); },
+         [=] { return grid->selectionCount() == 3; }},
+        {"Done leaves select mode and clears it", [=] { click(window, centreOf(window, "selectButton")); },
+         [=] { return !grid->selecting() && grid->selectionCount() == 0; }},
+        {"Ctrl+click starts selecting with that photo",
+         [=] { click(window, grid->rectOf(*start).center(), Qt::LeftButton, Qt::ControlModifier); },
+         [=, &viewer] { return grid->selecting() && grid->selectionCount() == 1 && !viewer.isOpen(); }},
+        {"and Done again", [=] { click(window, centreOf(window, "selectButton")); },
+         [=] { return !grid->selecting(); }},
         {"a video opens and plays", [=, &viewer] { viewer.openAt(clip, grid->rectOf(clip)); },
          [=] { return clip >= 0 && length() > 0 && at() > 0; }, 6000},
         {"clicking three quarters along the bottom seeks there",
@@ -417,6 +442,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         {"the video closes", [=] { click(window, middle, Qt::BackButton); },
          [&viewer] { return !viewer.isOpen(); }},
     });
+    Viewer *viewerPtr = &viewer;
     auto failures = std::make_shared<int>(0);
     auto run = std::make_shared<std::function<void(int)>>();
     *run = [=](int k) {
@@ -433,7 +459,12 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
             // PINHOLE_SELFTEST_DIR: the window after each step, to look at.
             if (const QString dir = qEnvironmentVariable("PINHOLE_SELFTEST_DIR"); !dir.isEmpty())
                 window->grabWindow().save(QStringLiteral("%1/mouse-%2.png").arg(dir).arg(k + 1, 2, 10, QLatin1Char('0')));
-            std::printf("selftest: %-4s %s\n", ok ? "ok" : "FAIL", (*steps)[k].what);
+            std::printf("selftest: %-4s %s%s\n", ok ? "ok" : "FAIL", (*steps)[k].what,
+                        ok ? "" : qPrintable(QStringLiteral(" (viewer %1 at start%2%3, offset %4)")
+                                                 .arg(viewerPtr->isOpen() ? "open" : "closed")
+                                                 .arg(viewerPtr->index() - *start >= 0 ? "+" : "")
+                                                 .arg(viewerPtr->index() - *start)
+                                                 .arg(viewerPtr->property("offset").toDouble(), 0, 'f', 0)));
             std::fflush(stdout);
             (*run)(k + 1);
         });

@@ -297,26 +297,24 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
         return;
     const int index = m_pressIndex;
     const auto mods = event->modifiers();
-    if (index < 0) {
-        if (!(mods & (Qt::ControlModifier | Qt::ShiftModifier)))
-            clearSelection();
-        return;
-    }
-    // Ctrl and Shift gather several photos, to copy, export or drag
-    // together; only then is anything marked as selected.
-    if (mods & Qt::ShiftModifier) {
+    if (index < 0)
+        return; // between photos: nothing, a selection included
+    // In select mode a click ticks a photo, Shift+click a range; a Ctrl or
+    // Shift click outside it enters it. Otherwise a click opens.
+    if (mods & (Qt::ControlModifier | Qt::ShiftModifier))
+        setSelecting(true);
+    if (m_selecting && !(mods & Qt::ShiftModifier)) {
+        if (!m_selected.erase(index))
+            m_selected.insert(index);
+        m_selectionAnchor = index;
+    } else if (mods & Qt::ShiftModifier) {
         const int anchor = m_selectionAnchor >= 0 ? m_selectionAnchor : index;
         for (int i = std::min(index, anchor); i <= std::max(index, anchor); ++i)
             m_selected.insert(i);
         m_selectionAnchor = index;
-    } else if (mods & Qt::ControlModifier) {
-        if (!m_selected.erase(index))
-            m_selected.insert(index);
-        m_selectionAnchor = index;
     } else {
         // A click or a tap opens the photo, as in Photos; one that only
         // stopped the grid coasting does not.
-        clearSelection();
         if (!m_pressStopped)
             emit activated(index, rectOf(index));
         return;
@@ -335,7 +333,18 @@ void PhotoGrid::setAccent(const QColor &accent) {
 
 QList<int> PhotoGrid::selection() const { return QList<int>(m_selected.begin(), m_selected.end()); }
 
+void PhotoGrid::setSelecting(bool selecting) {
+    if (selecting == m_selecting)
+        return;
+    m_selecting = selecting;
+    if (!selecting)
+        clearSelection();
+    emit selectingChanged();
+    update();
+}
+
 void PhotoGrid::selectAll() {
+    setSelecting(true);
     m_selected.clear();
     for (int i = 0; i < count(); ++i)
         m_selected.insert(m_selected.end(), i);
@@ -1467,8 +1476,12 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             for (auto it = m_selected.lower_bound(from); it != m_selected.end() && *it < to; ++it)
                 frames.push_back(cellRect(*it, l));
         }
+        // Each: a border, and a check badge in the bottom right corner as
+        // on an iPhone: a white ring, the accent inside, a white tick.
+        constexpr int kSegments = 16;
+        constexpr int kPerCell = 24 + 2 * kSegments * 3 + 12;
         QSGGeometry *g = rs.selection->geometry();
-        g->allocate(int(frames.size() * 24));
+        g->allocate(int(frames.size() * kPerCell));
         auto *v = g->vertexDataAsColoredPoint2D();
         const float w = 3;
         const uchar r = uchar(m_accent.red()), gr = uchar(m_accent.green()), b = uchar(m_accent.blue());
@@ -1481,12 +1494,42 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             v[5].set(x0, y1, r, gr, b, 255);
             v += 6;
         };
+        auto disc = [&](float cx, float cy, float radius, uchar dr, uchar dg, uchar db) {
+            for (int i = 0; i < kSegments; ++i) {
+                const double a0 = 2 * M_PI * i / kSegments, a1 = 2 * M_PI * (i + 1) / kSegments;
+                v[0].set(cx, cy, dr, dg, db, 255);
+                v[1].set(cx + radius * float(std::cos(a0)), cy + radius * float(std::sin(a0)), dr, dg, db, 255);
+                v[2].set(cx + radius * float(std::cos(a1)), cy + radius * float(std::sin(a1)), dr, dg, db, 255);
+                v += 3;
+            }
+        };
+        // A stroke from p to q, `t` thick, in white.
+        auto stroke = [&](QPointF p, QPointF q, double t) {
+            const QPointF d = q - p;
+            const double len = std::max(1e-6, std::hypot(d.x(), d.y()));
+            const QPointF n(-d.y() / len * t / 2, d.x() / len * t / 2);
+            const QPointF a = p + n, b2 = p - n, c = q + n, e = q - n;
+            v[0].set(float(a.x()), float(a.y()), 255, 255, 255, 255);
+            v[1].set(float(b2.x()), float(b2.y()), 255, 255, 255, 255);
+            v[2].set(float(c.x()), float(c.y()), 255, 255, 255, 255);
+            v[3].set(float(b2.x()), float(b2.y()), 255, 255, 255, 255);
+            v[4].set(float(e.x()), float(e.y()), 255, 255, 255, 255);
+            v[5].set(float(c.x()), float(c.y()), 255, 255, 255, 255);
+            v += 6;
+        };
         for (const QRectF &f : frames) {
             const float x0 = float(f.left()), y0 = float(f.top()), x1 = float(f.right()), y1 = float(f.bottom());
             quad(x0, y0, x1, y0 + w);
             quad(x0, y1 - w, x1, y1);
             quad(x0, y0 + w, x0 + w, y1 - w);
             quad(x1 - w, y0 + w, x1, y1 - w);
+            const double radius = std::clamp(f.width() * 0.1, 6.0, 11.0);
+            const double cx = f.right() - radius - 6, cy = f.bottom() - radius - 6;
+            disc(float(cx), float(cy), float(radius + 1.5), 255, 255, 255);
+            disc(float(cx), float(cy), float(radius), r, gr, b);
+            const double t = std::max(1.5, radius * 0.22);
+            stroke({cx - radius * 0.45, cy + radius * 0.02}, {cx - radius * 0.1, cy + radius * 0.38}, t);
+            stroke({cx - radius * 0.1, cy + radius * 0.38}, {cx + radius * 0.48, cy - radius * 0.35}, t);
         }
         rs.selection->markDirty(QSGNode::DirtyGeometry);
     }

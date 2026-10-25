@@ -13,6 +13,7 @@ Item {
     // Touchpad and mouse side by side: each does everything.
     readonly property var sections: [
         { title: qsTr("Browsing"), keys: [
+            [qsTr("Click"), qsTr("Open the photo")],
             [qsTr("Two fingers"), qsTr("Scroll; flick to coast, rest a finger to stop")],
             [qsTr("Wheel"), qsTr("Scroll")],
             [qsTr("Pinch"), qsTr("Zoom in and out")],
@@ -23,11 +24,12 @@ Item {
             [qsTr("Right edge"), qsTr("Drag the date scrubber")]
         ] },
         { title: qsTr("Selecting"), keys: [
-            [qsTr("Click"), qsTr("Open the photo")],
-            [qsTr("Ctrl+click"), qsTr("Select several: add or remove one")],
-            [qsTr("Shift+click"), qsTr("Select a range")],
+            [qsTr("Select"), qsTr("The button at the top: start choosing photos")],
+            [qsTr("Click"), qsTr("Tick or untick a photo, while selecting")],
+            [qsTr("Shift+click"), qsTr("Tick a range")],
+            [qsTr("Ctrl+click"), qsTr("Start selecting with this photo")],
             ["Ctrl+A", qsTr("Select all")],
-            ["Esc", qsTr("Clear the selection")]
+            [qsTr("Done  Esc"), qsTr("Stop selecting")]
         ] },
         { title: qsTr("Taking photos out"), keys: [
             [qsTr("Drag"), qsTr("Drop the selection into any app")],
