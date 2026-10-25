@@ -5,6 +5,8 @@
 #include "thumbnailloader.h"
 
 #include <QDateTime>
+#include <QImage>
+#include <QQuickWindow>
 #include <QRandomGenerator>
 
 #include <algorithm>
@@ -137,6 +139,11 @@ Bench::Bench(PhotoGrid *grid, FrameStats *stats, ThumbnailLoader *loader, QObjec
              }
          }},
     };
+    // PINHOLE_BENCH_ONLY=<text>: only the phases whose name has it.
+    if (const QString only = qEnvironmentVariable("PINHOLE_BENCH_ONLY"); !only.isEmpty())
+        m_phases.erase(std::remove_if(m_phases.begin(), m_phases.end(),
+                                      [&only](const Phase &p) { return !p.name.contains(only); }),
+                       m_phases.end());
     // PINHOLE_BENCH_IDLE=<seconds>: only redraw the same frame, to see how
     // often the system alone stalls a frame.
     if (const int idle = qEnvironmentVariableIntValue("PINHOLE_BENCH_IDLE"); idle > 0)
@@ -182,6 +189,13 @@ void Bench::tick(qreal dt) {
     }
     if (p.step)
         p.step(before, m_t);
+    // PINHOLE_BENCH_GRAB=<folder>: the window 20 times a second, to look at
+    // what a phase looks like (grabbing stalls frames: not for timing).
+    static const QString grabs = qEnvironmentVariable("PINHOLE_BENCH_GRAB");
+    if (!grabs.isEmpty() && std::floor(m_t * 20) != std::floor(before * 20)) {
+        static int n = 0;
+        m_grid->window()->grabWindow().save(QStringLiteral("%1/%2.png").arg(grabs).arg(++n, 4, 10, QLatin1Char('0')));
+    }
     if (m_t >= p.seconds)
         endPhase();
 }

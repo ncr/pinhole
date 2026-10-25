@@ -30,6 +30,9 @@ constexpr std::array<int, 11> kLevels = {1, 2, 3, 4, 6, 8, 11, 15, 21, 29, 40};
 constexpr int kDefaultLevel = 5;
 // Seconds for a zoom to settle after the fingers lift, or for a zoom step.
 constexpr double kSettleSeconds = 0.3;
+// A pinch passing from one level to the next cross-fades in this long, as
+// Photos on an iPhone does (3-4 frames at 30 fps in a recording of it).
+constexpr double kReflowSeconds = 0.12;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
@@ -518,28 +521,32 @@ std::vector<PhotoGrid::Layer> PhotoGrid::layers() const {
         return {layerFor(dense, 1), layerFor(coarse, coarseWeight)};
     };
     if (m_zoom.settling) {
-        const double w = lerp(m_zoom.fromWeight, 1, easeOut(m_zoom.t));
+        // The cross-fade done in the first part of the settle: briefly two
+        // layouts at once, then one moving into place.
+        const double w = lerp(m_zoom.fromWeight, 1, easeOut(std::min(1.0, m_zoom.t / 0.4)));
         if (m_zoom.partner == m_zoom.target)
             return {layerFor(m_zoom.target, 1)};
         return pair(m_zoom.target, w, m_zoom.partner);
     }
 
-    // Pinching: the two levels whose cell sizes bracket the current one.
-    // Strides shrink as the column count grows.
+    // Pinching: one level, scaled; while the level changes, the old one
+    // fading out over a tenth of a second (pinchLevel(), advance()).
+    if (m_zoom.fade < 1 && m_zoom.fadeFrom >= 0 && m_zoom.fadeFrom != m_zoom.shown)
+        return pair(m_zoom.shown, easeOut(m_zoom.fade), m_zoom.fadeFrom);
+    return {layerFor(m_zoom.shown, 1)};
+}
+
+int PhotoGrid::pinchLevel(double stride) const {
+    // The denser of the two levels whose cell sizes are either side of
+    // `stride`: drawn scaled up, it always covers the window. Strides shrink
+    // as the column count grows.
     const int last = levelCount() - 1;
-    if (m_zoom.stride >= strideFor(kLevels.front()))
-        return {layerFor(0, 1)};
-    if (m_zoom.stride <= strideFor(kLevels.back()))
-        return {layerFor(last, 1)};
-    int coarse = 0;
-    while (coarse < last - 1 && m_zoom.stride < strideFor(kLevels[size_t(coarse + 1)]))
-        coarse += 1;
-    const int dense = coarse + 1;
-    const double sDense = strideFor(kLevels[size_t(dense)]);
-    const double sCoarse = strideFor(kLevels[size_t(coarse)]);
-    // The coarser level's share grows with the zoom, measured as a ratio.
-    const double t = std::log(m_zoom.stride / sDense) / std::log(sCoarse / sDense);
-    return pair(coarse, t, dense);
+    if (stride >= strideFor(kLevels.front()))
+        return 0;
+    int level = 1;
+    while (level < last && stride < strideFor(kLevels[size_t(level)]))
+        level += 1;
+    return level;
 }
 
 void PhotoGrid::beginZoom(QPointF at) {
@@ -574,6 +581,9 @@ void PhotoGrid::beginZoom(QPointF at) {
     m_zoom.at = l.at + (pinIn(l.columns) - l.pin) * l.scale;
     m_zoom.pinStart = m_zoom.at;
     m_zoom.fingerStart = at;
+    m_zoom.shown = levelForColumns(l.columns);
+    m_zoom.fadeFrom = -1;
+    m_zoom.fade = 1;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
     updateAnimating();
 }
@@ -590,6 +600,15 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     else if (stride > coarsest)
         stride = coarsest * std::pow(stride / coarsest, 0.3);
     m_zoom.stride = stride;
+    // Past a level's own cell size the grid reflows to the next one, as in
+    // Photos: one quick cross-fade, however slowly the fingers move, rather
+    // than the two levels blended all the way between them.
+    if (const int level = pinchLevel(stride); level != m_zoom.shown) {
+        m_zoom.fadeFrom = m_zoom.shown;
+        m_zoom.shown = level;
+        m_zoom.fade = 0;
+        updateAnimating();
+    }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
     const double now = m_clock.nsecsElapsed() / 1e9;
@@ -721,6 +740,8 @@ void PhotoGrid::advance(qreal dt) {
         m_physics.step(dt);
         m_scroll = m_physics.position();
     }
+    if (m_zoom.active && !m_zoom.settling && m_zoom.fade < 1)
+        m_zoom.fade = std::min(1.0, m_zoom.fade + dt / kReflowSeconds);
     if (m_zoom.active && m_zoom.settling) {
         m_zoom.t = std::min(1.0, m_zoom.t + dt / kSettleSeconds);
         const double e = easeOut(m_zoom.t);
@@ -744,7 +765,8 @@ void PhotoGrid::advance(qreal dt) {
 }
 
 void PhotoGrid::updateAnimating() {
-    const bool animating = m_driveVelocity != 0 || m_physics.animating() || (m_zoom.active && m_zoom.settling);
+    const bool animating = m_driveVelocity != 0 || m_physics.animating() ||
+                           (m_zoom.active && (m_zoom.settling || m_zoom.fade < 1));
     if (animating != m_animating) {
         m_animating = animating;
         emit animatingChanged();
@@ -791,7 +813,13 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
     // The begin and end come with no movement in them, and each arrives
     // twice, so they are recognised by phase, and repeats ignored.
     const double t = double(event->timestamp());
-    const double dy = -event->pixelDelta().y();
+    // Zoomed out, the same swipe carries further: √(columns / 8), so 8
+    // columns (where it was tuned) is unchanged and 40 is 2.2x. Measured
+    // from Photos on an iPhone zoomed all the way out: a swipe there moves
+    // about a screen, some 2,300 photos; here at 40 columns it moved half
+    // a screen, a thousand.
+    const double density = std::sqrt(std::max(1.0, m_columns / 8.0));
+    const double dy = -event->pixelDelta().y() * density;
     switch (event->phase()) {
     case Qt::ScrollBegin:
         if (!m_physics.tracking()) {
@@ -802,7 +830,7 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
     case Qt::ScrollUpdate:
     case Qt::ScrollMomentum:
         syncBounds();
-        m_physics.move(t, !event->pixelDelta().isNull() ? dy : -event->angleDelta().y() / 8.0);
+        m_physics.move(t, !event->pixelDelta().isNull() ? dy : -event->angleDelta().y() / 8.0 * density);
         break;
     case Qt::ScrollEnd:
         // Holds from before this lift (the fingers landing for this very

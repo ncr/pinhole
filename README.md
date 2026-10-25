@@ -44,10 +44,16 @@ On your own library (after `pinhole-sync sign-in`):
 ```bash
 core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library
 app/bin/build
-app/build/pinhole            # S toggles the stats, +/- zoom, Ctrl+wheel zooms, double-click opens
+app/build/pinhole            # ? lists every key and gesture; S toggles the frame stats
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
-app/bin/test                 # unit tests: scroll physics, translations, theme, library
+app/bin/test                 # unit tests: scroll physics, viewer motion, translations, theme, library
 ```
+
+`PINHOLE_BENCH_ONLY=pinch` runs only the phases with that in their name;
+`PINHOLE_BENCH_GRAB=<folder>` saves the window 20 times a second (slow on
+screen; recording the window with `wf-recorder -g` shows real timing).
+`PINHOLE_SELFTEST=mouse` drives clicks, swipes, pinches and select mode
+with synthetic events and reports each step.
 
 `pinhole-sync` only fetches what is missing, so running it again is quick.
 After that, `pinholed` keeps the library in step with iCloud on its own:

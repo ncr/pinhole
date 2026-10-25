@@ -215,6 +215,8 @@ private:
 
     // Zoom
     int levelForColumns(int columns) const;
+    // The level a pinch at this cell size shows.
+    int pinchLevel(double stride) const;
     // Pin the photo under `at` (view coordinates) and start zooming around it.
     void beginZoom(QPointF at);
     // The cell size the zoom shows now, and where the pinned photo sits.
@@ -277,6 +279,12 @@ private:
         double fromStride = 0, toStride = 0;
         QPointF fromAt, toAt;
         double fromWeight = 0; // target level's share when settling began
+        // Pinching: the one level shown (the denser of the two around the
+        // cell size, scaled up so it covers the window), and the one it
+        // replaced, fading out over a fixed time as in Photos.
+        int shown = 0;
+        int fadeFrom = -1;
+        double fade = 1;
         double toScroll = 0;
         double t = 1;
     } m_zoom;
