@@ -45,17 +45,20 @@ public:
     void drag(QObject *source, const QList<int> &indexes);
     // Put these photos on the clipboard (compatible form), as files, and for
     // a single photo as an image too, so pasting into a chat works.
-    // `quiet`, from a button that shows its own tick: no status line; the
-    // outcome comes as copied().
+    // At once, as a promise: the files are prepared in the background and
+    // a paste waits for them. `quiet`, from a button that shows its own
+    // tick: no status line (a failure still says so).
     Q_INVOKABLE void copy(const QList<int> &indexes, bool quiet = false);
     // Ask for a folder (the desktop's own picker) and export into it.
     Q_INVOKABLE void exportTo(const QList<int> &indexes, bool compatible);
 
 signals:
     void statusChanged();
-    // A copy finished: how many went on the clipboard (0: none could be
-    // fetched) and how many could not.
+    // A copy was put on the clipboard, at once: how many photos (the files
+    // follow in the background).
     void copied(int files, int failed);
+    // Those files then did not all come: how many did, how many did not.
+    void copyFailed(int files, int failed);
 
 private:
     void flash(const QString &status);

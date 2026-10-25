@@ -466,6 +466,25 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              const QMimeData *copied = QGuiApplication::clipboard()->mimeData();
              return *ticked && !*bottomLine && copied && copied->hasUrls();
          }, 6000},
+        {"Copy again ticks again",
+         [=] {
+             auto *clock = new QElapsedTimer;
+             clock->start();
+             auto *watch = new QTimer(window);
+             auto last = std::make_shared<QString>();
+             QObject::connect(watch, &QTimer::timeout, window, [=] {
+                 QObject *b = window->findChild<QObject *>(QStringLiteral("viewerCopy"));
+                 const QString phase = b ? b->property("phase").toString() : QStringLiteral("?");
+                 if (phase != *last) {
+                     std::printf("selftest:      %5lld ms: %s\n", clock->elapsed(), qPrintable(phase));
+                     *last = phase;
+                 }
+             });
+             watch->start(10);
+             QTimer::singleShot(7000, watch, [watch, clock] { watch->deleteLater(); delete clock; });
+             click(window, centreOf(window, "viewerCopy"));
+         },
+         [] { return true; }, 7000},
         {"a two-finger tap in the viewer neither closes nor steps", [=, &viewer] {
              *mark = viewer.index();
              click(window, middle, Qt::RightButton);
@@ -526,11 +545,13 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
             if (const QString dir = qEnvironmentVariable("PINHOLE_SELFTEST_DIR"); !dir.isEmpty())
                 window->grabWindow().save(QStringLiteral("%1/mouse-%2.png").arg(dir).arg(k + 1, 2, 10, QLatin1Char('0')));
             std::printf("selftest: %-4s %s%s\n", ok ? "ok" : "FAIL", (*steps)[k].what,
-                        ok ? "" : qPrintable(QStringLiteral(" (viewer %1 at start%2%3, offset %4)")
+                        ok ? "" : qPrintable(QStringLiteral(" (viewer %1 at start%2%3, offset %4; viewer presses %5, clicks %6)")
                                                  .arg(viewerPtr->isOpen() ? "open" : "closed")
                                                  .arg(viewerPtr->index() - *start >= 0 ? "+" : "")
                                                  .arg(viewerPtr->index() - *start)
-                                                 .arg(viewerPtr->property("offset").toDouble(), 0, 'f', 0)));
+                                                 .arg(viewerPtr->property("offset").toDouble(), 0, 'f', 0)
+                                                 .arg(window->findChild<QObject *>("photoViewer")->property("presses").toInt())
+                                                 .arg(window->findChild<QObject *>("photoViewer")->property("clicks").toInt())));
             std::fflush(stdout);
             (*run)(k + 1);
         });

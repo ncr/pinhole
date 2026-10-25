@@ -26,6 +26,11 @@
 
 Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
+    // A copy is promised at once; should the files then not come, say so.
+    connect(this, &Outgoing::copyFailed, this, [this](int files, int) {
+        flash(files == 0 ? tr("Could not get the photos from iCloud")
+                         : tr("Copied %n, some could not be fetched", "", files));
+    });
     // Staged files from earlier days have long been dropped wherever they
     // were going.
     const QDateTime dayAgo = QDateTime::currentDateTime().addDays(-1);
@@ -97,6 +102,86 @@ private:
     mutable QStringList m_files;
 };
 
+// The clipboard's promise, as on a Mac: copying is instant. The files are
+// prepared at once in the background and handed over when something
+// pastes; a paste before they are ready waits for them. One photo is also
+// an image, for pasting into chats.
+class PromisedClipboard : public QMimeData {
+public:
+    PromisedClipboard(Outgoing *outgoing, const QList<LibraryItem> &items) : m_state(std::make_shared<State>()) {
+        m_state->image = items.size() == 1 && !items.first().video;
+        // Kept apart from this object: the clipboard may replace it while
+        // the files are still on their way.
+        auto state = m_state;
+        outgoing->prepare(items, true, {}, [state, outgoing](const QStringList &files, int failed) {
+            state->files = files;
+            state->ready = true;
+            if (state->wait)
+                state->wait->quit();
+            if (files.isEmpty() || failed)
+                emit outgoing->copyFailed(int(files.size()), failed);
+        }, true);
+    }
+
+    QStringList formats() const override {
+        QStringList f{QStringLiteral("text/uri-list"), QStringLiteral("x-special/gnome-copied-files")};
+        if (m_state->image)
+            f.append(QStringLiteral("application/x-qt-image"));
+        return f;
+    }
+    bool hasFormat(const QString &mime) const override { return formats().contains(mime); }
+
+protected:
+    QVariant retrieveData(const QString &mime, QMetaType type) const override {
+        auto state = m_state;
+        if (!state->ready) {
+            // Qt's Wayland clipboard asks for the URL list as the data is
+            // set (to offer a portal transfer): never wait in there.
+            const bool bytes = type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString;
+            if (mime == QLatin1String("text/uri-list") && !bytes)
+                return QVariantList();
+            QEventLoop wait;
+            state->wait = &wait;
+            QTimer::singleShot(120000, &wait, &QEventLoop::quit);
+            wait.exec();
+            state->wait = nullptr;
+        }
+        QList<QUrl> urls;
+        for (const QString &f : state->files)
+            urls.append(QUrl::fromLocalFile(f));
+        if (mime == QLatin1String("application/x-qt-image"))
+            return state->files.isEmpty() ? QVariant() : QVariant(QImage(state->files.first()));
+        if (mime == QLatin1String("x-special/gnome-copied-files")) {
+            // File managers paste from this one.
+            QByteArray gnome = "copy";
+            for (const QUrl &u : urls)
+                gnome += '\n' + u.toEncoded();
+            return gnome;
+        }
+        if (mime != QLatin1String("text/uri-list"))
+            return {};
+        if (type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString) {
+            QByteArray text;
+            for (const QUrl &u : urls)
+                text += u.toEncoded() + "\r\n";
+            return text;
+        }
+        QVariantList list;
+        for (const QUrl &u : urls)
+            list.append(u);
+        return list;
+    }
+
+private:
+    struct State {
+        bool image = false;
+        bool ready = false;
+        QStringList files;
+        QEventLoop *wait = nullptr;
+    };
+    std::shared_ptr<State> m_state;
+};
+
 } // namespace
 
 QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
@@ -124,34 +209,10 @@ void Outgoing::copy(const QList<int> &indexes, bool quiet) {
     const QList<LibraryItem> items = snapshot(indexes);
     if (items.isEmpty())
         return;
-    prepare(items, true, {}, [this, quiet](const QStringList &files, int failed) {
-        if (files.isEmpty()) {
-            if (!quiet)
-                flash(tr("Could not get the photos from iCloud"));
-            emit copied(0, failed);
-            return;
-        }
-        auto *mime = new QMimeData;
-        QList<QUrl> urls;
-        QByteArray gnome = "copy";
-        for (const QString &f : files) {
-            urls.append(QUrl::fromLocalFile(f));
-            gnome += '\n' + QUrl::fromLocalFile(f).toEncoded();
-        }
-        mime->setUrls(urls);
-        // File managers paste from this one.
-        mime->setData(QStringLiteral("x-special/gnome-copied-files"), gnome);
-        if (files.size() == 1) {
-            const QImage image(files.first());
-            if (!image.isNull())
-                mime->setImageData(image);
-        }
-        QGuiApplication::clipboard()->setMimeData(mime);
-        if (!quiet)
-            flash(failed ? tr("Copied %n, some could not be fetched", "", int(files.size()))
-                         : tr("Copied %n photo(s)", "", int(files.size())));
-        emit copied(int(files.size()), failed);
-    }, quiet);
+    QGuiApplication::clipboard()->setMimeData(new PromisedClipboard(this, items));
+    if (!quiet)
+        flash(tr("Copied %n photo(s)", "", int(items.size())));
+    emit copied(int(items.size()), 0);
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {

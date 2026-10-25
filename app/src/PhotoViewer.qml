@@ -13,6 +13,9 @@ Item {
 
     required property var grid
     property double openedAt: 0
+    // Presses and clicks the viewer's mouse area has had (self-tests).
+    property int presses: 0
+    property int clicks: 0
     readonly property bool shown: viewer.open || progress > 0
 
     visible: shown
@@ -228,6 +231,7 @@ Item {
         readonly property int hoveredSide: containsMouse ? sideAt(mouseX) : 0
 
         onPressed: mouse => {
+            root.presses += 1
             last = Qt.point(mouse.x, mouse.y)
             panned = false
             // Any press is a touch first: a coasting zoomed photo stops (a
@@ -237,6 +241,7 @@ Item {
                 root.closeViewer()
         }
         onClicked: mouse => {
+            root.clicks += 1
             if (mouse.button !== Qt.LeftButton || panned)
                 return
             const s = sideAt(mouse.x)
