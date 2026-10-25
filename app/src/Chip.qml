@@ -11,10 +11,11 @@ Rectangle {
     // While true, a new text morphs from the old: what the two share at the
     // start stays, what they share at the end slides to its new place, and
     // only what differs between cross-fades ("24–28 July" to "25–28 July"
-    // changes the one digit). The chip's width eases to fit. Texts coming
-    // faster than that (scrolling quickly past the days) change at once,
-    // as a counter does: morphing one after another never settled and
-    // flickered.
+    // changes the one digit). The chip's width eases to fit. A morph waits
+    // for the text to hold still a moment, and is never cut short: texts
+    // coming faster (scrolling quickly past the days, zooming out all the
+    // way in one pinch) change at once, as a counter does. Morphs cut off
+    // by the next text, or one after another, flickered.
     property bool morphing: false
     // The text inside, centred; or from the left, the chip's right edge
     // moving as it changes.
@@ -60,17 +61,32 @@ Rectangle {
         morph.restart()
     }
     onTextChanged: {
-        if (!chip.morphing || shownText === "" || text === "" || morph.running || quick.running) {
-            ticking = chip.morphing && (morph.running || quick.running)
-            morph.stop()
-            morphed = 1
-            shownText = text
+        if (!chip.morphing || shownText === "" || text === "") {
+            snap()
+            ticking = false
+        } else if (morph.running) {
+            // Shown once this one is done (morph's onFinished).
+        } else if (settling.running || quick.running) {
+            ticking = true // first, so the edge jumps with the text
+            snap()
+            settling.stop()
+            quick.restart()
         } else {
-            change()
+            settling.restart()
         }
-        quick.restart()
     }
-    // Since the last change: within this, the next is quick.
+    function snap() {
+        morph.stop()
+        morphed = 1
+        shownText = text
+    }
+    // A text holding still this long morphs in.
+    Timer {
+        id: settling
+        interval: 70
+        onTriggered: if (chip.text !== chip.shownText) chip.change()
+    }
+    // After a change: within this, the next is quick.
     Timer { id: quick; interval: 250; onTriggered: chip.ticking = false }
     // Changing at once, the chip's edge too, so it hugs the text.
     property bool ticking: false
@@ -143,5 +159,13 @@ Rectangle {
         from: 0
         to: 1
         duration: 200
+        // What came meanwhile shows at once, and so would what comes next.
+        onFinished: {
+            if (chip.shownText !== chip.text) {
+                chip.ticking = true
+                chip.snap()
+            }
+            quick.restart()
+        }
     }
 }

@@ -249,6 +249,9 @@ int main(int argc, char *argv[]) {
         });
     }
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("help:"))) {
+        // PINHOLE_SELFTEST_SIZE: the window's, as 1400x900.
+        if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
+            window->resize(size[0].toInt(), size[1].toInt());
         QTimer::singleShot(800, window, [window, test] {
             if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
                 help->setProperty("shown", true);
@@ -280,6 +283,43 @@ int main(int argc, char *argv[]) {
                 });
             };
             (*next)();
+        });
+    }
+    // PINHOLE_SELFTEST=zoomfast:<dir>: a quick pinch from 3 columns all the
+    // way out, the date label's state every 16 ms on the output and as
+    // frames of the top left in <dir>.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("zoomfast:"))) {
+        QTimer::singleShot(1200, window, [window, grid, test] {
+            grid->setColumnsNow(3);
+            grid->jumpToFraction(0.6);
+            auto *clock = new QElapsedTimer;
+            auto *frame = new int(0);
+            auto *timer = new QTimer(window);
+            QObject *label = window->findChild<QObject *>(QStringLiteral("dateLabel"));
+            QTimer::singleShot(500, window, [=] {
+                clock->start();
+                QObject::connect(timer, &QTimer::timeout, window, [=] {
+                    const double t = clock->nsecsElapsed() / 1e9;
+                    const QPointF middle(grid->width() / 2, grid->height() / 2);
+                    if (t < 0.5)
+                        grid->setEffectiveStride(grid->width() / (3 * std::pow(29.0 / 3, t / 0.5)), middle);
+                    else if (!grid->property("ended").toBool()) {
+                        grid->setProperty("ended", true);
+                        grid->endContinuousZoom();
+                    } else if (t > 1.5) {
+                        timer->stop();
+                        QCoreApplication::quit();
+                    }
+                    std::printf("%03d %5.3f grid=%-28s shown=%-28s morphed=%.2f ticking=%d w=%.1f\n", *frame, t,
+                                qPrintable(grid->dateLabel()), qPrintable(label->property("shownText").toString()),
+                                label->property("morphed").toDouble(), label->property("ticking").toBool(),
+                                label->property("width").toDouble());
+                    std::fflush(stdout);
+                    window->grabWindow().copy(0, 0, 420, 70).save(QStringLiteral("%1/%2.png").arg(test.mid(9)).arg(*frame, 3, 10, QLatin1Char('0')));
+                    ++*frame;
+                });
+                timer->start(16);
+            });
         });
     }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
