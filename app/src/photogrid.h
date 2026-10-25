@@ -50,6 +50,17 @@ public:
     ~PhotoGrid() override;
 
     void setSources(const Library *library, ThumbnailLoader *loader, FrameStats *stats);
+    // The library was read again and its positions moved: `moved[old]` is
+    // each photo's new position, or -1 if it is gone. Call right after the
+    // swap; the view keeps the photos it showed, or stays at the newest end.
+    void libraryReloaded(const std::vector<int> &moved);
+    // Where the view is, for keeping it across a reload: the photo at the
+    // top-left and how far from the top it is, and whether it is at the end.
+    struct Anchor { int index; double offset; bool atEnd; };
+    Anchor anchor() const;
+    // Note where the view is, just before a reload.
+    void rememberAnchor() { m_reloadAnchor = anchor(); }
+
     // Fingers resting on the touchpad stop a coast, as on a Mac.
     void setTouchpadHold(TouchpadHold *hold);
 
@@ -202,6 +213,9 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_scrubbing = false;
+    Anchor m_reloadAnchor{-1, 0, true};
+    // Position moves for the render thread to apply to its texture cache.
+    std::shared_ptr<std::vector<int>> m_pendingMoves;
     qreal m_lastFraction = -1;
     void notifyScrolled();
     // When the current coast began; a touch from before it is old news.

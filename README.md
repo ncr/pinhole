@@ -36,6 +36,8 @@ app/build/pinhole --bench    # scripted run, prints frame timing per phase
 ```
 
 `pinhole-sync` only fetches what is missing, so running it again is quick.
+After that, `pinholed` keeps the library in step with iCloud on its own:
+new, deleted and edited photos appear within a minute, without a restart.
 
 When cells grow past what the 480 px thumbnails can fill, the window asks
 `pinholed` for the 2048 px rendition. The window starts the service if it is

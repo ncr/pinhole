@@ -6,6 +6,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -63,6 +64,11 @@ public:
     // Forget about a photo's medium rendition, so it is asked for again.
     void clearMedium(int index);
 
+    // Run `swap` with every decoder idle, then forget everything keyed by
+    // position (queued, decoded, failed, medium files): the positions mean
+    // other photos now. GUI thread.
+    void reload(const std::function<void()> &swap);
+
     int threads() const { return int(m_threads.size()); }
     quint64 decodedCount() const { return m_decoded.load(); }
     quint64 decodeNanos() const { return m_decodeNanos.load(); }
@@ -81,6 +87,8 @@ private:
     const Library *m_library;
     std::mutex m_mutex;
     std::condition_variable m_wake;
+    std::condition_variable m_idle;
+    bool m_paused = false;
     std::deque<quint64> m_queue;
     std::unordered_set<quint64> m_inFlight;
     std::unordered_set<quint64> m_readyKeys;

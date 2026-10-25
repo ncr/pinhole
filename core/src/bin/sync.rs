@@ -39,6 +39,13 @@ enum Cmd {
     },
     /// Index, then thumbnails.
     All,
+    /// Apply what changed in iCloud since the last walk or sync, then fetch
+    /// thumbnails for anything new.
+    Changes {
+        /// Only report what would change.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -54,6 +61,30 @@ fn main() -> Result<()> {
         Cmd::Index { parallel } => (Some(parallel), None),
         Cmd::Thumbs { parallel } => (None, Some(parallel)),
         Cmd::All => (Some(4), Some(64)),
+        Cmd::Changes { dry_run } => {
+            let r = sync::apply_changes(&mut client, &mut conn, dry_run)?;
+            let name = |id: &String| -> String {
+                conn.query_row("SELECT filename FROM assets WHERE id = ?1", [id], |r| r.get::<_, Option<String>>(0))
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| id.clone())
+            };
+            println!("{}{} records: {} new, {} changed, {} removed, {} skipped",
+                if dry_run { "dry run: " } else { "" }, r.records, r.added.len(), r.updated.len(), r.removed.len(), r.skipped);
+            if !r.reasons.is_empty() {
+                println!("  changed, by what: {:?}", r.reasons);
+            }
+            for (label, ids) in [("new", &r.added), ("changed", &r.updated), ("removed", &r.removed)] {
+                let shown: Vec<String> = ids.iter().take(8).map(name).collect();
+                if !shown.is_empty() {
+                    println!("  {label}: {}{}", shown.join(", "), if ids.len() > 8 { ", …" } else { "" });
+                }
+            }
+            if dry_run || r.added.is_empty() {
+                return Ok(());
+            }
+            (None, Some(16))
+        }
     };
 
     if let Some(parallel) = index {

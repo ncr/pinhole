@@ -51,6 +51,9 @@ public:
     Q_INVOKABLE void close();
     Q_INVOKABLE void step(int delta);
     Q_INVOKABLE void playLive();
+    // After the library was read again: follow the open photo to its new
+    // position, or close if it is gone.
+    void libraryReloaded(const std::vector<int> &moved);
 
 signals:
     void openChanged();

@@ -176,6 +176,45 @@ void PhotoGrid::setTouchpadHold(TouchpadHold *hold) {
     });
 }
 
+PhotoGrid::Anchor PhotoGrid::anchor() const {
+    const int index = indexAt(0, 0);
+    return {index, index >= 0 ? rectOf(index).top() : 0, m_scroll >= maxScroll(m_columns) - stride()};
+}
+
+void PhotoGrid::libraryReloaded(const std::vector<int> &moved) {
+    const Anchor before = m_reloadAnchor;
+    auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
+
+    std::set<int> selected;
+    for (int i : m_selected)
+        if (const int n = mapped(i); n >= 0)
+            selected.insert(n);
+    const bool selectionChanged = selected != m_selected;
+    m_selected = std::move(selected);
+    m_selectionAnchor = mapped(m_selectionAnchor);
+    m_zoom = {};
+    m_pendingMoves = std::make_shared<std::vector<int>>(moved);
+    emit libraryChanged();
+
+    // At the newest end it stays there, so new photos come into view;
+    // elsewhere the photo that was at the top stays where it was, or the
+    // next one that survived.
+    if (before.atEnd) {
+        scrollToEnd();
+    } else {
+        int index = -1;
+        for (int old = before.index; old >= 0 && old < int(moved.size()) && index < 0; ++old)
+            index = mapped(old);
+        if (index >= 0)
+            setScroll(m_scroll + rectOf(index).top() - before.offset);
+        else
+            setScroll(m_scroll);
+    }
+    if (selectionChanged)
+        emit this->selectionChanged();
+    update();
+}
+
 void PhotoGrid::touched(double timeMs, const char *) {
     if (timeMs < m_coastFrom)
         return;
@@ -843,6 +882,48 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     }
     if (!m_library || !m_loader || width() <= 0 || count() == 0)
         return root;
+
+    // The library was read again: textures follow their photos to their new
+    // positions (no flash of colours), those of deleted photos go; mosaic
+    // pages are rebuilt, since they hold positions, not photos.
+    if (m_pendingMoves) {
+        const std::vector<int> &moved = *m_pendingMoves;
+        std::unordered_map<int, GridRenderState::Entry> cache;
+        for (auto &[old, entry] : rs.cache) {
+            const int now = old < int(moved.size()) ? moved[size_t(old)] : -1;
+            if (now >= 0) {
+                cache.emplace(now, entry);
+                continue;
+            }
+            for (int lv = 0; lv < 4; ++lv) {
+                if (entry.texture[lv]) {
+                    rs.bytes -= qint64(entry.size[lv].width()) * entry.size[lv].height() * 4;
+                    delete entry.texture[lv];
+                    rs.textures -= 1;
+                }
+            }
+            if (entry.medium) {
+                rs.bytes -= qint64(entry.mediumSize.width()) * entry.mediumSize.height() * 4;
+                delete entry.medium;
+                rs.textures -= 1;
+            }
+        }
+        rs.cache = std::move(cache);
+        // Nodes may point at page textures: drop the nodes first.
+        for (auto &slot : rs.drawSlots) {
+            for (auto &[key, node] : slot.groups) {
+                slot.opacity->removeChildNode(node);
+                delete node;
+            }
+            slot.groups.clear();
+        }
+        for (auto &[page, p] : rs.pages) {
+            rs.bytes -= qint64(kMosaicSide * kMosaicTile) * kMosaicSide * kMosaicTile * 4;
+            delete p.texture;
+        }
+        rs.pages.clear();
+        m_pendingMoves.reset();
+    }
 
     const qreal dpr = window()->effectiveDevicePixelRatio();
     const std::vector<Layer> drawn = layers();

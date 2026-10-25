@@ -57,5 +57,6 @@ fn main() -> Result<()> {
         auth: cli.auth.unwrap_or_else(default_auth),
         cache_cap: cap_gb << 30,
         downloads: cli.downloads,
+        sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60),
     })
 }

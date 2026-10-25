@@ -42,6 +42,8 @@ pub struct Asset {
     pub orientation: Option<i64>,
     pub subtype: Option<i64>,
     pub has_location: bool,
+    /// In Recently Deleted, hidden, or erased: not shown in the library.
+    pub gone: bool,
     pub resources: Vec<Resource>,
     /// The two records as iCloud sent them, for inspecting fields during
     /// the probe.
@@ -187,6 +189,7 @@ fn build_asset(asset: &Value, master: &Value, keep_raw: bool) -> Asset {
         orientation: af["orientation"]["value"].as_i64().or_else(|| mf["originalOrientation"]["value"].as_i64()),
         subtype: af["assetSubtypeV2"]["value"].as_i64().or_else(|| af["assetSubtype"]["value"].as_i64()),
         has_location: !af["locationEnc"].is_null() || !af["locationV2Enc"].is_null(),
+        gone: ["isDeleted", "isHidden", "isExpunged"].iter().any(|f| af[*f]["value"].as_i64() == Some(1)),
         resources,
         raw: keep_raw.then(|| (asset.clone(), master.clone())),
     }

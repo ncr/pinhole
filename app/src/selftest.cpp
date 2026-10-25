@@ -2,6 +2,7 @@
 
 #include "library.h"
 #include "outgoing.h"
+#include "photogrid.h"
 #include "photoprovider.h"
 #include "viewer.h"
 
@@ -173,6 +174,38 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
                     QCoreApplication::quit();
                 });
             });
+        });
+    });
+}
+
+void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer) {
+    QTimer::singleShot(300, grid, [&library, grid, &viewer] {
+        const int before = library.count();
+        const QByteArray open = library.at(before - 10).id;
+        const QByteArray b = library.at(before - 1).id;
+        viewer.openAt(before - 10, QRectF(0, 0, 10, 10));
+        // Everything selected: after the reload every one of these should
+        // still be, and none of the new photos.
+        grid->selectAll();
+        std::printf("selftest: %d items; viewer on %s; waiting for the service\n", before, open.constData());
+        std::fflush(stdout);
+        QObject::connect(grid, &PhotoGrid::libraryChanged, grid, [&library, grid, &viewer, before, open, b] {
+            QTimer::singleShot(500, grid, [&library, grid, &viewer, before, open, b] {
+                const bool viewerKept = viewer.isOpen() && library.at(viewer.index()).id == open;
+                std::printf("selftest: reloaded: %d items (was %d)\n", library.count(), before);
+                std::printf("selftest: viewer still on the same photo: %s\n", viewerKept ? "yes" : "no");
+                std::printf("selftest: grid at the newest end: %s\n", grid->scrollFraction() > 0.999 ? "yes" : "no");
+                std::printf("selftest: selection followed its photos: %d selected (expected %d)\n", grid->selectionCount(), before);
+                std::printf("selftest: newest is now %s (was %s)\n", library.at(library.count() - 1).filename.toUtf8().constData(),
+                            qPrintable(QString::fromUtf8(b)));
+                std::printf("selftest: done\n");
+                std::fflush(stdout);
+                QCoreApplication::quit();
+            });
+        });
+        QTimer::singleShot(60000, [] {
+            std::printf("selftest: no change announced within a minute\n");
+            QCoreApplication::quit();
         });
     });
 }

@@ -33,6 +33,8 @@ pub struct Config {
     pub auth: PathBuf,
     pub cache_cap: u64,
     pub downloads: usize,
+    /// Seconds between rounds of following iCloud's change feed.
+    pub sync_every: u64,
 }
 
 /// Where to answer one request.
@@ -75,6 +77,21 @@ struct Shared {
     waiting: Mutex<HashMap<PathBuf, (Value, Vec<Reply>)>>,
     in_flight: AtomicUsize,
     downloader: Mutex<Option<Downloader>>,
+    /// Every connected window, to tell when the library changed.
+    listeners: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
+    /// Wakes the sync thread before its next round is due.
+    sync_now: Mutex<mpsc::Sender<()>>,
+}
+
+impl Shared {
+    /// Send an event line to every window; ones that have gone are dropped.
+    fn broadcast(&self, event: Value) {
+        let line = format!("{event}\n");
+        self.listeners.lock().unwrap().retain(|out| {
+            let Ok(mut out) = out.lock() else { return false };
+            out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_ok()
+        });
+    }
 }
 
 impl Shared {
@@ -127,6 +144,7 @@ pub fn run(config: Config) -> Result<()> {
     eprintln!("pinholed: listening on {}", config.socket.display());
 
     let (lookup_tx, lookup_rx) = mpsc::channel::<Job>();
+    let (sync_tx, sync_rx) = mpsc::channel::<()>();
     let (download_tx, download_rx) = mpsc::channel::<Job>();
     let shared = Arc::new(Shared {
         config,
@@ -135,6 +153,8 @@ pub fn run(config: Config) -> Result<()> {
         waiting: Mutex::new(HashMap::new()),
         in_flight: AtomicUsize::new(0),
         downloader: Mutex::new(None),
+        listeners: Mutex::new(Vec::new()),
+        sync_now: Mutex::new(sync_tx),
     });
 
     {
@@ -149,6 +169,10 @@ pub fn run(config: Config) -> Result<()> {
     {
         let shared = shared.clone();
         std::thread::spawn(move || evict_loop(shared));
+    }
+    {
+        let shared = shared.clone();
+        std::thread::spawn(move || sync_loop(shared, sync_rx));
     }
 
     for stream in listener.incoming() {
@@ -182,6 +206,7 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
+    shared.listeners.lock().unwrap().push(out.clone());
     let db = Connection::open_with_flags(
         shared.config.library.join("library.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -201,6 +226,10 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
         let reply = Reply { id: request["id"].clone(), out: out.clone() };
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
+            Some("sync") => {
+                let _ = shared.sync_now.lock().unwrap().send(());
+                reply.send(Ok(json!({})))
+            }
             Some("status") => reply.send(Ok(json!({
                 "library": shared.config.library,
                 "cache": shared.config.cache,
@@ -475,4 +504,56 @@ fn evict_loop(shared: Arc<Shared>) {
         }
         std::thread::sleep(Duration::from_secs(120));
     }
+}
+
+/// Follows iCloud's change feed: every `sync_every` seconds, or when a
+/// window asks, it applies what changed, fetches thumbnails for anything new,
+/// and tells every window that the library changed (only when something it
+/// draws did). A change token iCloud no longer accepts means a full walk.
+fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
+    let mut client: Option<PhotosClient> = None;
+    loop {
+        if client.is_none() {
+            match ProcessProvider::spawn(shared.config.auth.clone(), None).and_then(|p| PhotosClient::new(Box::new(p))) {
+                Ok(c) => client = Some(c),
+                Err(e) => eprintln!("pinholed: sync: not signed in: {e:#}"),
+            }
+        }
+        if let Some(c) = client.as_mut() {
+            if let Err(e) = sync_round(&shared, c) {
+                eprintln!("pinholed: sync: {e:#}");
+            }
+        }
+        // Until the next round, or a window asking for one now.
+        match wake.recv_timeout(Duration::from_secs(shared.config.sync_every.max(5))) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+        // Several asks at once make one round.
+        while wake.try_recv().is_ok() {}
+    }
+}
+
+fn sync_round(shared: &Shared, client: &mut PhotosClient) -> Result<()> {
+    let mut db = Connection::open(shared.config.library.join("library.sqlite"))?;
+    db.busy_timeout(Duration::from_secs(10))?;
+    let (added, removed, visible) = match crate::sync::apply_changes(client, &mut db, false) {
+        Ok(r) => (r.added.len(), r.removed.len(), r.visible()),
+        Err(e) if e.downcast_ref::<crate::sync::TokenExpired>().is_some() => {
+            eprintln!("pinholed: sync: {e}; walking the whole library");
+            let r = crate::sync::walk(client, &mut db, 100, 4, false, &|_, _| {})?;
+            (r.assets as usize, r.removed, true)
+        }
+        Err(e) => return Err(e),
+    };
+    if !visible {
+        return Ok(());
+    }
+    if added > 0 {
+        crate::sync::download_thumbs(client, &mut db, &shared.config.library, 16, &|_, _| {})?;
+    }
+    let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
+    eprintln!("pinholed: sync: library version {version}: {added} new, {removed} removed");
+    shared.broadcast(json!({"event": "library_changed", "version": version, "added": added, "removed": removed}));
+    Ok(())
 }

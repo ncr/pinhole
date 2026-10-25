@@ -158,6 +158,22 @@ std::vector<DecodedThumb> ThumbnailLoader::takeReady(size_t max) {
     return out;
 }
 
+void ThumbnailLoader::reload(const std::function<void()> &swap) {
+    std::unique_lock lock(m_mutex);
+    m_paused = true;
+    m_queue.clear();
+    m_idle.wait(lock, [this] { return m_inFlight.empty(); });
+    swap();
+    m_ready.clear();
+    m_readyKeys.clear();
+    m_failed.clear();
+    m_mediumPaths.clear();
+    m_mediumAsked.clear();
+    m_mediumMissing.clear();
+    m_signalPending = false;
+    m_paused = false;
+}
+
 size_t ThumbnailLoader::queued() {
     std::lock_guard lock(m_mutex);
     return m_queue.size();
@@ -171,7 +187,7 @@ void ThumbnailLoader::run() {
         quint64 key;
         {
             std::unique_lock lock(m_mutex);
-            m_wake.wait(lock, [this] { return m_stop || !m_queue.empty(); });
+            m_wake.wait(lock, [this] { return m_stop || (!m_paused && !m_queue.empty()); });
             if (m_stop)
                 break;
             key = m_queue.front();
@@ -200,6 +216,8 @@ void ThumbnailLoader::run() {
         {
             std::lock_guard lock(m_mutex);
             m_inFlight.erase(key);
+            if (m_inFlight.empty())
+                m_idle.notify_all();
             if (image.isNull()) {
                 m_failed.insert(key);
             } else {

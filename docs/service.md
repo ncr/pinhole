@@ -3,7 +3,12 @@
 The window never talks to iCloud. It reads the library index and the
 thumbnails straight from disk, and asks `pinholed` for everything else: the
 larger renditions of a photo, originals, videos. The service owns all
-network access and all writes, so the window stays a fast reader.
+network access and all writes, so the window stays a fast reader. It also
+follows iCloud's changes and tells the window when the library changed.
+
+The window starts the service if none answers, passing the library it
+shows (`--library`) and the socket (`$PINHOLE_SOCKET`, else
+`$XDG_RUNTIME_DIR/pinhole.sock`).
 
 ## Transport
 
@@ -23,7 +28,32 @@ order, since a cached file answers at once while a download takes a while.
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind` | the local file: `path`, `type` (a UTI), `rendition`, `cached` |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight` |
+| `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
 | `ping` | | `{}` |
+
+## Events
+
+Lines without an `id` are the service's own news, sent to every connected
+window:
+
+```json
+{"event": "library_changed", "version": 2, "added": 5, "removed": 0}
+```
+
+The library index changed in a way a window draws (new, deleted, hidden,
+favourited, edited or re-dated photos); the thumbnails of new photos are
+already on disk. A window reads the index again.
+
+## Staying in sync
+
+Every minute (`PINHOLE_SYNC_SECS`), and when a window asks, the service reads
+CloudKit's change feed from the token the last walk or sync saved
+(`sync::apply_changes`): changed assets are written, an asset that changed
+alone gets its master looked up, and assets deleted, hidden or erased are
+removed. Photos' own background work changes many records in ways Pinhole
+does not draw; those are written but announce nothing. If iCloud no longer
+accepts the token, the service walks the whole library again.
+`pinhole-sync changes [--dry-run]` does the same from the command line.
 
 `kind` picks the rendition, the first one the asset has:
 

@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     TouchpadHold hold;
 
     // Larger renditions come from pinholed.
-    ServiceClient service;
+    ServiceClient service(library.dir());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
 
@@ -130,8 +130,42 @@ int main(int argc, char *argv[]) {
     QObject::connect(window, &QQuickWindow::frameSwapped, window, [&stats] { stats.frameSwapped(); },
                      Qt::DirectConnection);
 
+    // The service found changes in iCloud: read the library again, swap it in
+    // with the decoders idle, and let everything that holds positions follow
+    // its photos.
+    auto reloadLibrary = [&] {
+        Library fresh;
+        QString error;
+        if (!fresh.open(library.dir(), &error)) {
+            std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
+            return;
+        }
+        QHash<QByteArray, int> positions;
+        positions.reserve(fresh.count());
+        for (int i = 0; i < fresh.count(); ++i)
+            positions.insert(fresh.at(i).id, i);
+        std::vector<int> moved(size_t(library.count()), -1);
+        for (int i = 0; i < library.count(); ++i)
+            moved[size_t(i)] = positions.value(library.at(i).id, -1);
+        const int before = library.count();
+        grid->rememberAnchor();
+        loader.reload([&] { library.swap(fresh); });
+        grid->libraryReloaded(moved);
+        viewer.libraryReloaded(moved);
+        std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d)\n", library.count(), before);
+    };
+    QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &) {
+        if (name == QLatin1String("library_changed"))
+            reloadLibrary();
+    });
+    // New photos since the window last looked: ask now rather than within
+    // the minute.
+    service.sync();
+
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
+    if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))
+        runReloadSelfTest(library, grid, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("outgoing"))
         runOutgoingSelfTest(library, outgoing, qEnvironmentVariable("PINHOLE_SELFTEST_DIR"));
 

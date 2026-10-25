@@ -8,7 +8,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 
-ServiceClient::ServiceClient(QObject *parent) : QObject(parent) {
+ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(parent), m_library(library) {
     connect(&m_socket, &QLocalSocket::readyRead, this, &ServiceClient::readReplies);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
         m_attempts = 0;
@@ -41,6 +41,8 @@ ServiceClient::ServiceClient(QObject *parent) : QObject(parent) {
 }
 
 QString ServiceClient::socketPath() {
+    if (const QString path = qEnvironmentVariable("PINHOLE_SOCKET"); !path.isEmpty())
+        return path;
     QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (runtime.isEmpty())
         runtime = QDir::homePath() + "/.cache";
@@ -74,6 +76,7 @@ void ServiceClient::startService() {
     QDir().mkpath(state);
     QProcess process;
     process.setProgram(program);
+    process.setArguments({QStringLiteral("--library"), m_library, QStringLiteral("--socket"), socketPath()});
     process.setStandardInputFile(QProcess::nullDevice());
     process.setStandardOutputFile(state + "/pinholed.log", QIODevice::Append);
     process.setStandardErrorFile(state + "/pinholed.log", QIODevice::Append);
@@ -88,6 +91,10 @@ void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback
                      {"params", QJsonObject{{"asset", QString::fromUtf8(asset)}, {"kind", kind}}}});
 }
 
+void ServiceClient::sync() {
+    send(QJsonObject{{"id", m_nextId++}, {"method", "sync"}});
+}
+
 void ServiceClient::send(const QJsonObject &request) {
     const QByteArray line = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
     if (connected())
@@ -99,6 +106,10 @@ void ServiceClient::send(const QJsonObject &request) {
 void ServiceClient::readReplies() {
     while (m_socket.canReadLine()) {
         const QJsonObject reply = QJsonDocument::fromJson(m_socket.readLine()).object();
+        if (reply.contains("event")) {
+            emit announced(reply.value("event").toString(), reply);
+            continue;
+        }
         const auto done = m_waiting.take(reply.value("id").toInteger());
         if (!done)
             continue;

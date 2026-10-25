@@ -459,3 +459,194 @@ mod tests {
         assert_eq!(p, thumb_path("AQn+dI2mCHvNQz6vj/K4BvumTtZV"));
     }
 }
+
+#[derive(Debug, Default)]
+pub struct ChangeReport {
+    pub records: usize,
+    /// Assets the index did not have.
+    pub added: Vec<String>,
+    /// Assets it had, with something about them changed.
+    pub updated: Vec<String>,
+    /// For the changed ones, what changed as far as Pinhole cares: counts by
+    /// reason (favourite, edited, date, other).
+    pub reasons: std::collections::BTreeMap<&'static str, usize>,
+    /// Assets deleted, hidden or erased since.
+    pub removed: Vec<String>,
+    /// Records that could not be made sense of (an asset whose master is gone).
+    pub skipped: usize,
+}
+
+impl ChangeReport {
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.updated.is_empty() && self.removed.is_empty()
+    }
+
+    /// Whether anything a window shows changed: Photos' own background work
+    /// touches many records in ways Pinhole does not draw ("other").
+    pub fn visible(&self) -> bool {
+        !self.added.is_empty() || !self.removed.is_empty() || self.reasons.iter().any(|(r, n)| *r != "other" && *n > 0)
+    }
+}
+
+/// The change feed said the token is no use any more: only a full walk
+/// brings the index back in step.
+#[derive(Debug)]
+pub struct TokenExpired(pub String);
+
+impl std::fmt::Display for TokenExpired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the change token is no longer accepted: {}", self.0)
+    }
+}
+
+impl std::error::Error for TokenExpired {}
+
+/// Bring the index up to date from CloudKit's change feed, starting at the
+/// token the last walk or sync saved. New and changed assets are written
+/// (an asset that changed alone gets its master looked up), and assets
+/// deleted, hidden or erased are removed. With `dry_run` nothing is written,
+/// the token included. Thumbnails are not fetched here: new assets have none
+/// yet, which `download_thumbs` then takes care of.
+pub fn apply_changes(client: &mut PhotosClient, conn: &mut Connection, dry_run: bool) -> Result<ChangeReport> {
+    let mut token = db::meta(conn, "sync_token")
+        .or_else(|| db::meta(conn, "walk_sync_token"))
+        .ok_or_else(|| anyhow!("no change token yet; walk the library first"))?;
+
+    let mut report = ChangeReport::default();
+    let mut assets: HashMap<String, Value> = HashMap::new();
+    let mut masters: HashMap<String, Value> = HashMap::new();
+    let mut deleted: HashSet<String> = HashSet::new();
+    loop {
+        let r = client.zone_changes(Some(&token), 400)?;
+        let zone = &r["zones"][0];
+        if let Some(code) = zone["serverErrorCode"].as_str() {
+            return Err(TokenExpired(format!("{code}: {}", zone["reason"].as_str().unwrap_or(""))).into());
+        }
+        for rec in zone["records"].as_array().into_iter().flatten() {
+            report.records += 1;
+            let Some(name) = rec["recordName"].as_str() else { continue };
+            if rec["deleted"] == true {
+                deleted.insert(name.to_owned());
+                continue;
+            }
+            match rec["recordType"].as_str() {
+                Some("CPLAsset") => drop(assets.insert(name.to_owned(), rec.clone())),
+                Some("CPLMaster") => drop(masters.insert(name.to_owned(), rec.clone())),
+                _ => {}
+            }
+        }
+        if let Some(next) = zone["syncToken"].as_str() {
+            token = next.to_owned();
+        }
+        if zone["moreComing"] != true {
+            break;
+        }
+    }
+
+    let known = |id: &str| -> bool {
+        conn.query_row("SELECT 1 FROM assets WHERE id = ?1", [id], |_| Ok(())).is_ok()
+    };
+
+    // A master that changed alone: its assets need their own records again.
+    let mut lonely_masters: Vec<String> = Vec::new();
+    for master in masters.keys() {
+        let mut stmt = conn.prepare("SELECT id FROM assets WHERE master_id = ?1")?;
+        let ids: Vec<String> = stmt.query_map([master], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
+        for id in ids {
+            if !assets.contains_key(&id) {
+                lonely_masters.push(id);
+            }
+        }
+    }
+    for chunk in lonely_masters.chunks(200) {
+        let names: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        for rec in client.lookup(&names)?["records"].as_array().into_iter().flatten() {
+            if let Some(name) = rec["recordName"].as_str() {
+                assets.insert(name.to_owned(), rec.clone());
+            }
+        }
+    }
+
+    // An asset that changed alone (a favourite, an edit, a deletion): its
+    // master, looked up.
+    let missing: Vec<String> = assets
+        .values()
+        .filter_map(|a| a["fields"]["masterRef"]["value"]["recordName"].as_str())
+        .filter(|m| !masters.contains_key(*m))
+        .map(str::to_owned)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    for chunk in missing.chunks(200) {
+        let names: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        for rec in client.lookup(&names)?["records"].as_array().into_iter().flatten() {
+            if rec["recordType"] == "CPLMaster" {
+                if let Some(name) = rec["recordName"].as_str() {
+                    masters.insert(name.to_owned(), rec.clone());
+                }
+            }
+        }
+    }
+
+    let records: Vec<Value> = assets.values().cloned().chain(masters.values().cloned()).collect();
+    let (paired, leftovers) = pair_records_with_leftovers(&records, false);
+    report.skipped = leftovers.iter().filter(|r| r["recordType"] == "CPLAsset").count();
+    let mut upserts: Vec<Asset> = Vec::new();
+    for asset in paired {
+        if asset.gone {
+            if known(&asset.id) {
+                report.removed.push(asset.id.clone());
+            }
+        } else {
+            if known(&asset.id) {
+                report.updated.push(asset.id.clone());
+                let (favorite, date, thumb): (bool, Option<i64>, Option<String>) = conn
+                    .query_row(
+                        "SELECT a.favorite, a.asset_date, r.checksum FROM assets a
+                         LEFT JOIN resources r ON r.asset_id = a.id AND r.kind = 'JPEGThumb' WHERE a.id = ?1",
+                        [&asset.id],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .unwrap_or((false, None, None));
+                let new_thumb = asset.resource("JPEGThumb").and_then(|r| r.checksum.clone());
+                let reason = if favorite != asset.favorite {
+                    "favourite"
+                } else if thumb != new_thumb {
+                    "edited"
+                } else if date != asset.asset_date {
+                    "date"
+                } else {
+                    "other"
+                };
+                *report.reasons.entry(reason).or_default() += 1;
+            } else {
+                report.added.push(asset.id.clone());
+            }
+            upserts.push(asset);
+        }
+    }
+    // Deleted records: assets, and assets whose master went.
+    for name in &deleted {
+        if known(name) {
+            report.removed.push(name.clone());
+        }
+        let mut stmt = conn.prepare("SELECT id FROM assets WHERE master_id = ?1")?;
+        for id in stmt.query_map([name], |r| r.get::<_, String>(0))?.filter_map(|r| r.ok()) {
+            if !report.removed.contains(&id) {
+                report.removed.push(id);
+            }
+        }
+    }
+
+    if !dry_run {
+        db::upsert_assets(conn, &upserts, None, now_secs())?;
+        db::remove_assets(conn, &report.removed)?;
+        db::set_meta(conn, "sync_token", &token)?;
+        db::set_meta(conn, "synced_at", &now_secs().to_string())?;
+        if report.visible() {
+            let version: i64 = db::meta(conn, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0) + 1;
+            db::set_meta(conn, "library_version", &version.to_string())?;
+        }
+    }
+    Ok(report)
+}

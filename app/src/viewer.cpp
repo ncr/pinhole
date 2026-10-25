@@ -146,3 +146,16 @@ void Viewer::playLive() {
     }
     request(m_index, QStringLiteral("live"));
 }
+
+void Viewer::libraryReloaded(const std::vector<int> &moved) {
+    if (m_index < 0)
+        return;
+    const int now = m_index < int(moved.size()) ? moved[size_t(m_index)] : -1;
+    if (now >= 0) {
+        // The same photo: nothing on screen changes, only its position.
+        m_index = now;
+        return;
+    }
+    m_index = -1;
+    close();
+}
