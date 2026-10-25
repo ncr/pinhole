@@ -1,10 +1,11 @@
 # pinholed: the background service
 
-The window never talks to iCloud. It reads the library index and the
+The window never talks to the source of the photos (iCloud, or a folder;
+see [sources.md](sources.md)). It reads the library index and the
 thumbnails straight from disk, and asks `pinholed` for everything else: the
 larger renditions of a photo, originals, videos. The service owns all
 network access and all writes, so the window stays a fast reader. It also
-follows iCloud's changes and tells the window when the library changed.
+follows the source's changes and tells the window when the library changed.
 
 The window starts the service if none answers, passing the library it
 shows (`--library`) and the socket (`$PINHOLE_SOCKET`, else
@@ -27,21 +28,30 @@ order, since a cached file answers at once while a download takes a while.
 | Method | Params | Result |
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
-| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health` |
-| `sync` | | `{}`: look for changes in iCloud now rather than within the minute |
+| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event) |
+| `sync` | | `{}`: look for changes in the source now rather than at the next round |
+| `set_source` | `kind` (`icloud` or `folder`), and a folder's `path` | the source, as the `source` event; see Sources |
 | `storage` | | where and how much: `location` (the one folder), `library`, `cache`, `limit_bytes`, `min_limit_bytes`, `default_limit_bytes`, `limit_set`, `used_bytes` (all of it), `kinds` (bytes of `library` and of each kind of photo), `freeing`, `moving` (`done_bytes`, `total_bytes`, or null) |
 | `set_storage` | `limit_bytes` and/or `location` (an absolute folder) | as `storage`, after the change (see Storage) |
 | `ping` | | `{}` |
 
-`kind` picks the rendition, the first one the asset has:
+`kind` picks the rendition: `medium` (about 2048 px), `full` (the photo as
+it looks now: the edit, if it has one), `original` (as taken, unedited),
+`video`, `live` (a Live Photo's motion). Which of the source's files serves
+each was chosen as the library was indexed (the index's `renditions`);
+`rendition` is the source's name for it. For iCloud:
 
 | kind | renditions tried |
 |---|---|
 | `medium` | JPEGMed, JPEGFull, JPEGLarge |
-| `full` | JPEGFull, VidFull, Original (the photo as it looks now: the edit, if it has one) |
-| `original` | Original (as taken, unedited) |
-| `video` | VidMed, VidFull, Original |
-| `live` | OriginalVidCompl (a Live Photo's motion) |
+| `full` | JPEGFull, VidFull, Original |
+| `original` | Original |
+| `video` | VidMed, VidFull, Original (videos only) |
+| `live` | OriginalVidCompl |
+
+A folder's `full`, `original`, `video` and `live` are the files themselves,
+answered with `cached: true` and their own path; its `medium` is made into
+the cache when first asked for.
 
 ## Events
 
@@ -57,27 +67,50 @@ favourited, edited or re-dated photos); the thumbnails of new photos are
 already on disk. A window reads the index again.
 
 ```json
+{"event": "source", "kind": "folder", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures"}
+```
+
+Where the photos come from, sent to a window as it connects and when it
+changes: `name` is what to call it ("iCloud", or the folder's name), and
+`needs_sign_in` whether it is one that can need signing in.
+
+```json
 {"event": "health", "state": "offline"}
 ```
 
-How the last exchange with iCloud went, sent when it changes and to a
+How the last exchange with the source went, sent when it changes and to a
 window as it connects (unless all is fine): `fine`, `needs_sign_in` (no
 session, or Apple rejected it; `pinhole-sync sign-in` fixes it), `offline`
-(the network or Apple's sign-in service is out of reach) or `failing`
-(iCloud answers with errors). A sync round, a lookup or a download that
+(the network, Apple's sign-in service or the folder's disk is out of reach)
+or `failing` (the source answers with errors). A sync round, a lookup or a download that
 works sets it back. The window shows anything but `fine` in a corner, and
 `no_service` of its own when no service answers at all.
 
 ## Staying in sync
 
-Every minute (`PINHOLE_SYNC_SECS`), and when a window asks, the service reads
-CloudKit's change feed from the token the last walk or sync saved
-(`sync::apply_changes`): changed assets are written, an asset that changed
-alone gets its master looked up, and assets deleted, hidden or erased are
-removed. Photos' own background work changes many records in ways Pinhole
-does not draw; those are written but announce nothing. If iCloud no longer
-accepts the token, the service walks the whole library again.
-`pinhole-sync changes [--dry-run]` does the same from the command line.
+Every minute for iCloud and every ten seconds for a folder
+(`PINHOLE_SYNC_SECS` sets another), and when a window asks, the service
+asks the source what changed since the token the last round saved
+(`sync::follow`). For iCloud that is CloudKit's change feed: changed assets
+are written, an asset that changed alone gets its master looked up, and
+assets deleted, hidden or erased are removed. Photos' own background work
+changes many records in ways Pinhole does not draw; those are written but
+announce nothing. For a folder it is a fresh look at the files. With no
+token yet, or one the source no longer accepts, the whole library is
+listed again, which is also how a new library is first made. A library
+holds one source's photos and is never written by another
+(`sync::claim`). `pinhole-sync changes [--dry-run]` does the same from the
+command line.
+
+## Sources
+
+`set_source` changes where the photos come from, kept in the settings as
+`source` (`{"kind": "icloud"}` or `{"kind": "folder", "path": ...}`; none is
+iCloud). Each source has its own library in the one folder: iCloud's in
+`library/`, a folder's in `library-folder/`, made again from scratch when
+the folder changes. Every window hears the new `source`, then
+`library_moved` with the library to read, then `library_changed` as it
+fills.
 
 ## Streaming
 
@@ -87,7 +120,7 @@ that plays it while it arrives (`path` is where it will be once complete).
 The URL carries a random token and serves byte ranges, so a player can seek:
 a range at most 4 MB past what has arrived waits for the download; one
 further on (such as a QuickTime index at the end of the file) is fetched
-from iCloud for that range alone. The download carries on into the cache
+from the source for that range alone. The download carries on into the cache
 either way, and the URL keeps working for an hour after it was last read.
 A cached file is answered with `path` alone.
 
@@ -97,16 +130,18 @@ A cached file is answered with `path` alone.
 |---|---|
 | `not_found` | no such asset, or it has no rendition of that kind |
 | `needs_sign_in` | the sign-in provider has no valid session |
-| `unavailable` | iCloud or the network failed; trying again later may work |
+| `unavailable` | the source or the network failed; trying again later may work |
 | `bad_request` | unknown method or missing params |
 
 ## Storage
 
 Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
 the window chose another: the library in `library/` (`library.sqlite` and
-`thumbs/`, built by `pinhole-sync` and kept by the service) and the photos
-fetched from iCloud in `cache/<kind>/`, named by iCloud's checksum of the
-file, so a re-edited photo gets a new name and duplicates share one.
+`thumbs/`, built by `pinhole-sync` or the service and kept by the service;
+another source's in `library-<kind>/`) and the photos fetched from the
+source in `cache/<kind>/`, named by the rendition's key (iCloud's checksum
+of the file), so a re-edited photo gets a new name and duplicates share
+one.
 
 One limit covers the whole folder. The library always stays, so the limit
 is never under the library and 1 GB for photos; unless set it is the

@@ -35,6 +35,8 @@ pub struct Config {
     pub socket: PathBuf,
     /// Where the photos come from.
     pub source: Arc<dyn Source>,
+    /// iCloud's sign-in provider, should the window switch to iCloud.
+    pub auth: PathBuf,
     /// The limit for all of it, if one was set.
     pub limit: Option<u64>,
     /// Where the location and limit are kept when the window changes them.
@@ -42,8 +44,9 @@ pub struct Config {
     /// A folder of photos from before (the old cache) to move in.
     pub adopt: Option<PathBuf>,
     pub downloads: usize,
-    /// Seconds between rounds of following the source's changes.
-    pub sync_every: u64,
+    /// Seconds between rounds of following the source's changes, if not
+    /// as often as the source would.
+    pub sync_every: Option<u64>,
 }
 
 /// Where to answer one request.
@@ -102,6 +105,53 @@ struct Shared {
 
 fn health_event(health: Health) -> Value {
     json!({"event": "health", "state": health.name()})
+}
+
+/// What a window says about the source: its name, and whether it is one
+/// that needs signing in.
+fn source_info(source: &dyn Source) -> Value {
+    let mut info = json!({"kind": source.kind(), "name": source.name(), "needs_sign_in": source.needs_sign_in()});
+    if let Some(path) = source.id().strip_prefix("folder:") {
+        info["path"] = json!(path);
+    }
+    info
+}
+
+fn source_event(source: &dyn Source) -> Value {
+    let mut event = source_info(source);
+    event["event"] = json!("source");
+    event
+}
+
+/// Photos from another source from now on: kept in the settings, the
+/// library switched to that source's own (made from scratch if it has none
+/// yet), and every window told to read it.
+fn set_source(shared: &Arc<Shared>, params: &Value) -> Result<Value> {
+    let source = crate::sync::source_for(Some(params), shared.config.auth.clone())?;
+    if let Some(path) = source.id().strip_prefix("folder:") {
+        if !Path::new(path).is_dir() {
+            return Err(anyhow!("{path} is not a folder"));
+        }
+    }
+    if source.id() == shared.source().id() {
+        return Ok(source_info(&*source));
+    }
+    {
+        // Not while a sync round writes the library.
+        let _writing = shared.storage.library_lock.lock().unwrap();
+        crate::storage::update_settings(&shared.config.settings, |settings| settings["source"] = params.clone())?;
+        *shared.source.write().unwrap() = source.clone();
+        *shared.health.lock().unwrap() = Health::Fine;
+        eprintln!("pinholed: photos from {} now", source.name());
+        shared.broadcast(source_event(&*source));
+        shared.broadcast(health_event(Health::Fine));
+        shared.storage.switch_library(crate::storage::library_for(&shared.storage.location(), &*source));
+    }
+    let _ = shared.sync_now.lock().unwrap().send(());
+    if let Err(e) = source.start() {
+        shared.failed(&e);
+    }
+    Ok(source_info(&*source))
 }
 
 impl Shared {
@@ -299,7 +349,9 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
     shared.listeners.lock().unwrap().push(out.clone());
-    // A window that connects while something is wrong hears so at once.
+    // A window that connects hears where the photos come from, and if
+    // something is wrong, that too.
+    let _ = writeln!(out.lock().unwrap(), "{}", source_event(&*shared.source()));
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
         let _ = writeln!(out.lock().unwrap(), "{}", health_event(health));
@@ -335,7 +387,12 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 "cache_bytes": shared.storage.report()["used_bytes"],
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
                 "health": shared.health.lock().unwrap().name(),
+                "source": source_info(&*shared.source()),
             }))),
+            Some("set_source") => match set_source(&shared, &request["params"]) {
+                Ok(info) => reply.send(Ok(info)),
+                Err(e) => reply.send(Err(("bad_request", format!("{e:#}")))),
+            },
             Some("storage") => reply.send(Ok(shared.storage.report())),
             Some("set_storage") => {
                 let params = &request["params"];
@@ -578,7 +635,8 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
             }
         }
         // Until the next round, or a window asking for one now.
-        match wake.recv_timeout(Duration::from_secs(shared.config.sync_every.max(5))) {
+        let every = shared.config.sync_every.map_or_else(|| shared.source().rounds_every(), Duration::from_secs);
+        match wake.recv_timeout(every.max(Duration::from_secs(5))) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
@@ -594,6 +652,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
     let library = shared.storage.library();
     std::fs::create_dir_all(&library)?;
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
+    crate::sync::claim(source.as_ref(), &mut db, &library)?;
     let report = crate::sync::catch_up(source.as_ref(), &mut db)?;
     let (added, removed) = (report.changes.added.len(), report.changes.removed.len());
     if !report.changes.visible() {

@@ -5,6 +5,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -209,6 +210,17 @@ pub trait Source: Send + Sync {
 
     /// "icloud" or "folder", as the settings name it.
     fn kind(&self) -> &'static str;
+
+    /// Which library this is, written into the index it fills, so it never
+    /// writes into another's: "icloud", or the folder's path.
+    fn id(&self) -> String {
+        self.kind().to_owned()
+    }
+
+    /// How often to look for changes.
+    fn rounds_every(&self) -> Duration {
+        Duration::from_secs(60)
+    }
 
     /// Whether it needs signing in (pinhole-sync sign-in).
     fn needs_sign_in(&self) -> bool {

@@ -42,22 +42,21 @@ fn main() -> Result<()> {
     let saved = storage::read_settings(&settings);
     let location = saved.location.unwrap_or_else(storage::default_location);
     let cache_given = cli.cache.is_some();
-    let source = pinhole_core::sync::source_for(
-        saved.source.as_ref(),
-        cli.auth.unwrap_or_else(pinhole_core::icloud::auth::default_provider),
-    )?;
+    let auth = cli.auth.unwrap_or_else(pinhole_core::icloud::auth::default_provider);
+    let source = pinhole_core::sync::source_for(saved.source.as_ref(), auth.clone())?;
     service::run(Config {
         library: cli.library.unwrap_or_else(|| storage::library_for(&location, source.as_ref())),
         cache: cli.cache.unwrap_or_else(|| location.join("cache")),
         location,
         socket: cli.socket.unwrap_or_else(|| env_dir("XDG_RUNTIME_DIR", ".cache").join("pinhole.sock")),
         source,
+        auth,
         limit: saved.limit,
         settings,
         // Photos still where the cache was before it moved in with the
         // library come over.
         adopt: (!cache_given).then(storage::old_cache),
         downloads: cli.downloads,
-        sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60),
+        sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()),
     })
 }

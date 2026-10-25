@@ -1,0 +1,527 @@
+//! A folder of photos on this computer (and the folders in it) as a source.
+//! An asset's id is its path inside the folder. The originals are served as
+//! they are, never copied; thumbnails and the 2048 px medium size are made
+//! from them with ImageMagick (a video's from a frame, with ffmpeg). Changes
+//! are found by looking at the folder again: a stat of every file, compared
+//! with what the index has. See docs/sources.md.
+
+use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, UNIX_EPOCH};
+
+use anyhow::{anyhow, Context, Result};
+use rayon::prelude::*;
+use rusqlite::Connection;
+
+use crate::db::Index;
+use crate::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
+
+/// Long edges of the thumbnail (kept in the library, like iCloud's) and of
+/// the medium size (made into the cache when first asked for).
+const THUMB_EDGE: u32 = 480;
+const MEDIUM_EDGE: u32 = 2048;
+/// Assets put into the index at a time while listing.
+const PUT_BATCH: usize = 500;
+
+pub struct FolderSource {
+    root: PathBuf,
+}
+
+/// What a file is, by its extension.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Media {
+    Photo,
+    Video,
+}
+
+/// A file of the folder as a look at it finds it.
+#[derive(Clone, Debug)]
+struct Found {
+    /// Inside the folder, with '/' between parts.
+    rel: String,
+    media: Media,
+    size: u64,
+    modified_ns: i128,
+}
+
+impl Found {
+    /// Names its thumbnail and cached files; changes when the file does.
+    fn key(&self) -> String {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in self.rel.bytes().chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()) {
+            hash = (hash ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("f{hash:016x}")
+    }
+}
+
+/// An asset as found: the file, and a Live Photo's motion beside it.
+#[derive(Clone, Debug)]
+struct Entry {
+    file: Found,
+    motion: Option<Found>,
+}
+
+impl Entry {
+    /// What the index keeps to tell whether it changed since.
+    fn signature(&self) -> (String, Option<String>) {
+        (self.file.key(), self.motion.as_ref().map(Found::key))
+    }
+}
+
+fn media_of(path: &Path) -> Option<Media> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "heic" | "heif" | "png" | "gif" | "tif" | "tiff" | "webp" | "avif" => Some(Media::Photo),
+        "mov" | "mp4" | "m4v" | "mkv" | "webm" | "avi" => Some(Media::Video),
+        _ => None,
+    }
+}
+
+/// The UTI the service has always answered with, by extension.
+fn file_type(rel: &str) -> &'static str {
+    let ext = rel.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "public.jpeg",
+        "heic" | "heif" => "public.heic",
+        "png" => "public.png",
+        "gif" => "com.compuserve.gif",
+        "tif" | "tiff" => "public.tiff",
+        "webp" => "org.webmproject.webp",
+        "avif" => "public.avif",
+        "mov" => "com.apple.quicktime-movie",
+        "mp4" => "public.mpeg-4",
+        "m4v" => "com.apple.m4v-video",
+        "mkv" => "org.matroska.mkv",
+        "webm" => "org.webmproject.webm",
+        "avi" => "public.avi",
+        _ => "public.data",
+    }
+}
+
+impl FolderSource {
+    pub fn new(root: PathBuf) -> Self {
+        FolderSource { root }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Every photo and video in the folder, with Live Photos' motion paired
+    /// to its photo: a video named as a photo beside it (IMG_1234.HEIC with
+    /// IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names it) is that
+    /// photo's motion, not an asset of its own. Hidden files and folders are
+    /// skipped.
+    fn look(&self) -> Result<HashMap<String, Entry>> {
+        if !self.root.is_dir() {
+            // Never "everything was deleted": a disk not mounted, say.
+            return Err(anyhow!("{} is not there", self.root.display()));
+        }
+        let mut found = Vec::new();
+        let mut dirs = vec![self.root.clone()];
+        while let Some(dir) = dirs.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if entry.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
+                let Ok(meta) = entry.metadata() else { continue };
+                if meta.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let Some(media) = media_of(&path) else { continue };
+                let Ok(rel) = path.strip_prefix(&self.root) else { continue };
+                let modified_ns = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos() as i128);
+                found.push(Found { rel: rel.to_string_lossy().into_owned(), media, size: meta.len(), modified_ns });
+            }
+        }
+
+        // Photos by folder and name without extension, for their motion.
+        let stem = |rel: &str| -> String {
+            let without = rel.rsplit_once('.').map_or(rel, |(s, _)| s);
+            without.to_ascii_lowercase()
+        };
+        let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
+        let mut motion: HashMap<String, Found> = HashMap::new();
+        let mut entries: HashMap<String, Entry> = HashMap::new();
+        for f in found {
+            if f.media == Media::Video {
+                let s = stem(&f.rel);
+                let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
+                    .or_else(|| photos.contains(&s).then_some(s));
+                if let Some(photo) = photo {
+                    motion.insert(photo, f);
+                    continue;
+                }
+            }
+            entries.insert(f.rel.clone(), Entry { file: f, motion: None });
+        }
+        for entry in entries.values_mut() {
+            if entry.file.media == Media::Photo {
+                entry.motion = motion.remove(&stem(&entry.file.rel));
+            }
+        }
+        Ok(entries)
+    }
+
+    /// The asset for an entry: its dates and details read from the file.
+    fn describe(&self, entry: &Entry) -> Asset {
+        let f = &entry.file;
+        let path = self.root.join(&f.rel);
+        let modified_ms = (f.modified_ns / 1_000_000) as i64;
+        let (taken, duration, orientation, has_location) = match f.media {
+            Media::Photo => {
+                let exif = read_exif(&path);
+                (exif.taken, None, exif.orientation, exif.has_location)
+            }
+            Media::Video => {
+                let probe = probe_video(&path);
+                (probe.taken, probe.duration, None, false)
+            }
+        };
+        let key = f.key();
+        let file_type = file_type(&f.rel);
+        let made = |want: Want| Rendition {
+            want,
+            name: f.rel.clone(),
+            key: key.clone(),
+            width: None,
+            height: None,
+            size: None,
+            file_type: Some("public.jpeg".into()),
+        };
+        let itself = |want: Want| Rendition {
+            want,
+            name: f.rel.clone(),
+            key: key.clone(),
+            width: None,
+            height: None,
+            size: Some(f.size as i64),
+            file_type: Some(file_type.into()),
+        };
+        let mut renditions = vec![made(Want::Thumb), made(Want::Medium), itself(Want::Full), itself(Want::Original)];
+        if f.media == Media::Video {
+            renditions.push(itself(Want::Video));
+        }
+        if let Some(m) = &entry.motion {
+            renditions.push(Rendition {
+                want: Want::Live,
+                name: m.rel.clone(),
+                key: m.key(),
+                width: None,
+                height: None,
+                size: Some(m.size as i64),
+                file_type: Some(self::file_type(&m.rel).into()),
+            });
+        }
+        Asset {
+            id: f.rel.clone(),
+            filename: Path::new(&f.rel).file_name().map(|n| n.to_string_lossy().into_owned()),
+            item_type: Some(file_type.into()),
+            taken: taken.or(Some(modified_ms)),
+            added: Some(modified_ms),
+            kind: match (f.media, &entry.motion) {
+                (Media::Video, _) => Kind::Video,
+                (Media::Photo, Some(_)) => Kind::Live,
+                (Media::Photo, None) => Kind::Photo,
+            },
+            favorite: false,
+            duration,
+            orientation,
+            has_location,
+            size: Some(f.size as i64),
+            renditions,
+        }
+    }
+
+    /// Describe entries (reading files takes a while: in parallel) and put
+    /// them, a batch at a time.
+    fn put(&self, index: &mut Index, entries: &[&Entry], progress: &(dyn Fn(u64, u64) + Sync), total: u64) -> Result<()> {
+        for batch in entries.chunks(PUT_BATCH) {
+            let assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
+            index.put(&assets)?;
+            progress(index.seen.len() as u64, total);
+        }
+        Ok(())
+    }
+
+    /// A JPEG of a photo or of a video's frame, at most `edge` on the long
+    /// side, the right way up.
+    fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
+        let path = self.root.join(rel);
+        let fit = format!("{edge}x{edge}>");
+        let output = match media_of(&path) {
+            Some(Media::Video) => {
+                let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
+                // A second in, past a fade from black; a shorter video from
+                // its start.
+                let frame = |at: &str| {
+                    Command::new("ffmpeg")
+                        .args(["-v", "error", "-ss", at, "-i"])
+                        .arg(&path)
+                        .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
+                        .stdin(Stdio::null())
+                        .output()
+                };
+                let first = frame("1").context("running ffmpeg")?;
+                if first.stdout.is_empty() { frame("0").context("running ffmpeg")? } else { first }
+            }
+            _ => Command::new("magick")
+                // Decoding a JPEG at a fraction of its size is much quicker.
+                .args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)])
+                .arg(format!("{}[0]", path.display()))
+                .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
+                .stdin(Stdio::null())
+                .output()
+                .context("running magick")?,
+        };
+        if output.stdout.is_empty() {
+            return Err(anyhow!("could not make an image of {rel}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        Ok(output.stdout)
+    }
+}
+
+impl Source for FolderSource {
+    fn name(&self) -> String {
+        self.root.file_name().map_or_else(|| self.root.display().to_string(), |n| n.to_string_lossy().into_owned())
+    }
+
+    fn kind(&self) -> &'static str {
+        "folder"
+    }
+
+    fn id(&self) -> String {
+        format!("folder:{}", self.root.display())
+    }
+
+    fn health(&self, error: &anyhow::Error) -> Health {
+        if !self.root.is_dir() {
+            return Health::Offline;
+        }
+        let _ = error;
+        Health::Failing
+    }
+
+    fn rounds_every(&self) -> Duration {
+        Duration::from_secs(10)
+    }
+
+    fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
+        let entries = self.look()?;
+        let mut all: Vec<&Entry> = entries.values().collect();
+        all.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
+        self.put(index, &all, progress, all.len() as u64)?;
+        let lives = entries.values().filter(|e| e.motion.is_some()).count();
+        Ok(Listing {
+            token: Some(crate::sync::now_secs().to_string()),
+            summary: format!("{} photos and videos in {}, {lives} of them Live Photos", entries.len(), self.root.display()),
+        })
+    }
+
+    fn changes(&self, index: &mut Index, _token: &str) -> Result<Listing> {
+        let entries = self.look()?;
+        // What the index has, by the keys of each asset's file and motion.
+        let mut known: HashMap<String, (String, Option<String>)> = HashMap::new();
+        {
+            let mut stmt = index.conn.prepare(
+                "SELECT a.id, o.key, l.key FROM assets a
+                 LEFT JOIN renditions o ON o.asset_id = a.id AND o.kind = 'original'
+                 LEFT JOIN renditions l ON l.asset_id = a.id AND l.kind = 'live'",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get(2)?)))?;
+            for row in rows {
+                let (id, key, live) = row?;
+                known.insert(id, (key.unwrap_or_default(), live));
+            }
+        }
+        let changed: Vec<&Entry> =
+            entries.values().filter(|e| known.get(&e.file.rel) != Some(&e.signature())).collect();
+        let gone: Vec<String> = known.keys().filter(|id| !entries.contains_key(*id)).cloned().collect();
+        self.put(index, &changed, &|_, _| {}, changed.len() as u64)?;
+        index.remove(&gone)?;
+        Ok(Listing {
+            token: Some(crate::sync::now_secs().to_string()),
+            summary: format!("{} files looked at", entries.len()),
+        })
+    }
+
+    fn local(&self, rendition: &Stored) -> Option<PathBuf> {
+        matches!(rendition.want, Want::Full | Want::Original | Want::Video | Want::Live)
+            .then(|| self.root.join(&rendition.name))
+    }
+
+    fn prepare(&self, _index: &Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
+        Ok(wanted
+            .iter()
+            .map(|w| {
+                if self.root.join(&w.name).is_file() {
+                    Ok(Ticket(format!("{}\t{}", w.want.name(), w.name)))
+                } else {
+                    Err(FetchError::NotFound(format!("{} is not in {}", w.name, self.root.display())))
+                }
+            })
+            .collect())
+    }
+
+    fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError> {
+        let (want, rel) = ticket.0.split_once('\t').ok_or_else(|| anyhow!("not a ticket of this folder"))?;
+        let edge = match Want::parse(want) {
+            Some(Want::Thumb) => Some(THUMB_EDGE),
+            Some(Want::Medium) => Some(MEDIUM_EDGE),
+            _ => None,
+        };
+        if let Some(edge) = edge {
+            let bytes = self.render(rel, edge)?;
+            return Ok(Body { length: Some(bytes.len() as u64), reader: Box::new(std::io::Cursor::new(bytes)) });
+        }
+        let path = self.root.join(rel);
+        let mut file = File::open(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
+            _ => FetchError::Failed(e.into()),
+        })?;
+        let length = file.metadata().map_err(|e| FetchError::Failed(e.into()))?.len();
+        match range {
+            Some((start, end)) => {
+                file.seek(SeekFrom::Start(start)).map_err(|e| FetchError::Failed(e.into()))?;
+                let n = end.min(length.saturating_sub(1)).saturating_sub(start) + 1;
+                Ok(Body { length: Some(n), reader: Box::new(file.take(n)) })
+            }
+            None => Ok(Body { length: Some(length), reader: Box::new(file) }),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Exif {
+    taken: Option<i64>,
+    orientation: Option<i64>,
+    has_location: bool,
+}
+
+/// When a photo was taken (the camera's local time, with its offset when
+/// it wrote one, else this computer's), which way up it is, and whether it
+/// has a place.
+fn read_exif(path: &Path) -> Exif {
+    let Ok(file) = File::open(path) else { return Exif::default() };
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(file)) else {
+        return Exif::default();
+    };
+    let text = |tag| {
+        exif.get_field(tag, exif::In::PRIMARY).map(|f| f.display_value().to_string().trim_matches('"').to_owned())
+    };
+    let taken = text(exif::Tag::DateTimeOriginal)
+        .or_else(|| text(exif::Tag::DateTimeDigitized))
+        .or_else(|| text(exif::Tag::DateTime))
+        .and_then(|t| exif_time(&t, text(exif::Tag::OffsetTimeOriginal).as_deref()));
+    let orientation = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY).and_then(|f| f.value.get_uint(0)).map(i64::from);
+    let has_location = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY).is_some();
+    Exif { taken, orientation, has_location }
+}
+
+/// "2024-05-01 12:34:56" (as kamadak-exif shows EXIF's 2024:05:01
+/// 12:34:56) in milliseconds since the epoch.
+fn exif_time(text: &str, offset: Option<&str>) -> Option<i64> {
+    use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+    let naive = NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(text, "%Y:%m:%d %H:%M:%S"))
+        .ok()?;
+    if let Some(offset) = offset {
+        if let Ok(t) = DateTime::parse_from_str(&format!("{} {offset}", naive.format("%Y-%m-%d %H:%M:%S")), "%Y-%m-%d %H:%M:%S %:z") {
+            return Some(t.timestamp_millis());
+        }
+    }
+    Local.from_local_datetime(&naive).earliest().map(|t| t.timestamp_millis())
+}
+
+#[derive(Default)]
+struct Probe {
+    taken: Option<i64>,
+    duration: Option<f64>,
+}
+
+/// A video's length and when it was recorded, from ffprobe: Apple's own
+/// creation date (with the place's offset) when there is one, else the
+/// container's.
+fn probe_video(path: &Path) -> Probe {
+    let Ok(output) = Command::new("ffprobe")
+        .args(["-v", "quiet", "-print_format", "json", "-show_entries", "format=duration:format_tags"])
+        .arg(path)
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return Probe::default();
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return Probe::default() };
+    let format = &v["format"];
+    let duration = format["duration"].as_str().and_then(|d| d.parse().ok());
+    let tags = &format["tags"];
+    let taken = ["com.apple.quicktime.creationdate", "creation_time"]
+        .iter()
+        .filter_map(|k| tags[*k].as_str())
+        .find_map(|t| chrono::DateTime::parse_from_rfc3339(t).ok().or_else(|| {
+            chrono::DateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%z").ok()
+        }))
+        .map(|t| t.timestamp_millis());
+    Probe { taken, duration }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pinhole-folder-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn live_photos_pair_with_their_motion_and_the_rest_stand_alone() {
+        let dir = temp("look");
+        for f in ["2026/IMG_1.HEIC", "2026/IMG_1_HEVC.MOV", "2026/IMG_2.JPG", "2026/IMG_2.MOV", "2026/clip.mp4",
+                  "2026/notes.txt", ".hidden/IMG_9.JPG", "other/IMG_1.MOV"] {
+            touch(&dir.join(f));
+        }
+        let entries = FolderSource::new(dir.clone()).look().unwrap();
+        let mut ids: Vec<(&str, Option<&str>)> =
+            entries.values().map(|e| (e.file.rel.as_str(), e.motion.as_ref().map(|m| m.rel.as_str()))).collect();
+        ids.sort();
+        assert_eq!(ids, [
+            ("2026/IMG_1.HEIC", Some("2026/IMG_1_HEVC.MOV")),
+            ("2026/IMG_2.JPG", Some("2026/IMG_2.MOV")),
+            ("2026/clip.mp4", None),
+            // A video named as a photo in another folder is a video.
+            ("other/IMG_1.MOV", None),
+        ]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_is_an_error_not_an_empty_library() {
+        assert!(FolderSource::new(PathBuf::from("/nonexistent/pinhole")).look().is_err());
+    }
+
+    #[test]
+    fn exif_times_with_and_without_an_offset() {
+        assert_eq!(exif_time("2024-05-01 12:00:00", Some("+02:00")), Some(1_714_557_600_000));
+        assert!(exif_time("2024:05:01 12:00:00", None).is_some());
+        assert_eq!(exif_time("not a date", None), None);
+    }
+}

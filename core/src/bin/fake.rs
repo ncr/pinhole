@@ -86,6 +86,8 @@ fn main() -> Result<()> {
     }
     tx.commit()?;
     db::set_meta(&conn, "fake_seed", &cli.seed.to_string())?;
+    // No source syncs into it.
+    db::set_meta(&conn, "source", "fake")?;
     println!("{} assets in {}", specs.len(), out.display());
     Ok(())
 }

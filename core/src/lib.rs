@@ -7,6 +7,7 @@
 //! `Session`, and nothing else knows how Apple's sign-in works.
 
 pub mod db;
+pub mod folder;
 pub mod icloud;
 pub mod service;
 pub mod source;

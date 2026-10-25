@@ -70,6 +70,7 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&library)?;
     let mut conn = db::open(&library.join("library.sqlite"))?;
     let source = source.as_ref();
+    sync::claim(source, &mut conn, &library)?;
 
     let (index, thumbs) = match cli.command {
         Cmd::Index => (true, None),
