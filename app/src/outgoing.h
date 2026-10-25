@@ -28,7 +28,9 @@ public:
     QList<LibraryItem> snapshot(const QList<int> &indexes) const;
     // Prepare the files, into `folder` (a staging folder if empty); `done`
     // gets them once all have arrived or failed.
-    void prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done);
+    // `quiet`: no "Preparing…" status (the caller shows progress itself).
+    void prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done,
+                 bool quiet = false);
 
     // What the window shows while files are on their way: "Preparing 3
     // photos…", "Exported 12 photos", and so on.
@@ -43,12 +45,17 @@ public:
     void drag(QObject *source, const QList<int> &indexes);
     // Put these photos on the clipboard (compatible form), as files, and for
     // a single photo as an image too, so pasting into a chat works.
-    Q_INVOKABLE void copy(const QList<int> &indexes);
+    // `quiet`, from a button that shows its own tick: no status line; the
+    // outcome comes as copied().
+    Q_INVOKABLE void copy(const QList<int> &indexes, bool quiet = false);
     // Ask for a folder (the desktop's own picker) and export into it.
     Q_INVOKABLE void exportTo(const QList<int> &indexes, bool compatible);
 
 signals:
     void statusChanged();
+    // A copy finished: how many went on the clipboard (0: none could be
+    // fetched) and how many could not.
+    void copied(int files, int failed);
 
 private:
     void flash(const QString &status);

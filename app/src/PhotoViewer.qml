@@ -327,29 +327,28 @@ Item {
                 onClicked: viewer.playLive()
             }
         }
-        // Out of the app, as buttons: no menu to find them in.
-        Repeater {
-            model: [
-                { label: qsTr("Copy"), act: () => outgoing.copy([viewer.index]) },
-                { label: qsTr("Export"), act: () => outgoing.exportTo([viewer.index], false) }
-            ]
-            delegate: Rectangle {
-                required property var modelData
-                anchors.verticalCenter: parent.verticalCenter
-                width: buttonLabel.implicitWidth + 22
-                height: buttonLabel.implicitHeight + 10
-                radius: height / 2
-                color: buttonHover.hovered ? "#e0303036" : "#a0202024"
-                Text {
-                    id: buttonLabel
-                    anchors.centerIn: parent
-                    text: parent.modelData.label
-                    color: "white"
-                    font.pixelSize: 12
-                }
-                HoverHandler { id: buttonHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: parent.modelData.act() }
+        // Out of the app, as buttons: no menu to find them in. Copy answers
+        // with a tick on itself.
+        CopyButton {
+            objectName: "viewerCopy"
+            anchors.verticalCenter: parent.verticalCenter
+            photos: () => [viewer.index]
+        }
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: exportLabel.implicitWidth + 22
+            height: exportLabel.implicitHeight + 10
+            radius: height / 2
+            color: exportHover.hovered ? "#e0303036" : "#a0202024"
+            Text {
+                id: exportLabel
+                anchors.centerIn: parent
+                text: qsTr("Export")
+                color: "white"
+                font.pixelSize: 12
             }
+            HoverHandler { id: exportHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: outgoing.exportTo([viewer.index], false) }
         }
         // Back to the library.
         Text {

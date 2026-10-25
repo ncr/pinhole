@@ -221,16 +221,25 @@ ApplicationWindow {
                 color: "white"
                 font.pixelSize: 13
             }
+            CopyButton {
+                anchors.verticalCenter: parent.verticalCenter
+                photos: () => grid.selection()
+                enabledHere: grid.selectionCount > 0
+                pill: false
+                height: 28
+                fontSize: 13
+                idleColor: "transparent"
+                hoverColor: "#40ffffff"
+            }
             Repeater {
                 model: [
-                    { label: qsTr("Copy"), act: () => outgoing.copy(grid.selection()) },
                     { label: qsTr("Export originals"), act: () => outgoing.exportTo(grid.selection(), false) },
                     { label: qsTr("Export as JPEG and MP4"), act: () => outgoing.exportTo(grid.selection(), true) },
                     { label: qsTr("Select all"), act: () => grid.selectAll() }
                 ]
                 delegate: Rectangle {
                     required property var modelData
-                    readonly property bool usable: grid.selectionCount > 0 || index === 3
+                    readonly property bool usable: grid.selectionCount > 0 || index === 2
                     required property int index
                     anchors.verticalCenter: parent.verticalCenter
                     width: actionLabel.implicitWidth + 20

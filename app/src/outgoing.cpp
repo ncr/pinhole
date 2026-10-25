@@ -120,13 +120,15 @@ void Outgoing::drag(QObject *source, const QList<int> &indexes) {
     drag->exec(Qt::CopyAction);
 }
 
-void Outgoing::copy(const QList<int> &indexes) {
+void Outgoing::copy(const QList<int> &indexes, bool quiet) {
     const QList<LibraryItem> items = snapshot(indexes);
     if (items.isEmpty())
         return;
-    prepare(items, true, {}, [this](const QStringList &files, int failed) {
+    prepare(items, true, {}, [this, quiet](const QStringList &files, int failed) {
         if (files.isEmpty()) {
-            flash(tr("Could not get the photos from iCloud"));
+            if (!quiet)
+                flash(tr("Could not get the photos from iCloud"));
+            emit copied(0, failed);
             return;
         }
         auto *mime = new QMimeData;
@@ -145,9 +147,11 @@ void Outgoing::copy(const QList<int> &indexes) {
                 mime->setImageData(image);
         }
         QGuiApplication::clipboard()->setMimeData(mime);
-        flash(failed ? tr("Copied %n, some could not be fetched", "", int(files.size()))
-                     : tr("Copied %n photo(s)", "", int(files.size())));
-    });
+        if (!quiet)
+            flash(failed ? tr("Copied %n, some could not be fetched", "", int(files.size()))
+                         : tr("Copied %n photo(s)", "", int(files.size())));
+        emit copied(int(files.size()), failed);
+    }, quiet);
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {
@@ -186,7 +190,8 @@ QString Outgoing::uniqueName(const QString &folder, const QString &name) {
     return candidate;
 }
 
-void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done) {
+void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done,
+                       bool quiet) {
     QString target = folder;
     if (target.isEmpty()) {
         // A fresh staging folder per request: dropped files must not be
@@ -206,14 +211,16 @@ void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const Q
         state->done({}, 0);
         return;
     }
-    setStatus(items.size() == 1 ? tr("Preparing the photo…") : tr("Preparing %n photos…", "", int(items.size())));
-    auto finishOne = [this, state](const QString &file) {
+    if (!quiet)
+        setStatus(items.size() == 1 ? tr("Preparing the photo…") : tr("Preparing %n photos…", "", int(items.size())));
+    auto finishOne = [this, state, quiet](const QString &file) {
         if (file.isEmpty())
             state->failed += 1;
         else
             state->files.append(file);
         if (--state->left == 0) {
-            setStatus({});
+            if (!quiet)
+                setStatus({});
             state->done(state->files, state->failed);
         }
     };

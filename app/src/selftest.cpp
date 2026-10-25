@@ -14,6 +14,7 @@
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
 #include <QProcess>
+#include <QQmlContext>
 #include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -343,6 +344,9 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     const QPointF left(40.0, window->height() / 2.0);
     // No menu anywhere: a two-finger tap (the right button) is only a touch.
     auto popups = [window] { return window->findChildren<QObject *>(QRegularExpression("Menu|Popup")).size(); };
+    // Copy's tick seen, and anything in the status line meanwhile.
+    auto ticked = std::make_shared<bool>(false);
+    auto bottomLine = std::make_shared<bool>(false);
     auto steps = std::make_shared<QList<Step>>(QList<Step>{
         {"a flick sets the grid coasting", [=] { swipe(window, middle, {0, 30}, 8); },
          [=] { return grid->animating(); }, 100},
@@ -434,6 +438,34 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer] { return !viewer.isOpen(); }, 900},
         {"a click opens it again", [=] { click(window, grid->rectOf(*start + 5).center()); },
          [&viewer] { return viewer.isOpen(); }, 900},
+        {"Copy above the photo answers with a tick on itself",
+         [=] {
+             // Watch the button's phase as it goes; the copy fetches the
+             // original first.
+             *ticked = false;
+             auto *watch = new QTimer(window);
+             QObject::connect(watch, &QTimer::timeout, window, [=] {
+                 if (QObject *b = window->findChild<QObject *>(QStringLiteral("viewerCopy"))) {
+                     const bool done = b->property("phase").toString() == QLatin1String("done");
+                     // The tick as it shows, to look at (PINHOLE_SELFTEST_DIR).
+                     if (done && !*ticked && !qEnvironmentVariable("PINHOLE_SELFTEST_DIR").isEmpty())
+                         QTimer::singleShot(200, window, [window] {
+                             window->grabWindow().save(qEnvironmentVariable("PINHOLE_SELFTEST_DIR") + "/copy-tick.png");
+                         });
+                     *ticked = *ticked || done;
+                 }
+                 *bottomLine = *bottomLine || !qmlContext(window->contentItem())
+                                                      ->contextProperty("outgoing").value<QObject *>()
+                                                      ->property("status").toString().isEmpty();
+             });
+             watch->start(30);
+             QTimer::singleShot(6000, watch, &QObject::deleteLater);
+             click(window, centreOf(window, "viewerCopy"));
+         },
+         [=] {
+             const QMimeData *copied = QGuiApplication::clipboard()->mimeData();
+             return *ticked && !*bottomLine && copied && copied->hasUrls();
+         }, 6000},
         {"a two-finger tap in the viewer neither closes nor steps", [=, &viewer] {
              *mark = viewer.index();
              click(window, middle, Qt::RightButton);
