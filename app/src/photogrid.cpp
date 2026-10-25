@@ -404,15 +404,15 @@ void PhotoGrid::setScroll(double y) {
     notifyScrolled();
 }
 
-void PhotoGrid::updateDateHeaders() {
-    QVariantList headers;
+void PhotoGrid::updateDateLabel() {
+    QString label;
     if (m_library && count() > 0 && height() > 0) {
         // The rows on screen, in content coordinates of their level: the
-        // grid's, or while a zoom moves, the layer drawn underneath.
+        // grid's, or while a zoom moves, the shown level's layer.
         int columns = m_columns;
         double rowStride = stride(), contentTop = m_scroll, contentBottom = m_scroll + height();
-        // The format follows this level: the grid's, or the one a zoom
-        // shows or is landing on.
+        // The form follows this level: the grid's, or the one a zoom shows
+        // or is landing on.
         int formatColumns = m_columns;
         if (m_zoom.active) {
             formatColumns = kLevels[size_t(m_zoom.settling ? m_zoom.target : m_zoom.shown)];
@@ -429,28 +429,30 @@ void PhotoGrid::updateDateHeaders() {
             contentTop = l.pin.y() + (0 - l.at.y()) / l.scale;
             contentBottom = l.pin.y() + (height() - l.at.y()) / l.scale;
         }
-        // Far out the year, then the month (both sticky, a header to each
-        // run), then the range of days on screen, then, close in, the date.
-        // While zooming, one label, not sticky; it changes form as the
-        // levels do (the window morphs it).
+        // Far out the year at the top of the view, then the month, then the
+        // range of days on screen, then, close in, the date at the top. The
+        // window morphs the label as it changes.
         enum Unit { Year, Month, DayRange, Day };
         const Unit unit = formatColumns >= 23 ? Year : formatColumns >= 13 ? Month : formatColumns >= 7 ? DayRange : Day;
-        const bool sticky = !m_zoom.active && (unit == Year || unit == Month);
-        const double s = rowStride;
         const int rows = (count() + columns - 1) / columns;
-        const int first = std::clamp(int(std::floor(contentTop / s)), 0, rows - 1);
-        const int last = std::clamp(int(std::floor(contentBottom / s)), 0, rows - 1);
+        const int first = std::clamp(int(std::floor(contentTop / rowStride)), 0, rows - 1);
+        const int last = std::clamp(int(std::floor(contentBottom / rowStride)), 0, rows - 1);
         const QLocale locale;
         auto dateOf = [this](int index) { return QDateTime::fromMSecsSinceEpoch(m_library->at(index).date).date(); };
-        // A row belongs to the date of its first photo: the grid has no gaps
-        // between runs, so a run's header starts with the row it starts in.
-        auto dateOfRow = [&](int row) { return dateOf(row * columns); };
+        // A row belongs to the date of its first photo.
+        const QDate from = dateOf(first * columns);
 
-        if (unit == Day || unit == DayRange) {
-            // One label, not sticky: the date at the top, or the days the
-            // photos on screen span.
-            const QDate from = dateOfRow(first);
-            QString label = locale.toString(from, QStringLiteral("d MMMM yyyy"));
+        if (unit == Year) {
+            label = QString::number(from.year());
+        } else if (unit == Month) {
+            // The month on its own (Polish "październik", not the
+            // "października" of a full date), capitalised as a heading.
+            QString month = locale.standaloneMonthName(from.month());
+            if (!month.isEmpty())
+                month[0] = month[0].toUpper();
+            label = month + ' ' + QString::number(from.year());
+        } else {
+            label = locale.toString(from, QStringLiteral("d MMMM yyyy"));
             if (unit == DayRange) {
                 const QDate to = dateOf(std::min(count() - 1, (last + 1) * columns - 1));
                 if (to != from) {
@@ -465,39 +467,16 @@ void PhotoGrid::updateDateHeaders() {
                                 locale.toString(to, QStringLiteral("d MMMM yyyy"));
                 }
             }
-            headers.append(QVariantMap{{"label", label}, {"top", -1e9}});
-        } else {
-            auto key = [unit](QDate d) { return unit == Year ? d.year() : d.year() * 12 + d.month(); };
-            auto label = [unit, &locale](QDate d) {
-                if (unit == Year)
-                    return QString::number(d.year());
-                // The month on its own (Polish "październik", not the
-                // "października" of a full date), capitalised as a heading.
-                QString month = locale.standaloneMonthName(d.month());
-                if (!month.isEmpty())
-                    month[0] = month[0].toUpper();
-                return month + ' ' + QString::number(d.year());
-            };
-            QDate date = dateOfRow(first);
-            int current = key(date);
-            headers.append(QVariantMap{{"label", label(date)}, {"top", -1e9}, {"sticky", sticky}});
-            for (int row = first + 1; sticky && row <= last && headers.size() < 8; ++row) {
-                date = dateOfRow(row);
-                if (const int k = key(date); k != current) {
-                    headers.append(QVariantMap{{"label", label(date)}, {"top", row * s - m_scroll}, {"sticky", true}});
-                    current = k;
-                }
-            }
         }
     }
-    if (headers != m_dateHeaders) {
-        m_dateHeaders = headers;
-        emit dateHeadersChanged();
+    if (label != m_dateLabel) {
+        m_dateLabel = label;
+        emit dateLabelChanged();
     }
 }
 
 void PhotoGrid::notifyScrolled() {
-    updateDateHeaders();
+    updateDateLabel();
     const qreal f = scrollFraction();
     if (std::abs(f - m_lastFraction) > 1e-6) {
         m_lastFraction = f;
@@ -706,7 +685,7 @@ void PhotoGrid::beginZoom(QPointF at) {
     if (!continuing)
         m_zoom.focusX = at.x() < width() * 0.2 ? 0 : at.x() > width() * 0.8 ? width() : width() / 2;
     m_pinTracked = false; // a new photo is pinned: start measuring afresh
-    updateDateHeaders(); // one label now, in the shown level's form
+    updateDateLabel(); // one label now, in the shown level's form
     updateAnimating();
     emit zoomingChanged();
 }
@@ -739,7 +718,7 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     }
     // Moving fingers pan: the pinned point follows them.
     m_zoom.at = m_zoom.pinStart + (at - m_zoom.fingerStart);
-    updateDateHeaders();
+    updateDateLabel();
     const double now = m_clock.nsecsElapsed() / 1e9;
     m_zoom.samples.emplace_back(now, std::log(stride));
     while (m_zoom.samples.size() > 2 && now - m_zoom.samples.front().first > 0.1)

@@ -258,35 +258,10 @@ int main(int argc, char *argv[]) {
             });
         });
     }
-    // PINHOLE_SELFTEST=dates:<file>: the sticky date headers as an image, at
-    // PINHOLE_SELFTEST_COLUMNS (29 by default), scrolled to where the next
-    // header has just started pushing the current one out.
-    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("dates:"))) {
-        QTimer::singleShot(1200, window, [window, grid, test] {
-            grid->setColumnsNow(qEnvironmentVariableIsSet("PINHOLE_SELFTEST_COLUMNS")
-                                    ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_COLUMNS")
-                                    : 29);
-            // PINHOLE_SELFTEST_FRACTION: where in the library (0.5 by default).
-            grid->jumpToFraction(qEnvironmentVariableIsSet("PINHOLE_SELFTEST_FRACTION")
-                                     ? qEnvironmentVariable("PINHOLE_SELFTEST_FRACTION").toDouble()
-                                     : 0.5);
-            QTimer::singleShot(300, window, [window, grid, test] {
-                const QVariantList headers = grid->dateHeaders();
-                if (headers.size() > 1) {
-                    const double top = headers[1].toMap().value("top").toDouble();
-                    grid->jumpToFraction(grid->scrollFraction() + (top - 30) / grid->scrollRange());
-                }
-                QTimer::singleShot(300, window, [window, test] {
-                    window->grabWindow().save(test.mid(6));
-                    QCoreApplication::quit();
-                });
-            });
-        });
-    }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from
     // 7 columns out to 29 and in to 3, then two seconds of scrolling at 11
-    // (where the label is a range of days), as
-    // frames of the top left in <dir>, with the label of each on the output.
+    // (where the label is a range of days), as frames of the top left in
+    // <dir>, with the label of each on the output.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("zoomdates:"))) {
         QTimer::singleShot(1200, window, [window, grid, test] {
             grid->setColumnsNow(7);
@@ -312,9 +287,8 @@ int main(int argc, char *argv[]) {
                     timer->stop();
                     QCoreApplication::quit();
                 }
-                const QVariantList headers = grid->dateHeaders();
                 std::printf("%03d %s %.4f %s\n", *frame, grid->zooming() ? "zooming" : "still  ", grid->scrollFraction(),
-                            headers.isEmpty() ? "-" : qPrintable(headers[0].toMap().value("label").toString()));
+                            grid->dateLabel().isEmpty() ? "-" : qPrintable(grid->dateLabel()));
                 std::fflush(stdout);
                 window->grabWindow().copy(0, 0, 420, 70).save(QStringLiteral("%1/%2.png").arg(test.mid(10)).arg(*frame, 3, 10, QLatin1Char('0')));
                 ++*frame;

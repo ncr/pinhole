@@ -72,41 +72,19 @@ ApplicationWindow {
         }
     }
 
-    // Date headers at the top left, sticky as in HTML or Photos: each run of
-    // photos from the same year, month or day (by zoom level, the grid's
-    // dateHeaders) has one where it starts; the current one stays at the top
-    // until the next comes up and pushes it out.
-    Item {
-        id: dateHeaders
-        objectName: "dateHeaders"
-        anchors.fill: parent
-        visible: win.inGrid && grid.count > 0
-        clip: true
-        Repeater {
-            model: 8
-            delegate: Chip {
-                required property int index
-                readonly property var header: index < grid.dateHeaders.length ? grid.dateHeaders[index] : null
-                readonly property var next: index + 1 < grid.dateHeaders.length ? grid.dateHeaders[index + 1] : null
-                visible: header !== null
-                x: 16
-                // Where its run starts (the first one: at the top), and never
-                // lower than where the next one would push it out from.
-                y: {
-                    if (!header)
-                        return 0
-                    const own = Math.max(16, header.top + 16)
-                    return next ? Math.min(own, next.top + 16 - height - 8) : own
-                }
-                text: header ? header.label : ""
-                // Every change morphs, but where a sticky header takes over
-                // from the one it pushed out: that one has gone already.
-                morphing: grid.zooming || (header !== null && !header.sticky)
-                centred: false
-                textColor: theme.brightForeground
-                label.font.pixelSize: Math.round(theme.fontSize * 1.167)
-            }
-        }
+    // The date at the top left: the year, month, days or date of what is on
+    // screen, by zoom level (the grid's dateLabel), morphing as it changes.
+    Chip {
+        id: dateLabel
+        objectName: "dateLabel"
+        visible: win.inGrid && grid.count > 0 && text !== ""
+        x: 16
+        y: 16
+        text: grid.dateLabel
+        morphing: true
+        centred: false
+        textColor: theme.brightForeground
+        label.font.pixelSize: Math.round(theme.fontSize * 1.167)
     }
 
     PhotoViewer {

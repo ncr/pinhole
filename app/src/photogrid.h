@@ -50,12 +50,10 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(qreal scrollFraction READ scrollFraction NOTIFY scrolled)
     // Within half a screen of the newest photos.
     Q_PROPERTY(bool atNewest READ atNewest NOTIFY scrolled)
-    // The date labels on screen, for the window to draw at the top left:
-    // [{label, top, sticky}]. Far out by year and month, sticky: the run the top of
-    // the view is in (top far above), then each run that starts lower down.
-    // Closer in, one label: the days on screen, or the date at the top.
-    // While zooming, one label in the form of the level shown.
-    Q_PROPERTY(QVariantList dateHeaders READ dateHeaders NOTIFY dateHeadersChanged)
+    // The date for the window to show at the top left: far out the year at
+    // the top of the view, then the month, then the days on screen, close
+    // in the date at the top. While zooming, in the form of the level shown.
+    Q_PROPERTY(QString dateLabel READ dateLabel NOTIFY dateLabelChanged)
     // A pinch or zoom step is moving the grid between levels (the date
     // label morphs meanwhile).
     Q_PROPERTY(bool zooming READ zooming NOTIFY zoomingChanged)
@@ -134,7 +132,7 @@ public:
     // half before them and the rest eased, so the motion shows without
     // racing through the whole library.
     Q_INVOKABLE void glideToNewest();
-    QVariantList dateHeaders() const { return m_dateHeaders; }
+    QString dateLabel() const { return m_dateLabel; }
     Q_INVOKABLE void scrubTo(qreal fraction);
     Q_INVOKABLE qint64 dateAt(qreal fraction) const;
     Q_INVOKABLE QVariantList yearMarks() const;
@@ -192,7 +190,7 @@ signals:
     void accentChanged();
     void backgroundChanged();
     void selectingChanged();
-    void dateHeadersChanged();
+    void dateLabelChanged();
     void zoomingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
     void dragRequested(const QList<int> &indexes);
@@ -263,8 +261,8 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_selecting = false;
-    void updateDateHeaders();
-    QVariantList m_dateHeaders;
+    void updateDateLabel();
+    QString m_dateLabel;
     // The press stopped the grid moving: its click opens nothing.
     bool m_pressStopped = false;
     bool m_scrubbing = false;
