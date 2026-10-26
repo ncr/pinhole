@@ -9,11 +9,12 @@
 class ServiceClient;
 class PortalFolderPicker;
 
-// Where the photos come from (iCloud, or a folder on this computer), where
-// Pinhole keeps everything (the library and the photos fetched from the
-// source, in one folder) and how much room it may take: the settings
-// panel's side of the service's source, storage, set_source and
-// set_storage (docs/service.md), with the free space on that disk.
+// Where the photos shown come from (iCloud, or a folder on this computer),
+// where Pinhole keeps everything (the library and the photos fetched from
+// the source, in one folder) and how much room it may take: the settings
+// panel's side of the service's source, storage and set_storage
+// (docs/service.md), with the free space on that disk. Adding and choosing
+// sources is Sources'.
 class Storage : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool loaded READ loaded NOTIFY changed)
@@ -22,10 +23,8 @@ class Storage : public QObject {
     Q_PROPERTY(QString sourceKind READ sourceKind NOTIFY sourceChanged)
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY sourceChanged)
     Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY sourceChanged)
-    // An iCloud source's Apple ID; the Apple IDs signed in to on this
-    // computer (pinhole-sync sign-in), each with a library of its own.
+    // An iCloud source's Apple ID.
     Q_PROPERTY(QString sourceAccount READ sourceAccount NOTIFY sourceChanged)
-    Q_PROPERTY(QStringList accounts READ accounts NOTIFY sourceChanged)
     Q_PROPERTY(bool sourceNeedsSignIn READ sourceNeedsSignIn NOTIFY sourceChanged)
     // The folder, with ~ for the home folder.
     Q_PROPERTY(QString location READ location NOTIFY changed)
@@ -66,6 +65,8 @@ public:
     // library/icloud/<apple id>, library/folder/home-me-Pictures
     // (docs/sources.md).
     static QString library();
+    // The Apple IDs signed in to on this computer, each with a library of
+    // its own.
     static QStringList accounts();
 
     bool loaded() const { return m_loaded; }
@@ -97,10 +98,6 @@ public:
     Q_INVOKABLE void setLimit(double bytes);
     // The desktop's folder picker, then everything moved to the folder chosen.
     Q_INVOKABLE void chooseLocation();
-    // Photos from an Apple ID's iCloud; from a folder chosen in the
-    // desktop's picker.
-    Q_INVOKABLE void useICloud(const QString &account);
-    Q_INVOKABLE void chooseSourceFolder();
     // Stops the service; the window starts the new one at once.
     Q_INVOKABLE void restartService();
     // Bytes as people read them: "6.2 GB".
@@ -115,7 +112,6 @@ private:
     void take(const QJsonObject &report);
     void failed(const QString &code, const QString &message);
     void moveTo(const QString &folder);
-    void setSource(const QJsonObject &source);
 
     ServiceClient *m_service;
     QTimer m_poll;

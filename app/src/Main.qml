@@ -37,58 +37,92 @@ ApplicationWindow {
         }
     }
 
-    // First run: no library yet.
+    // The first run: no source yet, so where the photos are is all there is
+    // to ask.
+    readonly property bool firstRun: sources.known && sources.list.length === 0
+    // Where the photos are, in a sentence: iCloud, or the folder's name
+    // (an Apple ID's source is named after its owner, which reads wrong
+    // there).
+    readonly property string placeName: storage.sourceKind === "icloud" ? "iCloud" : storage.sourceName
+    SourcePicker {
+        id: firstRunPicker
+        objectName: "firstRun"
+        firstRun: true
+        shown: win.firstRun
+        onSignInRequested: icloudpd => signIn.open("")
+    }
+
+    // A source with nothing in it yet, and nothing under way to say so.
     Column {
         anchors.centerIn: parent
-        visible: grid.count === 0
+        visible: !win.firstRun && sources.known && grid.count === 0 && !buildProgress.visible && !trouble.visible
         spacing: theme.fontSize
         width: Math.min(parent.width - 48, 520)
         UiText {
             width: parent.width
-            text: qsTr("No photo library yet")
+            text: qsTr("Nothing in %1 yet").arg(win.placeName)
             color: theme.brightForeground
             font.pixelSize: Math.round(theme.fontSize * 1.333)
             horizontalAlignment: Text.AlignHCenter
         }
-        // iCloud is signed in to and built in a terminal; a folder the
-        // service reads on its own.
         UiText {
             width: parent.width
-            text: storage.sourceNeedsSignIn
-                  ? qsTr("Sign in to %1 and build it in a terminal. It takes about ten minutes for 50,000 photos, and Pinhole opens it as soon as it is there.").arg(storage.sourceName)
-                  : qsTr("Pinhole is looking through %1. Photos show here as soon as they are found.").arg(storage.sourceName)
+            text: qsTr("Photos show here as soon as they are found.")
             wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignHCenter
-        }
-        Chip {
-            visible: storage.sourceNeedsSignIn
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "pinhole-sync sign-in\npinhole-sync all"
-            textColor: theme.accent
-            label.lineHeight: 1.4
-        }
-        UiText {
-            width: parent.width
-            visible: libraryProblem !== ""
-            text: libraryProblem
-            color: theme.darkForeground
-            wrapMode: Text.WrapAnywhere
             horizontalAlignment: Text.AlignHCenter
         }
     }
 
-    // The date at the top left: the year, month, days or date of what is on
+    // Where the photos come from, at the top left: the sources bar on a
+    // click or Tab.
+    ShellButton {
+        id: sourcesButton
+        objectName: "sourcesButton"
+        floating: true
+        visible: win.inGrid && !win.firstRun && sources.known
+        x: 16
+        y: 16
+        // A cloud or a folder, from the Nerd Font Omarchy's type is.
+        text: storage.sourceKind === "folder" ? "" : ""
+        hint: "Tab"
+        onTapped: bar.shown = true
+    }
+
+    // The date beside it: the year, month, days or date of what is on
     // screen, by zoom level (the grid's dateLabel), morphing as it changes.
+    // For a moment after another source is shown, its name instead.
+    property string switchedTo
+    Timer { id: switchedTimer; interval: 2000; onTriggered: win.switchedTo = "" }
+    Connections {
+        target: sources
+        function onSwitched(name) {
+            win.switchedTo = name
+            switchedTimer.restart()
+        }
+    }
     Chip {
         id: dateLabel
         objectName: "dateLabel"
-        visible: win.inGrid && grid.count > 0 && text !== ""
-        x: 16
+        visible: win.inGrid && text !== "" && (grid.count > 0 || win.switchedTo !== "")
+        x: sourcesButton.visible ? sourcesButton.x + sourcesButton.width + 6 : 16
         y: 16
-        text: grid.dateLabel
+        text: win.switchedTo !== "" ? win.switchedTo : grid.dateLabel
         morphing: true
         centred: false
         textColor: theme.brightForeground
+        border.color: win.switchedTo !== "" ? theme.accent
+                    : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+    }
+
+    // A library being built: how far, at the foot.
+    BuildProgress {
+        id: buildProgress
+        objectName: "buildProgress"
+        name: win.placeName
+        visible: win.inGrid && !win.firstRun && (phase === "index" || phase === "thumbs")
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
     }
 
     PhotoViewer {
@@ -122,7 +156,7 @@ ApplicationWindow {
         id: healthNotice
         readonly property string message: {
             switch (serviceHealth) {
-            case "needs_sign_in": return qsTr("Not signed in to %1. To sign in again, run pinhole-sync sign-in in a terminal.").arg(storage.sourceName)
+            case "needs_sign_in": return qsTr("Not signed in to %1. Click to sign in again.").arg(storage.sourceAccount || win.placeName)
             // Out of reach: the network for a source that needs signing in,
             // the disk for a folder.
             case "offline": return storage.sourceNeedsSignIn ? qsTr("Offline. Showing what is on this computer.")
@@ -145,7 +179,63 @@ ApplicationWindow {
         width: Math.min(parent.width - 32, label.implicitWidth + 2 * theme.fontSize)
         label.width: width - 2 * theme.fontSize
         label.elide: Text.ElideRight
+        // Signing in again, from here too.
+        HoverHandler { enabled: serviceHealth === "needs_sign_in"; cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: serviceHealth === "needs_sign_in"; onTapped: signIn.open(storage.sourceAccount) }
     }
+
+    // Apple wants the Apple ID signed in to again: said once, in the middle,
+    // with the way to do it. Looking around first leaves it to the corner.
+    property bool troubleSeen: false
+    readonly property string health: serviceHealth
+    onHealthChanged: if (health !== "needs_sign_in") troubleSeen = false
+    Rectangle {
+        id: trouble
+        objectName: "trouble"
+        visible: win.inGrid && !win.firstRun && !win.troubleSeen
+                 && serviceHealth === "needs_sign_in" && storage.sourceKind === "icloud"
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 32, theme.fontSize * 37)
+        height: troubleContent.implicitHeight + 2 * Math.round(theme.fontSize * 1.714)
+        radius: Math.min(4, theme.radius)
+        color: theme.background
+        border.width: 1
+        border.color: theme.red
+        Column {
+            id: troubleContent
+            anchors.fill: parent
+            anchors.margins: Math.round(theme.fontSize * 1.714)
+            spacing: theme.fontSize
+            UiText {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: qsTr("Apple wants you to sign in again")
+                color: theme.brightForeground
+                font.pixelSize: Math.round(theme.fontSize * 1.143)
+            }
+            UiText {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: qsTr("Until then you see the photos of %1 already on this computer, and nothing new arrives.").arg(storage.sourceAccount)
+            }
+            Row {
+                spacing: 8
+                ShellButton {
+                    active: true
+                    text: qsTr("Sign in")
+                    hint: "⏎"
+                    onTapped: signIn.open(storage.sourceAccount)
+                }
+                ShellButton {
+                    text: qsTr("Look around first")
+                    hint: "Esc"
+                    onTapped: win.troubleSeen = true
+                }
+            }
+        }
+    }
+    Shortcut { enabled: trouble.visible; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: signIn.open(storage.sourceAccount) }
+    Shortcut { enabled: trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: win.troubleSeen = true }
 
     // Back to the newest photos, whenever the grid is away from them.
     ShellButton {
@@ -171,7 +261,7 @@ ApplicationWindow {
         id: helpButton
         objectName: "helpButton"
         floating: true
-        visible: win.inGrid && grid.count > 0
+        visible: !photoViewer.shown && !win.panelUp
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 16
@@ -311,12 +401,48 @@ ApplicationWindow {
         }
     }
 
+    SourcesBar {
+        id: bar
+        objectName: "sourcesBar"
+        health: serviceHealth
+        onAddRequested: {
+            bar.shown = false
+            addPicker.shown = true
+        }
+        onSignInRequested: appleId => signIn.open(appleId)
+    }
+    SourcePicker {
+        id: addPicker
+        objectName: "addSource"
+        onSignInRequested: icloudpd => {
+            addPicker.shown = false
+            signIn.open("")
+        }
+    }
+    SignInPanel {
+        id: signIn
+        objectName: "signIn"
+        function open(appleId) {
+            signIn.appleId = appleId
+            signIn.shown = true
+        }
+    }
+    // A folder added, or an Apple ID signed in to: what was open for it goes.
+    Connections {
+        target: sources
+        function onSwitched() {
+            addPicker.shown = false
+            bar.shown = false
+        }
+    }
     HelpOverlay { id: help; objectName: "help" }
     SettingsPanel { id: settings; objectName: "settings" }
 
-    readonly property bool inGrid: !photoViewer.shown && !help.shown && !settings.shown
+    // Something over the window that takes the keys.
+    readonly property bool panelUp: help.shown || settings.shown || bar.shown || addPicker.shown || signIn.shown
+    readonly property bool inGrid: !photoViewer.shown && !panelUp && !firstRun
     // The buttons' own keys (ShellButton.qml), but for while a panel is up.
-    readonly property bool buttonKeys: !help.shown && !settings.shown
+    readonly property bool buttonKeys: !panelUp && !firstRun
 
     // What Copy and Export act on: the selection, else the photo in view.
     // What Copy and Export take: the photo on screen in the viewer, else the
@@ -336,10 +462,30 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { enabled: !settings.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
+    Shortcut { enabled: !settings.shown && !signIn.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
-    Shortcut { enabled: win.inGrid; sequence: ","; context: Qt.ApplicationShortcut; onActivated: settings.shown = true }
+    Shortcut { enabled: !photoViewer.shown && !win.panelUp; sequence: ","; context: Qt.ApplicationShortcut; onActivated: settings.shown = true }
+
+    // The sources: the bar on Tab, and any of the first nine shown on its
+    // number, from the grid or the bar.
+    Shortcut {
+        enabled: (win.inGrid || bar.shown) && sources.known; sequence: "Tab"; context: Qt.ApplicationShortcut
+        onActivated: bar.shown = !bar.shown
+    }
+    Repeater {
+        model: 9
+        delegate: Item {
+            id: digit
+            required property int index
+            Shortcut {
+                enabled: (win.inGrid || bar.shown) && digit.index < sources.list.length
+                sequence: String(digit.index + 1)
+                context: Qt.ApplicationShortcut
+                onActivated: sources.showAt(digit.index)
+            }
+        }
+    }
 
     // Every button presses on its own key too, shown beside it, while it
     // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,
@@ -357,9 +503,9 @@ ApplicationWindow {
     Shortcut { enabled: win.inGrid; sequence: "Shift+Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, true) }
     Shortcut { enabled: win.inGrid; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
     Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
-    Shortcut { enabled: win.inGrid; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
+    Shortcut { enabled: win.inGrid && !trouble.visible; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
 
-    Shortcut { enabled: win.inGrid && grid.selecting; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
+    Shortcut { enabled: win.inGrid && grid.selecting && !trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
 
     // Out of the app, from the grid or the viewer.
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }

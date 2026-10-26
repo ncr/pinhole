@@ -24,6 +24,7 @@
 #include "photoprovider.h"
 #include "selftest.h"
 #include "serviceclient.h"
+#include "sources.h"
 #include "storage.h"
 #include "viewer.h"
 #include "theme.h"
@@ -160,6 +161,7 @@ int main(int argc, char *argv[]) {
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
     Storage storage(&service);
+    Sources sources(&service);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
@@ -169,17 +171,16 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("storage", &storage);
+    engine.rootContext()->setContextProperty("sources", &sources);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
-    engine.rootContext()->setContextProperty("libraryProblem", QString());
     engine.load(QUrl("qrc:/Main.qml"));
     opening.join();
     if (!haveLibrary)
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
     std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
                  loadTimer.elapsed());
-    engine.rootContext()->setContextProperty("libraryProblem", haveLibrary ? QString() : error);
     if (engine.rootObjects().isEmpty())
         return 1;
 
@@ -305,7 +306,6 @@ int main(int argc, char *argv[]) {
             if (!QFile::exists(libraryDir + "/library.sqlite"))
                 return;
             waitForLibrary.stop();
-            engine.rootContext()->setContextProperty("libraryProblem", QString());
             reloadLibrary();
         });
         waitForLibrary.start(5000);

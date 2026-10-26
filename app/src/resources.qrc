@@ -9,6 +9,12 @@
         <file alias="Spinner.qml">Spinner.qml</file>
         <file alias="SettingsPanel.qml">SettingsPanel.qml</file>
         <file alias="keys.js">keys.js</file>
+        <file alias="pinhole.svg">../../pkgbuild/pinhole.svg</file>
+        <file alias="FieldInput.qml">FieldInput.qml</file>
+        <file alias="SourcePicker.qml">SourcePicker.qml</file>
+        <file alias="SignInPanel.qml">SignInPanel.qml</file>
+        <file alias="SourcesBar.qml">SourcesBar.qml</file>
+        <file alias="BuildProgress.qml">BuildProgress.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/pl.json">i18n/pl.json</file>

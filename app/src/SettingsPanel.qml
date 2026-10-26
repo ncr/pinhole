@@ -1,9 +1,9 @@
 import QtQuick
 
-// Pinhole's settings, on the gear button or ",": where the photos come from
-// (iCloud, or a folder on this computer), the one folder it keeps everything
-// in (the library, and the photos fetched from the source), how much room
-// that takes and how much it may; the library always fits. As an Omarchy
+// Pinhole's settings, on the gear button or ",": the one folder it keeps
+// everything in (each source's library, and the photos fetched from them),
+// how much room that takes and how much it may; the library always fits.
+// Where the photos come from is the sources bar's (Tab). As an Omarchy
 // panel: a scrim, a card with a hairline, keys beside what they press.
 Item {
     id: root
@@ -79,11 +79,6 @@ Item {
     }
     Shortcut { enabled: root.shown && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
     Shortcut { enabled: root.shown && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
-    Shortcut {
-        enabled: root.shown && storage.accounts.length > 0; sequence: "I"; context: Qt.ApplicationShortcut
-        onActivated: storage.useICloud(storage.accounts[0])
-    }
-    Shortcut { enabled: root.shown; sequence: "P"; context: Qt.ApplicationShortcut; onActivated: storage.chooseSourceFolder() }
 
     Rectangle {
         anchors.fill: parent
@@ -134,55 +129,6 @@ Item {
                         text: "✕"
                         hint: "Esc"
                         onTapped: root.shown = false
-                    }
-                }
-
-                // Where the photos come from: iCloud, or a folder, each on a
-                // button of its own; the one in use is lit.
-                Column {
-                    width: parent.width
-                    spacing: 4
-                    UiText {
-                        text: qsTr("Photos from")
-                        color: theme.darkForeground
-                    }
-                    UiText {
-                        width: parent.width
-                        text: storage.sourceKind === "folder" ? storage.sourcePath
-                              : storage.sourceAccount !== "" ? storage.sourceName + " · " + storage.sourceAccount
-                              : storage.sourceName
-                        color: theme.brightForeground
-                        elide: Text.ElideMiddle
-                    }
-                    // One button to each Apple ID signed in to (named by it
-                    // when there are several), and one for a folder.
-                    Flow {
-                        width: parent.width
-                        spacing: 6
-                        Repeater {
-                            model: storage.accounts
-                            ShellButton {
-                                required property string modelData
-                                required property int index
-                                active: storage.sourceKind === "icloud" && storage.sourceAccount === modelData
-                                text: storage.accounts.length > 1 ? modelData : "iCloud"
-                                hint: index === 0 ? "I" : ""
-                                onTapped: storage.useICloud(modelData)
-                            }
-                        }
-                        ShellButton {
-                            active: storage.sourceKind === "folder"
-                            text: qsTr("Folder")
-                            hint: "P"
-                            onTapped: storage.chooseSourceFolder()
-                        }
-                    }
-                    UiText {
-                        visible: storage.accounts.length === 0
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        color: theme.darkForeground
-                        text: qsTr("To show photos from iCloud, run pinhole-sync sign-in in a terminal.")
                     }
                 }
 

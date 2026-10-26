@@ -19,6 +19,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c
 HEADERS += \
     src/library.h \
     src/storage.h \
+    src/sources.h \
     src/thumbnailloader.h \
     src/photogrid.h \
     src/scrollphysics.h \
@@ -39,6 +40,7 @@ SOURCES += \
     src/main.cpp \
     src/library.cpp \
     src/storage.cpp \
+    src/sources.cpp \
     src/thumbnailloader.cpp \
     src/photogrid.cpp \
     src/scrollphysics.cpp \

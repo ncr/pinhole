@@ -34,6 +34,8 @@ Item {
             ["⇧ E", qsTr("Export original")]
         ] },
         { title: "Pinhole", keys: [
+            ["Tab", qsTr("Sources")],
+            ["1–9", qsTr("Show a source")],
             ["?", qsTr("Keys")],
             [",", qsTr("Settings")],
             ["Q", qsTr("Quit")]

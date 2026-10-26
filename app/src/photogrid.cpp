@@ -225,6 +225,11 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved) {
     }
     if (selectionChanged)
         emit this->selectionChanged();
+    // Said again even where the fraction is the same: what depends on it
+    // (at the newest end or not) was read with the new count before the
+    // scroll above followed it.
+    m_lastFraction = -1;
+    notifyScrolled();
     update();
 }
 
@@ -1157,8 +1162,18 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         rs.selection->setFlag(QSGNode::OwnsMaterial);
         root->appendChildNode(rs.selection);
     }
-    if (!m_library || !m_loader || width() <= 0 || count() == 0)
+    if (!m_library || !m_loader || width() <= 0 || count() == 0) {
+        // Nothing to show (another source's library, still empty): nothing
+        // of the last one stays on screen. Drawing anything sets them again.
+        for (auto &slot : rs.drawSlots)
+            if (slot.opacity->opacity() != 0)
+                slot.opacity->setOpacity(0);
+        if (rs.selection->geometry()->vertexCount() > 0) {
+            rs.selection->geometry()->allocate(0);
+            rs.selection->markDirty(QSGNode::DirtyGeometry);
+        }
         return root;
+    }
 
     // The library was read again: textures follow their photos to their new
     // positions (no flash of colours), those of deleted photos go; mosaic

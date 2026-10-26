@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QJsonObject>
@@ -58,19 +59,35 @@ QStringList Storage::accounts() {
 }
 
 QJsonObject Storage::configuredSource() {
-    const QJsonObject source = settings().value("source").toObject();
+    // As the service reads them (storage::resolve): the source shown, else
+    // the first added, else the first Apple ID signed in to; null is none.
+    const QJsonObject all = settings();
+    const QJsonObject none{{"kind", QJsonValue::Null}, {"name", ""}, {"needs_sign_in", false}};
+    QJsonObject source;
+    if (all.contains("source")) {
+        if (!all.value("source").isObject())
+            return none;
+        source = all.value("source").toObject();
+    } else if (const QJsonArray added = all.value("sources").toArray(); all.contains("sources")) {
+        if (added.isEmpty())
+            return none;
+        source = added.first().toObject();
+    } else if (const QStringList signedIn = accounts(); !signedIn.isEmpty()) {
+        source = {{"kind", "icloud"}, {"account", signedIn.first()}};
+    } else {
+        return none;
+    }
     if (source.value("kind").toString() == QLatin1String("folder")) {
         const QString path = source.value("path").toString();
         return {{"kind", "folder"}, {"name", QFileInfo(path).fileName()}, {"path", path}, {"needs_sign_in", false}};
     }
-    // The Apple ID named, else the only one signed in to.
+    // An iCloud entry naming no Apple ID is the only one signed in to.
     QString account = source.value("account").toString();
     if (const QStringList signedIn = accounts(); account.isEmpty() && signedIn.size() == 1)
         account = signedIn.first();
-    QJsonObject icloud{{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}};
-    if (!account.isEmpty())
-        icloud.insert("account", account);
-    return icloud;
+    if (source.value("kind").toString() != QLatin1String("icloud") || account.isEmpty())
+        return none;
+    return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}, {"account", account}};
 }
 
 QString Storage::library() {
@@ -78,6 +95,8 @@ QString Storage::library() {
     // id>, library/folder/home-me-Pictures.
     const QJsonObject source = configuredSource();
     const QString kind = source.value("kind").toString();
+    if (kind.isEmpty())
+        return folder() + "/library/none";
     QString name = source.value("account").toString();
     if (kind == QLatin1String("folder")) {
         name = source.value("path").toString();
@@ -106,32 +125,6 @@ QString Storage::sourceName() const { return m_service->sourceName(); }
 QString Storage::sourcePath() const { return withTilde(m_service->source().value("path").toString()); }
 QString Storage::sourceAccount() const { return m_service->source().value("account").toString(); }
 bool Storage::sourceNeedsSignIn() const { return m_service->source().value("needs_sign_in").toBool(); }
-
-void Storage::useICloud(const QString &account) {
-    setSource({{"kind", "icloud"}, {"account", account}});
-}
-
-void Storage::chooseSourceFolder() {
-    auto *picker = new PortalFolderPicker(this);
-    connect(picker, &PortalFolderPicker::picked, this, [this, picker](const QString &folder) {
-        picker->deleteLater();
-        if (!folder.isEmpty())
-            setSource({{"kind", "folder"}, {"path", QDir::cleanPath(folder)}});
-    });
-    picker->pick(tr("Show photos from"));
-}
-
-void Storage::setSource(const QJsonObject &source) {
-    m_error.clear();
-    emit changed();
-    m_service->call(QStringLiteral("set_source"), source, [this](bool ok, const QJsonObject &, const QString &code) {
-        if (!ok) {
-            m_error = code == QLatin1String("bad_request") ? tr("Photos cannot be shown from there.")
-                                                           : tr("The Pinhole service is not answering.");
-            emit changed();
-        }
-    });
-}
 
 QString Storage::location() const { return withTilde(m_location); }
 
