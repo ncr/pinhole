@@ -364,7 +364,21 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     // Copy's tick seen, and anything in the status line meanwhile.
     auto ticked = std::make_shared<bool>(false);
     auto bottomLine = std::make_shared<bool>(false);
+    auto columns = std::make_shared<int>(0);
     auto steps = std::make_shared<QList<Step>>(QList<Step>{
+        {"three notches of a horizontal wheel zoom in a level, as a pinch",
+         [=] {
+             *columns = grid->columns();
+             for (int i = 0; i < 3; ++i)
+                 wheel(window, middle(), {15, 0}, {120, 0});
+         },
+         [=] { return grid->columns() < *columns && !grid->zooming(); }, 1200},
+        {"three back zoom out to where it was",
+         [=] {
+             for (int i = 0; i < 3; ++i)
+                 wheel(window, middle(), {-15, 0}, {-120, 0});
+         },
+         [=] { return grid->columns() == *columns && !grid->zooming(); }, 1200},
         {"a flick sets the grid coasting", [=] { swipe(window, middle(), {0, 30}, 8); },
          [=] { return grid->animating(); }, 100},
         {"a two-finger tap stops it, and opens nothing", [=] { click(window, middle(), Qt::RightButton); },

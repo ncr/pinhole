@@ -47,6 +47,26 @@ public:
         // the spring that brings it back.
         double rubber = 0.55;
         double springSeconds = 0.42;
+        // Mouse wheel: the stiffness (1/s) of the spring that follows it,
+        // from its stiffest for a single click or a fast spin, down to its
+        // softest for a wheel turned slowly, so a step that comes every
+        // 80 ms still blends into the next rather than starting and stopping.
+        double wheelStiffest = 30;
+        double wheelSoftest = 12;
+        // A wheel kept turning is a spin: steps this close (ms), the same
+        // way. Turned at a controlled pace each step moves about its full
+        // distance; spun faster, the speed levels off at `wheelCruise`
+        // (px/s) rather than growing with every step, so a wheel spun
+        // freely starts at a speed the eye can follow. A spin of more than
+        // `wheelSpinAbove` (px/s of steps) then gathers speed as
+        // Shift+Up/Down does: after `wheelRampDelay` seconds, up to
+        // `wheelTopSpeed` over `wheelRampSeconds`.
+        double wheelSpinGap = 120;
+        double wheelCruise = 5000;
+        double wheelSpinAbove = 8000;
+        double wheelTopSpeed = 16000;
+        double wheelRampDelay = 0.4;
+        double wheelRampSeconds = 2.5;
     };
 
     ScrollPhysics() = default;
@@ -70,6 +90,12 @@ public:
     // A mouse wheel notch or keyboard step: eased, never past the ends,
     // with this time constant (a notch's 80 ms by default; longer glides).
     void nudge(double delta, double seconds = 0.08);
+    // A mouse wheel turned by `delta` (what one step moves when turned
+    // slowly): it glides there with a speed that never jumps, so steps that
+    // come every few milliseconds (an MX Master spinning freely) read as one
+    // movement rather than a push each, and a spin speeds up the longer it
+    // lasts (Params).
+    void wheel(double tMs, double delta);
     // Set the position outright; all motion stops.
     void jumpTo(double position);
     // Start coasting at `velocity` px/s, as if just thrown.
@@ -84,7 +110,7 @@ public:
     double velocity() const { return m_velocity; }
 
 private:
-    enum class Mode { Idle, Tracking, Coasting, Spring, Easing };
+    enum class Mode { Idle, Tracking, Coasting, Spring, Easing, Wheel };
     double gain(double speed) const;
     double overscroll() const;
     double rubberBand(double over) const;
@@ -99,6 +125,13 @@ private:
     double m_unbounded = 0;     // where the fingers would have put it without the rubber band
     double m_easeRemaining = 0;
     double m_easeSeconds = 0.08;
+    double m_wheelTarget = 0;
+    double m_wheelStiffness = 30;
+    double m_wheelInterval = 0;  // ms between recent wheel steps; 0: none recent
+    double m_lastWheelAt = -1e9;
+    double m_wheelRate = 0;      // px/s of steps in this spin, smoothed
+    double m_wheelSpin = 0;      // seconds this spin has been fast
+    double m_wheelLastDelta = 0;
     double m_velocityAtBegin = 0;
     double m_caughtVelocity = 0;
     double m_caughtAt = -1e9;

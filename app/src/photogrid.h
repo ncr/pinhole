@@ -249,6 +249,7 @@ private:
     void beginZoom(QPointF at);
     // The cell size the zoom shows now, and where the pinned photo sits.
     void zoomTo(double stride, QPointF at);
+    void wheelZoom(double notches, QPointF at);
     // Settle on `level`: scale, position and fade animate there.
     void settleZoom(int level);
     // Content position of the pinned point in a grid `columns` wide.
@@ -289,6 +290,8 @@ private:
     void notifyScrolled();
     // When the current coast began; a touch from before it is old news.
     double m_coastFrom = 0;
+    // Ctrl+wheel notches not yet used; high-resolution wheels send parts.
+    double m_zoomNotches = 0;
 
     // Layout and motion, GUI thread (read by the render thread while the
     // GUI thread is blocked in sync).
@@ -331,6 +334,14 @@ private:
         double toScroll = 0;
         double t = 1;
     } m_zoom;
+    // A horizontal wheel zooming as a pinch does: the log of the cell size
+    // shown and the one its notches add up to, and when the last came (s,
+    // on m_clock).
+    struct WheelZoom {
+        bool active = false;
+        double current = 0, target = 0;
+        double lastAt = 0;
+    } m_wheelZoom;
 
     QElapsedTimer m_clock;
 

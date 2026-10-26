@@ -125,6 +125,15 @@ screen recording of Photos on an iPhone.
   flicks, and stretches and springs back at the ends. Releases under
   300 px/s do not coast. `app/tests/scroll_replay.cpp` replays a recorded log
   through it.
+- **A mouse wheel** (tuned on an MX Master over input-remapper, which sends
+  whole notches, each with 15 px of `pixelDelta` on Wayland) glides on a
+  critically damped spring, softer the slower the notches come, so no notch
+  is a jump of its own. A notch moves 180 px at a controlled pace; spun
+  freely, the speed levels off at 5,000 px/s, then gathers speed as
+  Shift+Up/Down does, up to 16,000 px/s, losing it again as the wheel slows.
+  The horizontal (thumb) wheel zooms as a pinch does, about the pointer, and
+  lands on a level once it rests. `PINHOLE_INPUT_LOG` logs each frame's
+  interval and scroll position too.
 - **Stopping a coast** with a resting finger uses libinput's hold gesture,
   which Hyprland sends through the pointer-gestures protocol but Qt does not
   bind; `app/src/touchpadhold.*` binds it on Qt's Wayland connection, on a

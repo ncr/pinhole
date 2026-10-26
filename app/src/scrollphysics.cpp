@@ -134,6 +134,55 @@ void ScrollPhysics::nudge(double delta, double seconds) {
     m_easeRemaining = target - m_position;
 }
 
+void ScrollPhysics::wheel(double tMs, double delta) {
+    const double gap = tMs - m_lastWheelAt;
+    m_lastWheelAt = tMs;
+    const bool spinning = gap <= m_p.wheelSpinGap && (delta > 0) == (m_wheelLastDelta > 0);
+    m_wheelLastDelta = delta;
+    double moved = delta;
+    if (!spinning) {
+        m_wheelRate = 0;
+        m_wheelSpin = 0;
+    } else {
+        // Two reports in one millisecond are one frame's steps, not a
+        // wheel turning a thousand times faster.
+        const double g = std::max(4.0, gap);
+        const double rate = std::abs(delta) / g * 1000;
+        m_wheelRate = m_wheelRate == 0 ? rate : m_wheelRate + (rate - m_wheelRate) * (1 - std::exp(-g / 80));
+        // Fast, it gathers speed; slowing down, it loses it twice as fast,
+        // so spinning the wheel again after it slowed does not shoot off at
+        // the speed it had.
+        if (m_wheelRate >= m_p.wheelSpinAbove)
+            m_wheelSpin += g / 1000;
+        else
+            m_wheelSpin = std::max(0.0, m_wheelSpin - 2 * g / 1000);
+        // The speed levels off at the cruise: about 1 at a controlled pace,
+        // cruise / rate when spun.
+        const double r = m_wheelRate / m_p.wheelCruise;
+        const double levelled = r > 1e-6 ? std::tanh(r) / r : 1;
+        const double ramp = std::clamp((m_wheelSpin - m_p.wheelRampDelay) / m_p.wheelRampSeconds, 0.0, 1.0);
+        const double boost = 1 + (m_p.wheelTopSpeed / m_p.wheelCruise - 1) * ramp * ramp * (3 - 2 * ramp);
+        moved = delta * levelled * boost;
+    }
+
+    // How fast the steps come sets how soft the spring is: about the time
+    // between two of them, so each one carries on where the last leaves off.
+    if (gap > 150)
+        m_wheelInterval = 0;
+    else
+        m_wheelInterval = m_wheelInterval == 0 ? std::max(1.0, gap) : 0.6 * m_wheelInterval + 0.4 * std::max(1.0, gap);
+    m_wheelStiffness = m_wheelInterval == 0
+                           ? m_p.wheelStiffest
+                           : std::clamp(1000 / m_wheelInterval, m_p.wheelSoftest, m_p.wheelStiffest);
+    if (m_mode != Mode::Wheel) {
+        m_mode = Mode::Wheel;
+        m_velocity = 0;
+        m_easeRemaining = 0;
+        m_wheelTarget = boundFor(m_position);
+    }
+    m_wheelTarget = boundFor(m_wheelTarget + moved);
+}
+
 void ScrollPhysics::jumpTo(double position) {
     m_position = position;
     m_unbounded = position;
@@ -158,7 +207,7 @@ void ScrollPhysics::stop() {
 }
 
 bool ScrollPhysics::animating() const {
-    return m_mode == Mode::Coasting || m_mode == Mode::Spring || m_mode == Mode::Easing;
+    return m_mode == Mode::Coasting || m_mode == Mode::Spring || m_mode == Mode::Easing || m_mode == Mode::Wheel;
 }
 
 bool ScrollPhysics::step(double dt) {
@@ -205,6 +254,20 @@ bool ScrollPhysics::step(double dt) {
             if (std::abs(m_easeRemaining) < 0.5) {
                 m_position += m_easeRemaining;
                 m_easeRemaining = 0;
+                m_mode = Mode::Idle;
+            }
+            break;
+        }
+        case Mode::Wheel: {
+            // Critically damped towards where the wheel points: a new step
+            // moves the target, never the speed, so there is no jolt.
+            const double omega = m_wheelStiffness;
+            const double a = omega * omega * (m_wheelTarget - m_position) - 2 * omega * m_velocity;
+            m_velocity += a * s;
+            m_position = boundFor(m_position + m_velocity * s);
+            if (std::abs(m_wheelTarget - m_position) < 0.5 && std::abs(m_velocity) < 20) {
+                m_position = m_wheelTarget;
+                m_velocity = 0;
                 m_mode = Mode::Idle;
             }
             break;

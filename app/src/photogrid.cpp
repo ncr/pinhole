@@ -43,6 +43,11 @@ constexpr double kMorphSeconds = 0.35;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
+// A horizontal wheel's notch zooms by this much, eased over about this
+// long, and lands on a level once it has been still this long (seconds).
+constexpr double kWheelZoomStep = 1.25;
+constexpr double kWheelZoomEase = 0.06;
+constexpr double kWheelZoomRest = 0.2;
 // Texture data uploaded per frame, at most, and the time that may take.
 // More and a frame could miss its vsync. Counted in bytes, not textures: a
 // 1/8 thumbnail is 64 times cheaper than a full one.
@@ -79,7 +84,8 @@ QRectF squareCrop(int w, int h) {
 } // namespace
 
 // PINHOLE_INPUT_LOG=<file>: every scroll and gesture event as it arrives,
-// for tuning scrolling against what the touchpad really sends.
+// and every animated frame, for tuning scrolling against what the touchpad
+// or wheel really sends and what the screen then shows.
 void logInput(const QString &line) {
     static QFile *file = [] {
         const QString path = qEnvironmentVariable("PINHOLE_INPUT_LOG");
@@ -705,6 +711,7 @@ int PhotoGrid::nearestLevel(double stride) const {
 
 void PhotoGrid::beginZoom(QPointF at) {
     const bool continuing = m_zoom.active;
+    m_wheelZoom.active = false;
     m_physics.stop();
     m_driveVelocity = 0;
     // Find the photo under `at` in whatever is shown now (a settle that is
@@ -786,7 +793,20 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     update();
 }
 
+void PhotoGrid::wheelZoom(double notches, QPointF at) {
+    if (!m_wheelZoom.active) {
+        beginZoom(at);
+        m_wheelZoom.active = true;
+        m_wheelZoom.current = m_wheelZoom.target = std::log(m_zoom.stride);
+    }
+    m_wheelZoom.target = std::clamp(m_wheelZoom.target + notches * std::log(kWheelZoomStep),
+                                    std::log(strideFor(kLevels.back())), std::log(strideFor(kLevels.front())));
+    m_wheelZoom.lastAt = m_clock.nsecsElapsed() / 1e9;
+    updateAnimating();
+}
+
 void PhotoGrid::settleZoom(int level) {
+    m_wheelZoom.active = false;
     level = std::clamp(level, 0, levelCount() - 1);
     const std::vector<Layer> shown = layers();
     const int columns = kLevels[size_t(level)];
@@ -945,6 +965,15 @@ void PhotoGrid::advance(qreal dt) {
         m_physics.step(dt);
         m_scroll = m_physics.position();
     }
+    if (m_wheelZoom.active) {
+        // The cell size eases towards where the notches point; still for a
+        // moment, it lands on the nearest level as a released pinch does.
+        m_wheelZoom.current = m_wheelZoom.target + (m_wheelZoom.current - m_wheelZoom.target) * std::exp(-dt / kWheelZoomEase);
+        zoomTo(std::exp(m_wheelZoom.current), m_zoom.fingerStart);
+        if (m_clock.nsecsElapsed() / 1e9 - m_wheelZoom.lastAt > kWheelZoomRest &&
+            std::abs(m_wheelZoom.current - m_wheelZoom.target) < 0.005)
+            endContinuousZoom();
+    }
     if (m_zoom.active && !m_zoom.settling && m_zoom.fade < 1)
         m_zoom.fade = std::min(1.0, m_zoom.fade + dt / kMorphSeconds);
     if (m_zoom.active && m_zoom.settling) {
@@ -964,6 +993,9 @@ void PhotoGrid::advance(qreal dt) {
                 emit columnsChanged();
         }
     }
+    static const bool logging = qEnvironmentVariableIsSet("PINHOLE_INPUT_LOG");
+    if (logging)
+        logInput(QStringLiteral("frame dt=%1 scroll=%2").arg(dt * 1000, 0, 'f', 2).arg(m_scroll, 0, 'f', 1));
     updateAnimating();
     update();
     notifyScrolled();
@@ -973,7 +1005,7 @@ void PhotoGrid::advance(qreal dt) {
 }
 
 void PhotoGrid::updateAnimating() {
-    const bool animating = m_driveVelocity != 0 || m_physics.animating() ||
+    const bool animating = m_driveVelocity != 0 || m_physics.animating() || m_wheelZoom.active ||
                            (m_zoom.active && (m_zoom.settling || m_zoom.fade < 1));
     if (animating != m_animating) {
         m_animating = animating;
@@ -1002,12 +1034,22 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
                  .arg(event->timestamp())
                  .arg(int(event->modifiers())));
     if (event->modifiers() & Qt::ControlModifier) {
-        const int notches = event->angleDelta().y() / 120;
+        m_zoomNotches += event->angleDelta().y() / 120.0;
+        const int notches = int(m_zoomNotches);
         if (notches != 0) {
+            m_zoomNotches -= notches;
             const int from = m_zoom.active ? m_zoom.target : m_level;
             beginZoom(event->position());
             settleZoom(from - notches);
         }
+        event->accept();
+        return;
+    }
+    if (event->phase() == Qt::NoScrollPhase && std::abs(event->angleDelta().x()) > std::abs(event->angleDelta().y())) {
+        // A mouse's horizontal wheel (an MX Master's thumb wheel) zooms as
+        // a pinch does, about the pointer. A touchpad's sideways swipes come
+        // with phases and are not this.
+        wheelZoom(event->angleDelta().x() / 120.0, event->position());
         event->accept();
         return;
     }
@@ -1050,12 +1092,15 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
         break;
     case Qt::NoScrollPhase:
         syncBounds();
-        if (!event->pixelDelta().isNull()) {
-            // Smooth scrolling without phases: follow it directly.
+        if (event->angleDelta().y() == 0 && !event->pixelDelta().isNull()) {
+            // Smooth scrolling without phases or notches: follow it directly.
             setScroll(m_scroll + dy);
         } else {
-            // Mouse wheel: three quarters of a row per notch, eased.
-            m_physics.nudge(-event->angleDelta().y() / 120.0 * stride() * 0.75);
+            // Mouse wheel, 180 px a notch. On Wayland its notches come with
+            // pixels too (15 a notch, after the compositor's scroll
+            // factor), which set the distance. Glided, and sped up the
+            // longer it spins (ScrollPhysics::wheel()).
+            m_physics.wheel(t, (!event->pixelDelta().isNull() ? dy : -event->angleDelta().y() / 8.0 * density) * 12);
         }
         break;
     }

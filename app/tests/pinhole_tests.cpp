@@ -125,6 +125,89 @@ private slots:
         QCOMPARE(p.position(), 1000.0);
     }
 
+    void aSlowlyTurnedWheelGlidesWithoutPulsing() {
+        // A wheel turned slowly: a step every 40 ms, watched at 120 Hz. The
+        // speed from frame to frame barely changes, and each step moves
+        // about its whole distance.
+        ScrollPhysics p;
+        p.setBounds(0, 1e9, 1000);
+        p.jumpTo(500000);
+        double last = p.position(), lowest = 1e9, highest = 0;
+        for (int frame = 0; frame < 120; ++frame) {
+            const double t = frame * 1000.0 / 120;
+            if (frame % 5 == 0 && frame < 100)
+                p.wheel(t, 20);
+            p.step(1.0 / 120);
+            if (frame >= 40 && frame < 100) {
+                lowest = std::min(lowest, p.position() - last);
+                highest = std::max(highest, p.position() - last);
+            }
+            last = p.position();
+        }
+        QVERIFY(lowest > 0);
+        QVERIFY(highest < lowest * 1.4);
+        settle(p);
+        QVERIFY(p.position() > 500000.0 + 20 * 20 * 0.9 && p.position() <= 500000.0 + 20 * 20);
+    }
+
+    void aWheelClickMovesItsWholeStep() {
+        ScrollPhysics p;
+        p.setBounds(0, 1e9, 1000);
+        p.jumpTo(500000);
+        p.wheel(0, 75);
+        settle(p);
+        QCOMPARE(p.position(), 500075.0);
+    }
+
+    void aWheelSpinGathersSpeedLikeShift() {
+        // An MX Master spinning freely: a notch every 7 ms for 4 s. It
+        // starts at about the cruise speed, however fast the notches come,
+        // and gets to the top speed by the end.
+        ScrollPhysics p;
+        p.setBounds(0, 1e9, 1000);
+        p.jumpTo(500000);
+        auto speedAt = [&](double fromMs, double toMs) {
+            const double from = p.position();
+            for (double t = fromMs; t < toMs; t += 7) {
+                p.wheel(t, 75);
+                p.step(0.007);
+            }
+            return (p.position() - from) / (toMs - fromMs) * 1000;
+        };
+        speedAt(0, 100);
+        const double early = speedAt(100, 300);
+        speedAt(300, 3400);
+        const double late = speedAt(3400, 4000);
+        const ScrollPhysics::Params defaults;
+        QVERIFY(early > defaults.wheelCruise * 0.7 && early < defaults.wheelCruise * 1.3);
+        QVERIFY(late > defaults.wheelTopSpeed * 0.85 && late < defaults.wheelTopSpeed * 1.15);
+    }
+
+    void aWheelSpinStartsOverAfterAPause() {
+        ScrollPhysics p;
+        p.setBounds(0, 1e9, 1000);
+        p.jumpTo(500000);
+        double t = 0;
+        for (; t < 3000; t += 7)
+            p.wheel(t, 75);
+        settle(p);
+        // After a pause the first click is a click again.
+        const double before = p.position();
+        p.wheel(t + 500, 75);
+        settle(p);
+        QCOMPARE(p.position() - before, 75.0);
+    }
+
+    void aWheelStopsAtTheEnd() {
+        ScrollPhysics p;
+        p.setBounds(0, 1000, 1000);
+        p.jumpTo(950);
+        for (int i = 0; i < 8; ++i)
+            p.wheel(i * 5, 30);
+        settle(p);
+        QCOMPARE(p.position(), 1000.0);
+    }
+
     void themeFallsBackAndReadsTheAccent() {
         QTemporaryDir dir;
         {
