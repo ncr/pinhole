@@ -162,12 +162,16 @@ holds one source's photos and is never written by another
 command line. Windows hear when each round ran and the next will
 (`rounds`).
 
-Nothing tells the service of a change as it happens: it asks. CloudKit's
-web services describe pushes for a web page (a token from `tokens/create`,
-a long poll on the URL that comes with it, and a zone subscription saved
-to the database), but for an app's own container and its API token;
-whether Apple's photos container takes them from an iCloud.com session
-has not been tried.
+Nothing tells the service of a change as it happens yet: it asks. Apple
+would tell it as icloud.com is told, which works with Pinhole's session
+(tried by hand): a WebSocket to `websocket.push.apple.com` with a P-256
+key gives a push token and a JWT; the token, registered with PDS
+(`gatewayws.icloud.com/pds`, with the JWT and the session's cookies) for
+`com.apple.icloud-container.com.apple.photos.cloud` and with ckdevice's
+`tokens/register`, hears of a change to `PrimarySync` within seconds,
+with no subscription of its own (the web cannot save one in the photos
+container, and CloudKit's `tokens/create` is gone). A push says only that
+the zone changed, so a round would still ask what.
 
 ## Sources
 
