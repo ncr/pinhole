@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QTimer>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -108,7 +109,11 @@ int main(int argc, char *argv[]) {
         qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
     app.setApplicationName("pinhole");
     app.setApplicationVersion("1.0.0");
+    // Matches the window to pinhole.desktop, so the compositor (its Wayland
+    // app id) and Omarchy's launcher pick up the installed icon; the window's
+    // own icon is that one too.
     app.setDesktopFileName("pinhole");
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("pinhole")));
 
     // Where the source's library is: in the folder Pinhole keeps everything
     // in, iCloud's or a folder's as the settings say. The synthetic one for
