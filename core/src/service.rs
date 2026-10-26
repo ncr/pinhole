@@ -708,8 +708,22 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 let (shared, params, method) = (shared.clone(), request["params"].clone(), method.to_owned());
                 std::thread::spawn(move || {
                     let result = match method.as_str() {
-                        "sign_in" => sign_in(&shared, &params),
-                        "submit_code" => submit_code(&shared, &params),
+                        "sign_in" | "submit_code" => {
+                            // Each step and how it ended, in the log: what
+                            // went wrong a first time is otherwise lost.
+                            // Never the password or the code.
+                            let apple_id = params["apple_id"].as_str().unwrap_or("?");
+                            let how = if method == "submit_code" { "the code" }
+                                      else if params["password"].as_str().is_some_and(|p| !p.is_empty()) { "a password" }
+                                      else { "icloudpd's session" };
+                            eprintln!("pinholed: {method} {apple_id} with {how}");
+                            let result = if method == "sign_in" { sign_in(&shared, &params) } else { submit_code(&shared, &params) };
+                            match &result {
+                                Ok(r) => eprintln!("pinholed: {method} {apple_id}: {}", r["state"].as_str().unwrap_or("done")),
+                                Err((code, message)) => eprintln!("pinholed: {method} {apple_id}: {code}: {message}"),
+                            }
+                            result
+                        }
                         _ => Ok(discover(&shared)),
                     };
                     match result {

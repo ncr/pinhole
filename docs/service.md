@@ -178,7 +178,7 @@ provider process to an Apple ID while it waits for the code, so
 `submit_code` reaches the same sign-in). Without a `password` it takes
 over the session icloudpd has for that Apple ID, as `pinhole-sync sign-in
 --from-icloudpd` does. Signed in, the Apple ID is added and shown. Errors
-carry the provider's codes: `wrong_password`, `wrong_code`,
+carry the provider's codes: `wrong_password`, `try_again`, `wrong_code`,
 `rate_limited`, `unavailable`, `needs_sign_in` (no icloudpd session for it).
 
 `discover` says what could be added, for the first window and the Add

@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from pyicloud_ipd.base import PyiCloudService
@@ -87,7 +88,7 @@ class Provider:
         except (FileNotFoundError, json.JSONDecodeError, AttributeError):
             return None
 
-    def connect(self, apple_id, password=None):
+    def connect(self, apple_id, password=None, again=True):
         # No session token kept and no password (signed out): nothing to
         # try, and nothing to send Apple, which would count it as a failed
         # sign-in.
@@ -100,8 +101,23 @@ class Provider:
             api = PyiCloudService(
                 "com", apple_id, lambda: password, cookie_directory=str(self.cookie_dir)
             )
-        except PyiCloudFailedLoginException:
-            raise ProviderError("wrong_password", "Apple refused the Apple ID or password")
+        except PyiCloudFailedLoginException as e:
+            # pyicloud says this for anything that stops a sign-in: Apple
+            # refusing the password, but also refusing to start one (401 on
+            # signin/init) or failing itself (5xx). Only the first is a wrong
+            # password; the others usually go through a moment later.
+            what = str(e.args[0]) if e.args else ""
+            cause = e.args[1] if len(e.args) > 1 else None
+            status = int(cause.code) if str(getattr(cause, "code", "")).isdigit() else 0
+            logging.warning("sign-in stopped: %s %s", what, cause or "")
+            if what.startswith("Invalid email/password") and 400 <= status < 500:
+                raise ProviderError("wrong_password", "Apple refused the Apple ID or password")
+            if password is None:
+                raise ProviderError("needs_sign_in", f"Apple did not accept the session: {what}")
+            if again:
+                time.sleep(2)
+                return self.connect(apple_id, password, again=False)
+            raise ProviderError("try_again", f"Apple's sign-in did not go through: {what} {cause or ''}".strip())
         except PyiCloudServiceUnavailableException:
             # Apple's answer to too many sign-ins in a short time. Every new
             # attempt stretches the wait, so say so instead of retrying.

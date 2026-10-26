@@ -66,6 +66,7 @@ only.
 | `needs_sign_in` | no session, or Apple rejected it |
 | `needs_code` | a two-factor code is required (`submit_code`) |
 | `wrong_password` | Apple refused the Apple ID or password |
+| `try_again` | Apple would not start the sign-in or failed in it, twice (the provider tries once more by itself); not the password's fault |
 | `wrong_code` | Apple refused the two-factor code |
 | `rate_limited` | Apple is refusing sign-ins for a while; retrying extends the wait |
 | `unavailable` | Apple's service answered 5xx or the network is down |

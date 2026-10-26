@@ -189,6 +189,8 @@ void Sources::setSignIn(const QString &state, const QString &errorCode) {
         m_signInError = tr("Apple did not accept that Apple ID or password.");
     else if (errorCode == QLatin1String("wrong_code"))
         m_signInError = tr("That code did not work. The newest one Apple sent is the one to type.");
+    else if (errorCode == QLatin1String("try_again"))
+        m_signInError = tr("Apple's sign-in did not go through this time. Try again in a moment.");
     else if (errorCode == QLatin1String("rate_limited"))
         m_signInError = tr("Apple is not taking sign-ins for this Apple ID right now. Try once more in half an hour.");
     else if (errorCode == QLatin1String("needs_sign_in"))
