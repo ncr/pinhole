@@ -83,6 +83,17 @@ void Sources::remove(const QString &id) {
                     });
 }
 
+void Sources::signOut(const QString &id) {
+    setError({});
+    emit signedOut(id);
+    m_service->call(QStringLiteral("sign_out"), {{"id", id}}, [this](bool ok, const QJsonObject &result, const QString &code) {
+        if (ok)
+            take(result);
+        else
+            setError(code);
+    });
+}
+
 void Sources::addFolder(const QString &path) {
     const QString folder = QDir::cleanPath(path);
     m_switching = QStringLiteral("folder:") + folder;

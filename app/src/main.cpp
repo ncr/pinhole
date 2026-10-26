@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
     // 100,000 photos, so it happens on a thread of its own; the window only
     // stops for the swap. A change announced meanwhile reloads once more.
     std::thread reader;
-    bool reloading = false, reloadAgain = false;
+    bool reloading = false, reloadAgain = false, toNewest = false;
     std::function<void()> reloadLibrary = [&] {
         if (reloading) {
             reloadAgain = true;
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
         reloading = true;
         if (reader.joinable())
             reader.join();
-        reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &loader, grid,
+        reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, grid,
                               &viewer] {
             QElapsedTimer took;
             took.start();
@@ -260,13 +260,15 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < library.count(); ++i)
                 moved[size_t(i)] = positions.value(library.at(i).id, -1);
             const qint64 read = took.elapsed();
-            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &loader, &viewer] {
+            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer] {
                 QElapsedTimer swapping;
                 swapping.start();
                 const int before = library.count();
                 grid->rememberAnchor();
                 loader.reload([&] { library.swap(*fresh); });
                 grid->libraryReloaded(moved);
+                if (std::exchange(toNewest, false))
+                    grid->scrollToEnd();
                 viewer.libraryReloaded(moved);
                 std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                              library.count(), before, read, swapping.elapsed());
@@ -285,6 +287,10 @@ int main(int argc, char *argv[]) {
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed")) {
             reloadLibrary();
+        } else if (name == QLatin1String("source")) {
+            // Another source's library comes next: shown from its newest
+            // photos, not from where the last one was.
+            toNewest = true;
         } else if (name == QLatin1String("library_moved")) {
             // Read from its new place from now on (the old one goes soon).
             libraryDir = details.value("library").toString();

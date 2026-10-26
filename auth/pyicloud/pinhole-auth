@@ -78,7 +78,21 @@ class Provider:
         os.chmod(tmp, 0o600)
         tmp.replace(self.account_file)
 
+    def session_token(self, apple_id):
+        # pyicloud's session file, named after the Apple ID with everything
+        # but word characters removed.
+        path = self.cookie_dir / (re.sub(r"\W", "", apple_id) + ".session")
+        try:
+            return json.loads(path.read_text()).get("session_token")
+        except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+            return None
+
     def connect(self, apple_id, password=None):
+        # No session token kept and no password (signed out): nothing to
+        # try, and nothing to send Apple, which would count it as a failed
+        # sign-in.
+        if password is None and not self.session_token(apple_id):
+            raise ProviderError("needs_sign_in", "Signed out: no session is kept")
         # The constructor signs in by itself: the stored session token first,
         # the password only when that fails. Calling authenticate() again
         # would be a second sign-in in a row, which Apple answers with 503.

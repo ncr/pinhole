@@ -33,6 +33,7 @@ order, since a cached file answers at once while a download takes a while.
 | `sources` | | every source added, as the `sources` event |
 | `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
 | `remove_source` | `id` | the `sources` left; see Sources |
+| `sign_out` | an Apple ID's `id` | the `sources`, that one still among them; see Sources |
 | `discover` | | what could be added: `icloudpd` and `folders`; see Sources |
 | `sign_in` | `apple_id`, and `password` unless icloudpd is signed in to it | `state`: `signed_in` (added and shown) or `needs_code` |
 | `submit_code` | `apple_id`, `code` (six digits) | `state`: `signed_in` (added and shown) |
@@ -166,6 +167,11 @@ fills, and `sources`.
 (the index and thumbnails: never the photos themselves). An Apple ID is
 signed out of too, its session deleted. Removing the one shown shows the
 first left, or none.
+
+`sign_out` deletes an Apple ID's session and nothing else: it stays among
+the sources with its library, which shows what is on this computer (health
+`needs_sign_in`) until it is signed in to again. Without a session the
+provider says so without asking Apple.
 
 `sign_in` signs in to an Apple ID through the sign-in provider (one
 provider process to an Apple ID while it waits for the code, so

@@ -58,6 +58,8 @@ public:
     Q_INVOKABLE bool showAt(int index);
     // Take it out of the list, its library with it.
     Q_INVOKABLE void remove(const QString &id);
+    // Sign out of an Apple ID: its session goes, its library stays.
+    Q_INVOKABLE void signOut(const QString &id);
     // Add a folder and show it: one given, or one chosen in the desktop's
     // picker.
     Q_INVOKABLE void addFolder(const QString &path);
@@ -82,6 +84,8 @@ signals:
     void errorChanged();
     // Signed in and shown: the sign-in can close.
     void signedIn();
+    // Signing out of an Apple ID, as asked here: said as it is asked.
+    void signedOut(const QString &id);
     // Another source is shown, as it was asked for here: its name, for the
     // window to say. Said as it is asked for when the source is known, else
     // (one just added) once the service has made it.

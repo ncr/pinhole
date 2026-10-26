@@ -166,7 +166,8 @@ ApplicationWindow {
             default: return ""
             }
         }
-        visible: message !== "" && grid.count > 0
+        // Not while the middle says it.
+        visible: message !== "" && grid.count > 0 && !trouble.visible
         // Beside the Newest button when it shows.
         anchors.left: newestButton.opacity > 0 ? newestButton.right : parent.left
         anchors.leftMargin: newestButton.opacity > 0 ? 8 : 16
@@ -184,15 +185,28 @@ ApplicationWindow {
         TapHandler { enabled: serviceHealth === "needs_sign_in"; onTapped: signIn.open(storage.sourceAccount) }
     }
 
-    // Apple wants the Apple ID signed in to again: said once, in the middle,
-    // with the way to do it. Looking around first leaves it to the corner.
+    // The Apple ID shown is not signed in to (Apple wants it again, or it was
+    // signed out of): said once, in the middle, with the way to do it.
+    // Looking around first leaves it to the corner.
     property bool troubleSeen: false
+    // An Apple ID signed out of here, on purpose: the corner says so, the
+    // middle need not.
+    property string signedOutOf
+    Connections {
+        target: sources
+        function onSignedOut(id) { win.signedOutOf = id }
+    }
+    // Another source: anything wrong with it is said afresh.
+    Connections {
+        target: storage
+        function onSourceChanged() { win.troubleSeen = false }
+    }
     readonly property string health: serviceHealth
     onHealthChanged: if (health !== "needs_sign_in") troubleSeen = false
     Rectangle {
         id: trouble
         objectName: "trouble"
-        visible: win.inGrid && !win.firstRun && !win.troubleSeen
+        visible: win.inGrid && !win.firstRun && !win.troubleSeen && sources.current !== win.signedOutOf
                  && serviceHealth === "needs_sign_in" && storage.sourceKind === "icloud"
         anchors.centerIn: parent
         width: Math.min(parent.width - 32, theme.fontSize * 37)
@@ -209,14 +223,14 @@ ApplicationWindow {
             UiText {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: qsTr("Apple wants you to sign in again")
+                text: qsTr("Not signed in to %1").arg(storage.sourceAccount)
                 color: theme.brightForeground
                 font.pixelSize: Math.round(theme.fontSize * 1.143)
             }
             UiText {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: qsTr("Until then you see the photos of %1 already on this computer, and nothing new arrives.").arg(storage.sourceAccount)
+                text: qsTr("Until you sign in again, you see the photos already on this computer, and nothing new arrives.")
             }
             Row {
                 spacing: 8

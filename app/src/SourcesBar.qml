@@ -13,9 +13,11 @@ Item {
     property bool shown: false
     // How the source shown is doing (the service's health).
     property string health: "fine"
-    // The row the keys are on; the one asked about before removing.
+    // The row the keys are on; the one asked about before removing or
+    // signing out, and which of the two.
     property int focusIndex: 0
     property int confirming: -1
+    property bool signingOut: false
     signal addRequested()
     signal signInRequested(string appleId)
 
@@ -62,7 +64,10 @@ Item {
     Shortcut {
         enabled: root.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut
         onActivated: {
-            if (root.confirming >= 0) {
+            if (root.confirming >= 0 && root.signingOut) {
+                sources.signOut(root.at(root.confirming).id)
+                root.confirming = -1
+            } else if (root.confirming >= 0) {
                 sources.remove(root.at(root.confirming).id)
                 root.confirming = -1
                 root.focusIndex = Math.max(0, Math.min(root.focusIndex, sources.list.length - 2))
@@ -72,7 +77,21 @@ Item {
         }
     }
     Shortcut { enabled: root.shown && root.confirming < 0 && sources.list.length > 0; sequences: ["Delete", "Backspace"]; context: Qt.ApplicationShortcut
-        onActivated: root.confirming = root.focusIndex }
+        onActivated: {
+            root.signingOut = false
+            root.confirming = root.focusIndex
+        } }
+    // Signing out of an Apple ID keeps its photos here; signed out, the row
+    // offers signing in again instead.
+    Shortcut {
+        enabled: root.shown && root.confirming < 0 && root.at(root.focusIndex) !== undefined
+                 && root.at(root.focusIndex).kind === "icloud" && root.trouble(root.at(root.focusIndex)) !== "needs_sign_in"
+        sequence: "O"; context: Qt.ApplicationShortcut
+        onActivated: {
+            root.signingOut = true
+            root.confirming = root.focusIndex
+        }
+    }
     Shortcut { enabled: root.shown && root.confirming < 0; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: root.addRequested() }
     Shortcut {
         enabled: root.shown; sequence: "Escape"; context: Qt.ApplicationShortcut
@@ -197,7 +216,9 @@ Item {
                                 wrapMode: Text.WordWrap
                                 color: theme.red
                                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                                text: (row.modelData.kind === "icloud"
+                                text: (root.signingOut
+                                       ? qsTr("Sign out? Its index stays here, so signing in again is quick.")
+                                       : row.modelData.kind === "icloud"
                                        ? qsTr("Sign out and forget its index? The photos stay in iCloud.")
                                        : qsTr("Forget its index? The photos stay in the folder."))
                                       + "  " + qsTr("⏎ yes · Esc no")
@@ -231,7 +252,7 @@ Item {
             // Key, words; key, words.
             Repeater {
                 model: ["↑ ↓", qsTr("Choose"), "⏎", qsTr("Show it"), "1–9", qsTr("Show one, from anywhere"),
-                        "Del", qsTr("Remove"), "Tab", qsTr("Hide")]
+                        "O", qsTr("Sign out"), "Del", qsTr("Remove"), "Tab", qsTr("Hide")]
                 delegate: UiText {
                     required property var modelData
                     required property int index

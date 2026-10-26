@@ -275,6 +275,34 @@ fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Va
     Ok(sources_report(shared))
 }
 
+/// Sign out of an Apple ID: its session deleted, nothing else. It stays
+/// among the sources with its library (and its owner's name), which shows
+/// what is on this computer until it is signed in to again, at once.
+fn sign_out(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
+    let bad = |m: String| ("bad_request".to_owned(), m);
+    let id = params["id"].as_str().ok_or_else(|| bad("sign_out needs an id".into()))?;
+    let _changing = shared.changing.lock().unwrap();
+    let settings = crate::storage::read_settings(&shared.config.settings);
+    let entry = crate::storage::source_entry(&settings, id).ok_or_else(|| bad(format!("no source {id}")))?;
+    let account = entry["account"].as_str().ok_or_else(|| bad(format!("{id} is not an Apple ID")))?;
+    shared.signing_in.lock().unwrap().remove(account);
+    // The provider keeps the whole session there (docs: auth/PROTOCOL.md).
+    let cookies = crate::icloud::auth::state_dir(account).join("cookies");
+    if let Err(e) = std::fs::remove_dir_all(&cookies) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(("unavailable".into(), format!("removing {}: {e}", cookies.display())));
+        }
+    }
+    // Shown: a fresh source, which has no session to go on.
+    if shared.source().id() == id {
+        let source = crate::sync::source_for(Some(&entry), shared.config.auth.clone()).map_err(|e| bad(format!("{e:#}")))?;
+        switch(shared, source).map_err(|e| bad(format!("{e:#}")))?;
+    }
+    eprintln!("pinholed: signed out of {account}");
+    shared.broadcast(sources_event(shared));
+    Ok(sources_report(shared))
+}
+
 /// What could be added (docs/service.md, `discover`).
 fn discover(shared: &Shared) -> Value {
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
@@ -574,7 +602,11 @@ pub fn run(config: Config) -> Result<()> {
         let shared = shared.clone();
         std::thread::spawn(move || {
             for (method, params, reply) in changes_rx {
-                let result = if method == "set_source" { set_source(&shared, &params) } else { remove_source(&shared, &params) };
+                let result = match method.as_str() {
+                    "set_source" => set_source(&shared, &params),
+                    "sign_out" => sign_out(&shared, &params),
+                    _ => remove_source(&shared, &params),
+                };
                 match result {
                     Ok(value) => reply.send(Ok(value)),
                     Err((code, message)) => reply.send(Err((&code, message))),
@@ -666,7 +698,7 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
             Some("sources") => reply.send(Ok(sources_report(&shared))),
             // A switch may wait a moment for a library being built to
             // give up: done in turn, off this connection's thread.
-            Some(method @ ("set_source" | "remove_source")) => {
+            Some(method @ ("set_source" | "remove_source" | "sign_out")) => {
                 let _ = shared.changes.lock().unwrap().send((method.to_owned(), request["params"].clone(), reply));
             }
             // These take a while (the sign-in provider starts, Apple
