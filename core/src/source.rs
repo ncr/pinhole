@@ -218,6 +218,32 @@ pub struct Listing {
     pub summary: String,
 }
 
+/// What a source watching for changes says (`Source::watch`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heard {
+    /// Something changed: a round finds out what.
+    Changed,
+    /// Whether it is being told of changes now.
+    Listening(bool),
+}
+
+/// Watching a source for changes, until dropped.
+pub struct Watch {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Watch {
+    pub fn new(stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        Watch { stop }
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 pub trait Source: Send + Sync {
     /// "iCloud", or the folder's name: what the window calls it.
     fn name(&self) -> String;
@@ -238,6 +264,14 @@ pub trait Source: Send + Sync {
     /// How often to look for changes.
     fn rounds_every(&self) -> Duration {
         Duration::from_secs(60)
+    }
+
+    /// Be told of changes as they happen, if the source can tell: `tell`
+    /// hears of each, and of whether it is listening, from a thread of the
+    /// source's own until the Watch is dropped. Rounds go on meanwhile,
+    /// in case a change is missed.
+    fn watch(&self, _tell: Box<dyn Fn(Heard) + Send + Sync>) -> Option<Watch> {
+        None
     }
 
     /// Whether it needs signing in (pinhole-sync sign-in).

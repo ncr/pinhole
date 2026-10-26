@@ -29,7 +29,8 @@ class Sources : public QObject {
     Q_PROPERTY(QVariantMap progress READ progress NOTIFY progressChanged)
     // When the source shown was last looked at for new photos and when it
     // is next: source (its id), last and next (milliseconds since 1970;
-    // no last before the first round that worked, no next while one runs).
+    // no last before the first round that worked, no next while one runs),
+    // and push, whether it tells of changes itself as they happen.
     Q_PROPERTY(QVariantMap rounds READ rounds NOTIFY roundsChanged)
     // What could be added: the Apple IDs icloudpd is signed in to here (as
     // its file names), and folders with photos (path, name, assets, live,

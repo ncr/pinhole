@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
@@ -17,7 +17,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Value};
 
 use crate::icloud::auth::{ProcessProvider, ProviderError};
-use crate::source::{FetchError, Health, Source, Stored, Ticket, Want};
+use crate::source::{FetchError, Health, Heard, Source, Stored, Ticket, Want, Watch};
 use crate::storage::Storage;
 use crate::stream::Streams;
 use crate::sync::thumb_path;
@@ -123,15 +123,19 @@ struct Shared {
     rounds_shown: std::sync::atomic::AtomicU64,
     /// When sync rounds ran and run next: the `rounds` event.
     rounds: Mutex<Rounds>,
+    /// The source shown, watched for changes as they happen, if it can be.
+    watch: Mutex<Option<Watch>>,
 }
 
 /// When each source was last looked at for changes (the end of its last
-/// round that worked, by its id; since this service started), and when
-/// the next round of the one shown is due: none while one runs.
+/// round that worked, by its id; since this service started), when the
+/// next round of the one shown is due (none while one runs), and whether
+/// it tells of changes itself as they happen.
 #[derive(Default)]
 struct Rounds {
     last: HashMap<String, SystemTime>,
     next: Option<SystemTime>,
+    push: bool,
 }
 
 fn millis(time: SystemTime) -> u64 {
@@ -142,7 +146,7 @@ fn millis(time: SystemTime) -> u64 {
 /// `source` is null.
 fn rounds_event(source: &dyn Source, rounds: &Rounds) -> Value {
     if source.kind() == "none" {
-        return json!({"event": "rounds", "source": null, "last": null, "next": null});
+        return json!({"event": "rounds", "source": null, "last": null, "next": null, "push": false});
     }
     let id = source.id();
     json!({
@@ -150,6 +154,7 @@ fn rounds_event(source: &dyn Source, rounds: &Rounds) -> Value {
         "source": id,
         "last": rounds.last.get(&id).copied().map(millis),
         "next": rounds.next.map(millis),
+        "push": rounds.push,
     })
 }
 
@@ -431,6 +436,8 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         // up within a second or so, told by `shown`.
         let _writing = shared.storage.library_lock.lock().unwrap();
         *shared.source.write().unwrap() = source.clone();
+        *shared.watch.lock().unwrap() = None;
+        shared.rounds.lock().unwrap().push = false;
         *shared.health.lock().unwrap() = Health::Fine;
         *shared.progress.lock().unwrap() = None;
         let shown = if source.kind() == "none" { "nowhere".to_owned() } else { source.id() };
@@ -447,7 +454,44 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
     if let Err(e) = source.start() {
         shared.failed(&e);
     }
+    watch(shared, &*source);
     Ok(())
+}
+
+/// Be told of the source's changes as they happen, if it can tell: a
+/// round as soon as one comes (those within a moment of each other make
+/// one, as a change comes as a few pushes), and windows hear whether it
+/// is listening. Rounds every minute go on regardless.
+fn watch(shared: &Arc<Shared>, source: &dyn Source) {
+    let (weak, shown) = (Arc::downgrade(shared), shared.shown.load(Ordering::SeqCst));
+    let pending = Arc::new(AtomicBool::new(false));
+    let watching = source.watch(Box::new(move |heard| {
+        let Some(shared) = weak.upgrade() else { return };
+        // From a source shown before: its watch is stopping.
+        if shared.shown.load(Ordering::SeqCst) != shown {
+            return;
+        }
+        match heard {
+            Heard::Changed => {
+                if pending.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                let pending = pending.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    pending.store(false, Ordering::SeqCst);
+                    let _ = shared.sync_now.lock().unwrap().send(());
+                });
+            }
+            Heard::Listening(listening) => {
+                shared.rounds.lock().unwrap().push = listening;
+                shared.broadcast(shared.rounds_event());
+            }
+        }
+    }));
+    if shared.shown.load(Ordering::SeqCst) == shown {
+        *shared.watch.lock().unwrap() = watching;
+    }
 }
 
 /// The source the settings name, if pinhole-sync changed it (signing in to
@@ -600,6 +644,7 @@ pub fn run(config: Config) -> Result<()> {
         shown: std::sync::atomic::AtomicU64::new(0),
         rounds_shown: std::sync::atomic::AtomicU64::new(u64::MAX),
         rounds: Mutex::new(Rounds::default()),
+        watch: Mutex::new(None),
         changing: Mutex::new(()),
         changes: Mutex::new(changes_tx),
     });
@@ -633,6 +678,7 @@ pub fn run(config: Config) -> Result<()> {
         let shared = shared.clone();
         std::thread::spawn(move || sync_loop(shared, sync_rx));
     }
+    watch(&shared, &*shared.source());
     {
         let shared = shared.clone();
         std::thread::spawn(move || {
@@ -1175,6 +1221,9 @@ mod tests {
         let event = rounds_event(&folder, &rounds);
         assert_eq!(event["last"], 1_000_000);
         assert_eq!(event["next"], 1_010_000);
+        assert_eq!(event["push"], false);
+        rounds.push = true;
+        assert_eq!(rounds_event(&folder, &rounds)["push"], true);
 
         let none = rounds_event(&crate::source::NoSource, &rounds);
         assert!(none["source"].is_null() && none["next"].is_null());

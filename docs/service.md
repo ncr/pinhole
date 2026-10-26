@@ -121,7 +121,7 @@ takes a `progress` only for the source it shows. `set_source` and
 several asked at once the last is the one shown.
 
 ```json
-{"event": "rounds", "source": "icloud:me@example.com", "last": 1793026800000, "next": 1793026860000}
+{"event": "rounds", "source": "icloud:me@example.com", "last": 1793026800000, "next": 1793026860000, "push": true}
 ```
 
 When the source shown was last looked at for changes and when it will be
@@ -130,8 +130,10 @@ as it connects, as each round starts (`next` null: one is under way) and
 as it ends (`next` when the one after is due). `last` is when the last
 round that worked ended, null before one has since the service started
 (a failed round leaves it, and says why in `health`). With no source,
-`source` is null. A round also starts early when a window sends `sync` or
-another source is shown, so `next` is when it will be at the latest.
+`source` is null. A round also starts early when a window sends `sync`,
+another source is shown or the source says something changed, so `next`
+is when it will be at the latest. `push` is whether the source tells of
+its changes as they happen (also sent when that changes).
 
 ```json
 {"event": "health", "state": "offline"}
@@ -162,16 +164,18 @@ holds one source's photos and is never written by another
 command line. Windows hear when each round ran and the next will
 (`rounds`).
 
-Nothing tells the service of a change as it happens yet: it asks. Apple
-would tell it as icloud.com is told, which works with Pinhole's session
-(tried by hand): a WebSocket to `websocket.push.apple.com` with a P-256
-key gives a push token and a JWT; the token, registered with PDS
-(`gatewayws.icloud.com/pds`, with the JWT and the session's cookies) for
-`com.apple.icloud-container.com.apple.photos.cloud` and with ckdevice's
-`tokens/register`, hears of a change to `PrimarySync` within seconds,
-with no subscription of its own (the web cannot save one in the photos
-container, and CloudKit's `tokens/create` is gone). A push says only that
-the zone changed, so a round would still ask what.
+iCloud also tells the service of a change as it happens, as icloud.com
+is told (`icloud::push`): a WebSocket to `websocket.push.apple.com` with
+a P-256 key gives a push token and a JWT; the token is registered for an
+hour at a time with PDS (`gatewayws.icloud.com/pds`, with the JWT and the
+session's cookies) for `com.apple.icloud-container.com.apple.photos.cloud`,
+and with ckdevice's `tokens/register`, with no subscription of its own
+(the web cannot save one in the photos container, and CloudKit's
+`tokens/create` is gone). A change to `PrimarySync` then comes down the
+socket within seconds, saying only that the zone changed: a round starts
+1.5 s after it (the few pushes of one change make one round). A lost
+connection is tried again after 5 s, doubling to 5 minutes; the rounds
+every minute go on regardless, in case a push is missed.
 
 ## Sources
 

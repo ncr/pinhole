@@ -57,7 +57,9 @@ Item {
         return kind + " · " + count(s.count)
     }
     // When the one shown was last looked at for new photos, and when it is
-    // next (the service's rounds), counted on as the bar is open.
+    // next (the service's rounds), counted on as the bar is open; or
+    // that Apple notifies of changes, when it does (a round then comes at
+    // once, and the minute's rounds are only in case one is missed).
     property double now: Date.now()
     Timer {
         running: root.shown
@@ -84,6 +86,7 @@ Item {
                    : ago < 5000 ? qsTr("Checked just now")
                    : qsTr("Checked %1 ago").arg(span(ago))
         const next = r.next === undefined || r.next <= root.now ? qsTr("Checking now…")
+                   : r.push ? qsTr("Apple notifies of changes")
                    : qsTr("Next check in %1").arg(span(r.next - root.now))
         return last + "\n" + next
     }

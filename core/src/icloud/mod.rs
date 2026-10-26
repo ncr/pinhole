@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod cloudkit;
 pub mod index;
+pub mod push;
 pub mod records;
 pub mod session;
 pub mod walk;
@@ -20,7 +21,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::db::Index;
-use crate::source::{Body, FetchError, Health, Listing, Source, Stored, Ticket};
+use crate::source::{Body, FetchError, Health, Heard, Listing, Source, Stored, Ticket, Watch};
 use crate::sync::now_secs;
 use auth::{FixedSession, ProcessProvider, ProviderError};
 use cloudkit::{Downloader, PhotosClient};
@@ -186,6 +187,14 @@ impl Source for IcloudSource {
 
     fn start(&self) -> Result<()> {
         self.with(&self.links, |_| Ok(()))
+    }
+
+    fn watch(&self, tell: Box<dyn Fn(Heard) + Send + Sync>) -> Option<Watch> {
+        let account = self.account.clone()?;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (auth, stopping) = (self.auth.clone(), stop.clone());
+        std::thread::spawn(move || push::listen(auth, account, tell, stopping));
+        Some(Watch::new(stop))
     }
 
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {

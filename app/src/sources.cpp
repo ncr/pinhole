@@ -28,7 +28,7 @@ Sources::Sources(ServiceClient *service, QObject *parent) : QObject(parent), m_s
             }
         } else if (name == QLatin1String("rounds")) {
             QVariantMap rounds;
-            for (const QString &key : {QStringLiteral("source"), QStringLiteral("last"), QStringLiteral("next")})
+            for (const QString &key : {QStringLiteral("source"), QStringLiteral("last"), QStringLiteral("next"), QStringLiteral("push")})
                 if (!details.value(key).isNull())
                     rounds.insert(key, details.value(key).toVariant());
             if (rounds != m_rounds) {
