@@ -113,11 +113,18 @@ pub struct Index<'a> {
     pub changes: Changes,
     /// Nothing is written: only `changes` says what would be.
     pub dry_run: bool,
+    /// Asked before each `put`: true gives up with `Stopped`.
+    pub stop: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
 
 impl<'a> Index<'a> {
     pub fn new(conn: &'a mut Connection) -> Self {
-        Index { conn, seen: HashSet::new(), changes: Changes::default(), dry_run: false }
+        Index { conn, seen: HashSet::new(), changes: Changes::default(), dry_run: false, stop: None }
+    }
+
+    /// Whoever listed into this should give up (see `stop`).
+    pub fn stopping(&self) -> bool {
+        self.stop.is_some_and(|stop| stop())
     }
 
     pub fn known(&self, id: &str) -> bool {
@@ -126,6 +133,9 @@ impl<'a> Index<'a> {
 
     /// Store assets, new or changed, in one transaction.
     pub fn put(&mut self, assets: &[Asset]) -> Result<()> {
+        if self.stopping() {
+            return Err(crate::source::Stopped.into());
+        }
         let tx = self.conn.transaction()?;
         {
             let mut before = tx.prepare_cached(

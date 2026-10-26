@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
 use crate::db::{self, Changes, Index};
-use crate::source::{FetchError, Source, Stored, Ticket, TokenExpired, Want};
+use crate::source::{FetchError, Source, Stopped, Stored, Ticket, TokenExpired, Want};
 
 pub fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -48,10 +48,19 @@ pub fn claim(source: &dyn Source, conn: &mut Connection, library: &Path) -> Resu
 }
 
 /// List the whole library into the index: what the source has is put,
-/// what it no longer has is removed, and the change token saved.
-pub fn list(source: &dyn Source, conn: &mut Connection, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<SyncReport> {
+/// what it no longer has is removed, and the change token saved. `stop`
+/// true gives up with `Stopped`, before anything is removed.
+pub fn list(
+    source: &dyn Source,
+    conn: &mut Connection,
+    progress: &(dyn Fn(u64, u64) + Sync),
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<SyncReport> {
     let started = Instant::now();
+    // Under way, before the source has counted anything.
+    progress(0, 0);
     let mut index = Index::new(conn);
+    index.stop = Some(stop);
     let listing = source.list(&mut index, progress)?;
     index.remove_unseen()?;
     let changes = std::mem::take(&mut index.changes);
@@ -84,12 +93,19 @@ pub fn follow(source: &dyn Source, conn: &mut Connection, dry_run: bool) -> Resu
 }
 
 /// Follow the changes, or list everything when there is no token yet or
-/// the source no longer accepts it.
-pub fn catch_up(source: &dyn Source, conn: &mut Connection) -> Result<SyncReport> {
+/// the source no longer accepts it, telling `progress` how the listing
+/// goes (assets put, and the source's count of them); `stop` as for
+/// `list`.
+pub fn catch_up(
+    source: &dyn Source,
+    conn: &mut Connection,
+    progress: &(dyn Fn(u64, u64) + Sync),
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<SyncReport> {
     match follow(source, conn, false) {
         Err(e) if e.downcast_ref::<TokenExpired>().is_some() => {
             eprintln!("pinholed: sync: {e}; listing the whole library");
-            list(source, conn, &|_, _| {})
+            list(source, conn, progress, stop)
         }
         other => other,
     }
@@ -147,13 +163,15 @@ enum ThumbResult {
 /// grid's starting screen fills first: from the file already on disk under
 /// its key when there is one, else read through the source (iCloud's are
 /// downloaded, a folder's made from the photo). A ticket that turns out
-/// stale is prepared again, once.
+/// stale is prepared again, once. `stop` true gives up with `Stopped`
+/// once the thumbnails under way are in; the rest are made next time.
 pub fn make_thumbs(
     source: &dyn Source,
     conn: &mut Connection,
     library: &Path,
     parallel: usize,
     progress: &(dyn Fn(usize, usize) + Sync),
+    stop: &(dyn Fn() -> bool + Sync),
 ) -> Result<ThumbReport> {
     let started = Instant::now();
     let mut wanted: Vec<Stored> = Vec::new();
@@ -180,9 +198,12 @@ pub fn make_thumbs(
     let (local, remote): (Vec<Stored>, Vec<Stored>) =
         wanted.into_iter().partition(|s| library.join(thumb_path(&s.key)).exists());
     let jobs = local.into_iter().map(|stored| ThumbJob { stored, ticket: Ticket(String::new()), retried: false }).collect();
-    run_thumb_jobs(source, library, jobs, parallel, conn, &mut report, &mut Vec::new(), progress)?;
+    run_thumb_jobs(source, library, jobs, parallel, conn, &mut report, &mut Vec::new(), progress, stop)?;
 
     for batch in remote.chunks(THUMB_BATCH) {
+        if stop() {
+            return Err(Stopped.into());
+        }
         let mut jobs = Vec::new();
         for (stored, ticket) in batch.iter().zip(source.prepare(conn, batch)?) {
             match ticket {
@@ -194,7 +215,7 @@ pub fn make_thumbs(
             }
         }
         let mut expired = Vec::new();
-        run_thumb_jobs(source, library, jobs, parallel, conn, &mut report, &mut expired, progress)?;
+        run_thumb_jobs(source, library, jobs, parallel, conn, &mut report, &mut expired, progress, stop)?;
         if expired.is_empty() {
             continue;
         }
@@ -207,8 +228,11 @@ pub fn make_thumbs(
             }
         }
         let mut expired_twice = Vec::new();
-        run_thumb_jobs(source, library, again, parallel, conn, &mut report, &mut expired_twice, progress)?;
+        run_thumb_jobs(source, library, again, parallel, conn, &mut report, &mut expired_twice, progress, stop)?;
         report.failed += expired_twice.len();
+    }
+    if stop() {
+        return Err(Stopped.into());
     }
     report.seconds = started.elapsed().as_secs_f64();
     Ok(report)
@@ -224,6 +248,7 @@ fn run_thumb_jobs(
     report: &mut ThumbReport,
     expired: &mut Vec<ThumbJob>,
     progress: &(dyn Fn(usize, usize) + Sync),
+    stop: &(dyn Fn() -> bool + Sync),
 ) -> Result<()> {
     if jobs.is_empty() {
         return Ok(());
@@ -252,6 +277,9 @@ fn run_thumb_jobs(
         for _ in 0..parallel.max(1) {
             let (queue, tx) = (&queue, tx.clone());
             scope.spawn(move || loop {
+                if stop() {
+                    break;
+                }
                 let job = queue.lock().unwrap().pop();
                 let Some(job) = job else { break };
                 if tx.send(fetch_thumb(source, library, job)).is_err() {
@@ -348,21 +376,18 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
 }
 
-/// A source from its settings entry: {"kind": "icloud", "account": apple
-/// id} or {"kind": "folder", "path": ...}. None is iCloud, and an iCloud
-/// one without an account is the only Apple ID signed in to, if there is
-/// just one.
+/// A source from its settings entry, `{"kind": "icloud", "account": apple
+/// id}` or `{"kind": "folder", "path": ...}` (`storage::read_settings` has
+/// filled in an iCloud one's Apple ID); none is `NoSource`.
 pub fn source_for(entry: Option<&serde_json::Value>, auth: PathBuf) -> Result<Arc<dyn Source>> {
-    match entry.and_then(|e| e["kind"].as_str()).unwrap_or("icloud") {
+    let Some(entry) = entry else { return Ok(Arc::new(crate::source::NoSource)) };
+    match entry["kind"].as_str().unwrap_or("") {
         "icloud" => {
-            let account = entry.and_then(|e| e["account"].as_str()).map(str::to_owned).or_else(|| {
-                let accounts = crate::icloud::auth::accounts();
-                (accounts.len() == 1).then(|| accounts[0].clone())
-            });
+            let account = entry["account"].as_str().map(str::to_owned);
             Ok(Arc::new(crate::icloud::IcloudSource::new(auth, account)))
         }
         "folder" => {
-            let path = entry.and_then(|e| e["path"].as_str()).ok_or_else(|| anyhow!("a folder source needs a path"))?;
+            let path = entry["path"].as_str().ok_or_else(|| anyhow!("a folder source needs a path"))?;
             if !Path::new(path).is_absolute() {
                 return Err(anyhow!("not an absolute path: {path}"));
             }
@@ -411,6 +436,41 @@ mod tests {
         assert!(claim(&photos, &mut conn, &dir).is_err());
         assert_eq!(conn.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         assert!(dir.join("thumbs").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_listing_or_thumbnails_stopped_part_way_lose_nothing() {
+        use crate::folder::FolderSource;
+        let dir = std::env::temp_dir().join(format!("pinhole-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (photos, library) = (dir.join("photos"), dir.join("library"));
+        std::fs::create_dir_all(&photos).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            image::RgbImage::new(4, 4).save(photos.join(name)).unwrap();
+        }
+        let source = FolderSource::new(photos.clone());
+        let mut conn = db::open(&library.join("library.sqlite")).unwrap();
+        let count = |conn: &Connection, sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(count(&conn, "SELECT count(*) FROM assets"), 3);
+
+        // Stopped: nothing put, and above all nothing removed for not being
+        // seen, though a file went meanwhile.
+        std::fs::remove_file(photos.join("c.jpg")).unwrap();
+        let e = list(&source, &mut conn, &|_, _| {}, &|| true).unwrap_err();
+        assert!(e.downcast_ref::<Stopped>().is_some());
+        assert_eq!(count(&conn, "SELECT count(*) FROM assets"), 3);
+        let e = make_thumbs(&source, &mut conn, &library, 2, &|_, _| {}, &|| true).unwrap_err();
+        assert!(e.downcast_ref::<Stopped>().is_some());
+        assert_eq!(count(&conn, "SELECT count(thumb_path) FROM assets"), 0);
+
+        // Shown again: listed again, and the thumbnails made.
+        list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(count(&conn, "SELECT count(*) FROM assets"), 2);
+        let made = make_thumbs(&source, &mut conn, &library, 2, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(made.made, 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

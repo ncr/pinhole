@@ -122,6 +122,13 @@ pub fn state_dir(apple_id: &str) -> PathBuf {
         .join(apple_id)
 }
 
+/// The Apple ID's owner as Apple gives it, if the provider has kept it.
+pub fn account_name(apple_id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(state_dir(apple_id).join("account.json")).ok()?;
+    let account: Value = serde_json::from_str(&text).ok()?;
+    account["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned)
+}
+
 /// The Apple IDs signed in to on this computer, whether or not their
 /// session is still good.
 pub fn accounts() -> Vec<String> {

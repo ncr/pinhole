@@ -54,24 +54,124 @@ pub fn old_cache() -> PathBuf {
 pub struct Settings {
     pub location: Option<PathBuf>,
     pub limit: Option<u64>,
-    /// Where the photos come from (docs/sources.md); none is iCloud.
+    /// Every source added, in order (docs/sources.md).
+    pub sources: Vec<Value>,
+    /// The one shown, if any.
     pub source: Option<Value>,
 }
 
 pub fn read_settings(path: &Path) -> Settings {
-    let Ok(text) = std::fs::read_to_string(path) else { return Settings::default() };
-    let Ok(v) = serde_json::from_str::<Value>(&text) else { return Settings::default() };
+    let written = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    resolve(&written, &crate::icloud::auth::accounts())
+}
+
+/// The settings as written, with the Apple IDs signed in to on this
+/// computer: without `sources`, those Apple IDs then the folder shown if
+/// it is one; without `source`, the first of them (`null` is none).
+fn resolve(v: &Value, accounts: &[String]) -> Settings {
+    // An iCloud entry naming no Apple ID is the only one signed in to.
+    let normal = |entry: &Value| -> Option<Value> {
+        match entry["kind"].as_str()? {
+            "icloud" => {
+                let account = entry["account"].as_str().map(str::to_owned).or_else(|| (accounts.len() == 1).then(|| accounts[0].clone()))?;
+                Some(json!({"kind": "icloud", "account": account}))
+            }
+            "folder" => Some(json!({"kind": "folder", "path": entry["path"].as_str()?})),
+            _ => None,
+        }
+    };
+    let shown = match v.get("source") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(entry) => Some(normal(entry)),
+    };
+    let mut sources: Vec<Value> = match v["sources"].as_array() {
+        Some(list) => list.iter().filter_map(normal).collect(),
+        None => {
+            let mut list: Vec<Value> = accounts.iter().map(|a| json!({"kind": "icloud", "account": a})).collect();
+            if let Some(Some(entry)) = &shown {
+                if entry["kind"] == "folder" {
+                    list.push(entry.clone());
+                }
+            }
+            list
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    sources.retain(|e| seen.insert(source_id(e)));
+    let source = match shown {
+        Some(entry) => entry,
+        None => sources.first().cloned(),
+    };
     Settings {
         location: v["location"].as_str().map(PathBuf::from),
         limit: v["limit_bytes"].as_u64(),
-        source: v.get("source").filter(|s| s.is_object()).cloned(),
+        sources,
+        source,
     }
+}
+
+/// A settings entry's id, as its source's `id()` says it: `icloud:<apple
+/// id>`, `folder:<path>`.
+pub fn source_id(entry: &Value) -> String {
+    match entry["kind"].as_str() {
+        Some("icloud") => format!("icloud:{}", entry["account"].as_str().unwrap_or("")),
+        Some("folder") => format!("folder:{}", entry["path"].as_str().unwrap_or("")),
+        _ => "none".into(),
+    }
+}
+
+/// The entry an id names, among those added.
+pub fn source_entry(settings: &Settings, id: &str) -> Option<Value> {
+    settings.sources.iter().find(|e| source_id(e) == id).cloned()
+}
+
+/// Show `entry`, adding it to the sources first if it is new; `None`
+/// shows nothing.
+pub fn show_source(path: &Path, entry: Option<&Value>) -> Result<()> {
+    let _writing = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+    let current = read_settings(path);
+    write_settings(path, |settings| {
+        let mut sources = current.sources.clone();
+        if let Some(entry) = entry {
+            if !sources.iter().any(|e| source_id(e) == source_id(entry)) {
+                sources.push(entry.clone());
+            }
+        }
+        settings["sources"] = json!(sources);
+        settings["source"] = entry.cloned().unwrap_or(Value::Null);
+    })
+}
+
+/// Take a source out of the list; the one shown, if it was that, becomes
+/// the first left (or none). The entry shown afterwards.
+pub fn remove_source(path: &Path, id: &str) -> Result<Option<Value>> {
+    let _writing = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+    let current = read_settings(path);
+    let sources: Vec<Value> = current.sources.iter().filter(|e| source_id(e) != id).cloned().collect();
+    let shown = match &current.source {
+        Some(entry) if source_id(entry) != id => Some(entry.clone()),
+        _ => sources.first().cloned(),
+    };
+    write_settings(path, |settings| {
+        settings["sources"] = json!(sources);
+        settings["source"] = shown.clone().unwrap_or(Value::Null);
+    })?;
+    Ok(shown)
 }
 
 /// A source's library in the folder Pinhole keeps everything in, one to a
 /// source, under its kind: `library/icloud/<apple-id>`,
-/// `library/folder/home-me-Pictures`.
+/// `library/folder/home-me-Pictures`; with no source, an empty one in
+/// `library/none`.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
+    if source.kind() == "none" {
+        return location.join("library/none");
+    }
     location.join("library").join(source.kind()).join(source.library_name())
 }
 
@@ -83,6 +183,15 @@ pub fn location() -> PathBuf {
 /// Change the settings file, keeping whatever else is in it, written
 /// aside and renamed so a reader never sees half of it.
 pub fn update_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<()> {
+    let _writing = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+    write_settings(path, change)
+}
+
+/// One change of the settings at a time in this process: each reads what
+/// the one before wrote.
+static SETTINGS: Mutex<()> = Mutex::new(());
+
+fn write_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<()> {
     let mut settings = std::fs::read_to_string(path)
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -92,7 +201,8 @@ pub fn update_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let part = path.with_extension("json.part");
+    // Named for this process: pinhole-sync may be writing them too.
+    let part = path.with_extension(format!("json.{}.part", std::process::id()));
     std::fs::write(&part, serde_json::to_vec_pretty(&settings)?)?;
     std::fs::rename(&part, path)?;
     Ok(())
@@ -578,7 +688,8 @@ mod tests {
         let storage = storage_in(&location, &dir.join("settings.json"));
         storage.set_limit(1).unwrap();
         // Kept at the least there can be, in the settings with the folder.
-        assert_eq!(read_settings(&dir.join("settings.json")), Settings { location: Some(location), limit: Some(GB), source: None });
+        let saved = read_settings(&dir.join("settings.json"));
+        assert_eq!((saved.location, saved.limit), (Some(location), Some(GB)));
         // What the eviction thread does when asked, at a test's size.
         storage.free(1300, 1300);
         assert!(!cache.join("full/aa/old.jpg").exists());
@@ -648,5 +759,63 @@ mod tests {
         until_moved(&storage);
         assert!(location.join("cache/medium/aa/one.jpg").exists());
         assert!(!old.exists());
+    }
+
+    #[test]
+    fn without_a_list_the_sources_are_the_apple_ids_then_the_folder_shown() {
+        let accounts = vec!["a@x.com".to_owned(), "b@x.com".to_owned()];
+        let folder = json!({"kind": "folder", "path": "/photos"});
+        let s = resolve(&json!({"source": folder}), &accounts);
+        assert_eq!(s.sources, vec![
+            json!({"kind": "icloud", "account": "a@x.com"}),
+            json!({"kind": "icloud", "account": "b@x.com"}),
+            folder.clone(),
+        ]);
+        assert_eq!(s.source, Some(folder));
+        // Nothing said: the first of them; nothing at all: none.
+        assert_eq!(resolve(&json!({}), &accounts).source, Some(json!({"kind": "icloud", "account": "a@x.com"})));
+        assert_eq!(resolve(&json!({}), &[]), Settings::default());
+        // `null` is none, though there are sources.
+        assert_eq!(resolve(&json!({"source": null}), &accounts).source, None);
+        // An iCloud entry without an Apple ID is the only one signed in to.
+        let one = resolve(&json!({"source": {"kind": "icloud"}}), &accounts[..1]);
+        assert_eq!(one.source, Some(json!({"kind": "icloud", "account": "a@x.com"})));
+    }
+
+    #[test]
+    fn a_list_is_kept_in_order_without_repeats() {
+        let s = resolve(
+            &json!({"sources": [
+                {"kind": "folder", "path": "/b"}, {"kind": "icloud", "account": "a@x.com"},
+                {"kind": "folder", "path": "/b"}, {"kind": "what"},
+            ]}),
+            &["z@x.com".to_owned()],
+        );
+        assert_eq!(s.sources, vec![json!({"kind": "folder", "path": "/b"}), json!({"kind": "icloud", "account": "a@x.com"})]);
+        assert_eq!(s.source, Some(json!({"kind": "folder", "path": "/b"})));
+        assert_eq!(source_id(&s.sources[1]), "icloud:a@x.com");
+        assert_eq!(source_entry(&s, "folder:/b"), Some(json!({"kind": "folder", "path": "/b"})));
+    }
+
+    #[test]
+    fn sources_are_added_shown_and_removed() {
+        let dir = temp("sources");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"location": "/keep", "sources": [{"kind": "folder", "path": "/a"}]}"#).unwrap();
+        let b = json!({"kind": "folder", "path": "/b"});
+        show_source(&path, Some(&b)).unwrap();
+        let s = read_settings(&path);
+        assert_eq!(s.sources, vec![json!({"kind": "folder", "path": "/a"}), b.clone()]);
+        assert_eq!(s.source, Some(b.clone()));
+        assert_eq!(s.location, Some(PathBuf::from("/keep")));
+        // Shown again: not added twice.
+        show_source(&path, Some(&b)).unwrap();
+        assert_eq!(read_settings(&path).sources.len(), 2);
+        // The one shown goes: the first left is shown; then none.
+        assert_eq!(remove_source(&path, "folder:/b").unwrap(), Some(json!({"kind": "folder", "path": "/a"})));
+        assert_eq!(remove_source(&path, "folder:/a").unwrap(), None);
+        let s = read_settings(&path);
+        assert!(s.sources.is_empty());
+        assert_eq!(s.source, None);
     }
 }

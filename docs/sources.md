@@ -112,7 +112,7 @@ be `pinhole-sync`'s job only.
 
 `pinhole-sync` does the same from a terminal for whichever source the
 settings name: `index`, `thumbs`, `all`, `changes`. `sign-in` is iCloud's,
-and only offered for it.
+whichever source is shown: it adds the Apple ID and shows it.
 
 ## The iCloud source
 
@@ -152,19 +152,31 @@ Making thumbnails is the slow part: a JPEG takes about 40 ms, but a 12 MP
 HEIC about a CPU-second to decode, in ImageMagick or vips alike. ~/Pictures
 (625 assets, mostly HEIC) took 41 s on 12 cores; a folder of 50,000 HEICs
 would take an hour or so in the background. Windows see the photos as their
-thumbnails arrive, every ten seconds.
+thumbnails arrive, every four seconds.
+
+That must never slow the computer down (`background.rs`). ImageMagick,
+ffmpeg and ffprobe run at idle priority (SCHED_IDLE, nice 19), so whatever
+the person does goes first, and only on four in five of the physical cores
+with their second threads, so the rest stay free however many threads a
+decoder starts itself (libheif does). On an 8-core Ryzen, Pictures/iCloud
+(654 assets) took 37 s at 80% of the CPU, and a single-threaded task beside
+it ran 7% slower instead of twice as slow.
 
 ## Choosing a source
 
-`~/.config/pinhole/settings.json` gains `source`:
+`~/.config/pinhole/settings.json` keeps every source added, in order, and
+the one shown:
 
 ```json
-{"source": {"kind": "folder", "path": "/home/me/Pictures"}}
-{"source": {"kind": "icloud", "account": "me@example.com"}}
+{"sources": [{"kind": "icloud", "account": "me@example.com"},
+             {"kind": "folder", "path": "/home/me/Pictures/iCloud"}],
+ "source": {"kind": "folder", "path": "/home/me/Pictures/iCloud"}}
 ```
 
-No `source` means iCloud, and an iCloud source without an `account` is
-the only Apple ID signed in to, if there is just one.
+Without `sources` they are the Apple IDs signed in to, then the folder
+shown if it is one; without `source`, the first of them; `"source": null`
+is none, as on a first run. An iCloud entry without an `account` is the
+only Apple ID signed in to, if there is just one.
 
 Every source has a library of its own in the one folder Pinhole keeps
 everything in, under its kind: `library/icloud/<apple-id>/` for each Apple
@@ -172,22 +184,23 @@ ID, `library/folder/home-me-Pictures/` for each folder (its path, with
 dashes). Switching between them rebuilds nothing, and a library is only
 ever written by its own source (`sync::claim`). All of them share `cache/`
 (files named by their keys, which do not clash) and the one limit, and a
-move of the folder takes `library/` as a whole.
+move of the folder takes `library/` as a whole. Removing a source deletes
+its library, and an Apple ID's session.
 
 Each Apple ID's session is kept apart too, in
-`~/.local/state/pinhole/auth/<apple-id>/` (the provider's `--state-dir`).
-`pinhole-sync sign-in` signs in to one and makes it the source; a running
-service sees the settings change and switches to it, listing its library
-if it has none yet.
-
-The window's settings panel picks the source: a button for each Apple ID
-signed in to, and one for a folder chosen in the desktop's picker. The
-service switches as it runs: windows are told the library moved, and read
-the new one.
+`~/.local/state/pinhole/auth/<apple-id>/` (the provider's `--state-dir`),
+with the owner's name as Apple gives it, which the window calls the source
+by. The service signs in for the window (`sign_in`, `submit_code`), and
+`pinhole-sync sign-in` does from a terminal; either adds the Apple ID and
+shows it, and a running service sees the settings change and switches,
+listing its library if it has none yet.
 
 ## The window
 
-It stops saying iCloud where it means the source: the health line, the
-viewer's messages, the empty library's advice and the settings panel use
-the name the service gives, and only a source that needs signing in is
-said to.
+It never sends anyone to a terminal. With no source it offers what
+`discover` finds (icloudpd's sign-in, folders of photos) and signs in to
+iCloud itself; with sources it shows one at a time and switches between
+them (`sources`, `set_source`, `remove_source`), and a library being built
+fills the grid as `progress` says how far it is. It says the source's name
+where it means the source (the health line, the viewer's messages), and
+asks to sign in only for a source that needs it.

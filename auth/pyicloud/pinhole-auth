@@ -59,9 +59,22 @@ class Provider:
         except (FileNotFoundError, KeyError, json.JSONDecodeError):
             return None
 
-    def save_apple_id(self, apple_id):
+    def save_apple_id(self, apple_id, api=None):
+        """Note the Apple ID, and its owner's name when a signed-in `api`
+        gives it (the window calls the account by it); a name noted before
+        stays when there is none to give."""
+        account = {"apple_id": apple_id}
+        try:
+            old = json.loads(self.account_file.read_text())
+            if old.get("apple_id") == apple_id and old.get("name"):
+                account["name"] = old["name"]
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        name = ((getattr(api, "data", None) or {}).get("dsInfo") or {}).get("fullName")
+        if name:
+            account["name"] = name
         tmp = self.account_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"apple_id": apple_id}))
+        tmp.write_text(json.dumps(account))
         os.chmod(tmp, 0o600)
         tmp.replace(self.account_file)
 
@@ -109,6 +122,8 @@ class Provider:
                 return {"state": "signed_out", "apple_id": apple_id}
             raise
         state = "needs_code" if api.requires_2fa else "signed_in"
+        if state == "signed_in":
+            self.save_apple_id(apple_id, api)
         return {"state": state, "apple_id": apple_id}
 
     def sign_in(self, params):
@@ -116,7 +131,7 @@ class Provider:
         if not apple_id or not password:
             raise ProviderError("bad_request", "sign_in needs apple_id and password")
         api = self.connect(apple_id, password)
-        self.save_apple_id(apple_id)
+        self.save_apple_id(apple_id, None if api.requires_2fa else api)
         if api.requires_2fa:
             # Apple usually pushes a code on the sign-in itself; asking again
             # sometimes answers 503, which must not look like a failed sign-in.
@@ -137,6 +152,7 @@ class Provider:
         if not self.pending.validate_2fa_code(code):
             raise ProviderError("wrong_code", "Apple did not accept that code")
         self.pending.trust_session()
+        self.save_apple_id(self.apple_id(), self.pending)
         self.pending = None
         return {"state": "signed_in"}
 

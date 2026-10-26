@@ -28,9 +28,14 @@ order, since a cached file answers at once while a download takes a while.
 | Method | Params | Result |
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
-| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event) |
+| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
-| `set_source` | `kind` (`icloud` or `folder`), and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event; see Sources |
+| `sources` | | every source added, as the `sources` event |
+| `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
+| `remove_source` | `id` | the `sources` left; see Sources |
+| `discover` | | what could be added: `icloudpd` and `folders`; see Sources |
+| `sign_in` | `apple_id`, and `password` unless icloudpd is signed in to it | `state`: `signed_in` (added and shown) or `needs_code` |
+| `submit_code` | `apple_id`, `code` (six digits) | `state`: `signed_in` (added and shown) |
 | `storage` | | where and how much: `location` (the one folder), `library`, `cache`, `limit_bytes`, `min_limit_bytes`, `default_limit_bytes`, `limit_set`, `used_bytes` (all of it), `kinds` (bytes of `library` and of each kind of photo), `freeing`, `moving` (`done_bytes`, `total_bytes`, or null) |
 | `set_storage` | `limit_bytes` and/or `location` (an absolute folder) | as `storage`, after the change (see Storage) |
 | `ping` | | `{}` |
@@ -71,9 +76,48 @@ already on disk. A window reads the index again.
 ```
 
 Where the photos come from, sent to a window as it connects and when it
-changes: `name` is what to call it ("iCloud", or the folder's name),
-`needs_sign_in` whether it is one that can need signing in, and an iCloud
-source's `account` (its Apple ID) or a folder's `path`.
+changes: `name` is what to call it ("iCloud", or the folder's name as in
+`sources`), `needs_sign_in` whether it is one that can need signing in, and
+an iCloud source's `account` (its Apple ID) or a folder's `path`. With no
+source at all (none added yet, or every one removed) `kind` is null and
+`name` empty, and the library is an empty one in `library/none`.
+
+```json
+{"event": "sources", "current": "icloud:me@example.com", "sources": [
+  {"id": "icloud:me@example.com", "kind": "icloud", "name": "Jacek Becela", "account": "me@example.com", "count": 49024, "thumbs": 49022},
+  {"id": "folder:/home/me/Pictures/iCloud", "kind": "folder", "name": "Pictures/iCloud", "path": "/home/me/Pictures/iCloud", "count": 654, "thumbs": 320}
+]}
+```
+
+Every source added, in the order they were added (the window numbers them
+1 to 9 in it), and the one shown (`current`, null when there is none):
+sent to a window as it connects, and whenever the list, the one shown or a
+library's counts change. `name` is what to call it: an Apple ID's owner as
+Apple gives it (the Apple ID itself until known), a folder's name with the
+folder it is in (`Pictures/iCloud`, `T7/DCIM`; alone when that is the home
+folder or the root). `count` is the photos and videos in its library and
+`thumbs` how many of them have their thumbnail.
+
+```json
+{"event": "progress", "source": "icloud:me@example.com", "phase": "index", "done": 32200, "total": 49024}
+```
+
+A library being built: `phase` is `index` while the source is listed
+(`total` is the source's own count, 0 when it gives none or has not
+counted yet: the first is always `0` of `0`) and `thumbs`
+while thumbnails are made, at most four times a second, then `done` once.
+Only for a whole listing or more than 100 thumbnails to make; a sync
+round's handful says nothing. Meanwhile `library_changed` comes every four
+seconds, and once the listing is done, so the grid fills as the index does.
+
+Showing another source never waits for a library being built: the round
+building it gives up within a second or so (between pages of the listing
+and between thumbnails), says `done` for its source, and what it made
+stays. When that source is shown again its first round lists again if the
+listing was cut short and makes the thumbnails still missing. A window
+takes a `progress` only for the source it shows. `set_source` and
+`remove_source` are done one after another in the order they came, so of
+several asked at once the last is the one shown.
 
 ```json
 {"event": "health", "state": "offline"}
@@ -81,7 +125,7 @@ source's `account` (its Apple ID) or a folder's `path`.
 
 How the last exchange with the source went, sent when it changes and to a
 window as it connects (unless all is fine): `fine`, `needs_sign_in` (no
-session, or Apple rejected it; `pinhole-sync sign-in` fixes it), `offline`
+session, or Apple rejected it; `sign_in` again fixes it), `offline`
 (the network, Apple's sign-in service or the folder's disk is out of reach)
 or `failing` (the source answers with errors). A sync round, a lookup or a download that
 works sets it back. The window shows anything but `fine` in a corner, and
@@ -105,14 +149,44 @@ command line.
 
 ## Sources
 
-`set_source` changes where the photos come from, kept in the settings as
-`source` (`{"kind": "icloud", "account": apple-id}` or `{"kind": "folder",
-"path": ...}`; none is iCloud). Each source has its own library in the one
-folder: `library/icloud/<apple-id>/`, `library/folder/home-me-Pictures/`.
-The service also switches when the settings change under it, as
+The settings keep every source added, in order, as `sources`, and the one
+shown as `source` (each `{"kind": "icloud", "account": apple-id}` or
+`{"kind": "folder", "path": ...}`). Settings without `sources` have the
+Apple IDs signed in to, then the folder shown if it is one. Each source has
+its own library in the one folder: `library/icloud/<apple-id>/`,
+`library/folder/home-me-Pictures/`.
+
+`set_source` shows another source, adding it first if it is new. The
+service also switches when the settings change under it, as
 `pinhole-sync sign-in` does. Every window hears the new `source`, then
 `library_moved` with the library to read, then `library_changed` as it
-fills.
+fills, and `sources`.
+
+`remove_source` takes a source out of the list and deletes its library
+(the index and thumbnails: never the photos themselves). An Apple ID is
+signed out of too, its session deleted. Removing the one shown shows the
+first left, or none.
+
+`sign_in` signs in to an Apple ID through the sign-in provider (one
+provider process to an Apple ID while it waits for the code, so
+`submit_code` reaches the same sign-in). Without a `password` it takes
+over the session icloudpd has for that Apple ID, as `pinhole-sync sign-in
+--from-icloudpd` does. Signed in, the Apple ID is added and shown. Errors
+carry the provider's codes: `wrong_password`, `wrong_code`,
+`rate_limited`, `unavailable`, `needs_sign_in` (no icloudpd session for it).
+
+`discover` says what could be added, for the first window and the Add
+button: `icloudpd`, the Apple IDs icloudpd is signed in to as the names of
+its session files (the Apple ID with everything but letters, digits and
+`_` removed: `megmailcom`; the window matches a typed Apple ID against
+them), and `folders`, each with `path`, `name` (as in `sources`),
+`assets` (photos and videos, a Live Photo's two files counted once),
+`live`, `bytes`, and `partial` when counting stopped before the end: every
+`DCIM` folder on a disk under `/run/media/$USER`, the folders in Pictures,
+then Pictures itself, those with any photos, not already added. Their
+files are only looked at by name and size, and counting stops after two
+seconds for all of them together. An Apple ID signed in to here already is
+not in `icloudpd`.
 
 ## Streaming
 

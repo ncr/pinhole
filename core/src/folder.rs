@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, UNIX_EPOCH};
+use std::process::Stdio;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
@@ -23,8 +23,10 @@ use crate::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, S
 /// the medium size (made into the cache when first asked for).
 const THUMB_EDGE: u32 = 480;
 const MEDIUM_EDGE: u32 = 2048;
-/// Assets put into the index at a time while listing.
-const PUT_BATCH: usize = 500;
+/// Assets put into the index at a time while listing: few enough that
+/// describing them (EXIF, ffprobe) takes well under a second, so a listing
+/// stops soon when another source is shown.
+const PUT_BATCH: usize = 128;
 
 pub struct FolderSource {
     root: PathBuf,
@@ -102,6 +104,110 @@ fn file_type(rel: &str) -> &'static str {
     }
 }
 
+/// The photos and videos in a folder and the folders in it, hidden ones
+/// skipped; whether the look got through all of them before `deadline`.
+fn walk(root: &Path, deadline: Option<Instant>) -> (Vec<Found>, bool) {
+    let mut found = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return (found, false);
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let Some(media) = media_of(&path) else { continue };
+            let Ok(rel) = path.strip_prefix(root) else { continue };
+            let modified_ns = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos() as i128);
+            found.push(Found { rel: rel.to_string_lossy().into_owned(), media, size: meta.len(), modified_ns });
+        }
+    }
+    (found, true)
+}
+
+/// The assets among the files found: a video named as a photo beside it
+/// (IMG_1234.HEIC with IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names
+/// it) is that photo's motion, not an asset of its own.
+fn pair(found: Vec<Found>) -> HashMap<String, Entry> {
+    // Photos by folder and name without extension, for their motion.
+    let stem = |rel: &str| -> String {
+        let without = rel.rsplit_once('.').map_or(rel, |(s, _)| s);
+        without.to_ascii_lowercase()
+    };
+    let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
+    let mut motion: HashMap<String, Found> = HashMap::new();
+    let mut entries: HashMap<String, Entry> = HashMap::new();
+    for f in found {
+        if f.media == Media::Video {
+            let s = stem(&f.rel);
+            let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
+                .or_else(|| photos.contains(&s).then_some(s));
+            if let Some(photo) = photo {
+                motion.insert(photo, f);
+                continue;
+            }
+        }
+        entries.insert(f.rel.clone(), Entry { file: f, motion: None });
+    }
+    for entry in entries.values_mut() {
+        if entry.file.media == Media::Photo {
+            entry.motion = motion.remove(&stem(&entry.file.rel));
+        }
+    }
+    entries
+}
+
+/// What a folder would bring, counted from its files' names and sizes
+/// alone: photos and videos (a Live Photo's two files once), Live Photos,
+/// bytes, and whether the count stopped at `deadline` before the end.
+#[derive(Debug, Default, PartialEq)]
+pub struct Count {
+    pub assets: u64,
+    pub live: u64,
+    pub bytes: u64,
+    pub partial: bool,
+}
+
+pub fn count(root: &Path, deadline: Option<Instant>) -> Count {
+    let (found, complete) = walk(root, deadline);
+    let bytes = found.iter().map(|f| f.size).sum();
+    let entries = pair(found);
+    Count {
+        assets: entries.len() as u64,
+        live: entries.values().filter(|e| e.motion.is_some()).count() as u64,
+        bytes,
+        partial: !complete,
+    }
+}
+
+/// What to call a folder: its name with the folder it is in
+/// (`Pictures/iCloud`, `T7/DCIM`), alone when that is the home folder or
+/// the root.
+pub fn display_name(path: &Path, home: &Path) -> String {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return path.display().to_string();
+    };
+    match path.parent() {
+        Some(parent) if parent != home && parent.parent().is_some() => match parent.file_name() {
+            Some(p) => format!("{}/{name}", p.to_string_lossy()),
+            None => name,
+        },
+        _ => name,
+    }
+}
+
 impl FolderSource {
     pub fn new(root: PathBuf) -> Self {
         FolderSource { root }
@@ -112,66 +218,13 @@ impl FolderSource {
     }
 
     /// Every photo and video in the folder, with Live Photos' motion paired
-    /// to its photo: a video named as a photo beside it (IMG_1234.HEIC with
-    /// IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names it) is that
-    /// photo's motion, not an asset of its own. Hidden files and folders are
-    /// skipped.
+    /// to its photo (`pair`). Hidden files and folders are skipped.
     fn look(&self) -> Result<HashMap<String, Entry>> {
         if !self.root.is_dir() {
             // Never "everything was deleted": a disk not mounted, say.
             return Err(anyhow!("{} is not there", self.root.display()));
         }
-        let mut found = Vec::new();
-        let mut dirs = vec![self.root.clone()];
-        while let Some(dir) = dirs.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if entry.file_name().to_string_lossy().starts_with('.') {
-                    continue;
-                }
-                let Ok(meta) = entry.metadata() else { continue };
-                if meta.is_dir() {
-                    dirs.push(path);
-                    continue;
-                }
-                let Some(media) = media_of(&path) else { continue };
-                let Ok(rel) = path.strip_prefix(&self.root) else { continue };
-                let modified_ns = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map_or(0, |d| d.as_nanos() as i128);
-                found.push(Found { rel: rel.to_string_lossy().into_owned(), media, size: meta.len(), modified_ns });
-            }
-        }
-
-        // Photos by folder and name without extension, for their motion.
-        let stem = |rel: &str| -> String {
-            let without = rel.rsplit_once('.').map_or(rel, |(s, _)| s);
-            without.to_ascii_lowercase()
-        };
-        let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
-        let mut motion: HashMap<String, Found> = HashMap::new();
-        let mut entries: HashMap<String, Entry> = HashMap::new();
-        for f in found {
-            if f.media == Media::Video {
-                let s = stem(&f.rel);
-                let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
-                    .or_else(|| photos.contains(&s).then_some(s));
-                if let Some(photo) = photo {
-                    motion.insert(photo, f);
-                    continue;
-                }
-            }
-            entries.insert(f.rel.clone(), Entry { file: f, motion: None });
-        }
-        for entry in entries.values_mut() {
-            if entry.file.media == Media::Photo {
-                entry.motion = motion.remove(&stem(&entry.file.rel));
-            }
-        }
-        Ok(entries)
+        Ok(pair(walk(&self.root, None).0))
     }
 
     /// The asset for an entry: its dates and details read from the file.
@@ -248,6 +301,9 @@ impl FolderSource {
     /// them, a batch at a time.
     fn put(&self, index: &mut Index, entries: &[&Entry], progress: &(dyn Fn(u64, u64) + Sync), total: u64) -> Result<()> {
         for batch in entries.chunks(PUT_BATCH) {
+            if index.stopping() {
+                return Err(crate::source::Stopped.into());
+            }
             let assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
             index.put(&assets)?;
             progress(index.seen.len() as u64, total);
@@ -259,6 +315,8 @@ impl FolderSource {
     /// side, the right way up.
     fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
         let path = self.root.join(rel);
+        // Never more at once than background work may take (background.rs).
+        let _slot = crate::background::slot();
         let fit = format!("{edge}x{edge}>");
         let output = match media_of(&path) {
             Some(Media::Video) => {
@@ -266,8 +324,8 @@ impl FolderSource {
                 // A second in, past a fade from black; a shorter video from
                 // its start.
                 let frame = |at: &str| {
-                    Command::new("ffmpeg")
-                        .args(["-v", "error", "-ss", at, "-i"])
+                    crate::background::command("ffmpeg")
+                        .args(["-v", "error", "-threads", "1", "-ss", at, "-i"])
                         .arg(&path)
                         .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
                         .stdin(Stdio::null())
@@ -277,7 +335,7 @@ impl FolderSource {
                 if first.stdout.is_empty() { frame("0").context("running ffmpeg")? } else { first }
             }
             _ => {
-                let mut magick = Command::new("magick");
+                let mut magick = crate::background::command("magick");
                 // Decoding a big JPEG at a fraction of its size is much
                 // quicker. Only a big one: the hint lets the decoder enlarge
                 // a small one too.
@@ -302,7 +360,7 @@ impl FolderSource {
 
 impl Source for FolderSource {
     fn name(&self) -> String {
-        self.root.file_name().map_or_else(|| self.root.display().to_string(), |n| n.to_string_lossy().into_owned())
+        display_name(&self.root, Path::new(&std::env::var_os("HOME").unwrap_or_default()))
     }
 
     fn kind(&self) -> &'static str {
@@ -468,7 +526,8 @@ struct Probe {
 /// creation date (with the place's offset) when there is one, else the
 /// container's.
 fn probe_video(path: &Path) -> Probe {
-    let Ok(output) = Command::new("ffprobe")
+    let _slot = crate::background::slot();
+    let Ok(output) = crate::background::command("ffprobe")
         .args(["-v", "quiet", "-print_format", "json", "-show_entries", "format=duration:format_tags"])
         .arg(path)
         .stdin(Stdio::null())

@@ -194,6 +194,20 @@ impl std::fmt::Display for TokenExpired {
 
 impl std::error::Error for TokenExpired {}
 
+/// A listing or the making of thumbnails given up part way, because
+/// another source is shown now. What was written stays: the next round
+/// for this source lists again and makes only the thumbnails missing.
+#[derive(Debug)]
+pub struct Stopped;
+
+impl std::fmt::Display for Stopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stopped: another source is shown now")
+    }
+}
+
+impl std::error::Error for Stopped {}
+
 /// What listing the library or following its changes came to, beyond the
 /// assets themselves.
 #[derive(Debug, Default)]
@@ -264,4 +278,49 @@ pub trait Source: Send + Sync {
 
     /// Start reading one rendition: all of it, or bytes `start..=end`.
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError>;
+}
+
+/// Nothing to show photos from yet, or any more: every source removed.
+/// Its library is an empty one (`storage::library_for`), and a sync round
+/// has nothing to do.
+pub struct NoSource;
+
+impl Source for NoSource {
+    fn name(&self) -> String {
+        String::new()
+    }
+
+    fn kind(&self) -> &'static str {
+        "none"
+    }
+
+    fn id(&self) -> String {
+        "none".into()
+    }
+
+    fn library_name(&self) -> String {
+        String::new()
+    }
+
+    /// Only the settings to look at: a source added from a terminal shows
+    /// within seconds.
+    fn rounds_every(&self) -> Duration {
+        Duration::from_secs(5)
+    }
+
+    fn list(&self, _index: &mut Index, _progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
+        Ok(Listing::default())
+    }
+
+    fn changes(&self, _index: &mut Index, _token: &str) -> Result<Listing> {
+        Ok(Listing::default())
+    }
+
+    fn prepare(&self, _index: &rusqlite::Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
+        Ok(wanted.iter().map(|_| Err(FetchError::NotFound("there is no source".into()))).collect())
+    }
+
+    fn open(&self, _ticket: &Ticket, _range: Option<(u64, u64)>) -> Result<Body, FetchError> {
+        Err(FetchError::NotFound("there is no source".into()))
+    }
 }

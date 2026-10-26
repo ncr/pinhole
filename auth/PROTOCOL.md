@@ -22,6 +22,9 @@ state between runs beyond its own session store.
 
 The process takes one argument, `--state-dir DIR`, where it keeps whatever it
 needs (for the pyicloud provider: a cookie jar and a session file, mode 0600).
+One file there the core reads too: `account.json`, with the `apple_id`
+signed in to and, once Apple has said it, the owner's `name`, which the
+window calls the account by.
 
 ## Methods
 

@@ -56,13 +56,15 @@ enum Cmd {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let auth = cli.auth.unwrap_or_else(pinhole_core::icloud::auth::default_provider);
+    // Signing in is iCloud's whatever the source is now: it makes the
+    // Apple ID the source, so a folder is no reason to refuse.
+    if let Cmd::SignIn { from_icloudpd } = &cli.command {
+        return sign_in(auth, from_icloudpd.as_deref());
+    }
     let settings = storage::read_settings(&storage::settings_path());
     let source = sync::source_for(settings.source.as_ref(), auth.clone())?;
-    if let Cmd::SignIn { from_icloudpd } = &cli.command {
-        if !source.needs_sign_in() {
-            bail!("{} needs no signing in", source.name());
-        }
-        return sign_in(auth, from_icloudpd.as_deref());
+    if source.kind() == "none" {
+        bail!("nothing to show photos from yet: pinhole-sync sign-in, or add a folder in the window");
     }
     // In the folder the window keeps everything in (storage.rs), the
     // source's own library.
@@ -112,7 +114,7 @@ fn main() -> Result<()> {
             if shown.swap(bucket, Ordering::Relaxed) != bucket {
                 eprintln!("index {done:>7}/{total}");
             }
-        })?;
+        }, &|| false)?;
         let total: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
         println!("index: {total} assets from {} in {:.0}s; {} new, {} removed; {}",
             source.name(), r.seconds, r.changes.added.len(), r.changes.removed.len(), r.summary);
@@ -126,7 +128,7 @@ fn main() -> Result<()> {
             if shown.swap(bucket, Ordering::Relaxed) != bucket {
                 eprintln!("thumbs {done:>7}/{total}  {:.0}/s", done as f64 / started.elapsed().as_secs_f64());
             }
-        })?;
+        }, &|| false)?;
         println!("thumbs: {} of {} made in {:.0}s ({:.0}/s, {:.2} GB fetched); {} failed",
             r.made, r.wanted, r.seconds, r.made as f64 / r.seconds.max(1e-3), r.bytes as f64 / 1e9, r.failed);
     }
@@ -176,9 +178,7 @@ fn sign_in(auth: PathBuf, from_icloudpd: Option<&str>) -> Result<()> {
             provider.call("submit_code", serde_json::json!({"code": code.trim()}))?;
         }
     }
-    storage::update_settings(&storage::settings_path(), |settings| {
-        settings["source"] = serde_json::json!({"kind": "icloud", "account": apple_id});
-    })?;
+    storage::show_source(&storage::settings_path(), Some(&serde_json::json!({"kind": "icloud", "account": apple_id})))?;
     println!("Signed in as {apple_id}; Pinhole shows its photos. Next: pinhole-sync all");
     Ok(())
 }
