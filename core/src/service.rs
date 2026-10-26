@@ -121,6 +121,36 @@ struct Shared {
     /// is the first since a source was shown, and finishes what an earlier
     /// round of it gave up (thumbnails still missing).
     rounds_shown: std::sync::atomic::AtomicU64,
+    /// When sync rounds ran and run next: the `rounds` event.
+    rounds: Mutex<Rounds>,
+}
+
+/// When each source was last looked at for changes (the end of its last
+/// round that worked, by its id; since this service started), and when
+/// the next round of the one shown is due: none while one runs.
+#[derive(Default)]
+struct Rounds {
+    last: HashMap<String, SystemTime>,
+    next: Option<SystemTime>,
+}
+
+fn millis(time: SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// The `rounds` event for the source shown (docs/service.md); with none,
+/// `source` is null.
+fn rounds_event(source: &dyn Source, rounds: &Rounds) -> Value {
+    if source.kind() == "none" {
+        return json!({"event": "rounds", "source": null, "last": null, "next": null});
+    }
+    let id = source.id();
+    json!({
+        "event": "rounds",
+        "source": id,
+        "last": rounds.last.get(&id).copied().map(millis),
+        "next": rounds.next.map(millis),
+    })
 }
 
 fn health_event(health: Health) -> Value {
@@ -469,6 +499,10 @@ impl Shared {
         }
     }
 
+    fn rounds_event(&self) -> Value {
+        rounds_event(&*self.source(), &self.rounds.lock().unwrap())
+    }
+
     /// Send an event line to every window; ones that have gone are dropped.
     fn broadcast(&self, event: Value) {
         let line = format!("{event}\n");
@@ -565,6 +599,7 @@ pub fn run(config: Config) -> Result<()> {
         signing_in: Mutex::new(HashMap::new()),
         shown: std::sync::atomic::AtomicU64::new(0),
         rounds_shown: std::sync::atomic::AtomicU64::new(u64::MAX),
+        rounds: Mutex::new(Rounds::default()),
         changing: Mutex::new(()),
         changes: Mutex::new(changes_tx),
     });
@@ -658,6 +693,7 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     if let Some(progress) = shared.progress.lock().unwrap().clone() {
         let _ = writeln!(out.lock().unwrap(), "{progress}");
     }
+    let _ = writeln!(out.lock().unwrap(), "{}", shared.rounds_event());
     // Opened when first needed: before pinhole-sync has built the library
     // there is none, and the connection must stay up regardless.
     // Opened again once the library has moved.
@@ -693,6 +729,10 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 "progress": shared.progress.lock().unwrap().clone().map(|mut p| {
                     p.as_object_mut().map(|o| o.remove("event"));
                     p
+                }),
+                "rounds": Some(shared.rounds_event()).map(|mut r| {
+                    r.as_object_mut().map(|o| o.remove("event"));
+                    r
                 }),
             }))),
             Some("sources") => reply.send(Ok(sources_report(&shared))),
@@ -967,8 +1007,18 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
 fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
     loop {
         follow_settings(&shared);
+        // Windows say it is being looked at now.
+        shared.rounds.lock().unwrap().next = None;
+        shared.broadcast(shared.rounds_event());
+        let (source, shown) = (shared.source(), shared.shown.load(Ordering::SeqCst));
         match sync_round(&shared) {
-            Ok(()) => shared.set_health(Health::Fine),
+            Ok(()) => {
+                shared.set_health(Health::Fine);
+                // Not a round given up as another source was shown.
+                if shared.shown.load(Ordering::SeqCst) == shown {
+                    shared.rounds.lock().unwrap().last.insert(source.id(), SystemTime::now());
+                }
+            }
             Err(e) => {
                 eprintln!("pinholed: sync: {e:#}");
                 shared.failed(&e);
@@ -976,7 +1026,10 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         }
         // Until the next round, or a window asking for one now.
         let every = shared.config.sync_every.map_or_else(|| shared.source().rounds_every(), Duration::from_secs);
-        match wake.recv_timeout(every.max(Duration::from_secs(5))) {
+        let every = every.max(Duration::from_secs(5));
+        shared.rounds.lock().unwrap().next = Some(SystemTime::now() + every);
+        shared.broadcast(shared.rounds_event());
+        match wake.recv_timeout(every) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
@@ -1099,5 +1152,31 @@ fn sync_round(shared: &Shared) -> Result<()> {
             Ok(())
         }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rounds_say_when_the_source_shown_was_looked_at_and_is_next() {
+        let folder = crate::folder::FolderSource::new(PathBuf::from("/home/me/Pictures"));
+        let checked = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let mut rounds = Rounds::default();
+        rounds.last.insert("folder:/home/elsewhere".into(), checked);
+        // Never looked at, and being looked at now.
+        let event = rounds_event(&folder, &rounds);
+        assert_eq!(event["source"], "folder:/home/me/Pictures");
+        assert!(event["last"].is_null() && event["next"].is_null());
+
+        rounds.last.insert(folder.id(), checked);
+        rounds.next = Some(checked + Duration::from_secs(10));
+        let event = rounds_event(&folder, &rounds);
+        assert_eq!(event["last"], 1_000_000);
+        assert_eq!(event["next"], 1_010_000);
+
+        let none = rounds_event(&crate::source::NoSource, &rounds);
+        assert!(none["source"].is_null() && none["next"].is_null());
     }
 }

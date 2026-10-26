@@ -393,6 +393,22 @@ int main(int argc, char *argv[]) {
             });
         });
     }
+    // PINHOLE_SELFTEST=sourcesbar:<dir>: the sources bar as it opens and a
+    // few seconds and a round later, as images in <dir>, to see when the
+    // source shown was looked at count on.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("sourcesbar:"))) {
+        QTimer::singleShot(1500, window, [window, test] {
+            window->findChild<QObject *>(QStringLiteral("sourcesBar"))->setProperty("shown", true);
+            const QString dir = test.mid(11);
+            for (const int seconds : {1, 4, 13}) {
+                QTimer::singleShot(seconds * 1000, window, [=] {
+                    window->grabWindow().save(dir + QStringLiteral("/after-%1s.png").arg(seconds));
+                    if (seconds == 13)
+                        QCoreApplication::quit();
+                });
+            }
+        });
+    }
     // PINHOLE_SELFTEST=zoomfast:<dir>: a quick pinch from 3 columns all the
     // way out, the date label's state every 16 ms on the output and as
     // frames of the top left in <dir>.

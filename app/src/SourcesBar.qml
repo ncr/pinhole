@@ -56,6 +56,37 @@ Item {
         const kind = s.kind === "icloud" ? "iCloud" : qsTr("Folder")
         return kind + " · " + count(s.count)
     }
+    // When the one shown was last looked at for new photos, and when it is
+    // next (the service's rounds), counted on as the bar is open.
+    property double now: Date.now()
+    Timer {
+        running: root.shown
+        interval: 1000
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.now = Date.now()
+    }
+    function span(ms) {
+        const s = Math.max(1, Math.round(ms / 1000))
+        if (s < 60)
+            return qsTr("%1 s").arg(s)
+        if (s < 3600)
+            return qsTr("%1 min").arg(Math.round(s / 60))
+        return qsTr("%1 h").arg(Math.round(s / 3600))
+    }
+    // The two, a line each; nothing for a source not shown.
+    function rounds(s) {
+        const r = sources.rounds
+        if (s.id !== sources.current || r.source !== s.id)
+            return ""
+        const ago = root.now - r.last
+        const last = r.last === undefined ? qsTr("Not checked yet")
+                   : ago < 5000 ? qsTr("Checked just now")
+                   : qsTr("Checked %1 ago").arg(span(ago))
+        const next = r.next === undefined || r.next <= root.now ? qsTr("Checking now…")
+                   : qsTr("Next check in %1").arg(span(r.next - root.now))
+        return last + "\n" + next
+    }
 
     Shortcut { enabled: root.shown && root.confirming < 0; sequence: "Up"; context: Qt.ApplicationShortcut
         onActivated: root.focusIndex = Math.max(0, root.focusIndex - 1) }
@@ -195,6 +226,14 @@ Item {
                                 width: parent.width
                                 text: root.detail(row.modelData)
                                 color: row.trouble !== "" ? theme.red : theme.darkForeground
+                                font.pixelSize: Math.round(theme.fontSize * 0.857)
+                            }
+                            UiText {
+                                visible: !row.asking && row.trouble === "" && text !== ""
+                                width: parent.width
+                                text: root.rounds(row.modelData)
+                                wrapMode: Text.WordWrap
+                                color: theme.darkForeground
                                 font.pixelSize: Math.round(theme.fontSize * 0.857)
                             }
                             // Thumbnails still coming.

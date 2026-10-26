@@ -20,6 +20,21 @@ Sources::Sources(ServiceClient *service, QObject *parent) : QObject(parent), m_s
                 m_progress = progress;
                 emit progressChanged();
             }
+        } else if (name == QLatin1String("health") && details.value("state").toString() == QLatin1String("no_service")) {
+            // No service, no rounds: what it said last is no longer so.
+            if (!m_rounds.isEmpty()) {
+                m_rounds.clear();
+                emit roundsChanged();
+            }
+        } else if (name == QLatin1String("rounds")) {
+            QVariantMap rounds;
+            for (const QString &key : {QStringLiteral("source"), QStringLiteral("last"), QStringLiteral("next")})
+                if (!details.value(key).isNull())
+                    rounds.insert(key, details.value(key).toVariant());
+            if (rounds != m_rounds) {
+                m_rounds = rounds;
+                emit roundsChanged();
+            }
         }
     });
 }

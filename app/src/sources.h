@@ -27,6 +27,10 @@ class Sources : public QObject {
     // A library being built: phase (index, thumbs), done, total, source.
     // Empty when none is.
     Q_PROPERTY(QVariantMap progress READ progress NOTIFY progressChanged)
+    // When the source shown was last looked at for new photos and when it
+    // is next: source (its id), last and next (milliseconds since 1970;
+    // no last before the first round that worked, no next while one runs).
+    Q_PROPERTY(QVariantMap rounds READ rounds NOTIFY roundsChanged)
     // What could be added: the Apple IDs icloudpd is signed in to here (as
     // its file names), and folders with photos (path, name, assets, live,
     // bytes).
@@ -47,6 +51,7 @@ public:
     int currentIndex() const;
     bool known() const { return m_known; }
     QVariantMap progress() const { return m_progress; }
+    QVariantMap rounds() const { return m_rounds; }
     QStringList icloudpd() const { return m_icloudpd; }
     QVariantList folders() const { return m_folders; }
     QString signInState() const { return m_signInState; }
@@ -79,6 +84,7 @@ public:
 signals:
     void listChanged();
     void progressChanged();
+    void roundsChanged();
     void discoveredChanged();
     void signInChanged();
     void errorChanged();
@@ -101,6 +107,7 @@ private:
     QString m_current;
     bool m_known = false;
     QVariantMap m_progress;
+    QVariantMap m_rounds;
     QStringList m_icloudpd;
     QVariantList m_folders;
     QString m_signInState, m_signInError, m_error;

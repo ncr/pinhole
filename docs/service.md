@@ -28,7 +28,7 @@ order, since a cached file answers at once while a download takes a while.
 | Method | Params | Result |
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
-| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null) |
+| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `sources` | | every source added, as the `sources` event |
 | `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
@@ -121,6 +121,19 @@ takes a `progress` only for the source it shows. `set_source` and
 several asked at once the last is the one shown.
 
 ```json
+{"event": "rounds", "source": "icloud:me@example.com", "last": 1793026800000, "next": 1793026860000}
+```
+
+When the source shown was last looked at for changes and when it will be
+next (see Staying in sync), in milliseconds since 1970: sent to a window
+as it connects, as each round starts (`next` null: one is under way) and
+as it ends (`next` when the one after is due). `last` is when the last
+round that worked ended, null before one has since the service started
+(a failed round leaves it, and says why in `health`). With no source,
+`source` is null. A round also starts early when a window sends `sync` or
+another source is shown, so `next` is when it will be at the latest.
+
+```json
 {"event": "health", "state": "offline"}
 ```
 
@@ -146,7 +159,15 @@ token yet, or one the source no longer accepts, the whole library is
 listed again, which is also how a new library is first made. A library
 holds one source's photos and is never written by another
 (`sync::claim`). `pinhole-sync changes [--dry-run]` does the same from the
-command line.
+command line. Windows hear when each round ran and the next will
+(`rounds`).
+
+Nothing tells the service of a change as it happens: it asks. CloudKit's
+web services describe pushes for a web page (a token from `tokens/create`,
+a long poll on the URL that comes with it, and a zone subscription saved
+to the database), but for an app's own container and its API token;
+whether Apple's photos container takes them from an iCloud.com session
+has not been tried.
 
 ## Sources
 
