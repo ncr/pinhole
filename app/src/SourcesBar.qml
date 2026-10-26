@@ -132,6 +132,15 @@ Item {
         onActivated: root.confirming >= 0 ? root.confirming = -1 : root.shown = false
     }
 
+    // The photos dimmed behind it, as behind Omarchy's menus and the other
+    // panels (a scrim of the theme's background at half), coming and going
+    // with the bar's slide: they are not what the keys work on meanwhile.
+    Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
+        opacity: Math.max(0, Math.min(1, (panel.x + panel.width) / panel.width))
+    }
+
     // A click beside it puts it away.
     MouseArea {
         anchors.fill: parent

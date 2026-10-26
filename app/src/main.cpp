@@ -317,6 +317,30 @@ int main(int argc, char *argv[]) {
         waitForLibrary.start(5000);
     }
 
+    // PINHOLE_SELFTEST=sourcesfade:<dir>: the sources bar coming in and going
+    // again, the photos dimming behind it and the grid's controls fading, as
+    // frames in <dir> (on screen, for the photos to be drawn).
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("sourcesfade:"))) {
+        QTimer::singleShot(2500, window, [window, test] {
+            QObject *bar = window->findChild<QObject *>(QStringLiteral("sourcesBar"));
+            const QString dir = test.mid(12);
+            auto grab = [window, dir](const QString &name) { window->grabWindow().save(dir + '/' + name + ".png"); };
+            grab("0-before");
+            // Apart, as a grab on screen comes back with a frame from a
+            // moment later.
+            QTimer::singleShot(500, window, [=] { bar->setProperty("shown", true); });
+            QTimer::singleShot(560, window, [=] { grab("1-coming"); });
+            QTimer::singleShot(1000, window, [=] {
+                grab("2-shown");
+                bar->setProperty("shown", false);
+                QTimer::singleShot(80, window, [=] { grab("3-going"); });
+                QTimer::singleShot(400, window, [=] {
+                    grab("4-after");
+                    QCoreApplication::quit();
+                });
+            });
+        });
+    }
     // PINHOLE_SELFTEST=help:<file>: the shortcut overlay as an image, to check
     // its layout (and each language's) without a screen.
     // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.

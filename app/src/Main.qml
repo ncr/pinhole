@@ -79,7 +79,8 @@ ApplicationWindow {
         id: sourcesButton
         objectName: "sourcesButton"
         floating: true
-        visible: win.inGrid && !win.firstRun && sources.known
+        visible: win.chromeUp && !win.firstRun && sources.known
+        opacity: win.chrome
         x: 16
         y: 16
         // A cloud or a folder, from the Nerd Font Omarchy's type is.
@@ -103,7 +104,8 @@ ApplicationWindow {
     Chip {
         id: dateLabel
         objectName: "dateLabel"
-        visible: win.inGrid && text !== "" && (grid.count > 0 || win.switchedTo !== "")
+        visible: win.chromeUp && !win.firstRun && text !== "" && (grid.count > 0 || win.switchedTo !== "")
+        opacity: win.chrome
         x: sourcesButton.visible ? sourcesButton.x + sourcesButton.width + 6 : 16
         y: 16
         text: win.switchedTo !== "" ? win.switchedTo : grid.dateLabel
@@ -119,7 +121,8 @@ ApplicationWindow {
         id: buildProgress
         objectName: "buildProgress"
         name: win.placeName
-        visible: win.inGrid && !win.firstRun && (phase === "index" || phase === "thumbs")
+        visible: win.chromeUp && !win.firstRun && (phase === "index" || phase === "thumbs")
+        opacity: win.chrome
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 24
@@ -206,8 +209,9 @@ ApplicationWindow {
     Rectangle {
         id: trouble
         objectName: "trouble"
-        visible: win.inGrid && !win.firstRun && !win.troubleSeen && sources.current !== win.signedOutOf
+        visible: win.chromeUp && !win.firstRun && !win.troubleSeen && sources.current !== win.signedOutOf
                  && serviceHealth === "needs_sign_in" && storage.sourceKind === "icloud"
+        opacity: win.chrome
         anchors.centerIn: parent
         width: Math.min(parent.width - 32, theme.fontSize * 37)
         height: troubleContent.implicitHeight + 2 * Math.round(theme.fontSize * 1.714)
@@ -262,9 +266,11 @@ ApplicationWindow {
         // Above select mode's bar when the window is too narrow for both.
         anchors.bottomMargin: selectBar.visible && selectBar.x < 16 + width + 8 ? 20 + selectBar.height + 8 : 16
         readonly property bool wanted: win.inGrid && grid.count > 0 && !grid.atNewest
-        opacity: wanted ? 1 : 0
+        // Its own fade (it comes and goes with the scroll), and the grid's.
+        property real shown: wanted ? 1 : 0
+        Behavior on shown { NumberAnimation { duration: 150 } }
+        opacity: shown * win.chrome
         visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
         text: "↓ " + qsTr("Newest")
         key: "N"
         onTapped: grid.glideToNewest()
@@ -275,7 +281,8 @@ ApplicationWindow {
         id: helpButton
         objectName: "helpButton"
         floating: true
-        visible: !photoViewer.shown && !win.panelUp
+        visible: win.chromeUp
+        opacity: win.chrome
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 16
@@ -295,6 +302,7 @@ ApplicationWindow {
         objectName: "settingsButton"
         floating: true
         visible: helpButton.visible
+        opacity: win.chrome
         anchors.right: helpButton.left
         anchors.rightMargin: 6
         anchors.bottom: helpButton.bottom
@@ -312,7 +320,8 @@ ApplicationWindow {
         id: selectButton
         objectName: "selectButton"
         floating: true
-        visible: win.inGrid && grid.count > 0
+        visible: win.chromeUp && !win.firstRun && grid.count > 0
+        opacity: win.chrome
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: 16
@@ -329,7 +338,8 @@ ApplicationWindow {
     Rectangle {
         id: selectBar
         objectName: "selectBar"
-        visible: win.inGrid && grid.selecting
+        visible: win.chromeUp && !win.firstRun && grid.selecting
+        opacity: win.chrome
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
@@ -451,6 +461,12 @@ ApplicationWindow {
     }
     HelpOverlay { id: help; objectName: "help" }
     SettingsPanel { id: settings; objectName: "settings" }
+
+    // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
+    // the viewer comes over the photos, and back, rather than vanish.
+    property real chrome: !photoViewer.shown && !panelUp ? 1 : 0
+    Behavior on chrome { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
     readonly property bool panelUp: help.shown || settings.shown || bar.shown || addPicker.shown || signIn.shown
