@@ -2,9 +2,11 @@
 
 #include "viewermotion.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QObject>
 #include <QRectF>
+#include <QTimer>
 #include <QUrl>
 
 class Library;
@@ -126,7 +128,7 @@ public:
     Q_INVOKABLE void close();
     // The next or previous photo (keys, the mouse wheel, a click), shown at
     // once with no slide, so two neighbours can be compared by flicking
-    // between them.
+    // between them; the carousel glides after it.
     Q_INVOKABLE void step(int delta);
     // Straight to a photo, no slide (scrubbing the carousel).
     Q_INVOKABLE void jumpTo(int index);
@@ -166,6 +168,8 @@ protected:
 
 private:
     void show(int index);
+    // Asks pinholed for the shown photo and its neighbours.
+    void fetchShown();
     // The photo a touchpad swipe paged to: it slides on from where the
     // fingers left the row.
     void slide(int delta);
@@ -215,4 +219,9 @@ private:
     int m_revision = 0;
     int m_jumpFrom = -1;
     int m_jumpSide = 0;
+    // Photos passing quicker than a person looks at them (a held key, the
+    // carousel scrubbed) show their thumbnails and are fetched only once
+    // it stops on one, so that one is not queued behind all the others.
+    QElapsedTimer m_lastShown;
+    QTimer m_fetchLater;
 };

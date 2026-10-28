@@ -22,6 +22,10 @@ constexpr double kCommitSpeed = 400;
 // second. Zoom and pan settle by easing out at this rate per second.
 constexpr double kSpring = 14;
 constexpr double kEase = 16;
+// The carousel's own spring (jumped()), and how much stiffer it gets for
+// each photo it is behind.
+constexpr double kStripSpring = 20;
+constexpr double kStripCatchUp = 10;
 // Pinched below this share of fitted on release: close.
 constexpr double kCloseBelow = 0.7;
 // Swiped up or down: the photo follows like this, and closing takes a drag
@@ -239,10 +243,21 @@ void ViewerMotion::stepped(int delta, int rowDelta) {
     m_raw = m_offset;
     m_offsetStart = m_offset;
     m_stripExtraStart = m_stripExtra = whole - m_offset;
+    m_strip = m_stripVelocity = 0;
     m_zoom = m_zoomTarget = 1;
     m_panX = m_panY = m_panTargetX = m_panTargetY = 0;
     m_holding = false;
     stopPanPhysics();
+}
+
+void ViewerMotion::jumped(int delta) {
+    // The carousel goes on from where it shows now, the row's slide
+    // included, keeping its speed.
+    const double strip = stripOffset() + delta * pageWidth();
+    const double velocity = m_stripVelocity;
+    reset();
+    m_strip = strip;
+    m_stripVelocity = velocity;
 }
 
 void ViewerMotion::reset() {
@@ -250,6 +265,7 @@ void ViewerMotion::reset() {
     m_dismiss = m_dismissVelocity = 0;
     m_close = false;
     m_stripExtra = m_stripExtraStart = m_offsetStart = 0;
+    m_strip = m_stripVelocity = 0;
     m_gesture = Gesture::None;
     m_offset = m_raw = m_velocity = 0;
     m_zoom = m_zoomTarget = 1;
@@ -346,9 +362,10 @@ void ViewerMotion::pan(double dx, double dy) {
 
 bool ViewerMotion::animating() const {
     const bool row = m_gesture != Gesture::Page && (m_offset != 0 || m_velocity != 0);
+    const bool strip = m_strip != 0 || m_stripVelocity != 0;
     const bool dismiss = m_gesture != Gesture::Dismiss && !m_close && m_dismiss != 0;
     const bool zoom = !m_holding && (m_zoom != m_zoomTarget || m_panX != m_panTargetX || m_panY != m_panTargetY);
-    return row || zoom || dismiss || panCoasting();
+    return row || strip || zoom || dismiss || panCoasting();
 }
 
 void ViewerMotion::advance(double dt) {
@@ -366,6 +383,20 @@ void ViewerMotion::advance(double dt) {
         }
         m_raw = m_offset;
         m_stripExtra = m_offsetStart != 0 ? m_stripExtraStart * m_offset / m_offsetStart : 0;
+    }
+    // The carousel after a photo changed at once: a spring stiffer the
+    // more photos behind it is, so a held key (40 photos a second) keeps it
+    // a photo or two behind rather than five.
+    if (m_strip != 0 || m_stripVelocity != 0) {
+        const double before = m_strip;
+        const double w = kStripSpring + kStripCatchUp * std::abs(m_strip) / pageWidth();
+        m_stripVelocity += (-w * w * m_strip - 2 * w * m_stripVelocity) * dt;
+        m_strip += m_stripVelocity * dt;
+        if ((before > 0 && m_strip < 0) || (before < 0 && m_strip > 0) ||
+            (std::abs(m_strip) < 0.5 && std::abs(m_stripVelocity) < 20)) {
+            m_strip = 0;
+            m_stripVelocity = 0;
+        }
     }
     // Let go short of closing: back into place, as the row springs.
     if (m_gesture != Gesture::Dismiss && !m_close && m_dismiss != 0) {

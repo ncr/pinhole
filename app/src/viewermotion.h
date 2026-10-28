@@ -43,6 +43,11 @@ public:
     // Zoom goes back to fitted.
     void stepped(int delta, int rowDelta);
     void stepped(int delta) { stepped(delta, delta); }
+    // The photo changed by `delta` at once (a key, a click): the row is at
+    // rest on it straight away, and only the carousel glides after it, from
+    // wherever it was, quicker the further behind it is, so a held key
+    // scrolls it evenly a photo or two behind and it lands when let go.
+    void jumped(int delta);
     // Opening, closing: everything at rest, fitted.
     void reset();
 
@@ -72,8 +77,9 @@ public:
     // from the window's centre.
     double offset() const { return m_offset; }
     // The same for the carousel, which travels the whole way when a step
-    // goes further than the photos slide (they come from 1.5 pages out).
-    double stripOffset() const { return m_offset + m_stripExtra; }
+    // goes further than the photos slide (they come from 1.5 pages out),
+    // and still glides after a photo changed at once (jumped()).
+    double stripOffset() const { return m_offset + m_stripExtra + m_strip; }
     double zoom() const { return m_zoom; }
     double panX() const { return m_panX; }
     double panY() const { return m_panY; }
@@ -113,6 +119,9 @@ private:
     // A long step: how much further the carousel has to travel than the
     // photos, shrinking in proportion as they settle.
     double m_stripExtra = 0, m_stripExtraStart = 0, m_offsetStart = 0;
+    // How far the carousel is behind a photo changed at once, and how fast
+    // it is catching up (px/s), on a spring of its own.
+    double m_strip = 0, m_stripVelocity = 0;
     struct Sample {
         double t, x;
     };

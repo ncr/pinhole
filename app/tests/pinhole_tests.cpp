@@ -437,6 +437,39 @@ private slots:
         QCOMPARE(m.stripOffset(), 0.0);
     }
 
+    // A key: the photo is there at once and the carousel glides one photo
+    // after it, never past; held (40 a second), the carousel scrolls a
+    // photo or two behind and lands when it is let go.
+    void aKeyChangesPhotoAtOnceAndTheCarouselGlidesAfter() {
+        ViewerMotion m = viewerShowing();
+        const double page = m.pageWidth();
+        m.jumped(1);
+        QCOMPARE(m.offset(), 0.0);
+        QCOMPARE(m.stripOffset(), page);
+        double lowest = page;
+        int frames = 0;
+        for (; frames < 600 && m.animating(); ++frames) {
+            m.advance(1.0 / 120);
+            lowest = std::min(lowest, m.stripOffset());
+        }
+        QCOMPARE(m.stripOffset(), 0.0);
+        QVERIFY(lowest >= 0);
+        QVERIFY(frames > 12 && frames < 72); // seen to glide, gone in under 0.6 s
+
+        ViewerMotion held = viewerShowing();
+        double most = 0;
+        for (int frame = 0; frame < 240; ++frame) { // 2 s at 120 fps
+            if (frame % 3 == 0)
+                held.jumped(1);
+            held.advance(1.0 / 120);
+            if (frame > 60)
+                most = std::max(most, held.stripOffset() / page);
+        }
+        QVERIFY(most > 0.5 && most < 2.5);
+        settle(held);
+        QCOMPARE(held.stripOffset(), 0.0);
+    }
+
     // Fingers moving `perEvent` px up or down every 8 ms, `events` times,
     // lifted `pause` ms after the last.
     static void swipeDown(ViewerMotion &m, double perEvent, int events, double pause = 8) {
@@ -735,15 +768,33 @@ private slots:
         QSignalSpy failed(&viewer, &Viewer::liveFailed);
         viewer.openAt(0, {});
         // A key changes photo at once, with nothing sliding, so two
-        // neighbours can be compared; back again just as fast.
+        // neighbours can be compared; only the carousel glides after it.
         viewer.setViewport(800, 600);
+        auto mediums = [&fake] {
+            fake.read();
+            return std::count_if(fake.asked.cbegin(), fake.asked.cend(), [](const QJsonObject &line) {
+                return line.value("params").toObject().value("kind").toString() == QLatin1String("medium");
+            });
+        };
+        QTRY_COMPARE(mediums(), 3); // a, and b and c beside it
+        QTest::qWait(200);
         viewer.step(1);
         QCOMPARE(viewer.index(), 1);
         QCOMPARE(viewer.offset(), 0.0);
-        QVERIFY(!viewer.animating());
+        QVERIFY(viewer.stripOffset() > 0);
+        QTRY_COMPARE(mediums(), 6);
+        // Photos passing under a held key are not fetched; the one it
+        // stops on is, a moment later.
+        QTest::qWait(200);
+        viewer.step(1); // the first press: fetched at once
+        viewer.step(-1);
         viewer.step(-1);
         QCOMPARE(viewer.index(), 0);
-        QVERIFY(!viewer.animating());
+        QTest::qWait(50);
+        QCOMPARE(mediums(), 9);
+        QTRY_COMPARE(mediums(), 12);
+        QTest::qWait(100);
+        QCOMPARE(mediums(), 12);
         QVERIFY(!viewer.liveLoading());
         // On its way at once, and asked for once however often it is pressed.
         viewer.playLive();

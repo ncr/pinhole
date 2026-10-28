@@ -12,8 +12,17 @@
 
 #include <cmath>
 
+namespace {
+// Photos shown closer together than this (ms) are passing, not looked at:
+// a held key repeats every 25.
+constexpr int kPassing = 150;
+}
+
 Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
+    m_fetchLater.setSingleShot(true);
+    m_fetchLater.setInterval(kPassing);
+    connect(&m_fetchLater, &QTimer::timeout, this, &Viewer::fetchShown);
     for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged,
                           &Viewer::liveChanged, &Viewer::effectChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
@@ -314,6 +323,8 @@ void Viewer::close() {
     m_motion.reset();
     m_jumpFrom = -1;
     m_mediums.clear();
+    m_fetchLater.stop();
+    m_lastShown.invalidate();
     emit openChanged();
     emit motionChanged();
 }
@@ -346,7 +357,13 @@ int Viewer::beside(int k) const {
 }
 
 void Viewer::step(int delta) {
-    jumpTo(std::clamp(m_index + delta, 0, m_library->count() - 1));
+    const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
+    if (next == m_index)
+        return;
+    m_jumpFrom = -1;
+    m_motion.jumped(next - m_index);
+    show(next);
+    emit motionChanged();
 }
 
 void Viewer::slide(int delta) {
@@ -388,6 +405,19 @@ void Viewer::show(int index) {
     emit liveChanged();
     emit effectChanged();
 
+    const bool passing = m_lastShown.isValid() && m_lastShown.elapsed() < kPassing;
+    m_lastShown.start();
+    if (passing)
+        m_fetchLater.start();
+    else
+        fetchShown();
+}
+
+void Viewer::fetchShown() {
+    m_fetchLater.stop();
+    if (m_index < 0 || m_index >= m_library->count())
+        return;
+    const int index = m_index;
     if (isVideo()) {
         request(index, QStringLiteral("video"));
     } else {
