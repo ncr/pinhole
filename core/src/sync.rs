@@ -387,6 +387,16 @@ pub fn cover_path(key: &str) -> String {
     format!("{}-cover.jpg", thumb.strip_suffix(".jpg").unwrap_or(&thumb))
 }
 
+/// The same frame for bigger cells and the viewer, in place of the
+/// source's `medium` (iCloud's is of the first frame too), beside the
+/// cover: `cover_path` of a cover's thumbnail key.
+pub fn medium_cover_path(cover: &str) -> String {
+    format!("{}-medium.jpg", cover.strip_suffix(".jpg").unwrap_or(cover))
+}
+
+/// The long edge of a medium cover, as a folder's medium.
+const MEDIUM_COVER_EDGE: u32 = 2048;
+
 /// A video bigger than this keeps a dull thumbnail rather than be fetched
 /// whole for a better one.
 const COVER_MAX_BYTES: i64 = 1 << 30;
@@ -479,10 +489,14 @@ fn make_cover(source: &dyn Source, conn: &Connection, video: &Stored, cover: &Pa
     };
     let picked = {
         let _slot = crate::background::slot();
-        crate::cover::pick(&file, edge)
+        crate::cover::best(&file, edge)
+            .and_then(|(at, thumb)| Ok((thumb, crate::cover::frame(&file, at, MEDIUM_COVER_EDGE)?)))
     };
     let _ = std::fs::remove_file(&fetched);
-    write_beside(cover, &picked?)?;
+    let (thumb, medium) = picked?;
+    // The medium first: a cover on disk is one done.
+    write_beside(Path::new(&medium_cover_path(&cover.to_string_lossy())), &medium)?;
+    write_beside(cover, &thumb)?;
     Ok(())
 }
 
@@ -610,6 +624,7 @@ mod tests {
         assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 1);
         let thumb: String = conn.query_row("SELECT thumb_path FROM assets", [], |r| r.get(0)).unwrap();
         assert!(thumb.ends_with("-cover.jpg") && library.join(&thumb).exists());
+        assert!(library.join(medium_cover_path(&thumb)).exists());
         // Made once, never again, however dull.
         assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
         let _ = std::fs::remove_dir_all(&dir);

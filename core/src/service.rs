@@ -990,6 +990,18 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
         Err(_) if want.effect().is_some() => return make(shared, db, asset, want, reply),
         Err(_) => return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition")))),
     };
+    // A video given a cover of its own (cover.rs) has the same frame in
+    // place of the source's medium, which shows its first.
+    if want == Want::Medium {
+        let thumb: Option<String> =
+            db.query_row("SELECT thumb_path FROM assets WHERE id = ?1", [asset], |r| r.get(0)).ok().flatten();
+        if let Some(cover) = thumb.filter(|t| t.ends_with("-cover.jpg")) {
+            let path = shared.storage.library().join(crate::sync::medium_cover_path(&cover));
+            if path.exists() {
+                return reply.send(Ok(json!({"path": path, "type": "public.jpeg", "rendition": "cover", "cached": true})));
+            }
+        }
+    }
     let (rendition, file_type) = (stored.name.clone(), stored.file_type.clone());
     // On this computer already: served as it is.
     if let Some(path) = shared.source().local(&stored) {

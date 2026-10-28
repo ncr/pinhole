@@ -68,30 +68,22 @@ fn measure(image: &RgbImage) -> (f64, f64) {
 /// A JPEG of the video's most telling frame, at most `edge` on the long
 /// side. Background work (background.rs): the caller holds a slot.
 pub fn pick(video: &Path, edge: u32) -> Result<Vec<u8>> {
-    let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
-    let frame = |at: f64| -> Result<Vec<u8>> {
-        let output = crate::background::command("ffmpeg")
-            .args(["-v", "error", "-threads", "1", "-ss", &format!("{at:.3}"), "-i"])
-            .arg(video)
-            .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
-            .stdin(Stdio::null())
-            .output()
-            .context("running ffmpeg")?;
-        if output.stdout.is_empty() {
-            return Err(anyhow!("no frame at {at:.1} s: {}", String::from_utf8_lossy(&output.stderr).trim()));
-        }
-        Ok(output.stdout)
-    };
+    best(video, edge).map(|(_, jpeg)| jpeg)
+}
+
+/// When the video's most telling frame is, in seconds, and a JPEG of it at
+/// most `edge` on the long side.
+pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
     // A video whose length ffprobe cannot tell, or a very short one, from
     // its start.
     let times: Vec<f64> = match duration(video) {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
-    let mut best: Option<(f64, Vec<u8>)> = None;
+    let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
     for at in times {
-        let jpeg = match frame(at) {
+        let jpeg = match frame(video, at, edge) {
             Ok(jpeg) => jpeg,
             Err(e) => {
                 failed = Some(e);
@@ -100,14 +92,30 @@ pub fn pick(video: &Path, edge: u32) -> Result<Vec<u8>> {
         };
         let Ok(image) = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg) else { continue };
         let score = interest(&image.to_rgb8());
-        if best.as_ref().is_none_or(|(b, _)| score > *b) {
-            best = Some((score, jpeg));
+        if best.as_ref().is_none_or(|(b, _, _)| score > *b) {
+            best = Some((score, at, jpeg));
         }
     }
     match best {
-        Some((_, jpeg)) => Ok(jpeg),
-        None => frame(0.0).map_err(|e| failed.unwrap_or(e)),
+        Some((_, at, jpeg)) => Ok((at, jpeg)),
+        None => frame(video, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
     }
+}
+
+/// A JPEG of the frame `at` seconds in, at most `edge` on the long side.
+pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
+    let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
+    let output = crate::background::command("ffmpeg")
+        .args(["-v", "error", "-threads", "1", "-ss", &format!("{at:.3}"), "-i"])
+        .arg(video)
+        .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
+        .stdin(Stdio::null())
+        .output()
+        .context("running ffmpeg")?;
+    if output.stdout.is_empty() {
+        return Err(anyhow!("no frame at {at:.1} s: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(output.stdout)
 }
 
 /// The video's length in seconds, from ffprobe.
