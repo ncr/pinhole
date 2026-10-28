@@ -674,10 +674,12 @@ ApplicationWindow {
         // Space plays and pauses a video; on a photo it closes, like Quick Look.
         onActivated: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
     }
-    Shortcut { enabled: win.inViewer; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
-    Shortcut { enabled: win.inViewer; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
-    Shortcut { enabled: win.inViewer; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
-    Shortcut { enabled: win.inViewer; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
+    // ← and →, with Shift or not, are the viewer's own: it reads them
+    // pressed and let go, to move on while one is held. On a video, Shift
+    // with them skips ten seconds instead.
+    Binding { target: viewer; property: "takesKeys"; value: win.inViewer }
+    Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
+    Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
     Shortcut { enabled: win.inViewer; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
     Shortcut { enabled: win.inViewer && viewer.live; sequence: "Shift+L"; context: Qt.ApplicationShortcut; onActivated: viewer.nextEffect() }
     Shortcut { enabled: win.inViewer; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }

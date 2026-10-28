@@ -26,6 +26,14 @@ constexpr double kEase = 16;
 // each photo it is behind.
 constexpr double kStripSpring = 20;
 constexpr double kStripCatchUp = 10;
+// A held key: how long before the photos move on by themselves (s), how
+// many a second they start at, the most (without and with Shift), and how
+// quickly they get there (the share left shrinks by e^-rate a second).
+constexpr double kHoldDelay = 0.35;
+constexpr double kHoldStart = 3;
+constexpr double kHoldTop = 20;
+constexpr double kHoldTopFast = 60;
+constexpr double kHoldRate = 1.2;
 // Pinched below this share of fitted on release: close.
 constexpr double kCloseBelow = 0.7;
 // Swiped up or down: the photo follows like this, and closing takes a drag
@@ -260,6 +268,20 @@ void ViewerMotion::jumped(int delta) {
     m_stripVelocity = velocity;
 }
 
+void ViewerMotion::hold(int direction, bool fast) {
+    m_holdDir = direction > 0 ? 1 : -1;
+    m_holdFast = fast;
+    m_holdTime = 0;
+    m_holdSpeed = 0;
+    m_heldSteps = 0;
+}
+
+void ViewerMotion::release() {
+    // The carousel's spring takes over from where it is, at its speed.
+    m_holdDir = 0;
+    m_holdSpeed = 0;
+}
+
 void ViewerMotion::reset() {
     stopPanPhysics();
     m_dismiss = m_dismissVelocity = 0;
@@ -362,7 +384,7 @@ void ViewerMotion::pan(double dx, double dy) {
 
 bool ViewerMotion::animating() const {
     const bool row = m_gesture != Gesture::Page && (m_offset != 0 || m_velocity != 0);
-    const bool strip = m_strip != 0 || m_stripVelocity != 0;
+    const bool strip = m_strip != 0 || m_stripVelocity != 0 || m_holdDir != 0;
     const bool dismiss = m_gesture != Gesture::Dismiss && !m_close && m_dismiss != 0;
     const bool zoom = !m_holding && (m_zoom != m_zoomTarget || m_panX != m_panTargetX || m_panY != m_panTargetY);
     return row || strip || zoom || dismiss || panCoasting();
@@ -387,7 +409,29 @@ void ViewerMotion::advance(double dt) {
     // The carousel after a photo changed at once: a spring stiffer the
     // more photos behind it is, so a held key (40 photos a second) keeps it
     // a photo or two behind rather than five.
-    if (m_strip != 0 || m_stripVelocity != 0) {
+    m_holdTime += m_holdDir != 0 ? dt : 0;
+    if (m_holdDir != 0 && m_holdTime >= kHoldDelay) {
+        // Held: the carousel moves on at the held speed, from wherever the
+        // press left it, a photo behind the shown one at most; reaching it
+        // brings the next (one a frame at most).
+        const double page = pageWidth();
+        const double top = m_holdFast ? kHoldTopFast : kHoldTop;
+        m_holdSpeed = std::max(m_holdSpeed, kHoldStart);
+        m_holdSpeed += (top - m_holdSpeed) * (1 - std::exp(-kHoldRate * dt));
+        m_stripVelocity = -m_holdDir * m_holdSpeed * page;
+        m_strip += m_stripVelocity * dt;
+        if (m_holdDir * m_strip <= 0) {
+            if ((m_holdDir > 0 ? m_after : m_before) && m_heldSteps == 0) {
+                m_heldSteps = m_holdDir;
+                m_strip = m_holdDir * std::max(0.0, page + m_holdDir * m_strip);
+            } else {
+                // The end of the library, or a frame too slow for the speed.
+                m_strip = 0;
+                if (!(m_holdDir > 0 ? m_after : m_before))
+                    m_stripVelocity = 0;
+            }
+        }
+    } else if (m_strip != 0 || m_stripVelocity != 0) {
         const double before = m_strip;
         const double w = kStripSpring + kStripCatchUp * std::abs(m_strip) / pageWidth();
         m_stripVelocity += (-w * w * m_strip - 2 * w * m_stripVelocity) * dt;

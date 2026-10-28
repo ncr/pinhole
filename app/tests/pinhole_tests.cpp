@@ -470,6 +470,70 @@ private slots:
         QCOMPARE(held.stripOffset(), 0.0);
     }
 
+    // A held key, timed here and not by the system's repeat: the press
+    // moves on one photo, and a moment later the photos move on by
+    // themselves, slowly at first and quicker the longer it is held, the
+    // carousel gliding along without a jump; let go, it lands on the photo
+    // shown without passing it. With Shift they go faster.
+    void aHeldKeyStartsSlowlyAndGathersSpeed() {
+        // Where it ended, -1 if it moved on after being let go or did not
+        // come to rest.
+        auto holdFor = [](bool fast, double seconds, QList<double> *times, double *jump, double *past) -> int {
+            ViewerMotion m = viewerShowing();
+            const double page = m.pageWidth();
+            const double dt = 1.0 / 120;
+            int index = 1;
+            m.jumped(1);
+            m.hold(1, fast);
+            double last = index - m.stripOffset() / page;
+            for (double t = 0; t < seconds; t += dt) {
+                m.advance(dt);
+                if (const int d = m.takeSteps()) {
+                    index += d;
+                    if (times)
+                        times->append(t);
+                }
+                const double at = index - m.stripOffset() / page;
+                if (jump)
+                    *jump = std::max(*jump, std::abs(at - last));
+                last = at;
+            }
+            m.release();
+            for (int i = 0; i < 600 && m.animating(); ++i) {
+                m.advance(dt);
+                if (m.takeSteps())
+                    return -1;
+                if (past)
+                    *past = std::max(*past, -m.stripOffset() / page);
+            }
+            return m.stripOffset() == 0 ? index : -1;
+        };
+        QList<double> times;
+        double jump = 0, past = 0;
+        const int plain = holdFor(false, 3, &times, &jump, &past);
+        QVERIFY(plain > 0);
+        QVERIFY(times.size() >= 4);
+        QVERIFY(times[0] >= 0.3); // nothing before a moment has passed
+        QVERIFY(times[1] - times[0] > 0.15); // slow at first
+        QVERIFY(times.last() - times[times.size() - 2] < 0.08); // quick later
+        QVERIFY(jump < 0.5); // the carousel glides, never jumps
+        QVERIFY(past <= 0);
+        const int fast = holdFor(true, 3, nullptr, nullptr, nullptr);
+        QVERIFY(fast > plain * 1.5);
+        // Let go before the moment: just the press's one photo.
+        QCOMPARE(holdFor(false, 0.2, nullptr, nullptr, nullptr), 1);
+
+        // At the end of the library it stops there.
+        ViewerMotion end = viewerShowing(true, false);
+        end.jumped(1);
+        end.hold(1, true);
+        for (int i = 0; i < 240; ++i) {
+            end.advance(1.0 / 120);
+            QCOMPARE(end.takeSteps(), 0);
+        }
+        QCOMPARE(end.stripOffset(), 0.0);
+    }
+
     // Fingers moving `perEvent` px up or down every 8 ms, `events` times,
     // lifted `pause` ms after the last.
     static void swipeDown(ViewerMotion &m, double perEvent, int events, double pause = 8) {

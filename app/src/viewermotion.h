@@ -48,6 +48,17 @@ public:
     // wherever it was, quicker the further behind it is, so a held key
     // scrolls it evenly a photo or two behind and it lands when let go.
     void jumped(int delta);
+    // A key held after its press (which jumped()): a moment later the
+    // carousel starts moving on by itself, slowly, and gathers speed, faster
+    // with Shift; takeSteps() says when the next photo is due. The system's
+    // key repeat plays no part, so it starts as gently for everyone.
+    void hold(int direction, bool fast);
+    void setHoldFast(bool fast) { m_holdFast = fast; }
+    // Let go: the carousel lands on the photo shown, from the speed it had.
+    void release();
+    bool holding() const { return m_holdDir != 0; }
+    // Photos to move on by since last asked (a held key), -1, 0 or 1.
+    int takeSteps() { return std::exchange(m_heldSteps, 0); }
     // Opening, closing: everything at rest, fitted.
     void reset();
 
@@ -122,6 +133,12 @@ private:
     // How far the carousel is behind a photo changed at once, and how fast
     // it is catching up (px/s), on a spring of its own.
     double m_strip = 0, m_stripVelocity = 0;
+    // A held key: its direction (0: none), whether with Shift, how long it
+    // has been down (s), how fast the photos pass (per s), and a step due.
+    int m_holdDir = 0;
+    bool m_holdFast = false;
+    double m_holdTime = 0, m_holdSpeed = 0;
+    int m_heldSteps = 0;
     struct Sample {
         double t, x;
     };

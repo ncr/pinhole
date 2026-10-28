@@ -26,6 +26,7 @@ Item {
         ] },
         { title: qsTr("Photo"), keys: [
             ["← →", qsTr("Previous, next")],
+            ["⇧ ← →", qsTr("Faster")],
             ["Esc", qsTr("Back")],
             ["+ − 0", qsTr("Zoom")],
             ["L", qsTr("Live")],

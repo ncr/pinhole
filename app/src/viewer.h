@@ -57,6 +57,10 @@ class Viewer : public QObject {
     Q_PROPERTY(qreal dismiss READ dismiss NOTIFY motionChanged)
     Q_PROPERTY(qreal pageWidth READ pageWidth NOTIFY motionChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY motionChanged)
+    // Whether ← and → are the viewer's now (not while the help or a plugin
+    // is over it). It reads them itself, pressed and let go, to move on
+    // while one is held (ViewerMotion::hold()).
+    Q_PROPERTY(bool takesKeys READ takesKeys WRITE setTakesKeys NOTIFY takesKeysChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
     Q_PROPERTY(int count READ count NOTIFY indexChanged)
     // During a far jump (goTo()), the photo sliding out beside the new one;
@@ -96,6 +100,8 @@ public:
     qreal dismiss() const { return m_motion.dismiss(); }
     qreal pageWidth() const { return m_motion.pageWidth(); }
     bool animating() const { return m_motion.animating(); }
+    bool takesKeys() const { return m_takesKeys; }
+    void setTakesKeys(bool takes);
     bool zoomed() const { return m_motion.zoomed(); }
     int count() const;
     int revision() const { return m_revision; }
@@ -146,6 +152,7 @@ public:
     void libraryReloaded(const std::vector<int> &moved);
 
 signals:
+    void takesKeysChanged();
     void openChanged();
     void indexChanged();
     void imageChanged();
@@ -168,6 +175,8 @@ protected:
 
 private:
     void show(int index);
+    // The held arrow let go (or lost track of): the photos stop moving on.
+    void letGo();
     // Asks pinholed for the shown photo and its neighbours.
     void fetchShown();
     // The photo a touchpad swipe paged to: it slides on from where the
@@ -224,4 +233,7 @@ private:
     // it stops on one, so that one is not queued behind all the others.
     QElapsedTimer m_lastShown;
     QTimer m_fetchLater;
+    bool m_takesKeys = false;
+    // The arrow held down (Qt::Key_Left or Key_Right), or 0.
+    int m_heldKey = 0;
 };

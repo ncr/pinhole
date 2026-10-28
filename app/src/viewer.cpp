@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QFile>
+#include <QKeyEvent>
 #include <QLocale>
 #include <QNativeGestureEvent>
 #include <QWheelEvent>
@@ -153,6 +154,33 @@ void Viewer::openAt(int index, QRectF from) {
 bool Viewer::eventFilter(QObject *, QEvent *event) {
     if (!m_open)
         return false;
+    if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        const bool press = event->type() == QEvent::KeyPress;
+        if (key->key() == Qt::Key_Shift) {
+            m_motion.setHoldFast(press);
+            return false;
+        }
+        if ((key->key() != Qt::Key_Left && key->key() != Qt::Key_Right) || !m_takesKeys ||
+            (key->modifiers() & ~(Qt::ShiftModifier | Qt::KeypadModifier)))
+            return false;
+        // The system's repeats are not wanted: holding is timed here.
+        if (key->isAutoRepeat())
+            return true;
+        if (press) {
+            const int direction = key->key() == Qt::Key_Right ? 1 : -1;
+            step(direction);
+            m_heldKey = key->key();
+            m_motion.hold(direction, key->modifiers() & Qt::ShiftModifier);
+        } else if (key->key() == m_heldKey) {
+            letGo();
+        }
+        emit motionChanged();
+        return true;
+    }
+    // Keys let go while the window was elsewhere never arrive.
+    if (event->type() == QEvent::FocusOut || event->type() == QEvent::WindowDeactivate)
+        letGo();
     if (event->type() == QEvent::NativeGesture) {
         auto *g = static_cast<QNativeGestureEvent *>(event);
         logInput(QStringLiteral("viewer gesture type=%1 value=%2 pos=%3,%4")
@@ -276,6 +304,14 @@ void Viewer::setViewport(qreal width, qreal height) {
 
 void Viewer::advance(qreal seconds) {
     m_motion.advance(seconds);
+    // A held key brought the next photo; the carousel is already on its way.
+    if (const int delta = m_motion.takeSteps()) {
+        const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
+        if (next != m_index) {
+            m_jumpFrom = -1;
+            show(next);
+        }
+    }
     // A far jump's slide is over: back to the true neighbours.
     if (m_jumpFrom >= 0 && m_motion.offset() == 0)
         m_jumpFrom = -1;
@@ -314,9 +350,27 @@ void Viewer::panBy(qreal dx, qreal dy) {
     emit motionChanged();
 }
 
+void Viewer::setTakesKeys(bool takes) {
+    if (takes == m_takesKeys)
+        return;
+    m_takesKeys = takes;
+    if (!takes)
+        letGo();
+    emit takesKeysChanged();
+}
+
+void Viewer::letGo() {
+    if (!m_heldKey)
+        return;
+    m_heldKey = 0;
+    m_motion.release();
+    emit motionChanged();
+}
+
 void Viewer::close() {
     if (!m_open)
         return;
+    letGo();
     m_open = false;
     m_generation += 1; // anything still arriving is for a closed viewer
     m_liveLoading = false;
