@@ -1,0 +1,14 @@
+[package]
+name = "pinhole-series"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Finds series of photos in a Pinhole library, for the Series plugin"
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[profile.release]
+opt-level = 3

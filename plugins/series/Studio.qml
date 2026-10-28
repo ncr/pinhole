@@ -1,0 +1,489 @@
+import QtQuick
+import Pinhole.Plugin
+import "Engine.js" as Engine
+
+// One series as its clip, full window: playing at once, with the ways to
+// change it beneath, every one a click or a key, and nothing like a
+// timeline. ← → go through the series; Enter makes a GIF, copied to the
+// clipboard and kept in Pictures/Pinhole.
+Item {
+    id: studio
+    required property var plugin
+    readonly property var pinhole: plugin.pinhole
+
+    property bool shown: false
+    visible: opacity > 0
+    opacity: shown ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+    // Which series, and whether it was opened from the grid (closing then
+    // shows the grid at it) or from a photo (closing goes back to it).
+    property int k: -1
+    property bool fromGrid: true
+    readonly property var positions: k >= 0 && k < plugin.series.length ? plugin.series[k] : []
+
+    // Every shot of the series: {index, thumbnail, sharp, aspect, shift}.
+    property var all: []
+    // Shots left out, by series (their first photo's id): for as long as
+    // the window runs.
+    property var leftOut: ({})
+    readonly property string key: positions.length > 0 ? pinhole.library.item(positions[0]).id : ""
+    readonly property var skipped: leftOut[key] || []
+    readonly property var shots: all.filter(s => skipped.indexOf(s.index) < 0)
+
+    // How the clip is made; all but the crop is kept for next time.
+    property var recipe: Object.assign({}, Engine.DEFAULT_RECIPE, pinhole.setting("recipe", {}), { pan: { x: 0, y: 0 } })
+    function change(part) {
+        recipe = Object.assign({}, recipe, part)
+        const kept = Object.assign({}, recipe)
+        delete kept.pan
+        pinhole.setSetting("recipe", kept)
+    }
+    function cycle(name, list) {
+        const at = list.indexOf(recipe[name])
+        const part = {}
+        part[name] = list[(at + 1) % list.length]
+        change(part)
+    }
+
+    property real time: 0
+    property bool playing: true
+    readonly property real duration: preview.timeline.duration
+
+    // A file being made, how far, and the last one made.
+    property string making: ""
+    property real progress: 0
+    property var made: null
+    property string error: ""
+
+    readonly property var names: ({
+        flip: qsTr("Flip"), bounce: qsTr("Bounce"), fade: qsTr("Fade"), drift: qsTr("Drift"), pile: qsTr("Pile"),
+        slow: qsTr("Slow"), normal: qsTr("Normal"), fast: qsTr("Fast"),
+        natural: qsTr("Natural"), vivid: qsTr("Vivid"), warm: qsTr("Warm"), mono: qsTr("Mono"), film: qsTr("Film"),
+        original: qsTr("Original"), square: qsTr("Square"), tall: "4:5", story: qsTr("Story")
+    })
+
+    function openSeries(k, fromGrid) {
+        if (k < 0 || k >= plugin.series.length)
+            return
+        studio.fromGrid = fromGrid
+        show(k)
+        shown = true
+    }
+    function show(k) {
+        studio.k = k
+        made = null
+        error = ""
+        time = 0
+        playing = true
+        change({ pan: { x: 0, y: 0 } })
+        const positions = plugin.series[k]
+        all = positions.map(i => {
+            const item = pinhole.library.item(i)
+            return { index: i, id: item.id, thumbnail: item.thumbnail, sharp: "",
+                     aspect: item.width > 0 && item.height > 0 ? item.width / item.height : 4 / 3, shift: { x: 0, y: 0 } }
+        })
+        // The sharper pictures, as each comes.
+        for (const i of positions) {
+            pinhole.fetch(i, "medium", (path, error) => {
+                if (studio.k !== k || path === "")
+                    return
+                studio.all = studio.all.map(s => s.index === i ? Object.assign({}, s, { sharp: "file://" + path }) : s)
+            })
+        }
+        // How each is moved against the first, for Steady.
+        pinhole.run(plugin.finder, ["steady", pinhole.library.dir].concat(all.map(s => s.id)), (code, out) => {
+            if (studio.k !== k || code !== 0)
+                return
+            const lines = out.trim().split("\n")
+            studio.all = studio.all.map((s, n) => {
+                const parts = (lines[n] || "0 0").split(" ")
+                return Object.assign({}, s, { shift: { x: Number(parts[0]) || 0, y: Number(parts[1]) || 0 } })
+            })
+        })
+    }
+    function step(delta) {
+        const next = k + delta
+        if (next >= 0 && next < plugin.series.length)
+            show(next)
+    }
+    function close() {
+        if (making !== "")
+            return
+        shown = false
+        if (fromGrid && positions.length > 0)
+            pinhole.reveal(positions[0])
+    }
+    // A shot in or out; two at least stay in.
+    function toggle(index) {
+        const now = skipped.slice()
+        const at = now.indexOf(index)
+        if (at >= 0)
+            now.splice(at, 1)
+        else if (all.length - now.length > 2)
+            now.push(index)
+        else
+            return
+        const map = Object.assign({}, leftOut)
+        map[key] = now
+        leftOut = map
+    }
+
+    // The file: named for when the series was taken and how it moves, in
+    // Pictures/Pinhole, then on the clipboard.
+    function make(format) {
+        if (making !== "" || shots.length < 2)
+            return
+        const plan = Engine.plan(recipe, shots, format)
+        const date = new Date(pinhole.library.item(positions[0]).date)
+        const base = pinhole.picturesDir() + "/Pinhole/" + Qt.formatDateTime(date, "yyyy-MM-dd HH.mm") + " " + names[recipe.motion]
+        const extension = format === "gif" ? ".gif" : ".mp4"
+        let path = base + extension
+        for (let n = 2; pinhole.exists(path); ++n)
+            path = base + " " + n + extension
+        recorder.width = plan.w
+        recorder.height = plan.h
+        recorder.time = 0
+        making = format
+        progress = 0
+        made = null
+        error = ""
+        // Once the pictures at the file's size are here.
+        recordWhenReady.plan = plan
+        recordWhenReady.path = path
+        recordWhenReady.restart()
+    }
+    Timer {
+        id: recordWhenReady
+        property var plan
+        property string path
+        interval: 50
+        repeat: true
+        onTriggered: {
+            if (!recorder.ready)
+                return
+            stop()
+            const fps = plan.fps
+            studio.pinhole.record(recorder, {
+                path: path, format: studio.making, width: plan.w, height: plan.h, fps: fps, frames: plan.frames,
+                seek: frame => recorder.time = frame / fps
+            }, fraction => studio.progress = fraction, (file, error) => {
+                studio.making = ""
+                if (file === "") {
+                    studio.error = error
+                    return
+                }
+                studio.pinhole.copyFile(file)
+                studio.made = { path: file, name: file.split("/").pop(), size: studio.pinhole.sizeText(studio.pinhole.fileSize(file)) }
+            })
+        }
+    }
+
+    FrameAnimation {
+        running: studio.shown && studio.playing && studio.making === ""
+        onTriggered: studio.time = (studio.time + frameTime) % Math.max(0.05, studio.duration)
+    }
+
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: studio.step(-1) }
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: studio.step(1) }
+    Shortcut { enabled: studio.shown; sequences: ["Escape", "G"]; context: Qt.ApplicationShortcut; onActivated: studio.close() }
+    Shortcut { enabled: studio.shown; sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: studio.playing = !studio.playing }
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "P"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("pace", Engine.PACES) }
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("look", Engine.LOOKS) }
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "O"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("shape", Engine.SHAPES) }
+    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "T"; context: Qt.ApplicationShortcut; onActivated: studio.change({ steady: !studio.recipe.steady }) }
+    Shortcut { enabled: studio.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: studio.make("gif") }
+    Shortcut { enabled: studio.shown; sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; onActivated: studio.make("mp4") }
+    Repeater {
+        model: Engine.MOTIONS
+        delegate: Item {
+            required property string modelData
+            required property int index
+            Shortcut {
+                enabled: studio.shown && studio.making === ""
+                sequence: String(index + 1)
+                context: Qt.ApplicationShortcut
+                onActivated: { studio.change({ motion: modelData }); studio.time = 0 }
+            }
+        }
+    }
+
+    // The file's frames are drawn here, at its size, out of sight under
+    // the studio (a picture is taken of it, not of the screen).
+    Clip {
+        id: recorder
+        visible: studio.making !== ""
+        shots: studio.shots
+        recipe: studio.recipe
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: theme.background
+    }
+    // Clicks stay here, off the photos beneath.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onWheel: wheel => wheel.accepted = true
+    }
+
+    // The series: when, how many, which of how many.
+    Row {
+        id: top
+        x: 16
+        y: 16
+        spacing: 6
+        Chip {
+            readonly property var item: studio.positions.length > 0 ? studio.pinhole.library.item(studio.positions[0]) : null
+            readonly property var date: item ? new Date(item.date) : null
+            text: date ? date.toLocaleDateString(Qt.locale(), Locale.LongFormat) + " <font color=\"" + theme.darkForeground + "\">· "
+                         + date.toLocaleTimeString(Qt.locale(), Locale.ShortFormat) + "</font>" : ""
+            textColor: theme.brightForeground
+        }
+        ShellButton {
+            text: "‹"
+            hint: "←"
+            usable: studio.k > 0 && studio.making === ""
+            onTapped: studio.step(-1)
+        }
+        Chip {
+            text: qsTr("%1 of %2").arg(Number(studio.k + 1).toLocaleString(Qt.locale(), "f", 0))
+                                  .arg(Number(studio.plugin.series.length).toLocaleString(Qt.locale(), "f", 0))
+            textColor: theme.darkForeground
+        }
+        ShellButton {
+            text: "›"
+            hint: "→"
+            usable: studio.k < studio.plugin.series.length - 1 && studio.making === ""
+            onTapped: studio.step(1)
+        }
+    }
+    ShellButton {
+        id: closeButton
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 16
+        text: "✕"
+        hint: "Esc"
+        onTapped: studio.close()
+    }
+
+    // The clip, as big as fits; drag it to move the crop.
+    Item {
+        id: area
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: top.bottom
+        anchors.bottom: strip.top
+        anchors.margins: 16
+        readonly property real ratio: Engine.ratio(studio.recipe, studio.shots)
+        Clip {
+            id: preview
+            anchors.centerIn: parent
+            width: Math.min(parent.width, parent.height * area.ratio)
+            height: width / area.ratio
+            shots: studio.shots
+            recipe: studio.recipe
+            time: studio.time
+            readonly property var room: geometry.room
+            HoverHandler {
+                cursorShape: preview.room.x > 1 || preview.room.y > 1 ? (drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
+            }
+            DragHandler {
+                id: drag
+                target: null
+                property var from: ({ x: 0, y: 0 })
+                onActiveChanged: if (active) from = studio.recipe.pan
+                onTranslationChanged: {
+                    const room = preview.room
+                    studio.change({ pan: {
+                        x: room.x > 1 ? Math.max(-1, Math.min(1, from.x + translation.x / room.x)) : 0,
+                        y: room.y > 1 ? Math.max(-1, Math.min(1, from.y + translation.y / room.y)) : 0
+                    } })
+                }
+            }
+            TapHandler { onDoubleTapped: studio.change({ pan: { x: 0, y: 0 } }) }
+        }
+        // Paused: said on the picture's corner, quietly.
+        Chip {
+            visible: !studio.playing
+            x: preview.x + 10
+            y: preview.y + 10
+            text: "❚❚"
+        }
+    }
+
+    // Every shot; a click leaves one out or takes it back. The one showing
+    // is marked.
+    Row {
+        id: strip
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: card.top
+        anchors.bottomMargin: 14
+        spacing: 4
+        readonly property real cell: 44
+        readonly property int showing: {
+            const m = preview.moment
+            const shot = studio.shots[m.a]
+            return shot ? shot.index : -1
+        }
+        Repeater {
+            model: studio.all
+            delegate: Item {
+                required property var modelData
+                readonly property bool out: studio.skipped.indexOf(modelData.index) >= 0
+                width: Math.round(strip.cell * Math.min(1.5, modelData.aspect))
+                height: strip.cell + 6
+                Image {
+                    width: parent.width
+                    height: strip.cell
+                    source: modelData.thumbnail
+                    sourceSize.height: strip.cell * 2
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    opacity: parent.out ? 0.25 : 1
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 2
+                    radius: 1
+                    color: theme.accent
+                    visible: strip.showing === modelData.index
+                }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: studio.toggle(modelData.index) }
+            }
+        }
+    }
+
+    // What was made, or why not: on the clipboard, and where it is kept.
+    // At the top, beside the way out, clear of the picture.
+    Row {
+        anchors.right: closeButton.left
+        anchors.rightMargin: 6
+        anchors.top: parent.top
+        anchors.topMargin: 16
+        spacing: 6
+        visible: studio.made !== null || studio.error !== ""
+        Chip {
+            text: studio.error !== "" ? qsTr("Could not make it: %1").arg(studio.error)
+                : studio.made ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole: %1 · %2").arg(studio.made.name).arg(studio.made.size) : ""
+            textColor: studio.error !== "" ? theme.red : theme.foreground
+        }
+        ShellButton {
+            visible: studio.made !== null
+            floating: true
+            text: qsTr("Show")
+            onTapped: studio.pinhole.showFile(studio.made.path)
+        }
+    }
+
+    // How it moves, at what pace, in what look and shape, and the file:
+    // as an Omarchy menu card, the choices lit in the accent.
+    Rectangle {
+        id: card
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 20
+        width: rows.width + 2
+        height: rows.height + 2
+        radius: Math.min(4, theme.radius)
+        color: theme.background
+        border.color: theme.foreground
+        border.width: 1
+
+        Column {
+            id: rows
+            x: 1
+            y: 1
+            visible: studio.making === ""
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                Repeater {
+                    model: Engine.MOTIONS
+                    delegate: ShellButton {
+                        required property string modelData
+                        required property int index
+                        flat: true
+                        text: studio.names[modelData]
+                        hint: String(index + 1)
+                        active: studio.recipe.motion === modelData
+                        onTapped: { studio.change({ motion: modelData }); studio.time = 0 }
+                    }
+                }
+            }
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.18)
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                ShellButton {
+                    flat: true
+                    text: studio.names[studio.recipe.pace]
+                    hint: "P"
+                    onTapped: studio.cycle("pace", Engine.PACES)
+                }
+                ShellButton {
+                    flat: true
+                    text: studio.names[studio.recipe.look]
+                    hint: "L"
+                    onTapped: studio.cycle("look", Engine.LOOKS)
+                }
+                ShellButton {
+                    flat: true
+                    text: studio.names[studio.recipe.shape]
+                    hint: "O"
+                    onTapped: studio.cycle("shape", Engine.SHAPES)
+                }
+                ShellButton {
+                    flat: true
+                    text: qsTr("Steady")
+                    hint: "T"
+                    active: studio.recipe.steady && studio.recipe.motion !== "pile"
+                    usable: studio.recipe.motion !== "pile"
+                    onTapped: studio.change({ steady: !studio.recipe.steady })
+                }
+                ShellButton {
+                    flat: true
+                    text: qsTr("Video")
+                    hint: "⇧ ⏎"
+                    onTapped: studio.make("mp4")
+                }
+                ShellButton {
+                    active: true
+                    text: qsTr("Make GIF")
+                    hint: "⏎"
+                    onTapped: studio.make("gif")
+                }
+            }
+        }
+        // Being made: how far.
+        Column {
+            anchors.centerIn: parent
+            visible: studio.making !== ""
+            spacing: 8
+            UiText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: (studio.making === "gif" ? qsTr("Making the GIF…") : qsTr("Making the video…"))
+                      + "  " + Math.round(studio.progress * 100) + "%"
+            }
+            Rectangle {
+                width: rows.width - 4 * theme.fontSize
+                height: Math.max(4, Math.round(theme.fontSize * 0.4))
+                radius: height / 2
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12)
+                Rectangle {
+                    width: parent.width * studio.progress
+                    height: parent.height
+                    radius: height / 2
+                    color: theme.accent
+                }
+            }
+        }
+    }
+}

@@ -10,11 +10,22 @@ It changes the library only by adding to it: photos and videos dropped on
 the window go into it (uploaded to iCloud, copied into a folder). Nothing
 in it is ever edited or deleted.
 
-A folder works too: in the settings (the gear button, or `,`), Photos from →
-Folder. Pinhole indexes it and makes the thumbnails in the background, shows
-its photos and videos as they are (an iPhone's `IMG_1234.HEIC` with
+A folder works too: in the side panel (Tab), Add a source → a folder.
+Pinhole indexes it and makes the thumbnails in the background, shows its
+photos and videos as they are (an iPhone's `IMG_1234.HEIC` with
 `IMG_1234.MOV` beside it is a Live Photo), and follows changes to it. How
 sources fit in is in [docs/sources.md](docs/sources.md).
+
+Everything that is set is in that side panel: the sources, where Pinhole
+keeps its files and how much room they take, and the plugins.
+
+Series, the first plugin, finds photos of one subject taken close together
+(G in the grid, or on a photo of one) and makes each a short GIF or video
+to send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
+shape, held steady; Enter copies it and keeps it in Pictures/Pinhole. It is
+on unless turned off in the side panel. A plugin of your own is a folder in
+`~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
+again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
 ## Install
 
@@ -44,6 +55,7 @@ core/src/bin/sync.rs      pinhole-sync, which builds the local library
 core/src/bin/daemon.rs    pinholed, the background service: larger renditions on demand
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 app/                      the window: Qt Quick, with the grid in C++
+plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 ```
 
 ## Trying the grid
@@ -72,7 +84,7 @@ When cells grow past what the 480 px thumbnails can fill, the window asks
 `pinholed` for the 2048 px rendition. The window starts the service if it is
 not running; it keeps the photos it fetches beside the library, in
 `~/.local/share/pinhole`, within one size limit for both (the folder and the
-limit can be changed with the gear button, or `,`), and logs to
+limit can be changed in the side panel, Tab), and logs to
 `~/.local/state/pinhole/pinholed.log`. Its protocol is in
 [docs/service.md](docs/service.md).
 

@@ -17,6 +17,7 @@ sha256sums=()
 build() {
   cd "$startdir/.."
   cargo build --release --locked --manifest-path core/Cargo.toml
+  cargo build --release --locked --manifest-path plugins/series/finder/Cargo.toml
   app/bin/build
 }
 
@@ -28,6 +29,13 @@ package() {
   # The sign-in provider: a uv script that fetches icloudpd into uv's cache
   # on first use (see auth/PROTOCOL.md).
   install -Dm755 auth/pyicloud/pinhole-auth "$pkgdir/usr/bin/pinhole-auth"
+  # Pinhole's own plugins (docs/plugins.md), each its folder as it is in
+  # the checkout, with its helpers built.
+  install -d "$pkgdir/usr/lib/pinhole/plugins/series/i18n"
+  install -Dm644 -t "$pkgdir/usr/lib/pinhole/plugins/series" plugins/series/manifest.json plugins/series/*.qml \
+    plugins/series/Engine.js plugins/series/grain.png
+  install -Dm644 -t "$pkgdir/usr/lib/pinhole/plugins/series/i18n" plugins/series/i18n/*.json
+  install -Dm755 plugins/series/finder/target/release/pinhole-series "$pkgdir/usr/lib/pinhole/plugins/series/pinhole-series"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/pinhole.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/pinhole.svg"
   install -Dm644 "$startdir/pinhole.desktop" "$pkgdir/usr/share/applications/pinhole.desktop"
