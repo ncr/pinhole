@@ -166,7 +166,7 @@ void Incoming::finished(const QJsonObject &result) {
 
 QString Incoming::reason(const QString &code, const QString &message) const {
     if (code == QLatin1String("unsupported"))
-        return tr("not a photo or a video %1 takes").arg(place());
+        return tr("not a photo or a video that %1 takes").arg(place());
     if (code == QLatin1String("too_large"))
         return tr("too large for %1").arg(place());
     if (code == QLatin1String("over_quota"))

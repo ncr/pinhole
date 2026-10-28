@@ -12,6 +12,10 @@ DropArea {
     property int files: 0
     property int folders: 0
     readonly property bool lit: containsDrag && files + folders > 0
+    // What the card says, kept as it fades out after the drop.
+    property string said
+    onLitChanged: if (lit) said = folders > 0 ? qsTr("Add the photos and videos to %1").arg(name)
+                                              : qsTr("Add %n file(s) to %1", "", files).arg(name)
 
     keys: ["text/uri-list"]
     onEntered: drag => {
@@ -56,8 +60,7 @@ DropArea {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                text: target.folders > 0 ? qsTr("Add the photos and videos to %1").arg(target.name)
-                                         : qsTr("Add %n file(s) to %1", "", target.files).arg(target.name)
+                text: target.said
                 color: theme.brightForeground
                 font.pixelSize: Math.round(theme.fontSize * 1.5)
             }
