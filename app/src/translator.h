@@ -26,6 +26,10 @@ public:
     QString translate(const char *context, const char *sourceText, const char *disambiguation = nullptr,
                       int n = -1) const override;
 
+    // More catalogs over the built-in ones (plugins' i18n folders), read
+    // the same way, each over the last.
+    void setExtraCatalogs(const QStringList &directories);
+
     static QString readLanguage(const QString &path);
     static QString pluralCategory(const QString &language, long long count);
     static QLocale formatLocale(const QString &language);
@@ -38,6 +42,7 @@ private:
 
     QString m_languageFile;
     QString m_catalogDirectory;
+    QStringList m_extraCatalogs;
     QString m_language;
     QHash<QString, QJsonValue> m_strings;
     QFileSystemWatcher m_watcher;

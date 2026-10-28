@@ -24,6 +24,7 @@
 #include "incoming.h"
 #include "outgoing.h"
 #include "photoprovider.h"
+#include "plugins.h"
 #include "selftest.h"
 #include "serviceclient.h"
 #include "sources.h"
@@ -155,6 +156,10 @@ int main(int argc, char *argv[]) {
     std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
+    // What a plugin's QML imports (docs/plugins.md): its root and its
+    // buttons, and Pinhole's own pieces to draw as Pinhole does.
+    for (const char *type : {"PinholePlugin", "PluginAction", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
+        qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     FrameStats stats;
     ThumbnailLoader loader(&library, parser.value("decoders").toInt());
     // Before the window, so it outlives the grid that polls it.
@@ -169,6 +174,7 @@ int main(int argc, char *argv[]) {
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
+    Plugins plugins(&library, &service, &viewer, &translator);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
@@ -180,6 +186,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
+    engine.rootContext()->setContextProperty("plugins", &plugins);
+    plugins.setEngine(&engine);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
@@ -196,6 +204,7 @@ int main(int argc, char *argv[]) {
     auto *grid = window->findChild<PhotoGrid *>("grid");
     window->installEventFilter(&viewer);
     grid->setSources(&library, &loader, &stats);
+    plugins.setGrid(grid);
     grid->setTouchpadHold(&hold);
     // A resting finger stops a zoomed photo coasting as well.
     QObject::connect(&hold, &TouchpadHold::began, &viewer, [&viewer](quint32 time, quint32) { viewer.touch(time); });
@@ -248,7 +257,7 @@ int main(int argc, char *argv[]) {
         if (reader.joinable())
             reader.join();
         reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, grid,
-                              &viewer] {
+                              &viewer, &plugins] {
             QElapsedTimer took;
             took.start();
             auto fresh = std::make_shared<Library>();
@@ -268,7 +277,7 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < library.count(); ++i)
                 moved[size_t(i)] = positions.value(library.at(i).id, -1);
             const qint64 read = took.elapsed();
-            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer] {
+            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer, &plugins] {
                 QElapsedTimer swapping;
                 swapping.start();
                 const int before = library.count();
@@ -278,6 +287,7 @@ int main(int argc, char *argv[]) {
                 if (std::exchange(toNewest, false))
                     grid->scrollToEnd();
                 viewer.libraryReloaded(moved);
+                plugins.libraryReloaded();
                 std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                              library.count(), before, read, swapping.elapsed());
                 reloading = false;
@@ -325,12 +335,12 @@ int main(int argc, char *argv[]) {
         waitForLibrary.start(5000);
     }
 
-    // PINHOLE_SELFTEST=sourcesfade:<dir>: the sources bar coming in and going
+    // PINHOLE_SELFTEST=sourcesfade:<dir>: the side panel coming in and going
     // again, the photos dimming behind it and the grid's controls fading, as
     // frames in <dir> (on screen, for the photos to be drawn).
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("sourcesfade:"))) {
         QTimer::singleShot(2500, window, [window, test] {
-            QObject *bar = window->findChild<QObject *>(QStringLiteral("sourcesBar"));
+            QObject *bar = window->findChild<QObject *>(QStringLiteral("sidePanel"));
             const QString dir = test.mid(12);
             auto grab = [window, dir](const QString &name) { window->grabWindow().save(dir + '/' + name + ".png"); };
             grab("0-before");
@@ -397,13 +407,13 @@ int main(int argc, char *argv[]) {
             (*next)();
         });
     }
-    // PINHOLE_SELFTEST=settings:<dir>: the settings panel as it opens, as an
+    // PINHOLE_SELFTEST=settings:<dir>: the side panel as it opens, as an
     // image in <dir>. With PINHOLE_SELFTEST_LOWER=1 also with the limit
     // stepped two down, and once that is confirmed: it removes photos, so
     // only for a service on a scratch cache.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("settings:"))) {
         QTimer::singleShot(1200, window, [window, test] {
-            QObject *panel = window->findChild<QObject *>(QStringLiteral("settings"));
+            QObject *panel = window->findChild<QObject *>(QStringLiteral("sidePanel"));
             const QString dir = test.mid(9);
             panel->setProperty("shown", true);
             QTimer::singleShot(1000, window, [=] {
@@ -416,7 +426,7 @@ int main(int argc, char *argv[]) {
                 QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));
                 QTimer::singleShot(800, window, [=] {
                     window->grabWindow().save(dir + "/2-lower.png");
-                    QMetaObject::invokeMethod(panel, "confirm");
+                    QMetaObject::invokeMethod(panel, "confirmLimit");
                     QTimer::singleShot(2500, window, [=] {
                         window->grabWindow().save(dir + "/3-freed.png");
                         QCoreApplication::quit();
@@ -425,12 +435,12 @@ int main(int argc, char *argv[]) {
             });
         });
     }
-    // PINHOLE_SELFTEST=sourcesbar:<dir>: the sources bar as it opens and a
+    // PINHOLE_SELFTEST=sourcesbar:<dir>: the side panel as it opens and a
     // few seconds and a round later, as images in <dir>, to see when the
     // source shown was looked at count on.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("sourcesbar:"))) {
         QTimer::singleShot(1500, window, [window, test] {
-            window->findChild<QObject *>(QStringLiteral("sourcesBar"))->setProperty("shown", true);
+            window->findChild<QObject *>(QStringLiteral("sidePanel"))->setProperty("shown", true);
             const QString dir = test.mid(11);
             for (const int seconds : {1, 4, 13}) {
                 QTimer::singleShot(seconds * 1000, window, [=] {

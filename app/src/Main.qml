@@ -86,7 +86,7 @@ ApplicationWindow {
         // A cloud or a folder, from the Nerd Font Omarchy's type is.
         text: storage.sourceKind === "folder" ? "" : ""
         hint: "Tab"
-        onTapped: bar.shown = true
+        onTapped: side.shown = true
     }
 
     // The date beside it: the year, month, days or date of what is on
@@ -133,6 +133,7 @@ ApplicationWindow {
         objectName: "photoViewer"
         anchors.fill: parent
         grid: grid
+        pluginActions: win.pluginActions.filter(a => a.place === "viewer")
     }
 
     Chip {
@@ -290,7 +291,7 @@ ApplicationWindow {
         onTapped: grid.glideToNewest()
     }
 
-    // Every key, on ? or this.
+    // Every key, on ? or this. Settings are in the side panel (Tab or ",").
     ShellButton {
         id: helpButton
         objectName: "helpButton"
@@ -310,23 +311,8 @@ ApplicationWindow {
         onTapped: help.shown = true
     }
 
-    // The settings, beside it: where photos are kept and how much.
-    ShellButton {
-        id: settingsButton
-        objectName: "settingsButton"
-        floating: true
-        visible: helpButton.visible
-        opacity: win.chrome
-        anchors.right: helpButton.left
-        anchors.rightMargin: 6
-        anchors.bottom: helpButton.bottom
-        // A cog, from the Nerd Font Omarchy's type is.
-        text: "\uf013"
-        width: height
-        onTapped: settings.shown = true
-    }
-    // What the two corner buttons take of the bottom right.
-    readonly property real cornerWidth: 16 + helpButton.width + 6 + settingsButton.width + 8
+    // What the corner button takes of the bottom right.
+    readonly property real cornerWidth: 16 + helpButton.width + 8
 
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
@@ -343,6 +329,33 @@ ApplicationWindow {
         key: "S"
         active: grid.selecting
         onTapped: grid.selecting = !grid.selecting
+    }
+
+    // Plugins' buttons for the grid, before Select (not in select mode,
+    // which has its own).
+    Row {
+        objectName: "gridActions"
+        visible: win.chromeUp && !win.firstRun && !grid.selecting
+        opacity: win.chrome
+        anchors.top: parent.top
+        anchors.right: selectButton.visible ? selectButton.left : parent.right
+        anchors.topMargin: 16
+        anchors.rightMargin: selectButton.visible ? 6 : 16
+        spacing: 6
+        Repeater {
+            model: win.pluginActions.filter(a => a.place === "grid")
+            delegate: ShellButton {
+                required property var modelData
+                floating: true
+                visible: modelData.shown
+                usable: modelData.usable
+                active: modelData.active
+                busy: modelData.busy
+                text: modelData.text
+                key: modelData.key
+                onTapped: modelData.triggered()
+            }
+        }
     }
 
     // The bar of select mode, as an Omarchy menu card: the theme's
@@ -439,12 +452,74 @@ ApplicationWindow {
         }
     }
 
-    SourcesBar {
-        id: bar
-        objectName: "sourcesBar"
+    // Plugins (plugins.h), each loaded while it is on, from its files as
+    // they are now: a plugin whose files change loads again.
+    Repeater {
+        id: pluginLayer
+        model: plugins.ids
+        delegate: Loader {
+            id: pluginLoader
+            required property string modelData
+            readonly property var info: (plugins.revision, plugins.at(modelData))
+            readonly property string main: info.enabled ? info.main : ""
+            anchors.fill: parent
+            property bool completed: false
+            function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
+            onMainChanged: if (completed) load()
+            Component.onCompleted: { completed = true; load() }
+            onLoaded: win.collectPlugins()
+            onStatusChanged: if (status === Loader.Null || status === Loader.Error) win.collectPlugins()
+            Connections {
+                target: pluginLoader.item
+                ignoreUnknownSignals: true
+                function onCoveringChanged() { win.collectPlugins() }
+                function onActionsChanged() { win.collectPlugins() }
+                function onHelpChanged() { win.collectPlugins() }
+            }
+        }
+    }
+    // What the plugins loaded add: their buttons, their keys for the help,
+    // and whether one is over the photos.
+    property var pluginActions: []
+    property var pluginHelp: []
+    property bool pluginCovering: false
+    property int pluginsLoaded: 0
+    function pluginItem(id) {
+        for (let i = 0; i < pluginLayer.count; ++i) {
+            const loader = pluginLayer.itemAt(i)
+            if (loader && loader.modelData === id)
+                return loader.item
+        }
+        return null
+    }
+    function collectPlugins() {
+        const actions = [], help = []
+        let covering = false
+        for (let i = 0; i < pluginLayer.count; ++i) {
+            const loader = pluginLayer.itemAt(i)
+            const item = loader ? loader.item : null
+            if (!item)
+                continue
+            for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k)
+                actions.push(item.actions[k])
+            if (item.help && item.help.length > 0)
+                help.push({ title: loader.info.name, keys: item.help })
+            covering = covering || item.covering === true
+        }
+        pluginActions = actions
+        pluginHelp = help
+        pluginCovering = covering
+        ++pluginsLoaded
+    }
+
+    SidePanel {
+        id: side
+        objectName: "sidePanel"
         health: serviceHealth
+        pluginItem: id => win.pluginItem(id)
+        pluginsLoaded: win.pluginsLoaded
         onAddRequested: {
-            bar.shown = false
+            side.shown = false
             addPicker.shown = true
         }
         onSignInRequested: appleId => signIn.open(appleId)
@@ -470,11 +545,10 @@ ApplicationWindow {
         target: sources
         function onSwitched() {
             addPicker.shown = false
-            bar.shown = false
+            side.shown = false
         }
     }
-    HelpOverlay { id: help; objectName: "help" }
-    SettingsPanel { id: settings; objectName: "settings" }
+    HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
     // the viewer comes over the photos, and back, rather than vanish.
@@ -483,8 +557,10 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: help.shown || settings.shown || bar.shown || addPicker.shown || signIn.shown
+    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || pluginCovering
     readonly property bool inGrid: !photoViewer.shown && !panelUp && !firstRun
+    // The viewer has the keys: not while the help or a plugin is over it.
+    readonly property bool inViewer: photoViewer.shown && !help.shown && !pluginCovering
     // The buttons' own keys (ShellButton.qml), but for while a panel is up.
     readonly property bool buttonKeys: !panelUp && !firstRun
 
@@ -514,16 +590,15 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { enabled: !settings.shown && !signIn.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
+    Shortcut { enabled: !signIn.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
-    Shortcut { enabled: !photoViewer.shown && !win.panelUp; sequence: ","; context: Qt.ApplicationShortcut; onActivated: settings.shown = true }
-
-    // The sources: the bar on Tab, and any of the first nine shown on its
-    // number, from the grid or the bar.
+    // The side panel: sources, storage and plugins, on Tab or ",", and any
+    // of the first nine sources shown on its number, from the grid or the
+    // panel.
     Shortcut {
-        enabled: (win.inGrid || bar.shown) && sources.known; sequence: "Tab"; context: Qt.ApplicationShortcut
-        onActivated: bar.shown = !bar.shown
+        enabled: (win.inGrid || side.shown) && sources.known; sequences: ["Tab", ","]; context: Qt.ApplicationShortcut
+        onActivated: side.shown = !side.shown
     }
     Repeater {
         model: 9
@@ -531,7 +606,7 @@ ApplicationWindow {
             id: digit
             required property int index
             Shortcut {
-                enabled: (win.inGrid || bar.shown) && digit.index < sources.list.length
+                enabled: (win.inGrid || side.shown) && digit.index < sources.list.length
                 sequence: String(digit.index + 1)
                 context: Qt.ApplicationShortcut
                 onActivated: sources.showAt(digit.index)
@@ -566,17 +641,17 @@ ApplicationWindow {
 
     // The viewer.
     Shortcut {
-        enabled: photoViewer.shown && !help.shown; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
+        enabled: win.inViewer; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
         // Space plays and pauses a video; on a photo it closes, like Quick Look.
         onActivated: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
     }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
-    Shortcut { enabled: photoViewer.shown && !help.shown && viewer.live; sequence: "Shift+L"; context: Qt.ApplicationShortcut; onActivated: viewer.nextEffect() }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }
-    Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "0"; context: Qt.ApplicationShortcut; onActivated: viewer.resetZoom() }
+    Shortcut { enabled: win.inViewer; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: viewer.step(1) }
+    Shortcut { enabled: win.inViewer; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: viewer.step(-1) }
+    Shortcut { enabled: win.inViewer; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
+    Shortcut { enabled: win.inViewer; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
+    Shortcut { enabled: win.inViewer; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
+    Shortcut { enabled: win.inViewer && viewer.live; sequence: "Shift+L"; context: Qt.ApplicationShortcut; onActivated: viewer.nextEffect() }
+    Shortcut { enabled: win.inViewer; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
+    Shortcut { enabled: win.inViewer; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }
+    Shortcut { enabled: win.inViewer; sequence: "0"; context: Qt.ApplicationShortcut; onActivated: viewer.resetZoom() }
 }

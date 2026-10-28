@@ -93,6 +93,15 @@ QString Translator::translate(const char *, const char *sourceText, const char *
     return {};
 }
 
+void Translator::setExtraCatalogs(const QStringList &directories) {
+    if (directories == m_extraCatalogs)
+        return;
+    m_extraCatalogs = directories;
+    // Read again, whatever the language.
+    m_language.clear();
+    reload();
+}
+
 void Translator::reload() {
     const auto paths = m_watcher.files() + m_watcher.directories();
     if (!paths.isEmpty())
@@ -106,7 +115,8 @@ void Translator::reload() {
     if (QFileInfo::exists(m_languageFile))
         m_watcher.addPath(m_languageFile);
 
-    // Catalogs are compiled in, so only a different language needs a reload.
+    // Catalogs are compiled in, so only a different language (or plugins'
+    // catalogs, setExtraCatalogs) needs a reload.
     const QString language = readLanguage(m_languageFile);
     if (language == m_language)
         return;
@@ -117,14 +127,16 @@ void Translator::reload() {
     QHash<QString, QJsonValue> strings;
     QStringList codes{"en", language.section('-', 0, 0), language};
     codes.removeDuplicates();
-    for (const auto &code : codes) {
-        QFile catalog(m_catalogDirectory + "/" + code + ".json");
-        if (!catalog.open(QIODevice::ReadOnly))
-            continue;
-        const QJsonObject object = QJsonDocument::fromJson(catalog.readAll()).object();
-        for (auto it = object.begin(); it != object.end(); ++it)
-            if ((it.value().isString() && !it.value().toString().isEmpty()) || it.value().isObject())
-                strings.insert(it.key(), it.value());
+    for (const QString &directory : QStringList{m_catalogDirectory} + m_extraCatalogs) {
+        for (const auto &code : codes) {
+            QFile catalog(directory + "/" + code + ".json");
+            if (!catalog.open(QIODevice::ReadOnly))
+                continue;
+            const QJsonObject object = QJsonDocument::fromJson(catalog.readAll()).object();
+            for (auto it = object.begin(); it != object.end(); ++it)
+                if ((it.value().isString() && !it.value().toString().isEmpty()) || it.value().isObject())
+                    strings.insert(it.key(), it.value());
+        }
     }
 
     m_language = language;

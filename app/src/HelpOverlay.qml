@@ -10,8 +10,11 @@ Item {
     Behavior on opacity { NumberAnimation { duration: 120 } }
 
     property bool shown: false
+    // The plugins' keys: [{title, keys}], after Pinhole's own.
+    property var pluginSections: []
 
-    readonly property var sections: [
+    readonly property var sections: builtIn.concat(pluginSections)
+    readonly property var builtIn: [
         { title: qsTr("Library"), keys: [
             ["↑ ↓", qsTr("Scroll")],
             ["⇧ ↑ ↓", qsTr("Faster")],
@@ -36,10 +39,9 @@ Item {
             [qsTr("Drop files"), qsTr("Add to the library")]
         ] },
         { title: "Pinhole", keys: [
-            ["Tab", qsTr("Sources")],
+            ["Tab", qsTr("Sources, settings")],
             ["1–9", qsTr("Show a source")],
             ["?", qsTr("Keys")],
-            [",", qsTr("Settings")],
             ["Q", qsTr("Quit")]
         ] }
     ]

@@ -13,6 +13,8 @@ Item {
     id: root
 
     required property var grid
+    // Plugins' buttons for a photo (PluginAction), before Copy.
+    property var pluginActions: []
     property double openedAt: 0
     // Presses and clicks the viewer's mouse area has had (self-tests).
     property int presses: 0
@@ -437,6 +439,21 @@ Item {
                         }
                     }
                 }
+            }
+        }
+        Repeater {
+            model: root.pluginActions
+            delegate: ShellButton {
+                required property var modelData
+                anchors.verticalCenter: parent.verticalCenter
+                floating: true
+                visible: modelData.shown
+                usable: modelData.usable
+                active: modelData.active
+                busy: modelData.busy
+                text: modelData.text
+                key: modelData.key
+                onTapped: modelData.triggered()
             }
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers
