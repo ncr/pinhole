@@ -62,6 +62,8 @@ class PluginHost : public QObject {
     Q_PROPERTY(QString cacheDir READ cacheDir NOTIFY cacheDirChanged)
     Q_PROPERTY(QObject *library READ library CONSTANT)
     Q_PROPERTY(QObject *viewer READ viewer CONSTANT)
+    // Photos ticked in the grid's select mode (a card's all of them).
+    Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
 
@@ -73,6 +75,9 @@ public:
 
     // The photo under the pointer in the grid, else the one in the middle.
     Q_INVOKABLE int currentIndex() const;
+    // The photos ticked, by position, oldest first.
+    Q_INVOKABLE QList<int> selection() const;
+    int selectionCount() const;
     // Scroll the grid to a photo, if it is not on screen.
     Q_INVOKABLE void reveal(int index) const;
     // Open a photo full window.
@@ -105,6 +110,7 @@ public:
 
 signals:
     void cacheDirChanged();
+    void selectionChanged();
 
 private:
     QString m_id;
@@ -134,7 +140,7 @@ public:
     ~Plugins() override;
 
     // The grid, once the window is there.
-    void setGrid(PhotoGrid *grid) { m_grid = grid; }
+    void setGrid(PhotoGrid *grid);
     // The engine plugins load in: what it keeps of a plugin's files is
     // dropped when they change.
     void setEngine(QQmlEngine *engine) { m_engine = engine; }
@@ -167,6 +173,8 @@ public:
 signals:
     void idsChanged();
     void changed();
+    // The grid's selection.
+    void selectionChanged();
 
 private:
     struct Plugin {

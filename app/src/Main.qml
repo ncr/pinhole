@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import Pinhole
+import "keys.js" as KeyNames
 
 ApplicationWindow {
     id: win
@@ -24,6 +25,8 @@ ApplicationWindow {
         focus: true
         accent: theme.accent
         background: win.color
+        stacks: win.pluginStacks
+        marks: side.marks
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
 
@@ -398,6 +401,8 @@ ApplicationWindow {
             return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
         }
         function originalsText(level) { return level === 0 ? qsTr("Export originals") : qsTr("Originals") }
+        // Plugins' buttons for what is ticked, after Export.
+        readonly property var pluginActions: win.pluginActions.filter(a => a.place === "selection")
         // What the row is wide at a level, from its words: the count's
         // padding, then each button's (see ShellButton.qml).
         function widthAt(level) {
@@ -408,6 +413,7 @@ ApplicationWindow {
                 + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad
                 + barMetrics.advanceWidth(qsTr("Export")) + key("E") + pad
                 + barMetrics.advanceWidth(originalsText(level)) + key("⇧ E") + pad
+                + pluginActions.reduce((sum, a) => sum + (a.shown ? barMetrics.advanceWidth(a.text) + key(a.key) + pad : 0), 0)
         }
         FontMetrics { id: barMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
 
@@ -449,6 +455,22 @@ ApplicationWindow {
                 hint: selectBar.hints ? "⇧ E" : ""
                 onTapped: outgoing.exportTo(grid.selection(), false)
             }
+            Repeater {
+                model: selectBar.pluginActions
+                delegate: ShellButton {
+                    required property var modelData
+                    anchors.verticalCenter: parent.verticalCenter
+                    flat: true
+                    visible: modelData.shown
+                    usable: modelData.usable
+                    active: modelData.active
+                    busy: modelData.busy
+                    text: modelData.text
+                    key: modelData.key
+                    hint: selectBar.hints ? KeyNames.nameOf(modelData.key) : ""
+                    onTapped: modelData.triggered()
+                }
+            }
         }
     }
 
@@ -475,12 +497,15 @@ ApplicationWindow {
                 function onCoveringChanged() { win.collectPlugins() }
                 function onActionsChanged() { win.collectPlugins() }
                 function onHelpChanged() { win.collectPlugins() }
+                function onStacksChanged() { win.collectPlugins() }
             }
         }
     }
     // What the plugins loaded add: their buttons, their keys for the help,
-    // and whether one is over the photos.
+    // the photos they stack into one card, and whether one is over the
+    // photos.
     property var pluginActions: []
+    property var pluginStacks: []
     property var pluginHelp: []
     property bool pluginCovering: false
     property int pluginsLoaded: 0
@@ -494,6 +519,7 @@ ApplicationWindow {
     }
     function collectPlugins() {
         const actions = [], help = []
+        let stacks = []
         let covering = false
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -504,10 +530,13 @@ ApplicationWindow {
                 actions.push(item.actions[k])
             if (item.help && item.help.length > 0)
                 help.push({ title: loader.info.name, keys: item.help })
+            if (item.stacks && item.stacks.length > 0)
+                stacks = stacks.concat(item.stacks)
             covering = covering || item.covering === true
         }
         pluginActions = actions
         pluginHelp = help
+        pluginStacks = stacks
         pluginCovering = covering
         ++pluginsLoaded
     }

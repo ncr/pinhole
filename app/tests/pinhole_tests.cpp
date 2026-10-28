@@ -10,15 +10,14 @@
 
 #include "library.h"
 #include "outgoing.h"
+#include "photogrid.h"
+#include "thumbnailloader.h"
 #include "scrollphysics.h"
 #include "serviceclient.h"
 #include "theme.h"
 #include "translator.h"
 #include "viewer.h"
 #include "viewermotion.h"
-
-// The grid's input log, which the viewer writes to; the grid is not here.
-void logInput(const QString &) {}
 
 class PinholeTests : public QObject {
     Q_OBJECT
@@ -626,6 +625,50 @@ private slots:
         settle(m);
         QCOMPARE(m.zoom(), 3.0);
         QCOMPARE(m.panX(), 0.0);
+    }
+
+    void aStackIsOneCardAndStaysWithItsPhotosThroughAReload() {
+        QTemporaryDir dir, after;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        makeLibrary(after.path(), {{"new", 0}, {"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        Library library, reloaded;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        QVERIFY(reloaded.open(after.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700)); // 7 columns of 100
+        grid.setSources(&library, &loader, nullptr);
+        QCOMPARE(grid.count(), 6);
+
+        // b, c and d as one card, where b is; a photo already in a stack
+        // stays there, and a stack left with one photo is none.
+        grid.setStacks({QVariantList{1, 2, 3}, QVariantList{3, 4}});
+        QCOMPARE(grid.count(), 4);
+        QCOMPARE(grid.rectOf(3), grid.rectOf(1));
+        QCOMPARE(grid.rectOf(4).left(), 200.0);
+        QCOMPARE(grid.indexAt(150, 50), 1);
+        QCOMPARE(grid.indexAt(250, 50), 4);
+
+        // Selecting the card selects its photos.
+        grid.selectAll();
+        QCOMPARE(grid.selectionCount(), 6);
+        QCOMPARE(grid.selection(), (QList<int>{0, 1, 2, 3, 4, 5}));
+
+        // A photo comes in first: the stack follows its photos.
+        grid.rememberAnchor();
+        std::vector<int> moved{1, 2, 3, 4, 5, 6};
+        loader.reload([&] { library.swap(reloaded); });
+        grid.libraryReloaded(moved);
+        QCOMPARE(grid.count(), 5);
+        QCOMPARE(grid.rectOf(4), grid.rectOf(2));
+        QCOMPARE(grid.selection(), (QList<int>{1, 2, 3, 4, 5, 6}));
+
+        // No stacks: a cell to each photo again, the selection kept.
+        grid.setStacks({});
+        QCOMPARE(grid.count(), 7);
+        QCOMPARE(grid.selectionCount(), 6);
+        QCOMPARE(grid.rectOf(4).left(), 400.0);
     }
 
     void whatGoesOutIsWhatWasChosenThroughAReload() {

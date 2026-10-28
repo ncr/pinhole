@@ -2,6 +2,7 @@
 
 #include "framestats.h"
 #include "library.h"
+#include "marks.h"
 #include "thumbnailloader.h"
 #include "touchpadhold.h"
 
@@ -10,6 +11,7 @@
 #include <QFile>
 #include <QInputDevice>
 #include <QNativeGestureEvent>
+#include <QPainter>
 #include <QQuickWindow>
 #include <QSGGeometryNode>
 #include <QSGOpacityNode>
@@ -20,7 +22,9 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
+#include <limits>
 #include <unordered_map>
 
 namespace {
@@ -61,6 +65,13 @@ constexpr qint64 kUploadNanos = 3'000'000;
 // 4 MB each.
 constexpr double kMosaicBelowPx = 100;
 constexpr size_t kMaxPages = 64;
+// Marks (marks.h): this big on screen whatever the cell's size, a little
+// in from its bottom left corner, on cells at least this big; smaller ones
+// would be all marks. In the order drawn, left to right.
+constexpr double kMarkPx = 18;
+constexpr double kMarkInset = 4;
+constexpr double kMarksFromPx = 72;
+constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, MarkLive, MarkStack};
 
 double easeOut(double t) { return 1 - std::pow(1 - std::clamp(t, 0.0, 1.0), 3); }
 double lerp(double a, double b, double t) { return a + (b - a) * t; }
@@ -132,8 +143,14 @@ struct GridRenderState {
         // The cells' rounded corners: the background drawn over each
         // corner outside its arc, above the photos of the same layer.
         QSGGeometryNode *corners = nullptr;
+        // The marks, over the corners.
+        QSGGeometryNode *marks = nullptr;
     };
     Slot drawSlots[2];
+    // Every mark side by side, in kMarkOrder, drawn for this device pixel
+    // ratio.
+    QSGTexture *marks = nullptr;
+    qreal marksDpr = 0;
 
     // Borders around selected photos, one node on top of everything.
     QSGGeometryNode *selection = nullptr;
@@ -151,6 +168,9 @@ struct GridRenderState {
         for (auto &[index, page] : pages)
             delete page.texture;
         pages.clear();
+        delete marks;
+        marks = nullptr;
+        marksDpr = 0;
         bytes = 0;
         textures = 0;
     }
@@ -180,7 +200,9 @@ void PhotoGrid::setSources(const Library *library, ThumbnailLoader *loader, Fram
     m_loader = loader;
     m_stats = stats;
     connect(loader, &ThumbnailLoader::ready, this, &QQuickItem::update, Qt::QueuedConnection);
+    rebuildCells();
     emit libraryChanged();
+    emit cellsChanged();
     scrollToEnd();
 }
 
@@ -204,16 +226,17 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved) {
     const Anchor before = m_reloadAnchor;
     auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
 
-    std::set<int> selected;
-    for (int i : m_selected)
+    QList<int> selectedBefore;
+    for (int i : selection())
         if (const int n = mapped(i); n >= 0)
-            selected.insert(n);
-    const bool selectionChanged = selected != m_selected;
-    m_selected = std::move(selected);
-    m_selectionAnchor = mapped(m_selectionAnchor);
+            selectedBefore.append(n);
+    std::sort(selectedBefore.begin(), selectedBefore.end());
     m_zoom = {};
+    rebuildCells(&moved);
+    const bool selectionChanged = selectedBefore != selection();
     m_pendingMoves = std::make_shared<std::vector<int>>(moved);
     emit libraryChanged();
+    emit cellsChanged();
 
     // At the newest end it stays there, so new photos come into view;
     // elsewhere the photo that was at the top stays where it was, or the
@@ -257,6 +280,11 @@ void PhotoGrid::hoverMoveEvent(QHoverEvent *event) { m_hover = event->position()
 void PhotoGrid::hoverLeaveEvent(QHoverEvent *) { m_hover = QPointF(-1, -1); }
 
 int PhotoGrid::indexAt(qreal x, qreal y) const {
+    const int cell = cellAt(x, y);
+    return cell >= 0 ? libraryAt(cell) : -1;
+}
+
+int PhotoGrid::cellAt(qreal x, qreal y) const {
     if (x < 0 || y < 0 || x >= width() || y >= height() || count() == 0)
         return -1;
     const double s = stride();
@@ -272,11 +300,157 @@ int PhotoGrid::currentIndex() const {
             return i;
     }
     const int middle = indexAt(width() / 2, height() / 2);
-    return middle >= 0 ? middle : count() - 1;
+    return middle >= 0 ? middle : count() > 0 ? libraryAt(count() - 1) : -1;
 }
 
 QRectF PhotoGrid::rectOf(int index) const {
-    return cellRect(index, Layer{m_columns, 1, QPointF(0, m_scroll), QPointF(0, 0), 1});
+    const int cell = cellOf(index);
+    if (cell < 0)
+        return {};
+    return cellRect(cell, Layer{m_columns, 1, QPointF(0, m_scroll), QPointF(0, 0), 1});
+}
+
+int PhotoGrid::stackOf(int index) const {
+    if (m_stackOf.empty())
+        return -1;
+    const int cell = cellOf(index);
+    if (cell < 0)
+        return -1;
+    const int card = libraryAt(cell);
+    return m_stackOf.contains(card) ? card : -1;
+}
+
+int PhotoGrid::cellOf(int index) const {
+    if (m_cellOf.empty())
+        return index;
+    return index >= 0 && index < int(m_cellOf.size()) ? m_cellOf[size_t(index)] : -1;
+}
+
+void PhotoGrid::appendPhotos(int cell, QList<int> &out) const {
+    const int index = libraryAt(cell);
+    if (const auto stack = m_stackOf.find(index); stack != m_stackOf.end())
+        out.append(QList<int>(stack->second.begin(), stack->second.end()));
+    else
+        out.append(index);
+}
+
+QList<int> PhotoGrid::photosOf(int cell) const {
+    QList<int> photos;
+    appendPhotos(cell, photos);
+    return photos;
+}
+
+void PhotoGrid::setStacks(const QVariantList &stacks) {
+    if (stacks == m_stacksGiven)
+        return;
+    m_stacksGiven = stacks;
+    m_stackLists.clear();
+    for (const QVariant &stack : stacks) {
+        std::vector<int> photos;
+        for (const QVariant &index : stack.toList())
+            photos.push_back(index.toInt());
+        m_stackLists.push_back(std::move(photos));
+    }
+    // The photo at the top of the view stays where it is, as across a
+    // reload, or the view at the newest end.
+    const Anchor before = anchor();
+    const QList<int> selectedBefore = selection();
+    rebuildCells();
+    emit stacksChanged();
+    emit cellsChanged();
+    if (before.atEnd)
+        scrollToEnd();
+    else if (before.index >= 0)
+        setScroll(m_scroll + rectOf(before.index).top() - before.offset);
+    else
+        setScroll(m_scroll);
+    if (selection() != selectedBefore)
+        emit selectionChanged();
+    m_lastFraction = -1;
+    notifyScrolled();
+    update();
+}
+
+void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
+    auto mapped = [&](int old) {
+        if (!moved)
+            return old;
+        return old >= 0 && old < int(moved->size()) ? (*moved)[size_t(old)] : -1;
+    };
+    // What stays with its photos, as photos.
+    QList<int> selected;
+    for (int cell : m_selected)
+        appendPhotos(cell, selected);
+    for (int &i : selected)
+        i = mapped(i);
+    // Cells as they were (a reload has already changed the library).
+    auto photoAt = [&](int cell) {
+        return cell < 0 ? -1 : m_cells.empty() ? cell : cell < int(m_cells.size()) ? m_cells[size_t(cell)] : -1;
+    };
+    const int anchorPhoto = mapped(photoAt(m_selectionAnchor));
+    const int zoomPhoto = m_zoom.active ? mapped(photoAt(m_zoom.index)) : -1;
+    if (moved) {
+        for (auto &stack : m_stackLists) {
+            for (int &i : stack)
+                i = mapped(i);
+            std::erase(stack, -1);
+        }
+    }
+
+    m_cells.clear();
+    m_cellOf.clear();
+    m_stackOf.clear();
+    const int n = m_library ? m_library->count() : 0;
+    // Each photo's card, by the card's position: the first stack to claim a
+    // photo keeps it.
+    std::vector<int> card;
+    for (const auto &stack : m_stackLists) {
+        std::vector<int> photos;
+        for (int i : stack) {
+            if (i < 0 || i >= n)
+                continue;
+            if (card.empty())
+                card.assign(size_t(n), -1);
+            if (card[size_t(i)] < 0 && std::find(photos.begin(), photos.end(), i) == photos.end())
+                photos.push_back(i);
+        }
+        if (photos.size() < 2)
+            continue;
+        for (int i : photos)
+            card[size_t(i)] = photos.front();
+        const int cover = photos.front();
+        std::sort(photos.begin(), photos.end());
+        m_stackOf.emplace(cover, std::move(photos));
+    }
+    if (!m_stackOf.empty()) {
+        m_cellOf.assign(size_t(n), -1);
+        m_cells.reserve(size_t(n));
+        for (int i = 0; i < n; ++i) {
+            if (card[size_t(i)] < 0 || card[size_t(i)] == i) {
+                m_cellOf[size_t(i)] = int(m_cells.size());
+                m_cells.push_back(i);
+            }
+        }
+        for (int i = 0; i < n; ++i)
+            if (card[size_t(i)] >= 0 && card[size_t(i)] != i)
+                m_cellOf[size_t(i)] = m_cellOf[size_t(card[size_t(i)])];
+    }
+
+    m_selected.clear();
+    for (int i : selected)
+        if (const int cell = cellOf(i); cell >= 0)
+            m_selected.insert(cell);
+    m_selectionAnchor = anchorPhoto >= 0 ? cellOf(anchorPhoto) : -1;
+    if (zoomPhoto >= 0)
+        m_zoom.index = cellOf(zoomPhoto);
+}
+
+void PhotoGrid::setMarks(int marks) {
+    if (marks == m_marks)
+        return;
+    m_marks = marks;
+    emit marksChanged();
+    update();
 }
 
 void PhotoGrid::reveal(int index) {
@@ -293,7 +467,7 @@ void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     m_pressStopped = m_physics.animating() || m_zoom.active;
     touched(double(event->timestamp()), "click");
     m_pressAt = event->position();
-    m_pressIndex = indexAt(event->position().x(), event->position().y());
+    m_pressIndex = cellAt(event->position().x(), event->position().y());
     m_dragged = false;
     event->accept();
     // Any other button (a two-finger tap is the right one) was only a
@@ -329,7 +503,7 @@ void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {
         return;
     }
     // A photo in the selection drags the selection; any other, itself.
-    emit dragRequested(m_selected.contains(m_pressIndex) ? selection() : QList<int>{m_pressIndex});
+    emit dragRequested(m_selected.contains(m_pressIndex) ? selection() : photosOf(m_pressIndex));
 }
 
 void PhotoGrid::sweep() {
@@ -391,7 +565,7 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
         // A click or a tap opens the photo, as in Photos; one that only
         // stopped the grid coasting does not.
         if (!m_pressStopped)
-            emit activated(index, rectOf(index));
+            emit activated(libraryAt(index), rectOf(libraryAt(index)));
         return;
     }
     emit selectionChanged();
@@ -406,7 +580,26 @@ void PhotoGrid::setAccent(const QColor &accent) {
     update();
 }
 
-QList<int> PhotoGrid::selection() const { return QList<int>(m_selected.begin(), m_selected.end()); }
+QList<int> PhotoGrid::selection() const {
+    if (m_stackOf.empty())
+        return QList<int>(m_selected.begin(), m_selected.end());
+    QList<int> photos;
+    for (int cell : m_selected)
+        appendPhotos(cell, photos);
+    std::sort(photos.begin(), photos.end());
+    return photos;
+}
+
+int PhotoGrid::selectionCount() const {
+    if (m_stackOf.empty())
+        return int(m_selected.size());
+    int n = 0;
+    for (int cell : m_selected) {
+        const auto stack = m_stackOf.find(libraryAt(cell));
+        n += stack != m_stackOf.end() ? int(stack->second.size()) : 1;
+    }
+    return n;
+}
 
 void PhotoGrid::setSelecting(bool selecting) {
     if (selecting == m_selecting)
@@ -436,7 +629,11 @@ void PhotoGrid::clearSelection() {
     update();
 }
 
-int PhotoGrid::count() const { return m_library ? m_library->count() : 0; }
+int PhotoGrid::count() const {
+    if (!m_library)
+        return 0;
+    return m_cells.empty() ? m_library->count() : int(m_cells.size());
+}
 
 void PhotoGrid::setStatsVisible(bool visible) {
     if (visible == m_statsVisible)
@@ -504,7 +701,7 @@ void PhotoGrid::updateDateLabel() {
         const int first = std::clamp(int(std::floor(contentTop / rowStride)), 0, rows - 1);
         const int last = std::clamp(int(std::floor(contentBottom / rowStride)), 0, rows - 1);
         const QLocale locale;
-        auto dateOf = [this](int index) { return QDateTime::fromMSecsSinceEpoch(m_library->at(index).date).date(); };
+        auto dateOf = [this](int cell) { return QDateTime::fromMSecsSinceEpoch(m_library->at(libraryAt(cell)).date).date(); };
         // A row belongs to the date of its first photo.
         const QDate from = dateOf(first * columns);
 
@@ -563,7 +760,7 @@ qint64 PhotoGrid::dateAt(qreal fraction) const {
     // The photo at the top of the view when scrolled there.
     const double y = std::clamp(fraction, 0.0, 1.0) * maxScroll(m_columns);
     const int index = std::clamp(int(y / stride()) * m_columns, 0, count() - 1);
-    return m_library->at(index).date;
+    return m_library->at(libraryAt(index)).date;
 }
 
 QVariantList PhotoGrid::yearMarks() const {
@@ -574,7 +771,7 @@ QVariantList PhotoGrid::yearMarks() const {
     // The library is oldest first, so each year's first photo is found by
     // halving: a few hundred dates looked at rather than every one, which
     // took 140 ms at 100,000 photos on every zoom step.
-    const auto dateOf = [this](int i) { return m_library->at(i).date; };
+    const auto dateOf = [this](int cell) { return m_library->at(libraryAt(cell)).date; };
     const int first = QDateTime::fromMSecsSinceEpoch(dateOf(0)).date().year();
     const int last = QDateTime::fromMSecsSinceEpoch(dateOf(count() - 1)).date().year();
     for (int y = first; y <= last; ++y) {
@@ -1196,6 +1393,16 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             slot.corners->setMaterial(new QSGVertexColorMaterial);
             slot.corners->setFlag(QSGNode::OwnsMaterial);
             slot.opacity->appendChildNode(slot.corners);
+            slot.marks = new QSGGeometryNode;
+            auto *markGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+            markGeometry->setDrawingMode(QSGGeometry::DrawTriangles);
+            slot.marks->setGeometry(markGeometry);
+            slot.marks->setFlag(QSGNode::OwnsGeometry);
+            auto *markMaterial = new QSGTextureMaterial;
+            markMaterial->setFiltering(QSGTexture::Linear);
+            slot.marks->setMaterial(markMaterial);
+            slot.marks->setFlag(QSGNode::OwnsMaterial);
+            slot.opacity->appendChildNode(slot.marks);
             root->appendChildNode(slot.opacity);
         }
         rs.selection = new QSGGeometryNode;
@@ -1311,12 +1518,16 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     // A thumbnail whose cell has meanwhile gone far off screen is dropped:
     // uploading it would only delay the ones that are still wanted, and
     // when scrolling fast that delay is what leaves cells empty.
+    // In library positions, as textures and pages are kept: a card's cell
+    // shows its first photo's.
     auto keptRange = [&](int lo, int hi) {
         for (size_t k = 0; k < drawn.size(); ++k) {
             const int margin = std::max(int(height() / strideFor(drawn[k].columns) * 3) + 2, k == 0 ? lookahead + 2 : 0);
             const int from = std::max(0, ranges[k].firstRow - margin) * drawn[k].columns;
             const int to = (ranges[k].lastRow + margin) * drawn[k].columns;
-            if (hi >= from && lo < to)
+            const int libraryFrom = libraryAt(std::min(from, count() - 1));
+            const int libraryTo = to >= count() ? std::numeric_limits<int>::max() : libraryAt(to);
+            if (hi >= libraryFrom && lo < libraryTo)
                 return true;
         }
         return false;
@@ -1408,6 +1619,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         std::vector<std::pair<QRectF, quint32>> colours;
     };
     std::vector<Built> built(drawn.size());
+    // The marks on each layer's cells: where, and which.
+    std::vector<std::vector<std::pair<QRectF, int>>> marked(drawn.size());
     std::vector<quint64> wanted;
     // Medium renditions come after every thumbnail: they sharpen what is
     // already there.
@@ -1424,13 +1637,22 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         int lastWantedPage = -1;
         for (int row = r.firstRow; row <= r.lastRow; ++row) {
             for (int col = r.firstCol; col <= r.lastCol; ++col) {
-                const int i = row * l.columns + col;
-                if (i >= count())
+                const int cell = row * l.columns + col;
+                if (cell >= count())
                     break;
-                const QRectF rect = cellRect(i, l);
+                const QRectF rect = cellRect(cell, l);
                 if (!rect.intersects(view))
                     continue;
+                // The photo it shows, by which its textures are kept.
+                const int i = libraryAt(cell);
                 const LibraryItem &item = m_library->at(i);
+                if (m_marks && rect.width() >= kMarksFromPx) {
+                    int marks = (item.video ? MarkVideo : 0) | (item.live ? MarkLive : 0) | (item.favorite ? MarkFavorite : 0);
+                    if (!m_stackOf.empty() && m_stackOf.contains(i))
+                        marks |= MarkStack;
+                    if (marks & m_marks)
+                        marked[k].emplace_back(rect, marks & m_marks);
+                }
                 if (mosaic) {
                     const int page = i / kMosaicCount;
                     auto found = rs.pages.find(page);
@@ -1549,7 +1771,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const bool down = m_speedRows >= 0;
         const int fromRow = down ? r.lastRow + 1 : std::max(0, r.firstRow - ahead);
         const int toRow = down ? r.lastRow + ahead : r.firstRow - 1;
-        const int lastPage = (count() - 1) / kMosaicCount;
+        const int lastPage = (m_library->count() - 1) / kMosaicCount;
+        // The page of a row's first photo.
+        auto pageAt = [&](int row) { return libraryAt(std::clamp(row * m_columns, 0, count() - 1)) / kMosaicCount; };
         auto wantPages = [&](int a, int b) {
             for (int p = std::max(0, a); p <= std::min(lastPage, b); ++p)
                 if (!rs.pages.contains(p))
@@ -1557,11 +1781,11 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 else
                     rs.pages[p].lastUsed = rs.frame;
         };
-        wantPages(fromRow * m_columns / kMosaicCount, (toRow + 1) * m_columns / kMosaicCount);
+        wantPages(pageAt(fromRow), pageAt(toRow + 1));
         if (down)
-            wantPages(r.firstRow * m_columns / kMosaicCount - 1, r.firstRow * m_columns / kMosaicCount - 1);
+            wantPages(pageAt(r.firstRow) - 1, pageAt(r.firstRow) - 1);
         else
-            wantPages((r.lastRow + 1) * m_columns / kMosaicCount + 1, (r.lastRow + 1) * m_columns / kMosaicCount + 1);
+            wantPages(pageAt(r.lastRow + 1) + 1, pageAt(r.lastRow + 1) + 1);
     }
     if (!m_zoom.active && !scrubbing && !restMosaic) {
         const Range &r = ranges.front();
@@ -1572,9 +1796,10 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         auto prefetchRows = [&](int fromRow, int toRow) {
             for (int row = fromRow; row <= toRow; ++row) {
                 for (int c = 0; c < m_columns; ++c) {
-                    const int i = row * m_columns + c;
-                    if (i < 0 || i >= count())
+                    const int cell = row * m_columns + c;
+                    if (cell < 0 || cell >= count())
                         continue;
+                    const int i = libraryAt(cell);
                     const int want = desiredLevel(m_library->at(i), cellDevicePx);
                     auto found = rs.cache.find(i);
                     if (found != rs.cache.end()) {
@@ -1690,6 +1915,27 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         node->markDirty(QSGNode::DirtyGeometry);
     };
 
+    // The marks, drawn once for this screen's pixels.
+    if (!rs.marks || rs.marksDpr != dpr) {
+        const int px = int(std::lround(kMarkPx * dpr));
+        QImage strip(px * kMarkKinds, px, QImage::Format_ARGB32_Premultiplied);
+        strip.fill(Qt::transparent);
+        {
+            QPainter p(&strip);
+            for (int k = 0; k < kMarkKinds; ++k)
+                p.drawImage(k * px, 0, markImage(kMarkOrder[size_t(k)], px));
+        }
+        // The nodes may still point at the old one.
+        for (auto &slot : rs.drawSlots)
+            static_cast<QSGTextureMaterial *>(slot.marks->material())->setTexture(nullptr);
+        delete rs.marks;
+        rs.marks = window()->createTextureFromImage(strip);
+        rs.marks->setFiltering(QSGTexture::Linear);
+        rs.marksDpr = dpr;
+    }
+    // A mark's corner snapped to a device pixel, so it is drawn crisp.
+    auto snap = [dpr](double v) { return std::round(v * dpr) / dpr; };
+
     // 5. Write the geometry into the two slots.
     int batches = 0;
     for (int k = 0; k < 2; ++k) {
@@ -1766,8 +2012,41 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
         }
         writeCorners(slot.corners, b);
+
+        {
+            static const std::vector<std::pair<QRectF, int>> none;
+            const auto &cells = size_t(k) < marked.size() ? marked[size_t(k)] : none;
+            int quads = 0;
+            for (const auto &[rect, marks] : cells)
+                quads += std::popcount(unsigned(marks));
+            QSGGeometry *mg = slot.marks->geometry();
+            mg->allocate(quads * 6);
+            auto *mv = mg->vertexDataAsTexturedPoint2D();
+            for (const auto &[rect, marks] : cells) {
+                double x = snap(rect.left() + kMarkInset);
+                const double y = snap(rect.bottom() - kMarkInset - kMarkPx);
+                for (int m = 0; m < kMarkKinds; ++m) {
+                    if (!(marks & kMarkOrder[size_t(m)]))
+                        continue;
+                    const float x0 = float(x), y0 = float(y), x1 = float(x + kMarkPx), y1 = float(y + kMarkPx);
+                    const float u0 = float(m) / kMarkKinds, u1 = float(m + 1) / kMarkKinds;
+                    mv[0].set(x0, y0, u0, 0);
+                    mv[1].set(x1, y0, u1, 0);
+                    mv[2].set(x0, y1, u0, 1);
+                    mv[3].set(x1, y0, u1, 0);
+                    mv[4].set(x1, y1, u1, 1);
+                    mv[5].set(x0, y1, u0, 1);
+                    mv += 6;
+                    // The next a little closer than a whole mark: each has
+                    // room around it for its shadow.
+                    x += std::round(kMarkPx * 0.8);
+                }
+            }
+            static_cast<QSGTextureMaterial *>(slot.marks->material())->setTexture(rs.marks);
+            slot.marks->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+        }
         if (opacity > 0)
-            batches += int(b.byTexture.size()) + 2;
+            batches += int(b.byTexture.size()) + 3;
     }
 
     // The selection: a border inside each selected cell of the main layer.

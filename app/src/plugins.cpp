@@ -182,7 +182,9 @@ bool safeEntry(const QString &path) {
 } // namespace
 
 PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
-    : QObject(plugins), m_id(id), m_dir(dir), m_plugins(plugins) {}
+    : QObject(plugins), m_id(id), m_dir(dir), m_plugins(plugins) {
+    connect(plugins, &Plugins::selectionChanged, this, &PluginHost::selectionChanged);
+}
 
 QString PluginHost::cacheDir() const {
     // library/icloud/<apple id> → icloud-<apple id>.
@@ -198,6 +200,15 @@ QObject *PluginHost::library() const { return m_plugins->library(); }
 QObject *PluginHost::viewer() const { return m_plugins->viewerObject(); }
 
 int PluginHost::currentIndex() const { return m_plugins->grid() ? m_plugins->grid()->currentIndex() : -1; }
+
+QList<int> PluginHost::selection() const { return m_plugins->grid() ? m_plugins->grid()->selection() : QList<int>(); }
+
+int PluginHost::selectionCount() const { return m_plugins->grid() ? m_plugins->grid()->selectionCount() : 0; }
+
+void Plugins::setGrid(PhotoGrid *grid) {
+    m_grid = grid;
+    connect(grid, &PhotoGrid::selectionChanged, this, &Plugins::selectionChanged);
+}
 
 void PluginHost::reveal(int index) const {
     if (m_plugins->grid())

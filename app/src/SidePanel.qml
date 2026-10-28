@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 
 // Pinhole's side panel, on Tab or ",": over the photos from the left,
 // hidden otherwise. Everything that is set is here, in three parts.
@@ -11,6 +12,9 @@ import QtQuick
 // Storage: the one folder Pinhole keeps everything in (each source's
 // library, and the photos fetched from them), how much room that takes and
 // how much it may; the library always fits.
+//
+// In the grid: which marks the cells carry (a video, a Live Photo, a
+// favourite, several photos as one card), each with its switch.
 //
 // Plugins: each with its switch, and its own settings under it while on.
 Item {
@@ -62,6 +66,17 @@ Item {
     // changes as plugins load.
     property var pluginItem: id => null
     property int pluginsLoaded: 0
+
+    // The marks the grid draws (marks.h: Mark), kept for this window alone:
+    // the service has no use for them.
+    readonly property int marks: gridSettings.marks
+    Settings {
+        id: gridSettings
+        location: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/pinhole/window.conf"
+        category: "grid"
+        // Not Live: nearly every iPhone photo is one.
+        property int marks: 13
+    }
 
     onShownChanged: {
         confirming = -1
@@ -605,6 +620,57 @@ Item {
                 visible: storage.loaded
                 text: qsTr("The index and thumbnails always stay, so the limit is never under %1. Unless you choose one, it is %2.")
                       .arg(storage.size(storage.minLimit)).arg(storage.size(storage.defaultLimit))
+            }
+
+            Item { width: 1; height: theme.fontSize }
+            Heading { text: qsTr("In the grid") }
+            Note { text: qsTr("Marks in the corner of a photo that say what it is.") }
+            Repeater {
+                model: [
+                    { mark: 1, icon: "video", name: qsTr("Videos") },
+                    { mark: 2, icon: "live", name: qsTr("Live Photos") },
+                    { mark: 4, icon: "favorite", name: qsTr("Favourites") },
+                    { mark: 8, icon: "stack", name: qsTr("Series and other groups") }
+                ]
+                delegate: Item {
+                    id: markRow
+                    required property var modelData
+                    readonly property bool on: (gridSettings.marks & modelData.mark) !== 0
+                    x: Math.round(theme.fontSize * 0.714)
+                    width: parent.width - 2 * x
+                    height: markSwitch.height
+                    // As it looks on a photo: on a dim square, white.
+                    Rectangle {
+                        id: swatch
+                        width: Math.round(theme.fontSize * 1.8)
+                        height: width
+                        anchors.verticalCenter: parent.verticalCenter
+                        radius: Math.min(4, theme.radius)
+                        color: "#5d6670"
+                        opacity: markRow.on ? 1 : 0.45
+                        Image {
+                            anchors.centerIn: parent
+                            width: Math.round(parent.width * 0.9)
+                            height: width
+                            sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
+                            source: "image://mark/" + markRow.modelData.icon
+                        }
+                    }
+                    UiText {
+                        x: swatch.width + Math.round(theme.fontSize * 0.6)
+                        width: parent.width - x - markSwitch.width - theme.fontSize
+                        y: centredIn(parent.height)
+                        text: markRow.modelData.name
+                        color: theme.brightForeground
+                        elide: Text.ElideRight
+                    }
+                    Toggle {
+                        id: markSwitch
+                        anchors.right: parent.right
+                        checked: markRow.on
+                        onToggled: gridSettings.marks ^= markRow.modelData.mark
+                    }
+                }
             }
 
             Item { width: 1; height: theme.fontSize }

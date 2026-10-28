@@ -310,7 +310,7 @@ Item {
             text: modelData < 0 ? "‹" : "›"
             label.font.pixelSize: theme.fontSize * 2
             width: height
-            readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < root.grid.count - 1
+            readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < viewer.count - 1
             opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
             y: (root.areaHeight - height) / 2
             Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -600,7 +600,9 @@ Item {
 
     // The carousel: the library's thumbnails in a row under the photo, the
     // shown one in the middle, sliding along as the photos do. Dragging it
-    // scrubs through the library; clicking one shows it. Drawn directly: a
+    // scrubs through the library; clicking one shows it. A stack's photos
+    // (a series) have a line under them; those of the shown photo's stack
+    // a line in the accent, and the rest dim. Drawn directly: a
     // fixed set of slots, each keeping its photo until it scrolls off, so
     // sliding reloads nothing.
     Item {
@@ -622,6 +624,9 @@ Item {
         readonly property int first: Math.floor(position - width / 2 / cell) - 1
         // The photo at a point of the strip.
         function indexAt(x) { return Math.round(position + (x - width / 2) / cell) }
+        // The stack the shown photo is in, by its card's photo, or -1.
+        readonly property int stack: (root.grid.stacks, viewer.open ? root.grid.stackOf(viewer.index) : -1)
+        function stackOf(i) { return i >= 0 && i < viewer.count ? (root.grid.stacks, root.grid.stackOf(i)) : -1 }
         // The middle, where the shown photo sits: thumbnails grow as they
         // pass it, and the marker stays there while they slide under it.
         readonly property real middle: width / 2
@@ -648,6 +653,8 @@ Item {
                 }
                 // 1 at the middle, 0 a cell or more away.
                 readonly property real nearness: Math.max(0, 1 - Math.abs(x + width / 2 - carousel.middle) / carousel.cell)
+                readonly property int stack: visible ? carousel.stackOf(photo) : -1
+                readonly property bool shownStack: stack >= 0 && stack === carousel.stack
                 visible: photo >= 0 && photo < viewer.count
                 x: carousel.width / 2 + (photo - carousel.position) * carousel.cell - carousel.cell / 2
                 width: carousel.cell
@@ -662,6 +669,8 @@ Item {
                     sourceSize: Qt.size(72, 72)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
+                    opacity: carousel.stack >= 0 && !parent.shownStack ? 0.4 : 1
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
                     // As Omarchy's image picker draws the ones not chosen.
                     Rectangle {
                         anchors.fill: parent
@@ -669,6 +678,20 @@ Item {
                         border.width: 1
                         border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.28)
                     }
+                }
+                // The stack's line: one across its photos, rounded at its ends.
+                Rectangle {
+                    readonly property bool first: carousel.stackOf(parent.photo - 1) !== parent.stack
+                    readonly property bool last: carousel.stackOf(parent.photo + 1) !== parent.stack
+                    visible: parent.stack >= 0
+                    // A pixel over into the next, so the line has no seams.
+                    x: first ? 3 : 0
+                    width: parent.width - x + (last ? -3 : 1)
+                    y: parent.height - 6
+                    height: 3
+                    radius: first || last ? 1.5 : 0
+                    color: parent.shownStack ? theme.accent
+                         : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.35)
                 }
             }
         }

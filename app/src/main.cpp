@@ -23,6 +23,7 @@
 #include "photogrid.h"
 #include "incoming.h"
 #include "outgoing.h"
+#include "marks.h"
 #include "photoprovider.h"
 #include "plugins.h"
 #include "selftest.h"
@@ -178,6 +179,7 @@ int main(int argc, char *argv[]) {
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
+    engine.addImageProvider(QStringLiteral("mark"), new MarkProvider);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);

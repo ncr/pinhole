@@ -18,6 +18,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c
 
 HEADERS += \
     src/library.h \
+    src/marks.h \
     src/storage.h \
     src/sources.h \
     src/thumbnailloader.h \
@@ -41,6 +42,7 @@ HEADERS += \
 SOURCES += \
     src/main.cpp \
     src/library.cpp \
+    src/marks.cpp \
     src/storage.cpp \
     src/sources.cpp \
     src/thumbnailloader.cpp \

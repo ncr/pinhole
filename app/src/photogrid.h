@@ -10,6 +10,8 @@
 #include <memory>
 #include <set>
 #include <tuple>
+#include <unordered_map>
+#include <vector>
 
 #include "scrollphysics.h"
 
@@ -36,12 +38,25 @@ struct GridRenderState;
 // current zoom are both drawn, scaled to it around that photo, and
 // cross-faded by how far the pinch has gone between them. On release the
 // grid settles on one level, scale, alignment and fade animating together.
+//
+// A cell is usually one photo, but a plugin can stack several into one card
+// (a series): the grid then lays out cells, each showing the library
+// position it stands for, and everything it says to the rest of Pinhole
+// (indexAt, rectOf, activated, selection) is in library positions, a
+// stacked photo's being its card's.
 // PINHOLE_INPUT_LOG=<file>: append a line about an input event there.
 void logInput(const QString &line);
 
 class PhotoGrid : public QQuickItem {
     Q_OBJECT
-    Q_PROPERTY(int count READ count NOTIFY libraryChanged)
+    // Cells: photos, a stack counting once.
+    Q_PROPERTY(int count READ count NOTIFY cellsChanged)
+    // Photos shown as one card, each a list of library positions: the card
+    // stands where its first one is and shows it. A photo already in an
+    // earlier stack stays there. Plugins' stacks, gathered (Main.qml).
+    Q_PROPERTY(QVariantList stacks READ stacks WRITE setStacks NOTIFY stacksChanged)
+    // The marks drawn on cells (marks.h: Mark), or-ed.
+    Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
     Q_PROPERTY(int columns READ columns NOTIFY columnsChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)
     Q_PROPERTY(bool statsVisible READ statsVisible WRITE setStatsVisible NOTIFY statsVisibleChanged)
@@ -87,6 +102,10 @@ public:
     void setTouchpadHold(TouchpadHold *hold);
 
     int count() const;
+    QVariantList stacks() const { return m_stacksGiven; }
+    void setStacks(const QVariantList &stacks);
+    int marks() const { return m_marks; }
+    void setMarks(int marks);
     int columns() const { return m_columns; }
     bool animating() const { return m_animating; }
     bool statsVisible() const { return m_statsVisible; }
@@ -112,11 +131,14 @@ public:
     // Where a photo's cell is on screen (it may be off it), and bringing it
     // into view if it is not.
     Q_INVOKABLE QRectF rectOf(int index) const;
+    // The stack a photo is in, by its card's photo, or -1: the viewer's
+    // strip marks a stack's photos.
+    Q_INVOKABLE int stackOf(int index) const;
     Q_INVOKABLE void reveal(int index);
 
     // Selection, as in Photos: click, Ctrl-click to add or remove,
-    // Shift-click for a range.
-    int selectionCount() const { return int(m_selected.size()); }
+    // Shift-click for a range. A card ticks all of its photos.
+    int selectionCount() const;
     bool selecting() const { return m_selecting; }
     void setSelecting(bool selecting);
     QColor accent() const { return m_accent; }
@@ -202,6 +224,10 @@ signals:
     void animatingChanged();
     void statsVisibleChanged();
     void statsTextChanged();
+    void stacksChanged();
+    void marksChanged();
+    // The cells changed: the library's photos, or how they are stacked.
+    void cellsChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
@@ -231,6 +257,18 @@ private:
     };
     std::vector<Layer> layers() const;
     QRectF cellRect(int index, const Layer &layer) const;
+    // Cells and library positions: the photo a cell shows, the cell a photo
+    // is in (its card's, when stacked), the cell at a point, and a cell's
+    // photos (one, or a stack's).
+    int libraryAt(int cell) const { return m_cells.empty() ? cell : m_cells[size_t(cell)]; }
+    int cellOf(int index) const;
+    int cellAt(qreal x, qreal y) const;
+    void appendPhotos(int cell, QList<int> &out) const;
+    QList<int> photosOf(int cell) const;
+    // Lay the cells out again from m_stacksGiven, positions mapped through
+    // `moved` (a reload's) first when given; the selection and the photo at
+    // the top of the view stay with their photos.
+    void rebuildCells(const std::vector<int> *moved = nullptr);
     double strideFor(int columns) const;
     double maxScroll(int columns) const;
     // Put the view at `y`, within the ends, stopping any motion.
@@ -257,6 +295,14 @@ private:
 
     const Library *m_library = nullptr;
     ThumbnailLoader *m_loader = nullptr;
+    // Cell to library position, empty while every cell is one photo; and
+    // back. Each stack's photos by its card's position, the card's first.
+    std::vector<int> m_cells;
+    std::vector<int> m_cellOf;
+    std::unordered_map<int, std::vector<int>> m_stackOf;
+    QVariantList m_stacksGiven;
+    std::vector<std::vector<int>> m_stackLists; // as given, through any reload since
+    int m_marks = 13; // all but Live, as the side panel starts
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
     QPointF m_hover{-1, -1};

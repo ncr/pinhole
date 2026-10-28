@@ -16,4 +16,8 @@ Item {
     property bool covering: false
     // Its keys, as the help (?) lists them: [["G", "Series"], ...].
     property var help: []
+    // Photos shown in the grid as one card, each a list of library
+    // positions: the card stands where the first is and shows it, with the
+    // mark for several photos. Opening it opens that photo.
+    property var stacks: []
 }
