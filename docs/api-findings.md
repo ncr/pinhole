@@ -95,6 +95,47 @@ bandwidth. Not yet tried: sustaining it for all 48k thumbnails.
   file type from the metadata.
 - Durations are in milliseconds.
 
+## Live Photo effects
+
+Measured on 2026-10-28 on the same library: every field of all 13,969
+Live Photos, through `pinhole-probe record` (a lookup without
+`desiredKeys`).
+
+- **The effect is an edit.** Loop, Bounce and Long Exposure are an
+  `AutoLoop` adjustment in `adjustmentSimpleDataEnc` (raw deflate, then
+  JSON: `{"identifier": "AutoLoop", "settings": {"flavor": "AutoLoop" |
+  "Mirror" | "LongExposure", "recipe": {...}}}`, the recipe holding the
+  loop's period and fade and per-frame stabilisation). The same is in
+  `adjustmentRenderType` as flags: **1 loop, 2 portrait, 4 long exposure,
+  8 bounce** ("mirror"). icloud.com reads only the flags, and so does
+  Pinhole. The two agreed on every photo: 57 loops, 47 bounces and 17 long
+  exposures; one loop had no simple data, only the flag.
+- **Apple keeps the renders.** An edited Live Photo's asset record has
+  `resVidComplRes` (with Width, Height, FileType), the motion as edited:
+  for a loop the crossfaded loop, for a bounce the clip forward and back
+  (60 frames for 31 shot, stabilised and cropped), for a long exposure the
+  stabilised motion. Smaller ones are its `resVidMedRes` and
+  `resVidSmallRes`. A long exposure's still is the edit itself,
+  `resJPEGFullRes` (HEIC, 1186x1582 for a 3024x4032 original). The
+  original motion stays on the master, `resOriginalVidComplRes`.
+- `viewPresentationTypeEnc` was 0 on every photo; `vidComplVisibilityState`
+  takes several values (0, 5, 8, 10, 11, 13, 15) and is not the effect.
+- **Changing the effect is not something the web does.** icloud.com
+  (photos3, build 2640Build32) shows the effect as a badge (LIVE, LOOP,
+  BOUNCE, LONG EXPOSURE) and plays a bounce by stepping its video back and
+  forth itself; its code has no editor, writes no adjustment field, and
+  the only `records/modify` it sends are favourites, deletions, hiding,
+  dates, places, captions and albums.
+
+Setting an effect from Pinhole would mean a `records/modify` of the
+CPLAsset with a new `adjustmentType`, `adjustmentSimpleDataEnc` (an
+`AutoLoop` recipe with Apple's stabilisation, which only Photos computes),
+`adjustmentRenderType`, the timestamps and fingerprints, and new renders
+uploaded for `resVidCompl`, `resJPEGFull`, `resJPEGMed` and `resJPEGThumb`
+(CloudKit's asset upload, which icloud.com uses only for new photos). A
+recipe the iPhone cannot read, or renders that disagree with it, would
+show differently on every device, and nothing on the web can undo an edit.
+
 ## Location
 
 `locationEnc` is a base64 binary plist with `lat`, `lon`, `alt`, `course`,

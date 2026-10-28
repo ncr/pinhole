@@ -27,6 +27,15 @@ class Viewer : public QObject {
     Q_PROPERTY(QUrl videoSource READ videoSource NOTIFY videoChanged)
     Q_PROPERTY(bool live READ isLive NOTIFY indexChanged)
     Q_PROPERTY(QUrl liveSource READ liveSource NOTIFY liveChanged)
+    // A Live Photo's effect: as set on the iPhone (live when none), and the
+    // one shown, which choosing another here changes for as long as the
+    // window runs, never in the library: live, loop, bounce, long_exposure.
+    Q_PROPERTY(QString savedEffect READ savedEffect NOTIFY indexChanged)
+    Q_PROPERTY(QString effect READ effect NOTIFY effectChanged)
+    // The motion plays round and round (a loop, a bounce), as it shows.
+    Q_PROPERTY(bool looping READ looping NOTIFY effectChanged)
+    // The long exposure, once here.
+    Q_PROPERTY(QUrl longExposure READ longExposure NOTIFY effectChanged)
     Q_PROPERTY(bool favorite READ isFavorite NOTIFY indexChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
@@ -66,6 +75,10 @@ public:
     QUrl videoSource() const { return m_video; }
     bool isLive() const;
     QUrl liveSource() const { return m_live; }
+    QString savedEffect() const;
+    QString effect() const { return m_effect; }
+    bool looping() const;
+    QUrl longExposure() const { return m_longExposure; }
     bool isFavorite() const;
     QString title() const;
     QString message() const { return m_message; }
@@ -112,7 +125,12 @@ public:
     Q_INVOKABLE void jumpTo(int index);
     // To a photo, sliding, the carousel with it (a tap on the carousel).
     Q_INVOKABLE void goTo(int index);
+    // Plays the motion as the effect shows it: once for Live and a long
+    // exposure, from the start for a loop or a bounce.
     Q_INVOKABLE void playLive();
+    Q_INVOKABLE void setEffect(const QString &effect);
+    // The next of live, loop, bounce, long exposure.
+    Q_INVOKABLE void nextEffect();
     // After the library was read again: follow the open photo to its new
     // position, or close if it is gone.
     void libraryReloaded(const std::vector<int> &moved);
@@ -123,6 +141,7 @@ signals:
     void imageChanged();
     void videoChanged();
     void liveChanged();
+    void effectChanged();
     void messageChanged();
     void loadingChanged();
     void motionChanged();
@@ -140,6 +159,14 @@ private:
     void request(int index, const QString &kind);
     void setMessage(const QString &message);
     void fitPhoto();
+    // What the effect needs fetched: a loop or a bounce to play, a long
+    // exposure to show.
+    void showEffect();
+    // The motion the effect plays (live, loop or bounce), and the photo
+    // under it: the edit, except for a long exposure set on the iPhone
+    // shown as anything else, where the edit is the long exposure.
+    QString motionKind() const;
+    QString stillKind() const;
     void remember(int index, const QString &mediumPath);
     static QUrl providerUrl(const QString &path);
 
@@ -155,6 +182,12 @@ private:
     QString m_stage;
     QUrl m_video;
     QUrl m_live;
+    // Which motion m_live is.
+    QString m_liveKind;
+    QString m_effect;
+    QUrl m_longExposure;
+    // The effects chosen here, by photo.
+    QHash<QByteArray, QString> m_chosen;
     QString m_message;
     ViewerMotion m_motion;
     QSizeF m_viewport{1, 1};

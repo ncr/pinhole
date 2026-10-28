@@ -14,14 +14,21 @@
 
 Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
-    for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged})
+    for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged,
+                          &Viewer::liveChanged, &Viewer::effectChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
 }
 
 bool Viewer::loading() const {
     if (!m_open || !m_message.isEmpty())
         return false;
-    return isVideo() ? m_video.isEmpty() : m_stage != QLatin1String("original");
+    if (isVideo())
+        return m_video.isEmpty();
+    // An effect being fetched or made (a bounce or a long exposure from
+    // the motion takes a few seconds).
+    const bool effectComing = looping() ? m_liveKind != m_effect
+                            : m_effect == QLatin1String("long_exposure") && m_longExposure.isEmpty();
+    return m_stage != QLatin1String("original") || effectComing;
 }
 
 QUrl Viewer::providerUrl(const QString &path) {
@@ -43,6 +50,31 @@ qreal Viewer::aspect() const {
 
 bool Viewer::isVideo() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).video; }
 bool Viewer::isLive() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).live; }
+QString Viewer::savedEffect() const {
+    if (!isLive())
+        return QStringLiteral("live");
+    switch (m_library->at(m_index).effect) {
+    case LiveEffect::Loop: return QStringLiteral("loop");
+    case LiveEffect::Bounce: return QStringLiteral("bounce");
+    case LiveEffect::LongExposure: return QStringLiteral("long_exposure");
+    case LiveEffect::None: break;
+    }
+    return QStringLiteral("live");
+}
+
+bool Viewer::looping() const {
+    return m_effect == QLatin1String("loop") || m_effect == QLatin1String("bounce");
+}
+
+QString Viewer::motionKind() const {
+    return looping() ? m_effect : QStringLiteral("live");
+}
+
+QString Viewer::stillKind() const {
+    const QString longExposure = QStringLiteral("long_exposure");
+    return savedEffect() == longExposure && m_effect != longExposure ? QStringLiteral("original") : QStringLiteral("full");
+}
+
 bool Viewer::isFavorite() const {
     return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).favorite;
 }
@@ -311,17 +343,22 @@ void Viewer::show(int index) {
     m_stage = QStringLiteral("thumbnail");
     m_video = QUrl();
     m_live = QUrl();
+    m_liveKind.clear();
+    m_longExposure = QUrl();
+    m_effect = isLive() ? m_chosen.value(m_library->at(index).id, savedEffect()) : QStringLiteral("live");
     setMessage({});
     fitPhoto();
     emit indexChanged();
     emit imageChanged();
     emit videoChanged();
     emit liveChanged();
+    emit effectChanged();
 
     if (isVideo()) {
         request(index, QStringLiteral("video"));
     } else {
         request(index, QStringLiteral("medium"));
+        showEffect();
     }
     // The neighbours, two each side: they show beside it while swiping.
     for (int d : {1, -1, 2, -2}) {
@@ -350,12 +387,18 @@ void Viewer::request(int index, const QString &kind) {
             // No medium rendition (some old photos): go straight to the full
             // one. Anything else is reported, and what is shown stays.
             if (kind == QLatin1String("medium") && code == QLatin1String("not_found")) {
-                request(index, QStringLiteral("full"));
+                request(index, stillKind());
                 return;
             }
-            if (kind != QLatin1String("live"))
-                setMessage(code == QLatin1String("needs_sign_in") ? tr("Not signed in to %1").arg(m_service->sourceName())
-                                                                  : tr("Could not load from %1").arg(m_service->sourceName()));
+            const bool effect = kind == QLatin1String("loop") || kind == QLatin1String("bounce") || kind == QLatin1String("long_exposure");
+            if (kind == QLatin1String("live") || (effect && kind != m_effect))
+                return; // a motion asked for, or an effect no longer shown
+            if (code == QLatin1String("needs_sign_in"))
+                setMessage(tr("Not signed in to %1").arg(m_service->sourceName()));
+            else if (effect)
+                setMessage(tr("Could not show this effect"));
+            else
+                setMessage(tr("Could not load from %1").arg(m_service->sourceName()));
             return;
         }
         const QString path = result.value("path").toString();
@@ -366,33 +409,77 @@ void Viewer::request(int index, const QString &kind) {
             m_video = playable;
             setMessage({});
             emit videoChanged();
-        } else if (kind == QLatin1String("live")) {
+        } else if (kind == QLatin1String("live") || kind == QLatin1String("loop") || kind == QLatin1String("bounce")) {
+            // Another effect chosen meanwhile: not this motion.
+            if (kind != motionKind())
+                return;
             m_live = playable;
+            m_liveKind = kind;
             emit liveChanged();
+        } else if (kind == QLatin1String("long_exposure")) {
+            m_longExposure = providerUrl(path);
+            emit effectChanged();
         } else {
+            // Shown as Live after all, or as the long exposure again.
+            if ((kind == QLatin1String("full") || kind == QLatin1String("original")) && kind != stillKind())
+                return;
             m_image = providerUrl(path);
             // The last, sharpest stage: the photo as edited at full size (the
             // unedited original only when there is no edit).
-            m_stage = kind == QLatin1String("full") ? QStringLiteral("original") : kind;
+            m_stage = kind == QLatin1String("full") || kind == QLatin1String("original") ? QStringLiteral("original") : kind;
             if (kind == QLatin1String("medium"))
                 remember(index, path);
             emit imageChanged();
             // The medium is on screen; the full size follows.
             if (kind == QLatin1String("medium"))
-                request(index, QStringLiteral("full"));
+                request(index, stillKind());
         }
-    }, kind == QLatin1String("video") || kind == QLatin1String("live"));
+    }, kind == QLatin1String("video") || kind == QLatin1String("live") || kind == QLatin1String("loop") || kind == QLatin1String("bounce"));
 }
 
 void Viewer::playLive() {
     if (!isLive())
         return;
-    if (!m_live.isEmpty()) {
+    if (!m_live.isEmpty() && m_liveKind == motionKind()) {
         // Already here: nudge QML to play it again.
         emit liveChanged();
         return;
     }
-    request(m_index, QStringLiteral("live"));
+    request(m_index, motionKind());
+}
+
+void Viewer::showEffect() {
+    if (!isLive())
+        return;
+    if (looping() && m_liveKind != m_effect)
+        request(m_index, m_effect);
+    else if (m_effect == QLatin1String("long_exposure") && m_longExposure.isEmpty())
+        request(m_index, QStringLiteral("long_exposure"));
+}
+
+void Viewer::setEffect(const QString &effect) {
+    static const QStringList effects{"live", "loop", "bounce", "long_exposure"};
+    if (!isLive() || effect == m_effect || !effects.contains(effect))
+        return;
+    const QString still = stillKind();
+    m_effect = effect;
+    if (effect == savedEffect())
+        m_chosen.remove(m_library->at(m_index).id);
+    else
+        m_chosen.insert(m_library->at(m_index).id, effect);
+    if (m_message == tr("Could not show this effect"))
+        setMessage({});
+    emit effectChanged();
+    // The photo under it changes only for a long exposure set on the
+    // iPhone; until the sharp one is here, the medium asks for the right one.
+    if (stillKind() != still && m_stage == QLatin1String("original"))
+        request(m_index, stillKind());
+    showEffect();
+}
+
+void Viewer::nextEffect() {
+    static const QStringList effects{"live", "loop", "bounce", "long_exposure"};
+    setEffect(effects[(effects.indexOf(m_effect) + 1) % effects.size()]);
 }
 
 void Viewer::libraryReloaded(const std::vector<int> &moved) {

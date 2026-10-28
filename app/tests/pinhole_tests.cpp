@@ -306,6 +306,23 @@ private slots:
         QCOMPARE(library.at(1).filename, QString("B.HEIC"));
         QVERIFY(library.at(1).favorite);
         QVERIFY(library.at(1).thumbPath.endsWith("/thumbs/b.jpg"));
+        // A library from before effects has none; once the service has
+        // added them, a Live Photo has the one set on the iPhone.
+        QCOMPARE(library.at(1).effect, LiveEffect::None);
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "make");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN live_effect TEXT"));
+            QVERIFY(q.exec("UPDATE assets SET is_live = 1, live_effect = 'bounce' WHERE id = 'b'"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("make");
+        Library effects;
+        QVERIFY(effects.open(dir.path(), &error));
+        QCOMPARE(effects.at(1).effect, LiveEffect::Bounce);
+        QCOMPARE(effects.at(0).effect, LiveEffect::None);
     }
 
     // A copy, export or drag waits (for downloads, the folder picker, the

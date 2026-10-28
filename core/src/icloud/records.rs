@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::icloud::cloudkit::PhotosClient;
 use crate::icloud::index::CANDIDATES;
-use crate::source::{Asset, Kind, Rendition, Want};
+use crate::source::{Asset, Effect, Kind, Rendition, Want};
 
 /// One rendition of an asset iCloud keeps: the original, the JPEG sizes
 /// and the video sizes. Download URLs are signed and short-lived, so they
@@ -45,6 +45,8 @@ pub struct CloudAsset {
     pub orientation: Option<i64>,
     pub subtype: Option<i64>,
     pub has_location: bool,
+    /// `adjustmentRenderType`: flags of what the edit is (`effect`).
+    pub render_type: i64,
     /// In Recently Deleted, hidden, or erased: not shown in the library.
     pub gone: bool,
     pub resources: Vec<Resource>,
@@ -66,6 +68,18 @@ impl CloudAsset {
         self.resources.iter().any(|r| r.kind == "OriginalVidCompl")
     }
 
+    /// A Live Photo's effect, from the edit's flags as icloud.com reads
+    /// them: 1 loop, 2 portrait, 4 long exposure, 8 bounce ("mirror").
+    pub fn effect(&self) -> Option<Effect> {
+        if !self.is_live() || self.is_video() {
+            return None;
+        }
+        [(1, Effect::Loop), (8, Effect::Bounce), (4, Effect::LongExposure)]
+            .into_iter()
+            .find(|(bit, _)| self.render_type & bit != 0)
+            .map(|(_, e)| e)
+    }
+
     pub fn resource(&self, kind: &str) -> Option<&Resource> {
         self.resources.iter().find(|r| r.kind == kind)
     }
@@ -74,22 +88,32 @@ impl CloudAsset {
     /// each kind a window asks for (`index::CANDIDATES`).
     pub fn neutral(&self) -> Asset {
         let video = self.is_video();
-        let renditions = CANDIDATES
+        let effect = self.effect();
+        let rendition = |want: Want, r: &Resource| Rendition {
+            want,
+            name: r.kind.clone(),
+            key: r.checksum.clone().unwrap_or_else(|| format!("{}-{}", self.id, r.kind)),
+            width: r.width,
+            height: r.height,
+            size: r.size,
+            file_type: r.file_type.clone(),
+        };
+        let mut renditions: Vec<Rendition> = CANDIDATES
             .iter()
             .filter(|(want, _)| *want != Want::Video || video)
-            .filter_map(|(want, names)| {
-                let r = names.iter().find_map(|n| self.resource(n))?;
-                Some(Rendition {
-                    want: *want,
-                    name: r.kind.clone(),
-                    key: r.checksum.clone().unwrap_or_else(|| format!("{}-{}", self.id, r.kind)),
-                    width: r.width,
-                    height: r.height,
-                    size: r.size,
-                    file_type: r.file_type.clone(),
-                })
-            })
+            .filter_map(|(want, names)| Some(rendition(*want, names.iter().find_map(|n| self.resource(n))?)))
             .collect();
+        // The effect as the iPhone rendered it: the motion looping or going
+        // back and forth (VidCompl, the edited motion), or the long
+        // exposure (the edited photo itself).
+        let rendered = match effect {
+            Some(Effect::Loop | Effect::Bounce) => self.resource("VidCompl"),
+            Some(Effect::LongExposure) => self.resource("JPEGFull"),
+            None => None,
+        };
+        if let (Some(e), Some(r)) = (effect, rendered) {
+            renditions.push(rendition(e.want(), r));
+        }
         Asset {
             id: self.id.clone(),
             filename: self.filename.clone(),
@@ -102,6 +126,7 @@ impl CloudAsset {
             orientation: self.orientation,
             has_location: self.has_location,
             size: self.resource("Original").and_then(|r| r.size),
+            effect,
             renditions,
         }
     }
@@ -120,7 +145,7 @@ pub struct Page {
 }
 
 const RESOURCE_KINDS: &[&str] = &[
-    "Original", "OriginalAlt", "OriginalVidCompl",
+    "Original", "OriginalAlt", "OriginalVidCompl", "VidCompl",
     "JPEGFull", "JPEGLarge", "JPEGMed", "JPEGThumb",
     "VidFull", "VidMed", "VidSmall",
 ];
@@ -219,6 +244,7 @@ fn build_asset(asset: &Value, master: &Value, keep_raw: bool) -> CloudAsset {
         orientation: af["orientation"]["value"].as_i64().or_else(|| mf["originalOrientation"]["value"].as_i64()),
         subtype: af["assetSubtypeV2"]["value"].as_i64().or_else(|| af["assetSubtype"]["value"].as_i64()),
         has_location: !af["locationEnc"].is_null() || !af["locationV2Enc"].is_null(),
+        render_type: af["adjustmentRenderType"]["value"].as_i64().unwrap_or(0),
         gone: ["isDeleted", "isHidden", "isExpunged"].iter().any(|f| af[*f]["value"].as_i64() == Some(1)),
         resources,
         raw: keep_raw.then(|| (asset.clone(), master.clone())),
@@ -274,5 +300,32 @@ mod tests {
         assert_eq!(assets.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["a1", "a1-copy"]);
         assert!(assets.iter().all(|a| a.master_id == "m1"));
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn a_live_photo_has_the_effect_set_on_the_iphone_with_its_render() {
+        let res = |checksum: &str| json!({"value": {"fileChecksum": checksum, "size": 10}});
+        let mut bounce = asset("a1", "m1");
+        bounce["fields"]["adjustmentRenderType"] = json!({"value": 16392}); // 0x4008: bounce
+        bounce["fields"]["resVidComplRes"] = res("rendered");
+        bounce["fields"]["resJPEGFullRes"] = res("still");
+        let mut long = asset("a2", "m2");
+        long["fields"]["adjustmentRenderType"] = json!({"value": 16390}); // portrait and long exposure
+        long["fields"]["resJPEGFullRes"] = res("blurred");
+        let mut portrait = asset("a3", "m3");
+        portrait["fields"]["adjustmentRenderType"] = json!({"value": 26626});
+        let live = |name: &str| {
+            let mut m = master(name);
+            m["fields"]["itemType"] = json!({"value": "public.heic"});
+            m["fields"]["resOriginalVidComplRes"] = res(&format!("{name}-motion"));
+            m
+        };
+        let page = [live("m1"), bounce, live("m2"), long, live("m3"), portrait];
+        let assets: Vec<Asset> = pair_records(&page, false).iter().map(CloudAsset::neutral).collect();
+        assert_eq!(assets.iter().map(|a| a.effect).collect::<Vec<_>>(), [Some(Effect::Bounce), Some(Effect::LongExposure), None]);
+        assert_eq!(assets[0].rendition(Want::Bounce).map(|r| r.key.as_str()), Some("rendered"));
+        assert_eq!(assets[0].rendition(Want::Live).map(|r| r.key.as_str()), Some("m1-motion"));
+        assert_eq!(assets[1].rendition(Want::LongExposure).map(|r| r.key.as_str()), Some("blurred"));
+        assert!(assets[2].rendition(Want::Loop).is_none());
     }
 }

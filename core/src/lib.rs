@@ -9,6 +9,7 @@
 pub mod background;
 pub mod db;
 pub mod discover;
+pub mod effects;
 pub mod folder;
 pub mod icloud;
 pub mod service;

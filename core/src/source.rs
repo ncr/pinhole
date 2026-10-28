@@ -20,6 +20,37 @@ pub enum Kind {
     Live,
 }
 
+/// How a Live Photo's motion is shown, as set on the iPhone: played in a
+/// loop, back and forth, or as one long exposure of all its frames. A Live
+/// Photo without one plays its motion once when asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    Loop,
+    Bounce,
+    LongExposure,
+}
+
+impl Effect {
+    pub const ALL: [Effect; 3] = [Effect::Loop, Effect::Bounce, Effect::LongExposure];
+
+    pub fn name(self) -> &'static str {
+        self.want().name()
+    }
+
+    pub fn parse(name: &str) -> Option<Effect> {
+        Effect::ALL.into_iter().find(|e| e.name() == name)
+    }
+
+    /// The file that shows it.
+    pub fn want(self) -> Want {
+        match self {
+            Effect::Loop => Want::Loop,
+            Effect::Bounce => Want::Bounce,
+            Effect::LongExposure => Want::LongExposure,
+        }
+    }
+}
+
 /// The files a window can ask for, whatever the source calls them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Want {
@@ -35,10 +66,20 @@ pub enum Want {
     Video,
     /// A Live Photo's motion.
     Live,
+    /// A Live Photo's motion made to loop, to play back and forth, and its
+    /// frames as one long exposure. The source's own when the effect was
+    /// set on the photo (iCloud's, rendered on the iPhone); otherwise the
+    /// service makes them from the motion (service.rs).
+    Loop,
+    Bounce,
+    LongExposure,
 }
 
 impl Want {
-    pub const ALL: [Want; 6] = [Want::Thumb, Want::Medium, Want::Full, Want::Original, Want::Video, Want::Live];
+    pub const ALL: [Want; 9] = [
+        Want::Thumb, Want::Medium, Want::Full, Want::Original, Want::Video, Want::Live,
+        Want::Loop, Want::Bounce, Want::LongExposure,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -48,6 +89,9 @@ impl Want {
             Want::Original => "original",
             Want::Video => "video",
             Want::Live => "live",
+            Want::Loop => "loop",
+            Want::Bounce => "bounce",
+            Want::LongExposure => "long_exposure",
         }
     }
 
@@ -57,7 +101,12 @@ impl Want {
 
     /// Played while it downloads, when a window asks to stream it.
     pub fn streamable(self) -> bool {
-        matches!(self, Want::Video | Want::Live)
+        matches!(self, Want::Video | Want::Live | Want::Loop | Want::Bounce)
+    }
+
+    /// The effects', which the service makes when the source has none.
+    pub fn effect(self) -> Option<Effect> {
+        Effect::ALL.into_iter().find(|e| e.want() == self)
     }
 }
 
@@ -100,6 +149,8 @@ pub struct Asset {
     pub has_location: bool,
     /// The original's, in bytes.
     pub size: Option<i64>,
+    /// A Live Photo's, as set on the iPhone.
+    pub effect: Option<Effect>,
     pub renditions: Vec<Rendition>,
 }
 

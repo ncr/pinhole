@@ -26,6 +26,7 @@ Item {
             ["Esc", qsTr("Back")],
             ["+ − 0", qsTr("Zoom")],
             ["L", qsTr("Live")],
+            ["⇧ L", qsTr("Live effect")],
             ["M", qsTr("Sound")]
         ] },
         { title: qsTr("Share"), keys: [

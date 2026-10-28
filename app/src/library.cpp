@@ -23,8 +23,11 @@ bool Library::open(const QString &dir, QString *error) {
         }
         QSqlQuery q(db);
         q.setForwardOnly(true);
-        if (!q.exec("SELECT thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, favorite, id, filename "
-                    "FROM assets ORDER BY asset_date, id")) {
+        // A library the service has not yet given effects to has no
+        // live_effect: none, until it has.
+        const QString columns = QStringLiteral("thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, "
+                                               "favorite, id, filename, %1 FROM assets ORDER BY asset_date, id");
+        if (!q.exec(QStringLiteral("SELECT ") + columns.arg("live_effect")) && !q.exec(QStringLiteral("SELECT ") + columns.arg("NULL"))) {
             *error = q.lastError().text();
             return false;
         }
@@ -46,6 +49,11 @@ bool Library::open(const QString &dir, QString *error) {
             item.favorite = q.value(8).toBool();
             item.id = q.value(9).toString().toUtf8();
             item.filename = q.value(10).toString();
+            const QString effect = q.value(11).toString();
+            item.effect = effect == QLatin1String("loop")            ? LiveEffect::Loop
+                        : effect == QLatin1String("bounce")          ? LiveEffect::Bounce
+                        : effect == QLatin1String("long_exposure")   ? LiveEffect::LongExposure
+                                                                     : LiveEffect::None;
             m_items.push_back(std::move(item));
         }
     }
