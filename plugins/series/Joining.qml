@@ -14,6 +14,8 @@ Item {
     property var shots: []
     property int joiner: -1
     property bool shown: false
+    // The key that opens the series, said beside its name.
+    property string key
 
     readonly property real most: 64
     readonly property real least: 28
@@ -74,9 +76,12 @@ Item {
         spacing: 6
         UiText {
             anchors.horizontalCenter: parent.horizontalCenter
-            color: theme.darkForeground
+            // With its key, as a button shows one, quieter.
+            color: joining.key !== "" ? theme.foreground : theme.darkForeground
             font.pixelSize: Math.round(theme.fontSize * 0.857)
+            textFormat: Text.StyledText
             text: qsTr("Series of %1").arg(joining.shots.length)
+                  + (joining.key !== "" ? " <font color=\"" + theme.darkForeground + "\">" + joining.key + "</font>" : "")
         }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter

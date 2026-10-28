@@ -8,12 +8,13 @@ import Pinhole.Plugin
 // the plugin's cache, so only new photos take it any time.
 //
 // What it finds can be put right by hand: a photo taken out of a series or
-// added to one, a series ungrouped, photos grouped. Those edits are kept
+// added to one, a series ungrouped, photos grouped; on a photo, or with the
+// whole series on a screen of its own (Editor.qml). Those edits are kept
 // by the photos' ids, over what the finder finds, until a photo is
 // grouped automatically again.
 PinholePlugin {
     id: plugin
-    covering: studio.shown
+    covering: studio.shown || editor.shown
 
     // Every series, in the library's order: the positions of its shots.
     property var series: []
@@ -207,7 +208,7 @@ PinholePlugin {
             text: plugin.shownSeries >= 0 ? qsTr("Series of %1").arg(plugin.series[plugin.shownSeries].length) : ""
             key: "G"
             shown: plugin.shownSeries >= 0
-            onTriggered: studio.openSeries(plugin.shownSeries, false)
+            onTriggered: editor.openSeries(plugin.shownSeries, pinhole.viewer.index)
         },
         PluginAction {
             place: "viewer"
@@ -275,6 +276,8 @@ PinholePlugin {
         ["U", qsTr("Ungroup")],
         ["G", qsTr("Group what is ticked")],
         ["R", qsTr("Group automatically again")],
+        ["G", qsTr("On a photo: its series, whole, to put right")],
+        ["Space", qsTr("There: a photo up close")],
         ["G", qsTr("Series: a GIF or a video")],
         ["← →", qsTr("Previous, next series")],
         ["1–5", qsTr("Motion")],
@@ -343,14 +346,30 @@ PinholePlugin {
     }
 
     Joining {
+        id: joining
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         shown: addAction.hovered && addAction.shown && pinhole.viewer.open
         shots: addAction.joined
         joiner: pinhole.viewer.index
+        key: "G"
+    }
+    // While it shows, G opens that series, the photo among those it could
+    // grow into, as the band says.
+    Shortcut {
+        enabled: joining.shown && !plugin.covering
+        sequence: "G"
+        context: Qt.ApplicationShortcut
+        onActivated: editor.openSeries(addAction.k, pinhole.viewer.index)
     }
 
+    Editor {
+        id: editor
+        anchors.fill: parent
+        plugin: plugin
+        studio: studio
+    }
     Studio {
         id: studio
         anchors.fill: parent
