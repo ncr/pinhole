@@ -54,26 +54,42 @@ pub struct Config {
 #[derive(Clone)]
 struct Reply {
     id: Value,
-    out: Arc<Mutex<UnixStream>>,
+    out: Out,
     /// Answer as soon as the download starts, with a URL that plays it.
     stream: bool,
+}
+
+/// A window, or the service itself, waiting on a file it makes from this
+/// one (an effect from the motion).
+#[derive(Clone)]
+enum Out {
+    Window(Arc<Mutex<UnixStream>>),
+    Service(mpsc::Sender<std::result::Result<Value, (String, String)>>),
 }
 
 impl Reply {
     /// A line of news for this window alone, before the answer.
     fn event(&self, event: Value) {
-        if let Ok(mut out) = self.out.lock() {
+        let Out::Window(out) = &self.out else { return };
+        if let Ok(mut out) = out.lock() {
             let _ = writeln!(out, "{event}");
             let _ = out.flush();
         }
     }
 
     fn send(&self, result: std::result::Result<Value, (&str, String)>) {
+        let out = match &self.out {
+            Out::Window(out) => out,
+            Out::Service(tx) => {
+                let _ = tx.send(result.map_err(|(code, message)| (code.to_owned(), message)));
+                return;
+            }
+        };
         let line = match result {
             Ok(r) => json!({"id": self.id, "ok": true, "result": r}),
             Err((code, message)) => json!({"id": self.id, "ok": false, "error": {"code": code, "message": message}}),
         };
-        if let Ok(mut out) = self.out.lock() {
+        if let Ok(mut out) = out.lock() {
             let _ = writeln!(out, "{line}");
             let _ = out.flush();
         }
@@ -766,12 +782,12 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
         let request: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(_) => {
-                Reply { id: Value::Null, out: out.clone(), stream: false }.send(Err(("bad_request", "not JSON".into())));
+                Reply { id: Value::Null, out: Out::Window(out.clone()), stream: false }.send(Err(("bad_request", "not JSON".into())));
                 continue;
             }
         };
         let stream = request["params"]["stream"].as_bool() == Some(true);
-        let reply = Reply { id: request["id"].clone(), out: out.clone(), stream };
+        let reply = Reply { id: request["id"].clone(), out: Out::Window(out.clone()), stream };
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
             Some("sync") => {
@@ -952,7 +968,7 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
     Ok(json!({"source": id, "added": count("added"), "duplicates": count("duplicate"), "failed": count("failed"), "files": results}))
 }
 
-fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
+fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     let (Some(asset), Some(kind)) = (params["asset"].as_str(), params["kind"].as_str()) else {
         return reply.send(Err(("bad_request", "fetch needs asset and kind".into())));
     };
@@ -966,8 +982,13 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
         params![asset, kind],
         |r| Ok(Stored { asset: asset.to_owned(), want, name: r.get(0)?, key: r.get(1)?, file_type: r.get(2)? }),
     );
-    let Ok(stored) = row else {
-        return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition"))));
+    let stored = match row {
+        Ok(stored) => stored,
+        // An effect the source has no render of: a loop is the motion
+        // itself, the others are made from it.
+        Err(_) if want == Want::Loop => return fetch(shared, db, &json!({"asset": asset, "kind": "live"}), reply),
+        Err(_) if want.effect().is_some() => return make(shared, db, asset, want, reply),
+        Err(_) => return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition")))),
     };
     let (rendition, file_type) = (stored.name.clone(), stored.file_type.clone());
     // On this computer already: served as it is.
@@ -978,9 +999,7 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
             Err(("not_found", format!("{} is not there", path.display())))
         });
     }
-    let relative = Path::new(kind).join(
-        thumb_path(&stored.key).replacen("thumbs/", "", 1).replace(".jpg", &format!(".{}", extension(&file_type))),
-    );
+    let relative = cached_path(want, &stored.key, extension(&file_type), false);
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
         return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true})));
@@ -1007,6 +1026,80 @@ fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {
     drop(waiting);
 
     let _ = shared.lookups.lock().unwrap().send(Job { stored, path, ticket: None, retried: false });
+}
+
+/// Where in the cache a file of this kind and key goes. The effects go
+/// with the motion (storage.rs counts them as `live`), except a long
+/// exposure the source has, which is the photo itself (iCloud's JPEGFull):
+/// the same file as `full`. Made ones are named after the motion's key.
+fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
+    let folder = match want {
+        Want::LongExposure if !made => Want::Full,
+        Want::Loop | Want::Bounce | Want::LongExposure => Want::Live,
+        other => other,
+    };
+    let suffix = if made { format!("-{}", want.name()) } else { String::new() };
+    Path::new(folder.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
+}
+
+/// An effect made from the motion (effects.rs), into the cache beside it:
+/// the motion is fetched as a window would, then ffmpeg makes the effect in
+/// a thread of its own. Requests for one being made wait for it.
+fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: Reply) {
+    let motion = db.query_row(
+        "SELECT key FROM renditions WHERE asset_id = ?1 AND kind = 'live'",
+        [asset],
+        |r| r.get::<_, String>(0),
+    );
+    let Ok(key) = motion else {
+        return reply.send(Err(("not_found", format!("{asset} has no motion to make a {} of", want.name()))));
+    };
+    let (file_type, extension) = match want {
+        Want::Bounce => ("public.mpeg-4", "mp4"),
+        _ => ("public.jpeg", "jpg"),
+    };
+    let relative = cached_path(want, &key, extension, true);
+    if let Some(path) = shared.storage.find(&relative) {
+        touch(&path);
+        return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": "made", "cached": true})));
+    }
+    let path = shared.storage.cache().join(&relative);
+    {
+        let mut waiting = shared.waiting.lock().unwrap();
+        if let Some((_, replies)) = waiting.get_mut(&path) {
+            replies.push(reply);
+            return;
+        }
+        let info = json!({"path": path, "type": file_type, "rendition": "made", "cached": false});
+        waiting.insert(path.clone(), (info, vec![reply]));
+        shared.in_flight.fetch_add(1, Ordering::Relaxed);
+    }
+    let (tx, rx) = mpsc::channel();
+    fetch(shared, db, &json!({"asset": asset, "kind": "live"}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
+    let shared = shared.clone();
+    std::thread::spawn(move || {
+        let made = (|| -> std::result::Result<(), (String, String)> {
+            let motion = rx.recv().map_err(|_| ("unavailable".to_owned(), "the motion never came".to_owned()))??;
+            let motion = PathBuf::from(motion["path"].as_str().unwrap_or_default());
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| ("unavailable".to_owned(), e.to_string()))?;
+            }
+            // Made beside the target and renamed: a reader never sees half a file.
+            let part = path.with_extension(format!("part.{extension}"));
+            let result = match want {
+                Want::Bounce => crate::effects::bounce(&motion, &part),
+                _ => crate::effects::long_exposure(&motion, &part),
+            }
+            .and_then(|()| Ok(std::fs::rename(&part, &path)?));
+            if let Err(e) = result {
+                let _ = std::fs::remove_file(&part);
+                eprintln!("pinholed: making the {} of {}: {e:#}", want.name(), motion.display());
+                return Err(("unavailable".to_owned(), format!("{e:#}")));
+            }
+            Ok(())
+        })();
+        shared.finish(&path, made.as_ref().map(|_| ()).map_err(|(code, message)| (code.as_str(), message.clone())));
+    });
 }
 
 /// Gathers requests for a moment and has the source get them all ready in

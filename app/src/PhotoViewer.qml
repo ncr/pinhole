@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtMultimedia
+import "keys.js" as KeyNames
 
 // The full-window view of one photo or video, as in Photos. It grows out of
 // the photo's cell in the grid and shrinks back into it; the square crop of
@@ -68,6 +69,12 @@ Item {
             liveOutput.visible = false
             livePlayer.stop()
             liveNotice.hide()
+            effectMenu.open = false
+        }
+        // Another effect: a loop or a bounce plays once it is here (liveSource).
+        function onEffectChanged() {
+            if (!viewer.looping)
+                livePlayer.stop()
         }
         function onImageChanged() {
             if (viewer.stage === "original")
@@ -186,6 +193,17 @@ Item {
             readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
             onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
+        // A Live Photo shown as a long exposure: its frames as one.
+        Image {
+            id: longExposureImage
+            anchors.fill: parent
+            source: viewer.effect === "long_exposure" ? viewer.longExposure : ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+            opacity: status === Image.Ready ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
 
         MediaPlayer {
             id: videoPlayer
@@ -204,6 +222,8 @@ Item {
         MediaPlayer {
             id: livePlayer
             videoOutput: liveOutput
+            // A loop and a bounce go round until another effect or photo.
+            loops: viewer.looping ? MediaPlayer.Infinite : 1
             onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState) liveOutput.visible = false
             onErrorOccurred: {
                 liveOutput.visible = false
@@ -245,6 +265,7 @@ Item {
 
         onPressed: mouse => {
             root.presses += 1
+            effectMenu.open = false
             last = Qt.point(mouse.x, mouse.y)
             panned = false
             // Any press is a touch first: a coasting zoomed photo stops (a
@@ -347,13 +368,76 @@ Item {
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
             floating: true
-            text: qsTr("Live")
+            text: root.effectName(viewer.effect)
             key: "L"
             active: viewer.liveLoading || liveOutput.visible
             busy: viewer.liveLoading || root.liveBuffering
             busyDelay: 300
             onTapped: viewer.playLive()
             transform: Translate { id: liveNudge }
+        }
+        // The effects, as on the iPhone: Live, Loop, Bounce, Long exposure.
+        ShellButton {
+            id: effectButton
+            objectName: "effectButton"
+            visible: viewer.live
+            anchors.verticalCenter: parent.verticalCenter
+            floating: true
+            text: "▾"
+            hint: KeyNames.nameOf("Shift+L")
+            active: effectMenu.open
+            onTapped: effectMenu.open = !effectMenu.open
+
+            // As Omarchy's menus: a card of the theme's background with a
+            // hairline in the text colour, the one shown in the accent, and
+            // the one set on the iPhone saying so.
+            Rectangle {
+                id: effectMenu
+                objectName: "effectMenu"
+                property bool open: false
+                visible: open && viewer.live
+                anchors.top: parent.bottom
+                anchors.topMargin: 6
+                anchors.right: parent.right
+                width: effectColumn.width + 2
+                height: effectColumn.height + 2
+                radius: Math.min(4, theme.radius)
+                color: theme.background
+                border.color: theme.foreground
+                border.width: 1
+                FontMetrics { id: effectMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+                function hintOf(effect) {
+                    return effect === viewer.savedEffect && effect !== "live" ? "iPhone" : ""
+                }
+                readonly property real itemWidth: {
+                    let most = 0
+                    for (const e of root.effects) {
+                        const hint = hintOf(e)
+                        most = Math.max(most, effectMetrics.advanceWidth(root.effectName(e) + (hint !== "" ? "  " + hint : "")))
+                    }
+                    return Math.ceil(most) + 2 * Math.round(theme.fontSize * 0.833)
+                }
+                Column {
+                    id: effectColumn
+                    x: 1
+                    y: 1
+                    Repeater {
+                        model: root.effects
+                        delegate: ShellButton {
+                            required property string modelData
+                            width: effectMenu.itemWidth
+                            flat: true
+                            text: root.effectName(modelData)
+                            hint: effectMenu.hintOf(modelData)
+                            active: viewer.effect === modelData
+                            onTapped: {
+                                viewer.setEffect(modelData)
+                                effectMenu.open = false
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers
         // with a tick on itself.
@@ -608,6 +692,16 @@ Item {
                 if (!scrubbed)
                     viewer.goTo(Math.max(0, Math.min(viewer.count - 1, carousel.indexAt(mouse.x))))
             }
+        }
+    }
+
+    readonly property var effects: ["live", "loop", "bounce", "long_exposure"]
+    function effectName(effect) {
+        switch (effect) {
+        case "loop": return qsTr("Loop")
+        case "bounce": return qsTr("Bounce")
+        case "long_exposure": return qsTr("Long exposure")
+        default: return qsTr("Live")
         }
     }
 

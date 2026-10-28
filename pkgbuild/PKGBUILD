@@ -6,7 +6,7 @@ pkgdesc='A fast, on-demand iCloud Photos browser for Omarchy'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
-         'libjpeg-turbo' 'libheif' 'wayland' 'imagemagick' 'xdg-desktop-portal' 'uv')
+         'libjpeg-turbo' 'libheif' 'wayland' 'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv')
 makedepends=('rust' 'gcc' 'make' 'wayland-protocols')
 source=()
 sha256sums=()

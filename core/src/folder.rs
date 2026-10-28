@@ -299,6 +299,7 @@ impl FolderSource {
             orientation,
             has_location,
             size: Some(f.size as i64),
+            effect: None,
             renditions,
         }
     }

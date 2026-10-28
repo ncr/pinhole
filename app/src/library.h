@@ -4,6 +4,9 @@
 #include <QString>
 #include <vector>
 
+// A Live Photo's effect as set on the iPhone (the index's live_effect).
+enum class LiveEffect : quint8 { None, Loop, Bounce, LongExposure };
+
 // One asset as the grid sees it. Kept small: the whole library sits in
 // memory, oldest first, and the grid addresses it by position.
 struct LibraryItem {
@@ -18,6 +21,7 @@ struct LibraryItem {
     bool video = false;
     bool live = false;
     bool favorite = false;
+    LiveEffect effect = LiveEffect::None;
 };
 
 // The library index the core writes (library.sqlite), read once at start.

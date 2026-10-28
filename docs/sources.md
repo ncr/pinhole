@@ -3,7 +3,8 @@
 Pinhole began as an iCloud Photos browser, but almost nothing in it needs to
 know that. The window reads `library.sqlite` and the thumbnails from disk and
 asks the service for a photo's `medium`, `full`, `original`, `video` or
-`live` file by asset id. What it needs is a list of assets with dates and
+`live` file by asset id, or a Live Photo's effect (`loop`, `bounce`,
+`long_exposure`). What it needs is a list of assets with dates and
 kinds, a thumbnail for each, and a way to get the larger files. Anything that
 can give those is a source. iCloud is one; a folder of photos on disk is the
 second.
@@ -28,7 +29,8 @@ has two parts.
 What the catalog puts is a neutral `Asset`: its id, file name, the time it
 was taken and added, whether it is a photo, a video or a Live Photo, its
 size, whether it is a favourite, a video's duration, its orientation and
-whether it has a place, and the renditions it has. A `Rendition` is one of
+whether it has a place, a Live Photo's effect as set on the iPhone (loop,
+bounce, long exposure; iCloud's only), and the renditions it has. A `Rendition` is one of
 the neutral kinds (`thumb`, `medium`, `full`, `original`, `video`, `live`)
 with its size and type (a UTI, as the service has always answered), the
 source's own name for it, and a key that names the file and changes when the
@@ -88,8 +90,9 @@ among them. What only iCloud means is in iCloud's own tables:
 ```text
 assets          id, filename, item_type, asset_date, added_date, favorite,
                 duration, orientation, has_location, is_video, is_live,
-                size, thumb_path, thumb_w, thumb_h, avg_color
-renditions      asset_id, kind (thumb|medium|full|original|video|live),
+                live_effect, size, thumb_path, thumb_w, thumb_h, avg_color
+renditions      asset_id, kind (thumb|medium|full|original|video|live|
+                loop|bounce|long_exposure),
                 name, key, width, height, size, file_type
 meta            key, value: change_token, library_version, source
 

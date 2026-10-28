@@ -34,6 +34,9 @@ fn create(db: &Connection) -> Result<()> {
             has_location INTEGER NOT NULL DEFAULT 0,
             is_video INTEGER NOT NULL DEFAULT 0,
             is_live INTEGER NOT NULL DEFAULT 0,
+            -- A Live Photo's effect as set on the iPhone: loop, bounce,
+            -- long_exposure, or NULL.
+            live_effect TEXT,
             -- The original's, in bytes.
             size INTEGER,
             -- The local thumbnail, relative to the library directory, and
@@ -65,6 +68,16 @@ fn create(db: &Connection) -> Result<()> {
         END;
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
+    // A library from before effects were kept: the column, and the whole
+    // library listed again at the next round to fill it (the change feed
+    // only tells of what changes).
+    let has_effect = db.prepare("SELECT live_effect FROM assets LIMIT 0").is_ok();
+    if !has_effect {
+        db.execute_batch(
+            "ALTER TABLE assets ADD COLUMN live_effect TEXT;
+             DELETE FROM meta WHERE key = 'change_token';",
+        )?;
+    }
     Ok(())
 }
 
@@ -139,7 +152,7 @@ impl<'a> Index<'a> {
         let tx = self.conn.transaction()?;
         {
             let mut before = tx.prepare_cached(
-                "SELECT a.favorite, a.asset_date, r.key FROM assets a
+                "SELECT a.favorite, a.asset_date, r.key, a.live_effect FROM assets a
                  LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'thumb' WHERE a.id = ?1",
             )?;
             // An update in place, not a replace: the thumbnail columns
@@ -147,14 +160,14 @@ impl<'a> Index<'a> {
             let mut asset_stmt = tx.prepare_cached(
                 "INSERT INTO assets
                  (id, item_type, filename, asset_date, added_date, favorite, duration, orientation,
-                  has_location, is_video, is_live, size)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                  has_location, is_video, is_live, size, live_effect)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT(id) DO UPDATE SET
                    item_type = excluded.item_type, filename = excluded.filename,
                    asset_date = excluded.asset_date, added_date = excluded.added_date, favorite = excluded.favorite,
                    duration = excluded.duration, orientation = excluded.orientation,
                    has_location = excluded.has_location, is_video = excluded.is_video, is_live = excluded.is_live,
-                   size = excluded.size",
+                   size = excluded.size, live_effect = excluded.live_effect",
             )?;
             let mut stale_thumb = tx.prepare_cached("UPDATE assets SET thumb_path = NULL WHERE id = ?1")?;
             let mut clear = tx.prepare_cached("DELETE FROM renditions WHERE asset_id = ?1")?;
@@ -163,15 +176,16 @@ impl<'a> Index<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for a in assets {
-                let old: Option<(bool, Option<i64>, Option<String>)> =
-                    before.query_row([&a.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+                let old: Option<(bool, Option<i64>, Option<String>, Option<String>)> =
+                    before.query_row([&a.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?;
+                let effect = a.effect.map(|e| e.name());
                 let thumb = a.rendition(crate::source::Want::Thumb).map(|r| r.key.clone());
                 match &old {
                     None => self.changes.added.push(a.id.clone()),
-                    Some((favorite, date, old_thumb)) => {
+                    Some((favorite, date, old_thumb, old_effect)) => {
                         let reason = if *favorite != a.favorite {
                             "favourite"
-                        } else if *old_thumb != thumb {
+                        } else if *old_thumb != thumb || old_effect.as_deref() != effect {
                             "edited"
                         } else if *date != a.taken {
                             "date"
@@ -188,7 +202,7 @@ impl<'a> Index<'a> {
                 }
                 asset_stmt.execute(params![
                     a.id, a.item_type, a.filename, a.taken, a.added, a.favorite, a.duration, a.orientation,
-                    a.has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size,
+                    a.has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect,
                 ])?;
                 // An edit gives the photo a new thumbnail: forget the old one.
                 if old.as_ref().is_some_and(|o| o.2.is_some() && o.2 != thumb) {
@@ -263,6 +277,7 @@ mod tests {
             orientation: Some(1),
             has_location: false,
             size: Some(10),
+            effect: None,
             renditions: vec![Rendition {
                 want: Want::Thumb, name: "t".into(), key: thumb.into(),
                 width: None, height: None, size: None, file_type: Some("public.jpeg".into()),
@@ -294,6 +309,45 @@ mod tests {
         assert_eq!(index.changes.removed, ["b", "c"]);
         let left: i64 = conn.query_row("SELECT count(*) FROM renditions", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_library_from_before_effects_gets_the_column_and_lists_again() {
+        let dir = temp("effects");
+        let path = dir.join("library.sqlite");
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "CREATE TABLE assets (id TEXT PRIMARY KEY, item_type TEXT, filename TEXT, asset_date INTEGER,
+                   added_date INTEGER, favorite INTEGER NOT NULL DEFAULT 0, duration REAL, orientation INTEGER,
+                   has_location INTEGER NOT NULL DEFAULT 0, is_video INTEGER NOT NULL DEFAULT 0,
+                   is_live INTEGER NOT NULL DEFAULT 0, size INTEGER, thumb_path TEXT, thumb_w INTEGER,
+                   thumb_h INTEGER, avg_color INTEGER);
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO meta VALUES ('change_token', 't1');",
+            )
+            .unwrap();
+        }
+        let mut conn = open(&path).unwrap();
+        assert_eq!(meta(&conn, "change_token"), None);
+        let mut bounce = asset("a", false, "k1");
+        bounce.kind = Kind::Live;
+        bounce.effect = Some(crate::source::Effect::Bounce);
+        Index::new(&mut conn).put(&[bounce.clone()]).unwrap();
+        set_meta(&conn, "change_token", "t2").unwrap();
+        drop(conn);
+
+        // Opened again, the token stays; an effect changed on the iPhone
+        // is an edit.
+        let mut conn = open(&path).unwrap();
+        assert_eq!(meta(&conn, "change_token").as_deref(), Some("t2"));
+        let effect: Option<String> = conn.query_row("SELECT live_effect FROM assets", [], |r| r.get(0)).unwrap();
+        assert_eq!(effect.as_deref(), Some("bounce"));
+        bounce.effect = Some(crate::source::Effect::Loop);
+        let mut index = Index::new(&mut conn);
+        index.put(&[bounce]).unwrap();
+        assert_eq!(index.changes.reasons.get("edited"), Some(&1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -24,6 +24,10 @@ struct Cli {
     /// The SQLite index the probe writes.
     #[arg(long)]
     db: Option<PathBuf>,
+    /// The Apple ID whose session to use (its folder in the provider's
+    /// state); the provider's own default without it.
+    #[arg(long)]
+    account: Option<String>,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -77,6 +81,15 @@ enum Cmd {
         #[arg(long)]
         rank: u64,
     },
+    /// Print assets' records as iCloud sends them, every field, asset and
+    /// master: one JSON record per line.
+    Record {
+        /// CPLAsset record names.
+        ids: Vec<String>,
+        /// More of them, one to a line, from this file.
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Check whether videos can be streamed: ranged reads, latency, expiry.
     Stream {
         #[arg(long, default_value_t = 3)]
@@ -90,7 +103,10 @@ fn main() -> Result<()> {
     if let Some(dir) = db_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let provider = Box::new(ProcessProvider::spawn(cli.auth.clone().unwrap_or_else(pinhole_core::icloud::auth::default_provider), None)?);
+    let provider = Box::new(ProcessProvider::spawn(
+        cli.auth.clone().unwrap_or_else(pinhole_core::icloud::auth::default_provider),
+        cli.account.as_deref().map(pinhole_core::icloud::auth::state_dir),
+    )?);
     let mut client = PhotosClient::new(provider)?;
 
     match cli.command {
@@ -103,6 +119,12 @@ fn main() -> Result<()> {
         Cmd::Sample { kind, n, threads, out, pool } => sample(&mut client, &db_path, &kind, n, threads, out, &pool),
         Cmd::Stream { n } => stream(&mut client, &db_path, n),
         Cmd::Page { rank } => page(&mut client, rank),
+        Cmd::Record { mut ids, from } => {
+            if let Some(file) = from {
+                ids.extend(std::fs::read_to_string(file)?.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned));
+            }
+            record(&mut client, &ids)
+        }
     }
 }
 
@@ -454,5 +476,30 @@ fn page(client: &mut PhotosClient, rank: u64) -> Result<()> {
     println!("rank {rank}: {} records: {} masters, {} assets, other {:?}", records.len(), masters.len(), refs.values().sum::<usize>(), other);
     println!("masters shared by several assets: {shared}; assets whose master is not on the page: {orphan_assets}; masters without an asset: {orphan_masters}");
     println!("paired by master: {}", pair_records(&records, false).len());
+    Ok(())
+}
+
+fn record(client: &mut PhotosClient, ids: &[String]) -> Result<()> {
+    // Every field, not only the ones the index reads.
+    let lookup = |client: &mut PhotosClient, names: &[&str]| -> Result<Vec<serde_json::Value>> {
+        let records: Vec<serde_json::Value> = names.iter().map(|n| serde_json::json!({"recordName": n})).collect();
+        let reply = client.post("private", "records/lookup", &serde_json::json!({"records": records, "zoneID": {"zoneName": "PrimarySync"}}))?;
+        Ok(reply["records"].as_array().cloned().unwrap_or_default())
+    };
+    for (n, chunk) in ids.chunks(100).enumerate() {
+        let names: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let assets = lookup(client, &names)?;
+        let masters: Vec<String> = assets
+            .iter()
+            .filter_map(|r| r["fields"]["masterRef"]["value"]["recordName"].as_str().map(str::to_owned))
+            .collect();
+        let masters = lookup(client, &masters.iter().map(String::as_str).collect::<Vec<_>>())?;
+        for r in assets.iter().chain(&masters) {
+            println!("{r}");
+        }
+        if ids.len() > 100 {
+            eprintln!("{:>7}/{}", (n + 1) * 100, ids.len());
+        }
+    }
     Ok(())
 }

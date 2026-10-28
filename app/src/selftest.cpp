@@ -59,6 +59,9 @@ struct Case {
     const char *name;
     QString where;
     bool live = false;
+    // A Live Photo shown with this effect: the one set on the iPhone, or
+    // made by the service when it is another.
+    QString effect = {};
 };
 
 } // namespace
@@ -112,6 +115,11 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         {"video", "a.is_video AND a.duration < 60"},
         {"long video", "a.is_video AND a.duration > 300"},
         {"Live Photo", "a.is_live", true},
+        {"loop", "a.live_effect = 'loop'", true, "loop"},
+        {"bounce", "a.live_effect = 'bounce'", true, "bounce"},
+        {"long exp.", "a.live_effect = 'long_exposure'", true, "long_exposure"},
+        {"made bounce", "a.is_live AND a.live_effect IS NULL", true, "bounce"},
+        {"made long", "a.is_live AND a.live_effect IS NULL", true, "long_exposure"},
     };
     auto next = std::make_shared<std::function<void(int)>>();
     *next = [&library, &viewer, cases, next](int k) {
@@ -152,12 +160,18 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
             if (viewer.image().isEmpty())
                 return;
             report(c.name, qPrintable(viewer.stage()), pathOf(viewer.image()));
-            if (viewer.stage() == QLatin1String("original")) {
+            if (viewer.stage() == QLatin1String("original") && c.effect.isEmpty()) {
                 if (c.live)
                     viewer.playLive();
                 else
                     finish();
             }
+        }));
+        connections->append(QObject::connect(&viewer, &Viewer::effectChanged, &viewer, [&viewer, c, report, pathOf, finish] {
+            if (c.effect != QLatin1String("long_exposure") || viewer.longExposure().isEmpty())
+                return;
+            report(c.name, "effect", pathOf(viewer.longExposure()));
+            finish();
         }));
         connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, clock, finish] {
             if (viewer.videoSource().isEmpty())
@@ -165,11 +179,14 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
             report(c.name, viewer.videoSource().isLocalFile() ? "file" : "stream", QString());
             playFirstFrame(viewer.videoSource(), c.name, clock, finish);
         }));
-        connections->append(QObject::connect(&viewer, &Viewer::liveChanged, &viewer, [&viewer, c, report, finish] {
+        connections->append(QObject::connect(&viewer, &Viewer::liveChanged, &viewer, [&viewer, c, report, clock, finish] {
             if (viewer.liveSource().isEmpty())
                 return;
-            report(c.name, "motion", QString());
-            finish();
+            report(c.name, c.effect.isEmpty() ? "motion" : "effect", QString());
+            if (c.effect.isEmpty())
+                finish();
+            else
+                playFirstFrame(viewer.liveSource(), c.name, clock, finish);
         }));
         connections->append(QObject::connect(&viewer, &Viewer::messageChanged, &viewer, [&viewer, c] {
             if (!viewer.message().isEmpty())
@@ -183,6 +200,10 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
             }
         });
         viewer.openAt(index, QRectF(0, 0, 100, 100));
+        if (!c.effect.isEmpty()) {
+            std::printf("selftest: %-11s set on the iPhone: %s\n", c.name, qPrintable(viewer.savedEffect()));
+            viewer.setEffect(c.effect);
+        }
     };
     QTimer::singleShot(500, [next] { (*next)(0); });
 }

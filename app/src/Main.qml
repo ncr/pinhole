@@ -575,6 +575,7 @@ ApplicationWindow {
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
+    Shortcut { enabled: photoViewer.shown && !help.shown && viewer.live; sequence: "Shift+L"; context: Qt.ApplicationShortcut; onActivated: viewer.nextEffect() }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }
     Shortcut { enabled: photoViewer.shown && !help.shown; sequence: "0"; context: Qt.ApplicationShortcut; onActivated: viewer.resetZoom() }

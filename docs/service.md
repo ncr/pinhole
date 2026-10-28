@@ -45,9 +45,11 @@ order, since a cached file answers at once while a download takes a while.
 
 `kind` picks the rendition: `medium` (about 2048 px), `full` (the photo as
 it looks now: the edit, if it has one), `original` (as taken, unedited),
-`video`, `live` (a Live Photo's motion). Which of the source's files serves
-each was chosen as the library was indexed (the index's `renditions`);
-`rendition` is the source's name for it. For iCloud:
+`video`, `live` (a Live Photo's motion), and a Live Photo's effects: `loop`,
+`bounce` (the motion forward and back) and `long_exposure` (its frames as
+one photo). Which of the source's files serves each was chosen as the
+library was indexed (the index's `renditions`); `rendition` is the source's
+name for it. For iCloud:
 
 | kind | renditions tried |
 |---|---|
@@ -56,6 +58,16 @@ each was chosen as the library was indexed (the index's `renditions`);
 | `original` | Original |
 | `video` | VidMed, VidFull, Original (videos only) |
 | `live` | OriginalVidCompl |
+| `loop`, `bounce` | VidCompl, when that is the effect set on the iPhone |
+| `long_exposure` | JPEGFull, when that is the effect set on the iPhone |
+
+An effect the source has no file for is made from the motion
+(`effects.rs`): a `loop` is the `live` file itself, played round and round;
+a `bounce` is ffmpeg's MP4 of it forward then reversed (about a second); a
+`long_exposure` is every frame held to the first one's framing (vidstab's
+tripod mode) and averaged into a JPEG (about five seconds for a 1920x1440
+motion). They are answered with `rendition: "made"` and kept in the cache
+beside the motion, named after its key, so each is made once.
 
 A folder's `full`, `original`, `video` and `live` are the files themselves,
 answered with `cached: true` and their own path; its `medium` is made into
