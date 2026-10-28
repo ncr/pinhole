@@ -278,6 +278,11 @@ int main(int argc, char *argv[]) {
             std::vector<int> moved(size_t(library.count()), -1);
             for (int i = 0; i < library.count(); ++i)
                 moved[size_t(i)] = positions.value(library.at(i).id, -1);
+            // A photo whose thumbnail is a new file is drawn afresh.
+            std::vector<int> textures = moved;
+            for (int i = 0; i < library.count(); ++i)
+                if (const int now = moved[size_t(i)]; now >= 0 && fresh->at(now).thumbPath != library.at(i).thumbPath)
+                    textures[size_t(i)] = -1;
             const qint64 read = took.elapsed();
             QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer, &plugins] {
                 QElapsedTimer swapping;
@@ -285,7 +290,7 @@ int main(int argc, char *argv[]) {
                 const int before = library.count();
                 grid->rememberAnchor();
                 loader.reload([&] { library.swap(*fresh); });
-                grid->libraryReloaded(moved);
+                grid->libraryReloaded(moved, &textures);
                 if (std::exchange(toNewest, false))
                     grid->scrollToEnd();
                 viewer.libraryReloaded(moved);

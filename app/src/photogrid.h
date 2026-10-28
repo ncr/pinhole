@@ -90,7 +90,10 @@ public:
     // The library was read again and its positions moved: `moved[old]` is
     // each photo's new position, or -1 if it is gone. Call right after the
     // swap; the view keeps the photos it showed, or stays at the newest end.
-    void libraryReloaded(const std::vector<int> &moved);
+    // `textures` says where each photo's drawn thumbnail goes, as `moved`
+    // unless a photo's thumbnail changed (an edit, a video's cover), whose
+    // old one must not stay on screen; none means as `moved`.
+    void libraryReloaded(const std::vector<int> &moved, const std::vector<int> *textures = nullptr);
     // Where the view is, for keeping it across a reload: the photo at the
     // top-left and how far from the top it is, and whether it is at the end.
     struct Anchor { int index; double offset; bool atEnd; };

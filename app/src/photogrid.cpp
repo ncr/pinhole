@@ -222,7 +222,7 @@ PhotoGrid::Anchor PhotoGrid::anchor() const {
     return {index, index >= 0 ? rectOf(index).top() : 0, m_scroll >= maxScroll(m_columns) - stride()};
 }
 
-void PhotoGrid::libraryReloaded(const std::vector<int> &moved) {
+void PhotoGrid::libraryReloaded(const std::vector<int> &moved, const std::vector<int> *textures) {
     const Anchor before = m_reloadAnchor;
     auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
 
@@ -234,7 +234,7 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved) {
     m_zoom = {};
     rebuildCells(&moved);
     const bool selectionChanged = selectedBefore != selection();
-    m_pendingMoves = std::make_shared<std::vector<int>>(moved);
+    m_pendingMoves = std::make_shared<std::vector<int>>(textures ? *textures : moved);
     emit libraryChanged();
     emit cellsChanged();
 
