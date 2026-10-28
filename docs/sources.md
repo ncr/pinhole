@@ -70,6 +70,16 @@ downloaded and a folder's are made from the photo.
   says why one cannot be added; the library hears of what was added at
   the next round, as of any other change.
 
+**Favourites** are the one thing besides adding that a window changes:
+
+- `set_favorite(index, ids, favorite)`: make these assets favourites, or
+  not, where the source keeps that. iCloud sets `isFavorite` on each
+  CPLAsset (`icloud/favorite.rs`, with the change tags in
+  `icloud_assets`, which it updates); a folder keeps them in its library
+  (`folder_favorites`) and puts them back on its assets each time it
+  describes them. The core sets `assets.favorite` once it has worked. A
+  source that keeps none says `Unsupported`.
+
 A source also says its name ("iCloud", or the folder's), whether it needs
 signing in, how often to look for changes (a minute; a folder ten seconds),
 and what an error means for the connection: `needs_sign_in`, `offline` or
@@ -100,6 +110,8 @@ icloud_assets   asset_id, master_id, change_tag, rank, subtype
 icloud_resources  asset_id, kind (Original, JPEGMed, ...), width, height,
                 size, file_type, checksum, url, url_fetched_at
 icloud_records  asset_id, asset_json, master_json (pinhole-probe's)
+
+folder_favorites  asset_id (a folder's favourites, kept nowhere else)
 ```
 
 `item_type` (the original's UTI) and `size` are neutral; `subtype` (Apple's

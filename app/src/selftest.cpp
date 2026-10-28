@@ -914,6 +914,73 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
     });
 }
 
+void runFavouriteSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder) {
+    QTimer::singleShot(2500, window, [=, &viewer, &library] {
+        const int newest = library.count() - 1;
+        if (newest < 2) {
+            std::printf("selftest: too few photos\n");
+            QCoreApplication::quit();
+            return;
+        }
+        viewer.openAt(newest, grid->rectOf(newest));
+        // Favourites among the newest `n`, by id, as a reload moves them.
+        const QByteArray id = library.at(newest).id;
+        auto favourites = [&library, id](int n) {
+            int at = -1;
+            for (int i = 0; i < library.count(); ++i)
+                if (library.at(i).id == id)
+                    at = i;
+            int count = 0;
+            for (int i = at; i > at - n && i >= 0; --i)
+                count += library.at(i).favorite;
+            return count;
+        };
+        auto grab = [window, folder](const QString &name, bool bottom) {
+            const QImage frame = window->grabWindow();
+            const int h = std::min(frame.height(), 200);
+            frame.copy(0, bottom ? frame.height() - h : 0, frame.width(), h).save(QStringLiteral("%1/%2.png").arg(folder, name));
+        };
+        struct Step {
+            QString name;
+            bool bottom;
+        };
+        auto steps = std::make_shared<QList<Step>>(QList<Step>{
+            {QStringLiteral("viewer-1"), false}, {QStringLiteral("viewer-2"), false},
+            {QStringLiteral("select-1"), true}, {QStringLiteral("select-2"), true},
+        });
+        auto next = std::make_shared<std::function<void()>>();
+        *next = [=, &viewer] {
+            if (steps->isEmpty()) {
+                QCoreApplication::quit();
+                return;
+            }
+            const Step step = steps->takeFirst();
+            const int n = step.bottom ? library.count() : 1;
+            // Select mode once the viewer has gone (its own F goes with it).
+            if (step.bottom && !grid->selecting()) {
+                key(window, Qt::Key_Escape);
+                grid->setSelecting(true);
+                grid->selectAll();
+                steps->prepend(step);
+                QTimer::singleShot(1000, window, [next] { (*next)(); });
+                return;
+            }
+            const int before = favourites(n);
+            grab(step.name + QStringLiteral("-before"), step.bottom);
+            key(window, Qt::Key_F);
+            const int atOnce = favourites(n);
+            QTimer::singleShot(1500, window, [=, &viewer] {
+                std::printf("selftest: %s: favourites of %d %d, at once %d, after the service %d%s\n", qPrintable(step.name), n,
+                            before, atOnce, favourites(n), step.bottom ? "" : viewer.isFavorite() ? " (viewer ♥)" : " (viewer ♡)");
+                std::fflush(stdout);
+                grab(step.name + QStringLiteral("-after"), step.bottom);
+                (*next)();
+            });
+        };
+        QTimer::singleShot(1200, window, [next] { (*next)(); });
+    });
+}
+
 void runActionBarSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder) {
     // Late enough for the plugins to have stacked their series.
     QTimer::singleShot(4000, window, [=, &viewer, &library] {

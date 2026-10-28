@@ -3,8 +3,9 @@
 //! they are, never copied; thumbnails and the 2048 px medium size are made
 //! from them with ImageMagick (a video's from its most telling frame, with
 //! ffmpeg: cover.rs). Changes are found by looking at the folder again: a
-//! stat of every file, compared with what the index has. See
-//! docs/sources.md.
+//! stat of every file, compared with what the index has. A folder has no
+//! favourites of its own: they are kept in its library (`folder_favorites`).
+//! See docs/sources.md.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -77,6 +78,12 @@ impl Entry {
     fn signature(&self) -> (String, Option<String>) {
         (self.file.key(), self.motion.as_ref().map(Found::key))
     }
+}
+
+/// The assets made favourites here (`set_favorite`), none before the first.
+fn favorites(index: &Connection) -> HashSet<String> {
+    let Ok(mut stmt) = index.prepare("SELECT asset_id FROM folder_favorites") else { return HashSet::new() };
+    stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
 }
 
 fn media_of(path: &Path) -> Option<Media> {
@@ -306,13 +313,17 @@ impl FolderSource {
     }
 
     /// Describe entries (reading files takes a while: in parallel) and put
-    /// them, a batch at a time.
+    /// them, a batch at a time, the favourites as the library keeps them.
     fn put(&self, index: &mut Index, entries: &[&Entry], progress: &(dyn Fn(u64, u64) + Sync), total: u64) -> Result<()> {
+        let favorites = favorites(index.conn);
         for batch in entries.chunks(PUT_BATCH) {
             if index.stopping() {
                 return Err(crate::source::Stopped.into());
             }
-            let assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
+            let mut assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
+            for a in &mut assets {
+                a.favorite = favorites.contains(&a.id);
+            }
             index.put(&assets)?;
             progress(index.seen.len() as u64, total);
         }
@@ -450,6 +461,26 @@ impl Source for FolderSource {
         }
         let names = crate::add::copy_into(&self.root, addition, sent)?;
         Ok(Added { id: names.into_iter().next(), ..Added::default() })
+    }
+
+    /// Kept in the library alone: the files stay as they are.
+    fn set_favorite(&self, index: &Connection, ids: &[String], favorite: bool) -> Result<()> {
+        index.execute_batch(
+            "CREATE TABLE IF NOT EXISTS folder_favorites (asset_id TEXT PRIMARY KEY) WITHOUT ROWID;
+             CREATE TRIGGER IF NOT EXISTS folder_forget AFTER DELETE ON assets BEGIN
+                 DELETE FROM folder_favorites WHERE asset_id = old.id;
+             END;",
+        )?;
+        let tx = index.unchecked_transaction()?;
+        for id in ids {
+            if favorite {
+                tx.execute("INSERT OR IGNORE INTO folder_favorites (asset_id) VALUES (?1)", [id])?;
+            } else {
+                tx.execute("DELETE FROM folder_favorites WHERE asset_id = ?1", [id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError> {
@@ -609,6 +640,43 @@ mod tests {
         assert!(from.join("IMG_1.MOV").is_file());
         assert!(FolderSource::new(PathBuf::from("/nonexistent/pinhole")).add(&additions[0], &|_, _| {}).is_err());
         let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_favourite_stays_through_an_edit_and_a_listing_and_goes_with_its_file() {
+        let dir = temp("favourite");
+        for f in ["IMG_1.JPG", "IMG_2.JPG"] {
+            touch(&dir.join(f));
+        }
+        let source = FolderSource::new(dir.clone());
+        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
+        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        source.set_favorite(&conn, &["IMG_1.JPG".into()], true).unwrap();
+        conn.execute("UPDATE assets SET favorite = 1 WHERE id = 'IMG_1.JPG'", []).unwrap();
+        let favourite = |conn: &Connection, id: &str| -> bool {
+            conn.query_row("SELECT favorite FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        // The file edited: put again, still a favourite.
+        std::fs::write(dir.join("IMG_1.JPG"), b"xy").unwrap();
+        let report = crate::sync::follow(&source, &mut conn, false).unwrap();
+        assert_eq!(report.changes.updated, ["IMG_1.JPG"]);
+        assert!(favourite(&conn, "IMG_1.JPG"));
+        // Listed afresh.
+        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert!(favourite(&conn, "IMG_1.JPG"));
+        assert!(!favourite(&conn, "IMG_2.JPG"));
+        // Gone, and back: not a favourite any more.
+        std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
+        crate::sync::follow(&source, &mut conn, false).unwrap();
+        assert!(favorites(&conn).is_empty());
+        touch(&dir.join("IMG_1.JPG"));
+        crate::sync::follow(&source, &mut conn, false).unwrap();
+        assert!(!favourite(&conn, "IMG_1.JPG"));
+        // And not one again once taken back.
+        source.set_favorite(&conn, &["IMG_2.JPG".into()], true).unwrap();
+        source.set_favorite(&conn, &["IMG_2.JPG".into()], false).unwrap();
+        assert!(favorites(&conn).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

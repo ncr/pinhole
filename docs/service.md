@@ -32,6 +32,7 @@ order, since a cached file answers at once while a download takes a while.
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
+| `set_favorite` | `assets` (ids from the index), `favorite` (true or false) | `changed`: how many were not so already; see Favourites |
 | `sources` | | every source added, as the `sources` event |
 | `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
 | `remove_source` | `id` | the `sources` left; see Sources |
@@ -293,6 +294,27 @@ source does not take), `too_large`, `over_quota` (iCloud storage is full),
 `failed` (anything else, in the message). The request itself fails with
 `unsupported` when nothing is shown, and `bad_request` without `files`.
 `pinhole-sync add <files>` does the same from a terminal.
+
+## Favourites
+
+`set_favorite` makes photos favourites, or not, in the source shown: for
+iCloud `isFavorite` on each asset's record, by a `records/modify` with the
+change tag the index has for it, as icloud.com does it (one changed since,
+on the iPhone say, is looked up for its tag now and sent again); a folder
+has no favourites of its own and keeps them in its library
+(`folder_favorites`), where they stay as its files change. The index
+follows at once, and every window hears `library_changed`, so the grid and
+the viewer show it before the next round, which then agrees: iCloud's
+change feed brings the same `isFavorite` back. Requests are done one after
+another in the order they came, so a photo made a favourite and back again
+quickly ends as it began. Those already as asked are left alone (`changed`
+counts the rest).
+
+An error leaves the index as it was: `not_found` for an asset the library
+does not have, `unsupported` for a source that keeps no favourites,
+`needs_sign_in` or `unavailable` as for any request to the source.
+`bad_request` without `assets` or `favorite`. pinhole-fake's library, which
+no source fills, keeps them itself.
 
 ## Streaming
 

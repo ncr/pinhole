@@ -31,6 +31,9 @@ public:
     int count() const { return int(m_items.size()); }
     const LibraryItem &at(int i) const { return m_items[size_t(i)]; }
     QString dir() const { return m_dir; }
+    // A favourite set from the window, before the index has it
+    // (favourites.h).
+    void setFavorite(int i, bool favorite) { m_items[size_t(i)].favorite = favorite; }
     // Take another library's items (a fresh read of the same index). Only
     // while nothing else reads this one: see ThumbnailLoader::reload.
     void swap(Library &other) {

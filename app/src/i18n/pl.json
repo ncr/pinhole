@@ -56,6 +56,7 @@
     "other": "Skopiowano %n; części nie udało się pobrać"
   },
   "Copy": "Kopiuj",
+  "Could not change favourites in %1": "Nie udało się zmienić ulubionych w %1",
   "Could not get the photos from %1": "Nie udało się pobrać zdjęć z %1",
   "Could not load from %1": "Nie udało się wczytać z %1",
   "Could not load the motion from %1": "Nie udało się wczytać ruchu z %1",
@@ -81,6 +82,8 @@
     "other": "Wyeksportowano %n zdjęcia do %1"
   },
   "Faster": "Szybciej",
+  "Favourite": "Ulubione",
+  "Favourite the selected": "Zaznaczone do ulubionych",
   "Favourites": "Ulubione",
   "Finding your photos in %1": "Szukam Twoich zdjęć w %1",
   "Folder": "Folder",

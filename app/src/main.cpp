@@ -25,6 +25,7 @@
 #include "photogrid.h"
 #include "incoming.h"
 #include "outgoing.h"
+#include "favourites.h"
 #include "marks.h"
 #include "photoprovider.h"
 #include "plugins.h"
@@ -193,6 +194,8 @@ int main(int argc, char *argv[]) {
     service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
+    Favourites favourites(&library, &service);
+    QObject::connect(&favourites, &Favourites::changed, &viewer, &Viewer::favoriteChanged);
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
@@ -206,6 +209,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
+    engine.rootContext()->setContextProperty("favourites", &favourites);
     engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
@@ -236,6 +240,8 @@ int main(int argc, char *argv[]) {
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
     grid->setTouchpadHold(&hold);
+    // A favourite's mark, the moment it is set.
+    QObject::connect(&favourites, &Favourites::changed, grid, [grid] { grid->update(); });
     // A resting finger stops a zoomed photo coasting as well.
     QObject::connect(&hold, &TouchpadHold::began, &viewer, [&viewer](quint32 time, quint32) { viewer.touch(time); });
     QObject::connect(grid, &PhotoGrid::dragRequested, &outgoing,
@@ -287,7 +293,7 @@ int main(int argc, char *argv[]) {
         if (reader.joinable())
             reader.join();
         reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, grid,
-                              &viewer, &plugins] {
+                              &viewer, &plugins, &favourites] {
             QElapsedTimer took;
             took.start();
             auto fresh = std::make_shared<Library>();
@@ -312,7 +318,7 @@ int main(int argc, char *argv[]) {
                 if (const int now = moved[size_t(i)]; now >= 0 && fresh->at(now).thumbPath != library.at(i).thumbPath)
                     textures[size_t(i)] = -1;
             const qint64 read = took.elapsed();
-            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer, &plugins] {
+            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer, &plugins, &favourites] {
                 QElapsedTimer swapping;
                 swapping.start();
                 const int before = library.count();
@@ -323,6 +329,7 @@ int main(int argc, char *argv[]) {
                     grid->scrollToEnd();
                 viewer.libraryReloaded(moved);
                 plugins.libraryReloaded();
+                favourites.reloaded();
                 std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                              library.count(), before, read, swapping.elapsed());
                 reloading = false;
@@ -631,6 +638,8 @@ int main(int argc, char *argv[]) {
         runLiveSelfTest(window, library, viewer, test.mid(5));
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("actionbar:")))
         runActionBarSelfTest(window, grid, viewer, library, test.mid(10));
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("favourite:")))
+        runFavouriteSelfTest(window, grid, viewer, library, test.mid(10));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

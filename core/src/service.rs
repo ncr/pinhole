@@ -17,7 +17,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Value};
 
 use crate::icloud::auth::{ProcessProvider, ProviderError};
-use crate::source::{FetchError, Health, Heard, Source, Stored, Ticket, Want, Watch};
+use crate::source::{FetchError, Health, Heard, Source, Stored, Ticket, Unsupported, Want, Watch};
 use crate::storage::Storage;
 use crate::stream::Streams;
 use crate::sync::thumb_path;
@@ -152,6 +152,9 @@ struct Shared {
     /// Held while files are added: one asset at a time, whichever window
     /// dropped them.
     adding: Mutex<()>,
+    /// set_favorite, done one after another in the order asked: F pressed
+    /// twice is a favourite and back, never the other way round.
+    favorites: Mutex<mpsc::Sender<(Value, Reply)>>,
 }
 
 /// When each source was last looked at for changes (the end of its last
@@ -647,6 +650,7 @@ pub fn run(config: Config) -> Result<()> {
     let (sync_tx, sync_rx) = mpsc::channel::<()>();
     let (download_tx, download_rx) = mpsc::channel::<Job>();
     let (changes_tx, changes_rx) = mpsc::channel::<(String, Value, Reply)>();
+    let (favorites_tx, favorites_rx) = mpsc::channel::<(Value, Reply)>();
     let storage = Arc::new(Storage::new(
         config.location.clone(),
         config.library.clone(),
@@ -676,6 +680,7 @@ pub fn run(config: Config) -> Result<()> {
         adding: Mutex::new(()),
         changing: Mutex::new(()),
         changes: Mutex::new(changes_tx),
+        favorites: Mutex::new(favorites_tx),
     });
 
     {
@@ -721,6 +726,15 @@ pub fn run(config: Config) -> Result<()> {
                     Ok(value) => reply.send(Ok(value)),
                     Err((code, message)) => reply.send(Err((&code, message))),
                 }
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        std::thread::spawn(move || {
+            for (params, reply) in favorites_rx {
+                reply.send(set_favorite(&shared, &params));
             }
         });
     }
@@ -826,6 +840,11 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                     Ok(value) => reply.send(Ok(value)),
                     Err((code, message)) => reply.send(Err((code, message))),
                 });
+            }
+            // A second or so for iCloud: in turn, off this connection's
+            // thread.
+            Some("set_favorite") => {
+                let _ = shared.favorites.lock().unwrap().send((request["params"].clone(), reply));
             }
             Some(method @ ("sign_in" | "submit_code" | "discover")) => {
                 let (shared, params, method) = (shared.clone(), request["params"].clone(), method.to_owned());
@@ -966,6 +985,69 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
     reply.event(progress(total, None, bytes));
     let count = |state: &str| results.iter().filter(|r| r["state"] == state).count();
     Ok(json!({"source": id, "added": count("added"), "duplicates": count("duplicate"), "failed": count("failed"), "files": results}))
+}
+
+/// Make assets favourites, or not (`assets`, `favorite`): in the source
+/// first (iCloud's records, a folder's library), then in the index, so
+/// every window shows it at once and the next round agrees. Those already
+/// so are left alone. pinhole-fake's library, which no source fills, keeps
+/// them itself.
+fn set_favorite(shared: &Shared, params: &Value) -> std::result::Result<Value, (&'static str, String)> {
+    let ids: Vec<String> = params["assets"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let (false, Some(favorite)) = (ids.is_empty(), params["favorite"].as_bool()) else {
+        return Err(("bad_request", "set_favorite needs assets and favorite".into()));
+    };
+    let source = shared.source();
+    // Not under the library's lock, which a sync round holds throughout:
+    // SQLite has the index's own writes wait for each other.
+    let path = shared.storage.library().join("library.sqlite");
+    if !path.exists() {
+        return Err(("not_found", "there is no library yet".into()));
+    }
+    let db = crate::db::open(&path).map_err(|e| ("unavailable", format!("{e:#}")))?;
+    let mut wanted = Vec::with_capacity(ids.len());
+    for id in ids {
+        let now: Option<bool> = db.query_row("SELECT favorite FROM assets WHERE id = ?1", [&id], |r| r.get(0)).ok();
+        match now {
+            None => return Err(("not_found", format!("the library has no {id}"))),
+            Some(now) if now != favorite => wanted.push(id),
+            Some(_) => {}
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(json!({"changed": 0}));
+    }
+    match crate::db::meta(&db, "source") {
+        Some(owner) if owner == "fake" => {}
+        Some(owner) if owner == source.id() => {
+            if let Err(e) = source.set_favorite(&db, &wanted, favorite) {
+                eprintln!("pinholed: set_favorite: {e:#}");
+                return Err(match e.downcast_ref::<Unsupported>() {
+                    Some(u) => ("unsupported", u.0.clone()),
+                    None => (shared.failed(&e), format!("{e:#}")),
+                });
+            }
+            shared.reached();
+        }
+        _ => return Err(("unsupported", format!("{} is not the library shown", path.display()))),
+    }
+    let version = (|| -> Result<i64> {
+        let tx = db.unchecked_transaction()?;
+        for id in &wanted {
+            tx.execute("UPDATE assets SET favorite = ?2 WHERE id = ?1", params![id, favorite])?;
+        }
+        let version = crate::db::meta(&tx, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0) + 1;
+        crate::db::set_meta(&tx, "library_version", &version.to_string())?;
+        tx.commit()?;
+        Ok(version)
+    })()
+    .map_err(|e| ("unavailable", format!("{e:#}")))?;
+    eprintln!("pinholed: favourite {} {} assets", if favorite { "set on" } else { "taken off" }, wanted.len());
+    shared.broadcast(json!({"event": "library_changed", "version": version, "added": 0, "removed": 0}));
+    Ok(json!({"changed": wanted.len()}))
 }
 
 fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {

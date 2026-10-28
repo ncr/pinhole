@@ -22,6 +22,7 @@ Item {
             ["+ −", qsTr("Zoom")],
             ["Space", qsTr("Open")],
             ["S", qsTr("Select")],
+            ["F", qsTr("Favourite the selected")],
             [qsTr("Drag"), qsTr("Select a range")]
         ] },
         { title: qsTr("Photo"), keys: [
@@ -29,6 +30,7 @@ Item {
             ["⇧ ← →", qsTr("Faster")],
             ["Esc", qsTr("Back")],
             ["+ − 0", qsTr("Zoom")],
+            ["F", qsTr("Favourite")],
             ["L", qsTr("Live")],
             ["⇧ L", qsTr("Live effects")],
             ["M", qsTr("Sound")]

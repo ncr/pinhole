@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod cloudkit;
+pub mod favorite;
 pub mod index;
 pub mod push;
 pub mod records;
@@ -301,6 +302,27 @@ impl Source for IcloudSource {
             }
         }
         result
+    }
+
+    /// In iCloud itself, as icloud.com sets them (`favorite`), with the
+    /// change tags the index has; the new ones go back into it, so the next
+    /// change needs no lookup.
+    fn set_favorite(&self, index: &Connection, ids: &[String], favorite: bool) -> Result<()> {
+        let mut assets = Vec::with_capacity(ids.len());
+        for id in ids {
+            let tag: Option<Option<String>> = index
+                .query_row("SELECT change_tag FROM icloud_assets WHERE asset_id = ?1", [id], |r| r.get(0))
+                .optional()?;
+            let Some(tag) = tag else { return Err(anyhow!("iCloud has no record of {id}")) };
+            assets.push((id.clone(), tag));
+        }
+        let tags = self.with(&self.links, |client| favorite::set(client, &assets, favorite))?;
+        let tx = index.unchecked_transaction()?;
+        for (id, tag) in &tags {
+            tx.execute("UPDATE icloud_assets SET change_tag = ?2 WHERE asset_id = ?1", params![id, tag])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError> {

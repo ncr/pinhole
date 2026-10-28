@@ -40,6 +40,13 @@ void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewe
 // arrow down in one), Esc between; then select mode's bar and its menus.
 void runActionBarSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
 
+// PINHOLE_SELFTEST=favourite:<folder>: open the newest photo and press F,
+// then F again; then in select mode tick them all and press F, and F
+// again. Report whether each showed at once and after the service
+// answered (the library read again), and grab the bar each time. It really
+// is set: only on a scratch source.
+void runFavouriteSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
+
 class Incoming;
 // PINHOLE_SELFTEST=drop:<dir>: drag the files in PINHOLE_SELFTEST_DROP
 // (separated by ':') over the window and drop them, as a file manager

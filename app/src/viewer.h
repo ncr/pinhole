@@ -41,7 +41,7 @@ class Viewer : public QObject {
     Q_PROPERTY(bool looping READ looping NOTIFY effectChanged)
     // The long exposure, once here.
     Q_PROPERTY(QUrl longExposure READ longExposure NOTIFY effectChanged)
-    Q_PROPERTY(bool favorite READ isFavorite NOTIFY indexChanged)
+    Q_PROPERTY(bool favorite READ isFavorite NOTIFY favoriteChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     // The full photo, or the video, still on its way (and nothing wrong).
@@ -153,6 +153,9 @@ signals:
     void takesKeysChanged();
     void openChanged();
     void indexChanged();
+    // Another photo shown, or this one's favourite changed (favourites.h)
+    // or read again.
+    void favoriteChanged();
     void imageChanged();
     void videoChanged();
     void liveChanged();

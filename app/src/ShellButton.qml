@@ -22,6 +22,9 @@ Rectangle {
     property string key
     property string hint: KeyNames.nameOf(key)
     property bool active: false
+    // The label's colour when not active: the theme's text, or the accent
+    // for a ♥ that is filled.
+    property color labelColor: theme.foreground
     property bool flat: false
     // Over the photos rather than on a surface of the app: backed with the
     // theme's background, as the chips are, so it reads on any photo.
@@ -64,7 +67,7 @@ Rectangle {
         UiText {
             id: label
             y: centredIn(control.height)
-            color: control.active ? theme.background : theme.foreground
+            color: control.active ? theme.background : control.labelColor
             opacity: control.turning && control.hint === "" ? 0 : 1
             text: control.text
         }

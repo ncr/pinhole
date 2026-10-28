@@ -104,6 +104,11 @@ Item {
         }
         function onLiveFailed(message) { liveNotice.say(message) }
     }
+    Connections {
+        target: favourites
+        enabled: root.shown
+        function onFailed(message) { liveNotice.say(message, favoriteButton, favoriteNudge) }
+    }
 
     NumberAnimation {
         id: opening
@@ -356,8 +361,9 @@ Item {
         }
     }
 
-    // What can be done with it, as one card: Live and its effects, the
-    // plugins' groups, Copy and Export, and back to the library.
+    // What can be done with it, as one card: its favourite, Live and its
+    // effects, the plugins' groups, Copy and Export, and back to the
+    // library.
     Row {
         id: actions
         anchors.right: parent.right
@@ -365,16 +371,23 @@ Item {
         anchors.margins: 16
         spacing: 8
         opacity: root.progress * root.chrome
-        UiText {
-            visible: viewer.favorite
-            anchors.verticalCenter: parent.verticalCenter
-            text: "♥"
-            color: theme.accent
-            font.pixelSize: Math.round(theme.fontSize * 1.333)
-        }
         ActionBar {
             id: actionBar
             objectName: "viewerActions"
+            // A favourite or not: a filled heart in the accent, or an empty
+            // one (Nerd Font's: the typeface's own ♥ is an outline too).
+            MenuGroup {
+                ShellButton {
+                    id: favoriteButton
+                    objectName: "favoriteButton"
+                    flat: true
+                    text: viewer.favorite ? "\uf004" : "\uf08a"
+                    labelColor: viewer.favorite ? theme.accent : theme.foreground
+                    key: "F"
+                    onTapped: favourites.toggle([viewer.index])
+                    transform: Translate { id: favoriteNudge }
+                }
+            }
             // The effects, as on the iPhone: Live, Loop, Bounce, Long
             // exposure, the one set on the iPhone saying so.
             MenuGroup {
@@ -448,10 +461,13 @@ Item {
         visible: opacity > 0
         opacity: 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
-        function say(message) {
+        // Under the button it is about (Live's unless said), which shakes.
+        property var nudged: liveNudge
+        function say(message, button = liveButton, shaken = liveNudge) {
             text = message
-            x = Math.max(16, Math.min(liveButton.mapToItem(root, 0, 0).x, root.width - 16 - width))
+            x = Math.max(16, Math.min(button.mapToItem(root, 0, 0).x, root.width - 16 - width))
             opacity = root.progress * root.chrome
+            nudged = shaken
             noticeShown.restart()
             nudge.restart()
         }
@@ -462,10 +478,10 @@ Item {
         Timer { id: noticeShown; interval: 4000; onTriggered: liveNotice.opacity = 0 }
         SequentialAnimation {
             id: nudge
-            NumberAnimation { target: liveNudge; property: "x"; to: -5; duration: 50 }
-            NumberAnimation { target: liveNudge; property: "x"; to: 5; duration: 80 }
-            NumberAnimation { target: liveNudge; property: "x"; to: -3; duration: 70 }
-            NumberAnimation { target: liveNudge; property: "x"; to: 0; duration: 60 }
+            NumberAnimation { target: liveNotice.nudged; property: "x"; to: -5; duration: 50 }
+            NumberAnimation { target: liveNotice.nudged; property: "x"; to: 5; duration: 80 }
+            NumberAnimation { target: liveNotice.nudged; property: "x"; to: -3; duration: 70 }
+            NumberAnimation { target: liveNotice.nudged; property: "x"; to: 0; duration: 60 }
         }
     }
 

@@ -259,6 +259,19 @@ impl std::fmt::Display for Stopped {
 
 impl std::error::Error for Stopped {}
 
+/// Something this source cannot do at all, such as keeping favourites:
+/// the window is told `unsupported`.
+#[derive(Debug)]
+pub struct Unsupported(pub String);
+
+impl std::fmt::Display for Unsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for Unsupported {}
+
 /// What listing the library or following its changes came to, beyond the
 /// assets themselves.
 #[derive(Debug, Default)]
@@ -378,6 +391,16 @@ pub trait Source: Send + Sync {
     /// source's, as `health` tells.
     fn add(&self, _addition: &crate::add::Addition, _sent: &(dyn Fn(u64, u64) + Sync)) -> Result<crate::add::Added> {
         Err(crate::add::AddError::new("unsupported", format!("{} cannot be added to", self.name())).into())
+    }
+
+    /// Make these assets favourites, or not, where the source keeps that:
+    /// iCloud in its records, a folder in its library alone. `index` is
+    /// the library's, for what the source keeps there; `assets.favorite`
+    /// is the core's to set once this has worked. An error changes
+    /// nothing the core keeps, and the next round shows what the source
+    /// has.
+    fn set_favorite(&self, _index: &rusqlite::Connection, _ids: &[String], _favorite: bool) -> Result<()> {
+        Err(Unsupported(format!("{} keeps no favourites", self.name())).into())
     }
 }
 

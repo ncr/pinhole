@@ -27,6 +27,7 @@ Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged,
                           &Viewer::liveChanged, &Viewer::effectChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
+    connect(this, &Viewer::indexChanged, this, &Viewer::favoriteChanged);
     // No service after all: the motion asked for will not come.
     connect(service, &ServiceClient::announced, this, [this](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("health") && details.value("state").toString() == QLatin1String("no_service"))
@@ -639,9 +640,11 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
         return;
     const int now = m_index < int(moved.size()) ? moved[size_t(m_index)] : -1;
     if (now >= 0) {
-        // The same photo: nothing on screen changes, only its position.
+        // The same photo: nothing on screen changes, only its position,
+        // and maybe whether it is a favourite.
         m_index = now;
         m_jumpFrom = -1;
+        emit favoriteChanged();
         return;
     }
     m_index = -1;

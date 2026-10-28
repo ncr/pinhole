@@ -177,6 +177,28 @@ ApplicationWindow {
     }
 
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
+    // Favourites the service could not set, from select mode (the viewer
+    // says so under its own button).
+    Chip {
+        id: favouriteNotice
+        visible: opacity > 0
+        opacity: 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: grid.selecting ? 72 : 24
+        textColor: theme.darkForeground
+        Timer { id: favouriteNoticeShown; interval: 4000; onTriggered: favouriteNotice.opacity = 0 }
+        Connections {
+            target: favourites
+            enabled: !win.viewerShown
+            function onFailed(message) {
+                favouriteNotice.text = message
+                favouriteNotice.opacity = 1
+                favouriteNoticeShown.restart()
+            }
+        }
+    }
     Chip {
         visible: outgoing.status !== ""
         anchors.horizontalCenter: parent.horizontalCenter
@@ -378,7 +400,8 @@ ApplicationWindow {
     }
 
     // The bar of select mode, as the viewer's (ActionBar.qml): the count in
-    // the accent, Copy with Export in its menu, and the plugins' groups.
+    // the accent, Favourite, Copy with Export in its menu, and the plugins'
+    // groups.
     // Fewer words when the window is narrow (`fit`).
     ActionBar {
         id: selectBar
@@ -420,6 +443,7 @@ ApplicationWindow {
             const key = name => level < 1 ? barMetrics.advanceWidth("  " + name) : 0
             const count = countText(level)
             let width = 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize + 5)
+                + barMetrics.advanceWidth("\uf08a") + key("F") + pad + 5
                 + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad + arrow
             for (const group of pluginGroups) {
                 const shown = group.filter(a => a.shown)
@@ -438,6 +462,23 @@ ApplicationWindow {
             rightPadding: theme.fontSize
             text: selectBar.countText(selectBar.fit)
             color: theme.accent
+        }
+        // The ticked photos all favourites (a filled heart in the accent),
+        // or not (an empty one): all made favourites, or none when they all
+        // are.
+        MenuGroup {
+            ShellButton {
+                objectName: "selectFavorite"
+                readonly property bool all: (favourites.revision, grid.selectionCount, favourites.all(grid.selection()))
+                flat: true
+                usable: grid.selectionCount > 0
+                text: all ? "\uf004" : "\uf08a"
+                labelColor: all ? theme.accent : theme.foreground
+                // The viewer's F, while a photo is open over select mode.
+                key: win.viewerShown ? "" : "F"
+                hint: selectBar.hints ? "F" : ""
+                onTapped: favourites.toggle(grid.selection())
+            }
         }
         // As JPEG and MP4, what opens anywhere; the originals on Shift.
         MenuGroup {
@@ -617,7 +658,8 @@ ApplicationWindow {
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { enabled: !signIn.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
-    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
+    // Frame times, for working on the grid: a key nobody presses by chance.
+    Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
     // The side panel: sources, storage and plugins, on Tab or ",", and any
     // of the first nine sources shown on its number, from the grid or the
     // panel.

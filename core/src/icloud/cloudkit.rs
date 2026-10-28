@@ -226,6 +226,28 @@ impl PhotosClient {
         }))
     }
 
+    /// Change some fields of CPLAsset records, as icloud.com does (a
+    /// favourite, a caption), leaving the rest as they are: each record by
+    /// its name and the change tag it was last read with, in one request.
+    /// Each comes back with its new tag, or with a `serverErrorCode`
+    /// (CONFLICT when it changed since that tag) for that one alone.
+    pub fn modify(&mut self, records: &[(&str, Option<&str>)], fields: &Value) -> Result<Value> {
+        let operations: Vec<Value> = records
+            .iter()
+            .map(|(name, tag)| {
+                json!({
+                    "operationType": "update",
+                    "record": {"recordName": name, "recordType": "CPLAsset", "recordChangeTag": tag, "fields": fields},
+                })
+            })
+            .collect();
+        self.post("private", "records/modify", &json!({
+            "operations": operations,
+            "zoneID": {"zoneName": PRIMARY_ZONE},
+            "atomic": false,
+        }))
+    }
+
     /// CloudKit's change feed for the library zone. Without a token it
     /// starts from the beginning; with one, it returns what changed since.
     pub fn zone_changes(&mut self, sync_token: Option<&str>, results_limit: u32) -> Result<Value> {
