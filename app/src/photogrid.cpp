@@ -84,8 +84,13 @@ constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, Ma
 // like neon in the theme's colours (marks.h: neonMark()), so a video or a
 // favourite is found among hundreds of photos at a glance, and a little
 // bigger. A zoom cross-fades the white marks into them with the level.
+// Unlike white marks they are on cells down to kNeonMarksFromPx, which
+// is what they are for: 29 columns on a window 1600 wide are 54 px. On
+// cells too small for kNeonMarkPx they shrink to kNeonMarkShare of one.
 constexpr int kNeonFromColumns = 13;
 constexpr double kNeonMarkPx = 22;
+constexpr double kNeonMarksFromPx = 20;
+constexpr double kNeonMarkShare = 0.42;
 // Once the grid rests at such a level, coming from a closer one, its tubes
 // strike (lit ones stay lit through a zoom between such levels): each dark until its
 // own moment within the first kNeonStagger seconds, then stuttering on and
@@ -1763,6 +1768,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const double cellDevicePx = (strideFor(l.columns) - gapFor(l.columns)) * l.scale * dpr;
         // Small cells, and anything flying past too fast to see detail.
         const bool mosaic = cellDevicePx < kMosaicBelowPx || scrubbing;
+        const double marksFromPx = neonAt(l.columns) ? kNeonMarksFromPx : kMarksFromPx;
         int lastWantedPage = -1;
         for (int row = r.firstRow; row <= r.lastRow; ++row) {
             for (int col = r.firstCol; col <= r.lastCol; ++col) {
@@ -1775,7 +1781,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 // The photo it shows, by which its textures are kept.
                 const int i = libraryAt(cell);
                 const LibraryItem &item = m_library->at(i);
-                if (m_marks && rect.width() >= kMarksFromPx) {
+                if (m_marks && rect.width() >= marksFromPx) {
                     int marks = (item.video ? MarkVideo : 0) | (item.live ? MarkLive : 0) | (item.favorite ? MarkFavorite : 0);
                     if (!m_stackOf.empty() && m_stackOf.contains(i))
                         marks |= MarkStack;
@@ -2201,7 +2207,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             QSGGeometry *mg = slot.marks->geometry();
             mg->allocate(quads * 6);
             auto *mv = mg->vertexDataAsTexturedPoint2D();
-            const double size = neon ? kNeonMarkPx : kMarkPx;
+            const double size = !neon ? kMarkPx
+                                : cells.empty() ? kNeonMarkPx
+                                                : std::min(kNeonMarkPx, cells.front().rect.width() * kNeonMarkShare);
             // A lit mark's square is kNeonSpread times as big, about the
             // same middle.
             const double grow = neon ? size * (kNeonSpread - 1) / 2 : 0;
