@@ -106,7 +106,9 @@ limit can be changed in the side panel, Tab), and logs to
 Double-click a photo, or press Space or Enter over it, to open it full
 window: the thumbnail at once, the medium rendition in about a second, then
 the original (HEIC through libheif). Left and Right step through, Escape or
-Space closes, Space plays and pauses a video, L plays a Live Photo's motion.
+Space closes, as does dragging the photo up or down (two fingers on a
+touchpad, the left button with a mouse), Space plays and pauses a video, L
+plays a Live Photo's motion.
 A Live Photo shows with the effect set on the iPhone (a loop or a bounce
 plays round and round, a long exposure is its frames as one); the ▾ beside
 Live, or Shift+L, shows it with another, here only: the library keeps its

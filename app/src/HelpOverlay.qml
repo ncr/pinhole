@@ -29,6 +29,7 @@ Item {
             ["← →", qsTr("Previous, next")],
             ["⇧ ← →", qsTr("Faster")],
             ["Esc", qsTr("Back")],
+            [qsTr("Drag") + " ↑ ↓", qsTr("Back")],
             ["+ − 0", qsTr("Zoom")],
             ["F", qsTr("Favourite")],
             ["L", qsTr("Live")],

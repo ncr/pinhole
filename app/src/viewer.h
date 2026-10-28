@@ -124,6 +124,12 @@ public:
     Q_INVOKABLE void zoomStep(int steps);
     Q_INVOKABLE void resetZoom();
     Q_INVOKABLE void panBy(qreal dx, qreal dy);
+    // The unzoomed photo grabbed with the mouse: it follows the pointer
+    // (moved this much since the last), sideways to the next photo, up or
+    // down to close, as a touchpad swipe does; let go, it lands or springs.
+    Q_INVOKABLE void grab();
+    Q_INVOKABLE void drag(qreal dx, qreal dy);
+    Q_INVOKABLE void drop();
     // A finger came to rest on the touchpad (TouchpadHold): stop coasting.
     void touch(double timeMs);
     // A press or tap of any kind: stop coasting.
@@ -222,6 +228,8 @@ private:
     QSizeF m_viewport{1, 1};
     // Mouse wheel notches not yet used; high-resolution wheels send parts.
     double m_notches = 0;
+    // Times for a mouse grab's moves, as the touchpad's events carry their own.
+    QElapsedTimer m_grabClock;
     // The pinch's scale so far: 1 + the sum of Qt's per-event changes.
     double m_pinchScale = 1;
     // Medium renditions fetched, by photo, while the viewer is open.

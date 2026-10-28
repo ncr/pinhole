@@ -91,9 +91,10 @@ void ViewerMotion::clampPanTargets() {
     m_panTargetY = std::clamp(m_panTargetY, -maxPanY(m_zoomTarget), maxPanY(m_zoomTarget));
 }
 
-void ViewerMotion::begin(double t) {
+void ViewerMotion::begin(double t, bool pointer) {
     if (m_pinching)
         return;
+    m_pointer = pointer;
     m_samples.clear();
     m_lastMove = t;
     m_decideX = m_decideY = 0;
@@ -130,13 +131,13 @@ void ViewerMotion::move(double t, double dx, double dy) {
             m_dismissSamples.clear();
             m_dismissVelocity = 0;
             dy = m_decideY;
-            m_dismiss += dy * kDismissGain;
+            m_dismiss += dy * (m_pointer ? 1 : kDismissGain);
             m_dismissSamples.push_back({t, m_dismiss});
             return;
         }
         [[fallthrough]];
     case Gesture::Page:
-        m_raw += dx * kPageGain;
+        m_raw += dx * (m_pointer ? 1 : kPageGain);
         m_offset = stretched(m_raw);
         m_samples.push_back({t, m_raw});
         while (m_samples.size() > 2 && t - m_samples.front().t > 100)
@@ -151,7 +152,7 @@ void ViewerMotion::move(double t, double dx, double dy) {
         m_panY = m_panTargetY = m_panYPhysics.position();
         return;
     case Gesture::Dismiss:
-        m_dismiss += dy * kDismissGain;
+        m_dismiss += dy * (m_pointer ? 1 : kDismissGain);
         m_dismissSamples.push_back({t, m_dismiss});
         while (m_dismissSamples.size() > 2 && t - m_dismissSamples.front().t > 100)
             m_dismissSamples.pop_front();

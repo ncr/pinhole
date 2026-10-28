@@ -21,6 +21,7 @@ constexpr int kPassing = 150;
 
 Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
+    m_grabClock.start();
     m_fetchLater.setSingleShot(true);
     m_fetchLater.setInterval(kPassing);
     connect(&m_fetchLater, &QTimer::timeout, this, &Viewer::fetchShown);
@@ -362,6 +363,25 @@ void Viewer::stopCoasting() {
 
 void Viewer::panBy(qreal dx, qreal dy) {
     m_motion.pan(dx, dy);
+    emit motionChanged();
+}
+
+void Viewer::grab() {
+    m_motion.begin(double(m_grabClock.elapsed()), true);
+    m_jumpFrom = -1; // caught mid-slide: the true neighbours again
+    emit motionChanged();
+}
+
+void Viewer::drag(qreal dx, qreal dy) {
+    m_motion.move(double(m_grabClock.elapsed()), dx, dy);
+    emit motionChanged();
+}
+
+void Viewer::drop() {
+    if (const int delta = m_motion.end(double(m_grabClock.elapsed())))
+        slide(delta);
+    if (m_motion.takeClose())
+        emit closeRequested();
     emit motionChanged();
 }
 

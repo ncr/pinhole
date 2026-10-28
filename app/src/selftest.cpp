@@ -359,6 +359,15 @@ void swipe(QQuickWindow *window, QPointF at, QPoint by, int steps) {
 
 } // namespace
 
+// The left button held from `at` and the pointer moved `by` in ten steps,
+// then let go there.
+void drag(QQuickWindow *window, QPointF at, QPointF by) {
+    mouse(window, QEvent::MouseButtonPress, at, Qt::LeftButton);
+    for (int i = 1; i <= 10; ++i)
+        mouse(window, QEvent::MouseMove, at + by * (i / 10.0), Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonRelease, at + by, Qt::LeftButton);
+}
+
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library) {
     struct Step {
         const char *what;
@@ -573,6 +582,17 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          },
          [=, &viewer] { return viewer.isOpen() && viewer.index() == int(*mark) && popups() == 0; }},
         {"a swipe down goes back to the library", [=] { swipe(window, middle(), {0, 12}, 12); },
+         [&viewer] { return !viewer.isOpen(); }, 900},
+        {"and a click opens a photo again", [=] { click(window, middle()); },
+         [&viewer] { return viewer.isOpen(); }, 900},
+        {"a short mouse drag down springs back and stays open", [=] { drag(window, middle(), {0, 30}); },
+         [&viewer] { return viewer.isOpen() && viewer.dismiss() == 0; }},
+        {"a mouse drag to the left shows the next", [=, &viewer] {
+             *mark = viewer.index();
+             drag(window, middle(), {-0.45 * w(), 0});
+         },
+         [=, &viewer] { return viewer.isOpen() && viewer.index() == int(*mark) + 1; }},
+        {"a mouse drag down goes back to the library", [=] { drag(window, middle(), {0, 0.3 * h()}); },
          [&viewer] { return !viewer.isOpen(); }, 900},
         {"and a click opens a photo again", [=] { click(window, middle()); },
          [&viewer] { return viewer.isOpen(); }, 900},

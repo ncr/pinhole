@@ -258,8 +258,10 @@ Item {
 
     // The mouse. The sides step to the previous and next photo; elsewhere a
     // click plays or pauses a video and a double-click goes back to the
-    // library, as does the mouse's back button. The wheel and sideways
-    // swipes are the Viewer's own (viewer.cpp), as the window's events.
+    // library, as does the mouse's back button. Dragged, the photo goes as a
+    // touchpad swipe takes it: up or down and let go to close, sideways to
+    // the next photo (zoomed, a drag pans it). The wheel and the swipes are
+    // the Viewer's own (viewer.cpp), as the window's events.
     MouseArea {
         id: pointer
         anchors.fill: parent
@@ -270,26 +272,49 @@ Item {
         // Zoomed, the sides are part of the photo, and dragging pans it.
         function sideAt(x) { return viewer.zoomed ? 0 : x < side ? -1 : x > width - side ? 1 : 0 }
         property point last
+        property point pressedAt
         property bool panned: false
+        // The unzoomed photo held by the left button (viewer.grab()).
+        property bool grabbed: false
         onPositionChanged: mouse => {
-            if (!(mouse.buttons & Qt.LeftButton) || !viewer.zoomed)
+            if (!(mouse.buttons & Qt.LeftButton))
                 return
-            viewer.panBy(mouse.x - last.x, mouse.y - last.y)
-            if (Math.abs(mouse.x - last.x) + Math.abs(mouse.y - last.y) > 0)
+            if (grabbed)
+                viewer.drag(mouse.x - last.x, mouse.y - last.y)
+            else if (viewer.zoomed)
+                viewer.panBy(mouse.x - last.x, mouse.y - last.y)
+            else
+                return
+            // Past a few pixels it is a drag, not a click.
+            if (viewer.zoomed ? Math.abs(mouse.x - last.x) + Math.abs(mouse.y - last.y) > 0
+                              : Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y) > 8)
                 panned = true
             last = Qt.point(mouse.x, mouse.y)
         }
+        function letGo() {
+            if (!grabbed)
+                return
+            grabbed = false
+            viewer.drop()
+        }
+        onReleased: mouse => { if (mouse.button === Qt.LeftButton) letGo() }
+        onCanceled: letGo()
         readonly property int hoveredSide: containsMouse ? sideAt(mouseX) : 0
 
         onPressed: mouse => {
             root.presses += 1
             last = Qt.point(mouse.x, mouse.y)
+            pressedAt = last
             panned = false
             // Any press is a touch first: a coasting zoomed photo stops (a
             // two-finger tap, which arrives as the right button, does only that).
             viewer.stopCoasting()
             if (mouse.button === Qt.BackButton)
                 root.closeViewer()
+            if (mouse.button === Qt.LeftButton && !viewer.zoomed) {
+                grabbed = true
+                viewer.grab()
+            }
         }
         onClicked: mouse => {
             root.clicks += 1

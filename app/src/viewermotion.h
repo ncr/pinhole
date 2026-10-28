@@ -31,7 +31,10 @@ public:
     void setNeighbours(bool before, bool after);
 
     // A two-finger touchpad gesture: begin, moves (finger movement), end.
-    void begin(double t);
+    // Grabbed with the mouse (`pointer`), the photo follows the pointer one
+    // to one instead of the fingers' gain, and goes the same ways: sideways
+    // to page, up or down to close.
+    void begin(double t, bool pointer = false);
     void move(double t, double dx, double dy);
     // When the gesture paged far or fast enough: -1 or +1, the photo to
     // show next; the caller changes photo and calls stepped(). Else 0.
@@ -145,6 +148,7 @@ private:
     };
     std::deque<Sample> m_samples;
     double m_lastMove = 0;
+    bool m_pointer = false; // this gesture is the mouse's (begin())
     double m_dismiss = 0, m_dismissVelocity = 0;
     std::deque<Sample> m_dismissSamples;
     bool m_close = false;

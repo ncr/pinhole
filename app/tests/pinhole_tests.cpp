@@ -599,6 +599,36 @@ private slots:
         QVERIFY(!m.takeClose());
     }
 
+    void aMouseDragFollowsThePointerAndClosesAsASwipeDoes() {
+        // Grabbed with the mouse, the photo moves as far as the pointer.
+        ViewerMotion small = viewerShowing();
+        double t = 1000;
+        small.begin(t, true);
+        for (int i = 0; i < 10; ++i)
+            small.move(t += 8, 0, 6); // 60 px down, then held still
+        QCOMPARE(small.dismiss(), 60.0);
+        QCOMPARE(small.end(t + 200), 0);
+        QVERIFY(!small.takeClose());
+        settle(small);
+        QCOMPARE(small.dismiss(), 0.0);
+
+        ViewerMotion far = viewerShowing();
+        t = 1000;
+        far.begin(t, true);
+        for (int i = 0; i < 30; ++i)
+            far.move(t += 8, 0, 5); // 150 px of 800
+        far.end(t + 200);
+        QVERIFY(far.takeClose());
+
+        // Sideways it pages, past three tenths of the way.
+        ViewerMotion page = viewerShowing();
+        t = 1000;
+        page.begin(t, true);
+        for (int i = 0; i < 40; ++i)
+            page.move(t += 8, -10, 0); // 400 px of 1024
+        QCOMPARE(page.end(t + 200), 1);
+    }
+
     void aZoomedPhotoPansUpAndDownInstead() {
         ViewerMotion m = viewerShowing();
         m.zoomBy(3, 500, 400);
