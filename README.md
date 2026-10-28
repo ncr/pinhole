@@ -88,6 +88,8 @@ app/bin/test                 # unit tests: scroll physics, viewer motion, transl
 screen; recording the window with `wf-recorder -g` shows real timing).
 `PINHOLE_SELFTEST=mouse` drives clicks, swipes, pinches and select mode
 with synthetic events and reports each step.
+Videos play without sound in a selftest and in the bench; `PINHOLE_SILENT=1`
+does the same for any other run.
 
 `pinhole-sync` only fetches what is missing, so running it again is quick.
 After that, `pinholed` keeps the library in step with iCloud on its own:

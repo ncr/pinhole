@@ -219,7 +219,7 @@ Item {
             id: videoPlayer
             source: viewer.video ? viewer.videoSource : ""
             videoOutput: videoOutput
-            audioOutput: AudioOutput { muted: root.muted }
+            audioOutput: AudioOutput { muted: root.muted || silent }
             onSourceChanged: if (source.toString() !== "" && viewer.open) play()
         }
         VideoOutput {

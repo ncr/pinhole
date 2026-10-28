@@ -212,6 +212,11 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("plugins", &plugins);
     plugins.setEngine(&engine);
     engine.rootContext()->setContextProperty("bench", nullptr);
+    // Videos play without sound in test runs (a selftest, the bench, or
+    // PINHOLE_SILENT=1), so a window on a hidden workspace makes no noise.
+    engine.rootContext()->setContextProperty("silent", qEnvironmentVariableIsSet("PINHOLE_SELFTEST")
+                                                           || parser.isSet("bench")
+                                                           || qEnvironmentVariable("PINHOLE_SILENT") == QLatin1String("1"));
     // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
     engine.load(QUrl("qrc:/Main.qml"));
