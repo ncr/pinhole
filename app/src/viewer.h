@@ -124,10 +124,14 @@ public:
     // `from` is the photo's cell in the grid, where the opening grows from.
     Q_INVOKABLE void openAt(int index, QRectF from);
     Q_INVOKABLE void close();
+    // The next or previous photo (keys, the mouse wheel, a click), shown at
+    // once with no slide, so two neighbours can be compared by flicking
+    // between them.
     Q_INVOKABLE void step(int delta);
     // Straight to a photo, no slide (scrubbing the carousel).
     Q_INVOKABLE void jumpTo(int index);
-    // To a photo, sliding, the carousel with it (a tap on the carousel).
+    // To a photo, sliding, the carousel with it (a tap on the carousel); a
+    // neighbour at once, as step() does.
     Q_INVOKABLE void goTo(int index);
     // Plays the motion as the effect shows it: once for Live and a long
     // exposure, from the start for a loop or a bounce.
@@ -162,6 +166,9 @@ protected:
 
 private:
     void show(int index);
+    // The photo a touchpad swipe paged to: it slides on from where the
+    // fingers left the row.
+    void slide(int delta);
     void request(int index, const QString &kind);
     void setMessage(const QString &message);
     void liveFailedWith(const QString &code);

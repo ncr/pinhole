@@ -209,7 +209,7 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
         break;
     case Qt::ScrollEnd:
         if (const int delta = m_motion.end(t))
-            step(delta);
+            slide(delta);
         if (m_motion.takeClose())
             emit closeRequested();
         break;
@@ -346,6 +346,10 @@ int Viewer::beside(int k) const {
 }
 
 void Viewer::step(int delta) {
+    jumpTo(std::clamp(m_index + delta, 0, m_library->count() - 1));
+}
+
+void Viewer::slide(int delta) {
     const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
     if (next == m_index)
         return;

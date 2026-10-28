@@ -734,6 +734,16 @@ private slots:
         Viewer viewer(&library, &service);
         QSignalSpy failed(&viewer, &Viewer::liveFailed);
         viewer.openAt(0, {});
+        // A key changes photo at once, with nothing sliding, so two
+        // neighbours can be compared; back again just as fast.
+        viewer.setViewport(800, 600);
+        viewer.step(1);
+        QCOMPARE(viewer.index(), 1);
+        QCOMPARE(viewer.offset(), 0.0);
+        QVERIFY(!viewer.animating());
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 0);
+        QVERIFY(!viewer.animating());
         QVERIFY(!viewer.liveLoading());
         // On its way at once, and asked for once however often it is pressed.
         viewer.playLive();
