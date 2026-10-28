@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QUrl>
+#include <QWheelEvent>
 #include <QtMultimedia/private/qplatformmediaintegration_p.h>
 
 #include "bench.h"
@@ -515,6 +516,35 @@ int main(int argc, char *argv[]) {
                 });
                 timer->start(16);
             });
+        });
+    }
+    // PINHOLE_SELFTEST=wheelzoom: a mouse's horizontal wheel turned a little
+    // at a time from 7 columns, a second apart, and the level each turn lands
+    // on, on the output: never back where it began unless it hardly turned.
+    if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("wheelzoom")) {
+        QTimer::singleShot(1200, window, [window, grid] {
+            grid->setColumnsNow(7);
+            grid->jumpToFraction(0.5);
+            // Frames stepped here too, in case the window is hidden and draws none.
+            auto *frames = new QTimer(window);
+            QObject::connect(frames, &QTimer::timeout, window, [grid] { grid->advance(1.0 / 60); });
+            frames->start(16);
+            const std::vector<std::vector<int>> turns = {{24}, {120}, {-120}, {-120}, {-120}, {120, 120, 120}, {60}, {-24}};
+            for (size_t k = 0; k <= turns.size(); ++k) {
+                QTimer::singleShot(int(k) * 1000 + 500, window, [grid, turns, k] {
+                    if (k > 0)
+                        std::printf("turn %zu: lands on %d columns\n", k, grid->columns()), std::fflush(stdout);
+                    if (k == turns.size())
+                        return QCoreApplication::quit();
+                    for (size_t n = 0; n < turns[k].size(); ++n)
+                        QTimer::singleShot(int(n) * 30, grid, [grid, x = turns[k][n]] {
+                            const QPointF at(grid->width() / 2, grid->height() / 2);
+                            QWheelEvent event(at, grid->mapToGlobal(at), QPoint(), QPoint(x, 0), Qt::NoButton, Qt::NoModifier,
+                                              Qt::NoScrollPhase, false);
+                            QCoreApplication::sendEvent(grid, &event);
+                        });
+                });
+            }
         });
     }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from

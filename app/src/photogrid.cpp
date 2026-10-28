@@ -49,10 +49,17 @@ constexpr double kMorphSeconds = 0.35;
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
 // A horizontal wheel's notch zooms by this much, eased over about this
-// long, and lands on a level once it has been still this long (seconds).
+// long, and lands on a level once it has been still this long (seconds):
+// the next one the way it was turning, unless it turned less than
+// kWheelZoomDead notches, too little to mean anything, and goes back.
 constexpr double kWheelZoomStep = 1.25;
 constexpr double kWheelZoomEase = 0.06;
 constexpr double kWheelZoomRest = 0.2;
+constexpr double kWheelZoomDead = 0.3;
+// A pinch or wheel goes over to the next level once it is this much (log
+// of the cell size) nearer to it than to the one shown, not right at the
+// point halfway: held there, it would flip between the two.
+constexpr double kZoomHysteresis = 0.08;
 // Texture data uploaded per frame, at most, and the time that may take.
 // More and a frame could miss its vsync. Counted in bytes, not textures: a
 // 1/8 thumbnail is 64 times cheaper than a full one.
@@ -73,14 +80,14 @@ constexpr double kMarkPx = 18;
 constexpr double kMarkInset = 4;
 constexpr double kMarksFromPx = 72;
 constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, MarkLive, MarkStack};
-// Where cells are smaller than this at rest (logical pixels), seen from
-// afar, the marks glow like neon in the theme's colours (marks.h:
-// neonMark()), so a video or a favourite is found among hundreds of photos
-// at a glance, and a little bigger. A zoom cross-fades the white marks into
-// them with the level.
-constexpr double kNeonBelowPx = 160;
+// At this many columns and further out, seen from afar, the marks glow
+// like neon in the theme's colours (marks.h: neonMark()), so a video or a
+// favourite is found among hundreds of photos at a glance, and a little
+// bigger. A zoom cross-fades the white marks into them with the level.
+constexpr int kNeonFromColumns = 13;
 constexpr double kNeonMarkPx = 22;
-// Once the grid rests at such a level its tubes strike: each dark until its
+// Once the grid rests at such a level, coming from a closer one, its tubes
+// strike (lit ones stay lit through a zoom between such levels): each dark until its
 // own moment within the first kNeonStagger seconds, then stuttering on and
 // off for kNeonStrike, more on than off as it warms, then steady. Drawn
 // in kNeonSteps of brightness, from dark to lit. As they come on the photos
@@ -1034,7 +1041,9 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
     // Past the point halfway to the next level, the grid changes to it: one
     // cross-fade played to its end whatever the fingers do next. Back across
     // the point while it plays, it plays back from where it is.
-    if (const int level = nearestLevel(stride); level != m_zoom.shown) {
+    const auto distance = [&](int level) { return std::abs(std::log(stride / strideFor(kLevels[size_t(level)]))); };
+    if (const int level = nearestLevel(stride);
+        level != m_zoom.shown && distance(level) < distance(m_zoom.shown) - kZoomHysteresis) {
         if (level == m_zoom.fadeFrom && m_zoom.fade < 1) {
             std::swap(m_zoom.fadeFrom, m_zoom.shown);
             m_zoom.fade = 1 - m_zoom.fade;
@@ -1145,6 +1154,28 @@ void PhotoGrid::endContinuousZoom() {
     settleZoom(best);
 }
 
+void PhotoGrid::endWheelZoom() {
+    const double from = std::log(m_zoom.startStride), now = m_wheelZoom.current;
+    if (std::abs(now - from) < kWheelZoomDead * std::log(kWheelZoomStep)) {
+        settleZoom(nearestLevel(m_zoom.stride));
+        return;
+    }
+    // On to the nearest level at or past the cell size shown, the way the
+    // wheel turned (levels go from the largest cells to the smallest).
+    const bool in = now > from;
+    int best = in ? 0 : levelCount() - 1;
+    for (int i = 0; i < levelCount(); ++i) {
+        const double level = std::log(strideFor(kLevels[size_t(i)]));
+        if (in && level >= now - 0.01)
+            best = i;
+        if (!in && level <= now + 0.01) {
+            best = i;
+            break;
+        }
+    }
+    settleZoom(best);
+}
+
 void PhotoGrid::setColumnsNow(int columns) {
     const double fraction = maxScroll(m_columns) > 0 ? m_scroll / maxScroll(m_columns) : 1;
     m_zoom = {};
@@ -1236,7 +1267,7 @@ void PhotoGrid::advance(qreal dt) {
         zoomTo(std::exp(m_wheelZoom.current), m_zoom.fingerStart);
         if (m_clock.nsecsElapsed() / 1e9 - m_wheelZoom.lastAt > kWheelZoomRest &&
             std::abs(m_wheelZoom.current - m_wheelZoom.target) < 0.005)
-            endContinuousZoom();
+            endWheelZoom();
     }
     if (m_zoom.active && !m_zoom.settling && m_zoom.fade < 1)
         m_zoom.fade = std::min(1.0, m_zoom.fade + dt / kMorphSeconds);
@@ -1269,7 +1300,7 @@ void PhotoGrid::advance(qreal dt) {
         emit zoomingChanged();
 }
 
-bool PhotoGrid::neonAt(int columns) const { return strideFor(columns) - gapFor(columns) < kNeonBelowPx; }
+bool PhotoGrid::neonAt(int columns) const { return columns >= kNeonFromColumns; }
 
 void PhotoGrid::updateNeon() {
     // A zoom keeps what was lit, fading with its level; it strikes again

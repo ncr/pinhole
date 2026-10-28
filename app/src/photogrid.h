@@ -287,7 +287,7 @@ private:
     void setScroll(double y);
     void syncBounds();
     void updateAnimating();
-    // Whether a level's cells are small enough for the marks to be neon,
+    // Whether a level is far enough out for the marks to be neon,
     // and noting when the grid came to rest at such a level, from which
     // the tubes strike one by one (-1: not lit).
     bool neonAt(int columns) const;
@@ -308,6 +308,8 @@ private:
     // The cell size the zoom shows now, and where the pinned photo sits.
     void zoomTo(double stride, QPointF at);
     void wheelZoom(double notches, QPointF at);
+    // The wheel still: on to the next level the way it turned.
+    void endWheelZoom();
     // Settle on `level`: scale, position and fade animate there.
     void settleZoom(int level);
     // Content position of the pinned point in a grid `columns` wide.
