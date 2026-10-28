@@ -10,13 +10,16 @@ Rectangle {
     // Whether it is waiting; the spinner shows after `delay` of it.
     property bool busy: false
     property int delay: 1000
+    // Without its square, for inside a button; drawn in `ink`.
+    property bool bare: false
+    property color ink: theme.foreground
 
     readonly property bool shown: busy && !waiting.running
     width: height
     height: Math.round(theme.fontSize * 2.333)
     radius: Math.min(4, theme.radius)
-    color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
-    border.width: 1
+    color: bare ? "transparent" : Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
+    border.width: bare ? 0 : 1
     border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
     visible: opacity > 0
     opacity: shown ? 1 : 0
@@ -32,7 +35,7 @@ Rectangle {
         height: size
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-            strokeColor: theme.foreground
+            strokeColor: spinner.ink
             strokeWidth: Math.max(1.5, theme.fontSize / 8)
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap

@@ -1,5 +1,8 @@
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -8,9 +11,14 @@
 #include "library.h"
 #include "outgoing.h"
 #include "scrollphysics.h"
+#include "serviceclient.h"
 #include "theme.h"
 #include "translator.h"
+#include "viewer.h"
 #include "viewermotion.h"
+
+// The grid's input log, which the viewer writes to; the grid is not here.
+void logInput(const QString &) {}
 
 class PinholeTests : public QObject {
     Q_OBJECT
@@ -35,8 +43,9 @@ private:
             p.step(1.0 / 120);
     }
 
-    // A library in `dir` holding `rows` (id, date) and nothing else of note.
-    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows) {
+    // A library in `dir` holding `rows` (id, date) and nothing else of note;
+    // all Live Photos, or none.
+    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows, bool live = false) {
         {
             QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "make");
             db.setDatabaseName(dir + "/library.sqlite");
@@ -45,9 +54,10 @@ private:
             QVERIFY(q.exec("CREATE TABLE assets (id TEXT, thumb_path TEXT, avg_color INTEGER, thumb_w INTEGER, thumb_h INTEGER,"
                            " duration REAL, asset_date INTEGER, is_video INTEGER, is_live INTEGER, favorite INTEGER, filename TEXT)"));
             for (const auto &[id, date] : rows) {
-                q.prepare("INSERT INTO assets VALUES (?, '', 0, 1, 1, 0, ?, 0, 0, 0, ?)");
+                q.prepare("INSERT INTO assets VALUES (?, '', 0, 1, 1, 0, ?, 0, ?, 0, ?)");
                 q.addBindValue(QString::fromUtf8(id));
                 q.addBindValue(date);
+                q.addBindValue(live ? 1 : 0);
                 q.addBindValue(QString::fromUtf8(id) + ".HEIC");
                 QVERIFY(q.exec());
             }
@@ -614,6 +624,99 @@ private slots:
         QCOMPARE(library.at(1).id, QByteArray("a"));
         QCOMPARE(chosen.first().id, QByteArray("b"));
         QCOMPARE(chosen.first().filename, QString("b.HEIC"));
+    }
+
+private:
+    // A stand-in for pinholed: the lines asked, and answers written by hand.
+    struct FakeService {
+        QLocalServer server;
+        QLocalSocket *peer = nullptr;
+        QList<QJsonObject> asked;
+        void read() {
+            while (peer && peer->canReadLine())
+                asked.append(QJsonDocument::fromJson(peer->readLine()).object());
+        }
+        // The `live` fetches asked for so far.
+        QList<QJsonObject> live() {
+            read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(asked))
+                if (line.value("params").toObject().value("kind").toString() == QLatin1String("live"))
+                    found.append(line);
+            return found;
+        }
+        void send(const QJsonObject &line) {
+            peer->write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
+            peer->flush();
+        }
+    };
+
+private slots:
+    void aLivePhotosMotionIsAskedForOnceAndSaysWhyItDidNotCome() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.send({{"event", "source"}, {"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}});
+        QTRY_VERIFY(service.sourceName() == QLatin1String("iCloud"));
+
+        Viewer viewer(&library, &service);
+        QSignalSpy failed(&viewer, &Viewer::liveFailed);
+        viewer.openAt(0, {});
+        QVERIFY(!viewer.liveLoading());
+        // On its way at once, and asked for once however often it is pressed.
+        viewer.playLive();
+        QVERIFY(viewer.liveLoading());
+        viewer.playLive();
+        viewer.playLive();
+        QTRY_COMPARE(fake.live().size(), 1);
+        QTest::qWait(50);
+        QCOMPARE(fake.live().size(), 1);
+        fake.send({{"id", fake.live()[0].value("id")}, {"ok", true},
+                   {"result", QJsonObject{{"path", "/cache/a.mov"}, {"stream", "http://127.0.0.1:1/a"}}}});
+        QTRY_VERIFY(!viewer.liveLoading());
+        QCOMPARE(viewer.liveSource(), QUrl("http://127.0.0.1:1/a"));
+        // Here: played again without asking.
+        viewer.playLive();
+        QVERIFY(!viewer.liveLoading());
+        QCOMPARE(fake.live().size(), 1);
+
+        // Not signed in: said, in so many words.
+        viewer.step(1);
+        viewer.playLive();
+        QTRY_COMPARE(fake.live().size(), 2);
+        fake.send({{"id", fake.live()[1].value("id")}, {"ok", false},
+                   {"error", QJsonObject{{"code", "needs_sign_in"}, {"message", "no session"}}}});
+        QTRY_COMPARE(failed.size(), 1);
+        QVERIFY(!viewer.liveLoading());
+        QCOMPARE(failed[0][0].toString(), QString("Not signed in to iCloud"));
+
+        // Offline: the service says so before it answers.
+        viewer.playLive();
+        QTRY_COMPARE(fake.live().size(), 3);
+        fake.send({{"event", "health"}, {"state", "offline"}});
+        fake.send({{"id", fake.live()[2].value("id")}, {"ok", false},
+                   {"error", QJsonObject{{"code", "unavailable"}, {"message", "network"}}}});
+        QTRY_COMPARE(failed.size(), 2);
+        QCOMPARE(failed[1][0].toString(), QString("Offline, and the motion is not on this computer"));
+
+        // Moving on drops the wait, and a late answer for the photo left.
+        viewer.playLive();
+        QTRY_COMPARE(fake.live().size(), 4);
+        viewer.step(1);
+        QVERIFY(!viewer.liveLoading());
+        fake.send({{"id", fake.live()[3].value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "not_found"}}}});
+        QTest::qWait(50);
+        QCOMPARE(failed.size(), 2);
+        QVERIFY(viewer.liveSource().isEmpty());
+        qunsetenv("PINHOLE_SOCKET");
     }
 };
 

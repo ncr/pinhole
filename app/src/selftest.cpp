@@ -708,6 +708,50 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     QTimer::singleShot(1200, window, [run] { (*run)(0); });
 }
 
+void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
+    QTimer::singleShot(1500, window, [=, &library, &viewer] {
+        const int index = findIndex(library, QStringLiteral("a.is_live"));
+        if (index < 0) {
+            std::printf("selftest: no Live Photo in the library\n");
+            QCoreApplication::quit();
+            return;
+        }
+        viewer.openAt(index, QRectF(0, 0, 100, 100));
+        auto *clock = new QElapsedTimer;
+        auto state = [window, &viewer] {
+            QObject *b = window->findChild<QObject *>(QStringLiteral("liveButton"));
+            QObject *notice = window->findChild<QObject *>(QStringLiteral("liveNotice"));
+            return QStringLiteral("loading %1, button %2%3, notice \"%4\"")
+                .arg(viewer.liveLoading())
+                .arg(b && b->property("active").toBool() ? "lit" : "plain")
+                .arg(b && b->property("busy").toBool() ? " busy" : "")
+                .arg(notice && notice->property("opacity").toReal() > 0 ? notice->property("text").toString() : QString());
+        };
+        QObject::connect(&viewer, &Viewer::liveFailed, window, [clock](const QString &message) {
+            std::printf("selftest: %5lld ms: failed: %s\n", clock->elapsed(), qPrintable(message));
+        });
+        // The photo sharp first, as it would be by the time anyone presses.
+        QTimer::singleShot(2500, window, [=] {
+            clock->start();
+            key(window, Qt::Key_L, Qt::NoModifier, QStringLiteral("l"));
+            key(window, Qt::Key_L, Qt::NoModifier, QStringLiteral("l"));
+            std::printf("selftest: pressed L twice: %s\n", qPrintable(state()));
+            for (int ms : {100, 400, 1000, 2000, 3500, 5000, 8000})
+                QTimer::singleShot(ms, window, [=] {
+                    std::printf("selftest: %5lld ms: %s\n", clock->elapsed(), qPrintable(state()));
+                    std::fflush(stdout);
+                    // The top only: a whole window takes long enough to save
+                    // that the timers and animations here fall behind.
+                    const QImage frame = window->grabWindow();
+                    frame.copy(0, 0, frame.width(), frame.height() / 8)
+                        .save(QStringLiteral("%1/live-%2.png").arg(folder).arg(ms, 4, 10, QLatin1Char('0')));
+                    if (ms == 8000)
+                        QCoreApplication::quit();
+                });
+        });
+    });
+}
+
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder) {
     QTimer::singleShot(1500, window, [=, &viewer] {
         const int index = grid->indexAt(grid->width() / 2, grid->height() / 2);

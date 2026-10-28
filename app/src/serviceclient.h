@@ -37,6 +37,9 @@ public:
     void setSource(const QJsonObject &source) { m_source = source; }
     // "iCloud", or a folder's name: what to call it in messages.
     QString sourceName() const { return m_source.value("name").toString(); }
+    // How the source is doing, as the last "health" event said: fine,
+    // needs_sign_in, offline, failing, or no_service of the client's own.
+    QString health() const { return m_health; }
 
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
     // Ask the service to look for changes in the source now.
@@ -55,6 +58,7 @@ private:
 
     QString m_library;
     QJsonObject m_source;
+    QString m_health = QStringLiteral("fine");
     QLocalSocket m_socket;
     QTimer m_retry;
     int m_attempts = 0;

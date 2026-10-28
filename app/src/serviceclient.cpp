@@ -13,6 +13,7 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
         m_attempts = 0;
         // Fine until the service says otherwise, which it does at once.
+        m_health = QStringLiteral("fine");
         emit announced(QStringLiteral("health"), QJsonObject{{"state", "fine"}});
         for (const QByteArray &line : std::as_const(m_unsent))
             m_socket.write(line);
@@ -27,8 +28,10 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
         }
         if (m_attempts++ < 40)
             m_retry.start();
-        else
+        else {
+            m_health = QStringLiteral("no_service");
             emit announced(QStringLiteral("health"), QJsonObject{{"state", "no_service"}});
+        }
     });
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         // The service went away: whatever was asked will not be answered.
@@ -126,6 +129,8 @@ void ServiceClient::readReplies() {
         if (reply.contains("event")) {
             if (reply.value("event").toString() == QLatin1String("source"))
                 m_source = reply;
+            else if (reply.value("event").toString() == QLatin1String("health"))
+                m_health = reply.value("state").toString();
             emit announced(reply.value("event").toString(), reply);
             continue;
         }

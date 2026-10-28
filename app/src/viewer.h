@@ -27,6 +27,9 @@ class Viewer : public QObject {
     Q_PROPERTY(QUrl videoSource READ videoSource NOTIFY videoChanged)
     Q_PROPERTY(bool live READ isLive NOTIFY indexChanged)
     Q_PROPERTY(QUrl liveSource READ liveSource NOTIFY liveChanged)
+    // The Live Photo's motion asked for (playLive()) and not here yet: one
+    // request at a time, however often it is asked for meanwhile.
+    Q_PROPERTY(bool liveLoading READ liveLoading NOTIFY liveChanged)
     Q_PROPERTY(bool favorite READ isFavorite NOTIFY indexChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
@@ -66,6 +69,7 @@ public:
     QUrl videoSource() const { return m_video; }
     bool isLive() const;
     QUrl liveSource() const { return m_live; }
+    bool liveLoading() const { return m_liveLoading; }
     bool isFavorite() const;
     QString title() const;
     QString message() const { return m_message; }
@@ -123,6 +127,8 @@ signals:
     void imageChanged();
     void videoChanged();
     void liveChanged();
+    // The motion asked for could not be had, and why, in a few words.
+    void liveFailed(const QString &message);
     void messageChanged();
     void loadingChanged();
     void motionChanged();
@@ -139,6 +145,7 @@ private:
     void show(int index);
     void request(int index, const QString &kind);
     void setMessage(const QString &message);
+    void liveFailedWith(const QString &code);
     void fitPhoto();
     void remember(int index, const QString &mediumPath);
     static QUrl providerUrl(const QString &path);
@@ -155,6 +162,7 @@ private:
     QString m_stage;
     QUrl m_video;
     QUrl m_live;
+    bool m_liveLoading = false;
     QString m_message;
     ViewerMotion m_motion;
     QSizeF m_viewport{1, 1};

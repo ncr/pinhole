@@ -67,6 +67,7 @@ Item {
             detailImage.source = ""
             liveOutput.visible = false
             livePlayer.stop()
+            liveNotice.hide()
         }
         function onImageChanged() {
             if (viewer.stage === "original")
@@ -81,6 +82,7 @@ Item {
                 livePlayer.play()
             }
         }
+        function onLiveFailed(message) { liveNotice.say(message) }
     }
 
     NumberAnimation {
@@ -203,6 +205,10 @@ Item {
             id: livePlayer
             videoOutput: liveOutput
             onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState) liveOutput.visible = false
+            onErrorOccurred: {
+                liveOutput.visible = false
+                liveNotice.say(qsTr("Could not play the motion"))
+            }
         }
         VideoOutput {
             id: liveOutput
@@ -318,6 +324,7 @@ Item {
     }
 
     Row {
+        id: actions
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 16
@@ -331,13 +338,22 @@ Item {
             color: theme.accent
             font.pixelSize: Math.round(theme.fontSize * 1.333)
         }
+        // Lit from the click until the motion has played. While it is on its
+        // way (asked for, or a stream before its first frames) its key
+        // turns; a file already here plays at once, before it would.
         ShellButton {
+            id: liveButton
+            objectName: "liveButton"
             visible: viewer.live
             anchors.verticalCenter: parent.verticalCenter
             floating: true
             text: qsTr("Live")
             key: "L"
+            active: viewer.liveLoading || liveOutput.visible
+            busy: viewer.liveLoading || root.liveBuffering
+            busyDelay: 300
             onTapped: viewer.playLive()
+            transform: Translate { id: liveNudge }
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers
         // with a tick on itself.
@@ -370,6 +386,37 @@ Item {
             text: "✕"
             key: "Escape"
             onTapped: root.closeViewer()
+        }
+    }
+
+    // The motion could not be had: said for a moment under the Live button,
+    // which shakes, as Copy does when nothing could be copied.
+    Chip {
+        id: liveNotice
+        objectName: "liveNotice"
+        x: Math.max(16, Math.min(actions.x + liveButton.x, root.width - 16 - width))
+        y: actions.y + actions.height + 6
+        textColor: theme.darkForeground
+        visible: opacity > 0
+        opacity: 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        function say(message) {
+            text = message
+            opacity = root.progress * root.chrome
+            noticeShown.restart()
+            nudge.restart()
+        }
+        function hide() {
+            noticeShown.stop()
+            opacity = 0
+        }
+        Timer { id: noticeShown; interval: 4000; onTriggered: liveNotice.opacity = 0 }
+        SequentialAnimation {
+            id: nudge
+            NumberAnimation { target: liveNudge; property: "x"; to: -5; duration: 50 }
+            NumberAnimation { target: liveNudge; property: "x"; to: 5; duration: 80 }
+            NumberAnimation { target: liveNudge; property: "x"; to: -3; duration: 70 }
+            NumberAnimation { target: liveNudge; property: "x"; to: 0; duration: 60 }
         }
     }
 
@@ -568,6 +615,9 @@ Item {
     property bool muted: false
     readonly property real videoPosition: videoPlayer.position
     readonly property real videoDuration: videoPlayer.duration
+    // The motion streaming in, not yet moving.
+    readonly property bool liveBuffering: liveOutput.visible && livePlayer.source.toString().startsWith("http")
+        && (livePlayer.position <= 0 || livePlayer.mediaStatus === MediaPlayer.StalledMedia)
 
     // 75000 → "1:15", 3725000 → "1:02:05".
     function clock(ms) {

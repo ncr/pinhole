@@ -9,6 +9,9 @@ import "keys.js" as KeyNames
 // Its key beside the label, as Omarchy's menus show theirs: `key` presses
 // it while it shows (a sequence: "C", "Shift+E", "Escape"); `hint` only
 // shows one, for a key the window handles itself.
+//
+// `busy`: on its way, after `busyDelay` an arc turns in the key's place
+// (in the label's, without one), as Spinner.qml turns.
 Rectangle {
     id: control
     property string text
@@ -20,6 +23,8 @@ Rectangle {
     // theme's background, as the chips are, so it reads on any photo.
     property bool floating: false
     property bool usable: true
+    property bool busy: false
+    property int busyDelay: 1000
     signal tapped()
 
     readonly property color ink: theme.foreground
@@ -44,7 +49,27 @@ Rectangle {
         readonly property color hintColor: control.active
             ? Qt.tint(theme.accent, Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.6))
             : theme.darkForeground
-        text: control.text + (control.hint !== "" ? "  <font color=\"" + hintColor + "\">" + control.hint + "</font>" : "")
+        // The arc in the key's place: the key stays, unseen, so the button
+        // keeps its width.
+        readonly property bool turning: turner.item !== null && turner.item.shown
+        opacity: turning && control.hint === "" ? 0 : 1
+        text: control.text + (control.hint !== "" ? "  <font color=\"" + (turning ? "transparent" : hintColor) + "\">"
+                                                    + control.hint + "</font>" : "")
+    }
+    TextMetrics { id: hintMetrics; font: label.font; text: control.hint }
+    Loader {
+        id: turner
+        active: control.busy
+        readonly property real middle: control.hint !== "" ? label.x + label.implicitWidth - hintMetrics.advanceWidth / 2
+                                                           : control.width / 2
+        x: Math.round(middle - width / 2)
+        sourceComponent: Spinner {
+            bare: true
+            busy: true
+            delay: control.busyDelay
+            height: control.height
+            ink: label.color
+        }
     }
     // Not while the window has its keys for something over it (the help).
     readonly property bool keysFree: Window.window === null || Window.window.buttonKeys !== false

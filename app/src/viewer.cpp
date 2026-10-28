@@ -16,6 +16,11 @@ Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
     for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
+    // No service after all: the motion asked for will not come.
+    connect(service, &ServiceClient::announced, this, [this](const QString &name, const QJsonObject &details) {
+        if (name == QLatin1String("health") && details.value("state").toString() == QLatin1String("no_service"))
+            liveFailedWith(QStringLiteral("no_service"));
+    });
 }
 
 bool Viewer::loading() const {
@@ -66,6 +71,29 @@ void Viewer::setMessage(const QString &message) {
         return;
     m_message = message;
     emit messageChanged();
+}
+
+void Viewer::liveFailedWith(const QString &code) {
+    if (!m_liveLoading)
+        return;
+    m_liveLoading = false;
+    emit liveChanged();
+    const QString source = m_service->sourceName();
+    QString message;
+    if (code == QLatin1String("needs_sign_in"))
+        message = tr("Not signed in to %1").arg(source);
+    else if (code == QLatin1String("not_found"))
+        message = tr("This Live Photo has no motion");
+    else if (code == QLatin1String("no_service") || m_service->health() == QLatin1String("no_service"))
+        message = tr("The Pinhole service is not running");
+    // The service says it is offline before it answers so.
+    else if (m_service->health() == QLatin1String("offline"))
+        message = m_service->source().value("needs_sign_in").toBool()
+                      ? tr("Offline, and the motion is not on this computer")
+                      : tr("%1 is not there. Is its disk connected?").arg(source);
+    else
+        message = tr("Could not load the motion from %1").arg(source);
+    emit liveFailed(message);
 }
 
 void Viewer::openAt(int index, QRectF from) {
@@ -250,6 +278,7 @@ void Viewer::close() {
         return;
     m_open = false;
     m_generation += 1; // anything still arriving is for a closed viewer
+    m_liveLoading = false;
     m_motion.reset();
     m_jumpFrom = -1;
     m_mediums.clear();
@@ -311,6 +340,7 @@ void Viewer::show(int index) {
     m_stage = QStringLiteral("thumbnail");
     m_video = QUrl();
     m_live = QUrl();
+    m_liveLoading = false;
     setMessage({});
     fitPhoto();
     emit indexChanged();
@@ -353,7 +383,9 @@ void Viewer::request(int index, const QString &kind) {
                 request(index, QStringLiteral("full"));
                 return;
             }
-            if (kind != QLatin1String("live"))
+            if (kind == QLatin1String("live"))
+                liveFailedWith(code);
+            else
                 setMessage(code == QLatin1String("needs_sign_in") ? tr("Not signed in to %1").arg(m_service->sourceName())
                                                                   : tr("Could not load from %1").arg(m_service->sourceName()));
             return;
@@ -368,6 +400,7 @@ void Viewer::request(int index, const QString &kind) {
             emit videoChanged();
         } else if (kind == QLatin1String("live")) {
             m_live = playable;
+            m_liveLoading = false;
             emit liveChanged();
         } else {
             m_image = providerUrl(path);
@@ -385,11 +418,18 @@ void Viewer::request(int index, const QString &kind) {
 }
 
 void Viewer::playLive() {
-    if (!isLive())
+    if (!isLive() || m_liveLoading)
         return;
     if (!m_live.isEmpty()) {
         // Already here: nudge QML to play it again.
         emit liveChanged();
+        return;
+    }
+    m_liveLoading = true;
+    emit liveChanged();
+    // Nobody to ask: said now, not never.
+    if (m_service->health() == QLatin1String("no_service")) {
+        liveFailedWith(QStringLiteral("no_service"));
         return;
     }
     request(m_index, QStringLiteral("live"));

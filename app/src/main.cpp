@@ -517,6 +517,8 @@ int main(int argc, char *argv[]) {
         runViewerSelfTest(library, viewer);
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("copytwice:")))
         runCopyTwiceSelfTest(window, grid, viewer, test.mid(10));
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("live:")))
+        runLiveSelfTest(window, library, viewer, test.mid(5));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

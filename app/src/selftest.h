@@ -27,3 +27,8 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
 // PINHOLE_SELFTEST=copytwice:<folder>: open a photo, click Copy, grab the
 // window; wait; click Copy again, grab again; report the button's phases.
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder);
+
+// PINHOLE_SELFTEST=live:<folder>: open the newest Live Photo, press L (twice,
+// quickly), and grab the window as the motion is asked for, comes and plays
+// or does not; report the Live button's state at each grab.
+void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
