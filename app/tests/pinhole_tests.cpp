@@ -279,6 +279,9 @@ private slots:
         QCOMPARE(translator.translate("Outgoing", "Copied %n photo(s)", nullptr, 5), QString("Skopiowano %n zdjęć"));
         QCOMPARE(translator.translate("Outgoing", "Copied %n photo(s)", nullptr, 22), QString("Skopiowano %n zdjęcia"));
         QCOMPARE(translator.translate("Main", "Quit"), QString("Zakończ"));
+        QCOMPARE(translator.translate("Incoming", "Adding %n file(s) to %1…", nullptr, 1), QString("Dodawanie %n pliku do %1…"));
+        QCOMPARE(translator.translate("Incoming", "Added %n file(s) to %1", nullptr, 3), QString("Dodano %n pliki do %1"));
+        QCOMPARE(translator.translate("Incoming", "%n file(s) not added", nullptr, 5), QString("Nie dodano %n plików"));
     }
 
     void englishIsTheFallback() {
@@ -287,6 +290,7 @@ private slots:
         QCOMPARE(translator.language(), QString("en"));
         QVERIFY(translator.translate("Main", "Quit").isNull());
         QCOMPARE(translator.translate("Outgoing", "Copied %n photo(s)", nullptr, 1), QString("Copied %n photo"));
+        QCOMPARE(translator.translate("Incoming", "Added %n file(s) to %1", nullptr, 2), QString("Added %n files to %1"));
     }
 
     void theLibraryIsOldestFirstAndAMissingOneIsReported() {

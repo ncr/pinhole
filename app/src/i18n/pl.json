@@ -177,5 +177,51 @@
   "Where are your photos?": "Gdzie są Twoje zdjęcia?",
   "Where to keep photos": "Gdzie trzymać zdjęcia",
   "Zoom": "Powiększ",
-  "⏎ yes · Esc no": "⏎ tak · Esc nie"
+  "⏎ yes · Esc no": "⏎ tak · Esc nie",
+  "%1 could not be reached": "brak połączenia z %1",
+  "%1 has them already": "%1 już je ma",
+  "%1 storage is full": "brak miejsca w %1",
+  "%1: added as a still photo, since iCloud on the web does not take a Live Photo's motion": "%1: dodano jako zwykłe zdjęcie, bo iCloud w przeglądarce nie przyjmuje ruchu zdjęcia Live",
+  "%1: already in %2": "%1: już jest w %2",
+  "%n file(s) not added": {
+    "one": "Nie dodano %n pliku",
+    "few": "Nie dodano %n plików",
+    "many": "Nie dodano %n plików",
+    "other": "Nie dodano %n pliku"
+  },
+  "Add %n file(s) to %1": {
+    "one": "Dodaj %n plik do %1",
+    "few": "Dodaj %n pliki do %1",
+    "many": "Dodaj %n plików do %1",
+    "other": "Dodaj %n pliku do %1"
+  },
+  "Add the photos and videos to %1": "Dodaj zdjęcia i filmy do %1",
+  "Add to the library": "Dodaj do biblioteki",
+  "Added %n file(s) to %1": {
+    "one": "Dodano %n plik do %1",
+    "few": "Dodano %n pliki do %1",
+    "many": "Dodano %n plików do %1",
+    "other": "Dodano %n pliku do %1"
+  },
+  "Added, with a note": "Dodano, z uwagą",
+  "Adding %n file(s) to %1…": {
+    "one": "Dodawanie %n pliku do %1…",
+    "few": "Dodawanie %n plików do %1…",
+    "many": "Dodawanie %n plików do %1…",
+    "other": "Dodawanie %n pliku do %1…"
+  },
+  "Advanced Data Protection keeps iCloud.com out of the library, so nothing can be added from here": "Zaawansowana ochrona danych nie wpuszcza iCloud.com do biblioteki, więc stąd nie da się nic dodać",
+  "Copied into the folder. The files here stay as they are.": "Zostaną skopiowane do folderu. Pliki tutaj zostają bez zmian.",
+  "Drop files": "Upuść pliki",
+  "Uploaded to your iCloud Photos. The files here stay as they are.": "Trafią do Twoich Zdjęć iCloud. Pliki tutaj zostają bez zmian.",
+  "and %n more": {
+    "one": "i jeszcze %n",
+    "few": "i jeszcze %n",
+    "many": "i jeszcze %n",
+    "other": "i jeszcze %n"
+  },
+  "could not be added": "nie udało się dodać",
+  "not a photo or a video %1 takes": "to nie zdjęcie ani film, które przyjmie %1",
+  "not signed in to %1": "nie zalogowano do %1",
+  "too large for %1": "za duży dla %1"
 }

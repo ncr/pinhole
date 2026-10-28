@@ -21,6 +21,7 @@
 #include "framestats.h"
 #include "library.h"
 #include "photogrid.h"
+#include "incoming.h"
 #include "outgoing.h"
 #include "photoprovider.h"
 #include "selftest.h"
@@ -165,6 +166,7 @@ int main(int argc, char *argv[]) {
     service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
+    Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
 
@@ -175,6 +177,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
+    engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
     engine.rootContext()->setContextProperty("bench", nullptr);
@@ -513,6 +516,8 @@ int main(int argc, char *argv[]) {
             timer->start(50);
         });
     }
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("drop:")))
+        runDropSelfTest(window, library, incoming, test.mid(5), qEnvironmentVariable("PINHOLE_SELFTEST_DROP").split(':', Qt::SkipEmptyParts));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))
         runViewerSelfTest(library, viewer);
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("copytwice:")))

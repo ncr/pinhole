@@ -4,7 +4,8 @@ The window never talks to the source of the photos (iCloud, or a folder;
 see [sources.md](sources.md)). It reads the library index and the
 thumbnails straight from disk, and asks `pinholed` for everything else: the
 larger renditions of a photo, originals, videos. The service owns all
-network access and all writes, so the window stays a fast reader. It also
+network access and all writes (to the library too: photos dropped on the
+window are added through it), so the window stays a fast reader. It also
 follows the source's changes and tells the window when the library changed.
 
 The window starts the service if none answers, passing the library it
@@ -30,6 +31,7 @@ order, since a cached file answers at once while a download takes a while.
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
+| `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
 | `sources` | | every source added, as the `sources` event |
 | `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
 | `remove_source` | `id` | the `sources` left; see Sources |
@@ -73,13 +75,16 @@ favourited, edited or re-dated photos); the thumbnails of new photos are
 already on disk. A window reads the index again.
 
 ```json
-{"event": "source", "kind": "folder", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures"}
+{"event": "source", "kind": "folder", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures",
+ "accepts": ["jpg", "jpeg", "heic", "...", "mov", "mp4"]}
 ```
 
 Where the photos come from, sent to a window as it connects and when it
 changes: `name` is what to call it ("iCloud", or the folder's name as in
 `sources`), `needs_sign_in` whether it is one that can need signing in, and
-an iCloud source's `account` (its Apple ID) or a folder's `path`. With no
+an iCloud source's `account` (its Apple ID) or a folder's `path`.
+`accepts` is the extensions of the files `add` takes for it, lower case
+(empty: nothing can be added). With no
 source at all (none added yet, or every one removed) `kind` is null and
 `name` empty, and the library is an empty one in `library/none`.
 
@@ -222,6 +227,59 @@ then Pictures itself, those with any photos, not already added. Their
 files are only looked at by name and size, and counting stops after two
 seconds for all of them together. An Apple ID signed in to here already is
 not in `icloudpd`.
+
+## Adding
+
+`add` puts photos and videos from this computer into the library of the
+source shown, and is the one thing that changes a library: a folder gets
+copies, iCloud gets uploads; the files given stay as they are. Folders
+given are looked into (hidden files skipped), and a Live Photo's two
+files (`IMG_1234.HEIC` with `IMG_1234.MOV` or `IMG_1234_HEVC.MOV`) make
+one asset. Assets go one at a time, whichever window asked: a second
+`add` waits for the first.
+
+A folder takes what a look at it finds (JPEG, HEIC, PNG, GIF, TIFF,
+WebP, AVIF, MOV, MP4, M4V, MKV, WebM, AVI) and copies it into the folder
+itself, never over a file there: `IMG_1234 (2).HEIC` when the name is
+taken, a Live Photo's two files under the same new name, each written
+under a hidden name first so a round never sees half a file. iCloud takes
+what icloud.com does (JPEG, PNG, HEIC, HEIF, TIFF, GIF, WebP, MOV, MP4,
+M4V, up to 500 MB a file), uploaded as icloud.com uploads them
+(api-findings.md, Uploading); a Live Photo goes as its still photo, since
+the web cannot pair the motion with it. Each asset added starts a round,
+so it is in the library (`library_changed`) as soon as the source has it:
+for a folder at once, for iCloud some seconds later.
+
+While it works, the window that asked hears, at most four times a second
+and as each asset starts:
+
+```json
+{"event": "adding", "request": 7, "source": "icloud:me@example.com", "done": 1, "total": 3,
+ "file": "/home/me/Desktop/IMG_1234.HEIC", "sent": 4200000, "bytes": 9800000}
+```
+
+`done` assets of `total`, `sent` bytes of all of them (`bytes`), and the
+file under way; the last has `done` equal to `total` and `file` null.
+The answer says how each went:
+
+```json
+{"id": 7, "ok": true, "result": {"source": "icloud:me@example.com", "added": 2, "duplicates": 0, "failed": 1, "files": [
+  {"file": "/home/me/notes.txt", "files": ["/home/me/notes.txt"], "state": "failed",
+   "error": {"code": "unsupported", "message": "not a photo or a video"}},
+  {"file": "/home/me/IMG_1234.HEIC", "files": ["/home/me/IMG_1234.HEIC", "/home/me/IMG_1234.MOV"], "state": "added",
+   "asset": "B7C1BB6F-...", "note": "IMG_1234.HEIC was added as a still photo: ..."},
+  {"file": "/home/me/clip.mp4", "files": ["/home/me/clip.mp4"], "state": "added", "asset": "..."}]}}
+```
+
+`state` is `added`, `duplicate` (iCloud has it already: nothing was
+added) or `failed`; `asset` is its id in the library when the source
+knows it already. An error's `code`: `unsupported` (a kind of file the
+source does not take), `too_large`, `over_quota` (iCloud storage is full),
+`protected` (Advanced Data Protection keeps the web out of the library),
+`needs_sign_in`, `unavailable` (the source or the network failed), or
+`failed` (anything else, in the message). The request itself fails with
+`unsupported` when nothing is shown, and `bad_request` without `files`.
+`pinhole-sync add <files>` does the same from a terminal.
 
 ## Streaming
 

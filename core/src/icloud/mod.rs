@@ -11,6 +11,7 @@ pub mod index;
 pub mod push;
 pub mod records;
 pub mod session;
+pub mod upload;
 pub mod walk;
 
 use std::collections::{HashMap, HashSet};
@@ -20,6 +21,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::add::{Added, Addition};
 use crate::db::Index;
 use crate::source::{Body, FetchError, Health, Heard, Listing, Source, Stored, Ticket, Watch};
 use crate::sync::now_secs;
@@ -282,6 +284,23 @@ impl Source for IcloudSource {
                 })
             })
             .collect())
+    }
+
+    fn accepts(&self) -> &'static [&'static str] {
+        upload::ACCEPTS
+    }
+
+    /// Uploaded as icloud.com does (`upload`), with the session the links
+    /// client has; one Apple rejected is dropped, as in `with`.
+    fn add(&self, addition: &Addition, sent: &(dyn Fn(u64, u64) + Sync)) -> Result<Added> {
+        let session = self.with(&self.links, |client| Ok(client.session().clone()))?;
+        let result = upload::Uploader::new(session)?.upload(addition, sent);
+        if let Err(e) = &result {
+            if self.health(e) == Health::NeedsSignIn {
+                *self.links.lock().unwrap() = None;
+            }
+        }
+        result
     }
 
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError> {

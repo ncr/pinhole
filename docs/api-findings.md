@@ -2,7 +2,7 @@
 
 Measured on 2026-10-24 against a real library (48,948 items, 2001–2026) from
 an M2 Pro on home broadband, with `pinhole-probe`. Everything here is
-read-only.
+read-only, but for Uploading.
 
 ## Sign-in
 
@@ -101,6 +101,55 @@ bandwidth. Not yet tried: sustaining it for all 48k thumbnails.
 `speed`, accuracy and a timestamp: readable, so a map and place filters are
 possible later. There are no place names; those would need local reverse
 geocoding. 29,426 assets have a location.
+
+## Uploading
+
+Read from icloud.com's own Photos app (build 2640Build32,
+`/applications/photos3/current/en-us/ui.main.js`) and tried on the real
+library on 2026-10-28 with one 800×600 JPEG of 15 KB, which is still
+there (`pinhole-upload-test.jpg`, asset
+`<its record name>`), by `pinhole-sync add`.
+
+- **The session is enough.** The pyicloud session's cookies, with its
+  `Origin` and `Referer`, do it; nothing else is signed in to. The
+  session's `webservices` include `photosupload` (and the older
+  `uploadimagews`), which the provider already hands over.
+- **Four steps**, each a POST with `Content-Type: text/plain`, the cookies
+  and `?dsid=` on the URL, to `<photosupload>/photosupload/<endpoint>`:
+  1. `createUploadUrl` with `{"zoneName": "PrimarySync", "assets": {<uuid>: <bytes>}}`
+     answers `{"uploadUrls": {<uuid>: <link>}}`.
+  2. The file itself, as the body of a POST to that link (cookies too).
+     It answers `{"singleFile": {...}}`, a receipt, or `isDuplicate: true`.
+  3. `putAsset` with `{"zoneName", "files": [{"fileName", "lastModDate"
+     (ms), "timeZoneOffset" (minutes, as Date.getTimezoneOffset),
+     "singleFileUploadRequest": <the receipt>}], "localTimeZoneId":
+     "Europe/Warsaw", "importGroup": <uuid>}` answers
+     `[{"uploadJobId", "cplMaster", "cplAsset"}]`: the new records' names,
+     or `[{"response": {"status", "errorMessage", "isRetryable"}}]`.
+  4. `uploadStatus` with `{"uploadJobIds": [...]}` answers
+     `{<job>: {"progress": 0..100}}` or `{<job>: {"errorCode": n}}`; done
+     at 100. icloud.com polls it.
+- **Timing:** the whole round for the test photo took 11 s from a cold
+  start (the provider checking the session is most of it); the photo was
+  in the change feed at once, and the running `pinholed`, told by a push,
+  had it in the library with its thumbnail about 20 s after the upload
+  began. With no EXIF date, the date taken is the file's `lastModDate`.
+- **Limits** (icloud.com's `iCPLUploadV2Requirements`): JPEG, PNG, HEIC,
+  HEIF, TIFF, GIF, WebP, QuickTime, MPEG-4 and M4V; 125 bytes to 500 MB a
+  file; at most 20,480 px on a side and 419 megapixels; names up to 255
+  characters; 1,000 files to a batch, one upload at a time. Error statuses:
+  413 storage full, 415 unsupported, 409 the same job twice, 423/424 PCS
+  missing or invalid (Advanced Data Protection keeps the web out), 429 and
+  500 worth trying again (icloud.com waits 0.5 s, doubling to 10 s, three
+  times).
+- **Live Photos:** the web takes one file per asset, so a Live Photo's
+  motion cannot go with its photo. Not tried: whether two `files` in one
+  `putAsset` would pair them; that would add to the real library to find
+  out.
+- `isRamped` (also on `photosupload`) decides between this and the older
+  `uploadimagews/upload?filename=&dsid=&lastModDate=&timezoneOffset=`,
+  which takes JPEG alone up to 100 MB; the current build always uses
+  `photosupload`.
 
 ## What this means for Pinhole
 

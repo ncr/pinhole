@@ -6,7 +6,9 @@ photos on this computer. Working name.
 Pinhole keeps an index of the whole library on disk (metadata and small
 thumbnails) and fetches everything else from iCloud only when it is looked at,
 dragged or exported, the way Photos on a Mac does with "Optimize Mac Storage".
-It never changes the library.
+It changes the library only by adding to it: photos and videos dropped on
+the window go into it (uploaded to iCloud, copied into a folder). Nothing
+in it is ever edited or deleted.
 
 A folder works too: in the settings (the gear button, or `,`), Photos from →
 Folder. Pinhole indexes it and makes the thumbnails in the background, shows
@@ -80,6 +82,12 @@ the original (HEIC through libheif). Left and Right step through, Escape or
 Space closes, Space plays and pauses a video, L plays a Live Photo's motion.
 `PINHOLE_SELFTEST=viewer app/build/pinhole` opens one of each kind and
 reports how long every stage took.
+
+Drop photos and videos (or folders of them) from a file manager on the
+window to add them to the source shown, as `pinhole-sync add <files>`
+does from a terminal; `PINHOLE_SELFTEST=drop:<dir>` with
+`PINHOLE_SELFTEST_DROP=<file>:<file>` drops files on the window and
+reports, for a scratch source only, since they really are added.
 
 Click selects (Ctrl-click adds, Shift-click a range, Ctrl+A all). Drag
 photos out to any app; Ctrl+C copies them; Ctrl+E exports the originals and

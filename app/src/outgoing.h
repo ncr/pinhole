@@ -18,6 +18,9 @@ class ServiceClient;
 class Outgoing : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // Photos are being dragged out of this window now: a drop back on it
+    // is not files coming in.
+    Q_PROPERTY(bool dragging READ dragging NOTIFY draggingChanged)
 public:
     Outgoing(const Library *library, ServiceClient *service, QObject *parent = nullptr);
 
@@ -39,6 +42,8 @@ public:
 
     static QString stagingFolder();
 
+    bool dragging() const { return m_dragging; }
+
     // Drag these photos out of `source` (compatible form). The drag starts at
     // once; the files are handed over when the drop target asks for them,
     // waiting for any still downloading, like a file promise on a Mac.
@@ -54,6 +59,7 @@ public:
 
 signals:
     void statusChanged();
+    void draggingChanged();
     // A copy was asked for: how many photos (the clipboard has them the
     // moment their files are ready).
     void copied(int files, int failed);
@@ -69,4 +75,5 @@ private:
     const Library *m_library;
     ServiceClient *m_service;
     QString m_status;
+    bool m_dragging = false;
 };

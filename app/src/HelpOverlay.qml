@@ -31,7 +31,8 @@ Item {
         { title: qsTr("Share"), keys: [
             ["C", qsTr("Copy")],
             ["E", qsTr("Export JPEG")],
-            ["⇧ E", qsTr("Export original")]
+            ["⇧ E", qsTr("Export original")],
+            [qsTr("Drop files"), qsTr("Add to the library")]
         ] },
         { title: "Pinhole", keys: [
             ["Tab", qsTr("Sources")],

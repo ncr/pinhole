@@ -312,6 +312,22 @@ pub trait Source: Send + Sync {
 
     /// Start reading one rendition: all of it, or bytes `start..=end`.
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError>;
+
+    /// The extensions of the files `add` takes, in lower case; none when
+    /// nothing can be added to this library.
+    fn accepts(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Add one photo or video to the library (a Live Photo's two files
+    /// together), from files on this computer, which stay as they are.
+    /// `sent` hears how many of its bytes have gone, of how many. The
+    /// library learns of it the usual way, at the next round. An
+    /// `AddError` says why one could not be added; any other error is the
+    /// source's, as `health` tells.
+    fn add(&self, _addition: &crate::add::Addition, _sent: &(dyn Fn(u64, u64) + Sync)) -> Result<crate::add::Added> {
+        Err(crate::add::AddError::new("unsupported", format!("{} cannot be added to", self.name())).into())
+    }
 }
 
 /// Nothing to show photos from yet, or any more: every source removed.

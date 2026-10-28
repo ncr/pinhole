@@ -277,7 +277,7 @@ impl Downloader {
     }
 }
 
-fn session_headers(session: &Session, url: &Url, with_cookies: bool) -> Result<HeaderMap> {
+pub fn session_headers(session: &Session, url: &Url, with_cookies: bool) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     for (k, v) in &session.headers {
         headers.insert(HeaderName::from_bytes(k.as_bytes())?, HeaderValue::from_str(v)?);
