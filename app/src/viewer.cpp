@@ -214,31 +214,35 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     logInput(QStringLiteral("viewer wheel phase=%1 pixel=%2,%3 angle=%4,%5 inverted=%6 ts=%7")
                  .arg(int(wheel->phase())).arg(px.x()).arg(px.y()).arg(angle.x()).arg(angle.y())
                  .arg(wheel->inverted()).arg(wheel->timestamp()));
+    // A mouse wheel comes with no phases and with notches (on Wayland with
+    // pixels too, 15 a notch); a touchpad has phases.
+    if (wheel->phase() == Qt::NoScrollPhase && !angle.isNull()) {
+        // Turned the natural (Apple) way, whatever the system's setting:
+        // the opposite of a classic wheel, which reads positive pushed away
+        // from you and rolled to the left.
+        const QPoint classic = wheel->inverted() ? -angle : angle;
+        if (std::abs(angle.y()) >= std::abs(angle.x())) {
+            // The wheel zooms at the pointer, a notch a quarter: pulled
+            // towards you, the photo comes closer.
+            m_motion.zoomBy(std::pow(1.25, -classic.y() / 120.0), wheel->position().x(), wheel->position().y());
+            emit motionChanged();
+            return true;
+        }
+        // The thumb wheel: a notch (120) is a photo, the photos going the
+        // way the wheel turns, as a swipe does.
+        m_notches += classic.x() / 120.0;
+        for (; m_notches >= 1; m_notches -= 1)
+            step(1);
+        for (; m_notches <= -1; m_notches += 1)
+            step(-1);
+        return true;
+    }
     if (wheel->modifiers() & Qt::ControlModifier) {
-        // Ctrl+wheel zooms at the pointer, a notch a quarter.
+        // Ctrl and a touchpad's scroll zoom at the pointer.
         const double notches = (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
         if (notches != 0)
             m_motion.zoomBy(std::pow(1.25, notches), wheel->position().x(), wheel->position().y());
         emit motionChanged();
-        return true;
-    }
-    // A mouse wheel comes with no phases and with notches (on Wayland with
-    // pixels too, 15 a notch); a touchpad has phases.
-    const bool mouseWheel = wheel->phase() == Qt::NoScrollPhase && !angle.isNull();
-    if (mouseWheel && std::abs(angle.x()) > std::abs(angle.y())) {
-        // The horizontal (thumb) wheel zooms at the pointer, as in the grid,
-        // a notch a quarter.
-        m_motion.zoomBy(std::pow(1.25, angle.x() / 120.0), wheel->position().x(), wheel->position().y());
-        emit motionChanged();
-        return true;
-    }
-    if (mouseWheel) {
-        // The wheel: a notch (120) is a photo, down for the next.
-        m_notches += angle.y() / 120.0;
-        for (; m_notches <= -1; m_notches += 1)
-            step(1);
-        for (; m_notches >= 1; m_notches -= 1)
-            step(-1);
         return true;
     }
     // A touchpad: the photos follow the fingers (viewermotion.h).

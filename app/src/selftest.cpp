@@ -418,21 +418,27 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [&viewer, start] { return viewer.index() == *start + 1; }},
         {"clicking the left side shows the previous", [=] { click(window, atLeft()); },
          [&viewer, start] { return viewer.index() == *start; }},
-        // As an MX Master sends a notch on Wayland: with 15 px.
-        {"a wheel notch down shows the next", [=] { wheel(window, middle(), {0, -15}, {0, -120}); },
+        // As an MX Master sends a notch on Wayland: with 15 px. Natural
+        // (Apple) direction, the system's being classic.
+        {"a thumb-wheel notch shows the next", [=] { wheel(window, middle(), {15, 0}, {120, 0}); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
-        {"two notches of the horizontal wheel zoom in",
+        {"two notches of the wheel pulled towards you zoom in",
          [=] {
-             wheel(window, middle(), {15, 0}, {120, 0});
-             wheel(window, middle(), {15, 0}, {120, 0});
+             wheel(window, middle(), {0, -15}, {0, -120});
+             wheel(window, middle(), {0, -15}, {0, -120});
          },
          [&viewer, start] {
+             // A video does not zoom; which one this is depends on the library.
+             if (viewer.property("video").toBool()) {
+                 std::printf("selftest:      (a video, which does not zoom)\n");
+                 return viewer.index() == *start + 1;
+             }
              return viewer.index() == *start + 1 && std::abs(viewer.property("zoom").toDouble() - 1.5625) < 0.02;
          }, 800},
-        {"and two back fit it again",
+        {"and two pushed away fit it again",
          [=] {
-             wheel(window, middle(), {-15, 0}, {-120, 0});
-             wheel(window, middle(), {-15, 0}, {-120, 0});
+             wheel(window, middle(), {0, 15}, {0, 120});
+             wheel(window, middle(), {0, 15}, {0, 120});
          },
          [&viewer] { return std::abs(viewer.property("zoom").toDouble() - 1) < 0.01; }, 800},
         {"a long swipe to the left shows the next, once", [=] { swipe(window, middle(), {-12, 2}, 30); },
