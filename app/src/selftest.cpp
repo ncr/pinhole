@@ -913,3 +913,74 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
         });
     });
 }
+
+void runActionBarSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder) {
+    // Late enough for the plugins to have stacked their series.
+    QTimer::singleShot(4000, window, [=, &viewer, &library] {
+        int index = -1;
+        for (int i = library.count() - 1; i >= 0 && index < 0; --i)
+            if (library.at(i).live && grid->stackOf(i) >= 0)
+                index = i;
+        if (index < 0) {
+            std::printf("selftest: no Live Photo in a series\n");
+            QCoreApplication::quit();
+            return;
+        }
+        viewer.openAt(index, grid->rectOf(index));
+        auto menuOpen = [window](const char *bar) {
+            QObject *b = window->findChild<QObject *>(QString::fromLatin1(bar));
+            return b && b->property("menuOpen").toBool();
+        };
+        struct Step {
+            int key;
+            Qt::KeyboardModifiers mods;
+            QString name; // grabbed after the key, if any
+            bool bottom;
+        };
+        // Each menu on its key, then Esc: the menu goes, the photo stays.
+        auto steps = std::make_shared<QList<Step>>(QList<Step>{
+            {0, Qt::NoModifier, QStringLiteral("viewer"), false},
+            {Qt::Key_G, Qt::ShiftModifier, QStringLiteral("viewer-series"), false},
+            {Qt::Key_Down, Qt::NoModifier, QStringLiteral("viewer-series-down"), false},
+            {Qt::Key_Escape, Qt::NoModifier, {}, false},
+            {Qt::Key_L, Qt::ShiftModifier, QStringLiteral("viewer-live"), false},
+            {Qt::Key_Escape, Qt::NoModifier, {}, false},
+            {Qt::Key_C, Qt::ShiftModifier, QStringLiteral("viewer-copy"), false},
+            {Qt::Key_Escape, Qt::NoModifier, {}, false},
+            {Qt::Key_Escape, Qt::NoModifier, {}, false},
+            {Qt::Key_C, Qt::ShiftModifier, QStringLiteral("select-copy"), true},
+            {Qt::Key_Escape, Qt::NoModifier, {}, true},
+            {Qt::Key_G, Qt::ShiftModifier, QStringLiteral("select-series"), true},
+        });
+        auto next = std::make_shared<std::function<void()>>();
+        *next = [=, &viewer] {
+            if (steps->isEmpty()) {
+                QCoreApplication::quit();
+                return;
+            }
+            const Step step = steps->takeFirst();
+            // Select mode once the viewer has gone.
+            if (step.bottom && !grid->selecting()) {
+                grid->setSelecting(true);
+                grid->selectAll();
+            }
+            if (step.key != 0)
+                key(window, step.key, step.mods);
+            QTimer::singleShot(600, window, [=, &viewer] {
+                std::printf("selftest: %s: viewer %s, viewer menu %s, select menu %s\n",
+                            qPrintable(step.name.isEmpty() ? QStringLiteral("key") : step.name),
+                            viewer.isOpen() ? "open" : "closed", menuOpen("viewerActions") ? "open" : "closed",
+                            menuOpen("selectBar") ? "open" : "closed");
+                std::fflush(stdout);
+                if (!step.name.isEmpty()) {
+                    const QImage frame = window->grabWindow();
+                    const int h = std::min(frame.height(), 420);
+                    frame.copy(0, step.bottom ? frame.height() - h : 0, frame.width(), h)
+                        .save(QStringLiteral("%1/%2.png").arg(folder, step.name));
+                }
+                (*next)();
+            });
+        };
+        QTimer::singleShot(1500, window, [next] { (*next)(); });
+    });
+}

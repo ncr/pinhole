@@ -634,11 +634,6 @@ void Viewer::setEffect(const QString &effect) {
     showEffect();
 }
 
-void Viewer::nextEffect() {
-    static const QStringList effects{"live", "loop", "bounce", "long_exposure"};
-    setEffect(effects[(effects.indexOf(m_effect) + 1) % effects.size()]);
-}
-
 void Viewer::libraryReloaded(const std::vector<int> &moved) {
     if (m_index < 0)
         return;

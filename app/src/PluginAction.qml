@@ -7,6 +7,10 @@ QtObject {
     // "selection": in select mode's bar, after Export, for what is ticked
     // (pinhole.selection()); its key works only while it shows.
     property string place: "grid"
+    // In the bars (the viewer's, select mode's): actions with the same
+    // group are one button, the first of them shown, and the rest in its
+    // menu under ▾, opened with ⇧ and its key too. Without one, alone.
+    property string group
     property string text
     // A key that presses it while it shows: "G", "Shift+G".
     property string key

@@ -30,7 +30,7 @@ Item {
             ["Esc", qsTr("Back")],
             ["+ − 0", qsTr("Zoom")],
             ["L", qsTr("Live")],
-            ["⇧ L", qsTr("Live effect")],
+            ["⇧ L", qsTr("Live effects")],
             ["M", qsTr("Sound")]
         ] },
         { title: qsTr("Share"), keys: [
@@ -40,6 +40,7 @@ Item {
             [qsTr("Drop files"), qsTr("Add to the library")]
         ] },
         { title: "Pinhole", keys: [
+            ["⇧ " + qsTr("key"), qsTr("The menu beside a button")],
             ["Tab", qsTr("Sources, settings")],
             ["1–9", qsTr("Show a source")],
             ["?", qsTr("Keys")],

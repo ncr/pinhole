@@ -205,6 +205,7 @@ PinholePlugin {
         // A photo shown full window: its series, and putting it right.
         PluginAction {
             place: "viewer"
+            group: "series"
             text: plugin.shownSeries >= 0 ? qsTr("Series of %1").arg(plugin.series[plugin.shownSeries].length) : ""
             key: "G"
             shown: plugin.shownSeries >= 0
@@ -212,6 +213,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "viewer"
+            group: "series"
             text: qsTr("Take out")
             key: "X"
             shown: plugin.shownSeries >= 0
@@ -219,6 +221,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "viewer"
+            group: "series"
             text: qsTr("Ungroup")
             key: "U"
             shown: plugin.shownSeries >= 0
@@ -230,6 +233,7 @@ PinholePlugin {
             // The series it would make, shown while the pointer is on it.
             readonly property var joined: k >= 0 ? plugin.series[k].concat([pinhole.viewer.index]).sort((a, b) => a - b) : []
             place: "viewer"
+            group: "series"
             text: qsTr("Add to series")
             key: "A"
             shown: k >= 0
@@ -237,6 +241,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "viewer"
+            group: "series"
             text: qsTr("Automatic")
             key: "R"
             shown: (plugin.revision, pinhole.viewer.open && pinhole.viewer.index >= 0 && plugin.isEdited(pinhole.viewer.index))
@@ -245,6 +250,7 @@ PinholePlugin {
         // What is ticked in the grid.
         PluginAction {
             place: "selection"
+            group: "series"
             text: qsTr("Group")
             key: "G"
             usable: pinhole.selectionCount >= 2
@@ -252,6 +258,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "selection"
+            group: "series"
             text: qsTr("Ungroup")
             key: "U"
             shown: plugin.picked.some(i => plugin.of(i) >= 0)
@@ -259,6 +266,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "selection"
+            group: "series"
             text: qsTr("Automatic")
             key: "R"
             shown: plugin.picked.some(i => plugin.isEdited(i))

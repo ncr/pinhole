@@ -20,6 +20,8 @@ Item {
     property int presses: 0
     property int clicks: 0
     readonly property bool shown: viewer.open || progress > 0
+    // A menu of its bar is open, and has the arrows, ⏎ and Esc.
+    readonly property bool menuOpen: actionBar.menuOpen
 
     visible: shown
     // 0: the photo's cell in the grid. 1: fitted to the window.
@@ -60,6 +62,7 @@ Item {
     }
 
     function closeViewer() {
+        actionBar.closeMenus()
         root.grid.reveal(viewer.index)
         root.cell = root.grid.rectOf(viewer.index)
         videoPlayer.stop()
@@ -79,7 +82,7 @@ Item {
             liveOutput.visible = false
             livePlayer.stop()
             liveNotice.hide()
-            effectMenu.open = false
+            actionBar.closeMenus()
         }
         // Another effect: a loop or a bounce plays once it is here (liveSource).
         function onEffectChanged() {
@@ -275,7 +278,6 @@ Item {
 
         onPressed: mouse => {
             root.presses += 1
-            effectMenu.open = false
             last = Qt.point(mouse.x, mouse.y)
             panned = false
             // Any press is a touch first: a coasting zoomed photo stops (a
@@ -354,149 +356,85 @@ Item {
         }
     }
 
+    // What can be done with it, as one card: Live and its effects, the
+    // plugins' groups, Copy and Export, and back to the library.
     Row {
         id: actions
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 16
-        spacing: 6
+        spacing: 8
         opacity: root.progress * root.chrome
         UiText {
             visible: viewer.favorite
             anchors.verticalCenter: parent.verticalCenter
-            rightPadding: 4
             text: "♥"
             color: theme.accent
             font.pixelSize: Math.round(theme.fontSize * 1.333)
         }
-        // Lit from the click until the motion has played. While it is on its
-        // way (asked for, or a stream before its first frames) its key
-        // turns; a file already here plays at once, before it would.
-        ShellButton {
-            id: liveButton
-            objectName: "liveButton"
-            visible: viewer.live
-            anchors.verticalCenter: parent.verticalCenter
-            floating: true
-            text: root.effectName(viewer.effect)
-            key: "L"
-            active: viewer.liveLoading || liveOutput.visible
-            busy: viewer.liveLoading || root.liveBuffering
-            busyDelay: 300
-            onTapped: viewer.playLive()
-            transform: Translate { id: liveNudge }
-        }
-        // The effects, as on the iPhone: Live, Loop, Bounce, Long exposure.
-        ShellButton {
-            id: effectButton
-            objectName: "effectButton"
-            visible: viewer.live
-            anchors.verticalCenter: parent.verticalCenter
-            floating: true
-            text: "▾"
-            hint: KeyNames.nameOf("Shift+L")
-            active: effectMenu.open
-            onTapped: effectMenu.open = !effectMenu.open
-
-            // As Omarchy's menus: a card of the theme's background with a
-            // hairline in the text colour, the one shown in the accent, and
-            // the one set on the iPhone saying so.
-            Rectangle {
-                id: effectMenu
-                objectName: "effectMenu"
-                property bool open: false
-                visible: open && viewer.live
-                anchors.top: parent.bottom
-                anchors.topMargin: 6
-                anchors.right: parent.right
-                width: effectColumn.width + 2
-                height: effectColumn.height + 2
-                radius: Math.min(4, theme.radius)
-                color: theme.background
-                border.color: theme.foreground
-                border.width: 1
-                FontMetrics { id: effectMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
-                function hintOf(effect) {
-                    return effect === viewer.savedEffect && effect !== "live" ? "iPhone" : ""
-                }
-                readonly property real itemWidth: {
-                    let most = 0
-                    for (const e of root.effects) {
-                        const hint = hintOf(e)
-                        most = Math.max(most, effectMetrics.advanceWidth(root.effectName(e) + (hint !== "" ? "  " + hint : "")))
-                    }
-                    return Math.ceil(most) + 2 * Math.round(theme.fontSize * 0.833)
-                }
-                Column {
-                    id: effectColumn
-                    x: 1
-                    y: 1
-                    Repeater {
-                        model: root.effects
-                        delegate: ShellButton {
-                            required property string modelData
-                            width: effectMenu.itemWidth
-                            flat: true
-                            text: root.effectName(modelData)
-                            hint: effectMenu.hintOf(modelData)
-                            active: viewer.effect === modelData
-                            onTapped: {
-                                viewer.setEffect(modelData)
-                                effectMenu.open = false
-                            }
-                        }
-                    }
+        ActionBar {
+            id: actionBar
+            objectName: "viewerActions"
+            // The effects, as on the iPhone: Live, Loop, Bounce, Long
+            // exposure, the one set on the iPhone saying so.
+            MenuGroup {
+                visible: viewer.live
+                menuKey: "Shift+L"
+                items: root.effects.map(effect => ({
+                    text: root.effectName(effect),
+                    hint: effect === viewer.savedEffect && effect !== "live" ? "iPhone" : "",
+                    active: viewer.effect === effect,
+                    triggered: () => viewer.setEffect(effect)
+                }))
+                // Lit from the click until the motion has played. While it
+                // is on its way (asked for, or a stream before its first
+                // frames) its key turns; a file already here plays at once,
+                // before it would.
+                ShellButton {
+                    id: liveButton
+                    objectName: "liveButton"
+                    flat: true
+                    text: root.effectName(viewer.effect)
+                    key: "L"
+                    active: viewer.liveLoading || liveOutput.visible
+                    busy: viewer.liveLoading || root.liveBuffering
+                    busyDelay: 300
+                    onTapped: viewer.playLive()
+                    transform: Translate { id: liveNudge }
                 }
             }
-        }
-        Repeater {
-            model: root.pluginActions
-            delegate: ShellButton {
-                required property var modelData
-                anchors.verticalCenter: parent.verticalCenter
-                floating: true
-                visible: modelData.shown
-                usable: modelData.usable
-                active: modelData.active
-                busy: modelData.busy
-                text: modelData.text
-                key: modelData.key
-                onTapped: modelData.triggered()
-                onHoveredChanged: modelData.hovered = hovered
-                Component.onDestruction: if (hovered) modelData.hovered = false
+            Repeater {
+                model: actionBar.groupsOf(root.pluginActions)
+                delegate: PluginGroup {
+                    required property var modelData
+                    items: modelData
+                }
             }
-        }
-        // Out of the app, as buttons: no menu to find them in. Copy answers
-        // with a tick on itself.
-        CopyButton {
-            objectName: "viewerCopy"
-            floating: true
-            anchors.verticalCenter: parent.verticalCenter
-            photos: () => [viewer.index]
-            key: "C"
-        }
-        // As JPEG or MP4, what opens anywhere; the original on Shift.
-        ShellButton {
-            anchors.verticalCenter: parent.verticalCenter
-            floating: true
-            text: qsTr("Export")
-            key: "E"
-            onTapped: outgoing.exportTo([viewer.index], true)
-        }
-        ShellButton {
-            anchors.verticalCenter: parent.verticalCenter
-            floating: true
-            text: root.width > 900 ? qsTr("Export original") : qsTr("Original")
-            key: "Shift+E"
-            onTapped: outgoing.exportTo([viewer.index], false)
-        }
-        // Back to the library.
-        ShellButton {
-            anchors.verticalCenter: parent.verticalCenter
-            floating: true
-            text: "✕"
-            key: "Escape"
-            onTapped: root.closeViewer()
+            // Out of the app: Copy answers with a tick on itself; Export as
+            // JPEG or MP4, what opens anywhere, or the original.
+            MenuGroup {
+                menuKey: "Shift+C"
+                items: [
+                    { text: qsTr("Export"), key: "E", triggered: () => outgoing.exportTo([viewer.index], true) },
+                    { text: qsTr("Export original"), key: "Shift+E", triggered: () => outgoing.exportTo([viewer.index], false) }
+                ]
+                CopyButton {
+                    objectName: "viewerCopy"
+                    flat: true
+                    photos: () => [viewer.index]
+                    key: "C"
+                }
+            }
+            // Back to the library; with a menu open, Esc closes that.
+            MenuGroup {
+                ShellButton {
+                    flat: true
+                    text: "✕"
+                    key: actionBar.menuOpen ? "" : "Escape"
+                    hint: "Esc"
+                    onTapped: root.closeViewer()
+                }
+            }
         }
     }
 
@@ -505,7 +443,6 @@ Item {
     Chip {
         id: liveNotice
         objectName: "liveNotice"
-        x: Math.max(16, Math.min(actions.x + liveButton.x, root.width - 16 - width))
         y: actions.y + actions.height + 6
         textColor: theme.darkForeground
         visible: opacity > 0
@@ -513,6 +450,7 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 150 } }
         function say(message) {
             text = message
+            x = Math.max(16, Math.min(liveButton.mapToItem(root, 0, 0).x, root.width - 16 - width))
             opacity = root.progress * root.chrome
             noticeShown.restart()
             nudge.restart()

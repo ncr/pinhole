@@ -62,8 +62,10 @@ own. It sets:
 
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
-  before Copy) or `"selection"` (select mode's bar, after Export); then `text`, `key`, `shown`, `usable`, `active`, `busy`, and
-  `onTriggered`. Pinhole sets its `hovered` while the pointer is on it,
+  before Copy) or `"selection"` (select mode's bar, after Copy); then `text`, `key`, `shown`, `usable`, `active`, `busy`, and
+  `onTriggered`. In the viewer and select mode, actions with the same
+  `group` are one button, the first of them shown, with the rest in a
+  menu under ▾ beside it, opened with ⇧ and that button's key. Pinhole sets its `hovered` while the pointer is on it,
   for the plugin to show what pressing it would do, as Series shows the
   series a photo would join.
 - `covering`: true while it is over the photos: the grid's controls fade

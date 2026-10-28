@@ -145,8 +145,6 @@ public:
     // exposure, from the start for a loop or a bounce.
     Q_INVOKABLE void playLive();
     Q_INVOKABLE void setEffect(const QString &effect);
-    // The next of live, loop, bounce, long exposure.
-    Q_INVOKABLE void nextEffect();
     // After the library was read again: follow the open photo to its new
     // position, or close if it is gone.
     void libraryReloaded(const std::vector<int> &moved);

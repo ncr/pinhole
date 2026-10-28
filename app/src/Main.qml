@@ -377,11 +377,10 @@ ApplicationWindow {
         }
     }
 
-    // The bar of select mode, as an Omarchy menu card: the theme's
-    // background with a hairline in the text colour, the count in the
-    // accent, rows lighting up under the pointer, and their keys beside them.
-    // Few words, and fewer when the window is narrow (`fit`).
-    Rectangle {
+    // The bar of select mode, as the viewer's (ActionBar.qml): the count in
+    // the accent, Copy with Export in its menu, and the plugins' groups.
+    // Fewer words when the window is narrow (`fit`).
+    ActionBar {
         id: selectBar
         objectName: "selectBar"
         visible: win.chromeUp && !win.firstRun && grid.selecting
@@ -389,105 +388,82 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
-        width: barRow.implicitWidth + 2
-        height: barRow.implicitHeight + 2
-        radius: Math.min(4, theme.radius)
-        color: theme.background
-        border.color: theme.foreground
-        border.width: 1
 
-        // How much it says, from 0, everything, to 4: "Export originals"
-        // becomes "Originals", then the keys go, then the count is only the
-        // number, then not there (the ticks show it). The first that fits.
+        // How much it says, from 0, everything, to 3: the keys go, then the
+        // count is only the number, then not there (the ticks show it). The
+        // first that fits.
         readonly property int fit: {
             // Clear of the corner buttons, on both sides as it is centred.
             const room = win.width - 2 * win.cornerWidth
-            for (let level = 0; level < 4; ++level)
+            for (let level = 0; level < 3; ++level)
                 if (widthAt(level) <= room)
                     return level
-            return 4
+            return 3
         }
-        readonly property bool hints: fit < 2
+        readonly property bool hints: fit < 1
         function countText(level) {
             const n = grid.selectionCount
-            if (level >= 4)
+            if (level >= 3)
                 return ""
-            if (level === 3)
+            if (level === 2)
                 return n === 0 ? "" : String(n)
             return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
         }
-        function originalsText(level) { return level === 0 ? qsTr("Export originals") : qsTr("Originals") }
-        // Plugins' buttons for what is ticked, after Export.
-        readonly property var pluginActions: win.pluginActions.filter(a => a.place === "selection")
+        // Plugins' groups for what is ticked, after Copy.
+        readonly property var pluginGroups: groupsOf(win.pluginActions.filter(a => a.place === "selection"))
         // What the row is wide at a level, from its words: the count's
-        // padding, then each button's (see ShellButton.qml).
+        // padding, then each group's button, ▾ and hairline (see
+        // ShellButton.qml and MenuGroup.qml).
         function widthAt(level) {
             const pad = 2 * Math.round(theme.fontSize * 0.833)
-            const key = name => level < 2 ? barMetrics.advanceWidth("  " + name) : 0
+            const arrow = barMetrics.advanceWidth("▾") + 2 * Math.round(theme.fontSize * 0.5)
+            const key = name => level < 1 ? barMetrics.advanceWidth("  " + name) : 0
             const count = countText(level)
-            return 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize)
-                + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad
-                + barMetrics.advanceWidth(qsTr("Export")) + key("E") + pad
-                + barMetrics.advanceWidth(originalsText(level)) + key("⇧ E") + pad
-                + pluginActions.reduce((sum, a) => sum + (a.shown ? barMetrics.advanceWidth(a.text) + key(a.key) + pad : 0), 0)
+            let width = 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize + 5)
+                + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad + arrow
+            for (const group of pluginGroups) {
+                const shown = group.filter(a => a.shown)
+                if (shown.length > 0)
+                    width += 5 + barMetrics.advanceWidth(shown[0].text) + key(KeyNames.nameOf(shown[0].key)) + pad
+                        + (shown.length > 1 ? arrow : 0)
+            }
+            return width
         }
         FontMetrics { id: barMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
 
-        Row {
-            id: barRow
-            anchors.centerIn: parent
-            UiText {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: text !== ""
-                leftPadding: theme.fontSize
-                rightPadding: theme.fontSize
-                text: selectBar.countText(selectBar.fit)
-                color: theme.accent
-            }
+        UiText {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: text !== ""
+            leftPadding: theme.fontSize
+            rightPadding: theme.fontSize
+            text: selectBar.countText(selectBar.fit)
+            color: theme.accent
+        }
+        // As JPEG and MP4, what opens anywhere; the originals on Shift.
+        MenuGroup {
+            upward: true
+            menuKey: "Shift+C"
+            items: [
+                { text: qsTr("Export"), key: "E", usable: grid.selectionCount > 0,
+                  triggered: () => outgoing.exportTo(grid.selection(), true) },
+                { text: qsTr("Export originals"), key: "Shift+E", usable: grid.selectionCount > 0,
+                  triggered: () => outgoing.exportTo(grid.selection(), false) }
+            ]
             CopyButton {
-                anchors.verticalCenter: parent.verticalCenter
                 photos: () => grid.selection()
                 enabledHere: grid.selectionCount > 0
                 flat: true
                 key: "C"
                 hint: selectBar.hints ? "C" : ""
             }
-            // As JPEG and MP4, what opens anywhere; the originals on Shift.
-            ShellButton {
-                anchors.verticalCenter: parent.verticalCenter
-                flat: true
-                usable: grid.selectionCount > 0
-                text: qsTr("Export")
-                key: "E"
-                hint: selectBar.hints ? "E" : ""
-                onTapped: outgoing.exportTo(grid.selection(), true)
-            }
-            ShellButton {
-                anchors.verticalCenter: parent.verticalCenter
-                flat: true
-                usable: grid.selectionCount > 0
-                text: selectBar.originalsText(selectBar.fit)
-                key: "Shift+E"
-                hint: selectBar.hints ? "⇧ E" : ""
-                onTapped: outgoing.exportTo(grid.selection(), false)
-            }
-            Repeater {
-                model: selectBar.pluginActions
-                delegate: ShellButton {
-                    required property var modelData
-                    anchors.verticalCenter: parent.verticalCenter
-                    flat: true
-                    visible: modelData.shown
-                    usable: modelData.usable
-                    active: modelData.active
-                    busy: modelData.busy
-                    text: modelData.text
-                    key: modelData.key
-                    hint: selectBar.hints ? KeyNames.nameOf(modelData.key) : ""
-                    onTapped: modelData.triggered()
-                    onHoveredChanged: modelData.hovered = hovered
-                    Component.onDestruction: if (hovered) modelData.hovered = false
-                }
+        }
+        Repeater {
+            model: selectBar.pluginGroups
+            delegate: PluginGroup {
+                required property var modelData
+                items: modelData
+                upward: true
+                hints: selectBar.hints
             }
         }
     }
@@ -606,8 +582,10 @@ ApplicationWindow {
     // Something over the window that takes the keys.
     readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || pluginCovering
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun
+    // The grid has its keys: not while a menu of select mode's bar is open.
+    readonly property bool gridKeys: inGrid && !selectBar.menuOpen
     // The viewer has the keys: not while the help or a plugin is over it.
-    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering
+    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering && !(photoViewer?.menuOpen ?? false)
     // The buttons' own keys (ShellButton.qml), but for while a panel is up.
     readonly property bool buttonKeys: !panelUp && !firstRun
 
@@ -663,23 +641,24 @@ ApplicationWindow {
 
     // Every button presses on its own key too, shown beside it, while it
     // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,
-    // originals ⇧E, Live L, close Esc. The keys here are the rest.
+    // originals ⇧E, Live L, close Esc; ⇧ with a button's key opens the
+    // menu beside it (MenuGroup.qml). The keys here are the rest.
 
     // The grid.
-    Shortcut { enabled: win.inGrid; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
-    Shortcut { enabled: win.inGrid; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
-    Shortcut { enabled: win.inGrid; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
+    Shortcut { enabled: win.gridKeys; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
+    Shortcut { enabled: win.gridKeys; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
+    Shortcut { enabled: win.gridKeys; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
     // Up and down a row, held a steady glide; with Shift a half screen,
     // held faster.
-    Shortcut { enabled: win.inGrid; sequence: "Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, false) }
-    Shortcut { enabled: win.inGrid; sequence: "Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, false) }
-    Shortcut { enabled: win.inGrid; sequence: "Shift+Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, true) }
-    Shortcut { enabled: win.inGrid; sequence: "Shift+Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, true) }
-    Shortcut { enabled: win.inGrid; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
-    Shortcut { enabled: win.inGrid; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
-    Shortcut { enabled: win.inGrid && !trouble.visible; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
+    Shortcut { enabled: win.gridKeys; sequence: "Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, false) }
+    Shortcut { enabled: win.gridKeys; sequence: "Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, false) }
+    Shortcut { enabled: win.gridKeys; sequence: "Shift+Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, true) }
+    Shortcut { enabled: win.gridKeys; sequence: "Shift+Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, true) }
+    Shortcut { enabled: win.gridKeys; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
+    Shortcut { enabled: win.gridKeys; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
+    Shortcut { enabled: win.gridKeys && !trouble.visible; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
 
-    Shortcut { enabled: win.inGrid && grid.selecting && !trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
+    Shortcut { enabled: win.gridKeys && grid.selecting && !trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
 
     // Out of the app, from the grid or the viewer.
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }
@@ -699,7 +678,6 @@ ApplicationWindow {
     Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
     Shortcut { enabled: win.inViewer; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
-    Shortcut { enabled: win.inViewer && viewer.live; sequence: "Shift+L"; context: Qt.ApplicationShortcut; onActivated: viewer.nextEffect() }
     Shortcut { enabled: win.inViewer; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
     Shortcut { enabled: win.inViewer; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }
     Shortcut { enabled: win.inViewer; sequence: "0"; context: Qt.ApplicationShortcut; onActivated: viewer.resetZoom() }
