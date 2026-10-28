@@ -408,12 +408,16 @@ private:
         double t = 1;
     } m_zoom;
     // A horizontal wheel zooming as a pinch does: the log of the cell size
-    // shown and the one its notches add up to, and when the last came (s,
-    // on m_clock).
+    // shown and the one its notches add up to, the level the turn began
+    // at, and when the last notch came (s, on m_clock). Spent: this turn
+    // has gone its one level, and its notches count for nothing until the
+    // wheel rests.
     struct WheelZoom {
         bool active = false;
+        bool spent = false;
+        int from = 0;
         double current = 0, target = 0;
-        double lastAt = 0;
+        double lastAt = -1;
     } m_wheelZoom;
 
     QElapsedTimer m_clock;

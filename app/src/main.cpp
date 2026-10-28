@@ -532,7 +532,9 @@ int main(int argc, char *argv[]) {
     }
     // PINHOLE_SELFTEST=wheelzoom: a mouse's horizontal wheel turned a little
     // at a time from 7 columns, a second apart, and the level each turn lands
-    // on, on the output: never back where it began unless it hardly turned.
+    // on, on the output: never back where it began unless it hardly turned,
+    // and never more than a level, even for a burst of notches (as an MX
+    // Master's thumb wheel sends for the slightest touch).
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("wheelzoom")) {
         QTimer::singleShot(1200, window, [window, grid] {
             grid->setColumnsNow(7);
@@ -541,7 +543,8 @@ int main(int argc, char *argv[]) {
             auto *frames = new QTimer(window);
             QObject::connect(frames, &QTimer::timeout, window, [grid] { grid->advance(1.0 / 60); });
             frames->start(16);
-            const std::vector<std::vector<int>> turns = {{24}, {120}, {-120}, {-120}, {-120}, {120, 120, 120}, {60}, {-24}};
+            const std::vector<std::vector<int>> turns = {{24}, {120}, {-120}, {-120}, {-120}, {120, 120, 120}, {60}, {-24},
+                                                       {-120, -120, -120, -120, -120, -120, -120, -120}, {360, 360}};
             for (size_t k = 0; k <= turns.size(); ++k) {
                 QTimer::singleShot(int(k) * 1000 + 500, window, [grid, turns, k] {
                     if (k > 0)
