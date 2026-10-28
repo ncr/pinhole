@@ -28,12 +28,14 @@ constexpr double kStripSpring = 20;
 constexpr double kStripCatchUp = 10;
 // A held key: how long before the photos move on by themselves (s), how
 // many a second they start at, the most (without and with Shift), and how
-// quickly they get there (the share left shrinks by e^-rate a second).
+// quickly they get there (the share left shrinks by e^-rate a second):
+// speeding up gently, slowing down at once when Shift is let go.
 constexpr double kHoldDelay = 0.35;
 constexpr double kHoldStart = 3;
 constexpr double kHoldTop = 20;
 constexpr double kHoldTopFast = 60;
 constexpr double kHoldRate = 1.2;
+constexpr double kHoldBrake = 8;
 // Pinched below this share of fitted on release: close.
 constexpr double kCloseBelow = 0.7;
 // Swiped up or down: the photo follows like this, and closing takes a drag
@@ -417,7 +419,8 @@ void ViewerMotion::advance(double dt) {
         const double page = pageWidth();
         const double top = m_holdFast ? kHoldTopFast : kHoldTop;
         m_holdSpeed = std::max(m_holdSpeed, kHoldStart);
-        m_holdSpeed += (top - m_holdSpeed) * (1 - std::exp(-kHoldRate * dt));
+        const double rate = m_holdSpeed > top ? kHoldBrake : kHoldRate;
+        m_holdSpeed += (top - m_holdSpeed) * (1 - std::exp(-rate * dt));
         m_stripVelocity = -m_holdDir * m_holdSpeed * page;
         m_strip += m_stripVelocity * dt;
         if (m_holdDir * m_strip <= 0) {

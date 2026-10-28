@@ -523,6 +523,26 @@ private slots:
         // Let go before the moment: just the press's one photo.
         QCOMPARE(holdFor(false, 0.2, nullptr, nullptr, nullptr), 1);
 
+        // Shift let go at full speed: the photos slow down at once, not
+        // over seconds, and keep going at the plain speed.
+        ViewerMotion brake = viewerShowing();
+        brake.jumped(1);
+        brake.hold(1, true);
+        for (int i = 0; i < 360; ++i) {
+            brake.advance(1.0 / 120);
+            brake.takeSteps();
+        }
+        brake.setHoldFast(false);
+        int later = 0;
+        for (int i = 0; i < 96; ++i) {
+            brake.advance(1.0 / 120);
+            const int d = brake.takeSteps();
+            if (i >= 36)
+                later += d;
+        }
+        QVERIFY(later > 0);
+        QVERIFY(later < 13); // 0.3–0.8 s after: about 20 a second, not 60
+
         // At the end of the library it stops there.
         ViewerMotion end = viewerShowing(true, false);
         end.jumped(1);
