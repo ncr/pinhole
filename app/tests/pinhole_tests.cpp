@@ -927,6 +927,52 @@ private slots:
         QVERIFY(viewer.liveSource().isEmpty());
         qunsetenv("PINHOLE_SOCKET");
     }
+
+    void aDragOutGivesItsFilesToTheDropAndNothingAsItStarts() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        QFile photo(dir.path() + "/a.jpg");
+        QVERIFY(photo.open(QIODevice::WriteOnly));
+        photo.write("jpeg");
+        photo.close();
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        // Answered as pinholed does, while the drop waits for it.
+        QObject::connect(fake.peer, &QLocalSocket::readyRead, fake.peer, [&fake, &photo] {
+            const qsizetype seen = fake.asked.size();
+            fake.read();
+            for (qsizetype i = seen; i < fake.asked.size(); ++i)
+                if (fake.asked[i].value("method") == QLatin1String("fetch"))
+                    fake.send({{"id", fake.asked[i].value("id")}, {"ok", true},
+                               {"result", QJsonObject{{"path", photo.fileName()}, {"type", "public.jpeg"}}}});
+        });
+
+        Outgoing outgoing(&library, &service);
+        std::unique_ptr<QMimeData> data(outgoing.dragData(outgoing.snapshot({0})));
+        // As Qt's Wayland drag starts, it asks for the URL list (to offer a
+        // portal transfer): nothing, at once, and nothing fetched.
+        QVERIFY(data->hasUrls());
+        QVERIFY(data->urls().isEmpty());
+        QTest::qWait(50);
+        fake.read();
+        QVERIFY(fake.asked.isEmpty());
+        // A drop target's request, which Qt 6.12 also makes through urls():
+        // the photo, under its camera name (a JPEG, so named one).
+        const QList<QUrl> urls = data->urls();
+        QCOMPARE(urls.size(), 1);
+        QCOMPARE(QFileInfo(urls.first().toLocalFile()).fileName(), QString("a.jpg"));
+        QVERIFY(QFileInfo::exists(urls.first().toLocalFile()));
+        QCOMPARE(data->data("text/uri-list"), urls.first().toEncoded() + "\r\n");
+        qunsetenv("PINHOLE_SOCKET");
+    }
 };
 
 QTEST_MAIN(PinholeTests)

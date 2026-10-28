@@ -57,7 +57,10 @@ namespace {
 // the list itself is produced when asked for, waiting for the files.
 class PromisedFiles : public QMimeData {
 public:
-    PromisedFiles(Outgoing *outgoing, QList<LibraryItem> items) : m_outgoing(outgoing), m_items(std::move(items)) {}
+    PromisedFiles(Outgoing *outgoing, QList<LibraryItem> items) : m_outgoing(outgoing), m_items(std::move(items)) {
+        // Under way once the drag's own event loop turns.
+        QTimer::singleShot(0, this, [this] { m_started = true; });
+    }
 
     QStringList formats() const override { return {QStringLiteral("text/uri-list")}; }
     bool hasFormat(const QString &mime) const override { return mime == QLatin1String("text/uri-list"); }
@@ -66,13 +69,13 @@ protected:
     QVariant retrieveData(const QString &mime, QMetaType type) const override {
         if (mime != QLatin1String("text/uri-list"))
             return {};
-        // The files are made when a drop target asks for the bytes. Asking
-        // for the URL list is something else: Qt's Wayland drag does it as
-        // the drag starts (to offer a portal file transfer), and waiting for
-        // downloads in there freed this object under Qt and crashed. That
-        // gets nothing until the files exist.
-        const bool bytes = type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString;
-        if (!m_ready && !bytes)
+        // The files are made when a drop target asks for them. Qt's Wayland
+        // drag also asks for the URL list as it starts (to offer a portal
+        // file transfer), and waiting for downloads in there freed this
+        // object under Qt and crashed: that gets nothing. It is told apart by
+        // when it asks, not how: a drop target's request comes through
+        // urls() as well (Qt 6.12), so an empty list there dropped nothing.
+        if (!m_ready && !m_started)
             return QVariantList();
         if (!m_ready) {
             QEventLoop wait;
@@ -102,6 +105,7 @@ protected:
 private:
     Outgoing *m_outgoing;
     QList<LibraryItem> m_items;
+    bool m_started = false;
     mutable bool m_ready = false;
     mutable QStringList m_files;
 };
@@ -117,12 +121,14 @@ QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
     return items;
 }
 
+QMimeData *Outgoing::dragData(const QList<LibraryItem> &items) { return new PromisedFiles(this, items); }
+
 void Outgoing::drag(QObject *source, const QList<int> &indexes) {
     const QList<LibraryItem> items = snapshot(indexes);
     if (items.isEmpty())
         return;
     auto *drag = new QDrag(source);
-    drag->setMimeData(new PromisedFiles(this, items));
+    drag->setMimeData(dragData(items));
     const QImage thumb(QFile::decodeName(items.first().thumbPath));
     if (!thumb.isNull())
         drag->setPixmap(QPixmap::fromImage(thumb.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation)));

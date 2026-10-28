@@ -8,6 +8,7 @@
 
 #include <functional>
 
+class QMimeData;
 class ServiceClient;
 
 // Files for photos leaving the app: dragged out, copied, exported. Each
@@ -48,6 +49,9 @@ public:
     // once; the files are handed over when the drop target asks for them,
     // waiting for any still downloading, like a file promise on a Mac.
     void drag(QObject *source, const QList<int> &indexes);
+    // What such a drag carries: the files' URLs, made when a drop target
+    // asks for them once the drag is under way.
+    QMimeData *dragData(const QList<LibraryItem> &items);
     // Put these photos on the clipboard (compatible form), as files, and for
     // a single photo as an image too, so pasting into a chat works.
     // copied() at once; the clipboard gets the files when they are ready.
