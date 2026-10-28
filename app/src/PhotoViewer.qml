@@ -38,7 +38,12 @@ Item {
     readonly property real fitHeight: fitWidth / Math.max(0.01, viewer.aspect)
     onWidthChanged: viewer.setViewport(width, areaHeight)
     onAreaHeightChanged: viewer.setViewport(width, areaHeight)
-    Component.onCompleted: viewer.setViewport(width, areaHeight)
+    Component.onCompleted: {
+        viewer.setViewport(width, areaHeight)
+        // Opened before the viewer was made (Main.qml): opens now.
+        if (viewer.open)
+            opened()
+    }
 
     FrameAnimation {
         running: viewer.open && viewer.animating
@@ -46,6 +51,13 @@ Item {
     }
 
     function lerp(a, b, t) { return a + (b - a) * t }
+
+    function opened() {
+        root.openedAt = Date.now()
+        root.cell = viewer.origin
+        closing.stop()
+        opening.start()
+    }
 
     function closeViewer() {
         root.grid.reveal(viewer.index)
@@ -58,12 +70,8 @@ Item {
     Connections {
         target: viewer
         function onOpenChanged() {
-            if (viewer.open) {
-                root.openedAt = Date.now()
-                root.cell = viewer.origin
-                closing.stop()
-                opening.start()
-            }
+            if (viewer.open)
+                root.opened()
         }
         function onIndexChanged() {
             originalImage.source = ""

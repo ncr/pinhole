@@ -133,13 +133,25 @@ ApplicationWindow {
         anchors.bottomMargin: 24
     }
 
-    PhotoViewer {
-        id: photoViewer
-        objectName: "photoViewer"
+    // Made once Qt Multimedia, which plays its videos, is ready: that takes
+    // most of a second, done on a thread of its own while the grid shows
+    // (main.cpp). A photo opened before then opens as soon as it is.
+    property bool mediaReady: false
+    Loader {
+        id: viewerLoader
         anchors.fill: parent
-        grid: grid
-        pluginActions: win.pluginActions.filter(a => a.place === "viewer")
+        active: win.mediaReady
+        asynchronous: true
+        // Inside the PhotoViewer, grid would be its own property.
+        readonly property PhotoGrid photoGrid: grid
+        sourceComponent: PhotoViewer {
+            objectName: "photoViewer"
+            grid: viewerLoader.photoGrid
+            pluginActions: win.pluginActions.filter(a => a.place === "viewer")
+        }
     }
+    readonly property PhotoViewer photoViewer: viewerLoader.item
+    readonly property bool viewerShown: photoViewer?.shown ?? false
 
     Chip {
         anchors.bottom: parent.bottom
@@ -587,15 +599,15 @@ ApplicationWindow {
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
     // the viewer comes over the photos, and back, rather than vanish.
-    property real chrome: !photoViewer.shown && !panelUp ? 1 : 0
+    property real chrome: !viewerShown && !panelUp ? 1 : 0
     Behavior on chrome { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
     readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || pluginCovering
-    readonly property bool inGrid: !photoViewer.shown && !panelUp && !firstRun
+    readonly property bool inGrid: !viewerShown && !panelUp && !firstRun
     // The viewer has the keys: not while the help or a plugin is over it.
-    readonly property bool inViewer: photoViewer.shown && !help.shown && !pluginCovering
+    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering
     // The buttons' own keys (ShellButton.qml), but for while a panel is up.
     readonly property bool buttonKeys: !panelUp && !firstRun
 

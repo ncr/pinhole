@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QUrl>
+#include <QtMultimedia/private/qplatformmediaintegration_p.h>
 
 #include "bench.h"
 #include "framestats.h"
@@ -110,6 +111,25 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     if (platformTheme.startsWith("gtk"))
         qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
+
+    // Qt Multimedia, when first used, tries every hardware video decoder
+    // FFmpeg knows of (CUDA, VA-API, VDPAU, Vulkan): some 900 ms on an
+    // NVIDIA card, most of the time the window took to open. So it starts
+    // here, on a thread of its own, and the viewer, the one thing that
+    // plays video, is made once it is ready (mediaReady in Main.qml).
+    bool mediaReady = false;
+    QQuickWindow *mainWindow = nullptr;
+    std::jthread media([&app, &mediaReady, &mainWindow] {
+        QPlatformMediaIntegration *integration = QPlatformMediaIntegration::instance();
+        // Its later children (the devices) are made on the window's thread.
+        integration->moveToThread(app.thread());
+        QMetaObject::invokeMethod(&app, [&mediaReady, &mainWindow] {
+            mediaReady = true;
+            if (mainWindow)
+                mainWindow->setProperty("mediaReady", true);
+        }, Qt::QueuedConnection);
+    });
+
     app.setApplicationName("pinhole");
     app.setApplicationVersion("1.0.0");
     // Matches the window to pinhole.desktop, so the compositor (its Wayland
@@ -203,6 +223,8 @@ int main(int argc, char *argv[]) {
         return 1;
 
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    mainWindow = window;
+    window->setProperty("mediaReady", mediaReady);
     auto *grid = window->findChild<PhotoGrid *>("grid");
     window->installEventFilter(&viewer);
     grid->setSources(&library, &loader, &stats);
