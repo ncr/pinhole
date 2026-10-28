@@ -23,20 +23,6 @@ build() {
 
 package() {
   cd "$startdir/.."
-  install -Dm755 app/build/pinhole "$pkgdir/usr/bin/pinhole"
-  install -Dm755 core/target/release/pinholed "$pkgdir/usr/bin/pinholed"
-  install -Dm755 core/target/release/pinhole-sync "$pkgdir/usr/bin/pinhole-sync"
-  # The sign-in provider: a uv script that fetches icloudpd into uv's cache
-  # on first use (see auth/PROTOCOL.md).
-  install -Dm755 auth/pyicloud/pinhole-auth "$pkgdir/usr/bin/pinhole-auth"
-  # Pinhole's own plugins (docs/plugins.md), each its folder as it is in
-  # the checkout, with its helpers built.
-  install -d "$pkgdir/usr/lib/pinhole/plugins/series/i18n"
-  install -Dm644 -t "$pkgdir/usr/lib/pinhole/plugins/series" plugins/series/manifest.json plugins/series/*.qml \
-    plugins/series/Engine.js plugins/series/grain.png
-  install -Dm644 -t "$pkgdir/usr/lib/pinhole/plugins/series/i18n" plugins/series/i18n/*.json
-  install -Dm755 plugins/series/finder/target/release/pinhole-series "$pkgdir/usr/lib/pinhole/plugins/series/pinhole-series"
+  bin/install-files "$pkgdir/usr"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 "$startdir/pinhole.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/pinhole.svg"
-  install -Dm644 "$startdir/pinhole.desktop" "$pkgdir/usr/share/applications/pinhole.desktop"
 }

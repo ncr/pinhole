@@ -47,6 +47,10 @@ pinhole-sync all             # the index (~5 min) and every thumbnail (~6 min)
 Then open Pinhole from the launcher. Without a library it says what to do
 and opens the library as soon as it is there. `?` lists every shortcut.
 
+Working on Pinhole, `bin/install-local` builds the checkout into `~/.local`
+instead, with no password and no package, and stops a running window so the
+launcher opens the new one.
+
 ## Development
 
 Status: two spikes grown into an app. The iCloud API probe is in

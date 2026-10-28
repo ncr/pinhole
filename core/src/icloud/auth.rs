@@ -109,9 +109,6 @@ impl Drop for ProcessProvider {
     }
 }
 
-/// The sign-in provider to run: $PINHOLE_AUTH, else the one in this
-/// checkout when running from core/target/release/, else `pinhole-auth` on
-/// PATH (as the package installs it).
 /// Where the provider keeps each account's session, one folder to an Apple
 /// ID: `~/.local/state/pinhole/auth/<apple-id>`.
 pub fn state_dir(apple_id: &str) -> PathBuf {
@@ -143,6 +140,9 @@ pub fn accounts() -> Vec<String> {
     accounts
 }
 
+/// The sign-in provider to run: $PINHOLE_AUTH, else the one in this
+/// checkout when running from core/target/release/, else the one installed
+/// beside pinholed, else `pinhole-auth` on PATH.
 pub fn default_provider() -> PathBuf {
     if let Some(p) = std::env::var_os("PINHOLE_AUTH") {
         return PathBuf::from(p);
@@ -150,6 +150,10 @@ pub fn default_provider() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         let checkout = exe.ancestors().nth(4).map(|root| root.join("auth/pyicloud/pinhole-auth"));
         if let Some(p) = checkout.filter(|p| p.exists()) {
+            return p;
+        }
+        // Installed beside pinholed (/usr/bin, ~/.local/bin).
+        if let Some(p) = exe.parent().map(|dir| dir.join("pinhole-auth")).filter(|p| p.exists()) {
             return p;
         }
     }

@@ -70,12 +70,15 @@ void ServiceClient::connectNow() {
 
 void ServiceClient::startService() {
     // PINHOLED, else the one built in this checkout (app/build/pinhole ->
-    // core/target/release/pinholed), else whatever is on PATH.
+    // core/target/release/pinholed), else the one installed beside this
+    // window (/usr/bin, ~/.local/bin), else whatever is on PATH.
     QString program = qEnvironmentVariable("PINHOLED");
     if (program.isEmpty()) {
         const QString checkout =
             QCoreApplication::applicationDirPath() + "/../../core/target/release/pinholed";
+        const QString beside = QCoreApplication::applicationDirPath() + "/pinholed";
         program = QFileInfo::exists(checkout) ? QFileInfo(checkout).canonicalFilePath()
+                  : QFileInfo::exists(beside) ? beside
                                               : QStandardPaths::findExecutable("pinholed");
     }
     if (program.isEmpty()) {
