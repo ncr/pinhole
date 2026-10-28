@@ -6,6 +6,7 @@
 #include <QQuickItem>
 #include <QTimer>
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <set>
@@ -13,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "marks.h"
 #include "scrollphysics.h"
 
 class Library;
@@ -57,6 +59,10 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QVariantList stacks READ stacks WRITE setStacks NOTIFY stacksChanged)
     // The marks drawn on cells (marks.h: Mark), or-ed.
     Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
+    // The marks' colours where cells are small and the marks glow like
+    // neon, the Omarchy theme's: a video's, a Live Photo's, a favourite's
+    // and a stack's.
+    Q_PROPERTY(QVariantList markColours READ markColours WRITE setMarkColours NOTIFY markColoursChanged)
     Q_PROPERTY(int columns READ columns NOTIFY columnsChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)
     Q_PROPERTY(bool statsVisible READ statsVisible WRITE setStatsVisible NOTIFY statsVisibleChanged)
@@ -109,6 +115,8 @@ public:
     void setStacks(const QVariantList &stacks);
     int marks() const { return m_marks; }
     void setMarks(int marks);
+    QVariantList markColours() const;
+    void setMarkColours(const QVariantList &colours);
     int columns() const { return m_columns; }
     bool animating() const { return m_animating; }
     bool statsVisible() const { return m_statsVisible; }
@@ -229,6 +237,7 @@ signals:
     void statsTextChanged();
     void stacksChanged();
     void marksChanged();
+    void markColoursChanged();
     // The cells changed: the library's photos, or how they are stacked.
     void cellsChanged();
 
@@ -306,6 +315,11 @@ private:
     QVariantList m_stacksGiven;
     std::vector<std::vector<int>> m_stackLists; // as given, through any reload since
     int m_marks = 13; // all but Live, as the side panel starts
+    // By Mark's bit: video, live, favourite, stack. Counted up on every
+    // change, for the render thread to draw them again.
+    std::array<QColor, kMarkKinds> m_markColours{QColor(0x4f, 0xe3, 0xd0), QColor(0xf5, 0xc9, 0x45),
+                                                 QColor(0xff, 0x54, 0x68), QColor(0xb9, 0x7a, 0xff)};
+    int m_markColoursVersion = 0;
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
     QPointF m_hover{-1, -1};

@@ -533,6 +533,24 @@ int main(int argc, char *argv[]) {
             timer->start(50);
         });
     }
+    // PINHOLE_SELFTEST=marks:<dir>: the grid at each level from 7 columns
+    // out, where the marks turn to neon, as <dir>/<columns>.png.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("marks:"))) {
+        QTimer::singleShot(2500, window, [window, grid, test] {
+            const QList<int> columns = {7, 13, 29};
+            for (int k = 0; k < columns.size(); ++k) {
+                QTimer::singleShot(k * 5000, window, [=] {
+                    grid->setColumnsNow(columns[k]);
+                    grid->jumpToFraction(qEnvironmentVariable("PINHOLE_SELFTEST_AT").toDouble());
+                });
+                QTimer::singleShot(k * 5000 + 4500, window, [=] {
+                    window->grabWindow().save(QStringLiteral("%1/%2.png").arg(test.mid(6)).arg(columns[k]));
+                    if (k == columns.size() - 1)
+                        QCoreApplication::quit();
+                });
+            }
+        });
+    }
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("drop:")))
         runDropSelfTest(window, library, incoming, test.mid(5), qEnvironmentVariable("PINHOLE_SELFTEST_DROP").split(':', Qt::SkipEmptyParts));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("viewer"))

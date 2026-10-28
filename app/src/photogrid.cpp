@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstring>
 #include <cmath>
 #include <limits>
 #include <unordered_map>
@@ -72,6 +73,13 @@ constexpr double kMarkPx = 18;
 constexpr double kMarkInset = 4;
 constexpr double kMarksFromPx = 72;
 constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, MarkLive, MarkStack};
+// Where cells are smaller than this at rest (logical pixels), seen from
+// afar, the marks glow like neon in the theme's colours (marks.h:
+// neonMark()), so a video or a favourite is found among hundreds of photos
+// at a glance, and a little bigger. A zoom cross-fades the white marks into
+// them with the level.
+constexpr double kNeonBelowPx = 160;
+constexpr double kNeonMarkPx = 22;
 
 double easeOut(double t) { return 1 - std::pow(1 - std::clamp(t, 0.0, 1.0), 3); }
 double lerp(double a, double b, double t) { return a + (b - a) * t; }
@@ -151,6 +159,11 @@ struct GridRenderState {
     // ratio.
     QSGTexture *marks = nullptr;
     qreal marksDpr = 0;
+    // The same lit as neon: a row of glows over a row of cores, in the
+    // colours of this version of them.
+    QSGTexture *neon = nullptr;
+    qreal neonDpr = 0;
+    int neonVersion = -1;
 
     // Borders around selected photos, one node on top of everything.
     QSGGeometryNode *selection = nullptr;
@@ -171,6 +184,9 @@ struct GridRenderState {
         delete marks;
         marks = nullptr;
         marksDpr = 0;
+        delete neon;
+        neon = nullptr;
+        neonDpr = 0;
         bytes = 0;
         textures = 0;
     }
@@ -443,6 +459,23 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
     m_selectionAnchor = anchorPhoto >= 0 ? cellOf(anchorPhoto) : -1;
     if (zoomPhoto >= 0)
         m_zoom.index = cellOf(zoomPhoto);
+}
+
+QVariantList PhotoGrid::markColours() const {
+    return QVariantList(m_markColours.begin(), m_markColours.end());
+}
+
+void PhotoGrid::setMarkColours(const QVariantList &colours) {
+    std::array<QColor, kMarkKinds> given = m_markColours;
+    for (int k = 0; k < std::min(kMarkKinds, int(colours.size())); ++k)
+        if (const QColor c = colours[k].value<QColor>(); c.isValid())
+            given[size_t(k)] = c;
+    if (given == m_markColours)
+        return;
+    m_markColours = given;
+    ++m_markColoursVersion;
+    emit markColoursChanged();
+    update();
 }
 
 void PhotoGrid::setMarks(int marks) {
@@ -1933,6 +1966,29 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         rs.marks->setFiltering(QSGTexture::Linear);
         rs.marksDpr = dpr;
     }
+    if (!rs.neon || rs.neonDpr != dpr || rs.neonVersion != m_markColoursVersion) {
+        const int px = int(std::lround(kNeonMarkPx * dpr));
+        const int side = int(std::lround(px * kNeonSpread));
+        // Copied in, not painted: the glows' light is premultiplied colour
+        // stronger than its alpha, which painting would not keep.
+        QImage strip(side * kMarkKinds, side * 2, QImage::Format_ARGB32_Premultiplied);
+        strip.fill(Qt::transparent);
+        for (int k = 0; k < kMarkKinds; ++k) {
+            const Mark mark = kMarkOrder[size_t(k)];
+            const NeonMark neon = neonMark(mark, m_markColours[size_t(std::countr_zero(unsigned(mark)))], px);
+            for (int y = 0; y < side; ++y) {
+                std::memcpy(strip.scanLine(y) + size_t(k) * side * 4, neon.glow.constScanLine(y), size_t(side) * 4);
+                std::memcpy(strip.scanLine(side + y) + size_t(k) * side * 4, neon.core.constScanLine(y), size_t(side) * 4);
+            }
+        }
+        for (auto &slot : rs.drawSlots)
+            static_cast<QSGTextureMaterial *>(slot.marks->material())->setTexture(nullptr);
+        delete rs.neon;
+        rs.neon = window()->createTextureFromImage(strip);
+        rs.neon->setFiltering(QSGTexture::Linear);
+        rs.neonDpr = dpr;
+        rs.neonVersion = m_markColoursVersion;
+    }
     // A mark's corner snapped to a device pixel, so it is drawn crisp.
     auto snap = [dpr](double v) { return std::round(v * dpr) / dpr; };
 
@@ -2016,33 +2072,45 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         {
             static const std::vector<std::pair<QRectF, int>> none;
             const auto &cells = size_t(k) < marked.size() ? marked[size_t(k)] : none;
+            // A layer of small cells has its marks lit, glows then cores.
+            const bool neon = size_t(k) < drawn.size()
+                              && strideFor(drawn[size_t(k)].columns) - gapFor(drawn[size_t(k)].columns) < kNeonBelowPx;
+            const int passes = neon ? 2 : 1;
             int quads = 0;
             for (const auto &[rect, marks] : cells)
-                quads += std::popcount(unsigned(marks));
+                quads += std::popcount(unsigned(marks)) * passes;
             QSGGeometry *mg = slot.marks->geometry();
             mg->allocate(quads * 6);
             auto *mv = mg->vertexDataAsTexturedPoint2D();
-            for (const auto &[rect, marks] : cells) {
-                double x = snap(rect.left() + kMarkInset);
-                const double y = snap(rect.bottom() - kMarkInset - kMarkPx);
-                for (int m = 0; m < kMarkKinds; ++m) {
-                    if (!(marks & kMarkOrder[size_t(m)]))
-                        continue;
-                    const float x0 = float(x), y0 = float(y), x1 = float(x + kMarkPx), y1 = float(y + kMarkPx);
-                    const float u0 = float(m) / kMarkKinds, u1 = float(m + 1) / kMarkKinds;
-                    mv[0].set(x0, y0, u0, 0);
-                    mv[1].set(x1, y0, u1, 0);
-                    mv[2].set(x0, y1, u0, 1);
-                    mv[3].set(x1, y0, u1, 0);
-                    mv[4].set(x1, y1, u1, 1);
-                    mv[5].set(x0, y1, u0, 1);
-                    mv += 6;
-                    // The next a little closer than a whole mark: each has
-                    // room around it for its shadow.
-                    x += std::round(kMarkPx * 0.8);
+            const double size = neon ? kNeonMarkPx : kMarkPx;
+            for (int pass = 0; pass < passes; ++pass) {
+                const float v0 = neon ? pass * 0.5f : 0, v1 = neon ? v0 + 0.5f : 1;
+                // A lit mark's square is kNeonSpread times as big, about
+                // the same middle.
+                const double grow = neon ? size * (kNeonSpread - 1) / 2 : 0;
+                for (const auto &[rect, marks] : cells) {
+                    double x = snap(rect.left() + kMarkInset);
+                    const double y = snap(rect.bottom() - kMarkInset - size);
+                    for (int m = 0; m < kMarkKinds; ++m) {
+                        if (!(marks & kMarkOrder[size_t(m)]))
+                            continue;
+                        const float x0 = float(x - grow), y0 = float(y - grow);
+                        const float x1 = float(x + size + grow), y1 = float(y + size + grow);
+                        const float u0 = float(m) / kMarkKinds, u1 = float(m + 1) / kMarkKinds;
+                        mv[0].set(x0, y0, u0, v0);
+                        mv[1].set(x1, y0, u1, v0);
+                        mv[2].set(x0, y1, u0, v1);
+                        mv[3].set(x1, y0, u1, v0);
+                        mv[4].set(x1, y1, u1, v1);
+                        mv[5].set(x0, y1, u0, v1);
+                        mv += 6;
+                        // The next a little closer than a whole mark: each has
+                        // room around it for its shadow.
+                        x += std::round(size * 0.8);
+                    }
                 }
             }
-            static_cast<QSGTextureMaterial *>(slot.marks->material())->setTexture(rs.marks);
+            static_cast<QSGTextureMaterial *>(slot.marks->material())->setTexture(neon ? rs.neon : rs.marks);
             slot.marks->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
         }
         if (opacity > 0)

@@ -24,6 +24,9 @@ class Theme : public QObject {
     Q_PROPERTY(QColor selection READ selection NOTIFY changed)
     Q_PROPERTY(QColor muted READ muted NOTIFY changed)
     Q_PROPERTY(QColor red READ red NOTIFY changed)
+    Q_PROPERTY(QColor yellow READ yellow NOTIFY changed)
+    Q_PROPERTY(QColor cyan READ cyan NOTIFY changed)
+    Q_PROPERTY(QColor magenta READ magenta NOTIFY changed)
     Q_PROPERTY(bool light READ light NOTIFY changed)
     // Omarchy's typeface and its type scale's base size (shell.toml).
     Q_PROPERTY(QString font READ font CONSTANT)
@@ -46,6 +49,9 @@ public:
     QColor selection() const { return color("selection"); }
     QColor muted() const { return color("muted"); }
     QColor red() const { return color("red"); }
+    QColor yellow() const { return color("yellow"); }
+    QColor cyan() const { return color("cyan"); }
+    QColor magenta() const { return color("magenta"); }
     bool light() const { return m_light; }
     QString font() const { return QStringLiteral("JetBrainsMono Nerd Font"); }
     int fontSize() const { return m_fontSize; }

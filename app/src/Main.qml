@@ -27,6 +27,7 @@ ApplicationWindow {
         background: win.color
         stacks: win.pluginStacks
         marks: side.marks
+        markColours: [theme.cyan, theme.yellow, theme.red, theme.magenta]
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
 

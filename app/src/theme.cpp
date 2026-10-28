@@ -104,7 +104,9 @@ QColor Theme::color(const QString &key) const {
         {"darker_background", QColor("#0e0e14")}, {"lighter_background", QColor("#24283b")},
         {"foreground", QColor("#a9b1d6")},        {"dark_foreground", QColor("#565f89")},
         {"bright_foreground", QColor("#c0caf5")}, {"selection", QColor("#292e42")},
-        {"muted", QColor("#414868")},             {"red", QColor("#f7768e")}};
+        {"muted", QColor("#414868")},             {"red", QColor("#f7768e")},
+        {"yellow", QColor("#e0af68")},            {"cyan", QColor("#449dab")},
+        {"magenta", QColor("#ad8ee6")}};
     if (m_colors.contains("background") && m_colors.contains("foreground")) {
         const QColor bg = m_colors.value("background"), fg = m_colors.value("foreground");
         auto mix = [](QColor a, QColor b, double t) {
