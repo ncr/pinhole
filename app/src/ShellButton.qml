@@ -25,6 +25,8 @@ Rectangle {
     property bool usable: true
     property bool busy: false
     property int busyDelay: 1000
+    // The pointer over it, while it shows.
+    readonly property bool hovered: hover.hovered && visible
     signal tapped()
 
     readonly property color ink: theme.foreground

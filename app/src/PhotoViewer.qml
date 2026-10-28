@@ -454,6 +454,8 @@ Item {
                 text: modelData.text
                 key: modelData.key
                 onTapped: modelData.triggered()
+                onHoveredChanged: modelData.hovered = hovered
+                Component.onDestruction: if (hovered) modelData.hovered = false
             }
         }
         // Out of the app, as buttons: no menu to find them in. Copy answers

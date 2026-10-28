@@ -16,5 +16,8 @@ QtObject {
     property bool active: false
     // On its way: an arc turns in its key's place.
     property bool busy: false
+    // The pointer over its button, for a plugin to show what pressing it
+    // would do: Pinhole sets it.
+    property bool hovered: false
     signal triggered()
 }

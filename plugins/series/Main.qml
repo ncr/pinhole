@@ -224,7 +224,10 @@ PinholePlugin {
             onTriggered: plugin.ungroup([pinhole.viewer.index])
         },
         PluginAction {
+            id: addAction
             readonly property int k: (plugin.revision, pinhole.viewer.open ? plugin.beside(pinhole.viewer.index) : -1)
+            // The series it would make, shown while the pointer is on it.
+            readonly property var joined: k >= 0 ? plugin.series[k].concat([pinhole.viewer.index]).sort((a, b) => a - b) : []
             place: "viewer"
             text: qsTr("Add to series")
             key: "A"
@@ -337,6 +340,15 @@ PinholePlugin {
                 }
             }
         }
+    }
+
+    Joining {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        shown: addAction.hovered && addAction.shown && pinhole.viewer.open
+        shots: addAction.joined
+        joiner: pinhole.viewer.index
     }
 
     Studio {

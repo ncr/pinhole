@@ -63,7 +63,9 @@ own. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Export); then `text`, `key`, `shown`, `usable`, `active`, `busy`, and
-  `onTriggered`.
+  `onTriggered`. Pinhole sets its `hovered` while the pointer is on it,
+  for the plugin to show what pressing it would do, as Series shows the
+  series a photo would join.
 - `covering`: true while it is over the photos: the grid's controls fade
   and its keys rest, as for Pinhole's panels. Its own `Shortcut`s should be
   enabled only then.

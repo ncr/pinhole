@@ -358,6 +358,8 @@ ApplicationWindow {
                 text: modelData.text
                 key: modelData.key
                 onTapped: modelData.triggered()
+                onHoveredChanged: modelData.hovered = hovered
+                Component.onDestruction: if (hovered) modelData.hovered = false
             }
         }
     }
@@ -470,6 +472,8 @@ ApplicationWindow {
                     key: modelData.key
                     hint: selectBar.hints ? KeyNames.nameOf(modelData.key) : ""
                     onTapped: modelData.triggered()
+                    onHoveredChanged: modelData.hovered = hovered
+                    Component.onDestruction: if (hovered) modelData.hovered = false
                 }
             }
         }
