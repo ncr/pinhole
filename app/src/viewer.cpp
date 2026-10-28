@@ -222,9 +222,19 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
         emit motionChanged();
         return true;
     }
-    if (wheel->phase() == Qt::NoScrollPhase && px.isNull()) {
-        // A mouse wheel: a notch (120) is a photo, down for the next.
-        m_notches += (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
+    // A mouse wheel comes with no phases and with notches (on Wayland with
+    // pixels too, 15 a notch); a touchpad has phases.
+    const bool mouseWheel = wheel->phase() == Qt::NoScrollPhase && !angle.isNull();
+    if (mouseWheel && std::abs(angle.x()) > std::abs(angle.y())) {
+        // The horizontal (thumb) wheel zooms at the pointer, as in the grid,
+        // a notch a quarter.
+        m_motion.zoomBy(std::pow(1.25, angle.x() / 120.0), wheel->position().x(), wheel->position().y());
+        emit motionChanged();
+        return true;
+    }
+    if (mouseWheel) {
+        // The wheel: a notch (120) is a photo, down for the next.
+        m_notches += angle.y() / 120.0;
         for (; m_notches <= -1; m_notches += 1)
             step(1);
         for (; m_notches >= 1; m_notches -= 1)
