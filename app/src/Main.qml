@@ -144,6 +144,20 @@ ApplicationWindow {
         label.horizontalAlignment: Text.AlignRight
     }
 
+    // Files dropped on the window on their way in, above a library being
+    // built if one is.
+    AddProgress {
+        id: addProgress
+        objectName: "addProgress"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: buildProgress.visible ? buildProgress.top : parent.bottom
+        anchors.bottomMargin: buildProgress.visible ? 8 : grid.selecting ? 72 : 24
+    }
+    Shortcut {
+        enabled: addProgress.visible && !incoming.busy && win.inGrid && !grid.selecting && !trouble.visible
+        sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: incoming.dismiss()
+    }
+
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
     Chip {
         visible: outgoing.status !== ""
@@ -489,6 +503,14 @@ ApplicationWindow {
         const index = grid.currentIndex()
         if (index >= 0)
             viewer.openAt(index, grid.rectOf(index))
+    }
+
+    // Photos and videos dragged in from elsewhere, over everything.
+    DropTarget {
+        objectName: "dropTarget"
+        anchors.fill: parent
+        name: win.placeName
+        enabled: sources.known && !win.firstRun
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }

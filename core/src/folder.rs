@@ -16,6 +16,7 @@ use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
 use rusqlite::Connection;
 
+use crate::add::{Added, Addition};
 use crate::db::Index;
 use crate::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
 
@@ -27,6 +28,9 @@ const MEDIUM_EDGE: u32 = 2048;
 /// describing them (EXIF, ffprobe) takes well under a second, so a listing
 /// stops soon when another source is shown.
 const PUT_BATCH: usize = 128;
+/// Whatever a look at the folder takes: photos and videos.
+const ACCEPTS: &[&str] = &["jpg", "jpeg", "heic", "heif", "png", "gif", "tif", "tiff", "webp", "avif",
+                           "mov", "mp4", "m4v", "mkv", "webm", "avi"];
 
 pub struct FolderSource {
     root: PathBuf,
@@ -76,10 +80,12 @@ impl Entry {
 
 fn media_of(path: &Path) -> Option<Media> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" | "heic" | "heif" | "png" | "gif" | "tif" | "tiff" | "webp" | "avif" => Some(Media::Photo),
-        "mov" | "mp4" | "m4v" | "mkv" | "webm" | "avi" => Some(Media::Video),
-        _ => None,
+    if crate::add::PHOTOS.contains(&ext.as_str()) {
+        Some(Media::Photo)
+    } else if crate::add::VIDEOS.contains(&ext.as_str()) {
+        Some(Media::Video)
+    } else {
+        None
     }
 }
 
@@ -446,6 +452,20 @@ impl Source for FolderSource {
             .collect())
     }
 
+    fn accepts(&self) -> &'static [&'static str] {
+        ACCEPTS
+    }
+
+    /// Copied into the folder itself, beside what is there, never over it
+    /// (`add::copy_into`); the next look at the folder finds it.
+    fn add(&self, addition: &Addition, sent: &(dyn Fn(u64, u64) + Sync)) -> Result<Added> {
+        if !self.root.is_dir() {
+            return Err(anyhow!("{} is not there", self.root.display()));
+        }
+        let names = crate::add::copy_into(&self.root, addition, sent)?;
+        Ok(Added { id: names.into_iter().next(), ..Added::default() })
+    }
+
     fn open(&self, ticket: &Ticket, range: Option<(u64, u64)>) -> Result<Body, FetchError> {
         let (want, rel) = ticket.0.split_once('\t').ok_or_else(|| anyhow!("not a ticket of this folder"))?;
         let edge = match Want::parse(want) {
@@ -584,6 +604,32 @@ mod tests {
             ("other/IMG_1.MOV", None),
         ]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_is_added_is_copied_in_and_found_by_the_next_look() {
+        let (from, dir) = (temp("add-from"), temp("add-to"));
+        touch(&from.join("IMG_1.HEIC"));
+        touch(&from.join("IMG_1.MOV"));
+        touch(&dir.join("IMG_1.HEIC"));
+        let source = FolderSource::new(dir.clone());
+        let (additions, _) = crate::add::gather(&[from.join("IMG_1.HEIC"), from.join("IMG_1.MOV")]);
+        let added = source.add(&additions[0], &|_, _| {}).unwrap();
+        assert_eq!(added.id.as_deref(), Some("IMG_1 (2).HEIC"));
+        let entries = source.look().unwrap();
+        assert_eq!(entries["IMG_1 (2).HEIC"].motion.as_ref().map(|m| m.rel.as_str()), Some("IMG_1 (2).MOV"));
+        assert!(entries["IMG_1.HEIC"].motion.is_none());
+        // The originals stay where they were.
+        assert!(from.join("IMG_1.MOV").is_file());
+        assert!(FolderSource::new(PathBuf::from("/nonexistent/pinhole")).add(&additions[0], &|_, _| {}).is_err());
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn it_accepts_whatever_a_look_finds() {
+        let both: Vec<&str> = crate::add::PHOTOS.iter().chain(crate::add::VIDEOS).copied().collect();
+        assert_eq!(ACCEPTS, both.as_slice());
     }
 
     #[test]

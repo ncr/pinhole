@@ -1,5 +1,6 @@
 #include "selftest.h"
 
+#include "incoming.h"
 #include "library.h"
 #include "outgoing.h"
 #include "photogrid.h"
@@ -18,6 +19,7 @@
 #include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <qpa/qplatformdrag.h>
 #include <qpa/qwindowsysteminterface.h>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
@@ -761,6 +763,67 @@ void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer,
             std::printf("selftest: done\n");
             std::fflush(stdout);
             QCoreApplication::quit();
+        });
+    });
+}
+
+void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &incoming, const QString &dir,
+                     const QStringList &files) {
+    // Once the service has said what the source takes.
+    QTimer::singleShot(2000, window, [=, &library, &incoming] {
+        auto *mime = new QMimeData;
+        QList<QUrl> urls;
+        for (const QString &f : files)
+            urls.append(QUrl::fromLocalFile(f));
+        mime->setUrls(urls);
+        const QPoint middle(window->width() / 2, window->height() / 2);
+        const int before = library.count();
+        auto *clock = new QElapsedTimer;
+        clock->start();
+        QObject *target = window->findChild<QObject *>(QStringLiteral("dropTarget"));
+        auto grab = [window, dir](const QString &name) { window->grabWindow().save(dir + '/' + name + ".png"); };
+
+        QWindowSystemInterface::handleDrag(window, mime, middle, Qt::CopyAction | Qt::MoveAction, Qt::LeftButton, {});
+        QTimer::singleShot(400, window, [=, &library, &incoming] {
+            std::printf("selftest: hovering %lld files: lit %s, wants %d files and %d folders\n", qint64(files.size()),
+                        target->property("lit").toBool() ? "yes" : "NO", target->property("files").toInt(),
+                        target->property("folders").toInt());
+            std::fflush(stdout);
+            grab("1-hover");
+            const auto response = QWindowSystemInterface::handleDrop(window, mime, middle, Qt::CopyAction | Qt::MoveAction,
+                                                                     Qt::LeftButton, {});
+            std::printf("selftest: dropped: accepted %s as %s\n", response.isAccepted() ? "yes" : "NO",
+                        response.acceptedAction() == Qt::CopyAction ? "a copy" : "SOMETHING ELSE");
+            std::fflush(stdout);
+            QTimer::singleShot(150, window, [=] { grab("2-adding"); });
+            auto *watch = new QTimer(window);
+            auto said = std::make_shared<bool>(false);
+            QObject::connect(watch, &QTimer::timeout, window, [=, &library, &incoming] {
+                if (!incoming.busy() && !*said) {
+                    *said = true;
+                    std::printf("selftest: %5lld ms: done: \"%s\"; %s\n", clock->elapsed(), qPrintable(incoming.status()),
+                                incoming.problems().isEmpty() ? "no problems"
+                                                              : qPrintable(incoming.problemsTitle() + ": " + incoming.problems().join("; ")));
+                    std::fflush(stdout);
+                    grab("3-done");
+                }
+                if (*said && library.count() > before) {
+                    watch->stop();
+                    std::printf("selftest: %5lld ms: the grid has %d new (%d to %d)\n", clock->elapsed(), library.count() - before,
+                                before, library.count());
+                    std::fflush(stdout);
+                    QTimer::singleShot(600, window, [=] {
+                        grab("4-grid");
+                        QCoreApplication::quit();
+                    });
+                } else if (clock->elapsed() > 120000) {
+                    watch->stop();
+                    std::printf("selftest: NOTHING new in the grid after two minutes\n");
+                    std::fflush(stdout);
+                    QCoreApplication::exit(1);
+                }
+            });
+            watch->start(100);
         });
     });
 }

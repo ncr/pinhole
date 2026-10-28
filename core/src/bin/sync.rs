@@ -44,6 +44,12 @@ enum Cmd {
         #[arg(long, value_name = "APPLE_ID")]
         from_icloudpd: Option<String>,
     },
+    /// Add photos and videos (files, or folders of them) to the source:
+    /// copied into a folder, uploaded to iCloud. The files stay as they are.
+    Add {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
     /// Apply what changed in the source since the last listing or sync,
     /// then make thumbnails for anything new.
     Changes {
@@ -66,6 +72,9 @@ fn main() -> Result<()> {
     if source.kind() == "none" {
         bail!("nothing to show photos from yet: pinhole-sync sign-in, or add a folder in the window");
     }
+    if let Cmd::Add { files } = &cli.command {
+        return add(source.as_ref(), files);
+    }
     // In the folder the window keeps everything in (storage.rs), the
     // source's own library.
     let library = cli.library.unwrap_or_else(|| storage::library_for(&storage::location(), source.as_ref()));
@@ -78,7 +87,7 @@ fn main() -> Result<()> {
         Cmd::Index => (true, None),
         Cmd::Thumbs { parallel } => (false, Some(parallel)),
         Cmd::All => (true, Some(64)),
-        Cmd::SignIn { .. } => unreachable!("handled above"),
+        Cmd::SignIn { .. } | Cmd::Add { .. } => unreachable!("handled above"),
         Cmd::Changes { dry_run } => {
             let report = sync::follow(source, &mut conn, dry_run)?;
             let r = &report.changes;
@@ -180,5 +189,43 @@ fn sign_in(auth: PathBuf, from_icloudpd: Option<&str>) -> Result<()> {
     }
     storage::show_source(&storage::settings_path(), Some(&serde_json::json!({"kind": "icloud", "account": apple_id})))?;
     println!("Signed in as {apple_id}; Pinhole shows its photos. Next: pinhole-sync all");
+    Ok(())
+}
+
+/// Each asset in turn, saying how it went; an error at the end if any
+/// failed. The library hears of them at its next round (`changes`).
+fn add(source: &dyn pinhole_core::source::Source, files: &[PathBuf]) -> Result<()> {
+    let (additions, other) = pinhole_core::add::gather(files);
+    for path in &other {
+        println!("{}: not a photo or video", path.display());
+    }
+    let mut failed = other.len();
+    for addition in &additions {
+        let name = addition.file.display();
+        let shown = AtomicUsize::new(0);
+        let result = source.add(addition, &|done, total| {
+            // A line every tenth.
+            let tenth = (done * 10 / total.max(1)) as usize;
+            if shown.swap(tenth, Ordering::Relaxed) != tenth && tenth < 10 {
+                eprintln!("{name}: {}%", tenth * 10);
+            }
+        });
+        match result {
+            Ok(added) if added.duplicate => println!("{name}: {} has it already", source.name()),
+            Ok(added) => {
+                println!("{name}: added{}", added.id.map(|id| format!(" as {id}")).unwrap_or_default());
+                if let Some(note) = added.note {
+                    println!("  {note}");
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                println!("{name}: {e:#}");
+            }
+        }
+    }
+    if failed > 0 {
+        bail!("{failed} not added");
+    }
     Ok(())
 }

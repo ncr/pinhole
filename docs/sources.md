@@ -56,6 +56,18 @@ video while it downloads reads byte ranges through `open` too. The
 thumbnail pass reads `thumb` renditions the same way, so iCloud's are
 downloaded and a folder's are made from the photo.
 
+**Adding** puts photos and videos from this computer into the library:
+
+- `accepts()`: the extensions it takes; none for a source that cannot
+  be added to.
+- `add(addition, sent)`: one asset, a photo or a video with a Live
+  Photo's motion beside it (`add::gather` makes them of the files and
+  folders given), with how many bytes have gone. A folder copies it in
+  (`add::copy_into`: never over a file, the two halves of a Live Photo
+  under one name), iCloud uploads it (`icloud/upload.rs`). An `AddError`
+  says why one cannot be added; the library hears of what was added at
+  the next round, as of any other change.
+
 A source also says its name ("iCloud", or the folder's), whether it needs
 signing in, how often to look for changes (a minute; a folder ten seconds),
 and what an error means for the connection: `needs_sign_in`, `offline` or

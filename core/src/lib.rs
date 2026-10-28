@@ -6,6 +6,7 @@
 //! `auth` talks to a sign-in provider process and gets back a finished
 //! `Session`, and nothing else knows how Apple's sign-in works.
 
+pub mod add;
 pub mod background;
 pub mod db;
 pub mod discover;

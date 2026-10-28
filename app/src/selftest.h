@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QStringList>
+
 class Library;
 class Viewer;
 class Outgoing;
@@ -27,3 +29,12 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
 // PINHOLE_SELFTEST=copytwice:<folder>: open a photo, click Copy, grab the
 // window; wait; click Copy again, grab again; report the button's phases.
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder);
+
+class Incoming;
+// PINHOLE_SELFTEST=drop:<dir>: drag the files in PINHOLE_SELFTEST_DROP
+// (separated by ':') over the window and drop them, as a file manager
+// would; report whether the window lit up, how adding went and when the
+// new photos were in the grid, with the window as images in <dir> at each
+// step. They really are added: only on a scratch source.
+void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &incoming, const QString &dir,
+                     const QStringList &files);

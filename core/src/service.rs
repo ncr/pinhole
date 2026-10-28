@@ -60,6 +60,14 @@ struct Reply {
 }
 
 impl Reply {
+    /// A line of news for this window alone, before the answer.
+    fn event(&self, event: Value) {
+        if let Ok(mut out) = self.out.lock() {
+            let _ = writeln!(out, "{event}");
+            let _ = out.flush();
+        }
+    }
+
     fn send(&self, result: std::result::Result<Value, (&str, String)>) {
         let line = match result {
             Ok(r) => json!({"id": self.id, "ok": true, "result": r}),
@@ -125,6 +133,9 @@ struct Shared {
     rounds: Mutex<Rounds>,
     /// The source shown, watched for changes as they happen, if it can be.
     watch: Mutex<Option<Watch>>,
+    /// Held while files are added: one asset at a time, whichever window
+    /// dropped them.
+    adding: Mutex<()>,
 }
 
 /// When each source was last looked at for changes (the end of its last
@@ -166,9 +177,10 @@ fn health_event(health: Health) -> Value {
 /// that needs signing in. With none, `kind` is null.
 fn source_info(source: &dyn Source) -> Value {
     if source.kind() == "none" {
-        return json!({"kind": null, "name": "", "needs_sign_in": false});
+        return json!({"kind": null, "name": "", "needs_sign_in": false, "accepts": []});
     }
-    let mut info = json!({"kind": source.kind(), "name": source.name(), "needs_sign_in": source.needs_sign_in()});
+    let mut info = json!({"kind": source.kind(), "name": source.name(), "needs_sign_in": source.needs_sign_in(),
+                          "accepts": source.accepts()});
     if let Some(path) = source.id().strip_prefix("folder:") {
         info["path"] = json!(path);
     }
@@ -645,6 +657,7 @@ pub fn run(config: Config) -> Result<()> {
         rounds_shown: std::sync::atomic::AtomicU64::new(u64::MAX),
         rounds: Mutex::new(Rounds::default()),
         watch: Mutex::new(None),
+        adding: Mutex::new(()),
         changing: Mutex::new(()),
         changes: Mutex::new(changes_tx),
     });
@@ -790,6 +803,14 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
             // These take a while (the sign-in provider starts, Apple
             // answers, a disk is looked through): on a thread of their
             // own, so this window's photos keep coming meanwhile.
+            // Minutes for a long video to iCloud: on a thread of its own.
+            Some("add") => {
+                let (shared, params) = (shared.clone(), request["params"].clone());
+                std::thread::spawn(move || match add(&shared, &params, &reply) {
+                    Ok(value) => reply.send(Ok(value)),
+                    Err((code, message)) => reply.send(Err((code, message))),
+                });
+            }
             Some(method @ ("sign_in" | "submit_code" | "discover")) => {
                 let (shared, params, method) = (shared.clone(), request["params"].clone(), method.to_owned());
                 std::thread::spawn(move || {
@@ -852,6 +873,83 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Add the files a window dropped (`files`, absolute paths; folders of
+/// them too) to the source shown, one asset at a time, a Live Photo's two
+/// files as one (`add::gather`). The window hears `adding` as it goes, and
+/// how each asset went in the answer. Each asset added starts a round, so
+/// it shows as soon as the source has it.
+fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Value, (&'static str, String)> {
+    let files: Vec<PathBuf> = params["files"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(PathBuf::from).collect())
+        .unwrap_or_default();
+    if files.is_empty() || files.iter().any(|f| f.is_relative()) {
+        return Err(("bad_request", "add needs files, as absolute paths".into()));
+    }
+    let source = shared.source();
+    let accepts = source.accepts();
+    if accepts.is_empty() {
+        return Err(("unsupported", format!("{} cannot be added to", if source.kind() == "none" { "Nothing".into() } else { source.name() })));
+    }
+    let (additions, other) = crate::add::gather(&files);
+    let mut results: Vec<Value> = other
+        .iter()
+        .map(|f| json!({"file": f, "files": [f], "state": "failed", "error": {"code": "unsupported", "message": "not a photo or a video"}}))
+        .collect();
+    let bytes: u64 = additions.iter().map(|a| a.size()).sum();
+    let (total, id) = (additions.len(), source.id());
+    let progress = |done: usize, file: Option<&Path>, sent: u64| {
+        json!({"event": "adding", "request": reply.id, "source": id, "done": done, "total": total,
+               "file": file, "sent": sent, "bytes": bytes})
+    };
+    // Another window's drop first, if one is being added.
+    let _one_at_a_time = shared.adding.lock().unwrap();
+    let mut sent_before = 0u64;
+    let said = Mutex::new(std::time::Instant::now() - Duration::from_secs(1));
+    for (i, addition) in additions.iter().enumerate() {
+        reply.event(progress(i, Some(&addition.file), sent_before));
+        let mut result = json!({"file": addition.file, "files": addition.files().collect::<Vec<_>>()});
+        let outcome = if accepts.contains(&crate::add::extension(&addition.file).as_str()) {
+            source.add(addition, &|sent, _| {
+                // At most four times a second.
+                let mut said = said.lock().unwrap();
+                if said.elapsed() >= Duration::from_millis(250) {
+                    *said = std::time::Instant::now();
+                    reply.event(progress(i, Some(&addition.file), sent_before + sent));
+                }
+            })
+        } else {
+            let name = addition.file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            Err(crate::add::AddError::new("unsupported", format!("{} does not take {name}", source.name())).into())
+        };
+        sent_before += addition.size();
+        match outcome {
+            Ok(added) => {
+                result["state"] = json!(if added.duplicate { "duplicate" } else { "added" });
+                result["asset"] = json!(added.id);
+                if let Some(note) = added.note {
+                    result["note"] = json!(note);
+                }
+                shared.reached();
+                let _ = shared.sync_now.lock().unwrap().send(());
+            }
+            Err(e) => {
+                eprintln!("pinholed: add {}: {e:#}", addition.file.display());
+                let code = match e.downcast_ref::<crate::add::AddError>() {
+                    Some(a) => a.code,
+                    None => shared.failed(&e),
+                };
+                result["state"] = json!("failed");
+                result["error"] = json!({"code": code, "message": format!("{e:#}")});
+            }
+        }
+        results.push(result);
+    }
+    reply.event(progress(total, None, bytes));
+    let count = |state: &str| results.iter().filter(|r| r["state"] == state).count();
+    Ok(json!({"source": id, "added": count("added"), "duplicates": count("duplicate"), "failed": count("failed"), "files": results}))
 }
 
 fn fetch(shared: &Shared, db: &Connection, params: &Value, reply: Reply) {

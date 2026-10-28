@@ -126,7 +126,11 @@ void Outgoing::drag(QObject *source, const QList<int> &indexes) {
     const QImage thumb(QFile::decodeName(items.first().thumbPath));
     if (!thumb.isNull())
         drag->setPixmap(QPixmap::fromImage(thumb.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    m_dragging = true;
+    emit draggingChanged();
     drag->exec(Qt::CopyAction);
+    m_dragging = false;
+    emit draggingChanged();
 }
 
 void Outgoing::copy(const QList<int> &indexes, bool quiet) {

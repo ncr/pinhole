@@ -29,6 +29,7 @@ HEADERS += \
     src/viewer.h \
     src/viewermotion.h \
     src/outgoing.h \
+    src/incoming.h \
     src/portal.h \
     src/selftest.h \
     src/theme.h \
@@ -50,6 +51,7 @@ SOURCES += \
     src/viewer.cpp \
     src/viewermotion.cpp \
     src/outgoing.cpp \
+    src/incoming.cpp \
     src/portal.cpp \
     src/selftest.cpp \
     src/theme.cpp \
