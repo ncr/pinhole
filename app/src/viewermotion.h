@@ -49,9 +49,10 @@ public:
     // scrolls it evenly a photo or two behind and it lands when let go.
     void jumped(int delta);
     // A key held after its press (which jumped()): a moment later the
-    // carousel starts moving on by itself, slowly, and gathers speed, faster
-    // with Shift; takeSteps() says when the next photo is due. The system's
-    // key repeat plays no part, so it starts as gently for everyone.
+    // carousel starts moving on by itself, a photo every half second, and
+    // with Shift gathers speed; takeSteps() says when the next photo is
+    // due. The system's key repeat plays no part, so it is the same for
+    // everyone.
     void hold(int direction, bool fast);
     void setHoldFast(bool fast) { m_holdFast = fast; }
     // Let go: the carousel lands on the photo shown, from the speed it had.
