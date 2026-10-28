@@ -140,6 +140,8 @@ fn main() -> Result<()> {
         }, &|| false)?;
         println!("thumbs: {} of {} made in {:.0}s ({:.0}/s, {:.2} GB fetched); {} failed",
             r.made, r.wanted, r.seconds, r.made as f64 / r.seconds.max(1e-3), r.bytes as f64 / 1e9, r.failed);
+        let covers = sync::make_covers(source, &mut conn, &library, &|| false)?;
+        println!("covers: {covers} dull video thumbnails replaced");
     }
 
     let (total, with_thumbs): (i64, i64) = conn.query_row(

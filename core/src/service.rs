@@ -1350,9 +1350,6 @@ fn sync_round(shared: &Shared) -> Result<()> {
         } else {
             0
         };
-        if !report.changes.visible() && missing == 0 {
-            return Ok(());
-        }
         let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
         let announce = |added: usize, removed: usize| {
             shared.broadcast(json!({"event": "library_changed", "version": version, "added": added, "removed": removed}));
@@ -1375,7 +1372,15 @@ fn sync_round(shared: &Shared) -> Result<()> {
                 }
             }, &stop)?;
         }
-        eprintln!("pinholed: sync: library version {version}: {added} new, {removed} removed, {missing} thumbnails wanted");
+        // A video whose thumbnail shows next to nothing gets a cover of its
+        // own (cover.rs), looked for as thumbnails are.
+        let covers = if added > 0 || first { crate::sync::make_covers(source.as_ref(), &mut db, &library, &stop)? } else { 0 };
+        if !report.changes.visible() && missing == 0 && covers == 0 {
+            return Ok(());
+        }
+        eprintln!(
+            "pinholed: sync: library version {version}: {added} new, {removed} removed, {missing} thumbnails wanted, {covers} covers made"
+        );
         announce(added, removed);
         shared.broadcast(sources_event(shared));
         Ok(())

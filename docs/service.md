@@ -83,8 +83,9 @@ window:
 ```
 
 The library index changed in a way a window draws (new, deleted, hidden,
-favourited, edited or re-dated photos); the thumbnails of new photos are
-already on disk. A window reads the index again.
+favourited, edited or re-dated photos, or a video given a cover of its own
+in place of a black or blank thumbnail: `cover.rs`); the thumbnails of new
+photos are already on disk. A window reads the index again.
 
 ```json
 {"event": "source", "kind": "folder", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures",

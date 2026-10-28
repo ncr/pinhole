@@ -155,7 +155,8 @@ hash of the path, size and modification time, so a changed file gets a new
 thumbnail. `original`, `full`, `video` and `live` are the files themselves;
 `thumb` (480 px, kept in the library like iCloud's) and `medium` (2048 px,
 made into the cache when first asked for, as iCloud's are downloaded) are
-made with ImageMagick, and a video's from a frame by ffmpeg.
+made with ImageMagick, and a video's by ffmpeg from the most telling of
+seven frames spread across it (`cover.rs`), not a fade from black.
 
 Following changes is a fresh look at the folder each round, compared with
 the index by path, size and modification time. A folder is not on a

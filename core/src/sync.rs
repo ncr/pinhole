@@ -347,6 +347,18 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
         Err(e) => return ThumbResult::Failed(format!("not a JPEG: {e}")),
     };
     let (w, h) = image.dimensions();
+    let colour = average_colour(&image);
+    if fetched {
+        if let Err(e) = write_beside(&path, &bytes) {
+            return ThumbResult::Failed(e.to_string());
+        }
+    }
+    let bytes = if fetched { bytes.len() as u64 } else { 0 };
+    ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
+}
+
+/// What the grid draws until it has decoded the thumbnail.
+fn average_colour(image: &image::RgbImage) -> u32 {
     let mut sum = [0u64; 3];
     let mut n = 0u64;
     for p in image.pixels().step_by(7) {
@@ -356,24 +368,122 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
         n += 1;
     }
     let n = n.max(1);
-    let colour = ((sum[0] / n) << 16 | (sum[1] / n) << 8 | (sum[2] / n)) as u32;
+    ((sum[0] / n) << 16 | (sum[1] / n) << 8 | (sum[2] / n)) as u32
+}
 
-    let write = || -> std::io::Result<()> {
-        if !fetched {
-            return Ok(());
-        }
-        std::fs::create_dir_all(path.parent().expect("thumb folder"))?;
-        // Written beside the target and renamed, so the window never reads
-        // half a file.
-        let tmp = path.with_extension("jpg.part");
-        std::fs::write(&tmp, &bytes)?;
-        std::fs::rename(&tmp, &path)
-    };
-    if let Err(e) = write() {
-        return ThumbResult::Failed(e.to_string());
+/// Written beside the target and renamed, so the window never reads half
+/// a file.
+fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(path.parent().expect("thumb folder"))?;
+    let tmp = path.with_extension("jpg.part");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Where a video's own cover lives (cover.rs), beside the thumbnail it
+/// stands in for, named by that thumbnail's key.
+pub fn cover_path(key: &str) -> String {
+    let thumb = thumb_path(key);
+    format!("{}-cover.jpg", thumb.strip_suffix(".jpg").unwrap_or(&thumb))
+}
+
+/// A video bigger than this keeps a dull thumbnail rather than be fetched
+/// whole for a better one.
+const COVER_MAX_BYTES: i64 = 1 << 30;
+
+/// A cover of its own (cover.rs) for each video whose thumbnail shows next
+/// to nothing: iCloud makes a video's of its first frame unless an iPhone
+/// chose another, and a screen recording or a clip that fades in starts
+/// black. The video is fetched as a window would play it, into the library
+/// beside its cover, and gone once the cover is made. A cover made stays,
+/// even one as dull as the video is, so no video is fetched twice; one
+/// already on disk (a library rebuilt) is used as it is. Returns how many
+/// thumbnails were replaced.
+pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
+    struct Dull {
+        asset: String,
+        cover: String,
+        edge: u32,
+        video: Stored,
+        size: Option<i64>,
     }
-    let bytes = if fetched { bytes.len() as u64 } else { 0 };
-    ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
+    let mut dull = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.thumb_path, t.key, v.name, v.key, coalesce(v.file_type, ''), v.size FROM assets a
+             JOIN renditions t ON t.asset_id = a.id AND t.kind = 'thumb'
+             JOIN renditions v ON v.asset_id = a.id AND v.kind = 'video'
+             WHERE a.is_video AND a.thumb_path IS NOT NULL AND a.thumb_path NOT LIKE '%-cover.jpg'
+             ORDER BY a.asset_date DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, Stored {
+                asset: r.get(0)?,
+                want: Want::Video,
+                name: r.get(3)?,
+                key: r.get(4)?,
+                file_type: r.get(5)?,
+            }, r.get::<_, Option<i64>>(6)?))
+        })?;
+        for row in rows {
+            let (asset, thumb, key, video, size) = row?;
+            let Ok(image) = image::open(library.join(&thumb)) else { continue };
+            let image = image.to_rgb8();
+            if crate::cover::dull(&image) {
+                let edge = image.width().max(image.height());
+                dull.push(Dull { asset, cover: cover_path(&key), edge, video, size });
+            }
+        }
+    }
+    let mut made = 0;
+    for d in dull {
+        if stop() {
+            return Err(Stopped.into());
+        }
+        let path = library.join(&d.cover);
+        if !path.exists() {
+            if d.size.is_some_and(|s| s > COVER_MAX_BYTES) {
+                continue;
+            }
+            if let Err(e) = make_cover(source, conn, &d.video, &path, d.edge) {
+                eprintln!("cover for {}: {e:#}", d.asset);
+                continue;
+            }
+        }
+        let image = image::open(&path)?.to_rgb8();
+        conn.execute(
+            "UPDATE assets SET thumb_path = ?2, thumb_w = ?3, thumb_h = ?4, avg_color = ?5 WHERE id = ?1",
+            params![d.asset, d.cover, image.width(), image.height(), average_colour(&image)],
+        )?;
+        made += 1;
+    }
+    Ok(made)
+}
+
+fn make_cover(source: &dyn Source, conn: &Connection, video: &Stored, cover: &Path, edge: u32) -> Result<()> {
+    let fetched = cover.with_extension("video.part");
+    let file = match source.local(video) {
+        Some(file) => file,
+        None => {
+            let ticket = source.prepare(conn, std::slice::from_ref(video))?.pop().ok_or_else(|| anyhow!("no ticket"))?;
+            let ticket = ticket.map_err(|e| anyhow!("{e}"))?;
+            std::fs::create_dir_all(cover.parent().expect("thumb folder"))?;
+            let mut body = source.open(&ticket, None).map_err(|e| anyhow!("{e}"))?;
+            let copied = std::fs::File::create(&fetched).and_then(|mut f| std::io::copy(&mut body.reader, &mut f));
+            if let Err(e) = copied {
+                let _ = std::fs::remove_file(&fetched);
+                return Err(e.into());
+            }
+            fetched.clone()
+        }
+    };
+    let picked = {
+        let _slot = crate::background::slot();
+        crate::cover::pick(&file, edge)
+    };
+    let _ = std::fs::remove_file(&fetched);
+    write_beside(cover, &picked?)?;
+    Ok(())
 }
 
 /// A source from its settings entry, `{"kind": "icloud", "account": apple
@@ -471,6 +581,37 @@ mod tests {
         assert_eq!(count(&conn, "SELECT count(*) FROM assets"), 2);
         let made = make_thumbs(&source, &mut conn, &library, 2, &|_, _| {}, &|| false).unwrap();
         assert_eq!(made.made, 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_video_with_a_dull_thumbnail_gets_a_cover_once() {
+        use crate::folder::FolderSource;
+        use std::process::{Command, Stdio};
+        if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("pinhole-covers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (videos, library) = (dir.join("videos"), dir.join("library"));
+        std::fs::create_dir_all(&videos).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+        // Black all through: its thumbnail is dull, and so is any cover.
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=64x36:d=3:r=10", "-pix_fmt", "yuv420p"])
+            .arg(videos.join("dark.mp4"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let source = FolderSource::new(videos);
+        let mut conn = db::open(&library.join("library.sqlite")).unwrap();
+        list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        make_thumbs(&source, &mut conn, &library, 1, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 1);
+        let thumb: String = conn.query_row("SELECT thumb_path FROM assets", [], |r| r.get(0)).unwrap();
+        assert!(thumb.ends_with("-cover.jpg") && library.join(&thumb).exists());
+        // Made once, never again, however dull.
+        assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

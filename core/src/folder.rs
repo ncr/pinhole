@@ -1,9 +1,10 @@
 //! A folder of photos on this computer (and the folders in it) as a source.
 //! An asset's id is its path inside the folder. The originals are served as
 //! they are, never copied; thumbnails and the 2048 px medium size are made
-//! from them with ImageMagick (a video's from a frame, with ffmpeg). Changes
-//! are found by looking at the folder again: a stat of every file, compared
-//! with what the index has. See docs/sources.md.
+//! from them with ImageMagick (a video's from its most telling frame, with
+//! ffmpeg: cover.rs). Changes are found by looking at the folder again: a
+//! stat of every file, compared with what the index has. See
+//! docs/sources.md.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -324,40 +325,24 @@ impl FolderSource {
         let path = self.root.join(rel);
         // Never more at once than background work may take (background.rs).
         let _slot = crate::background::slot();
+        // A video's from its most telling frame (cover.rs).
+        if media_of(&path) == Some(Media::Video) {
+            return crate::cover::pick(&path, edge).with_context(|| format!("could not make an image of {rel}"));
+        }
         let fit = format!("{edge}x{edge}>");
-        let output = match media_of(&path) {
-            Some(Media::Video) => {
-                let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
-                // A second in, past a fade from black; a shorter video from
-                // its start.
-                let frame = |at: &str| {
-                    crate::background::command("ffmpeg")
-                        .args(["-v", "error", "-threads", "1", "-ss", at, "-i"])
-                        .arg(&path)
-                        .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
-                        .stdin(Stdio::null())
-                        .output()
-                };
-                let first = frame("1").context("running ffmpeg")?;
-                if first.stdout.is_empty() { frame("0").context("running ffmpeg")? } else { first }
-            }
-            _ => {
-                let mut magick = crate::background::command("magick");
-                // Decoding a big JPEG at a fraction of its size is much
-                // quicker. Only a big one: the hint lets the decoder enlarge
-                // a small one too.
-                let big = image::image_dimensions(&path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
-                if big {
-                    magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
-                }
-                magick
-                    .arg(format!("{}[0]", path.display()))
-                    .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
-                    .stdin(Stdio::null())
-                    .output()
-                    .context("running magick")?
-            }
-        };
+        let mut magick = crate::background::command("magick");
+        // Decoding a big JPEG at a fraction of its size is much quicker.
+        // Only a big one: the hint lets the decoder enlarge a small one too.
+        let big = image::image_dimensions(&path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
+        if big {
+            magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
+        }
+        let output = magick
+            .arg(format!("{}[0]", path.display()))
+            .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
+            .stdin(Stdio::null())
+            .output()
+            .context("running magick")?;
         if output.stdout.is_empty() {
             return Err(anyhow!("could not make an image of {rel}: {}", String::from_utf8_lossy(&output.stderr).trim()));
         }

@@ -8,6 +8,7 @@
 
 pub mod add;
 pub mod background;
+pub mod cover;
 pub mod db;
 pub mod discover;
 pub mod effects;
