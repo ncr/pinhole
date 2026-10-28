@@ -472,9 +472,10 @@ private slots:
 
     // A held key, timed here and not by the system's repeat: the press
     // moves on one photo, and a moment later the photos move on by
-    // themselves, one every half second, the carousel gliding along without
-    // a jump; let go, it lands on the photo shown without passing it. With
-    // Shift they go slowly at first and quicker the longer it is held.
+    // themselves, one every quarter second, the carousel gliding along
+    // without a jump; let go, it lands on the photo shown without passing
+    // it. With Shift they go slowly at first and quicker the longer it is
+    // held.
     void aHeldKeyStartsSlowlyAndGathersSpeed() {
         // Where it ended, -1 if it moved on after being let go or did not
         // come to rest.
@@ -513,9 +514,9 @@ private slots:
         const int plain = holdFor(false, 3, &times, &jump, &past);
         QVERIFY(plain > 0);
         QVERIFY(times.size() >= 4);
-        QVERIFY(times[0] >= 0.45); // nothing before a moment has passed
-        for (int i = 1; i < times.size(); ++i) // then a photo every half second
-            QVERIFY(std::abs(times[i] - times[i - 1] - 0.5) < 0.05);
+        QVERIFY(times[0] >= 0.2); // nothing before a moment has passed
+        for (int i = 1; i < times.size(); ++i) // then a photo every quarter second
+            QVERIFY(std::abs(times[i] - times[i - 1] - 0.25) < 0.03);
         QVERIFY(jump < 0.5); // the carousel glides, never jumps
         QVERIFY(past <= 0);
         QList<double> fastTimes;
@@ -545,7 +546,7 @@ private slots:
             if (i >= 36)
                 later += d;
         }
-        QVERIFY(later <= 2); // 0.3–0.8 s after: about 2 a second, not 60
+        QVERIFY(later <= 3); // 0.3–0.8 s after: about 4 a second, not 60
 
         // At the end of the library it stops there.
         ViewerMotion end = viewerShowing(true, false);

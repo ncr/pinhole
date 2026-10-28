@@ -31,8 +31,8 @@ constexpr double kStripCatchUp = 10;
 // and the most with it, and how quickly Shift gets there (the share left
 // shrinks by e^-rate a second): speeding up gently, slowing down at once
 // when Shift is let go.
-constexpr double kHoldDelay = 0.5;
-constexpr double kHoldTop = 2;
+constexpr double kHoldDelay = 0.25;
+constexpr double kHoldTop = 4;
 constexpr double kHoldTopFast = 60;
 constexpr double kHoldRate = 1.2;
 constexpr double kHoldBrake = 8;
