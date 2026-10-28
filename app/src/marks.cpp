@@ -9,6 +9,8 @@
 
 namespace {
 
+double lerp(double a, double b, double t) { return a + (b - a) * t; }
+
 // A box blur of an image's alpha, `radius` pixels each way, three passes
 // across and down: near enough a Gaussian for a shadow this small.
 QImage blurredAlpha(const QImage &source, int radius) {
@@ -148,24 +150,27 @@ QImage markImage(Mark mark, int px) {
     return result;
 }
 
-NeonMark neonMark(Mark mark, const QColor &colour, int px) {
+NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit) {
     px = std::max(8, px);
     const int side = int(std::lround(px * kNeonSpread)), at = (side - px) / 2;
+    QImage tube(side, side, QImage::Format_ARGB32_Premultiplied);
+    tube.fill(Qt::transparent);
+    QPainter(&tube).drawImage(at, at, shape(mark, px, true));
     NeonMark neon;
-    neon.core = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
-    neon.core.fill(Qt::transparent);
+    neon.core = tube;
     {
         QPainter p(&neon.core);
-        p.drawImage(at, at, shape(mark, px, true));
         p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        const auto hot = [&](int c) { return c + int((255 - c) * 0.3); };
-        p.fillRect(neon.core.rect(), QColor(hot(colour.red()), hot(colour.green()), hot(colour.blue())));
+        // White-hot when lit, the colour's dark glass when not.
+        const auto hot = [&](int c) { return int(lerp(c * 0.3, c + (255 - c) * 0.3, lit)); };
+        p.fillRect(neon.core.rect(), QColor(hot(colour.red()), hot(colour.green()), hot(colour.blue()),
+                                            int(255 * (0.55 + 0.45 * lit))));
     }
     // A tight bright glow hugging the tube and a wide soft one, and under
     // them a wider dark one.
-    const QImage near = blurredAlpha(neon.core, std::max(1, px / 18));
-    const QImage far = blurredAlpha(neon.core, std::max(2, px / 5));
-    const QImage dark = blurredAlpha(neon.core, std::max(3, px / 4));
+    const QImage near = blurredAlpha(tube, std::max(1, px / 18));
+    const QImage far = blurredAlpha(tube, std::max(2, px / 5));
+    const QImage dark = blurredAlpha(tube, std::max(3, px / 4));
     neon.glow = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
     for (int y = 0; y < side; ++y) {
         const auto *n = reinterpret_cast<const QRgb *>(near.constScanLine(y));
@@ -173,8 +178,8 @@ NeonMark neonMark(Mark mark, const QColor &colour, int px) {
         const auto *d = reinterpret_cast<const QRgb *>(dark.constScanLine(y));
         auto *out = reinterpret_cast<QRgb *>(neon.glow.scanLine(y));
         for (int x = 0; x < side; ++x) {
-            const double light = std::min(1.0, 2.0 * qAlpha(n[x]) / 255.0 + 2.4 * qAlpha(f[x]) / 255.0);
-            const double shade = std::min(1.0, 2.5 * qAlpha(d[x]) / 255.0) * 0.5;
+            const double light = lit * std::min(1.0, 2.0 * qAlpha(n[x]) / 255.0 + 2.4 * qAlpha(f[x]) / 255.0);
+            const double shade = std::min(1.0, 2.5 * qAlpha(d[x]) / 255.0) * (0.2 + 0.3 * lit);
             const double alpha = shade * (1 - light) + 0.45 * light;
             out[x] = qRgba(int(colour.red() * light), int(colour.green() * light), int(colour.blue() * light),
                            int(std::lround(alpha * 255)));

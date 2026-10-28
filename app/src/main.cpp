@@ -533,22 +533,35 @@ int main(int argc, char *argv[]) {
             timer->start(50);
         });
     }
-    // PINHOLE_SELFTEST=marks:<dir>: the grid at each level from 7 columns
-    // out, where the marks turn to neon, as <dir>/<columns>.png.
-    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("marks:"))) {
+    // PINHOLE_SELFTEST=neon:<dir>: zooming out to 29 columns, where the
+    // marks' tubes strike, in and out again, as 60 frames a second in <dir>
+    // (PINHOLE_SELFTEST_AT: where in the library). Frames are stepped here,
+    // not by the clock, so slow grabs do not change the timing. 29 first, so
+    // its thumbnails are in.
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("neon:"))) {
         QTimer::singleShot(2500, window, [window, grid, test] {
-            const QList<int> columns = {7, 13, 29};
-            for (int k = 0; k < columns.size(); ++k) {
-                QTimer::singleShot(k * 5000, window, [=] {
-                    grid->setColumnsNow(columns[k]);
-                    grid->jumpToFraction(qEnvironmentVariable("PINHOLE_SELFTEST_AT").toDouble());
-                });
-                QTimer::singleShot(k * 5000 + 4500, window, [=] {
-                    window->grabWindow().save(QStringLiteral("%1/%2.png").arg(test.mid(6)).arg(columns[k]));
-                    if (k == columns.size() - 1)
-                        QCoreApplication::quit();
-                });
-            }
+            const double at = qEnvironmentVariable("PINHOLE_SELFTEST_AT").toDouble();
+            window->setProperty("troubleSeen", true);
+            grid->setColumnsNow(29);
+            grid->jumpToFraction(at);
+            QTimer::singleShot(5000, window, [grid, at] { grid->setColumnsNow(13), grid->jumpToFraction(at); });
+            QTimer::singleShot(8000, window, [window, grid, test] {
+                int frame = 0;
+                auto frames = [&](int n) {
+                    for (int i = 0; i < n; ++i, ++frame) {
+                        grid->advance(1.0 / 60);
+                        window->grabWindow().save(QStringLiteral("%1/%2.jpg").arg(test.mid(5)).arg(frame, 4, 10, QLatin1Char('0')), nullptr, 92);
+                    }
+                };
+                frames(30);
+                grid->zoomStep(1);
+                frames(150);
+                grid->zoomStep(-1);
+                frames(50);
+                grid->zoomStep(1);
+                frames(150);
+                QCoreApplication::quit();
+            });
         });
     }
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("drop:")))

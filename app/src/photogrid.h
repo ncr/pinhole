@@ -287,6 +287,14 @@ private:
     void setScroll(double y);
     void syncBounds();
     void updateAnimating();
+    // Whether a level's cells are small enough for the marks to be neon,
+    // and noting when the grid came to rest at such a level, from which
+    // the tubes strike one by one (-1: not lit).
+    bool neonAt(int columns) const;
+    void updateNeon();
+    double m_neonSince = -1; // s, on m_neonClock
+    // Seconds of animation frames, the strike's clock.
+    double m_neonClock = 0;
     void refreshStats();
     void invalidateSceneGraph();
     void touched(double timeMs, const char *how);

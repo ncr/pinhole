@@ -25,12 +25,13 @@ QImage markImage(Mark mark, int px);
 // (premultiplied, its colour stronger than its alpha) and darkens the rest a
 // little so it shows on bright photos too. Both kNeonSpread times the
 // mark's `px`, the mark in their middle. The grid draws every glow, then
-// every core, so no light falls on a neighbour's core.
+// every core, so no light falls on a neighbour's core. `lit` from 0, the
+// tube dark, to 1, as it strikes and stays on.
 constexpr double kNeonSpread = 2;
 struct NeonMark {
     QImage glow, core;
 };
-NeonMark neonMark(Mark mark, const QColor &colour, int px);
+NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit = 1);
 
 // "image://mark/video" (live, favorite, stack) for QML, as the grid draws
 // them.
