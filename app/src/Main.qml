@@ -86,8 +86,9 @@ ApplicationWindow {
         opacity: win.chrome
         x: 16
         y: 16
-        // A cloud or a folder, from the Nerd Font Omarchy's type is.
-        text: storage.sourceKind === "folder" ? "" : ""
+        // What it opens: a panel at the left (the Nerd Font's
+        // layout-sidebar-left, outlined in the weight of the letters).
+        text: "\uebf3"
         hint: "Tab"
         onTapped: side.shown = true
     }

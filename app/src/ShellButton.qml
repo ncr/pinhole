@@ -30,7 +30,7 @@ Rectangle {
     readonly property color ink: theme.foreground
     // Omarchy's control metrics (control-height 28, control-padding-x 10
     // at a base size of 12), with the type scale.
-    width: label.implicitWidth + 2 * Math.round(theme.fontSize * 0.833)
+    width: content.width + 2 * Math.round(theme.fontSize * 0.833)
     height: Math.round(theme.fontSize * 2.333)
     radius: Math.min(4, theme.radius)
     opacity: usable ? 1 : 0.4
@@ -39,28 +39,43 @@ Rectangle {
     border.width: active ? 0 : 1
     border.color: Qt.rgba(ink.r, ink.g, ink.b, hover.hovered && usable ? 0.25 : flat ? 0 : 0.4)
 
-    UiText {
-        id: label
+    // The arc in the key's place: the key stays, unseen, so the button
+    // keeps its width.
+    readonly property bool turning: turner.item !== null && turner.item.shown
+    Item {
+        id: content
         anchors.horizontalCenter: parent.horizontalCenter
-        y: centredIn(control.height)
-        color: control.active ? theme.background : theme.foreground
-        // The key quieter than the label: the theme's dark text, or on the
-        // accent, the background let through.
-        readonly property color hintColor: control.active
-            ? Qt.tint(theme.accent, Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.6))
-            : theme.darkForeground
-        // The arc in the key's place: the key stays, unseen, so the button
-        // keeps its width.
-        readonly property bool turning: turner.item !== null && turner.item.shown
-        opacity: turning && control.hint === "" ? 0 : 1
-        text: control.text + (control.hint !== "" ? "  <font color=\"" + (turning ? "transparent" : hintColor) + "\">"
-                                                    + control.hint + "</font>" : "")
+        width: control.hint !== "" ? keyLabel.x + keyLabel.implicitWidth : label.implicitWidth
+        height: control.height
+        UiText {
+            id: label
+            y: centredIn(control.height)
+            color: control.active ? theme.background : theme.foreground
+            opacity: control.turning && control.hint === "" ? 0 : 1
+            text: control.text
+        }
+        // A space after the label's ink: a Nerd Font icon is drawn wider
+        // than its cell, which the label's width takes in but a space in
+        // the same line would not, so the key stands as far from an icon's
+        // edge as from a word's.
+        TextMetrics { id: spaceMetrics; font: label.font; text: " " }
+        UiText {
+            id: keyLabel
+            visible: control.hint !== ""
+            x: Math.round(label.implicitWidth + spaceMetrics.advanceWidth)
+            y: label.y
+            // The key quieter than the label: the theme's dark text, or on
+            // the accent, the background let through.
+            color: control.turning ? "transparent"
+                 : control.active ? Qt.tint(theme.accent, Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.6))
+                 : theme.darkForeground
+            text: control.hint
+        }
     }
-    TextMetrics { id: hintMetrics; font: label.font; text: control.hint }
     Loader {
         id: turner
         active: control.busy
-        readonly property real middle: control.hint !== "" ? label.x + label.implicitWidth - hintMetrics.advanceWidth / 2
+        readonly property real middle: control.hint !== "" ? content.x + keyLabel.x + keyLabel.implicitWidth / 2
                                                            : control.width / 2
         x: Math.round(middle - width / 2)
         sourceComponent: Spinner {
