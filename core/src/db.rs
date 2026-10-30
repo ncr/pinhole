@@ -68,15 +68,36 @@ fn create(db: &Connection) -> Result<()> {
         END;
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
-    // A library from before effects were kept: the column, and the whole
-    // library listed again at the next round to fill it (the change feed
-    // only tells of what changes).
-    let has_effect = db.prepare("SELECT live_effect FROM assets LIMIT 0").is_ok();
-    if !has_effect {
-        db.execute_batch(
-            "ALTER TABLE assets ADD COLUMN live_effect TEXT;
-             DELETE FROM meta WHERE key = 'change_token';",
-        )?;
+    migrate(db)
+}
+
+/// The index's schema, kept as `PRAGMA user_version`. Readers (the window,
+/// plugins' helpers) may read a library of a later schema as long as the
+/// columns they read mean what they did; a writer never writes one later
+/// than its own. Each step up is a step in `migrate`.
+pub const SCHEMA: i64 = 1;
+
+/// Bring a library up to `SCHEMA`, one step at a time, each in a
+/// transaction with the version it reaches.
+fn migrate(db: &Connection) -> Result<()> {
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version > SCHEMA {
+        anyhow::bail!("this library was made by a later Pinhole (schema {version}, this one knows {SCHEMA})");
+    }
+    if version < 1 {
+        // 0 to 1, from before the schema was numbered: a library from
+        // before effects were kept gets the column, and the whole library
+        // listed again at the next round to fill it (the change feed only
+        // tells of what changes).
+        let tx = db.unchecked_transaction()?;
+        if tx.prepare("SELECT live_effect FROM assets LIMIT 0").is_err() {
+            tx.execute_batch(
+                "ALTER TABLE assets ADD COLUMN live_effect TEXT;
+                 DELETE FROM meta WHERE key = 'change_token';",
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 1")?;
+        tx.commit()?;
     }
     Ok(())
 }
@@ -348,6 +369,19 @@ mod tests {
         let mut index = Index::new(&mut conn);
         index.put(&[bounce]).unwrap();
         assert_eq!(index.changes.reasons.get("edited"), Some(&1));
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_library_of_a_later_schema_is_not_written() {
+        let dir = temp("later");
+        let path = dir.join("library.sqlite");
+        drop(open(&path).unwrap());
+        Connection::open(&path).unwrap().execute_batch(&format!("PRAGMA user_version = {}", SCHEMA + 1)).unwrap();
+        let error = open(&path).unwrap_err().to_string();
+        assert!(error.contains("later Pinhole"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
