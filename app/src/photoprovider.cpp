@@ -54,10 +54,13 @@ private:
 
 QImage decodePhoto(const QString &path, QSize maxSize) {
     QImage image;
-    if (path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive)) {
+    if (path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive))
         image = decodeHeif(path);
-    } else {
+    // Not HEIF after all, whatever its name says (iCloud calls a loop's
+    // JPEG a HEIC): read for what it is.
+    if (image.isNull()) {
         QImageReader reader(path);
+        reader.setDecideFormatFromContent(true);
         reader.setAutoTransform(true);
         // Scaled while decoding where the format can (JPEG at 1/2, 1/4, 1/8).
         if (maxSize.isValid() && reader.size().isValid()) {

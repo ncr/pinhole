@@ -13,6 +13,7 @@
 #include "libraryreloader.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "photoprovider.h"
 #include "thumbnailloader.h"
 #include "scrollphysics.h"
 #include "serviceclient.h"
@@ -874,6 +875,16 @@ private slots:
         QCOMPARE(loader.generation(), generation + 2);
         QTest::qWait(50);
         QCOMPARE(moves.size(), size_t(2));
+    }
+
+    void aPhotoIsReadForWhatItIsWhateverItsNameSays() {
+        // iCloud calls a loop's JPEG a HEIC, and the cache names it so.
+        QTemporaryDir dir;
+        QImage picture(64, 48, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        QVERIFY(picture.save(dir.path() + "/loop.heic", "JPEG"));
+        const QImage read = decodePhoto(dir.path() + "/loop.heic", QSize());
+        QCOMPARE(read.size(), QSize(64, 48));
     }
 
     void aMediumAnswerFromBeforeAReloadIsNotTakenForAnotherPhoto() {
