@@ -10,6 +10,7 @@
 
 #include "history.h"
 #include "library.h"
+#include "libraryreloader.h"
 #include "outgoing.h"
 #include "photogrid.h"
 #include "thumbnailloader.h"
@@ -831,6 +832,44 @@ private slots:
         settle(m);
         QCOMPARE(m.zoom(), 3.0);
         QCOMPARE(m.panX(), 0.0);
+    }
+
+    void aReloadSaysWhereEachPhotoWentAndReadsAgainForAChangeMeanwhile() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        LibraryReloader reloader(&library, &loader, dir.path());
+        std::vector<std::vector<int>> moves;
+        std::vector<bool> newest;
+        int swaps = 0;
+        connect(&reloader, &LibraryReloader::aboutToSwap, this, [&] { ++swaps; });
+        connect(&reloader, &LibraryReloader::reloaded, this,
+                [&](const std::vector<int> &moved, const std::vector<int> &, bool toNewest) {
+                    moves.push_back(moved);
+                    newest.push_back(toNewest);
+                });
+
+        // b is gone and one came first: a to 1, c to 2.
+        QFile::remove(dir.path() + "/library.sqlite");
+        makeLibrary(dir.path(), {{"new", 0}, {"a", 1}, {"c", 3}});
+        const quint64 generation = loader.generation();
+        reloader.showNewestNext();
+        reloader.reload();
+        // A change announced while that is read: one more read after it.
+        reloader.reload();
+        QTRY_COMPARE(moves.size(), size_t(2));
+        QCOMPARE(swaps, 2);
+        QCOMPARE(moves[0], (std::vector<int>{1, -1, 2}));
+        QCOMPARE(moves[1], (std::vector<int>{0, 1, 2}));
+        QCOMPARE(newest, (std::vector<bool>{true, false}));
+        QCOMPARE(library.count(), 3);
+        QCOMPARE(library.at(0).id, QByteArray("new"));
+        QCOMPARE(loader.generation(), generation + 2);
+        QTest::qWait(50);
+        QCOMPARE(moves.size(), size_t(2));
     }
 
     void aMediumAnswerFromBeforeAReloadIsNotTakenForAnotherPhoto() {

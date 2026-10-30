@@ -23,6 +23,7 @@
 #include "framestats.h"
 #include "keymap.h"
 #include "library.h"
+#include "libraryreloader.h"
 #include "photogrid.h"
 #include "incoming.h"
 #include "outgoing.h"
@@ -292,86 +293,31 @@ int main(int argc, char *argv[]) {
     QObject::connect(window, &QQuickWindow::frameSwapped, window, [&stats] { stats.frameSwapped(); },
                      Qt::DirectConnection);
 
-    // The service found changes in the source: read the library again, swap it in
-    // with the decoders idle, and let everything that holds positions follow
-    // its photos.
-    // Reading the index and matching old positions to new takes ~100 ms at
-    // 100,000 photos, so it happens on a thread of its own; the window only
-    // stops for the swap. A change announced meanwhile reloads once more.
-    std::thread reader;
-    bool reloading = false, reloadAgain = false, toNewest = false;
-    std::function<void()> reloadLibrary = [&] {
-        if (reloading) {
-            reloadAgain = true;
-            return;
-        }
-        reloading = true;
-        if (reader.joinable())
-            reader.join();
-        reader = std::thread([&library, dir = libraryDir, window, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, grid,
-                              &viewer, &plugins, &favourites] {
-            QElapsedTimer took;
-            took.start();
-            auto fresh = std::make_shared<Library>();
-            QString error;
-            if (!fresh->open(dir, &error)) {
-                std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
-                QMetaObject::invokeMethod(window, [&reloading] { reloading = false; }, Qt::QueuedConnection);
-                return;
-            }
-            // Only the window's thread swaps the library, and not before
-            // this hands over, so reading the old one here is safe.
-            QHash<QByteArray, int> positions;
-            positions.reserve(fresh->count());
-            for (int i = 0; i < fresh->count(); ++i)
-                positions.insert(fresh->at(i).id, i);
-            std::vector<int> moved(size_t(library.count()), -1);
-            for (int i = 0; i < library.count(); ++i)
-                moved[size_t(i)] = positions.value(library.at(i).id, -1);
-            // A photo whose thumbnail is a new file is drawn afresh.
-            std::vector<int> textures = moved;
-            for (int i = 0; i < library.count(); ++i)
-                if (const int now = moved[size_t(i)]; now >= 0 && fresh->at(now).thumbPath != library.at(i).thumbPath)
-                    textures[size_t(i)] = -1;
-            const qint64 read = took.elapsed();
-            QMetaObject::invokeMethod(window, [=, &library, &reloadAgain, &reloading, &reloadLibrary, &toNewest, &loader, &viewer, &plugins, &favourites] {
-                QElapsedTimer swapping;
-                swapping.start();
-                const int before = library.count();
-                grid->rememberAnchor();
-                loader.reload([&] { library.swap(*fresh); });
-                grid->libraryReloaded(moved, &textures);
-                if (std::exchange(toNewest, false))
-                    grid->scrollToEnd();
-                viewer.libraryReloaded(moved);
-                plugins.libraryReloaded();
-                favourites.reloaded();
-                std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
-                             library.count(), before, read, swapping.elapsed());
-                reloading = false;
-                if (std::exchange(reloadAgain, false))
-                    reloadLibrary();
-            }, Qt::QueuedConnection);
-        });
-    };
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&reader] {
-        if (reader.joinable())
-            reader.join();
+    // The service found changes in the source: read the library again and
+    // let everything that holds positions follow its photos.
+    LibraryReloader reloader(&library, &loader, libraryDir);
+    QObject::connect(&reloader, &LibraryReloader::aboutToSwap, grid, [grid] { grid->rememberAnchor(); });
+    QObject::connect(&reloader, &LibraryReloader::reloaded, grid,
+                     [&, grid](const std::vector<int> &moved, const std::vector<int> &textures, bool toNewest) {
+        grid->libraryReloaded(moved, &textures);
+        if (toNewest)
+            grid->scrollToEnd();
+        viewer.libraryReloaded(moved);
+        plugins.libraryReloaded();
+        favourites.reloaded();
     });
     // How the source is doing, as the service sees it: fine, needs_sign_in,
     // offline, failing, or no_service when there is no service to ask.
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed")) {
-            reloadLibrary();
+            reloader.reload();
         } else if (name == QLatin1String("source")) {
-            // Another source's library comes next: shown from its newest
-            // photos, not from where the last one was.
-            toNewest = true;
+            // Another source's library comes next.
+            reloader.showNewestNext();
         } else if (name == QLatin1String("library_moved")) {
             // Read from its new place from now on (the old one goes soon).
-            libraryDir = details.value("library").toString();
-            service.setLibrary(libraryDir);
-            reloadLibrary();
+            service.setLibrary(details.value("library").toString());
+            reloader.moveTo(details.value("library").toString());
         }
         else if (name == QLatin1String("health"))
             engine.rootContext()->setContextProperty("serviceHealth", details.value("state").toString());
@@ -380,18 +326,10 @@ int main(int argc, char *argv[]) {
     // the minute.
     service.sync();
 
-    // Without a library, look for one every few seconds: pinhole-sync may be
-    // building it right now.
-    QTimer waitForLibrary;
-    if (!haveLibrary) {
-        QObject::connect(&waitForLibrary, &QTimer::timeout, &waitForLibrary, [&] {
-            if (!QFile::exists(libraryDir + "/library.sqlite"))
-                return;
-            waitForLibrary.stop();
-            reloadLibrary();
-        });
-        waitForLibrary.start(5000);
-    }
+    // Without a library, look for one: pinhole-sync may be building it
+    // right now.
+    if (!haveLibrary)
+        reloader.waitForLibrary();
 
     // PINHOLE_SELFTEST=sourcesfade:<dir>: the side panel coming in and going
     // again, the photos dimming behind it and the grid's controls fading, as
