@@ -9,8 +9,21 @@
 
 #include <cstdio>
 
+namespace {
+
+// Which source's library a folder is (library/<kind>/<name>): the same one
+// moved elsewhere keeps it, another source's has another.
+QString sourceOf(const QString &dir) {
+    const QStringList parts = dir.split('/', Qt::SkipEmptyParts);
+    return parts.mid(std::max(0, int(parts.size()) - 2)).join('/');
+}
+
+} // namespace
+
 // One read of the index, and how its positions follow the library shown.
 struct LibraryReloader::Read {
+    // The folder it was read from.
+    QString dir;
     Library fresh;
     std::vector<int> moved, textures;
     qint64 readMs = 0;
@@ -57,6 +70,7 @@ void LibraryReloader::reload() {
         QElapsedTimer took;
         took.start();
         auto read = std::make_shared<Read>();
+        read->dir = dir;
         QString error;
         if (!read->fresh.open(dir, &error)) {
             std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
@@ -73,8 +87,11 @@ void LibraryReloader::reload() {
         for (int i = 0; i < fresh.count(); ++i)
             positions.insert(fresh.at(i).id, i);
         read->moved.assign(size_t(library->count()), -1);
-        for (int i = 0; i < library->count(); ++i)
-            read->moved[size_t(i)] = positions.value(library->at(i).id, -1);
+        // Another source's library: nothing carries over, though a photo
+        // there have the same id (a folder's are paths).
+        if (sourceOf(fresh.dir()) == sourceOf(library->dir()))
+            for (int i = 0; i < library->count(); ++i)
+                read->moved[size_t(i)] = positions.value(library->at(i).id, -1);
         // A photo whose thumbnail is a new file is drawn afresh.
         read->textures = read->moved;
         for (int i = 0; i < library->count(); ++i)
@@ -86,6 +103,14 @@ void LibraryReloader::reload() {
 }
 
 void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
+    // Read from where the library was, before it moved or another was
+    // shown: never swapped in; the one there now is read instead.
+    if (read->dir != m_dir) {
+        m_reading = false;
+        m_again = false;
+        reload();
+        return;
+    }
     QElapsedTimer swapping;
     swapping.start();
     const int before = m_library->count();

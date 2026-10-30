@@ -887,6 +887,29 @@ private slots:
         QCOMPARE(read.size(), QSize(64, 48));
     }
 
+    void aReadOfALibraryShownNoLongerIsDroppedAndAnotherSourcesPhotosAreOthers() {
+        QTemporaryDir first, other;
+        makeLibrary(first.path(), {{"a.jpg", 1}, {"b.jpg", 2}});
+        makeLibrary(other.path(), {{"a.jpg", 1}, {"b.jpg", 2}, {"c.jpg", 3}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(first.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        LibraryReloader reloader(&library, &loader, first.path());
+        std::vector<std::vector<int>> moves;
+        connect(&reloader, &LibraryReloader::reloaded, this,
+                [&](const std::vector<int> &moved, const std::vector<int> &, bool) { moves.push_back(moved); });
+        // A read of the first under way as another source's is shown.
+        reloader.reload();
+        reloader.moveTo(other.path());
+        QTRY_COMPARE(library.count(), 3);
+        QTest::qWait(50);
+        // Only the other's swapped in, and its a.jpg is not the first's.
+        QCOMPARE(moves.size(), size_t(1));
+        QCOMPARE(moves[0], (std::vector<int>{-1, -1}));
+        QCOMPARE(library.dir(), QDir(other.path()).absolutePath());
+    }
+
     void aMediumAnswerFromBeforeAReloadIsNotTakenForAnotherPhoto() {
         Library library;
         ThumbnailLoader loader(&library, 1);
