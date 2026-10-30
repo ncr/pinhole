@@ -418,40 +418,47 @@ impl Storage {
         }
         let this = self.clone();
         std::thread::spawn(move || {
-            if library_moves {
-                if let Err(e) = this.move_library(&old_libraries, &new_libraries, &new_library) {
-                    // All of it stays where it was, the settings too.
-                    eprintln!("pinholed: the move to {} is given up; everything stays in {}: {e:#}", folder.display(), from.display());
-                    let _ = std::fs::remove_dir_all(new_libraries.with_extension("part"));
-                    let _ = this.plan(None);
-                    let mut state = this.state.lock().unwrap();
-                    state.moving = false;
-                    state.moving_to = None;
-                    return;
-                }
+            let commit = || this.commit(&from, &folder, &old_cache);
+            let moved = if library_moves { this.move_library(&old_libraries, &new_libraries, &new_library, commit) } else { commit() };
+            if let Err(e) = moved {
+                // All of it stays where it was, the settings too.
+                eprintln!("pinholed: the move to {} is given up; everything stays in {}: {e:#}", folder.display(), from.display());
+                let _ = std::fs::remove_dir_all(new_libraries.with_extension("part"));
+                let _ = this.plan(None);
+                let mut state = this.state.lock().unwrap();
+                state.moving = false;
+                state.moving_to = None;
+                return;
             }
             this.photos_over(&from, &folder, &old_cache);
         });
         Ok(())
     }
 
-    /// The second half of a move, the libraries over: the new folder in
-    /// the settings and in force, new photos there at once, and the photos
-    /// kept moved over in the background (each served from the old folder
-    /// until it has moved). Then the old folder goes, and the plan.
+    /// The point a move cannot go back from: the new folder in the
+    /// settings, with the plan's photos half, in one write, and in force
+    /// (new photos go there at once). Made while nothing writes the
+    /// libraries (move_library), so none is written in the new folder
+    /// before the settings say it; a failure to write it gives the move up.
+    fn commit(&self, from: &Path, to: &Path, old_cache: &Path) -> Result<()> {
+        update_settings(&self.settings, |settings| {
+            settings["location"] = json!(to);
+            settings["moving"] = json!({"from": from, "to": to, "cache": old_cache, "phase": "photos"});
+        })?;
+        let mut state = self.state.lock().unwrap();
+        state.location = to.to_owned();
+        state.cache = to.join("cache");
+        state.moving_to = None;
+        state.moving = true;
+        state.moving_from = Some(old_cache.to_owned());
+        Ok(())
+    }
+
+    /// The second half of a move, once committed: the photos kept moved
+    /// over in the background (each served from the old folder until it
+    /// has moved). Then the old folder goes, and the plan.
     fn photos_over(&self, from: &Path, to: &Path, old_cache: &Path) {
         let (old_cache, new_cache) = (old_cache.to_owned(), to.join("cache"));
-        {
-            let mut state = self.state.lock().unwrap();
-            state.location = to.to_owned();
-            state.cache = new_cache.clone();
-            state.moving_to = None;
-            state.moving = true;
-            state.moving_from = Some(old_cache.clone());
-        }
-        if let Err(e) = self.save().and_then(|()| self.plan(Some((from, to, &old_cache, "photos")))) {
-            eprintln!("pinholed: keeping the new folder in the settings: {e:#}");
-        }
         self.move_files(&old_cache, &new_cache);
         // The old folder goes too once nothing else is in it.
         let _ = std::fs::remove_dir(from);
@@ -475,10 +482,11 @@ impl Storage {
     }
 
     /// A move cut short, put right as the service starts, before anything
-    /// reads the library. Its libraries half either got all the way (the
-    /// rename into the new folder is one step) and the photos are moved
-    /// on, or it did not and is undone, everything staying in the old
-    /// folder; the photos half is gone on with.
+    /// reads the library. Committed (the photos half), the photos are moved
+    /// on. Not, it is undone and everything stays in the old folder: a copy
+    /// made in the new one was never written, as nothing writes before the
+    /// commit. Only libraries renamed over (one step) with no old ones left
+    /// are committed now and gone on with.
     pub fn resume(self: &std::sync::Arc<Self>) {
         let written = std::fs::read_to_string(&self.settings)
             .ok()
@@ -490,13 +498,25 @@ impl Storage {
         };
         let old_cache = plan["cache"].as_str().map_or_else(|| from.join("cache"), PathBuf::from);
         let (old_libraries, new_libraries) = (from.join("library"), to.join("library"));
-        let libraries_over = plan["phase"] == "photos" || (!old_libraries.exists() && new_libraries.exists());
-        if !libraries_over {
+        let committed = plan["phase"] == "photos";
+        let renamed = !old_libraries.exists() && new_libraries.exists();
+        if !committed && !renamed {
             eprintln!("pinholed: a move to {} was cut short; everything stays in {}", to.display(), from.display());
             let _ = std::fs::remove_dir_all(new_libraries.with_extension("part"));
+            // A whole copy published but not committed: never written.
+            if old_libraries.exists() {
+                let _ = std::fs::remove_dir_all(&new_libraries);
+            }
             let _ = std::fs::remove_dir(&to);
             let _ = self.plan(None);
             return;
+        }
+        if !committed {
+            if let Err(e) = self.commit(&from, &to, &old_cache) {
+                // Tried again as the service starts next.
+                eprintln!("pinholed: going on with the move to {}: {e:#}", to.display());
+                return;
+            }
         }
         eprintln!("pinholed: going on with the move from {} to {}", from.display(), to.display());
         {
@@ -505,7 +525,10 @@ impl Storage {
             if let Ok(inside) = state.library.strip_prefix(&from) {
                 state.library = to.join(inside);
             }
+            state.location = to.clone();
+            state.cache = to.join("cache");
             state.moving = true;
+            state.moving_from = Some(old_cache.clone());
             state.moving_total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum();
         }
         // The old libraries, if a copy of them was left behind.
@@ -563,7 +586,7 @@ impl Storage {
     /// one disk, else copied beside their new place and renamed into it.
     /// Whoever reads the one in use (`library`, there now) is told, and the
     /// old copy goes a little later, once they have let go of it.
-    fn move_library(&self, from: &Path, to: &Path, library: &Path) -> Result<()> {
+    fn move_library(&self, from: &Path, to: &Path, library: &Path, commit: impl FnOnce() -> Result<()>) -> Result<()> {
         // Nothing writes them meanwhile: not a round (library_lock), not a
         // favourite or a lookup (library_moving), not pinhole-sync (each
         // library's writer).
@@ -587,6 +610,16 @@ impl Storage {
             std::fs::rename(&part, to)?;
             true
         };
+        // Over: the settings say so before anything writes them there.
+        // If they cannot, it is undone, as if it had not begun.
+        if let Err(e) = commit() {
+            if copied {
+                let _ = std::fs::remove_dir_all(to);
+            } else {
+                let _ = std::fs::rename(to, from);
+            }
+            return Err(e);
+        }
         if !copied {
             self.moved.fetch_add(bytes, Ordering::Relaxed);
         }
@@ -905,6 +938,41 @@ mod tests {
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
         assert_eq!(read_settings(&settings).location, Some(to));
+    }
+
+    #[test]
+    fn a_whole_copy_never_committed_is_not_taken_for_the_library() {
+        let dir = temp("cut-copy");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        // Copied across disks and renamed into place, the service stopped
+        // before the commit: both there, the plan's libraries half.
+        file(&from.join("library/icloud/library.sqlite"), 50, 0);
+        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        let settings = dir.join("settings.json");
+        std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
+            "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
+        let storage = storage_in(&from, &settings);
+        storage.resume();
+        assert_eq!(storage.library(), from.join("library/icloud"));
+        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert!(!to.join("library").exists());
+        assert_eq!(read_settings(&settings).location, Some(from));
+    }
+
+    #[test]
+    fn a_commit_that_cannot_be_written_undoes_the_move() {
+        let dir = temp("no-commit");
+        let (from, to) = (dir.join("old/library"), dir.join("new/library"));
+        file(&from.join("icloud/library.sqlite"), 50, 0);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        let storage = storage_in(&dir.join("old"), &dir.join("settings.json"));
+        let result = storage.move_library(&from, &to, &to.join("icloud"), || Err(anyhow!("the settings cannot be written")));
+        assert!(result.is_err());
+        // Back where it was, and in use there.
+        assert!(from.join("icloud/library.sqlite").exists());
+        assert!(!to.exists());
+        assert_eq!(storage.library(), dir.join("old/library/icloud"));
+        assert_eq!(storage.library_generation.load(Ordering::Relaxed), 0);
     }
 
     #[test]

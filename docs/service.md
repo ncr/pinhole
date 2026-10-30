@@ -394,11 +394,16 @@ photos, new ones into the new folder at once and those kept each served
 from the old folder until it has moved, keeping when it was last used. The
 old folders go once empty.
 
-The settings say the new folder only once the libraries are over; until
-then a move is kept in them as `moving` (from, to, which half). A move cut
+The settings say the new folder only once the libraries are over, in one
+write with the move's second half, made while still nothing writes them
+(the commit); until then a move is kept in them as `moving` (from, to,
+which half), and a commit that cannot be written undoes it. A move cut
 short (the service stopped, the computer off) is put right as the service
-starts again: if the libraries had not got over, it is undone and
-everything stays in the old folder; if they had, the photos go on moving. A folder inside the current
+starts again: committed, the photos go on moving; not, it is undone and
+everything stays in the old folder (a copy already in the new one was
+never written, and goes), unless the libraries were renamed over whole,
+which is committed then. pinhole-sync asks where the library is again
+once it may write, in case it moved while it waited. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.

@@ -109,6 +109,8 @@ impl Reply {
 #[derive(Clone)]
 struct Job {
     source: Arc<dyn Source>,
+    /// Its library, inside the folder everything is kept in (absolute if
+    /// it is elsewhere): found there wherever that folder has moved since.
     library: PathBuf,
     stored: Stored,
     path: PathBuf,
@@ -477,6 +479,9 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         // Not while a sync round writes the library: one building it gives
         // up within a second or so, told by `shown`.
         let _writing = shared.storage.library_lock.lock().unwrap();
+        // The source and its library change together for whoever reads
+        // both (a fetch taking them for its job).
+        let _context = shared.storage.library_moving.write().unwrap();
         *shared.source.write().unwrap() = source.clone();
         *shared.watch.lock().unwrap() = None;
         shared.rounds.lock().unwrap().push = false;
@@ -927,6 +932,9 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 }
             }
             Some("fetch") => {
+                // The index read, the source and the library taken for the
+                // job all of one moment: no switch or move between them.
+                let _context = shared.storage.library_moving.read().unwrap();
                 let generation = shared.storage.library_generation.load(Ordering::Relaxed);
                 if db.is_none() || generation != db_generation {
                     db_generation = generation;
@@ -1127,6 +1135,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     // From here on the source and library it was asked of, whatever is
     // shown by the time it comes.
     let (source, library) = (shared.source(), shared.storage.library());
+    let library = library.strip_prefix(shared.storage.location()).map_or(library.clone(), Path::to_path_buf);
     // On this computer already: served as it is.
     if let Some(path) = source.local(&stored) {
         return reply.send(if path.exists() {
@@ -1276,7 +1285,11 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
 /// Get a batch of one source's jobs ready (`prepare`), and hand them to
 /// the downloads.
 fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch: Vec<Job>) {
-    let (source, library) = (batch[0].source.clone(), batch[0].library.clone());
+    // Nothing moves the library while it is opened and written (fresh
+    // links); where it is now, as it may have moved since it was asked.
+    let _moving = shared.storage.library_moving.read().unwrap();
+    let source = batch[0].source.clone();
+    let library = shared.storage.location().join(&batch[0].library);
     // Only the source shown says how the source is doing.
     let shown = source.id() == shared.source().id();
     let failed = |e: &anyhow::Error| if shown { shared.failed(e) } else { "unavailable" };
@@ -1297,11 +1310,7 @@ fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch:
         return;
     };
     let stored: Vec<Stored> = batch.iter().map(|j| j.stored.clone()).collect();
-    // What it keeps of the links is not lost to a copy under way.
-    let moving = shared.storage.library_moving.read().unwrap();
-    let tickets = source.prepare(db, &stored);
-    drop(moving);
-    let tickets = match tickets {
+    let tickets = match source.prepare(db, &stored) {
         Ok(t) => t,
         Err(e) => {
             let code = failed(&e);

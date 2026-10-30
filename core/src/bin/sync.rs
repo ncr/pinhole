@@ -77,14 +77,23 @@ fn main() -> Result<()> {
     }
     // In the folder the window keeps everything in (storage.rs), the
     // source's own library.
-    let library = cli.library.unwrap_or_else(|| storage::library_for(&storage::location(), source.as_ref()));
-    std::fs::create_dir_all(&library)?;
-    // One writer at a time: pinholed's rounds wait while this writes.
-    let _writer = match sync::Writer::try_take(&library)? {
-        Some(writer) => writer,
-        None => {
-            eprintln!("pinholed is writing this library now; waiting for it to finish…");
-            sync::Writer::take(&library)?
+    let given = cli.library.clone();
+    let place = || given.clone().unwrap_or_else(|| storage::library_for(&storage::location(), source.as_ref()));
+    // One writer at a time: pinholed's rounds wait while this writes. Where
+    // the library is is asked again once it is this one's turn: the folder
+    // may have moved meanwhile (pinholed moves it holding every writer).
+    let (library, _writer) = loop {
+        let library = place();
+        std::fs::create_dir_all(&library)?;
+        let writer = match sync::Writer::try_take(&library)? {
+            Some(writer) => writer,
+            None => {
+                eprintln!("pinholed is writing this library now; waiting for it to finish…");
+                sync::Writer::take(&library)?
+            }
+        };
+        if place() == library {
+            break (library, writer);
         }
     };
     let mut conn = db::open(&library.join("library.sqlite"))?;
