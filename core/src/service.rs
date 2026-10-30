@@ -31,6 +31,10 @@ const BATCH_MAX: usize = 100;
 /// either side would misread what the other says.
 pub const PROTOCOL: u32 = 1;
 
+/// How long a line to a window may take to write: one that has not read for
+/// this long is hung up on.
+const WRITE_WITHIN: Duration = Duration::from_secs(5);
+
 pub struct Config {
     /// The folder everything is kept in (storage.rs), and in it, unless
     /// given otherwise, the library and the cache.
@@ -588,10 +592,28 @@ impl Shared {
     /// Send an event line to every window; ones that have gone are dropped.
     fn broadcast(&self, event: Value) {
         let line = format!("{event}\n");
-        self.listeners.lock().unwrap().retain(|out| {
-            let Ok(mut out) = out.lock() else { return false };
-            out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_ok()
-        });
+        // Written to each outside the list's lock: a window slow to read
+        // holds up only its own line (WRITE_WITHIN at most), not every
+        // other window's, nor the next to connect.
+        let listeners = self.listeners.lock().unwrap().clone();
+        let gone: Vec<_> = listeners
+            .into_iter()
+            .filter(|out| {
+                let Ok(mut out) = out.lock() else { return true };
+                out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_err()
+            })
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        // Cut off, maybe halfway through a line: hung up on, so it starts
+        // afresh with a connection of its own.
+        for out in &gone {
+            if let Ok(out) = out.lock() {
+                let _ = out.shutdown(std::net::Shutdown::Both);
+            }
+        }
+        self.listeners.lock().unwrap().retain(|out| !gone.iter().any(|g| Arc::ptr_eq(g, out)));
     }
 }
 
@@ -779,6 +801,8 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 }
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
+    // A window that stops reading does not hold up whoever writes to it.
+    stream.set_write_timeout(Some(WRITE_WITHIN))?;
     let out = Arc::new(Mutex::new(stream.try_clone()?));
     // First which protocol this is, for a window of another version to
     // tell (docs/service.md, Transport): before it hears any news.

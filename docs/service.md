@@ -32,6 +32,9 @@ below), and whatever it asks is answered `incompatible` until another
 service answers. A service whose first line is not a `hello` speaks
 protocol 0, from before there was one.
 
+A window that does not read what it is sent for five seconds is hung up
+on, so it holds up no other; it connects again and starts afresh.
+
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}
 {"id": 7, "ok": true, "result": {"path": "/home/me/.local/share/pinhole/cache/medium/3f/AWx...jpg", "type": "public.jpeg", "rendition": "JPEGMed", "cached": false}}
