@@ -125,11 +125,13 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         {"made long", "a.is_live AND a.live_effect IS NULL", true, "long_exposure"},
     };
     auto next = std::make_shared<std::function<void(int)>>();
-    *next = [&library, &viewer, cases, next](int k) {
+    // Kinds that did not come within a minute: the run fails.
+    auto failures = std::make_shared<int>(0);
+    *next = [&library, &viewer, cases, next, failures](int k) {
         if (k >= cases.size()) {
-            std::printf("selftest: done\n");
+            std::printf("selftest: done, %d timed out\n", *failures);
             std::fflush(stdout);
-            QCoreApplication::quit();
+            QCoreApplication::exit(*failures ? 1 : 0);
             return;
         }
         const Case c = cases[k];
@@ -196,9 +198,10 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
                 std::printf("selftest: %-11s says \"%s\"\n", c.name, qPrintable(viewer.message()));
         }));
         // Nothing within a minute is a failure too.
-        QTimer::singleShot(60000, &viewer, [c, finish, clock] {
+        QTimer::singleShot(60000, &viewer, [c, finish, clock, failures] {
             if (clock->elapsed() >= 59000) {
                 std::printf("selftest: %s: timed out\n", c.name);
+                ++*failures;
                 finish();
             }
         });
