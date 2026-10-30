@@ -392,7 +392,6 @@ impl Storage {
         // them, unless it was opened from elsewhere.
         let (old_libraries, new_libraries) = (from.join("library"), folder.join("library"));
         let library_moves = old_library.starts_with(&old_libraries);
-        let new_library = folder.join(old_library.strip_prefix(&from).unwrap_or(&old_library));
         if new_libraries.exists() {
             return Err(anyhow!("{} already has a library", folder.display()));
         }
@@ -419,7 +418,7 @@ impl Storage {
         let this = self.clone();
         std::thread::spawn(move || {
             let commit = || this.commit(&from, &folder, &old_cache);
-            let moved = if library_moves { this.move_library(&old_libraries, &new_libraries, &new_library, commit) } else { commit() };
+            let moved = if library_moves { this.move_library(&old_libraries, &new_libraries, commit) } else { commit() };
             if let Err(e) = moved {
                 // All of it stays where it was, the settings too.
                 eprintln!("pinholed: the move to {} is given up; everything stays in {}: {e:#}", folder.display(), from.display());
@@ -441,7 +440,10 @@ impl Storage {
     /// libraries (move_library), so none is written in the new folder
     /// before the settings say it; a failure to write it gives the move up.
     fn commit(&self, from: &Path, to: &Path, old_cache: &Path) -> Result<()> {
-        update_settings(&self.settings, |settings| {
+        // Written and in force under the settings' lock: whoever writes
+        // them next (a new limit) writes this folder.
+        let _settings = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+        write_settings(&self.settings, |settings| {
             settings["location"] = json!(to);
             settings["moving"] = json!({"from": from, "to": to, "cache": old_cache, "phase": "photos"});
         })?;
@@ -513,8 +515,20 @@ impl Storage {
         }
         if !committed {
             if let Err(e) = self.commit(&from, &to, &old_cache) {
-                // Tried again as the service starts next.
+                // Undone instead: the libraries back where the settings
+                // say, the plan's libraries half then undone at the next
+                // start. Should even that fail, the libraries are used
+                // where they are, and the next start commits them.
                 eprintln!("pinholed: going on with the move to {}: {e:#}", to.display());
+                let back = std::fs::create_dir_all(&from).and_then(|()| std::fs::rename(&new_libraries, &old_libraries));
+                if back.is_ok() {
+                    let _ = self.plan(None);
+                } else {
+                    let mut state = self.state.lock().unwrap();
+                    if let Ok(inside) = state.library.strip_prefix(&from) {
+                        state.library = to.join(inside);
+                    }
+                }
                 return;
             }
         }
@@ -569,11 +583,15 @@ impl Storage {
     }
 
     fn save(&self) -> Result<()> {
+        // What is in force read under the settings' lock, which a move's
+        // commit holds until it is in force: never a folder a move has
+        // just left.
+        let _settings = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
         let (location, limit) = {
             let s = self.state.lock().unwrap();
             (s.location.clone(), s.limit)
         };
-        update_settings(&self.settings, |settings| {
+        write_settings(&self.settings, |settings| {
             settings["location"] = json!(location);
             match limit {
                 Some(limit) => settings["limit_bytes"] = json!(limit),
@@ -586,7 +604,7 @@ impl Storage {
     /// one disk, else copied beside their new place and renamed into it.
     /// Whoever reads the one in use (`library`, there now) is told, and the
     /// old copy goes a little later, once they have let go of it.
-    fn move_library(&self, from: &Path, to: &Path, library: &Path, commit: impl FnOnce() -> Result<()>) -> Result<()> {
+    fn move_library(&self, from: &Path, to: &Path, commit: impl FnOnce() -> Result<()>) -> Result<()> {
         // Nothing writes them meanwhile: not a round (library_lock), not a
         // favourite or a lookup (library_moving), not pinhole-sync (each
         // library's writer).
@@ -600,6 +618,12 @@ impl Storage {
                 }
             }
         }
+        // The library in use now, under these locks (another source's may
+        // have been shown since the move was asked for): its place there.
+        let library = {
+            let current = self.state.lock().unwrap().library.clone();
+            current.strip_prefix(from).map(|inside| to.join(inside)).ok()
+        };
         let bytes = size_of(from);
         let copied = if std::fs::rename(from, to).is_ok() {
             false
@@ -623,10 +647,12 @@ impl Storage {
         if !copied {
             self.moved.fetch_add(bytes, Ordering::Relaxed);
         }
-        self.state.lock().unwrap().library = library.to_owned();
-        self.library_generation.fetch_add(1, Ordering::Relaxed);
-        if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
-            tell(library);
+        if let Some(library) = &library {
+            self.state.lock().unwrap().library = library.clone();
+            self.library_generation.fetch_add(1, Ordering::Relaxed);
+            if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
+                tell(library);
+            }
         }
         if copied {
             let old = from.to_owned();
@@ -966,13 +992,81 @@ mod tests {
         file(&from.join("icloud/library.sqlite"), 50, 0);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         let storage = storage_in(&dir.join("old"), &dir.join("settings.json"));
-        let result = storage.move_library(&from, &to, &to.join("icloud"), || Err(anyhow!("the settings cannot be written")));
+        let result = storage.move_library(&from, &to, || Err(anyhow!("the settings cannot be written")));
         assert!(result.is_err());
         // Back where it was, and in use there.
         assert!(from.join("icloud/library.sqlite").exists());
         assert!(!to.exists());
         assert_eq!(storage.library(), dir.join("old/library/icloud"));
         assert_eq!(storage.library_generation.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn a_move_takes_the_library_in_use_when_it_moves_not_when_it_was_asked_for() {
+        let dir = temp("move-switched");
+        let (from, to) = (dir.join("old/library"), dir.join("new/library"));
+        file(&from.join("icloud/library.sqlite"), 50, 0);
+        file(&from.join("folder/library.sqlite"), 50, 0);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        let storage = storage_in(&dir.join("old"), &dir.join("settings.json"));
+        // Asked for with iCloud's in use; the folder's shown before it goes.
+        storage.switch_library(from.join("folder"));
+        storage.move_library(&from, &to, || Ok(())).unwrap();
+        assert_eq!(storage.library(), to.join("folder"));
+    }
+
+    #[test]
+    fn a_new_limit_never_writes_back_the_folder_a_move_has_left() {
+        let dir = temp("limit-during-move");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        file(&from.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("cache/full/aa/one.jpg"), 100, 0);
+        let settings = dir.join("settings.json");
+        let storage = storage_in(&from, &settings);
+        // Limits set all the while the move goes on.
+        let setting = {
+            let storage = storage.clone();
+            std::thread::spawn(move || {
+                for i in 0..300 {
+                    storage.set_limit((30 + i % 3) * GB).unwrap();
+                }
+            })
+        };
+        storage.set_location(to.clone()).unwrap();
+        setting.join().unwrap();
+        until_moved(&storage);
+        storage.set_limit(40 * GB).unwrap();
+        assert_eq!(read_settings(&settings).location, Some(to.clone()));
+        assert_eq!(storage.location(), to);
+    }
+
+    #[test]
+    fn a_resumed_move_whose_commit_cannot_be_written_is_undone_not_left_half() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("resume-unwritable");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        let conf = dir.join("conf");
+        std::fs::create_dir_all(&conf).unwrap();
+        let settings = conf.join("settings.json");
+        std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
+            "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
+        // The settings can be read but not written.
+        std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let storage = storage_in(&from, &settings);
+        storage.resume();
+        std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Back where the settings say, and nothing new made in its place.
+        assert_eq!(storage.library(), from.join("library/icloud"));
+        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert!(!to.join("library").exists());
+        // Started again, with the settings writable: undone for good.
+        let storage = storage_in(&from, &settings);
+        storage.resume();
+        assert!(from.join("library/icloud/library.sqlite").exists());
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(written.get("moving").is_none(), "{written:#}");
+        assert_eq!(read_settings(&settings).location, Some(from));
     }
 
     #[test]
