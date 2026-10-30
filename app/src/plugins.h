@@ -29,12 +29,13 @@ class PluginLibrary : public QObject {
     // The folder of the source's library: library.sqlite, read only, and
     // the thumbnails (docs/plugins.md).
     Q_PROPERTY(QString dir READ dir NOTIFY changed)
-    // Which source's library it is, wherever it is kept: its kind and
-    // name ("icloud/me@example.com", "folder/home-me-Pictures"). For what a
-    // plugin keeps apart for each source, as Series does its edits.
+    // Which source's library it is, as the service names the source
+    // ("icloud:me@example.com", "folder:/home/me/Pictures"), wherever the
+    // library is kept. For what a plugin keeps apart for each source, as
+    // Series does its edits.
     Q_PROPERTY(QString key READ key NOTIFY changed)
 public:
-    explicit PluginLibrary(const Library *library, QObject *parent = nullptr);
+    PluginLibrary(const Library *library, const ServiceClient *service, QObject *parent = nullptr);
     int count() const;
     QString dir() const;
     QString key() const;
@@ -51,6 +52,7 @@ signals:
 
 private:
     const Library *m_library;
+    const ServiceClient *m_service;
     mutable QHash<QByteArray, int> m_positions;
 };
 

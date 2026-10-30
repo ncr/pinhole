@@ -96,7 +96,7 @@ type, so a plugin can look like the rest.
 
 | | |
 |---|---|
-| `library` | `count`, `item(i)` (id, date in ms, filename, thumbnail URL, width, height, video, live, favorite), `indexOf(id)`, `dir` (the source's library: `library.sqlite`, to read, and its thumbnails), `key` (which source's library it is, wherever it is kept: `icloud/me@example.com`, `folder/home-me-Pictures`; for what a plugin keeps for each source apart), and `changed()` when it is read again |
+| `library` | `count`, `item(i)` (id, date in ms, filename, thumbnail URL, width, height, video, live, favorite), `indexOf(id)`, `dir` (the source's library: `library.sqlite`, to read, and its thumbnails), `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`; for what a plugin keeps for each source apart), and `changed()` when it is read again |
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |

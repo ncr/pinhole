@@ -30,19 +30,23 @@
 
 #include <algorithm>
 
-PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(parent), m_library(library) {}
+PluginLibrary::PluginLibrary(const Library *library, const ServiceClient *service, QObject *parent)
+    : QObject(parent), m_library(library), m_service(service) {}
 
 int PluginLibrary::count() const { return m_library->count(); }
 
 QString PluginLibrary::dir() const { return m_library->dir(); }
 
 QString PluginLibrary::key() const {
-    // library/<kind>/<name>: the last two, which a move of the folder
-    // everything is kept in leaves as they are.
-    const QDir library(m_library->dir());
-    QDir kind(library);
-    kind.cdUp();
-    return kind.dirName() + '/' + library.dirName();
+    // As the service's source ids (storage::source_id): unlike the
+    // library's folder name, one to a source.
+    const QJsonObject source = m_service->source();
+    const QString kind = source.value("kind").toString();
+    if (kind == QLatin1String("folder"))
+        return kind + ':' + source.value("path").toString();
+    if (kind == QLatin1String("icloud"))
+        return kind + ':' + source.value("account").toString();
+    return {};
 }
 
 QVariantMap PluginLibrary::item(int index) const {
@@ -330,7 +334,7 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                  History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
       m_history(history),
-      m_libraryApi(std::make_unique<PluginLibrary>(library)) {
+      m_libraryApi(std::make_unique<PluginLibrary>(library, service)) {
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
     m_settle.setSingleShot(true);

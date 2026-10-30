@@ -108,16 +108,19 @@ PinholePlugin {
         return [...ids]
     }
     // An edit, `name` in the history: undone, the edits go back to what
-    // they were before it.
+    // they were before it. Undone or done again, it is the edits of the
+    // library it was made in, whichever is shown by then.
     function keep(manual, apart, name) {
-        const before = edits, after = { manual: manual, apart: apart }
-        setEdits(after)
-        pinhole.did(name, () => setEdits(before), () => setEdits(after))
+        const key = editsKey, before = edits, after = { manual: manual, apart: apart }
+        setEdits(key, after)
+        pinhole.did(name, () => setEdits(key, before), () => setEdits(key, after))
     }
-    function setEdits(state) {
-        edits = state
-        if (!pinhole.setSetting(editsKey, edits))
+    function setEdits(key, state) {
+        if (!pinhole.setSetting(key, state))
             console.warn("Series: the edits could not be kept")
+        if (key !== editsKey)
+            return
+        edits = state
         apply()
     }
     // The edits of the library shown, when another is.
