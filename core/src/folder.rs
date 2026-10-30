@@ -184,12 +184,13 @@ fn unread_holds(unread: &[String], id: &str) -> bool {
 /// The assets among the files found: a video named as a photo beside it
 /// (IMG_1234.HEIC with IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names
 /// it) is that photo's motion, not an asset of its own.
+/// A file's folder and name without its extension, lower case: a photo and
+/// its motion share it (the motion maybe with `_hevc` after).
+fn stem(rel: &str) -> String {
+    rel.rsplit_once('.').map_or(rel, |(s, _)| s).to_ascii_lowercase()
+}
+
 fn pair(found: Vec<Found>) -> HashMap<String, Entry> {
-    // Photos by folder and name without extension, for their motion.
-    let stem = |rel: &str| -> String {
-        let without = rel.rsplit_once('.').map_or(rel, |(s, _)| s);
-        without.to_ascii_lowercase()
-    };
     let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
     let mut motion: HashMap<String, Found> = HashMap::new();
     let mut entries: HashMap<String, Entry> = HashMap::new();
@@ -260,6 +261,18 @@ struct Look {
 }
 
 impl Look {
+    /// A Live Photo known with its motion, now seen without it because the
+    /// motion's file could not be read: left as the index has it, not made
+    /// a still photo.
+    fn motion_unread(&self, entry: &Entry) -> bool {
+        entry.file.media == Media::Photo
+            && entry.motion.is_none()
+            && self.unread.iter().any(|u| {
+                let s = stem(u);
+                media_of(Path::new(u)) == Some(Media::Video) && (s == stem(&entry.file.rel) || s == stem(&entry.file.rel) + "_hevc")
+            })
+    }
+
     /// For the listing's summary: nothing when all was read.
     fn unread_note(&self) -> String {
         match self.unread.len() {
@@ -447,16 +460,23 @@ impl Source for FolderSource {
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
         let look = self.look()?;
         let entries = &look.entries;
-        let mut all: Vec<&Entry> = entries.values().collect();
-        all.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
-        self.put(index, &all, progress, all.len() as u64)?;
-        // What could not be read is not gone: the listing leaves it be.
+        // What could not be read is not gone: the listing leaves it be, and
+        // a Live Photo whose motion it is as the index has it.
+        let mut held = HashSet::new();
         if !look.unread.is_empty() {
             let mut stmt = index.conn.prepare("SELECT id FROM assets")?;
-            let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<HashSet<String>>>()?;
             drop(stmt);
-            index.seen.extend(ids.into_iter().filter(|id| unread_holds(&look.unread, id)));
+            held = entries
+                .values()
+                .filter(|e| ids.contains(&e.file.rel) && look.motion_unread(e))
+                .map(|e| e.file.rel.clone())
+                .collect();
+            index.seen.extend(ids.into_iter().filter(|id| unread_holds(&look.unread, id) || held.contains(id)));
         }
+        let mut all: Vec<&Entry> = entries.values().filter(|e| !held.contains(&e.file.rel)).collect();
+        all.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
+        self.put(index, &all, progress, all.len() as u64)?;
         let lives = entries.values().filter(|e| e.motion.is_some()).count();
         Ok(Listing {
             token: Some(crate::sync::now_secs().to_string()),
@@ -482,8 +502,11 @@ impl Source for FolderSource {
                 known.insert(id, (key.unwrap_or_default(), live));
             }
         }
-        let changed: Vec<&Entry> =
-            entries.values().filter(|e| known.get(&e.file.rel) != Some(&e.signature())).collect();
+        let changed: Vec<&Entry> = entries
+            .values()
+            .filter(|e| known.get(&e.file.rel) != Some(&e.signature()))
+            .filter(|e| !(known.contains_key(&e.file.rel) && look.motion_unread(e)))
+            .collect();
         let gone: Vec<String> = known
             .keys()
             .filter(|id| !entries.contains_key(*id) && !unread_holds(&look.unread, id))
@@ -780,6 +803,30 @@ mod tests {
         crate::sync::follow(&source, &mut conn, false).unwrap();
         assert_eq!(ids(&conn), ["2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_live_photo_whose_motion_cannot_be_read_stays_as_it_is() {
+        let found = |rel: &str, media| Found { rel: rel.into(), media, size: 1, modified_ns: 0 };
+        let look = |unread: &[&str], files: Vec<Found>| Look {
+            entries: pair(files),
+            unread: unread.iter().map(|u| u.to_string()).collect(),
+        };
+        let photo = || found("2026/IMG_1.HEIC", Media::Photo);
+        // Its motion's file is there but could not be looked at.
+        for unread in ["2026/IMG_1.MOV", "2026/img_1_hevc.mov"] {
+            let l = look(&[unread], vec![photo()]);
+            assert!(l.motion_unread(&l.entries["2026/IMG_1.HEIC"]), "{unread}");
+        }
+        // Another photo's, a picture, or the motion read after all: no.
+        for (unread, files) in [
+            ("2026/IMG_2.MOV", vec![photo()]),
+            ("2026/IMG_1.JPG", vec![photo()]),
+            ("2026/other.MOV", vec![photo(), found("2026/IMG_1.MOV", Media::Video)]),
+        ] {
+            let l = look(&[unread], files);
+            assert!(!l.motion_unread(&l.entries["2026/IMG_1.HEIC"]), "{unread}");
+        }
     }
 
     #[test]
