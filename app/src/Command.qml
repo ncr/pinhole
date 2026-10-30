@@ -38,12 +38,15 @@ Item {
     property string keyLayer: "chrome"
     property bool when: true
     property bool autoRepeat: false
+    // False for keys read elsewhere (the viewer's arrows, timed as they are
+    // held): listed, but no shortcut of its own.
+    property bool bound: true
     // ShellButtons showing it now (they count themselves).
     property int buttons: 0
 
     // The key as a button or the help shows it: "⇧ E", "Esc".
     readonly property string keyName: keysText !== "" ? keysText : keys.length > 0 ? KeyNames.nameOf(keys[0]) : ""
-    readonly property bool live: when && (keyLayer === "any" || keymap.layer === keyLayer
+    readonly property bool live: bound && when && (keyLayer === "any" || keymap.layer === keyLayer
         || (keyLayer === "chrome" && (keymap.layer === "grid" || keymap.layer === "viewer")))
 
     signal triggered()

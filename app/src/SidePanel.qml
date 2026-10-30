@@ -58,7 +58,33 @@ Item {
     property string health: "fine"
     // The row the keys are on; the one asked about before removing or
     // signing out, and which of the two.
+    // Where the keys are: a source's row, then each other control in the
+    // panel in turn (`stops`, which add themselves as they are made), as
+    // ↑ ↓ move, ⏎ and Space press, the panel scrolling to show it.
     property int focusIndex: 0
+    property var stops: []
+    function addStop(item) { stops = stops.concat([item]) }
+    function dropStop(item) { stops = stops.filter(s => s !== item) }
+    // Those showing, in the order they are laid out.
+    readonly property var stopsShown: {
+        const shown = stops.filter(s => s.visible)
+        return shown.sort((a, b) => a.mapToItem(top, 0, 0).y - b.mapToItem(top, 0, 0).y
+                                   || a.mapToItem(top, 0, 0).x - b.mapToItem(top, 0, 0).x)
+    }
+    readonly property int sourceCount: sources.list.length
+    readonly property var focusedStop: focusIndex >= sourceCount ? stopsShown[focusIndex - sourceCount] ?? null : null
+    onFocusIndexChanged: showFocus()
+    function showFocus() {
+        const item = focusedStop ?? sourceRows.itemAt(focusIndex)
+        if (!item)
+            return
+        const y = item.mapToItem(top, 0, 0).y
+        const margin = theme.fontSize
+        if (y < scroller.contentY + margin)
+            scroller.contentY = Math.max(0, y - margin)
+        else if (y + item.height > scroller.contentY + scroller.height - margin)
+            scroller.contentY = Math.min(scroller.contentHeight - scroller.height, y + item.height - scroller.height + margin)
+    }
     property int confirming: -1
     property bool signingOut: false
     signal addRequested()
@@ -238,7 +264,7 @@ Item {
         autoRepeat: true
         mouse: qsTr("Point at a row")
         touchpad: qsTr("Point at a row")
-        onTriggered: root.focusIndex = Math.min(sources.list.length - 1, root.focusIndex + 1)
+        onTriggered: root.focusIndex = Math.min(root.sourceCount + root.stopsShown.length - 1, root.focusIndex + 1)
     }
     Command {
         id: enterAction
@@ -252,10 +278,21 @@ Item {
                 root.confirmLimit()
             } else if (root.confirming >= 0) {
                 root.answer(true)
+            } else if (root.focusedStop) {
+                root.focusedStop.press()
             } else {
                 root.open(root.focusIndex)
             }
         }
+    }
+    Command {
+        name: "side.press"
+        keys: ["Space"]
+        keyLayer: "side"
+        when: root.focusedStop !== null && root.confirming < 0 && !root.lowering
+        mouse: qsTr("Click it")
+        touchpad: qsTr("Tap it")
+        onTriggered: root.focusedStop.press()
     }
     function answer(yes) {
         if (yes && root.signingOut) {
@@ -271,7 +308,7 @@ Item {
         name: "side.remove"
         keys: ["Delete", "Backspace"]
         keyLayer: "side"
-        when: root.confirming < 0 && sources.list.length > 0
+        when: root.confirming < 0 && root.focusIndex < root.sourceCount
         onTriggered: {
             root.signingOut = false
             root.confirming = root.focusIndex
@@ -398,6 +435,7 @@ Item {
             }
 
             Repeater {
+                id: sourceRows
                 model: sources.list
                 delegate: Rectangle {
                     id: row
@@ -413,7 +451,8 @@ Item {
                          : hover.hovered ? Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.05) : "transparent"
                     border.width: 1
                     border.color: asking ? theme.red
-                                : root.shown && root.focusIndex === index && sources.list.length > 1 ? theme.accent : "transparent"
+                                : root.shown && root.focusIndex === index && (sources.list.length > 1 || keymap.input === "keyboard")
+                                  ? theme.accent : "transparent"
                     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor; onHoveredChanged: if (hovered) root.focusIndex = row.index }
                     TapHandler { onTapped: root.confirming >= 0 ? root.confirming = -1 : root.open(row.index) }
 
@@ -494,7 +533,11 @@ Item {
 
             ShellButton {
                 width: parent.width
+                id: addButton
                 text: qsTr("Add a source")
+                lit: root.focusedStop === addButton
+                Component.onCompleted: root.addStop(addButton)
+                Component.onDestruction: root.dropStop(addButton)
                 action: addAction
             }
             // The sources' keys.
@@ -540,6 +583,9 @@ Item {
                 }
                 ShellButton {
                     id: change
+                    lit: root.focusedStop === change
+                    Component.onCompleted: root.addStop(change)
+                    Component.onDestruction: root.dropStop(change)
                     anchors.right: parent.right
                     usable: !storage.moving
                     text: qsTr("Change")
@@ -708,7 +754,11 @@ Item {
             ShellButton {
                 visible: storage.outdated
                 x: Math.round(theme.fontSize * 0.714)
+                id: restartButton
                 text: qsTr("Restart it")
+                lit: root.focusedStop === restartButton
+                Component.onCompleted: root.addStop(restartButton)
+                Component.onDestruction: root.dropStop(restartButton)
                 action: restartAction
             }
             // What the limit can and cannot do.
@@ -762,6 +812,9 @@ Item {
                     }
                     Toggle {
                         id: markSwitch
+                        lit: root.focusedStop === markSwitch
+                        Component.onCompleted: root.addStop(markSwitch)
+                        Component.onDestruction: root.dropStop(markSwitch)
                         anchors.right: parent.right
                         checked: markRow.on
                         onToggled: gridSettings.marks ^= markRow.modelData.mark
@@ -799,6 +852,9 @@ Item {
                             }
                             Toggle {
                                 id: pluginSwitch
+                                lit: root.focusedStop === pluginSwitch
+                                Component.onCompleted: root.addStop(pluginSwitch)
+                                Component.onDestruction: root.dropStop(pluginSwitch)
                                 anchors.right: parent.right
                                 visible: pluginRow.info.error === ""
                                 checked: pluginRow.info.enabled
@@ -825,6 +881,9 @@ Item {
                             height: tourButton.height + Math.round(theme.fontSize * 0.4)
                             ShellButton {
                                 id: tourButton
+                                lit: root.focusedStop === tourButton
+                                Component.onCompleted: root.addStop(tourButton)
+                                Component.onDestruction: root.dropStop(tourButton)
                                 anchors.bottom: parent.bottom
                                 text: qsTr("Show how it works")
                                 onTapped: root.tourRequested(pluginRow.modelData)
@@ -841,7 +900,11 @@ Item {
             }
             ShellButton {
                 x: Math.round(theme.fontSize * 0.714)
+                id: folderButton
                 text: qsTr("Open the folder")
+                lit: root.focusedStop === folderButton
+                Component.onCompleted: root.addStop(folderButton)
+                Component.onDestruction: root.dropStop(folderButton)
                 onTapped: plugins.showPersonalDir()
             }
             Item { width: 1; height: theme.fontSize }

@@ -651,14 +651,21 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              QTimer::singleShot(300, window, [=] { key(window, Qt::Key_N, {}, QStringLiteral("n")); });
          },
          [=] { return grid->atNewest() && grid->scrollFraction() > 0.999; }, 1800},
-        {"Down scrolls a row", [=] {
+        // The keyboard's cursor: the first press shows it, the next moves it
+        // a row down (where it is in the library, not on screen: the view
+        // may glide after it).
+        {"Down shows the cursor, and again moves it a row", [=] {
              grid->jumpToFraction(0.5);
-             *mark = grid->scrollFraction() * grid->scrollRange();
-             QTimer::singleShot(100, window, [=] { key(window, Qt::Key_Down); });
+             QTimer::singleShot(100, window, [=] {
+                 key(window, Qt::Key_Down);
+                 const int index = grid->currentIndex();
+                 *mark = grid->rectOf(index).top() + grid->scrollFraction() * grid->scrollRange();
+                 QTimer::singleShot(300, window, [=] { key(window, Qt::Key_Down); });
+             });
          },
          [=] {
-             const double moved = grid->scrollFraction() * grid->scrollRange() - *mark;
-             return std::abs(moved - grid->rectOf(1).left() + grid->rectOf(0).left()) < 2;
+             const double at = grid->rectOf(grid->currentIndex()).top() + grid->scrollFraction() * grid->scrollRange();
+             return grid->cursorShown() && std::abs(at - *mark - (grid->rectOf(1).left() - grid->rectOf(0).left())) < 2;
          }, 1200},
         {"Shift+Up half a screen back", [=] {
              *mark = grid->scrollFraction() * grid->scrollRange();

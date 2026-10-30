@@ -216,6 +216,7 @@ Item {
         onTriggered: studio.close()
     }
     Command {
+        id: pauseCommand
         name: "studio.pause"
         text: qsTr("Pause, play")
         section: "Series"
@@ -308,6 +309,90 @@ Item {
             touchpad: qsTr("Its button")
             onTriggered: { studio.change({ motion: modelData }); studio.time = 0 }
         }
+    }
+
+    // The crop moved with ⇧ and the arrows, a quarter of its room a press,
+    // and 0 puts it back in the middle.
+    function nudgeCrop(dx, dy) {
+        const room = preview.room
+        const pan = studio.recipe.pan
+        studio.change({ pan: {
+            x: room.x > 1 ? Math.max(-1, Math.min(1, pan.x + dx * 0.25)) : 0,
+            y: room.y > 1 ? Math.max(-1, Math.min(1, pan.y + dy * 0.25)) : 0
+        } })
+    }
+    Repeater {
+        model: [["Shift+Left", -1, 0], ["Shift+Right", 1, 0], ["Shift+Up", 0, -1], ["Shift+Down", 0, 1]]
+        delegate: Command {
+            required property var modelData
+            required property int index
+            name: "studio.crop" + index
+            text: qsTr("Move the crop")
+            section: index === 0 ? "Series" : ""
+            keys: [modelData[0]]
+            keysText: "⇧ ← → ↑ ↓"
+            keyLayer: "plugin"
+            when: studio.shown && studio.making === ""
+            autoRepeat: true
+            mouse: qsTr("Drag the picture")
+            touchpad: qsTr("Drag it with three fingers")
+            onTriggered: studio.nudgeCrop(modelData[1], modelData[2])
+        }
+    }
+    Command {
+        name: "studio.centre"
+        keys: ["0"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("Double-click the picture")
+        touchpad: qsTr("Double-tap the picture")
+        onTriggered: studio.change({ pan: { x: 0, y: 0 } })
+    }
+    // A shot chosen with [ and ], and X leaves it out or takes it back.
+    property int shotCursor: 0
+    Command {
+        name: "studio.shotBack"
+        text: qsTr("Choose a shot")
+        section: "Series"
+        keys: ["["]
+        keysText: "[ ]"
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        autoRepeat: true
+        mouse: qsTr("Point at the strip")
+        touchpad: qsTr("Point at the strip")
+        onTriggered: studio.shotCursor = Math.max(0, studio.shotCursor - 1)
+    }
+    Command {
+        name: "studio.shotOn"
+        keys: ["]"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        autoRepeat: true
+        mouse: qsTr("Point at the strip")
+        touchpad: qsTr("Point at the strip")
+        onTriggered: studio.shotCursor = Math.min(studio.all.length - 1, studio.shotCursor + 1)
+    }
+    Command {
+        name: "studio.leaveOut"
+        text: qsTr("Leave the shot out, or back in")
+        section: "Series"
+        keys: ["X"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === "" && studio.shotCursor < studio.all.length
+        mouse: qsTr("Click it in the strip")
+        touchpad: qsTr("Tap it in the strip")
+        onTriggered: studio.toggle(studio.all[studio.shotCursor].index)
+    }
+    Command {
+        id: showCommand
+        name: "studio.show"
+        text: qsTr("Show the file made")
+        section: "Series"
+        keys: ["S"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.made !== null
+        onTriggered: studio.pinhole.showFile(studio.made.path)
     }
 
     // The file's frames are drawn here, at its size, out of sight under
@@ -455,6 +540,15 @@ Item {
                     color: theme.accent
                     visible: strip.showing === modelData.index
                 }
+                // The one [ and ] are on, while the keyboard is in use.
+                Rectangle {
+                    width: parent.width
+                    height: strip.cell
+                    color: "transparent"
+                    border.width: 2
+                    border.color: theme.brightForeground
+                    visible: keymap.input === "keyboard" && studio.all[studio.shotCursor]?.index === modelData.index
+                }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: studio.toggle(modelData.index) }
             }
@@ -479,7 +573,7 @@ Item {
             visible: studio.made !== null
             floating: true
             text: qsTr("Show")
-            onTapped: studio.pinhole.showFile(studio.made.path)
+            action: showCommand
         }
     }
 
@@ -549,6 +643,11 @@ Item {
                     active: studio.recipe.steady && studio.recipe.motion !== "pile"
                     usable: studio.recipe.motion !== "pile"
                     onTapped: studio.change({ steady: !studio.recipe.steady })
+                }
+                ShellButton {
+                    flat: true
+                    text: studio.playing ? qsTr("Pause") : qsTr("Play")
+                    action: pauseCommand
                 }
                 ShellButton {
                     flat: true

@@ -45,6 +45,14 @@ Rectangle {
     // The pointer over it, while it shows.
     readonly property bool hovered: hover.hovered && visible
     signal tapped()
+    // As a tap does: from the keys of a panel it is a stop in.
+    function press() {
+        if (!usable)
+            return
+        if (action)
+            action.trigger()
+        tapped()
+    }
 
     readonly property color ink: theme.foreground
     // Omarchy's control metrics (control-height 28, control-padding-x 10

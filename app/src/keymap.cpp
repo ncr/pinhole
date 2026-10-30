@@ -90,7 +90,11 @@ QStringList Keymap::uncovered() const {
 
 bool Keymap::eventFilter(QObject *watched, QEvent *event) {
     switch (event->type()) {
+    // A key that is a shortcut never arrives as a key press: Qt asks
+    // whether anything wants it first (ShortcutOverride), then triggers it.
     case QEvent::KeyPress:
+    case QEvent::ShortcutOverride:
+    case QEvent::Shortcut:
         setInput(QStringLiteral("keyboard"));
         break;
     case QEvent::Wheel: {

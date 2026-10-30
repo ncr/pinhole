@@ -7,7 +7,10 @@ Item {
     id: toggle
     property bool checked: false
     property string hint
+    // Chosen with the keys: a ring around it, in the accent.
+    property bool lit: false
     signal toggled()
+    function press() { toggled() }
 
     implicitWidth: track.width + (hintText.visible ? hintText.implicitWidth + Math.round(theme.fontSize * 0.6) : 0)
     implicitHeight: Math.round(theme.fontSize * 2.333)
@@ -41,6 +44,16 @@ Item {
             Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             color: toggle.checked ? theme.background : theme.foreground
         }
+    }
+    Rectangle {
+        visible: toggle.lit
+        anchors.centerIn: track
+        width: track.width + 6
+        height: track.height + 6
+        radius: height / 2
+        color: "transparent"
+        border.width: 2
+        border.color: theme.accent
     }
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: toggle.toggled() }

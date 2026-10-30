@@ -87,6 +87,13 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(bool selecting READ selecting WRITE setSelecting NOTIFY selectingChanged)
     // The window's colour, showing between the cells.
     Q_PROPERTY(QColor background MEMBER m_background NOTIFY backgroundChanged)
+    // The keyboard's cursor: a ring around one cell, while the keyboard is
+    // in use (`cursorShown`, which the window sets). The arrows move it, the
+    // view gliding to keep it in sight, and it is the photo Space, Enter
+    // and Ctrl+C take then. Scrolled from by other means, it comes along to
+    // the nearest cell in view.
+    Q_PROPERTY(bool cursorShown READ cursorShown WRITE setCursorShown NOTIFY cursorShownChanged)
+    Q_PROPERTY(QColor cursorColor MEMBER m_cursorColor NOTIFY cursorColorChanged)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -158,6 +165,23 @@ public:
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearSelection();
 
+    bool cursorShown() const { return m_cursorShown; }
+    void setCursorShown(bool shown);
+    // By photos across and rows down; with `extend`, in select mode, every
+    // photo from where the range began to the cursor ticks. A key held
+    // moves it on at a steady pace, a row or a photo at a time. The first
+    // press after the pointer was used only shows it, where that was.
+    Q_INVOKABLE void moveCursor(int dx, int dy, bool extend);
+    // A screen's rows up or down.
+    Q_INVOKABLE void cursorPages(int pages);
+    // To the oldest and the newest photos, the view with it.
+    Q_INVOKABLE void cursorToStart();
+    Q_INVOKABLE void cursorToEnd();
+    // Select mode: the cursor's photo ticked or not.
+    Q_INVOKABLE void tickCursor();
+    // On the photo the viewer closed on.
+    Q_INVOKABLE void putCursorOn(int index);
+
     // The date scrubber: jump anywhere, the capture date (ms) at a position,
     // where each year begins, and whether a drag is under way (the grid then
     // draws from mosaic pages, as when scrolling very fast).
@@ -226,6 +250,8 @@ signals:
     void accentChanged();
     void backgroundChanged();
     void selectingChanged();
+    void cursorShownChanged();
+    void cursorColorChanged();
     void dateLabelChanged();
     void zoomingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
@@ -335,6 +361,17 @@ private:
     QPointF m_hover{-1, -1};
     std::set<int> m_selected;
     int m_selectionAnchor = -1;
+    // The cursor's cell, -1 for none; whether it is moving the view now
+    // (else it follows the view); and when a held key last moved it.
+    int m_cursor = -1;
+    bool m_cursorShown = false;
+    bool m_cursorLeads = false;
+    double m_cursorPressed = -1, m_cursorStepped = -1;
+    QColor m_cursorColor{0xc0, 0xca, 0xf5};
+    void revealCell(int cell);
+    void keepCursorInView();
+    // The cell the pointer is over, else the middle one in view.
+    int pointedCell() const;
     QPointF m_pressAt;
     int m_pressIndex = -1;
     bool m_dragged = false;

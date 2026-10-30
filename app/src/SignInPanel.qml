@@ -76,6 +76,40 @@ Item {
         keyLayer: "signIn"
         onTriggered: root.shown = false
     }
+    // Tab and ⇧ Tab between the Apple ID and the password, as anywhere.
+    function nextField(direction) {
+        const fields = [account.input, password.input].filter(f => f.visible && f.enabled)
+        if (fields.length === 0)
+            return
+        const at = fields.findIndex(f => f.activeFocus)
+        fields[(at + direction + fields.length) % fields.length].forceActiveFocus()
+    }
+    Command {
+        name: "signIn.next"
+        keys: ["Tab"]
+        keyLayer: "signIn"
+        when: !root.codeStage
+        mouse: qsTr("Click the field")
+        touchpad: qsTr("Tap the field")
+        onTriggered: root.nextField(1)
+    }
+    Command {
+        name: "signIn.previous"
+        keys: ["Shift+Tab", "Backtab"]
+        keyLayer: "signIn"
+        when: !root.codeStage
+        mouse: qsTr("Click the field")
+        touchpad: qsTr("Tap the field")
+        onTriggered: root.nextField(-1)
+    }
+    Command {
+        name: "signIn.type"
+        noMouse: qsTr("Typing an Apple ID, a password or a code needs a keyboard")
+        noTouchpad: qsTr("Typing an Apple ID, a password or a code needs a keyboard")
+        noKeyboard: qsTr("Typed")
+        keyLayer: "signIn"
+        bound: false
+    }
     Command {
         id: newCodeAction
         name: "signIn.newCode"

@@ -108,6 +108,8 @@ public:
 
     double position() const { return m_position; }
     double velocity() const { return m_velocity; }
+    // Where an easing (nudge) is headed; where it is, otherwise.
+    double target() const { return m_mode == Mode::Easing ? m_position + m_easeRemaining : m_position; }
 
 private:
     enum class Mode { Idle, Tracking, Coasting, Spring, Easing, Wheel };

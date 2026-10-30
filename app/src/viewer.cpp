@@ -163,8 +163,21 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
             m_motion.setHoldFast(press);
             return false;
         }
-        if ((key->key() != Qt::Key_Left && key->key() != Qt::Key_Right) || !m_takesInput ||
-            (key->modifiers() & ~(Qt::ShiftModifier | Qt::KeypadModifier)))
+        const bool across = key->key() == Qt::Key_Left || key->key() == Qt::Key_Right;
+        const bool down = key->key() == Qt::Key_Up || key->key() == Qt::Key_Down;
+        if ((!across && !down) || !m_takesInput || (key->modifiers() & ~(Qt::ShiftModifier | Qt::KeypadModifier)))
+            return false;
+        // Zoomed in, the arrows look around the photo, as dragging it does
+        // (a step a fifth of the window, with Shift half), held on and on.
+        if (m_motion.zoomed()) {
+            if (press) {
+                const double step = (key->modifiers() & Qt::ShiftModifier ? 0.5 : 0.2) * m_motion.pageWidth();
+                const double sign = key->key() == Qt::Key_Left || key->key() == Qt::Key_Up ? 1 : -1;
+                panBy(across ? sign * step : 0, down ? sign * step : 0);
+            }
+            return true;
+        }
+        if (down)
             return false;
         // The system's repeats are not wanted: holding is timed here.
         if (key->isAutoRepeat())

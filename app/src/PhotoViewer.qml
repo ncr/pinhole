@@ -537,7 +537,7 @@ Item {
         anchors.bottom: carousel.top
         height: 56
         opacity: root.progress * root.chrome
-        readonly property bool active: seekHover.hovered || seekArea.pressed
+        readonly property bool active: seekHover.hovered || seekArea.pressed || root.justSkipped
         HoverHandler { id: seekHover }
 
         Rectangle {
@@ -779,8 +779,12 @@ Item {
         if (!viewer.video || videoPlayer.duration <= 0)
             return false
         videoPlayer.setPosition(Math.max(0, Math.min(videoPlayer.duration - 100, videoPlayer.position + seconds * 1000)))
+        // The time, for a moment, as under the pointer.
+        skipped.restart()
         return true
     }
+    Timer { id: skipped; interval: 1500 }
+    readonly property bool justSkipped: skipped.running
 
     function togglePlay() {
         if (!viewer.video)

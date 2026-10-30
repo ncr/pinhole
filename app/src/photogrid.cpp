@@ -366,6 +366,8 @@ int PhotoGrid::cellAt(qreal x, qreal y) const {
 }
 
 int PhotoGrid::currentIndex() const {
+    if (m_cursorShown && m_cursor >= 0 && m_cursor < count())
+        return libraryAt(m_cursor);
     if (m_hover.x() >= 0) {
         if (const int i = indexAt(m_hover.x(), m_hover.y()); i >= 0)
             return i;
@@ -753,6 +755,143 @@ void PhotoGrid::setScroll(double y) {
     updateAnimating();
     update();
     notifyScrolled();
+    keepCursorInView();
+}
+
+int PhotoGrid::pointedCell() const {
+    if (m_hover.x() >= 0)
+        if (const int cell = cellAt(m_hover.x(), m_hover.y()); cell >= 0)
+            return cell;
+    const int middle = cellAt(width() / 2, height() / 2);
+    return middle >= 0 ? middle : count() - 1;
+}
+
+void PhotoGrid::setCursorShown(bool shown) {
+    if (shown == m_cursorShown)
+        return;
+    m_cursorShown = shown;
+    emit cursorShownChanged();
+    update();
+}
+
+void PhotoGrid::revealCell(int cell) {
+    const double s = stride();
+    const double top = (cell / m_columns) * s, bottom = top + s;
+    const double target = m_physics.target();
+    double want = target;
+    if (top < target)
+        want = top;
+    else if (bottom > target + height())
+        want = bottom - height();
+    m_cursorLeads = true;
+    if (std::abs(want - target) < 0.5)
+        return;
+    syncBounds();
+    m_physics.nudge(want - target, 0.12);
+    updateAnimating();
+}
+
+void PhotoGrid::keepCursorInView() {
+    if (!m_cursorShown || m_cursor < 0 || count() == 0)
+        return;
+    if (m_cursorLeads) {
+        if (!m_physics.animating())
+            m_cursorLeads = false;
+        return;
+    }
+    const double s = stride();
+    const int rows = (count() + m_columns - 1) / m_columns;
+    const int first = std::clamp(int(std::ceil(m_scroll / s - 0.01)), 0, rows - 1);
+    const int last = std::clamp(int(std::floor((m_scroll + height()) / s + 0.01)) - 1, first, rows - 1);
+    const int row = m_cursor / m_columns;
+    if (row >= first && row <= last)
+        return;
+    m_cursor = std::min(count() - 1, std::clamp(row, first, last) * m_columns + m_cursor % m_columns);
+    update();
+}
+
+void PhotoGrid::moveCursor(int dx, int dy, bool extend) {
+    if (count() == 0)
+        return;
+    // A held key moves it on a row every 0.11 s, a photo every 0.05 s: the
+    // system's repeats come faster.
+    const double now = m_clock.nsecsElapsed() / 1e9;
+    const bool fresh = now - m_cursorPressed > 0.12 || m_cursorPressed < 0;
+    m_cursorPressed = now;
+    if (!fresh && now - m_cursorStepped < (dy != 0 ? 0.11 : 0.05))
+        return;
+    m_cursorStepped = now;
+    // Not shown yet, or left behind: shown first, where the pointer is.
+    const double s = stride();
+    const int row = m_cursor / std::max(1, m_columns);
+    const bool inView = m_cursor >= 0 && m_cursor < count() && (row + 1) * s > m_scroll && row * s < m_scroll + height();
+    if (!inView) {
+        m_cursor = pointedCell();
+        m_cursorLeads = false;
+        update();
+        return;
+    }
+    const int from = m_cursor;
+    int to = m_cursor + dx + dy * m_columns;
+    to = std::clamp(to, 0, count() - 1);
+    m_cursor = to;
+    if (extend && m_selecting) {
+        const int anchor = m_selectionAnchor >= 0 ? m_selectionAnchor : from;
+        for (int i = std::min(anchor, to); i <= std::max(anchor, to); ++i)
+            m_selected.insert(i);
+        m_selectionAnchor = anchor;
+        emit selectionChanged();
+    }
+    revealCell(to);
+    update();
+}
+
+void PhotoGrid::cursorPages(int pages) {
+    if (count() == 0)
+        return;
+    if (m_cursor < 0 || m_cursor >= count())
+        m_cursor = pointedCell();
+    const int rows = std::max(1, int(height() / stride()));
+    m_cursor = std::clamp(m_cursor + pages * rows * m_columns, 0, count() - 1);
+    revealCell(m_cursor);
+    update();
+}
+
+void PhotoGrid::cursorToStart() {
+    if (count() == 0)
+        return;
+    m_cursor = 0;
+    m_cursorLeads = true;
+    scrollToStart();
+}
+
+void PhotoGrid::cursorToEnd() {
+    if (count() == 0)
+        return;
+    m_cursor = count() - 1;
+    m_cursorLeads = true;
+    glideToNewest();
+}
+
+void PhotoGrid::tickCursor() {
+    if (m_cursor < 0 || m_cursor >= count())
+        m_cursor = pointedCell();
+    if (m_cursor < 0)
+        return;
+    if (!m_selected.erase(m_cursor))
+        m_selected.insert(m_cursor);
+    m_selectionAnchor = m_cursor;
+    emit selectionChanged();
+    update();
+}
+
+void PhotoGrid::putCursorOn(int index) {
+    const int cell = cellOf(index);
+    if (cell < 0)
+        return;
+    m_cursor = cell;
+    m_cursorLeads = false;
+    update();
 }
 
 void PhotoGrid::updateDateLabel() {
@@ -1315,6 +1454,7 @@ void PhotoGrid::advance(qreal dt) {
     updateAnimating();
     update();
     notifyScrolled();
+    keepCursorInView();
     // After the headers: a label the landing changes still morphs.
     if (wasZooming != m_zoom.active)
         emit zoomingChanged();
@@ -2277,12 +2417,21 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             for (auto it = m_selected.lower_bound(from); it != m_selected.end() && *it < to; ++it)
                 frames.push_back(cellRect(*it, l));
         }
+        // The keyboard's cursor, when it shows and is in view.
+        QRectF cursorFrame;
+        if (m_cursorShown && m_cursor >= 0 && m_cursor < count()) {
+            const Layer &l = drawn.front();
+            const Range &r = ranges.front();
+            if (m_cursor >= r.firstRow * l.columns && m_cursor < (r.lastRow + 1) * l.columns)
+                cursorFrame = cellRect(m_cursor, l);
+        }
         // Each: a border, and a check badge in the bottom right corner, square
         // as Omarchy draws things: the accent, with a tick in the background
         // colour.
         constexpr int kPerCell = 24 + 6 + 12;
+        constexpr int kCursor = 48;
         QSGGeometry *g = rs.selection->geometry();
-        g->allocate(int(frames.size() * kPerCell));
+        g->allocate(int(frames.size() * kPerCell + (cursorFrame.isNull() ? 0 : kCursor)));
         auto *v = g->vertexDataAsColoredPoint2D();
         const float w = 3;
         const uchar r = uchar(m_accent.red()), gr = uchar(m_accent.green()), b = uchar(m_accent.blue());
@@ -2322,6 +2471,31 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             const double t = std::max(1.5, radius * 0.22);
             stroke({cx - radius * 0.45, cy + radius * 0.02}, {cx - radius * 0.1, cy + radius * 0.38}, t);
             stroke({cx - radius * 0.1, cy + radius * 0.38}, {cx + radius * 0.48, cy - radius * 0.35}, t);
+        }
+        // The cursor: a ring in the theme's bright text inside the cell, and
+        // within it a hairline of the background, so it reads on any photo
+        // and apart from a tick's border in the accent.
+        if (!cursorFrame.isNull()) {
+            auto ring = [&](QRectF f, float t, QColor c) {
+                const uchar cr = uchar(c.red()), cg = uchar(c.green()), cb = uchar(c.blue());
+                auto box = [&](float x0, float y0, float x1, float y1) {
+                    v[0].set(x0, y0, cr, cg, cb, 255);
+                    v[1].set(x1, y0, cr, cg, cb, 255);
+                    v[2].set(x0, y1, cr, cg, cb, 255);
+                    v[3].set(x1, y0, cr, cg, cb, 255);
+                    v[4].set(x1, y1, cr, cg, cb, 255);
+                    v[5].set(x0, y1, cr, cg, cb, 255);
+                    v += 6;
+                };
+                const float x0 = float(f.left()), y0 = float(f.top()), x1 = float(f.right()), y1 = float(f.bottom());
+                box(x0, y0, x1, y0 + t);
+                box(x0, y1 - t, x1, y1);
+                box(x0, y0 + t, x0 + t, y1 - t);
+                box(x1 - t, y0 + t, x1, y1 - t);
+            };
+            const float t = 3;
+            ring(cursorFrame, t, m_cursorColor);
+            ring(cursorFrame.adjusted(t, t, -t, -t), 1, m_background);
         }
         rs.selection->markDirty(QSGNode::DirtyGeometry);
     }
