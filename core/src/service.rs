@@ -774,10 +774,10 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
-    shared.listeners.lock().unwrap().push(out.clone());
     // First which protocol this is, for a window of another version to
-    // tell (docs/service.md, Transport).
+    // tell (docs/service.md, Transport): before it hears any news.
     let _ = writeln!(out.lock().unwrap(), "{}", json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
+    shared.listeners.lock().unwrap().push(out.clone());
     // A window that connects hears where the photos come from, and if
     // something is wrong, that too.
     let _ = writeln!(out.lock().unwrap(), "{}", source_event(&*shared.source()));

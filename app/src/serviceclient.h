@@ -61,6 +61,8 @@ private:
     void setHealth(const QString &health);
     // No service, after trying for a while: whatever waits is answered so.
     void giveUp();
+    // Whatever waits is answered `code`, unsent requests too.
+    void failWaiting(const QString &code);
     static QString socketPath();
 
     QString m_library;
@@ -70,6 +72,9 @@ private:
     QTimer m_retry;
     int m_attempts = 0;
     bool m_started = false;
+    // The service connected to has said its protocol (its first line):
+    // until then requests wait in m_unsent.
+    bool m_greeted = false;
     qint64 m_nextId = 1;
     QHash<qint64, Callback> m_waiting;
     QList<QByteArray> m_unsent;

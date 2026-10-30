@@ -982,6 +982,8 @@ private:
             peer->write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
             peer->flush();
         }
+        // The service's first line, as a service of this window's protocol.
+        void greet() { send({{"event", "hello"}, {"protocol", ServiceClient::kProtocol}, {"version", "1.0.0"}}); }
     };
 
 private slots:
@@ -1017,6 +1019,44 @@ private slots:
             said |= args.at(0).toString() == QLatin1String("health")
                     && args.at(1).toJsonObject().value("state").toString() == QLatin1String("incompatible");
         QVERIFY(said);
+        // Nothing is asked of it: answered so at once, and nothing sent.
+        QString code;
+        service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { code = c; });
+        QTRY_COMPARE(code, QString("incompatible"));
+        fake.read();
+        QVERIFY(fake.asked.isEmpty());
+
+        // One from before there was a hello: protocol 0. What was asked
+        // before it said anything waited, and is refused now.
+        fake.peer->disconnectFromServer();
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QTRY_COMPARE(service.health(), QString("fine"));
+        QString waited;
+        service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { waited = c; });
+        QTest::qWait(50);
+        fake.read();
+        QVERIFY(fake.asked.isEmpty());
+        QVERIFY(waited.isEmpty());
+        fake.send({{"event", "source"}, {"kind", "folder"}, {"name", "Pictures"}});
+        QTRY_COMPARE(waited, QString("incompatible"));
+        QCOMPARE(service.health(), QString("incompatible"));
+
+        // And one of its own: what waited for its hello goes then.
+        fake.peer->disconnectFromServer();
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QTRY_COMPARE(service.health(), QString("fine"));
+        bool answered = false;
+        service.call(QStringLiteral("storage"), {}, [&](bool ok, const QJsonObject &, const QString &) { answered = ok; });
+        QTest::qWait(50);
+        fake.read();
+        QVERIFY(fake.asked.isEmpty());
+        fake.greet();
+        QTRY_COMPARE((fake.read(), fake.asked.size()), 1);
+        QCOMPARE(fake.asked.first().value("method").toString(), QString("storage"));
+        fake.send({{"id", fake.asked.first().value("id")}, {"ok", true}, {"result", QJsonObject{}}});
+        QTRY_VERIFY(answered);
         qunsetenv("PINHOLE_SOCKET");
     }
 
@@ -1032,6 +1072,7 @@ private slots:
         ServiceClient service(dir.path());
         QTRY_VERIFY(fake.server.hasPendingConnections());
         fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
         fake.send({{"event", "source"}, {"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}});
         QTRY_VERIFY(service.sourceName() == QLatin1String("iCloud"));
 
@@ -1132,6 +1173,7 @@ private slots:
         ServiceClient service(dir.path());
         QTRY_VERIFY(fake.server.hasPendingConnections());
         fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
         // Answered as pinholed does, while the drop waits for it.
         QObject::connect(fake.peer, &QLocalSocket::readyRead, fake.peer, [&fake, &photo] {
             const qsizetype seen = fake.asked.size();

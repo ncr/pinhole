@@ -26,9 +26,11 @@ version:
 ```
 
 `protocol` goes up whenever either side would misread what the other says.
-A window that speaks another one says so (health `incompatible`, below)
-rather than half work; one that hears no `hello` takes the service for an
-older one of the same protocol.
+A window sends nothing before it has heard it, and asks nothing of a
+service that speaks another one: it says so (health `incompatible`,
+below), and whatever it asks is answered `incompatible` until another
+service answers. A service whose first line is not a `hello` speaks
+protocol 0, from before there was one.
 
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}
@@ -178,7 +180,8 @@ or `failing` (the source answers with errors). A sync round, a lookup or a downl
 works sets it back. The window shows anything but `fine` in a corner, and
 two of its own: `no_service` when no service answers at all (whatever it
 had asked is answered `no_service` then, and so is anything it asks until
-one does), and `incompatible` when the service speaks another protocol.
+one does), and `incompatible` when the service speaks another protocol
+(whatever it asks is answered so too).
 
 ## Staying in sync
 

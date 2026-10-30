@@ -14,10 +14,9 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
         m_attempts = 0;
         m_retry.setInterval(250);
         // Fine until the service says otherwise, which it does at once.
+        // What was asked meanwhile goes once it has said its protocol.
+        m_greeted = false;
         setHealth(QStringLiteral("fine"));
-        for (const QByteArray &line : std::as_const(m_unsent))
-            m_socket.write(line);
-        m_unsent.clear();
     });
     connect(&m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
         // Nothing listening: start the service once, then keep trying for a
@@ -33,9 +32,8 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
     });
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         // The service went away: whatever was asked will not be answered.
-        const auto waiting = std::exchange(m_waiting, {});
-        for (const Callback &done : waiting)
-            done(false, {}, QStringLiteral("unavailable"));
+        m_greeted = false;
+        failWaiting(QStringLiteral("unavailable"));
         m_started = false;
         m_retry.start();
     });
@@ -70,10 +68,14 @@ void ServiceClient::setHealth(const QString &health) {
 void ServiceClient::giveUp() {
     m_retry.setInterval(5000);
     setHealth(QStringLiteral("no_service"));
+    failWaiting(QStringLiteral("no_service"));
+}
+
+void ServiceClient::failWaiting(const QString &code) {
     m_unsent.clear();
     const auto waiting = std::exchange(m_waiting, {});
     for (const Callback &done : waiting)
-        done(false, {}, QStringLiteral("no_service"));
+        done(false, {}, code);
 }
 
 void ServiceClient::connectNow() {
@@ -121,9 +123,11 @@ void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback
 }
 
 void ServiceClient::call(const QString &method, const QJsonObject &params, Callback done) {
-    // None to ask: said at once (after this returns, as an answer would be).
-    if (m_health == QLatin1String("no_service") && !connected()) {
-        QTimer::singleShot(0, this, [done = std::move(done)] { done(false, {}, QStringLiteral("no_service")); });
+    // None to ask, or one that speaks another protocol: said at once (after
+    // this returns, as an answer would be).
+    const bool none = m_health == QLatin1String("no_service") && !connected();
+    if (none || m_health == QLatin1String("incompatible")) {
+        QTimer::singleShot(0, this, [done = std::move(done), code = m_health] { done(false, {}, code); });
         return;
     }
     const qint64 id = m_nextId++;
@@ -137,24 +141,36 @@ void ServiceClient::sync() {
 
 void ServiceClient::send(const QJsonObject &request) {
     const QByteArray line = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
-    if (connected())
+    if (connected() && m_greeted)
         m_socket.write(line);
-    else
+    else if (m_health != QLatin1String("incompatible"))
         m_unsent.append(line);
 }
 
 void ServiceClient::readReplies() {
     while (m_socket.canReadLine()) {
         const QJsonObject reply = QJsonDocument::fromJson(m_socket.readLine()).object();
-        if (reply.contains("event")) {
-            const QString event = reply.value("event").toString();
-            if (event == QLatin1String("hello")) {
-                if (const int protocol = reply.value("protocol").toInt(); protocol != kProtocol) {
-                    qWarning("pinhole: the service speaks protocol %d, this window %d", protocol, kProtocol);
-                    setHealth(QStringLiteral("incompatible"));
-                }
-                continue;
+        const QString event = reply.value("event").toString();
+        if (!m_greeted) {
+            // Its first line says its protocol; one from before there was a
+            // hello speaks 0, which no window of now does.
+            m_greeted = true;
+            const int protocol = event == QLatin1String("hello") ? reply.value("protocol").toInt() : 0;
+            if (protocol != kProtocol) {
+                qWarning("pinhole: the service speaks protocol %d, this window %d", protocol, kProtocol);
+                setHealth(QStringLiteral("incompatible"));
+                failWaiting(QStringLiteral("incompatible"));
+            } else {
+                for (const QByteArray &line : std::as_const(m_unsent))
+                    m_socket.write(line);
+                m_unsent.clear();
             }
+            if (event == QLatin1String("hello"))
+                continue;
+        }
+        if (reply.contains("event")) {
+            if (event == QLatin1String("hello"))
+                continue;
             if (event == QLatin1String("source"))
                 m_source = reply;
             else if (event == QLatin1String("health")) {
