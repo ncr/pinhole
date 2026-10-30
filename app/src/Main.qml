@@ -158,6 +158,7 @@ ApplicationWindow {
         sourceComponent: PhotoViewer {
             objectName: "photoViewer"
             grid: viewerLoader.photoGrid
+            helpAction: helpToggle
             pluginActions: win.pluginActions.filter(a => a.place === "viewer")
         }
     }
@@ -399,8 +400,49 @@ ApplicationWindow {
         hint: ""
     }
 
-    // What the corner button takes of the bottom right.
-    readonly property real cornerWidth: 16 + helpButton.width + 8
+    // The years at the right edge, for a pointer to go anywhere at once.
+    Scrubber {
+        id: scrubber
+        objectName: "scrubber"
+        grid: grid
+        visible: win.chromeUp && !win.firstRun && grid.count > 0 && !grid.selecting
+        opacity: win.chrome
+        anchors.right: parent.right
+        anchors.top: selectButton.bottom
+        anchors.topMargin: 12
+        anchors.bottom: helpButton.top
+        anchors.bottomMargin: 12
+    }
+
+    // Closer and further, beside it: for a mouse with no side wheel to
+    // turn, and a touchpad that does not pinch.
+    Row {
+        id: zoomButtons
+        objectName: "zoomButtons"
+        visible: win.chromeUp && !win.firstRun && grid.count > 0
+        opacity: win.chrome
+        anchors.right: helpButton.left
+        anchors.rightMargin: 6
+        anchors.bottom: helpButton.bottom
+        spacing: 6
+        ShellButton {
+            floating: true
+            text: "−"
+            width: height
+            hint: ""
+            action: gridZoomOut
+        }
+        ShellButton {
+            floating: true
+            text: "+"
+            width: height
+            hint: ""
+            action: gridZoomIn
+        }
+    }
+
+    // What the corner buttons take of the bottom right.
+    readonly property real cornerWidth: 16 + helpButton.width + 6 + zoomButtons.width + 8
 
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
@@ -509,6 +551,7 @@ ApplicationWindow {
             const key = name => level < 1 ? barMetrics.advanceWidth("  " + name) : 0
             const count = countText(level)
             let width = 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize + 5)
+                + barMetrics.advanceWidth(qsTr("Range")) + key("R") + pad + 5
                 + barMetrics.advanceWidth("\uf08a") + key("F") + pad + 5
                 + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad + arrow
             for (const group of pluginGroups) {
@@ -528,6 +571,17 @@ ApplicationWindow {
             rightPadding: theme.fontSize
             text: selectBar.countText(selectBar.fit)
             color: theme.accent
+        }
+        // Range: the next photo tapped ticks all from the last ticked to it.
+        MenuGroup {
+            ShellButton {
+                objectName: "selectRange"
+                flat: true
+                text: qsTr("Range")
+                active: grid.rangeNext
+                hint: selectBar.hints ? "R" : ""
+                action: selectRange
+            }
         }
         // The ticked photos all favourites (a filled heart in the accent),
         // or not (an empty one): all made favourites, or none when they all
@@ -799,26 +853,71 @@ ApplicationWindow {
     }
     // Not while typing (an Apple ID, a code), nor while a tour shows.
     readonly property bool historyKeys: !signIn.shown && !addPicker.shown && !tour.shown
-    Chip {
+    // What was done, undone or done again, said at the foot for a while,
+    // with the button that takes it back (or does it again): undo and redo
+    // for a pointer, as Ctrl+Z and Ctrl+⇧Z are for the keys.
+    Rectangle {
         id: historyNotice
         objectName: "historyNotice"
+        property string message
+        // "undo" offers Undo, "redo" Redo, "" neither.
+        property string offer
         visible: opacity > 0
         opacity: 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: grid.selecting || win.viewerShown || win.pluginCovering ? 72 : 24
-        Timer { id: historyNoticeShown; interval: 2500; onTriggered: historyNotice.opacity = 0 }
-        function show(message) {
-            text = message
+        width: noticeRow.width + 2
+        height: noticeRow.height + 2
+        radius: Math.min(4, theme.radius)
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
+        border.width: 1
+        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+        // Long enough to reach for, and longer under the pointer.
+        Timer {
+            id: historyNoticeShown
+            interval: 4000
+            onTriggered: noticeHover.hovered ? restart() : historyNotice.opacity = 0
+        }
+        HoverHandler { id: noticeHover }
+        function show(message, offer) {
+            historyNotice.message = message
+            historyNotice.offer = offer
             opacity = 1
             historyNoticeShown.restart()
         }
+        Row {
+            id: noticeRow
+            x: 1
+            y: 1
+            UiText {
+                anchors.verticalCenter: parent.verticalCenter
+                leftPadding: theme.fontSize
+                rightPadding: theme.fontSize
+                text: historyNotice.message
+            }
+            ShellButton {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: historyNotice.offer === "undo"
+                flat: true
+                text: qsTr("Undo")
+                action: undo
+            }
+            ShellButton {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: historyNotice.offer === "redo"
+                flat: true
+                text: qsTr("Redo")
+                action: redo
+            }
+        }
         Connections {
             target: history
-            function onUndone(name) { historyNotice.show(qsTr("Undone: %1").arg(name)) }
-            function onRedone(name) { historyNotice.show(qsTr("Redone: %1").arg(name)) }
-            function onNothing(undo) { historyNotice.show(undo ? qsTr("Nothing to undo") : qsTr("Nothing to redo")) }
+            function onDone(name) { historyNotice.show(name, "undo") }
+            function onUndone(name) { historyNotice.show(qsTr("Undone: %1").arg(name), "redo") }
+            function onRedone(name) { historyNotice.show(qsTr("Redone: %1").arg(name), "undo") }
+            function onNothing(undo) { historyNotice.show(undo ? qsTr("Nothing to undo") : qsTr("Nothing to redo"), "") }
         }
     }
 
@@ -893,23 +992,25 @@ ApplicationWindow {
 
     // The grid.
     Command {
+        id: gridZoomIn
         name: "grid.zoomIn"
         text: qsTr("Zoom in")
         section: "library"
         keys: ["+", "="]
         keyLayer: "grid"
-        mouse: qsTr("Ctrl + wheel, or the thumb wheel")
-        touchpad: qsTr("Pinch out")
+        mouse: qsTr("The + button, the thumb wheel, or Ctrl + wheel")
+        touchpad: qsTr("Pinch out, or the + button")
         onTriggered: grid.zoomStep(-1)
     }
     Command {
+        id: gridZoomOut
         name: "grid.zoomOut"
         text: qsTr("Zoom out")
         section: "library"
         keys: ["-"]
         keyLayer: "grid"
-        mouse: qsTr("Ctrl + wheel, or the thumb wheel")
-        touchpad: qsTr("Pinch in")
+        mouse: qsTr("The − button, the thumb wheel, or Ctrl + wheel")
+        touchpad: qsTr("Pinch in, or the − button")
         onTriggered: grid.zoomStep(1)
     }
     Command {
@@ -918,6 +1019,8 @@ ApplicationWindow {
         section: "library"
         keys: ["Home"]
         keyLayer: "grid"
+        mouse: qsTr("The top of the years at the right edge")
+        touchpad: qsTr("The top of the years at the right edge")
         onTriggered: grid.cursorToStart()
     }
     // The cursor: a photo across, a row down, held a steady pace; the view
@@ -1027,6 +1130,16 @@ ApplicationWindow {
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
         onTriggered: grid.selecting ? grid.tickCursor() : win.openCurrent()
+    }
+    Command {
+        id: selectRange
+        name: "select.range"
+        text: qsTr("Range: the next photo ends it")
+        section: "select"
+        keys: ["R"]
+        keyLayer: "grid"
+        when: grid.selecting
+        onTriggered: grid.rangeNext = !grid.rangeNext
     }
     Command {
         name: "select.rangeUp"

@@ -14,6 +14,7 @@ void History::did(const QString &owner, const QString &name, Step undo, Step red
         m_steps.erase(m_steps.begin());
     m_done = int(m_steps.size());
     emit changed();
+    emit done(name);
 }
 
 void History::undo() {

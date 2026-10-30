@@ -454,7 +454,15 @@ Item {
                                 : root.shown && root.focusIndex === index && (sources.list.length > 1 || keymap.input === "keyboard")
                                   ? theme.accent : "transparent"
                     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor; onHoveredChanged: if (hovered) root.focusIndex = row.index }
-                    TapHandler { onTapped: root.confirming >= 0 ? root.confirming = -1 : root.open(row.index) }
+                    // Not a tap on one of its buttons, which do their own.
+                    TapHandler {
+                        onTapped: eventPoint => {
+                            const p = row.mapToItem(rowButtons, eventPoint.position.x, eventPoint.position.y)
+                            if (rowButtons.visible && rowButtons.contains(p))
+                                return
+                            root.confirming >= 0 ? root.confirming = -1 : root.open(row.index)
+                        }
+                    }
 
                     Row {
                         id: rowContent
@@ -519,7 +527,40 @@ Item {
                                        : row.modelData.kind === "icloud"
                                        ? qsTr("Sign out and forget its index? The photos stay in iCloud.")
                                        : qsTr("Forget its index? The photos stay in the folder."))
-                                      + "  " + qsTr("⏎ yes · Esc no")
+
+                            }
+                            // Its buttons: Yes and No while asking; else, under
+                            // the pointer or the keys, Sign out and Remove.
+                            Row {
+                                id: rowButtons
+                                spacing: 6
+                                visible: row.asking || hover.hovered || (root.focusIndex === row.index && keymap.input === "keyboard")
+                                ShellButton {
+                                    visible: row.asking
+                                    active: true
+                                    text: qsTr("Yes")
+                                    hint: "⏎"
+                                    onTapped: root.answer(true)
+                                }
+                                ShellButton {
+                                    visible: row.asking
+                                    flat: true
+                                    text: qsTr("No")
+                                    hint: "Esc"
+                                    onTapped: root.confirming = -1
+                                }
+                                ShellButton {
+                                    visible: !row.asking && root.canSignOut(row.index)
+                                    flat: true
+                                    text: qsTr("Sign out")
+                                    action: signOutSource
+                                }
+                                ShellButton {
+                                    visible: !row.asking
+                                    flat: true
+                                    text: qsTr("Remove")
+                                    action: removeSource
+                                }
                             }
                         }
                         UiText {

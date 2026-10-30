@@ -93,6 +93,10 @@ class PhotoGrid : public QQuickItem {
     // and Ctrl+C take then. Scrolled from by other means, it comes along to
     // the nearest cell in view.
     Q_PROPERTY(bool cursorShown READ cursorShown WRITE setCursorShown NOTIFY cursorShownChanged)
+    // Select mode's Range: the next photo tapped ticks every one from the
+    // last ticked to it, as a Shift+click does, for a touchpad that cannot
+    // drag across them.
+    Q_PROPERTY(bool rangeNext MEMBER m_rangeNext NOTIFY rangeNextChanged)
     Q_PROPERTY(QColor cursorColor MEMBER m_cursorColor NOTIFY cursorColorChanged)
 
 public:
@@ -251,6 +255,7 @@ signals:
     void backgroundChanged();
     void selectingChanged();
     void cursorShownChanged();
+    void rangeNextChanged();
     void cursorColorChanged();
     void dateLabelChanged();
     void zoomingChanged();
@@ -364,6 +369,7 @@ private:
     // The cursor's cell, -1 for none; whether it is moving the view now
     // (else it follows the view); and when a held key last moved it.
     int m_cursor = -1;
+    bool m_rangeNext = false;
     bool m_cursorShown = false;
     bool m_cursorLeads = false;
     double m_cursorPressed = -1, m_cursorStepped = -1;

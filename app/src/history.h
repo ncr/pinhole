@@ -34,6 +34,8 @@ public:
 
 signals:
     void changed();
+    // A step done just now, which the window offers to undo.
+    void done(const QString &name);
     void undone(const QString &name);
     void redone(const QString &name);
     // Ctrl+Z with nothing to undo, or Ctrl+⇧Z with nothing to redo.

@@ -1309,7 +1309,7 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
                 const int now = editor()->property("flow").toList().size();
                 auto *notice = window->findChild<QQuickItem *>(QStringLiteral("historyNotice"));
                 say(QStringLiteral("%1: %2 photos (%3)%4").arg(name).arg(now).arg(now == wanted ? "as it should" : "WRONG")
-                    .arg(notice && notice->opacity() > 0 ? QStringLiteral(", saying \"%1\"").arg(notice->property("text").toString()) : QString()));
+                    .arg(notice && notice->opacity() > 0 ? QStringLiteral(", saying \"%1\"").arg(notice->property("message").toString()) : QString()));
                 *failed = *failed || now != wanted;
                 grab(name);
                 (*step)(n + 1);

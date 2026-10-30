@@ -15,6 +15,8 @@ Item {
     required property var grid
     // Plugins' buttons for a photo (PluginAction), before Copy.
     property var pluginActions: []
+    // The window's keys and gestures (Main.qml), for its ? button here.
+    property var helpAction: null
     property double openedAt: 0
     // Presses and clicks the viewer's mouse area has had (self-tests).
     property int presses: 0
@@ -475,6 +477,15 @@ Item {
                     key: "C"
                     keyLayer: "viewer"
                     section: "photo"
+                }
+            }
+            // The keys and gestures, as the grid's ? button shows them.
+            MenuGroup {
+                ShellButton {
+                    flat: true
+                    text: "?"
+                    hint: ""
+                    action: root.helpAction
                 }
             }
             // Back to the library; with a menu open, Esc closes that.

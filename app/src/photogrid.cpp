@@ -642,11 +642,17 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
     // Shift click outside it enters it. Otherwise a click opens.
     if (mods & (Qt::ControlModifier | Qt::ShiftModifier))
         setSelecting(true);
-    if (m_selecting && !(mods & Qt::ShiftModifier)) {
+    // Range on: this tap ends a range, as a Shift+click.
+    const bool range = (mods & Qt::ShiftModifier) || (m_selecting && m_rangeNext);
+    if (m_rangeNext) {
+        m_rangeNext = false;
+        emit rangeNextChanged();
+    }
+    if (m_selecting && !range) {
         if (!m_selected.erase(index))
             m_selected.insert(index);
         m_selectionAnchor = index;
-    } else if (mods & Qt::ShiftModifier) {
+    } else if (range) {
         const int anchor = m_selectionAnchor >= 0 ? m_selectionAnchor : index;
         for (int i = std::min(index, anchor); i <= std::max(index, anchor); ++i)
             m_selected.insert(i);
@@ -695,6 +701,10 @@ void PhotoGrid::setSelecting(bool selecting) {
     if (selecting == m_selecting)
         return;
     m_selecting = selecting;
+    if (!selecting && m_rangeNext) {
+        m_rangeNext = false;
+        emit rangeNextChanged();
+    }
     if (!selecting)
         clearSelection();
     emit selectingChanged();
