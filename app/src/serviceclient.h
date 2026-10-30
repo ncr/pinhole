@@ -13,6 +13,8 @@
 // answers at all, the service is started.
 class ServiceClient : public QObject {
     Q_OBJECT
+    // As health(), for the window (the corner that says what is wrong).
+    Q_PROPERTY(QString health READ health NOTIFY healthChanged)
 public:
     // `library` is the directory the window shows; a service this client
     // starts serves that one.
@@ -50,6 +52,7 @@ public:
     void sync();
 
 signals:
+    void healthChanged();
     // Something the service announced: "library_changed", with its details.
     void announced(const QString &name, const QJsonObject &details);
 

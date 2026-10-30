@@ -236,8 +236,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("autoTours", (!qEnvironmentVariableIsSet("PINHOLE_SELFTEST")
                                                            || qEnvironmentVariable("PINHOLE_SELFTEST").startsWith(QLatin1String("tour:")))
                                                           && !parser.isSet("bench"));
-    // How the source is doing (set again as the service says): see below.
-    engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
+    // The line to pinholed, for how the source is doing (service.health).
+    engine.rootContext()->setContextProperty("service", &service);
     engine.load(QUrl("qrc:/Main.qml"));
     opening.join();
     if (!haveLibrary)
@@ -305,8 +305,7 @@ int main(int argc, char *argv[]) {
         plugins.libraryReloaded();
         favourites.reloaded();
     });
-    // How the source is doing, as the service sees it: fine, needs_sign_in,
-    // offline, failing, or no_service when there is no service to ask.
+    // What the service says that the window as a whole follows.
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed")) {
             reloader.reload();
@@ -318,8 +317,6 @@ int main(int argc, char *argv[]) {
             service.setLibrary(details.value("library").toString());
             reloader.moveTo(details.value("library").toString());
         }
-        else if (name == QLatin1String("health"))
-            engine.rootContext()->setContextProperty("serviceHealth", details.value("state").toString());
     });
     // New photos since the window last looked: ask now rather than within
     // the minute.

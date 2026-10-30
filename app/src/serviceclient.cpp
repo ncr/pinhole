@@ -62,6 +62,7 @@ void ServiceClient::setHealth(const QString &health) {
     if (health == m_health)
         return;
     m_health = health;
+    emit healthChanged();
     emit announced(QStringLiteral("health"), QJsonObject{{"state", health}});
 }
 

@@ -229,7 +229,7 @@ ApplicationWindow {
     Chip {
         id: healthNotice
         readonly property string message: {
-            switch (serviceHealth) {
+            switch (service.health) {
             case "needs_sign_in": return qsTr("Not signed in to %1. Click to sign in again.").arg(storage.sourceAccount || win.placeName)
             // Out of reach: the network for a source that needs signing in,
             // the disk for a folder.
@@ -250,14 +250,14 @@ ApplicationWindow {
         anchors.bottomMargin: 16
         // The sign-in and service problems in the theme's red; offline in
         // its muted text.
-        text: (serviceHealth === "offline" ? "" : "● ") + message
-        textColor: serviceHealth === "offline" ? theme.darkForeground : theme.red
+        text: (service.health === "offline" ? "" : "● ") + message
+        textColor: service.health === "offline" ? theme.darkForeground : theme.red
         width: Math.min(parent.width - 32, label.implicitWidth + 2 * theme.fontSize)
         label.width: width - 2 * theme.fontSize
         label.elide: Text.ElideRight
         // Signing in again, from here too, or with I.
-        HoverHandler { enabled: serviceHealth === "needs_sign_in"; cursorShape: Qt.PointingHandCursor }
-        TapHandler { enabled: serviceHealth === "needs_sign_in"; onTapped: signInAgain.trigger() }
+        HoverHandler { enabled: service.health === "needs_sign_in"; cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: service.health === "needs_sign_in"; onTapped: signInAgain.trigger() }
     }
     Command {
         id: signInAgain
@@ -265,7 +265,7 @@ ApplicationWindow {
         text: qsTr("Sign in again")
         keys: ["I"]
         keyLayer: "grid"
-        when: serviceHealth === "needs_sign_in" && healthNotice.visible
+        when: service.health === "needs_sign_in" && healthNotice.visible
         mouse: qsTr("Click the notice at the foot")
         touchpad: qsTr("Tap the notice at the foot")
         onTriggered: signIn.open(storage.sourceAccount)
@@ -287,13 +287,13 @@ ApplicationWindow {
         target: storage
         function onSourceChanged() { win.troubleSeen = false }
     }
-    readonly property string health: serviceHealth
+    readonly property string health: service.health
     onHealthChanged: if (health !== "needs_sign_in") troubleSeen = false
     Rectangle {
         id: trouble
         objectName: "trouble"
         visible: win.chromeUp && !win.firstRun && !win.troubleSeen && sources.current !== win.signedOutOf
-                 && serviceHealth === "needs_sign_in" && storage.sourceKind === "icloud"
+                 && service.health === "needs_sign_in" && storage.sourceKind === "icloud"
         opacity: win.chrome
         anchors.centerIn: parent
         width: Math.min(parent.width - 32, theme.fontSize * 37)
@@ -719,7 +719,7 @@ ApplicationWindow {
     SidePanel {
         id: side
         objectName: "sidePanel"
-        health: serviceHealth
+        health: service.health
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
         onTourRequested: id => win.startTour(id)
