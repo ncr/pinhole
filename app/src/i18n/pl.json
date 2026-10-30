@@ -248,5 +248,13 @@
   "could not be added": "nie udało się dodać",
   "not a photo or a video that %1 takes": "to nie zdjęcie ani film, które przyjmie %1",
   "not signed in to %1": "nie zalogowano do %1",
-  "too large for %1": "za duży dla %1"
+  "too large for %1": "za duży dla %1",
+  "adding to favourites": "dodanie do ulubionych",
+  "removing from favourites": "usunięcie z ulubionych",
+  "Undone: %1": "Cofnięto: %1",
+  "Redone: %1": "Ponowiono: %1",
+  "Nothing to undo": "Nic do cofnięcia",
+  "Nothing to redo": "Nic do ponowienia",
+  "Undo": "Cofnij",
+  "Redo": "Ponów"
 }

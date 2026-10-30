@@ -31,6 +31,7 @@ HEADERS += \
     src/viewermotion.h \
     src/outgoing.h \
     src/favourites.h \
+    src/history.h \
     src/plugins.h \
     src/incoming.h \
     src/portal.h \
@@ -56,6 +57,7 @@ SOURCES += \
     src/viewermotion.cpp \
     src/outgoing.cpp \
     src/favourites.cpp \
+    src/history.cpp \
     src/plugins.cpp \
     src/incoming.cpp \
     src/portal.cpp \

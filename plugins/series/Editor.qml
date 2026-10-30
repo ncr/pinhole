@@ -5,9 +5,9 @@ import Pinhole.Plugin
 // side by side in the middle, as large as the window lets them be, the rest
 // stacked behind them on either side as in a carousel, and the photos just
 // before and after it, and in its gaps, faint beside them, to add. Each a click or a key: X takes one out,
-// A adds one, Space shows one up close, U ungroups, R makes it automatic
-// again, G is its GIF or video (Studio, over this). Escape goes back to
-// the photo it was opened from.
+// A adds one, Space shows one up close, U ungroups, G is its GIF or video
+// (Studio, over this); Ctrl+Z undoes an edit. Escape goes back to the
+// photo it was opened from.
 Item {
     id: editor
     required property var plugin
@@ -144,15 +144,12 @@ Item {
         const tile = currentTile
         if (!tile || tile.member)
             return
-        edit(() => plugin.group([tile.index, positions[0]]))
+        edit(() => plugin.group([tile.index, positions[0]], qsTr("adding to a series")))
     }
     function ungroup() {
         edit(() => plugin.ungroup([positions[0]]))
         close()
     }
-    // The series and the photos in its gaps, as the finder finds them.
-    function automatic() { edit(() => plugin.automatic(flow.map(t => t.index))) }
-    readonly property bool edited: (plugin.revision, flow.some(t => plugin.isEdited(t.index)))
     function toStudio() {
         if (k >= 0)
             studio.openSeries(k, false)
@@ -208,7 +205,6 @@ Item {
     Shortcut { enabled: editor.keys; sequence: "X"; context: Qt.ApplicationShortcut; onActivated: editor.takeOut() }
     Shortcut { enabled: editor.keys; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: editor.add() }
     Shortcut { enabled: editor.keys; sequence: "U"; context: Qt.ApplicationShortcut; onActivated: editor.ungroup() }
-    Shortcut { enabled: editor.keys && editor.edited; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: editor.automatic() }
     Shortcut { enabled: editor.keys; sequence: "G"; context: Qt.ApplicationShortcut; onActivated: editor.toStudio() }
 
     Rectangle {
@@ -579,13 +575,6 @@ Item {
                 text: qsTr("Ungroup")
                 hint: "U"
                 onTapped: editor.ungroup()
-            }
-            ShellButton {
-                flat: true
-                visible: editor.edited
-                text: qsTr("Automatic")
-                hint: "R"
-                onTapped: editor.automatic()
             }
             ShellButton {
                 active: true

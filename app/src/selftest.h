@@ -67,3 +67,9 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // through it with → and the wheel, up close and back, grabbing each into
 // <dir>; check the viewer beneath took none of it.
 void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
+
+// PINHOLE_SELFTEST=undo:<dir>: the longest series on its screen to put it
+// right; X takes a photo out, Ctrl+Z puts it back, Ctrl+⇧Z takes it out
+// again, Ctrl+Z twice, the second with nothing left to undo. Check the
+// series' length after each and grab the window, its notice, into <dir>.
+void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);

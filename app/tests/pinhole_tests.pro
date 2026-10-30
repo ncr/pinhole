@@ -17,6 +17,6 @@ SOURCES += ../src/photogrid.cpp ../src/thumbnailloader.cpp ../src/framestats.cpp
     $$GENERATED/pointer-gestures-unstable-v1-protocol.c
 
 HEADERS += ../src/viewermotion.h ../src/scrollphysics.h ../src/theme.h ../src/translator.h ../src/library.h \
-    ../src/outgoing.h ../src/serviceclient.h ../src/portal.h ../src/viewer.h
+    ../src/outgoing.h ../src/serviceclient.h ../src/portal.h ../src/viewer.h ../src/history.h
 SOURCES += pinhole_tests.cpp ../src/viewermotion.cpp ../src/scrollphysics.cpp ../src/theme.cpp ../src/translator.cpp ../src/library.cpp \
-    ../src/outgoing.cpp ../src/serviceclient.cpp ../src/portal.cpp ../src/viewer.cpp
+    ../src/outgoing.cpp ../src/serviceclient.cpp ../src/portal.cpp ../src/viewer.cpp ../src/history.cpp

@@ -24,13 +24,13 @@ favourite, several photos as one card; each can be turned off in the side
 panel.
 
 Series, the first plugin, finds photos of one subject taken close together
-and shows each series as one card in the grid (unless turned off in its
-settings); under a photo of one, the strip underlines the series. What it
-finds can be put right: on a photo, X takes it out of its series, A adds
-it to the series beside it, U ungroups the series; in select mode, G
-groups what is ticked; R groups them automatically again. It also (G in
-the grid, or on a photo of one) makes a series a short GIF or video to
-send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
+and shows each series as one card in the grid; under a photo of one, the
+strip underlines the series. What it finds can be put right: on a photo,
+X takes it out of its series, A adds it to the series beside it, U
+ungroups the series; in select mode, G groups what is ticked. Ctrl+Z
+undoes any of it, as it does a favourite, and Ctrl+⇧Z does it again. It
+also (G in the grid, or on a photo of one) makes a series a short GIF or
+video to send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
 shape, held steady; Enter copies it and keeps it in Pictures/Pinhole. It is
 on unless turned off in the side panel. A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded

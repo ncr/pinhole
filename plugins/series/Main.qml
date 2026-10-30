@@ -10,8 +10,8 @@ import Pinhole.Plugin
 // What it finds can be put right by hand: a photo taken out of a series or
 // added to one, a series ungrouped, photos grouped; on a photo, or with the
 // whole series on a screen of its own (Editor.qml). Those edits are kept
-// by the photos' ids, over what the finder finds, until a photo is
-// grouped automatically again.
+// by the photos' ids, over what the finder finds, and each is a step of
+// Pinhole's history, to undo with Ctrl+Z.
 PinholePlugin {
     id: plugin
     covering: studio.shown || editor.shown
@@ -30,9 +30,8 @@ PinholePlugin {
     property bool finding: false
     property bool findAgain: false
     property bool found: false
-    // Each series one card in the grid, unless turned off.
-    property bool asOne: pinhole.setting("asOne", true)
-    stacks: asOne ? series : []
+    // Each series one card in the grid.
+    stacks: series
 
     // Installed beside this file; in a checkout, where cargo builds it.
     readonly property string finder: pinhole.exists(pinhole.dir + "/pinhole-series")
@@ -105,8 +104,15 @@ PinholePlugin {
             withSeries(indexes[i]).forEach(id => ids.add(id))
         return [...ids]
     }
-    function keep(manual, apart) {
-        edits = { manual: manual, apart: apart }
+    // An edit, `name` in the history: undone, the edits go back to what
+    // they were before it.
+    function keep(manual, apart, name) {
+        const before = edits, after = { manual: manual, apart: apart }
+        setEdits(after)
+        pinhole.did(name, () => setEdits(before), () => setEdits(after))
+    }
+    function setEdits(state) {
+        edits = state
         pinhole.setSetting("edits", edits)
         apply()
     }
@@ -115,17 +121,13 @@ PinholePlugin {
         const set = new Set(ids)
         return edits.manual.filter(series => !series.some(id => set.has(id)))
     }
-    function isEdited(index) {
-        const id = idOf(index)
-        return edits.apart.includes(id) || edits.manual.some(series => series.includes(id))
-    }
     // One series of all these photos, and the series they are in.
-    function group(indexes) {
+    function group(indexes, name = qsTr("grouping")) {
         const ids = allWithSeries(indexes)
         if (ids.length < 2)
             return
         const set = new Set(ids)
-        keep(manualWithout(ids).concat([ids]), edits.apart.filter(id => !set.has(id)))
+        keep(manualWithout(ids).concat([ids]), edits.apart.filter(id => !set.has(id)), name)
     }
     function takeOut(index) {
         const k = of(index)
@@ -134,22 +136,12 @@ PinholePlugin {
         const id = idOf(index)
         const all = idsOf(k)
         const rest = all.filter(other => other !== id)
-        keep(manualWithout(all).concat(rest.length >= 2 ? [rest] : []), edits.apart.concat([id]))
+        keep(manualWithout(all).concat(rest.length >= 2 ? [rest] : []), edits.apart.concat([id]), qsTr("taking out of a series"))
     }
     function ungroup(indexes) {
         const ids = allWithSeries(Array.from(indexes).filter(i => of(i) >= 0))
-        keep(manualWithout(ids), [...new Set(edits.apart.concat(ids))])
+        keep(manualWithout(ids), [...new Set(edits.apart.concat(ids))], qsTr("ungrouping"))
     }
-    // Back to what the finder finds, for these photos, the series they are
-    // in, and those the finder put them with.
-    function automatic(indexes) {
-        const ids = new Set(allWithSeries(indexes))
-        for (const series of foundIds.concat(edits.manual))
-            if (series.some(id => ids.has(id)))
-                series.forEach(id => ids.add(id))
-        keep(manualWithout([...ids]), edits.apart.filter(id => !ids.has(id)))
-    }
-    function automaticAll() { keep([], []) }
     // The series right beside a photo not in one, the nearer in time when
     // there is one on each side; -1 if none.
     function beside(index) {
@@ -239,15 +231,7 @@ PinholePlugin {
             text: qsTr("Add to series")
             key: "A"
             shown: k >= 0
-            onTriggered: plugin.group([pinhole.viewer.index, plugin.series[k][0]])
-        },
-        PluginAction {
-            place: "viewer"
-            group: "series"
-            text: qsTr("Automatic")
-            key: "R"
-            shown: (plugin.revision, pinhole.viewer.open && pinhole.viewer.index >= 0 && plugin.isEdited(pinhole.viewer.index))
-            onTriggered: plugin.automatic([pinhole.viewer.index])
+            onTriggered: plugin.group([pinhole.viewer.index, plugin.series[k][0]], qsTr("adding to a series"))
         },
         // What is ticked in the grid.
         PluginAction {
@@ -265,14 +249,6 @@ PinholePlugin {
             key: "U"
             shown: plugin.picked.some(i => plugin.of(i) >= 0)
             onTriggered: plugin.ungroup(pinhole.selection())
-        },
-        PluginAction {
-            place: "selection"
-            group: "series"
-            text: qsTr("Automatic")
-            key: "R"
-            shown: plugin.picked.some(i => plugin.isEdited(i))
-            onTriggered: plugin.automatic(pinhole.selection())
         }
     ]
     // The series of the photo shown full window, or -1.
@@ -301,13 +277,13 @@ PinholePlugin {
         },
         {
             title: qsTr("Put it right"),
-            text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked."),
+            text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked. Ctrl+Z undoes any of it."),
             open: () => touring >= 0 && touring < series.length ? series[touring][0] : -1,
             action: seriesAction
         },
         {
             title: qsTr("Settings"),
-            text: qsTr("Here, in the side panel (Tab), one card a series can be turned off, and this tour shown again."),
+            text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),
             settings: true
         }
     ]
@@ -317,7 +293,6 @@ PinholePlugin {
         ["A", qsTr("Add a photo to the series beside it")],
         ["U", qsTr("Ungroup")],
         ["G", qsTr("Group what is ticked")],
-        ["R", qsTr("Group automatically again")],
         ["G", qsTr("On a photo: its series, whole, to put right")],
         ["Space", qsTr("There: a photo up close")],
         ["G", qsTr("Series: a GIF or a video")],
@@ -331,59 +306,14 @@ PinholePlugin {
     ]
 
     settings: Component {
-        Column {
+        UiText {
             width: parent ? parent.width : 0
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.foreground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: !plugin.found ? qsTr("Looking for series…")
-                    : plugin.series.length === 0 ? qsTr("No series here yet.")
-                    : qsTr("%n series here: G in the grid, or on a photo of one.", "", plugin.series.length)
-            }
-            // Put right by hand: all of it undone at once.
-            Item {
-                readonly property int count: (plugin.revision, plugin.edits.manual.length + plugin.edits.apart.length)
-                visible: count > 0
-                width: parent.width
-                height: visible ? automaticAll.height + 4 : 0
-                UiText {
-                    width: parent.width - automaticAll.width - theme.fontSize
-                    anchors.verticalCenter: parent.verticalCenter
-                    wrapMode: Text.WordWrap
-                    color: theme.darkForeground
-                    font.pixelSize: Math.round(theme.fontSize * 0.857)
-                    text: qsTr("Put right by hand: %n photo(s) or series.", "", parent.count)
-                }
-                ShellButton {
-                    id: automaticAll
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("All automatic")
-                    onTapped: plugin.automaticAll()
-                }
-            }
-            Item {
-                width: parent.width
-                height: asOneSwitch.height
-                UiText {
-                    width: parent.width - asOneSwitch.width - theme.fontSize
-                    anchors.verticalCenter: parent.verticalCenter
-                    wrapMode: Text.WordWrap
-                    color: theme.foreground
-                    text: qsTr("One card a series in the grid")
-                }
-                Toggle {
-                    id: asOneSwitch
-                    anchors.right: parent.right
-                    checked: plugin.asOne
-                    onToggled: {
-                        plugin.asOne = !plugin.asOne
-                        pinhole.setSetting("asOne", plugin.asOne)
-                    }
-                }
-            }
+            wrapMode: Text.WordWrap
+            color: theme.foreground
+            font.pixelSize: Math.round(theme.fontSize * 0.857)
+            text: !plugin.found ? qsTr("Looking for series…")
+                : plugin.series.length === 0 ? qsTr("No series here yet.")
+                : qsTr("%n series here: G in the grid, or on a photo of one.", "", plugin.series.length)
         }
     }
 

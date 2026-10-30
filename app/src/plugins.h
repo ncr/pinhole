@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 
+class History;
 class Library;
 class PhotoGrid;
 class QQmlEngine;
@@ -107,6 +108,9 @@ public:
     // The plugin's settings, kept in ~/.config/pinhole/plugins.json.
     Q_INVOKABLE QVariant setting(const QString &key, const QVariant &fallback = {}) const;
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
+    // Done just now, to undo with Ctrl+Z: `name` in a word or two, and
+    // functions that undo and redo it (history.h).
+    Q_INVOKABLE void did(const QString &name, const QJSValue &undo, const QJSValue &redo);
 
 signals:
     void cacheDirChanged();
@@ -135,7 +139,7 @@ class Plugins : public QObject {
     // Where one's own plugins go.
     Q_PROPERTY(QString personalDir READ personalDir CONSTANT)
 public:
-    Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator,
+    Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator, History *history,
             QObject *parent = nullptr);
     ~Plugins() override;
 
@@ -170,6 +174,7 @@ public:
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
     PhotoGrid *grid() const { return m_grid; }
+    History *history() const { return m_history; }
     QJsonObject settingsOf(const QString &id) const;
     void setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
 
@@ -200,6 +205,7 @@ private:
     ServiceClient *m_service;
     Viewer *m_viewer;
     Translator *m_translator;
+    History *m_history;
     PhotoGrid *m_grid = nullptr;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;

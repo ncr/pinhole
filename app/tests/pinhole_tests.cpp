@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "history.h"
 #include "library.h"
 #include "outgoing.h"
 #include "photogrid.h"
@@ -72,6 +73,59 @@ private:
     }
 
 private slots:
+    // Undo and redo, as Ctrl+Z and Ctrl+⇧Z take them.
+    void historyUndoesAndRedoesInTurn() {
+        History history;
+        int value = 0;
+        QStringList said;
+        connect(&history, &History::undone, this, [&](const QString &name) { said << "undone " + name; });
+        connect(&history, &History::redone, this, [&](const QString &name) { said << "redone " + name; });
+        connect(&history, &History::nothing, this, [&](bool undo) { said << (undo ? "no undo" : "no redo"); });
+        auto set = [&](const QString &owner, int from, int to) {
+            value = to;
+            history.did(owner, QString::number(to), [&, from] { value = from; }, [&, to] { value = to; });
+        };
+        set("series", 0, 1);
+        set({}, 1, 2);
+        set("series", 2, 3);
+        history.undo();
+        history.undo();
+        QCOMPARE(value, 1);
+        history.redo();
+        QCOMPARE(value, 2);
+        // A new step drops what was undone.
+        set("series", 2, 4);
+        QVERIFY(!history.canRedo());
+        history.redo();
+        history.undo();
+        QCOMPARE(value, 2);
+        QCOMPARE(said, QStringList({"undone 3", "undone 2", "redone 2", "no redo", "undone 4"}));
+    }
+    void historyDoesNotRecordWhatAnUndoDoes() {
+        History history;
+        int steps = 0;
+        connect(&history, &History::changed, this, [&] { ++steps; });
+        history.did({}, "a", [&] { history.did({}, "inside", [] {}, [] {}); }, [] {});
+        history.undo();
+        QVERIFY(!history.canUndo());
+        QVERIFY(history.canRedo());
+    }
+    void aPluginLoadedAgainTakesOnlyItsOwnSteps() {
+        History history;
+        QStringList undone;
+        connect(&history, &History::undone, this, [&](const QString &name) { undone << name; });
+        history.did("series", "s1", [] {}, [] {});
+        history.did({}, "favourite", [] {}, [] {});
+        history.did("series", "s2", [] {}, [] {});
+        history.did({}, "unfavourite", [] {}, [] {});
+        history.undo();
+        history.forget("series");
+        history.undo();
+        QVERIFY(!history.canUndo());
+        QVERIFY(history.canRedo());
+        QCOMPARE(undone, QStringList({"unfavourite", "favourite"}));
+    }
+
     void aFlickCoastsAboutHalfASecondOfItsSpeed() {
         ScrollPhysics p = flicked(20, 12);
         const double start = p.position(), v = p.velocity();

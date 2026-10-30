@@ -26,6 +26,7 @@
 #include "incoming.h"
 #include "outgoing.h"
 #include "favourites.h"
+#include "history.h"
 #include "marks.h"
 #include "photoprovider.h"
 #include "plugins.h"
@@ -194,12 +195,15 @@ int main(int argc, char *argv[]) {
     service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
-    Favourites favourites(&library, &service);
+    History history;
+    Favourites favourites(&library, &service, &history);
     QObject::connect(&favourites, &Favourites::changed, &viewer, &Viewer::favoriteChanged);
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
-    Plugins plugins(&library, &service, &viewer, &translator);
+    Plugins plugins(&library, &service, &viewer, &translator, &history);
+    // What was done to one source's photos is not undone on another's.
+    QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
@@ -210,6 +214,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("favourites", &favourites);
+    engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
@@ -660,6 +665,8 @@ int main(int argc, char *argv[]) {
         runTourSelfTest(window, viewer, test.mid(5));
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("series:")))
         runSeriesSelfTest(window, viewer, test.mid(7));
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("undo:")))
+        runUndoSelfTest(window, viewer, test.mid(5));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

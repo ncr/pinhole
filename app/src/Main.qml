@@ -703,6 +703,42 @@ ApplicationWindow {
         enabled: sources.known && !win.firstRun
     }
 
+    // Undo and redo (history.h): favourites, and what plugins change, as
+    // Series does with a series put right. What was undone says so at the
+    // foot of the window, over the viewer and a plugin's screen too.
+    Shortcut {
+        enabled: win.historyKeys; sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut
+        onActivated: history.undo()
+    }
+    Shortcut {
+        enabled: win.historyKeys; sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut
+        onActivated: history.redo()
+    }
+    // Not while typing (an Apple ID, a code), nor while a tour shows.
+    readonly property bool historyKeys: !signIn.shown && !addPicker.shown && !tour.shown
+    Chip {
+        id: historyNotice
+        objectName: "historyNotice"
+        visible: opacity > 0
+        opacity: 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: grid.selecting || win.viewerShown || win.pluginCovering ? 72 : 24
+        Timer { id: historyNoticeShown; interval: 2500; onTriggered: historyNotice.opacity = 0 }
+        function show(message) {
+            text = message
+            opacity = 1
+            historyNoticeShown.restart()
+        }
+        Connections {
+            target: history
+            function onUndone(name) { historyNotice.show(qsTr("Undone: %1").arg(name)) }
+            function onRedone(name) { historyNotice.show(qsTr("Redone: %1").arg(name)) }
+            function onNothing(undo) { historyNotice.show(undo ? qsTr("Nothing to undo") : qsTr("Nothing to redo")) }
+        }
+    }
+
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { enabled: !signIn.shown && !tour.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }

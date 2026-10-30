@@ -46,6 +46,8 @@ Item {
             ["⇧ " + qsTr("key"), qsTr("The menu beside a button")],
             ["Tab", qsTr("Sources, settings")],
             ["1–9", qsTr("Show a source")],
+            ["Ctrl Z", qsTr("Undo")],
+            ["Ctrl ⇧ Z", qsTr("Redo")],
             ["?", qsTr("Keys")],
             ["Q", qsTr("Quit")]
         ] }

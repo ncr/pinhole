@@ -1,12 +1,13 @@
 #include "favourites.h"
 
+#include "history.h"
 #include "serviceclient.h"
 
 #include <QJsonArray>
 #include <QSet>
 
-Favourites::Favourites(Library *library, ServiceClient *service, QObject *parent)
-    : QObject(parent), m_library(library), m_service(service) {}
+Favourites::Favourites(Library *library, ServiceClient *service, History *history, QObject *parent)
+    : QObject(parent), m_library(library), m_service(service), m_history(history) {}
 
 bool Favourites::all(const QList<int> &indexes) const {
     bool any = false;
@@ -25,15 +26,23 @@ void Favourites::toggle(const QList<int> &indexes) {
     // Only those not so already; by id, as a reload may move them before
     // the service answers.
     QList<QByteArray> ids;
-    QJsonArray assets;
     for (int i : indexes) {
         if (i < 0 || i >= m_library->count() || m_library->at(i).favorite == favorite)
             continue;
         ids.append(m_library->at(i).id);
-        assets.append(QString::fromUtf8(m_library->at(i).id));
     }
     if (ids.isEmpty())
         return;
+    set(ids, favorite);
+    // Undone, those it changed go back; the rest were so already.
+    m_history->did({}, favorite ? tr("adding to favourites") : tr("removing from favourites"),
+                   [this, ids, favorite] { set(ids, !favorite); }, [this, ids, favorite] { set(ids, favorite); });
+}
+
+void Favourites::set(const QList<QByteArray> &ids, bool favorite) {
+    QJsonArray assets;
+    for (const QByteArray &id : ids)
+        assets.append(QString::fromUtf8(id));
     apply(ids, favorite);
     m_service->call(QStringLiteral("set_favorite"), QJsonObject{{"assets", assets}, {"favorite", favorite}},
                     [this, ids, favorite](bool ok, const QJsonObject &, const QString &code) {

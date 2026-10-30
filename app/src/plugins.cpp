@@ -1,5 +1,6 @@
 #include "plugins.h"
 
+#include "history.h"
 #include "library.h"
 #include "photogrid.h"
 #include "serviceclient.h"
@@ -303,8 +304,22 @@ void PluginHost::setSetting(const QString &key, const QVariant &value) {
     m_plugins->setSettingOf(m_id, key, QJsonValue::fromVariant(value));
 }
 
-Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator, QObject *parent)
+void PluginHost::did(const QString &name, const QJSValue &undo, const QJSValue &redo) {
+    if (!undo.isCallable() || !redo.isCallable())
+        return;
+    const QString id = m_id;
+    auto call = [id](const QJSValue &step) {
+        const QJSValue result = step.call();
+        if (result.isError())
+            qWarning("%s: %s", qPrintable(id), qPrintable(result.toString()));
+    };
+    m_plugins->history()->did(m_id, name, [call, undo] { call(undo); }, [call, redo] { call(redo); });
+}
+
+Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator,
+                 History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
+      m_history(history),
       m_libraryApi(std::make_unique<PluginLibrary>(library)) {
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
@@ -369,6 +384,8 @@ void Plugins::setEnabled(const QString &id, bool on) {
     states.insert(id, on);
     config.insert("enabled", states);
     writeConfig(config);
+    if (!on)
+        m_history->forget(id);
     updateCatalogs();
     ++m_revision;
     emit changed();
@@ -515,6 +532,12 @@ void Plugins::scan() {
     if (std::any_of(found.begin(), found.end(), [&](const auto &p) { return p->loads != loads.value(p->id); }))
         if (m_engine)
             m_engine->clearComponentCache();
+    // What a plugin loaded again or gone did is its old self's to undo.
+    for (const auto &old : m_plugins) {
+        const auto now = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == old->id; });
+        if (now == found.end() || (*now)->loads != old->loads || (*now)->dir != old->dir)
+            m_history->forget(old->id);
+    }
     m_plugins = std::move(found);
 
     QStringList ids;

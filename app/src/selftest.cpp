@@ -1232,3 +1232,81 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
     });
     wait->start();
 }
+
+void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    auto editor = [window] {
+        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == QLatin1String("seriesEditor"))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child))
+                    return found;
+            return nullptr;
+        };
+        return static_cast<QObject *>(find(window->contentItem()));
+    };
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    auto wait = std::make_shared<QTimer>();
+    wait->setInterval(250);
+    QObject::connect(wait.get(), &QTimer::timeout, window, [=, &viewer] {
+        window->setProperty("troubleSeen", true);
+        QObject *e = editor();
+        QObject *plugin = e ? e->property("plugin").value<QObject *>() : nullptr;
+        const QVariantList series = plugin ? plugin->property("series").toList() : QVariantList();
+        if (series.isEmpty()) {
+            if (clock->elapsed() > 60000) {
+                say(QStringLiteral("no series found in 60 s"));
+                QCoreApplication::exit(1);
+            }
+            return;
+        }
+        wait->stop();
+        int longest = 0;
+        for (int k = 1; k < series.size(); ++k)
+            if (series[k].toList().size() > series[longest].toList().size())
+                longest = k;
+        const int first = series[longest].toList().first().toInt();
+        viewer.openAt(first, QRectF(0, 0, 100, 100));
+        QMetaObject::invokeMethod(e, "openSeries", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
+        const int whole = e->property("flow").toList().size();
+        say(QStringLiteral("a series of %1 open to put right; the keys %2").arg(whole)
+            .arg(window->property("historyKeys").toBool() ? "on" : "off"));
+        // Each: the keys, and how many photos the series should then have.
+        const QList<std::tuple<QString, std::function<void()>, int>> steps = {
+            { QStringLiteral("take-out"), [window] { key(window, Qt::Key_X); }, whole - 1 },
+            { QStringLiteral("undo"), [window] { key(window, Qt::Key_Z, Qt::ControlModifier); }, whole },
+            { QStringLiteral("redo"), [window] { key(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier); }, whole - 1 },
+            { QStringLiteral("undo-again"), [window] { key(window, Qt::Key_Z, Qt::ControlModifier); }, whole },
+            { QStringLiteral("nothing-to-undo"), [window] { key(window, Qt::Key_Z, Qt::ControlModifier); }, whole },
+        };
+        auto failed = std::make_shared<bool>(false);
+        auto step = std::make_shared<std::function<void(int)>>();
+        *step = [=](int n) {
+            if (n == steps.size()) {
+                say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
+                QCoreApplication::exit(*failed ? 1 : 0);
+                return;
+            }
+            const auto &[name, press, wanted] = steps[n];
+            press();
+            QTimer::singleShot(600, window, [=] {
+                const auto &[name, press, wanted] = steps[n];
+                const int now = editor()->property("flow").toList().size();
+                auto *notice = window->findChild<QQuickItem *>(QStringLiteral("historyNotice"));
+                say(QStringLiteral("%1: %2 photos (%3)%4").arg(name).arg(now).arg(now == wanted ? "as it should" : "WRONG")
+                    .arg(notice && notice->opacity() > 0 ? QStringLiteral(", saying \"%1\"").arg(notice->property("text").toString()) : QString()));
+                *failed = *failed || now != wanted;
+                grab(name);
+                (*step)(n + 1);
+            });
+        };
+        (*step)(0);
+    });
+    wait->start();
+}
