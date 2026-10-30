@@ -74,6 +74,10 @@ private:
     }
 
 private slots:
+    // A client that finds no service starts one: never a real pinholed
+    // from a test, whose socket a fake service holds.
+    void initTestCase() { qputenv("PINHOLED", "/bin/false"); }
+
     // Undo and redo, as Ctrl+Z and Ctrl+⇧Z take them.
     void historyUndoesAndRedoesInTurn() {
         History history;
@@ -1057,6 +1061,49 @@ private slots:
         QCOMPARE(fake.asked.first().value("method").toString(), QString("storage"));
         fake.send({{"id", fake.asked.first().value("id")}, {"ok", true}, {"result", QJsonObject{}}});
         QTRY_VERIFY(answered);
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
+    void theViewersAnswerFollowsItsPhotoThroughAReload() {
+        QTemporaryDir dir, after;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}});
+        makeLibrary(after.path(), {{"new", 500}, {"a", 1000}, {"b", 2000}, {"c", 3000}});
+        Library library, reloaded;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        QVERIFY(reloaded.open(after.path(), &error));
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+
+        Viewer viewer(&library, &service);
+        viewer.setViewport(800, 600);
+        viewer.openAt(2, {});
+        auto asked = [&fake](const char *asset, const char *kind) {
+            fake.read();
+            for (const QJsonObject &line : std::as_const(fake.asked)) {
+                const QJsonObject params = line.value("params").toObject();
+                if (params.value("asset").toString() == QLatin1String(asset) && params.value("kind").toString() == QLatin1String(kind))
+                    return line;
+            }
+            return QJsonObject();
+        };
+        QTRY_VERIFY(!asked("c", "medium").isEmpty());
+
+        // A photo comes in before c: c is at 3 now, and 2 is b.
+        library.swap(reloaded);
+        viewer.libraryReloaded({1, 2, 3});
+        QCOMPARE(viewer.index(), 3);
+        fake.send({{"id", asked("c", "medium").value("id")}, {"ok", true},
+                   {"result", QJsonObject{{"path", dir.path() + "/c-medium.jpg"}}}});
+        // c's medium is shown, and the sharper one asked for is c's too.
+        QTRY_VERIFY(viewer.image().toString().contains("c-medium.jpg"));
+        QTRY_VERIFY(!asked("c", "full").isEmpty() || !asked("c", "original").isEmpty());
+        QVERIFY(asked("b", "full").isEmpty() && asked("b", "original").isEmpty());
         qunsetenv("PINHOLE_SOCKET");
     }
 

@@ -548,10 +548,15 @@ void Viewer::fetchShown() {
 
 void Viewer::request(int index, const QString &kind) {
     const int generation = m_generation;
-    m_service->fetch(m_library->at(index).id, kind, [this, generation, index, kind](bool ok, const QJsonObject &result,
-                                                                                    const QString &code) {
+    const QByteArray id = m_library->at(index).id;
+    m_service->fetch(id, kind, [this, generation, id, kind](bool ok, const QJsonObject &result, const QString &code) {
         if (generation != m_generation)
             return;
+        // The photo shown still, wherever a reload since has put it: never
+        // the position it was asked from, which may be another photo's now.
+        if (m_index < 0 || m_index >= m_library->count() || m_library->at(m_index).id != id)
+            return;
+        const int index = m_index;
         if (!ok) {
             // No medium rendition (some old photos): go straight to the full
             // one. Anything else is reported, and what is shown stays.
