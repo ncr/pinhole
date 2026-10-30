@@ -13,9 +13,15 @@ use crate::source::{Asset, Kind};
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
+    db.busy_timeout(std::time::Duration::from_secs(10))?;
+    // Before anything is written, the journal mode too: a library of a
+    // later schema is left exactly as it is.
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version > SCHEMA {
+        anyhow::bail!("this library was made by a later Pinhole (schema {version}, this one knows {SCHEMA})");
+    }
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.pragma_update(None, "synchronous", "NORMAL")?;
-    db.busy_timeout(std::time::Duration::from_secs(10))?;
     create(&db)?;
     Ok(db)
 }
@@ -81,9 +87,6 @@ pub const SCHEMA: i64 = 1;
 /// transaction with the version it reaches.
 fn migrate(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version > SCHEMA {
-        anyhow::bail!("this library was made by a later Pinhole (schema {version}, this one knows {SCHEMA})");
-    }
     if version < 1 {
         // 0 to 1, from before the schema was numbered: a library from
         // before effects were kept gets the column, and the whole library
@@ -378,10 +381,24 @@ mod tests {
     fn a_library_of_a_later_schema_is_not_written() {
         let dir = temp("later");
         let path = dir.join("library.sqlite");
-        drop(open(&path).unwrap());
-        Connection::open(&path).unwrap().execute_batch(&format!("PRAGMA user_version = {}", SCHEMA + 1)).unwrap();
+        // A later schema with none of this one's tables, in the journal
+        // mode SQLite starts with.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&format!("CREATE TABLE things (x); INSERT INTO things VALUES (1); PRAGMA user_version = {}", SCHEMA + 1))
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
         let error = open(&path).unwrap_err().to_string();
         assert!(error.contains("later Pinhole"), "{error}");
+        // Not a byte of it changed, and nothing beside it made.
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let check = Connection::open(&path).unwrap();
+        let tables: Vec<String> = check
+            .prepare("SELECT name FROM sqlite_master ORDER BY name").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(tables, ["things"]);
+        let mode: String = check.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode, "delete");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
