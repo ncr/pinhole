@@ -989,51 +989,6 @@ qreal PhotoGrid::scrollFraction() const {
     return max > 0 ? std::clamp(m_scroll / max, 0.0, 1.0) : 1.0;
 }
 
-void PhotoGrid::scrubTo(qreal fraction) { setScroll(std::clamp(fraction, 0.0, 1.0) * maxScroll(m_columns)); }
-
-qint64 PhotoGrid::dateAt(qreal fraction) const {
-    if (count() == 0)
-        return 0;
-    // The photo at the top of the view when scrolled there.
-    const double y = std::clamp(fraction, 0.0, 1.0) * maxScroll(m_columns);
-    const int index = std::clamp(int(y / stride()) * m_columns, 0, count() - 1);
-    return m_library->at(libraryAt(index)).date;
-}
-
-QVariantList PhotoGrid::yearMarks() const {
-    QVariantList marks;
-    const double max = maxScroll(m_columns);
-    if (count() == 0 || max <= 0)
-        return marks;
-    // The library is oldest first, so each year's first photo is found by
-    // halving: a few hundred dates looked at rather than every one, which
-    // took 140 ms at 100,000 photos on every zoom step.
-    const auto dateOf = [this](int cell) { return m_library->at(libraryAt(cell)).date; };
-    const int first = QDateTime::fromMSecsSinceEpoch(dateOf(0)).date().year();
-    const int last = QDateTime::fromMSecsSinceEpoch(dateOf(count() - 1)).date().year();
-    for (int y = first; y <= last; ++y) {
-        const qint64 starts = QDateTime(QDate(y, 1, 1), QTime(0, 0)).toMSecsSinceEpoch();
-        int lo = 0, hi = count(); // the first photo taken on or after `starts`
-        while (lo < hi) {
-            const int mid = lo + (hi - lo) / 2;
-            if (dateOf(mid) < starts)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        if (lo == count() || (y > first && QDateTime::fromMSecsSinceEpoch(dateOf(lo)).date().year() != y))
-            continue; // no photos that year
-        const double top = (y == first ? 0 : lo / m_columns) * stride();
-        marks.append(QVariantMap{{"year", y}, {"fraction", std::clamp(top / max, 0.0, 1.0)}});
-    }
-    return marks;
-}
-
-void PhotoGrid::setScrubbing(bool scrubbing) {
-    m_scrubbing = scrubbing;
-    update();
-}
-
 QRectF PhotoGrid::cellRect(int index, const Layer &l) const {
     const double s = strideFor(l.columns);
     const double size = (s - gapFor(l.columns)) * l.scale;
@@ -1775,11 +1730,10 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     if (rs.lastFrameAt > 0) {
         const double dt = std::max(1e-3, (now - rs.lastFrameAt) / 1e9);
         const double rows = (m_scroll - rs.lastScroll) / s;
-        // A jump (scrubber, Home, End) is not motion: nothing is moving once
-        // it lands, so it should not be decoded as if it were.
-        // (A scrubber drag is a run of jumps, and it is motion.)
+        // A jump (Home, End, the cursor) is not motion: nothing is moving
+        // once it lands, so it should not be decoded as if it were.
         const bool jumped = std::abs(rows) > rowsOnScreen && m_driveVelocity == 0 && !m_physics.animating() &&
-                            !m_physics.tracking() && !m_scrubbing;
+                            !m_physics.tracking();
         m_speedRows = jumped ? 0 : m_speedRows * 0.7 + rows / dt * 0.3;
     }
     rs.lastFrameAt = now;
@@ -1787,7 +1741,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     const double speed = std::abs(m_speedRows);
     // Faster than about three screens a second nobody sees detail, and the
     // decoders could not keep up anyway: coarse previews only.
-    const bool scrubbing = m_scrubbing || speed > rowsOnScreen * 3;
+    const bool scrubbing = speed > rowsOnScreen * 3;
     const bool fast = speed > rowsOnScreen * 0.75;
     // How far ahead to fetch, in rows: a screen and a half, or half a
     // second of travel when that is more. A mosaic page takes about 0.1 s

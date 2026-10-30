@@ -1409,7 +1409,7 @@ void runInputsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir
         // has a step of its own, nothing changing just after it.
         [=] { grab("1-cursor"); },
         [=] { key(window, Qt::Key_PageDown); },
-        [=] { grab("2-years"); },
+        [=] { grab("2-paged"); },
         [=] { key(window, Qt::Key_Home); },
         [=] { grid->setSelecting(true); key(window, Qt::Key_Space); },
         [=] { key(window, Qt::Key_Right, Qt::ShiftModifier); },

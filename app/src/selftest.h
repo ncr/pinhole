@@ -37,8 +37,8 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
 class Keymap;
 void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap);
 // PINHOLE_SELFTEST=inputs:<dir>: on screen, what the keys, the mouse and the
-// touchpad each get now, as images in <dir>: the grid's cursor, the years
-// at the right edge while scrolling, select mode with Range, the undo card
+// touchpad each get now, as images in <dir>: the grid's cursor, a page
+// down, select mode with Range, the undo card
 // and the side panel's focus on a switch.
 void runInputsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir);
 

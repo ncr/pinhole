@@ -391,20 +391,6 @@ ApplicationWindow {
         hint: ""
     }
 
-    // The years at the right edge, for a pointer to go anywhere at once.
-    Scrubber {
-        id: scrubber
-        objectName: "scrubber"
-        grid: grid
-        visible: win.chromeUp && !win.firstRun && grid.count > 0 && !grid.selecting
-        opacity: win.chrome
-        anchors.right: parent.right
-        anchors.top: selectButton.bottom
-        anchors.topMargin: 12
-        anchors.bottom: helpButton.top
-        anchors.bottomMargin: 12
-    }
-
     // Closer and further, beside it: for a mouse with no side wheel to
     // turn, and a touchpad that does not pinch.
     Row {
@@ -1074,12 +1060,12 @@ ApplicationWindow {
     }
     Command {
         name: "grid.oldest"
-        text: qsTr("Oldest; any year")
+        text: qsTr("Oldest")
         section: "library"
         keys: ["Home"]
         keyLayer: "grid"
-        mouse: qsTr("The years at the right")
-        touchpad: qsTr("The years at the right")
+        mouse: qsTr("Wheel, up to the top")
+        touchpad: qsTr("Two fingers, up to the top")
         onTriggered: grid.cursorToStart()
     }
     Command {

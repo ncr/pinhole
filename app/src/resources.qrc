@@ -7,7 +7,6 @@
         <file alias="Chip.qml">Chip.qml</file>
         <file alias="ShellButton.qml">ShellButton.qml</file>
         <file alias="Command.qml">Command.qml</file>
-        <file alias="Scrubber.qml">Scrubber.qml</file>
         <file alias="ActionBar.qml">ActionBar.qml</file>
         <file alias="MenuGroup.qml">MenuGroup.qml</file>
         <file alias="PluginGroup.qml">PluginGroup.qml</file>

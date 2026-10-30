@@ -186,9 +186,7 @@ public:
     // On the photo the viewer closed on.
     Q_INVOKABLE void putCursorOn(int index);
 
-    // The date scrubber: jump anywhere, the capture date (ms) at a position,
-    // where each year begins, and whether a drag is under way (the grid then
-    // draws from mosaic pages, as when scrolling very fast).
+    // How far down the library the view is (scrollFraction's).
     qreal scrollFraction() const;
     bool atNewest() const;
     bool zooming() const { return m_zoom.active; }
@@ -197,10 +195,6 @@ public:
     // racing through the whole library.
     Q_INVOKABLE void glideToNewest();
     QString dateLabel() const { return m_dateLabel; }
-    Q_INVOKABLE void scrubTo(qreal fraction);
-    Q_INVOKABLE qint64 dateAt(qreal fraction) const;
-    Q_INVOKABLE QVariantList yearMarks() const;
-    Q_INVOKABLE void setScrubbing(bool scrubbing);
 
     // For the benchmark.
     void setDriveVelocity(double pixelsPerSecond);
@@ -395,7 +389,6 @@ private:
     QString m_dateLabel;
     // The press stopped the grid moving: its click opens nothing.
     bool m_pressStopped = false;
-    bool m_scrubbing = false;
     QColor m_accent{0xff, 0xd6, 0x0a};
     // What shows between the cells, for their rounded corners.
     QColor m_background{0x0e, 0x0e, 0x10};
