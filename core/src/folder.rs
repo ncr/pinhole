@@ -118,22 +118,45 @@ fn file_type(rel: &str) -> &'static str {
     }
 }
 
+/// What a walk through a folder found.
+struct Walk {
+    found: Vec<Found>,
+    /// Inside the folder, what could not be read (a folder without
+    /// permission, a failing disk): "" when the folder itself could not.
+    /// What the index has there is unseen, not gone.
+    unread: Vec<String>,
+    /// It got through all of them before the deadline.
+    complete: bool,
+}
+
 /// The photos and videos in a folder and the folders in it, hidden ones
-/// skipped; whether the look got through all of them before `deadline`.
-fn walk(root: &Path, deadline: Option<Instant>) -> (Vec<Found>, bool) {
-    let mut found = Vec::new();
+/// skipped, and whatever could not be read.
+fn walk(root: &Path, deadline: Option<Instant>) -> Walk {
+    let rel_of = |path: &Path| path.strip_prefix(root).map_or_else(|_| String::new(), |r| r.to_string_lossy().into_owned());
+    let mut walk = Walk { found: Vec::new(), unread: Vec::new(), complete: false };
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         if deadline.is_some_and(|d| Instant::now() >= d) {
-            return (found, false);
+            return walk;
         }
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for entry in entries.flatten() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            walk.unread.push(rel_of(&dir));
+            continue;
+        };
+        for entry in entries {
+            // A listing that failed partway: whatever else is in it is unseen.
+            let Ok(entry) = entry else {
+                walk.unread.push(rel_of(&dir));
+                break;
+            };
             let path = entry.path();
             if entry.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
-            let Ok(meta) = entry.metadata() else { continue };
+            let Ok(meta) = entry.metadata() else {
+                walk.unread.push(rel_of(&path));
+                continue;
+            };
             if meta.is_dir() {
                 dirs.push(path);
                 continue;
@@ -145,10 +168,17 @@ fn walk(root: &Path, deadline: Option<Instant>) -> (Vec<Found>, bool) {
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_nanos() as i128);
-            found.push(Found { rel: rel.to_string_lossy().into_owned(), media, size: meta.len(), modified_ns });
+            walk.found.push(Found { rel: rel.to_string_lossy().into_owned(), media, size: meta.len(), modified_ns });
         }
     }
-    (found, true)
+    walk.complete = true;
+    walk
+}
+
+/// Whether an asset, by its path inside the folder, is in what a walk could
+/// not read (`Walk::unread`), so its file may well still be there.
+fn unread_holds(unread: &[String], id: &str) -> bool {
+    unread.iter().any(|u| u.is_empty() || id == u || id.strip_prefix(u.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
 /// The assets among the files found: a video named as a photo beside it
@@ -195,7 +225,7 @@ pub struct Count {
 }
 
 pub fn count(root: &Path, deadline: Option<Instant>) -> Count {
-    let (found, complete) = walk(root, deadline);
+    let Walk { found, complete, .. } = walk(root, deadline);
     let bytes = found.iter().map(|f| f.size).sum();
     let entries = pair(found);
     Count {
@@ -222,6 +252,23 @@ pub fn display_name(path: &Path, home: &Path) -> String {
     }
 }
 
+/// A look at the folder: its assets by id, and what could not be read
+/// (`Walk::unread`), where the index's assets are kept as they are.
+struct Look {
+    entries: HashMap<String, Entry>,
+    unread: Vec<String>,
+}
+
+impl Look {
+    /// For the listing's summary: nothing when all was read.
+    fn unread_note(&self) -> String {
+        match self.unread.len() {
+            0 => String::new(),
+            n => format!("; {n} files or folders could not be read, what the library has of them stays"),
+        }
+    }
+}
+
 impl FolderSource {
     pub fn new(root: PathBuf) -> Self {
         FolderSource { root }
@@ -232,13 +279,18 @@ impl FolderSource {
     }
 
     /// Every photo and video in the folder, with Live Photos' motion paired
-    /// to its photo (`pair`). Hidden files and folders are skipped.
-    fn look(&self) -> Result<HashMap<String, Entry>> {
+    /// to its photo (`pair`), and what could not be read. Hidden files and
+    /// folders are skipped.
+    fn look(&self) -> Result<Look> {
         if !self.root.is_dir() {
             // Never "everything was deleted": a disk not mounted, say.
             return Err(anyhow!("{} is not there", self.root.display()));
         }
-        Ok(pair(walk(&self.root, None).0))
+        let walk = walk(&self.root, None);
+        let mut unread = walk.unread;
+        unread.sort();
+        unread.dedup();
+        Ok(Look { entries: pair(walk.found), unread })
     }
 
     /// The asset for an entry: its dates and details read from the file.
@@ -393,19 +445,29 @@ impl Source for FolderSource {
     }
 
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
-        let entries = self.look()?;
+        let look = self.look()?;
+        let entries = &look.entries;
         let mut all: Vec<&Entry> = entries.values().collect();
         all.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
         self.put(index, &all, progress, all.len() as u64)?;
+        // What could not be read is not gone: the listing leaves it be.
+        if !look.unread.is_empty() {
+            let mut stmt = index.conn.prepare("SELECT id FROM assets")?;
+            let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            drop(stmt);
+            index.seen.extend(ids.into_iter().filter(|id| unread_holds(&look.unread, id)));
+        }
         let lives = entries.values().filter(|e| e.motion.is_some()).count();
         Ok(Listing {
             token: Some(crate::sync::now_secs().to_string()),
-            summary: format!("{} photos and videos in {}, {lives} of them Live Photos", entries.len(), self.root.display()),
+            summary: format!("{} photos and videos in {}, {lives} of them Live Photos{}", entries.len(),
+                             self.root.display(), look.unread_note()),
         })
     }
 
     fn changes(&self, index: &mut Index, _token: &str) -> Result<Listing> {
-        let entries = self.look()?;
+        let look = self.look()?;
+        let entries = &look.entries;
         // What the index has, by the keys of each asset's file and motion.
         let mut known: HashMap<String, (String, Option<String>)> = HashMap::new();
         {
@@ -422,12 +484,16 @@ impl Source for FolderSource {
         }
         let changed: Vec<&Entry> =
             entries.values().filter(|e| known.get(&e.file.rel) != Some(&e.signature())).collect();
-        let gone: Vec<String> = known.keys().filter(|id| !entries.contains_key(*id)).cloned().collect();
+        let gone: Vec<String> = known
+            .keys()
+            .filter(|id| !entries.contains_key(*id) && !unread_holds(&look.unread, id))
+            .cloned()
+            .collect();
         self.put(index, &changed, &|_, _| {}, changed.len() as u64)?;
         index.remove(&gone)?;
         Ok(Listing {
             token: Some(crate::sync::now_secs().to_string()),
-            summary: format!("{} files looked at", entries.len()),
+            summary: format!("{} files looked at{}", entries.len(), look.unread_note()),
         })
     }
 
@@ -609,7 +675,7 @@ mod tests {
                   "2026/notes.txt", ".hidden/IMG_9.JPG", "other/IMG_1.MOV"] {
             touch(&dir.join(f));
         }
-        let entries = FolderSource::new(dir.clone()).look().unwrap();
+        let entries = FolderSource::new(dir.clone()).look().unwrap().entries;
         let mut ids: Vec<(&str, Option<&str>)> =
             entries.values().map(|e| (e.file.rel.as_str(), e.motion.as_ref().map(|m| m.rel.as_str()))).collect();
         ids.sort();
@@ -633,7 +699,7 @@ mod tests {
         let (additions, _) = crate::add::gather(&[from.join("IMG_1.HEIC"), from.join("IMG_1.MOV")]);
         let added = source.add(&additions[0], &|_, _| {}).unwrap();
         assert_eq!(added.id.as_deref(), Some("IMG_1 (2).HEIC"));
-        let entries = source.look().unwrap();
+        let entries = source.look().unwrap().entries;
         assert_eq!(entries["IMG_1 (2).HEIC"].motion.as_ref().map(|m| m.rel.as_str()), Some("IMG_1 (2).MOV"));
         assert!(entries["IMG_1.HEIC"].motion.is_none());
         // The originals stay where they were.
@@ -678,6 +744,54 @@ mod tests {
         source.set_favorite(&conn, &["IMG_2.JPG".into()], false).unwrap();
         assert!(favorites(&conn).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_cannot_be_read_stays_in_the_library_with_its_favourites() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("unread");
+        for f in ["IMG_1.JPG", "2026/IMG_2.JPG", "2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"] {
+            touch(&dir.join(f));
+        }
+        let source = FolderSource::new(dir.clone());
+        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
+        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        source.set_favorite(&conn, &["2026/deeper/IMG_3.JPG".into()], true).unwrap();
+        let ids = |conn: &Connection| -> Vec<String> {
+            let mut stmt = conn.prepare("SELECT id FROM assets ORDER BY id").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        let all = ids(&conn);
+        assert_eq!(all.len(), 4);
+        // 2026 cannot be read now: a round and a listing both leave what is in
+        // it (2026b only shares the start of its name), and a file gone
+        // elsewhere still goes.
+        std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
+        let report = crate::sync::follow(&source, &mut conn, false).unwrap();
+        assert_eq!(report.changes.removed, ["IMG_1.JPG"]);
+        assert!(report.summary.contains("could not be read"), "{}", report.summary);
+        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(ids(&conn), ["2026/IMG_2.JPG", "2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
+        assert!(favorites(&conn).contains("2026/deeper/IMG_3.JPG"));
+        // Readable again, and the file in it gone: now that is seen.
+        std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_file(dir.join("2026/IMG_2.JPG")).unwrap();
+        crate::sync::follow(&source, &mut conn, false).unwrap();
+        assert_eq!(ids(&conn), ["2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unread_paths_hold_what_is_in_them_and_nothing_beside() {
+        let unread = ["2026".to_string(), "a/b.JPG".to_string()];
+        assert!(unread_holds(&unread, "2026/IMG_1.JPG"));
+        assert!(unread_holds(&unread, "2026/x/IMG_1.JPG"));
+        assert!(unread_holds(&unread, "a/b.JPG"));
+        assert!(!unread_holds(&unread, "2026b/IMG_1.JPG"));
+        assert!(!unread_holds(&unread, "a/b.JPG.MOV"));
+        assert!(unread_holds(&["".to_string()], "anything.JPG"));
+        assert!(!unread_holds(&[], "anything.JPG"));
     }
 
     #[test]

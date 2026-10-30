@@ -174,7 +174,10 @@ Following changes is a fresh look at the folder each round, compared with
 the index by path, size and modification time. A folder is not on a
 network, so this is quick (a stat of every file) and needs no change token
 beyond the time of the last look. A folder that is not there (a disk not
-mounted) is an error, `offline`, never an empty library.
+mounted) is an error, `offline`, never an empty library. In the same way,
+what a look cannot read (a folder without permission, a failing disk) is
+unseen, not gone: the photos the library has there stay, favourites and
+all, until a look gets through to them again.
 
 Making thumbnails is the slow part: a JPEG takes about 40 ms, but a 12 MP
 HEIC about a CPU-second to decode, in ImageMagick or vips alike. ~/Pictures
