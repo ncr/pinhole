@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QSaveFile>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -34,6 +35,15 @@ PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(
 int PluginLibrary::count() const { return m_library->count(); }
 
 QString PluginLibrary::dir() const { return m_library->dir(); }
+
+QString PluginLibrary::key() const {
+    // library/<kind>/<name>: the last two, which a move of the folder
+    // everything is kept in leaves as they are.
+    const QDir library(m_library->dir());
+    QDir kind(library);
+    kind.cdUp();
+    return kind.dirName() + '/' + library.dirName();
+}
 
 QVariantMap PluginLibrary::item(int index) const {
     if (index < 0 || index >= m_library->count())
@@ -300,8 +310,8 @@ QVariant PluginHost::setting(const QString &key, const QVariant &fallback) const
     return settings.contains(key) ? settings.value(key).toVariant() : fallback;
 }
 
-void PluginHost::setSetting(const QString &key, const QVariant &value) {
-    m_plugins->setSettingOf(m_id, key, QJsonValue::fromVariant(value));
+bool PluginHost::setSetting(const QString &key, const QVariant &value) {
+    return m_plugins->setSettingOf(m_id, key, QJsonValue::fromVariant(value));
 }
 
 void PluginHost::did(const QString &name, const QJSValue &undo, const QJSValue &redo) {
@@ -426,29 +436,29 @@ QJsonObject Plugins::readConfig() const {
     return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
 }
 
-void Plugins::writeConfig(const QJsonObject &config) const {
+bool Plugins::writeConfig(const QJsonObject &config) const {
+    // In place of the one there in one step (written beside it, then
+    // renamed over it), so a failure leaves that one as it was.
     QDir().mkpath(QFileInfo(configPath()).absolutePath());
-    QFile file(configPath() + ".part");
-    if (!file.open(QIODevice::WriteOnly))
-        return;
-    file.write(QJsonDocument(config).toJson());
-    file.close();
-    QFile::remove(configPath());
-    file.rename(configPath());
+    QSaveFile file(configPath());
+    if (file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(config).toJson()) >= 0 && file.commit())
+        return true;
+    qWarning("pinhole: could not keep %s: %s", qPrintable(configPath()), qPrintable(file.errorString()));
+    return false;
 }
 
 QJsonObject Plugins::settingsOf(const QString &id) const {
     return readConfig().value("settings").toObject().value(id).toObject();
 }
 
-void Plugins::setSettingOf(const QString &id, const QString &key, const QJsonValue &value) {
+bool Plugins::setSettingOf(const QString &id, const QString &key, const QJsonValue &value) {
     QJsonObject config = readConfig();
     QJsonObject all = config.value("settings").toObject();
     QJsonObject mine = all.value(id).toObject();
     mine.insert(key, value);
     all.insert(id, mine);
     config.insert("settings", all);
-    writeConfig(config);
+    return writeConfig(config);
 }
 
 void Plugins::rescan() {

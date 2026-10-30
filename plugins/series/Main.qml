@@ -23,8 +23,11 @@ PinholePlugin {
     // What the finder found, each series its photos' ids.
     property var foundIds: []
     // The edits: series made or changed by hand (ids), and photos kept out
-    // of any series.
-    property var edits: pinhole.setting("edits", { manual: [], apart: [] })
+    // of any series. Kept for each source's library apart (by its key): a
+    // folder's photos are named by their paths, and one folder's edits
+    // must not group another's photos of the same names.
+    property var edits: ({ manual: [], apart: [] })
+    property string editsKey: ""
     // Bumped when the series or the edits change, for bindings to follow.
     property int revision: 0
     property bool finding: false
@@ -113,8 +116,30 @@ PinholePlugin {
     }
     function setEdits(state) {
         edits = state
-        pinhole.setSetting("edits", edits)
+        if (!pinhole.setSetting(editsKey, edits))
+            console.warn("Series: the edits could not be kept")
         apply()
+    }
+    // The edits of the library shown, when another is.
+    function loadEdits() {
+        const key = "edits:" + pinhole.library.key
+        if (key === editsKey)
+            return
+        // Another library: what the finder found was the last one's.
+        if (editsKey !== "")
+            foundIds = []
+        editsKey = key
+        let kept = pinhole.setting(key, null)
+        // From before they were kept for each library: the one shown then.
+        const old = pinhole.setting("edits", null)
+        if (!kept && old) {
+            kept = old
+            if (pinhole.setSetting(key, old))
+                pinhole.setSetting("edits", null)
+        }
+        edits = kept || { manual: [], apart: [] }
+        if (found)
+            apply()
     }
     // The series made by hand, without any that holds one of `ids`.
     function manualWithout(ids) {
@@ -182,9 +207,15 @@ PinholePlugin {
     Timer { id: later; interval: 1500; onTriggered: plugin.find() }
     Connections {
         target: pinhole.library
-        function onChanged() { later.restart() }
+        function onChanged() {
+            plugin.loadEdits()
+            later.restart()
+        }
     }
-    Component.onCompleted: find()
+    Component.onCompleted: {
+        loadEdits()
+        find()
+    }
 
     actions: [
         PluginAction {

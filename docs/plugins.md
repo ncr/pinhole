@@ -96,7 +96,7 @@ type, so a plugin can look like the rest.
 
 | | |
 |---|---|
-| `library` | `count`, `item(i)` (id, date in ms, filename, thumbnail URL, width, height, video, live, favorite), `indexOf(id)`, `dir` (the source's library: `library.sqlite`, to read, and its thumbnails), and `changed()` when it is read again |
+| `library` | `count`, `item(i)` (id, date in ms, filename, thumbnail URL, width, height, video, live, favorite), `indexOf(id)`, `dir` (the source's library: `library.sqlite`, to read, and its thumbnails), `key` (which source's library it is, wherever it is kept: `icloud/me@example.com`, `folder/home-me-Pictures`; for what a plugin keeps for each source apart), and `changed()` when it is read again |
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
@@ -107,7 +107,7 @@ type, so a plugin can look like the rest.
 | `copyFile(path)`, `showFile(path)` | a file on the clipboard; its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
-| `setting(key, fallback)`, `setSetting(key, value)` | its settings, kept in `~/.config/pinhole/plugins.json` |
+| `setting(key, fallback)`, `setSetting(key, value)` | its settings, kept in `~/.config/pinhole/plugins.json`; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again |
 
 Strings in `qsTr()` are translated from `i18n/<language>.json` in the

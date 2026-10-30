@@ -29,10 +29,15 @@ class PluginLibrary : public QObject {
     // The folder of the source's library: library.sqlite, read only, and
     // the thumbnails (docs/plugins.md).
     Q_PROPERTY(QString dir READ dir NOTIFY changed)
+    // Which source's library it is, wherever it is kept: its kind and
+    // name ("icloud/me@example.com", "folder/home-me-Pictures"). For what a
+    // plugin keeps apart for each source, as Series does its edits.
+    Q_PROPERTY(QString key READ key NOTIFY changed)
 public:
     explicit PluginLibrary(const Library *library, QObject *parent = nullptr);
     int count() const;
     QString dir() const;
+    QString key() const;
     // id, date (ms), filename, thumbnail (a URL), width and height (of the
     // thumbnail), video, live, favorite.
     Q_INVOKABLE QVariantMap item(int index) const;
@@ -107,7 +112,8 @@ public:
     Q_INVOKABLE QString sizeText(double bytes) const;
     // The plugin's settings, kept in ~/.config/pinhole/plugins.json.
     Q_INVOKABLE QVariant setting(const QString &key, const QVariant &fallback = {}) const;
-    Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
+    // False if it could not be kept (the file could not be written).
+    Q_INVOKABLE bool setSetting(const QString &key, const QVariant &value);
     // Done just now, to undo with Ctrl+Z: `name` in a word or two, and
     // functions that undo and redo it (history.h).
     Q_INVOKABLE void did(const QString &name, const QJSValue &undo, const QJSValue &redo);
@@ -176,7 +182,7 @@ public:
     PhotoGrid *grid() const { return m_grid; }
     History *history() const { return m_history; }
     QJsonObject settingsOf(const QString &id) const;
-    void setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
+    bool setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
 
 signals:
     void idsChanged();
@@ -195,7 +201,7 @@ private:
     };
     void scan();
     QJsonObject readConfig() const;
-    void writeConfig(const QJsonObject &config) const;
+    bool writeConfig(const QJsonObject &config) const;
     bool enabled(const Plugin &plugin) const;
     void watch();
     // Each plugin turned on may bring its own translations (i18n/).
