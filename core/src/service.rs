@@ -716,6 +716,10 @@ pub fn run(config: Config) -> Result<()> {
         changes: Mutex::new(changes_tx),
         favorites: Mutex::new(favorites_tx),
     });
+    // A move of the folder cut short, put right before anything reads or
+    // writes the library; one that cannot be, and the service does not
+    // start, rather than work on a library not where the settings say.
+    shared.storage.resume()?;
 
     {
         let shared = shared.clone();
@@ -730,9 +734,6 @@ pub fn run(config: Config) -> Result<()> {
         let storage = shared.storage.clone();
         std::thread::spawn(move || storage.evict_loop());
     }
-    // A move of the folder cut short, put right before anything reads the
-    // library.
-    shared.storage.resume();
     {
         if let Some(old) = shared.config.adopt.clone() {
             shared.storage.adopt(old);

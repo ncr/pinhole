@@ -13,6 +13,7 @@
 #include "libraryreloader.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "plugins.h"
 #include "photoprovider.h"
 #include "thumbnailloader.h"
 #include "scrollphysics.h"
@@ -1197,6 +1198,37 @@ private slots:
         service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { after = c; });
         QVERIFY(after.isEmpty()); // after this returns, as an answer would come
         QTRY_COMPARE(after, QString("no_service"));
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
+    void aPluginsLibraryKeyIsTheLibrarysUntilAnothersPhotosAreIn() {
+        QTemporaryDir a, b;
+        makeLibrary(a.path(), {{"x.jpg", 1}}, false, "folder:/a");
+        makeLibrary(b.path(), {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/b");
+        Library library, next;
+        QString error;
+        QVERIFY(library.open(a.path(), &error));
+        QVERIFY(next.open(b.path(), &error));
+        FakeService fake;
+        QVERIFY(fake.server.listen(a.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (a.path() + "/s.sock").toUtf8());
+        ServiceClient service(a.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        PluginLibrary api(&library);
+        QCOMPARE(api.key(), QString("folder:/a"));
+        // The service says another source is shown; its library is not
+        // read yet: the key is still the photos' own.
+        fake.send({{"event", "source"}, {"kind", "folder"}, {"name", "b"}, {"path", "/b"}});
+        QTRY_COMPARE(service.source().value("path").toString(), QString("/b"));
+        QCOMPARE(api.key(), QString("folder:/a"));
+        QCOMPARE(api.count(), 1);
+        // Now its photos are in, and the key with them.
+        library.swap(next);
+        api.reloaded();
+        QCOMPARE(api.key(), QString("folder:/b"));
+        QCOMPARE(api.count(), 2);
         qunsetenv("PINHOLE_SOCKET");
     }
 

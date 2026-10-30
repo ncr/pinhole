@@ -191,6 +191,12 @@ pub fn update_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<(
 /// the one before wrote.
 static SETTINGS: Mutex<()> = Mutex::new(());
 
+/// For a test: run once in `save`, between reading what is in force and
+/// writing it, as another thread could come between them.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+static SAVE_BETWEEN: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
+
 fn write_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<()> {
     let mut settings = std::fs::read_to_string(path)
         .ok()
@@ -489,14 +495,14 @@ impl Storage {
     /// made in the new one was never written, as nothing writes before the
     /// commit. Only libraries renamed over (one step) with no old ones left
     /// are committed now and gone on with.
-    pub fn resume(self: &std::sync::Arc<Self>) {
+    pub fn resume(self: &std::sync::Arc<Self>) -> Result<()> {
         let written = std::fs::read_to_string(&self.settings)
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok())
             .unwrap_or(Value::Null);
         let plan = &written["moving"];
         let (Some(from), Some(to)) = (plan["from"].as_str().map(PathBuf::from), plan["to"].as_str().map(PathBuf::from)) else {
-            return;
+            return Ok(());
         };
         let old_cache = plan["cache"].as_str().map_or_else(|| from.join("cache"), PathBuf::from);
         let (old_libraries, new_libraries) = (from.join("library"), to.join("library"));
@@ -511,25 +517,25 @@ impl Storage {
             }
             let _ = std::fs::remove_dir(&to);
             let _ = self.plan(None);
-            return;
+            return Ok(());
         }
         if !committed {
             if let Err(e) = self.commit(&from, &to, &old_cache) {
                 // Undone instead: the libraries back where the settings
                 // say, the plan's libraries half then undone at the next
-                // start. Should even that fail, the libraries are used
-                // where they are, and the next start commits them.
+                // start. Should even that fail, nothing is touched and the
+                // service does not start: the next start commits them.
                 eprintln!("pinholed: going on with the move to {}: {e:#}", to.display());
                 let back = std::fs::create_dir_all(&from).and_then(|()| std::fs::rename(&new_libraries, &old_libraries));
-                if back.is_ok() {
-                    let _ = self.plan(None);
-                } else {
-                    let mut state = self.state.lock().unwrap();
-                    if let Ok(inside) = state.library.strip_prefix(&from) {
-                        state.library = to.join(inside);
-                    }
+                if let Err(back) = back {
+                    return Err(anyhow!(
+                        "the libraries are in {} but the settings cannot say so ({e:#}), nor can they go back ({back}); \
+                         make the settings writable and start again",
+                        to.display()
+                    ));
                 }
-                return;
+                let _ = self.plan(None);
+                return Ok(());
             }
         }
         eprintln!("pinholed: going on with the move from {} to {}", from.display(), to.display());
@@ -552,6 +558,7 @@ impl Storage {
         self.moved.store(0, Ordering::Relaxed);
         let this = self.clone();
         std::thread::spawn(move || this.photos_over(&from, &to, &old_cache));
+        Ok(())
     }
 
     /// Photos in a folder the cache used to be in (before it moved in with
@@ -591,6 +598,10 @@ impl Storage {
             let s = self.state.lock().unwrap();
             (s.location.clone(), s.limit)
         };
+        #[cfg(test)]
+        if let Some(between) = SAVE_BETWEEN.lock().unwrap().take() {
+            between();
+        }
         write_settings(&self.settings, |settings| {
             settings["location"] = json!(location);
             match limit {
@@ -932,7 +943,7 @@ mod tests {
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
             "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
         let storage = storage_in(&from, &settings);
-        storage.resume();
+        storage.resume().unwrap();
         assert!(!storage.state.lock().unwrap().moving);
         assert_eq!(storage.library(), from.join("library/icloud"));
         assert!(from.join("library/icloud/library.sqlite").exists());
@@ -954,7 +965,7 @@ mod tests {
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
             "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
         let storage = storage_in(&from, &settings);
-        storage.resume();
+        storage.resume().unwrap();
         // The library is read from its new place at once.
         assert_eq!(storage.library(), to.join("library/icloud"));
         until_moved(&storage);
@@ -978,7 +989,7 @@ mod tests {
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
             "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
         let storage = storage_in(&from, &settings);
-        storage.resume();
+        storage.resume().unwrap();
         assert_eq!(storage.library(), from.join("library/icloud"));
         assert!(from.join("library/icloud/library.sqlite").exists());
         assert!(!to.join("library").exists());
@@ -1019,25 +1030,89 @@ mod tests {
     fn a_new_limit_never_writes_back_the_folder_a_move_has_left() {
         let dir = temp("limit-during-move");
         let (from, to) = (dir.join("old"), dir.join("new"));
-        file(&from.join("library/icloud/library.sqlite"), 50, 0);
         file(&from.join("cache/full/aa/one.jpg"), 100, 0);
         let settings = dir.join("settings.json");
         let storage = storage_in(&from, &settings);
-        // Limits set all the while the move goes on.
-        let setting = {
+        // A new limit has read what is in force, and a move commits just
+        // then, before the limit is written.
+        let committing = {
             let storage = storage.clone();
-            std::thread::spawn(move || {
-                for i in 0..300 {
-                    storage.set_limit((30 + i % 3) * GB).unwrap();
-                }
-            })
+            let (from, to) = (from.clone(), to.clone());
+            move || {
+                let committer = std::thread::spawn(move || storage.commit(&from, &to, &from.join("cache")).unwrap());
+                // Give it every chance to commit now, if it can.
+                std::thread::sleep(Duration::from_millis(200));
+                drop(committer);
+            }
         };
-        storage.set_location(to.clone()).unwrap();
-        setting.join().unwrap();
-        until_moved(&storage);
-        storage.set_limit(40 * GB).unwrap();
-        assert_eq!(read_settings(&settings).location, Some(to.clone()));
+        *SAVE_BETWEEN.lock().unwrap() = Some(Box::new(committing));
+        storage.set_limit(30 * GB).unwrap();
+        // The commit came after the limit, not under it: the settings say
+        // the new folder, as soon as it is in force.
+        for _ in 0..100 {
+            if storage.location() == to {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(storage.location(), to);
+        assert_eq!(read_settings(&settings).location, Some(to));
+        assert_eq!(read_settings(&settings).limit, Some(30 * GB));
+    }
+
+    #[test]
+    fn a_moved_library_opens_with_its_favourites() {
+        let dir = temp("move-favourites");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        std::fs::create_dir_all(from.join("library/folder")).unwrap();
+        {
+            let db = crate::db::open(&from.join("library/folder/library.sqlite")).unwrap();
+            db.execute_batch("CREATE TABLE folder_favorites (asset_id TEXT PRIMARY KEY); INSERT INTO folder_favorites VALUES ('IMG_1.JPG');")
+                .unwrap();
+        }
+        let settings = dir.join("settings.json");
+        let storage = Arc::new(Storage::new(from.clone(), from.join("library/folder"), from.join("cache"), None, settings.clone()));
+        storage.set_location(to.clone()).unwrap();
+        until_moved(&storage);
+        assert_eq!(read_settings(&settings).location, Some(to.clone()));
+        let db = crate::db::open(&storage.library().join("library.sqlite")).unwrap();
+        let kept: String = db.query_row("SELECT asset_id FROM folder_favorites", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, "IMG_1.JPG");
+        assert!(storage.library().starts_with(&to));
+    }
+
+    #[test]
+    fn a_resumed_move_that_can_be_neither_committed_nor_undone_stops_the_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("resume-stuck");
+        // The old folder cannot be made again, the settings not written.
+        let locked = dir.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        let (from, to) = (locked.join("old"), dir.join("new"));
+        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        let conf = dir.join("conf");
+        std::fs::create_dir_all(&conf).unwrap();
+        let settings = conf.join("settings.json");
+        std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
+            "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
+        for d in [&conf, &locked] {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        let storage = storage_in(&from, &settings);
+        assert!(storage.resume().is_err());
+        for d in [&conf, &locked] {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // Nothing touched: the libraries where they are, none made old.
+        assert!(to.join("library/icloud/library.sqlite").exists());
+        assert!(!from.exists());
+        // Started again, writable: committed, and in use there.
+        let storage = storage_in(&from, &settings);
+        storage.resume().unwrap();
+        assert_eq!(storage.library(), to.join("library/icloud"));
+        assert_eq!(read_settings(&settings).location, Some(to.clone()));
+        until_moved(&storage);
+        assert!(to.join("library/icloud/library.sqlite").exists());
     }
 
     #[test]
@@ -1054,7 +1129,7 @@ mod tests {
         // The settings can be read but not written.
         std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o555)).unwrap();
         let storage = storage_in(&from, &settings);
-        storage.resume();
+        storage.resume().unwrap();
         std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Back where the settings say, and nothing new made in its place.
         assert_eq!(storage.library(), from.join("library/icloud"));
@@ -1062,7 +1137,7 @@ mod tests {
         assert!(!to.join("library").exists());
         // Started again, with the settings writable: undone for good.
         let storage = storage_in(&from, &settings);
-        storage.resume();
+        storage.resume().unwrap();
         assert!(from.join("library/icloud/library.sqlite").exists());
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none(), "{written:#}");

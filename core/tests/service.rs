@@ -245,5 +245,34 @@ fn a_window_meets_the_service_of_a_folder() {
     assert_eq!(after["ok"], true, "{after:#}");
     assert!(after["result"]["path"].as_str().unwrap().starts_with(moved_to.to_str().unwrap()), "{after:#}");
 
+    // A move asked for, and another source shown straight after, before it
+    // has begun: whichever goes first, the source shown and the library
+    // read are the same one's, in the new folder.
+    let again = root.join("again");
+    writeln!(window.out, "{}", json!({"id": window.next, "method": "set_storage", "params": {"location": again}})).unwrap();
+    window.next += 1;
+    let shown = window.ask("set_source", json!({"kind": "folder", "path": photos}));
+    assert_eq!(shown["ok"], true, "{shown:#}");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        let status = window.ask("status", json!({}));
+        let storage = window.ask("storage", json!({}));
+        if storage["result"]["moving"].is_null() && storage["result"]["location"] == json!(again) {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "{storage:#}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let library = PathBuf::from(status["result"]["library"].as_str().unwrap());
+    assert!(library.starts_with(&again), "{status:#}");
+    assert_eq!(status["result"]["source"]["path"], json!(photos), "{status:#}");
+    let owner: String = rusqlite::Connection::open(library.join("library.sqlite"))
+        .unwrap()
+        .query_row("SELECT value FROM meta WHERE key = 'source'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(owner, format!("folder:{}", photos.display()));
+    let red = window.ask("fetch", json!({"asset": "a.jpg", "kind": "original"}));
+    assert_eq!(red["result"]["path"], json!(photos.join("a.jpg")), "{red:#}");
+
     let _ = std::fs::remove_dir_all(&root);
 }
