@@ -20,4 +20,9 @@ Item {
     // positions: the card stands where the first is and shows it, with the
     // mark for several photos. Opening it opens that photo.
     property var stacks: []
+    // A few steps that show what it does, on the photos and its buttons as
+    // they are (Tour.qml): shown by itself the first time it is on, once
+    // `tourReady`, and again from the side panel.
+    property var tour: []
+    property bool tourReady: true
 }

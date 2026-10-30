@@ -153,10 +153,13 @@ public:
     static QString builtInDir();
 
     // id, name, description, version, author, personal, enabled, error,
-    // main (the entry point's URL, changing when its files change, so it
-    // loads again), host (its PluginHost).
+    // toured (its tour seen through or closed), main (the entry point's URL,
+    // changing when its files change, so it loads again), host (its
+    // PluginHost).
     Q_INVOKABLE QVariantMap at(const QString &id) const;
     Q_INVOKABLE void setEnabled(const QString &id, bool enabled);
+    // Its tour seen: it no longer shows by itself (Tour.qml).
+    Q_INVOKABLE void setToured(const QString &id);
     // The folder one's own plugins go in, in the file manager (made first).
     Q_INVOKABLE void showPersonalDir() const;
     // Look for plugins again.

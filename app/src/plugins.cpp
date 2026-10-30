@@ -352,6 +352,7 @@ QVariantMap Plugins::at(const QString &id) const {
             {"personal", p->personal},
             {"enabled", p->error.isEmpty() && enabled(*p)},
             {"error", p->error},
+            {"toured", readConfig().value("toured").toObject().value(p->id).toBool()},
             {"dir", p->dir},
             // Another URL for each load, so the engine reads the files again.
             {"main", p->main.isEmpty() ? QString()
@@ -369,6 +370,18 @@ void Plugins::setEnabled(const QString &id, bool on) {
     config.insert("enabled", states);
     writeConfig(config);
     updateCatalogs();
+    ++m_revision;
+    emit changed();
+}
+
+void Plugins::setToured(const QString &id) {
+    QJsonObject config = readConfig();
+    QJsonObject toured = config.value("toured").toObject();
+    if (toured.value(id).toBool())
+        return;
+    toured.insert(id, true);
+    config.insert("toured", toured);
+    writeConfig(config);
     ++m_revision;
     emit changed();
 }

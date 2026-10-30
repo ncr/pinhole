@@ -221,6 +221,11 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("silent", qEnvironmentVariableIsSet("PINHOLE_SELFTEST")
                                                            || parser.isSet("bench")
                                                            || qEnvironmentVariable("PINHOLE_SILENT") == QLatin1String("1"));
+    // A plugin's tour shows by itself the first time (Tour.qml), but not over
+    // a self-test or the bench, unless it is the tour's own test.
+    engine.rootContext()->setContextProperty("autoTours", (!qEnvironmentVariableIsSet("PINHOLE_SELFTEST")
+                                                           || qEnvironmentVariable("PINHOLE_SELFTEST").startsWith(QLatin1String("tour:")))
+                                                          && !parser.isSet("bench"));
     // How the source is doing (set again as the service says): see below.
     engine.rootContext()->setContextProperty("serviceHealth", QStringLiteral("fine"));
     engine.load(QUrl("qrc:/Main.qml"));
@@ -643,6 +648,8 @@ int main(int argc, char *argv[]) {
         runActionBarSelfTest(window, grid, viewer, library, test.mid(10));
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("favourite:")))
         runFavouriteSelfTest(window, grid, viewer, library, test.mid(10));
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("tour:")))
+        runTourSelfTest(window, viewer, test.mid(5));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

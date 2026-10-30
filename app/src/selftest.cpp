@@ -1071,3 +1071,70 @@ void runActionBarSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer,
         QTimer::singleShot(1500, window, [next] { (*next)(); });
     });
 }
+
+void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    auto tour = [window] { return window->findChild<QObject *>(QStringLiteral("tour")); };
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    auto describe = [tour, &viewer](const QString &name) {
+        QObject *t = tour();
+        return QStringLiteral("%1: tour %2, step %3 of %4, lit %5, viewer %6")
+            .arg(name, t->property("shown").toBool() ? "shown" : "gone")
+            .arg(t->property("index").toInt() + 1)
+            .arg(t->property("steps").toList().size())
+            .arg(t->property("lit").toBool() ? "yes" : "no", viewer.isOpen() ? "open" : "closed");
+    };
+    auto wait = std::make_shared<QTimer>();
+    wait->setInterval(250);
+    QObject::connect(wait.get(), &QTimer::timeout, window, [=, &viewer] {
+        // A source signed out (as a test profile's is) says so first, and
+        // no tour shows over that: looked past, as Esc does.
+        window->setProperty("troubleSeen", true);
+        QObject *t = tour();
+        if (!t || !t->property("shown").toBool()) {
+            if (clock->elapsed() > 60000) {
+                say(QStringLiteral("no tour showed by itself in 60 s"));
+                QCoreApplication::quit();
+            }
+            return;
+        }
+        wait->stop();
+        say(QStringLiteral("a tour showed by itself after %1 s").arg(clock->elapsed() / 1000.0, 0, 'f', 1));
+        const int count = t->property("steps").toList().size();
+        auto step = std::make_shared<std::function<void(int)>>();
+        *step = [=, &viewer](int k) {
+            QTimer::singleShot(1600, window, [=, &viewer] {
+                say(describe(QStringLiteral("step %1").arg(k + 1)));
+                grab(QStringLiteral("step-%1").arg(k + 1));
+                key(window, Qt::Key_Right);
+                if (k + 1 < count) {
+                    (*step)(k + 1);
+                    return;
+                }
+                QTimer::singleShot(1200, window, [=, &viewer] {
+                    say(describe(QStringLiteral("after the last")));
+                    // As the side panel's button asks for it.
+                    QMetaObject::invokeMethod(window->findChild<QObject *>(QStringLiteral("sidePanel")), "tourRequested",
+                                              Q_ARG(QString, QStringLiteral("pinhole.series")));
+                    QTimer::singleShot(1600, window, [=, &viewer] {
+                        say(describe(QStringLiteral("again")));
+                        grab(QStringLiteral("again"));
+                        key(window, Qt::Key_Escape);
+                        // Long enough for it to come back by itself, if it would.
+                        QTimer::singleShot(3000, window, [=, &viewer] {
+                            say(describe(QStringLiteral("after Esc")));
+                            QCoreApplication::quit();
+                        });
+                    });
+                });
+            });
+        };
+        (*step)(0);
+    });
+    wait->start();
+}

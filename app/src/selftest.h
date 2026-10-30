@@ -55,3 +55,9 @@ class Incoming;
 // step. They really are added: only on a scratch source.
 void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &incoming, const QString &dir,
                      const QStringList &files);
+
+// PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen it, wait for
+// a plugin's tour to show by itself, step through it with → and grab each
+// step into <dir>; check it ended, closed the viewer it opened and is
+// marked seen; then ask for Series' again, as the side panel does, and Esc.
+void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);

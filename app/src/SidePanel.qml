@@ -16,7 +16,8 @@ import QtCore
 // In the grid: which marks the cells carry (a video, a Live Photo, a
 // favourite, several photos as one card), each with its switch.
 //
-// Plugins: each with its switch, and its own settings under it while on.
+// Plugins: each with its switch, and its own settings under it while on,
+// and its tour again.
 Item {
     id: root
     anchors.fill: parent
@@ -66,6 +67,24 @@ Item {
     // changes as plugins load.
     property var pluginItem: id => null
     property int pluginsLoaded: 0
+    // A plugin's tour asked for again.
+    signal tourRequested(string id)
+    // Its keys, but for while a tour points into it.
+    property bool keys: true
+    readonly property bool takesKeys: shown && keys
+    // A plugin's part of the panel, scrolled into view, for a tour to light;
+    // kept there by `keptInView` as the parts above it fill in.
+    property string keptInView
+    function showPlugin(id) {
+        const k = plugins.ids.indexOf(id)
+        const row = k >= 0 ? pluginRows.itemAt(k) : null
+        if (row) {
+            const y = row.mapToItem(scroller.contentItem, 0, 0).y
+            if (y + row.height > scroller.contentY + scroller.height || y < scroller.contentY)
+                scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, y + row.height - scroller.height + theme.fontSize))
+        }
+        return row
+    }
 
     // The marks the grid draws (marks.h: Mark), kept for this window alone:
     // the service has no use for them.
@@ -202,12 +221,12 @@ Item {
         return last + "\n" + next
     }
 
-    Shortcut { enabled: root.shown && root.confirming < 0; sequence: "Up"; context: Qt.ApplicationShortcut
+    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "Up"; context: Qt.ApplicationShortcut
         onActivated: root.focusIndex = Math.max(0, root.focusIndex - 1) }
-    Shortcut { enabled: root.shown && root.confirming < 0; sequence: "Down"; context: Qt.ApplicationShortcut
+    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "Down"; context: Qt.ApplicationShortcut
         onActivated: root.focusIndex = Math.min(sources.list.length - 1, root.focusIndex + 1) }
     Shortcut {
-        enabled: root.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut
+        enabled: root.takesKeys; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut
         onActivated: {
             if (root.lowering) {
                 root.confirmLimit()
@@ -223,7 +242,7 @@ Item {
             }
         }
     }
-    Shortcut { enabled: root.shown && root.confirming < 0 && sources.list.length > 0; sequences: ["Delete", "Backspace"]; context: Qt.ApplicationShortcut
+    Shortcut { enabled: root.takesKeys && root.confirming < 0 && sources.list.length > 0; sequences: ["Delete", "Backspace"]; context: Qt.ApplicationShortcut
         onActivated: {
             root.signingOut = false
             root.confirming = root.focusIndex
@@ -231,7 +250,7 @@ Item {
     // Signing out of an Apple ID keeps its photos here; signed out, the row
     // offers signing in again instead.
     Shortcut {
-        enabled: root.shown && root.confirming < 0 && root.at(root.focusIndex) !== undefined
+        enabled: root.takesKeys && root.confirming < 0 && root.at(root.focusIndex) !== undefined
                  && root.at(root.focusIndex).kind === "icloud" && root.trouble(root.at(root.focusIndex)) !== "needs_sign_in"
         sequence: "O"; context: Qt.ApplicationShortcut
         onActivated: {
@@ -239,16 +258,16 @@ Item {
             root.confirming = root.focusIndex
         }
     }
-    Shortcut { enabled: root.shown && root.confirming < 0; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: root.addRequested() }
+    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: root.addRequested() }
     Shortcut {
-        enabled: root.shown; sequence: "Escape"; context: Qt.ApplicationShortcut
+        enabled: root.takesKeys; sequence: "Escape"; context: Qt.ApplicationShortcut
         onActivated: root.lowering ? root.pending = -1 : root.confirming >= 0 ? root.confirming = -1 : root.shown = false
     }
     // Storage.
-    Shortcut { enabled: root.shown && storage.loaded; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: root.step(-1) }
-    Shortcut { enabled: root.shown && storage.loaded; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: root.step(1) }
-    Shortcut { enabled: root.shown && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
-    Shortcut { enabled: root.shown && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
+    Shortcut { enabled: root.takesKeys && storage.loaded; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: root.step(-1) }
+    Shortcut { enabled: root.takesKeys && storage.loaded; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: root.step(1) }
+    Shortcut { enabled: root.takesKeys && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
+    Shortcut { enabled: root.takesKeys && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
 
     // The photos dimmed behind it, as behind Omarchy's menus and the other
     // panels (a scrim of the theme's background at half), coming and going
@@ -282,7 +301,9 @@ Item {
         }
 
         Flickable {
+            id: scroller
             anchors.fill: parent
+            onContentHeightChanged: if (root.keptInView !== "") root.showPlugin(root.keptInView)
             anchors.margins: Math.round(theme.fontSize * 0.857)
             contentHeight: top.implicitHeight
             boundsBehavior: Flickable.StopAtBounds
@@ -677,6 +698,7 @@ Item {
             Heading { text: qsTr("Plugins") }
 
             Repeater {
+                id: pluginRows
                 model: plugins.ids
                 delegate: Item {
                     id: pluginRow
@@ -721,6 +743,17 @@ Item {
                             width: parent.width
                             active: pluginRow.info.enabled && pluginRow.item !== null && pluginRow.item.settings !== null
                             sourceComponent: active ? pluginRow.item.settings : null
+                        }
+                        Item {
+                            visible: pluginRow.info.enabled && pluginRow.item !== null && (pluginRow.item.tour?.length ?? 0) > 0
+                            width: parent.width
+                            height: tourButton.height + Math.round(theme.fontSize * 0.4)
+                            ShellButton {
+                                id: tourButton
+                                anchors.bottom: parent.bottom
+                                text: qsTr("Show how it works")
+                                onTapped: root.tourRequested(pluginRow.modelData)
+                            }
                         }
                     }
                 }

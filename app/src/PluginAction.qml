@@ -1,4 +1,5 @@
 import QtQml
+import QtQuick
 
 // A button a plugin adds, drawn as Pinhole's own (docs/plugins.md).
 QtObject {
@@ -23,5 +24,7 @@ QtObject {
     // The pointer over its button, for a plugin to show what pressing it
     // would do: Pinhole sets it.
     property bool hovered: false
+    // Its button, where Pinhole draws it, for a tour step to light it.
+    property Item button: null
     signal triggered()
 }

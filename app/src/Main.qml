@@ -307,7 +307,7 @@ ApplicationWindow {
         }
     }
     Shortcut { enabled: trouble.visible; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: signIn.open(storage.sourceAccount) }
-    Shortcut { enabled: trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: win.troubleSeen = true }
+    Shortcut { enabled: trouble.visible && !tour.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: win.troubleSeen = true }
 
     // Back to the newest photos, whenever the grid is away from them.
     ShellButton {
@@ -384,6 +384,7 @@ ApplicationWindow {
         Repeater {
             model: win.pluginActions.filter(a => a.place === "grid")
             delegate: ShellButton {
+                id: gridAction
                 required property var modelData
                 floating: true
                 visible: modelData.shown
@@ -394,7 +395,13 @@ ApplicationWindow {
                 key: modelData.key
                 onTapped: modelData.triggered()
                 onHoveredChanged: modelData.hovered = hovered
-                Component.onDestruction: if (hovered) modelData.hovered = false
+                Component.onCompleted: modelData.button = gridAction
+                Component.onDestruction: {
+                    if (hovered)
+                        modelData.hovered = false
+                    if (modelData.button === gridAction)
+                        modelData.button = null
+                }
             }
         }
     }
@@ -533,6 +540,7 @@ ApplicationWindow {
                 function onActionsChanged() { win.collectPlugins() }
                 function onHelpChanged() { win.collectPlugins() }
                 function onStacksChanged() { win.collectPlugins() }
+                function onTourReadyChanged() { tourDue.restart() }
             }
         }
     }
@@ -574,7 +582,42 @@ ApplicationWindow {
         pluginStacks = stacks
         pluginCovering = covering
         ++pluginsLoaded
+        // A plugin turned off, or loaded again, takes its tour with it.
+        if (tour.shown && pluginItem(tour.pluginId) === null)
+            tour.close()
+        tourDue.restart()
     }
+
+    // A plugin's tour (Tour.qml), from the side panel; and by itself the
+    // first time the plugin is on, once it has something to show and the
+    // grid is free (a plugin turned on in the side panel: once it closes).
+    function startTour(id) {
+        const item = pluginItem(id)
+        if (!item || !item.tour || item.tour.length === 0)
+            return
+        side.shown = false
+        tour.start(id, plugins.at(id).name, item.tour)
+    }
+    Timer {
+        id: tourDue
+        interval: 1200
+        onTriggered: {
+            if (!autoTours || tour.shown || !win.tourFree)
+                return
+            for (let i = 0; i < pluginLayer.count; ++i) {
+                const loader = pluginLayer.itemAt(i)
+                const item = loader ? loader.item : null
+                if (item && item.tour && item.tour.length > 0 && item.tourReady && !loader.info.toured) {
+                    win.startTour(loader.modelData)
+                    return
+                }
+            }
+        }
+    }
+    // Nothing in the way: no panel, the viewer or select mode, nor a source
+    // in trouble saying so.
+    readonly property bool tourFree: inGrid && !grid.selecting && grid.count > 0 && !trouble.visible
+    onTourFreeChanged: if (tourFree) tourDue.restart()
 
     SidePanel {
         id: side
@@ -582,6 +625,8 @@ ApplicationWindow {
         health: serviceHealth
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
+        keys: !tour.shown
+        onTourRequested: id => win.startTour(id)
         onAddRequested: {
             side.shown = false
             addPicker.shown = true
@@ -613,6 +658,7 @@ ApplicationWindow {
         }
     }
     HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
+    Tour { id: tour; objectName: "tour"; grid: grid; photoViewer: win.photoViewer; side: side }
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
     // the viewer comes over the photos, and back, rather than vanish.
@@ -622,13 +668,15 @@ ApplicationWindow {
 
     // Something over the window that takes the keys.
     readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || pluginCovering
-    readonly property bool inGrid: !viewerShown && !panelUp && !firstRun
+    // A tour leaves the grid's controls as they are, to point at them, but
+    // takes the keys.
+    readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
     // The grid has its keys: not while a menu of select mode's bar is open.
     readonly property bool gridKeys: inGrid && !selectBar.menuOpen
     // The viewer has the keys: not while the help or a plugin is over it.
-    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering && !(photoViewer?.menuOpen ?? false)
+    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering && !tour.shown && !(photoViewer?.menuOpen ?? false)
     // The buttons' own keys (ShellButton.qml), but for while a panel is up.
-    readonly property bool buttonKeys: !panelUp && !firstRun
+    readonly property bool buttonKeys: !panelUp && !firstRun && !tour.shown
 
     // What Copy and Export act on: the selection, else the photo in view.
     // What Copy and Export take: the photo on screen in the viewer, else the
@@ -656,7 +704,7 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { enabled: !signIn.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
+    Shortcut { enabled: !signIn.shown && !tour.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
     Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
     // Frame times, for working on the grid: a key nobody presses by chance.
     Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
@@ -664,7 +712,7 @@ ApplicationWindow {
     // of the first nine sources shown on its number, from the grid or the
     // panel.
     Shortcut {
-        enabled: (win.inGrid || side.shown) && sources.known; sequences: ["Tab", ","]; context: Qt.ApplicationShortcut
+        enabled: (win.inGrid || side.takesKeys) && sources.known; sequences: ["Tab", ","]; context: Qt.ApplicationShortcut
         onActivated: side.shown = !side.shown
     }
     Repeater {
@@ -673,7 +721,7 @@ ApplicationWindow {
             id: digit
             required property int index
             Shortcut {
-                enabled: (win.inGrid || side.shown) && digit.index < sources.list.length
+                enabled: (win.inGrid || side.takesKeys) && digit.index < sources.list.length
                 sequence: String(digit.index + 1)
                 context: Qt.ApplicationShortcut
                 onActivated: sources.showAt(digit.index)

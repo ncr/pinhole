@@ -23,6 +23,7 @@
         <file alias="AddProgress.qml">AddProgress.qml</file>
         <file alias="DropTarget.qml">DropTarget.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="Tour.qml">Tour.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/pl.json">i18n/pl.json</file>
     </qresource>

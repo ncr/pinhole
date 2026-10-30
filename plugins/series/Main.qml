@@ -196,6 +196,7 @@ PinholePlugin {
 
     actions: [
         PluginAction {
+            id: gridAction
             place: "grid"
             text: qsTr("Series")
             key: "G"
@@ -204,6 +205,7 @@ PinholePlugin {
         },
         // A photo shown full window: its series, and putting it right.
         PluginAction {
+            id: seriesAction
             place: "viewer"
             group: "series"
             text: plugin.shownSeries >= 0 ? qsTr("Series of %1").arg(plugin.series[plugin.shownSeries].length) : ""
@@ -277,6 +279,38 @@ PinholePlugin {
     readonly property int shownSeries: (revision, pinhole.viewer.open ? of(pinhole.viewer.index) : -1)
     // The photos ticked in the grid.
     readonly property var picked: (revision, pinhole.selectionCount, Array.from(pinhole.selection()))
+
+    // What it does, on a series of one's own: shown the first time it is
+    // on, once there is a series to show, and from the side panel.
+    tourReady: found && series.length > 0
+    // The series the tour is on.
+    property int touring: -1
+    tour: [
+        {
+            title: qsTr("Taken close together"),
+            text: qsTr("Photos of one subject taken close together are a series: one card in the grid, marked in its corner."),
+            photo: () => {
+                touring = near(pinhole.currentIndex())
+                return touring >= 0 ? series[touring][0] : -1
+            }
+        },
+        {
+            title: qsTr("GIF or video"),
+            text: qsTr("G makes a series a short clip to send: pick a motion, a pace and a look, then Enter for a GIF or ⇧ Enter for a video."),
+            action: gridAction
+        },
+        {
+            title: qsTr("Put it right"),
+            text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked."),
+            open: () => touring >= 0 && touring < series.length ? series[touring][0] : -1,
+            action: seriesAction
+        },
+        {
+            title: qsTr("Settings"),
+            text: qsTr("Here, in the side panel (Tab), one card a series can be turned off, and this tour shown again."),
+            settings: true
+        }
+    ]
 
     help: [
         ["X", qsTr("Take a photo out of its series")],

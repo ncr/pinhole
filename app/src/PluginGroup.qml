@@ -12,7 +12,21 @@ MenuGroup {
     visible: primary >= 0
     menuKey: action && action.key !== "" && !action.key.startsWith("Shift+") ? "Shift+" + action.key : ""
 
+    // The button stands for each of them, for a tour to light.
+    function claim() {
+        for (const a of items)
+            a.button = groupButton
+    }
+    onItemsChanged: claim()
+    Component.onCompleted: claim()
+    Component.onDestruction: {
+        for (const a of items)
+            if (a.button === groupButton)
+                a.button = null
+    }
+
     ShellButton {
+        id: groupButton
         flat: true
         visible: group.action !== null
         usable: group.action?.usable ?? true

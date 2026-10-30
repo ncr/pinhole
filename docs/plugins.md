@@ -79,6 +79,14 @@ own. It sets:
   it opens that photo, selecting or dragging it takes them all, and the
   strip under a photo shown full window underlines a stack's photos. A
   photo in another plugin's stack already stays there.
+- `tour`: a few steps that show what it does, on the photos and buttons as
+  they are: `[{ title, text, photo, open, action, settings }, ...]`.
+  `photo` is a library position (or a function giving one) the grid goes to
+  and lights, `open` one shown full window, `action` one of its
+  `PluginAction`s whose button is lit, and `settings: true` lights its part
+  of the side panel. Pinhole shows it by itself the first time the plugin is
+  on, once `tourReady` is true and the grid is free, and again from the
+  side panel. Series' shows a series of your own.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner` and `Toggle`, and `theme` has the Omarchy theme's colours and
