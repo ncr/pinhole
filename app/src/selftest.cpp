@@ -144,7 +144,11 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         auto clock = std::make_shared<QElapsedTimer>();
         clock->start();
         auto connections = std::make_shared<QList<QMetaObject::Connection>>();
-        auto finish = [connections, next, k] {
+        // Once, whichever comes first: the last stage, or the minute.
+        auto finished = std::make_shared<bool>(false);
+        auto finish = [connections, next, k, finished] {
+            if (std::exchange(*finished, true))
+                return;
             for (const auto &c : *connections)
                 QObject::disconnect(c);
             QTimer::singleShot(0, [next, k] { (*next)(k + 1); });
@@ -198,12 +202,12 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
                 std::printf("selftest: %-11s says \"%s\"\n", c.name, qPrintable(viewer.message()));
         }));
         // Nothing within a minute is a failure too.
-        QTimer::singleShot(60000, &viewer, [c, finish, clock, failures] {
-            if (clock->elapsed() >= 59000) {
-                std::printf("selftest: %s: timed out\n", c.name);
-                ++*failures;
-                finish();
-            }
+        QTimer::singleShot(60000, &viewer, [c, finish, failures, finished] {
+            if (*finished)
+                return;
+            std::printf("selftest: %s: timed out\n", c.name);
+            ++*failures;
+            finish();
         });
         viewer.openAt(index, QRectF(0, 0, 100, 100));
         if (!c.effect.isEmpty()) {
