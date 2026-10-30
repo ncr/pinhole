@@ -30,23 +30,17 @@
 
 #include <algorithm>
 
-PluginLibrary::PluginLibrary(const Library *library, const ServiceClient *service, QObject *parent)
-    : QObject(parent), m_library(library), m_service(service) {}
+PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(parent), m_library(library) {}
 
 int PluginLibrary::count() const { return m_library->count(); }
 
 QString PluginLibrary::dir() const { return m_library->dir(); }
 
 QString PluginLibrary::key() const {
-    // As the service's source ids (storage::source_id): unlike the
-    // library's folder name, one to a source.
-    const QJsonObject source = m_service->source();
-    const QString kind = source.value("kind").toString();
-    if (kind == QLatin1String("folder"))
-        return kind + ':' + source.value("path").toString();
-    if (kind == QLatin1String("icloud"))
-        return kind + ':' + source.value("account").toString();
-    return {};
+    // The library's own word for its source, read with its photos: it
+    // changes with them, never before (as the service's news of another
+    // source would, while this library is still the last one).
+    return m_library->source();
 }
 
 QVariantMap PluginLibrary::item(int index) const {
@@ -334,7 +328,7 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                  History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
       m_history(history),
-      m_libraryApi(std::make_unique<PluginLibrary>(library, service)) {
+      m_libraryApi(std::make_unique<PluginLibrary>(library)) {
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
     m_settle.setSingleShot(true);

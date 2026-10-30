@@ -31,6 +31,10 @@ public:
     int count() const { return int(m_items.size()); }
     const LibraryItem &at(int i) const { return m_items[size_t(i)]; }
     QString dir() const { return m_dir; }
+    // The source whose library it is, as the core wrote into it
+    // (sync::claim): "icloud:me@example.com", "folder:/home/me/Pictures";
+    // empty for one that says nothing (pinhole-fake's).
+    QString source() const { return m_source; }
     // A favourite set from the window, before the index has it
     // (favourites.h).
     void setFavorite(int i, bool favorite) { m_items[size_t(i)].favorite = favorite; }
@@ -39,9 +43,11 @@ public:
     void swap(Library &other) {
         m_items.swap(other.m_items);
         m_dir.swap(other.m_dir);
+        m_source.swap(other.m_source);
     }
 
 private:
     QString m_dir;
+    QString m_source;
     std::vector<LibraryItem> m_items;
 };

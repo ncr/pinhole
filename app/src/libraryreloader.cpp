@@ -88,8 +88,12 @@ void LibraryReloader::reload() {
             positions.insert(fresh.at(i).id, i);
         read->moved.assign(size_t(library->count()), -1);
         // Another source's library: nothing carries over, though a photo
-        // there have the same id (a folder's are paths).
-        if (sourceOf(fresh.dir()) == sourceOf(library->dir()))
+        // there have the same id (a folder's are paths). By what each says
+        // it is, else by where it is.
+        const bool same = !fresh.source().isEmpty() && !library->source().isEmpty()
+                              ? fresh.source() == library->source()
+                              : sourceOf(fresh.dir()) == sourceOf(library->dir());
+        if (same)
             for (int i = 0; i < library->count(); ++i)
                 read->moved[size_t(i)] = positions.value(library->at(i).id, -1);
         // A photo whose thumbnail is a new file is drawn afresh.

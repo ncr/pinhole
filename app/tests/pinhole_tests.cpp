@@ -47,7 +47,8 @@ private:
 
     // A library in `dir` holding `rows` (id, date) and nothing else of note;
     // all Live Photos, or none.
-    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows, bool live = false) {
+    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows, bool live = false,
+                            const QString &source = {}) {
         {
             QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "make");
             db.setDatabaseName(dir + "/library.sqlite");
@@ -61,6 +62,12 @@ private:
                 q.addBindValue(date);
                 q.addBindValue(live ? 1 : 0);
                 q.addBindValue(QString::fromUtf8(id) + ".HEIC");
+                QVERIFY(q.exec());
+            }
+            if (!source.isEmpty()) {
+                QVERIFY(q.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)"));
+                q.prepare("INSERT INTO meta VALUES ('source', ?)");
+                q.addBindValue(source);
                 QVERIFY(q.exec());
             }
             db.close();
@@ -908,6 +915,37 @@ private slots:
         QCOMPARE(moves.size(), size_t(1));
         QCOMPARE(moves[0], (std::vector<int>{-1, -1}));
         QCOMPARE(library.dir(), QDir(other.path()).absolutePath());
+    }
+
+    void aLibrarySaysWhoseItIsAndAMovedOneIsTheSameOne() {
+        // Two folders' libraries named alike (a-b/c and a/b-c both make
+        // folder/a-b-c), and the first one moved elsewhere.
+        QTemporaryDir root;
+        const QString first = root.path() + "/one/library/folder/a-b-c", other = root.path() + "/two/library/folder/a-b-c",
+                      moved = root.path() + "/three/library/folder/a-b-c";
+        for (const QString &dir : {first, other, moved})
+            QVERIFY(QDir().mkpath(dir));
+        makeLibrary(first, {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/a-b/c");
+        makeLibrary(other, {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/a/b-c");
+        makeLibrary(moved, {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/a-b/c");
+        Library library;
+        QString error;
+        QVERIFY(library.open(first, &error));
+        QCOMPARE(library.source(), QString("folder:/a-b/c"));
+        ThumbnailLoader loader(&library, 1);
+        LibraryReloader reloader(&library, &loader, first);
+        std::vector<std::vector<int>> moves;
+        connect(&reloader, &LibraryReloader::reloaded, this,
+                [&](const std::vector<int> &moved, const std::vector<int> &, bool) { moves.push_back(moved); });
+        // The same source's library moved: the photos follow.
+        reloader.moveTo(moved);
+        QTRY_COMPARE(moves.size(), size_t(1));
+        QCOMPARE(moves[0], (std::vector<int>{0, 1}));
+        // Another source's, though named alike: nothing carries over.
+        reloader.moveTo(other);
+        QTRY_COMPARE(moves.size(), size_t(2));
+        QCOMPARE(moves[1], (std::vector<int>{-1, -1}));
+        QCOMPARE(library.source(), QString("folder:/a/b-c"));
     }
 
     void aMediumAnswerFromBeforeAReloadIsNotTakenForAnotherPhoto() {

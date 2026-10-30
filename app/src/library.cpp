@@ -56,6 +56,10 @@ bool Library::open(const QString &dir, QString *error) {
                                                                      : LiveEffect::None;
             m_items.push_back(std::move(item));
         }
+        QSqlQuery meta(db);
+        m_source = meta.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'source'")) && meta.next()
+                       ? meta.value(0).toString()
+                       : QString();
     }
     QSqlDatabase::removeDatabase("library");
     return true;
