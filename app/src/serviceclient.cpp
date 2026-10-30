@@ -142,9 +142,12 @@ void ServiceClient::sync() {
 
 void ServiceClient::send(const QJsonObject &request) {
     const QByteArray line = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
+    // Nothing at all to a service of another protocol (sync too).
+    if (m_health == QLatin1String("incompatible"))
+        return;
     if (connected() && m_greeted)
         m_socket.write(line);
-    else if (m_health != QLatin1String("incompatible"))
+    else
         m_unsent.append(line);
 }
 

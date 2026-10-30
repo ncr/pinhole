@@ -1034,10 +1034,13 @@ private slots:
             said |= args.at(0).toString() == QLatin1String("health")
                     && args.at(1).toJsonObject().value("state").toString() == QLatin1String("incompatible");
         QVERIFY(said);
-        // Nothing is asked of it: answered so at once, and nothing sent.
+        // Nothing is asked of it: answered so at once, and nothing sent,
+        // not a sync either.
         QString code;
         service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { code = c; });
+        service.sync();
         QTRY_COMPARE(code, QString("incompatible"));
+        QTest::qWait(50);
         fake.read();
         QVERIFY(fake.asked.isEmpty());
 
@@ -1115,6 +1118,24 @@ private slots:
         QTRY_VERIFY(viewer.image().toString().contains("c-medium.jpg"));
         QTRY_VERIFY(!asked("c", "full").isEmpty() || !asked("c", "original").isEmpty());
         QVERIFY(asked("b", "full").isEmpty() && asked("b", "original").isEmpty());
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
+    void withNoServiceToBeHadWhatWaitsIsAnsweredSoAndSoIsWhatIsAskedAfter() {
+        QTemporaryDir dir;
+        // Nothing listens there, and none is started (initTestCase).
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QString waited;
+        service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { waited = c; });
+        QVERIFY(waited.isEmpty());
+        // Some ten seconds of trying, then it gives up.
+        QTRY_COMPARE_WITH_TIMEOUT(service.health(), QString("no_service"), 20000);
+        QCOMPARE(waited, QString("no_service"));
+        QString after;
+        service.call(QStringLiteral("storage"), {}, [&](bool, const QJsonObject &, const QString &c) { after = c; });
+        QVERIFY(after.isEmpty()); // after this returns, as an answer would come
+        QTRY_COMPARE(after, QString("no_service"));
         qunsetenv("PINHOLE_SOCKET");
     }
 
