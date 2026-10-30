@@ -59,9 +59,9 @@ class PhotoGrid : public QQuickItem {
     Q_PROPERTY(QVariantList stacks READ stacks WRITE setStacks NOTIFY stacksChanged)
     // The marks drawn on cells (marks.h: Mark), or-ed.
     Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
-    // The marks' colours where cells are small and the marks glow like
-    // neon, the Omarchy theme's: a video's, a Live Photo's, a favourite's
-    // and a stack's.
+    // The marks' colours, the Omarchy theme's: a video's, a Live Photo's, a
+    // favourite's and a stack's, lit as neon where cells are small and
+    // unlit closer.
     Q_PROPERTY(QVariantList markColours READ markColours WRITE setMarkColours NOTIFY markColoursChanged)
     Q_PROPERTY(int columns READ columns NOTIFY columnsChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)

@@ -16,8 +16,15 @@ constexpr int kMarkKinds = 4;
 constexpr int kAllMarks = MarkVideo | MarkLive | MarkFavorite | MarkStack;
 
 // One mark, white with a soft shadow so it reads on any photo, `px` pixels
-// square (device pixels). The grid and the side panel draw the same ones.
+// square (device pixels), as the side panel shows it.
 QImage markImage(Mark mark, int px);
+
+// The same mark as its neon tube (neonMark()) in `colour` but unlit, for
+// cells seen closer, where a neon sign would be too much and a small white
+// mark is lost on a big photo: the tube's shape in the colour, a little
+// lighter, over a soft dark shadow so it reads on bright photos too, `px`
+// pixels square.
+QImage plainMark(Mark mark, const QColor &colour, int px);
 
 // The same mark lit like a neon tube, for cells seen from afar, where a
 // white mark is lost among the photos: a white-hot core in a tint of

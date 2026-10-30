@@ -77,10 +77,14 @@ constexpr qint64 kUploadNanos = 3'000'000;
 // 4 MB each.
 constexpr double kMosaicBelowPx = 100;
 constexpr size_t kMaxPages = 64;
-// Marks (marks.h): this big on screen whatever the cell's size, a little
-// in from its bottom left corner, on cells at least this big; smaller ones
-// would be all marks. In the order drawn, left to right.
-constexpr double kMarkPx = 18;
+// Marks (marks.h: plainMark()), the neon tubes' shapes unlit in the
+// theme's colours: kMarkShare of a cell's width on screen, from kMarkPx up
+// to kMarkMaxPx, a little in from its bottom left corner, on cells at
+// least kMarksFromPx big; smaller ones would be all marks. In the order
+// drawn, left to right.
+constexpr double kMarkPx = 22;
+constexpr double kMarkMaxPx = 40;
+constexpr double kMarkShare = 0.1;
 constexpr double kMarkInset = 4;
 constexpr double kMarksFromPx = 72;
 constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, MarkLive, MarkStack};
@@ -95,12 +99,14 @@ constexpr int kNeonFromColumns = 13;
 constexpr double kNeonMarkPx = 22;
 constexpr double kNeonMarksFromPx = 20;
 constexpr double kNeonMarkShare = 0.42;
-// Once the grid rests at such a level, coming from a closer one, its tubes
-// strike (lit ones stay lit through a zoom between such levels): each dark until its
-// own moment within the first kNeonStagger seconds, then stuttering on and
-// off for kNeonStrike, more on than off as it warms, then steady. Drawn
-// in kNeonSteps of brightness, from dark to lit. As they come on the photos
-// dim by kDusk, so the tubes stand out from them while the grid is still.
+// Once the grid rests at such a level, coming from a closer one, the photos
+// first dim by kDusk over kDuskFall seconds, smoothly, so the tubes stand
+// out from them while the grid is still; then the tubes strike (lit ones
+// stay lit through a zoom between such levels): each dark until its own
+// moment within the first kNeonStagger seconds, then stuttering on and off
+// for kNeonStrike, more on than off as it warms, then steady. Drawn in
+// kNeonSteps of brightness, from dark to lit.
+constexpr double kDuskFall = 0.25;
 constexpr double kNeonStagger = 0.8;
 constexpr double kNeonStrike = 0.5;
 constexpr int kNeonSteps = 6;
@@ -203,9 +209,10 @@ struct GridRenderState {
     };
     Slot drawSlots[2];
     // Every mark side by side, in kMarkOrder, drawn for this device pixel
-    // ratio.
+    // ratio in the colours of this version of them.
     QSGTexture *marks = nullptr;
     qreal marksDpr = 0;
+    int marksVersion = -1;
     // The same lit as neon: a row of glows over a row of cores, in the
     // colours of this version of them.
     // kNeonSteps rows of each, darkest first.
@@ -1329,7 +1336,7 @@ void PhotoGrid::updateNeon() {
 }
 
 void PhotoGrid::updateAnimating() {
-    const bool striking = m_neonSince >= 0 && m_neonClock - m_neonSince < kNeonStagger + kNeonStrike + 0.1;
+    const bool striking = m_neonSince >= 0 && m_neonClock - m_neonSince < kDuskFall + kNeonStagger + kNeonStrike + 0.1;
     const bool animating = m_driveVelocity != 0 || m_physics.animating() || m_wheelZoom.active ||
                            (m_zoom.active && (m_zoom.settling || m_zoom.fade < 1)) || striking;
     if (animating != m_animating) {
@@ -2059,14 +2066,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     };
 
     // The marks, drawn once for this screen's pixels.
-    if (!rs.marks || rs.marksDpr != dpr) {
-        const int px = int(std::lround(kMarkPx * dpr));
+    if (!rs.marks || rs.marksDpr != dpr || rs.marksVersion != m_markColoursVersion) {
+        const int px = int(std::lround(kMarkMaxPx * dpr));
         QImage strip(px * kMarkKinds, px, QImage::Format_ARGB32_Premultiplied);
         strip.fill(Qt::transparent);
         {
             QPainter p(&strip);
             for (int k = 0; k < kMarkKinds; ++k)
-                p.drawImage(k * px, 0, markImage(kMarkOrder[size_t(k)], px));
+                p.drawImage(k * px, 0, plainMark(kMarkOrder[size_t(k)], m_markColours[size_t(std::countr_zero(unsigned(kMarkOrder[size_t(k)])))], px));
         }
         // The nodes may still point at the old one.
         for (auto &slot : rs.drawSlots)
@@ -2075,6 +2082,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         rs.marks = window()->createTextureFromImage(strip);
         rs.marks->setFiltering(QSGTexture::Linear);
         rs.marksDpr = dpr;
+        rs.marksVersion = m_markColoursVersion;
     }
     if (!rs.neon || rs.neonDpr != dpr || rs.neonVersion != m_markColoursVersion) {
         const int px = int(std::lround(kNeonMarkPx * dpr));
@@ -2191,8 +2199,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             const bool neon = size_t(k) < drawn.size() && neonAt(drawn[size_t(k)].columns);
             const double since = m_neonSince < 0 ? -1 : m_neonClock - m_neonSince;
             {
-                // The dusk falls as the tubes strike.
-                const double t = std::clamp((since - 0.1) / (kNeonStagger + kNeonStrike), 0.0, 1.0);
+                // The dusk falls before the tubes strike.
+                const double t = std::clamp(since / kDuskFall, 0.0, 1.0);
                 const float a = float(neon && since >= 0 ? kDusk * t * t * (3 - 2 * t) : 0);
                 QSGGeometry *dg = slot.dusk->geometry();
                 dg->allocate(a > 0 ? 6 : 0);
@@ -2215,9 +2223,10 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             QSGGeometry *mg = slot.marks->geometry();
             mg->allocate(quads * 6);
             auto *mv = mg->vertexDataAsTexturedPoint2D();
-            const double size = !neon ? kMarkPx
+            const double cellWidth = cells.empty() ? 0 : cells.front().rect.width();
+            const double size = !neon ? std::clamp(cellWidth * kMarkShare, kMarkPx, kMarkMaxPx)
                                 : cells.empty() ? kNeonMarkPx
-                                                : std::min(kNeonMarkPx, cells.front().rect.width() * kNeonMarkShare);
+                                                : std::min(kNeonMarkPx, cellWidth * kNeonMarkShare);
             // A lit mark's square is kNeonSpread times as big, about the
             // same middle.
             const double grow = neon ? size * (kNeonSpread - 1) / 2 : 0;
@@ -2225,7 +2234,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 for (const Marked &c : cells) {
                     float v0 = 0, v1 = 1;
                     if (neon) {
-                        const double lit = since < 0 ? 0 : neonLit(since, quint32(c.photo));
+                        const double lit = since < kDuskFall ? 0 : neonLit(since - kDuskFall, quint32(c.photo));
                         const int row = pass * kNeonSteps + int(std::lround(lit * (kNeonSteps - 1)));
                         v0 = float(row) / (2 * kNeonSteps);
                         v1 = float(row + 1) / (2 * kNeonSteps);

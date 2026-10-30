@@ -606,7 +606,9 @@ int main(int argc, char *argv[]) {
         });
     }
     // PINHOLE_SELFTEST=neon:<dir>: zooming out to 29 columns, where the
-    // marks' tubes strike, in and out again, as 60 frames a second in <dir>
+    // marks' tubes strike, in and out again, then in to 7, where they are
+    // white, and out to 13, where the photos dim and the tubes strike anew,
+    // as 60 frames a second in <dir>
     // (PINHOLE_SELFTEST_AT: where in the library). Frames are stepped here,
     // not by the clock, so slow grabs do not change the timing. 29 first, so
     // its thumbnails are in.
@@ -628,6 +630,12 @@ int main(int argc, char *argv[]) {
                 frames(30);
                 grid->zoomStep(1);
                 frames(150);
+                grid->zoomStep(-1);
+                frames(50);
+                grid->zoomStep(1);
+                frames(150);
+                grid->zoomStep(-1);
+                frames(50);
                 grid->zoomStep(-1);
                 frames(50);
                 grid->zoomStep(1);

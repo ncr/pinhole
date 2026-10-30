@@ -150,6 +150,31 @@ QImage markImage(Mark mark, int px) {
     return result;
 }
 
+QImage plainMark(Mark mark, const QColor &colour, int px) {
+    px = std::max(8, px);
+    QImage tube = shape(mark, px, true);
+    {
+        QPainter p(&tube);
+        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        const auto light = [](int c) { return c + (255 - c) / 5; };
+        p.fillRect(tube.rect(), QColor(light(colour.red()), light(colour.green()), light(colour.blue())));
+    }
+    // The shadow darker and wider than a white mark's: thin coloured lines
+    // need more of it to stand off a photo.
+    QImage shadow = blurredAlpha(shape(mark, px, true), std::max(1, px / 10));
+    {
+        QPainter p(&shadow);
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.fillRect(shadow.rect(), QColor(0, 0, 0, 230));
+    }
+    QImage result(px, px, QImage::Format_ARGB32_Premultiplied);
+    result.fill(Qt::transparent);
+    QPainter r(&result);
+    r.drawImage(QPointF(0, std::max(1.0, px / 40.0)), shadow);
+    r.drawImage(QPointF(0, 0), tube);
+    return result;
+}
+
 NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit) {
     px = std::max(8, px);
     const int side = int(std::lround(px * kNeonSpread)), at = (side - px) / 2;
