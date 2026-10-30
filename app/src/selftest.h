@@ -61,3 +61,9 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
 // step into <dir>; check it ended, closed the viewer it opened and is
 // marked seen; then ask for Series' again, as the side panel does, and Esc.
 void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
+
+// PINHOLE_SELFTEST=series:<dir>: once Series has found its series, open the
+// longest on its screen to put it right, over the viewer, as G does; go
+// through it with → and the wheel, up close and back, grabbing each into
+// <dir>; check the viewer beneath took none of it.
+void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);

@@ -163,7 +163,7 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
             m_motion.setHoldFast(press);
             return false;
         }
-        if ((key->key() != Qt::Key_Left && key->key() != Qt::Key_Right) || !m_takesKeys ||
+        if ((key->key() != Qt::Key_Left && key->key() != Qt::Key_Right) || !m_takesInput ||
             (key->modifiers() & ~(Qt::ShiftModifier | Qt::KeypadModifier)))
             return false;
         // The system's repeats are not wanted: holding is timed here.
@@ -183,6 +183,9 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     // Keys let go while the window was elsewhere never arrive.
     if (event->type() == QEvent::FocusOut || event->type() == QEvent::WindowDeactivate)
         letGo();
+    // The wheel and the touchpad go to what is over it.
+    if (!m_takesInput)
+        return false;
     if (event->type() == QEvent::NativeGesture) {
         auto *g = static_cast<QNativeGestureEvent *>(event);
         logInput(QStringLiteral("viewer gesture type=%1 value=%2 pos=%3,%4")
@@ -385,13 +388,13 @@ void Viewer::drop() {
     emit motionChanged();
 }
 
-void Viewer::setTakesKeys(bool takes) {
-    if (takes == m_takesKeys)
+void Viewer::setTakesInput(bool takes) {
+    if (takes == m_takesInput)
         return;
-    m_takesKeys = takes;
+    m_takesInput = takes;
     if (!takes)
         letGo();
-    emit takesKeysChanged();
+    emit takesInputChanged();
 }
 
 void Viewer::letGo() {

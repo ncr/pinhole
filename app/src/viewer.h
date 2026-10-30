@@ -57,10 +57,11 @@ class Viewer : public QObject {
     Q_PROPERTY(qreal dismiss READ dismiss NOTIFY motionChanged)
     Q_PROPERTY(qreal pageWidth READ pageWidth NOTIFY motionChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY motionChanged)
-    // Whether ← and → are the viewer's now (not while the help or a plugin
-    // is over it). It reads them itself, pressed and let go, to move on
-    // while one is held (ViewerMotion::hold()).
-    Q_PROPERTY(bool takesKeys READ takesKeys WRITE setTakesKeys NOTIFY takesKeysChanged)
+    // Whether ← and →, the wheel and the touchpad are the viewer's now (not
+    // while the help, a tour or a plugin is over it). It reads the keys
+    // itself, pressed and let go, to move on while one is held
+    // (ViewerMotion::hold()).
+    Q_PROPERTY(bool takesInput READ takesInput WRITE setTakesInput NOTIFY takesInputChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
     Q_PROPERTY(int count READ count NOTIFY indexChanged)
     // During a far jump (goTo()), the photo sliding out beside the new one;
@@ -100,8 +101,8 @@ public:
     qreal dismiss() const { return m_motion.dismiss(); }
     qreal pageWidth() const { return m_motion.pageWidth(); }
     bool animating() const { return m_motion.animating(); }
-    bool takesKeys() const { return m_takesKeys; }
-    void setTakesKeys(bool takes);
+    bool takesInput() const { return m_takesInput; }
+    void setTakesInput(bool takes);
     bool zoomed() const { return m_motion.zoomed(); }
     int count() const;
     int revision() const { return m_revision; }
@@ -156,7 +157,7 @@ public:
     void libraryReloaded(const std::vector<int> &moved);
 
 signals:
-    void takesKeysChanged();
+    void takesInputChanged();
     void openChanged();
     void indexChanged();
     // Another photo shown, or this one's favourite changed (favourites.h)
@@ -242,7 +243,7 @@ private:
     // it stops on one, so that one is not queued behind all the others.
     QElapsedTimer m_lastShown;
     QTimer m_fetchLater;
-    bool m_takesKeys = false;
+    bool m_takesInput = false;
     // The arrow held down (Qt::Key_Left or Key_Right), or 0.
     int m_heldKey = 0;
 };

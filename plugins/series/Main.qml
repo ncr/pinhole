@@ -408,6 +408,7 @@ PinholePlugin {
 
     Editor {
         id: editor
+        objectName: "seriesEditor"
         anchors.fill: parent
         plugin: plugin
         studio: studio

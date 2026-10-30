@@ -764,7 +764,7 @@ ApplicationWindow {
     // ← and →, with Shift or not, are the viewer's own: it reads them
     // pressed and let go, to move on while one is held. On a video, Shift
     // with them skips ten seconds instead.
-    Binding { target: viewer; property: "takesKeys"; value: win.inViewer }
+    Binding { target: viewer; property: "takesInput"; value: win.inViewer }
     Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
     Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
     Shortcut { enabled: win.inViewer; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }

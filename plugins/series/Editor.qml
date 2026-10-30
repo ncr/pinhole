@@ -1,10 +1,10 @@
 import QtQuick
 import Pinhole.Plugin
 
-// One series on a screen of its own, to put it right: every photo of it as
-// large as the window lets them all be (scrolling once they would be too
-// small to judge), with the photos just before and after it, and in its
-// gaps, faint beside them, to add. Each a click or a key: X takes one out,
+// One series on a screen of its own, to put it right: three of its photos
+// side by side in the middle, as large as the window lets them be, the rest
+// stacked behind them on either side as in a carousel, and the photos just
+// before and after it, and in its gaps, faint beside them, to add. Each a click or a key: X takes one out,
 // A adds one, Space shows one up close, U ungroups, R makes it automatic
 // again, G is its GIF or video (Studio, over this). Escape goes back to
 // the photo it was opened from.
@@ -108,7 +108,10 @@ Item {
         current = from >= 0 ? from : p[0]
         looking = false
         shown = true
-        grid.showCurrent()
+        // It opens with that photo in the middle, without sliding to it.
+        sliding.enabled = false
+        view = flowAt
+        sliding.enabled = true
     }
     function close() {
         shown = false
@@ -155,40 +158,27 @@ Item {
             studio.openSeries(k, false)
     }
 
-    // ← → through the photos, ↑ ↓ a row; up close, ← → only.
+    // ← → through the photos, up close too.
     function move(delta) {
         const next = Math.max(0, Math.min(tiles.length - 1, at + delta))
-        if (next >= 0 && next < tiles.length) {
+        if (next >= 0 && next < tiles.length)
             current = tiles[next].index
-            grid.showCurrent()
-        }
     }
-    function moveRow(delta) {
-        const r = grid.rects[flowAt]
-        if (!r)
-            return
-        const middle = r.x + r.w / 2
-        let best = -1, bestRow = -1, bestDistance = Infinity
-        for (let n = 0; n < grid.rects.length; ++n) {
-            const o = grid.rects[n]
-            if (delta < 0 ? o.y >= r.y : o.y <= r.y)
-                continue
-            // The nearest row that way, then the photo nearest across.
-            const row = Math.abs(o.y - r.y)
-            if (bestRow >= 0 && row > bestRow + 0.5)
-                continue
-            const distance = Math.abs(o.x + o.w / 2 - middle)
-            if (bestRow < 0 || row < bestRow - 0.5 || distance < bestDistance) {
-                best = n
-                bestRow = row
-                bestDistance = distance
-            }
-        }
-        if (best >= 0) {
-            current = flow[best].index
-            grid.showCurrent()
-        }
+    // The three in the middle, by the one among them in the middle: they
+    // move only when the photo the keys are on goes past them.
+    property int view: 0
+    function follow() {
+        // On one before or after the series, its end that way.
+        if (flowAt < 0) {
+            const tile = tiles.find(t => t.index === current)
+            if (tile)
+                view = tile.apart < 0 ? 0 : flow.length - 1
+        } else if (flowAt > carousel.centre + 1)
+            view = flowAt - 1
+        else if (flowAt < carousel.centre - 1)
+            view = flowAt + 1
     }
+    onFlowAtChanged: follow()
     onTilesChanged: {
         if (tiles.length > 0 && at < 0) {
             // The photo the keys were on left the screen: the nearest that
@@ -213,8 +203,6 @@ Item {
     Shortcut { enabled: editor.keys; sequences: ["Space", "Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: editor.looking = !editor.looking }
     Shortcut { enabled: editor.keys; sequence: "Left"; context: Qt.ApplicationShortcut; autoRepeat: true; onActivated: editor.move(-1) }
     Shortcut { enabled: editor.keys; sequence: "Right"; context: Qt.ApplicationShortcut; autoRepeat: true; onActivated: editor.move(1) }
-    Shortcut { enabled: editor.keys && !editor.looking; sequence: "Up"; context: Qt.ApplicationShortcut; onActivated: editor.moveRow(-1) }
-    Shortcut { enabled: editor.keys && !editor.looking; sequence: "Down"; context: Qt.ApplicationShortcut; onActivated: editor.moveRow(1) }
     Shortcut { enabled: editor.keys; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: editor.move(-editor.tiles.length) }
     Shortcut { enabled: editor.keys; sequence: "End"; context: Qt.ApplicationShortcut; onActivated: editor.move(editor.tiles.length) }
     Shortcut { enabled: editor.keys; sequence: "X"; context: Qt.ApplicationShortcut; onActivated: editor.takeOut() }
@@ -227,11 +215,20 @@ Item {
         anchors.fill: parent
         color: theme.background
     }
-    // Clicks stay here, off the photo beneath.
+    // Clicks stay here, off the photo beneath; the wheel, either way, goes
+    // through the photos, one a notch.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
+        property real turned: 0
+        onWheel: wheel => {
+            const a = wheel.angleDelta
+            turned -= Math.abs(a.x) > Math.abs(a.y) ? a.x : a.y
+            for (; turned >= 120; turned -= 120)
+                editor.move(1)
+            for (; turned <= -120; turned += 120)
+                editor.move(-1)
+        }
     }
 
     // The series: when, and how many.
@@ -260,107 +257,56 @@ Item {
         onTapped: editor.close()
     }
 
-    // The photos in justified rows, all of one height in a row, the rows
-    // as tall as lets every photo show, down to a size still worth judging,
-    // then scrolling.
-    Flickable {
-        id: grid
+    // The series as a carousel: three photos side by side in the middle,
+    // as big as they fit, the one the keys are on among them; the rest
+    // stacked behind them on either side, smaller and dimmer the further
+    // they are, sliding in as the keys or the wheel go on.
+    Item {
+        id: carousel
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: top.bottom
         anchors.bottom: beside.top
-        anchors.topMargin: 12
-        anchors.bottomMargin: 12
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
+        anchors.topMargin: 16
+        anchors.bottomMargin: 16
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
         visible: !editor.looking
-        clip: true
-        contentWidth: width
-        contentHeight: Math.max(height, layout.height + 2 * edge)
-        boundsBehavior: Flickable.StopAtBounds
 
-        readonly property real gap: 6
-        // Room around the rows for the mark of the photo the keys are on.
-        readonly property real edge: 4
-        readonly property real room: width - 2 * edge
-        readonly property real fit: height - 2 * edge
-        readonly property real smallest: Math.max(140, theme.fontSize * 11)
-        // Rows at about a height `h`: each broken where its width comes
-        // nearest the room there is, so a row grows a little or shrinks a little
-        // to fill it, and the last at the height of those above. Their
-        // rects, and how tall all.
-        function rows(h) {
-            const out = []
-            let y = 0, start = 0, sum = 0, last = h
-            const place = (from, to, height, full) => {
-                let used = 0
-                for (let n = from; n < to; ++n)
-                    used += editor.flow[n].aspect * height
-                used += gap * (to - from - 1)
-                let x = full ? 0 : (room - used) / 2
-                for (let n = from; n < to; ++n) {
-                    const w = editor.flow[n].aspect * height
-                    out.push({ x: x, y: y, w: w, h: height })
-                    x += w + gap
-                }
-                y += height + gap
-            }
-            for (let n = 0; n < editor.flow.length; ++n) {
-                const aspect = editor.flow[n].aspect
-                const count = n - start + 1
-                const over = (sum + aspect) * h + gap * (count - 1) - room
-                if (over < 0) {
-                    sum += aspect
-                    continue
-                }
-                const under = room - sum * h - gap * (count - 2)
-                if (count > 1 && under < over) {
-                    last = (room - gap * (count - 2)) / sum
-                    place(start, n, last, true)
-                    start = n
-                    sum = aspect
-                } else {
-                    last = (room - gap * (count - 1)) / (sum + aspect)
-                    place(start, n + 1, last, true)
-                    start = n + 1
-                    sum = 0
-                }
-            }
-            if (start < editor.flow.length)
-                place(start, editor.flow.length, Math.min(last, h, (room - gap * (editor.flow.length - start - 1)) / sum), false)
-            return { rects: out, height: Math.max(0, y - gap) }
+        readonly property int count: editor.flow.length
+        readonly property real centre: count < 3 ? (count - 1) / 2 : Math.max(1, Math.min(count - 2, editor.view))
+        property real slide: centre
+        Behavior on slide {
+            id: sliding
+            NumberAnimation { id: slideAnimation; duration: 280; easing.type: Easing.OutCubic }
         }
-        readonly property var layout: {
-            if (room <= 0 || fit <= 0 || editor.flow.length === 0)
-                return { rects: [], height: 0 }
-            let lo = smallest, hi = Math.max(smallest, fit)
-            if (rows(hi).height <= fit)
-                return rows(hi)
-            if (rows(lo).height > fit)
-                return rows(lo)
-            for (let n = 0; n < 18; ++n) {
-                const mid = (lo + hi) / 2
-                if (rows(mid).height <= fit)
-                    lo = mid
-                else
-                    hi = mid
-            }
-            return rows(lo)
-        }
-        readonly property var rects: layout.rects
-        // Fitting, the rows stand in the middle.
-        readonly property real inset: edge + Math.max(0, (fit - layout.height) / 2)
 
-        function showCurrent() { Qt.callLater(() => {
-            const r = rects[editor.flowAt]
-            if (!r)
-                return
-            const y = inset + r.y
-            if (y < contentY)
-                contentY = Math.max(0, y - gap)
-            else if (y + r.h > contentY + height)
-                contentY = Math.min(contentHeight - height, y + r.h - height + gap)
-        }) }
+        readonly property real gap: 10
+        // The series' usual shape: a box each photo fits in.
+        readonly property real aspect: {
+            const a = editor.flow.filter(t => t.member).map(t => t.aspect).sort((x, y) => x - y)
+            return a.length > 0 ? a[Math.floor(a.length / 2)] : 4 / 3
+        }
+        // Room on each side for the stacks, when there is more than the three.
+        readonly property bool stacks: count > 3
+        readonly property real box: Math.max(0, Math.min((width - (stacks ? 0.2 * width : 0) - 2 * gap) / 3, height * aspect))
+        readonly property real tall: box / aspect
+        readonly property real wing: stacks ? Math.min((width - 3 * box - 2 * gap) / 2, 0.45 * box) : 0
+
+        // Where a photo `p` places from the middle one goes: within one of
+        // it, side by side; past that, `d` deep in its stack, each a little
+        // smaller, showing a little less of itself beyond the one before.
+        function place(p, a) {
+            const d = Math.max(0, Math.abs(p) - 1)
+            const shrink = Math.pow(0.82, d)
+            const step = box + gap
+            const off = Math.abs(p) <= 1 ? Math.abs(p) * step
+                                         : step + box / 2 + wing * (1 - Math.pow(0.55, d)) - shrink * box / 2
+            const w0 = Math.min(box, tall * a)
+            const w = w0 * shrink, h = w0 / a * shrink
+            const middle = width / 2 + (p < 0 ? -off : off)
+            return { x: middle - w / 2, y: (height - h) / 2, w: w, h: h, d: d }
+        }
 
         Repeater {
             model: editor.flow
@@ -368,39 +314,48 @@ Item {
                 id: tile
                 required property var modelData
                 required property int index
-                readonly property var r: grid.rects[index] || { x: 0, y: 0, w: 0, h: 0 }
+                readonly property var r: carousel.place(index - carousel.slide, modelData.aspect)
+                // One of the three in the middle, where the photo stops.
+                readonly property bool middle: Math.abs(index - carousel.centre) <= 1
                 readonly property bool isCurrent: editor.current === modelData.index
-                x: grid.edge + r.x
-                y: grid.inset + r.y
+                x: r.x
+                y: r.y
                 width: r.w
                 height: r.h
+                z: -r.d
+                visible: r.d < 5
+                opacity: Math.min(1, 5 - r.d)
                 // Bigger than the thumbnail is sharp: the medium size.
                 readonly property bool large: height * Screen.devicePixelRatio > 360
                 onLargeChanged: if (large) editor.sharpen(modelData)
                 Component.onCompleted: if (large) editor.sharpen(modelData)
 
-                Item {
+                Image {
                     anchors.fill: parent
-                    opacity: tile.modelData.member ? 1 : hover.hovered || tile.isCurrent ? 0.7 : 0.35
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                    Image {
-                        anchors.fill: parent
-                        source: tile.modelData.thumbnail
-                        sourceSize.height: Math.min(480, Math.ceil(tile.height * Screen.devicePixelRatio))
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                    }
-                    Image {
-                        id: sharpImage
-                        anchors.fill: parent
-                        visible: tile.large
-                        source: tile.large ? editor.sharp[tile.modelData.id] || "" : ""
-                        sourceSize.height: Math.ceil(tile.height * Screen.devicePixelRatio)
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        opacity: status === Image.Ready ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: 160 } }
-                    }
+                    source: tile.modelData.thumbnail
+                    sourceSize.height: Math.min(480, Math.ceil(carousel.tall * Screen.devicePixelRatio))
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                }
+                Image {
+                    anchors.fill: parent
+                    visible: tile.large
+                    source: tile.large ? editor.sharp[tile.modelData.id] || "" : ""
+                    sourceSize.height: Math.ceil(carousel.tall * Screen.devicePixelRatio)
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    opacity: status === Image.Ready ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 160 } }
+                }
+                // Dimmer deeper in a stack, and faint when not in the
+                // series; opaque, so a stack never shows through itself.
+                Rectangle {
+                    anchors.fill: parent
+                    color: theme.background
+                    readonly property real depth: Math.min(0.7, tile.r.d * 0.28)
+                    property real out: tile.modelData.member ? 0 : hover.hovered || tile.isCurrent ? 0.3 : 0.65
+                    opacity: 1 - (1 - depth) * (1 - out)
+                    Behavior on out { NumberAnimation { duration: 120 } }
                 }
                 // The photo the keys act on.
                 Rectangle {
@@ -414,16 +369,16 @@ Item {
                 }
                 // In a gap of the series, not in it.
                 Chip {
-                    visible: !tile.modelData.member && tile.width > width + 16
+                    visible: tile.middle && !tile.modelData.member && tile.width > width + 16
                     x: 8
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
                     text: editor.spoken(tile.modelData.apart)
-                textColor: theme.darkForeground
+                    textColor: theme.darkForeground
                 }
                 // What a click on the photo's corner does, and its key.
                 ShellButton {
-                    visible: hover.hovered && tile.width > width + 16 && tile.height > height + 16
+                    visible: tile.middle && hover.hovered && tile.width > width + 16 && tile.height > height + 16
                     floating: true
                     anchors.right: parent.right
                     anchors.top: parent.top
@@ -435,15 +390,20 @@ Item {
                         tile.modelData.member ? editor.takeOut() : editor.add()
                     }
                 }
+                // The pointer picks one of the three; not while they slide
+                // under it.
                 HoverHandler {
                     id: hover
                     cursorShape: Qt.PointingHandCursor
-                    onHoveredChanged: if (hovered) editor.current = tile.modelData.index
+                    onHoveredChanged: if (hovered && tile.middle && !slideAnimation.running) editor.current = tile.modelData.index
                 }
+                // A click on one of the three shows it up close; on one in a
+                // stack, brings it to the middle.
                 TapHandler {
                     onTapped: {
                         editor.current = tile.modelData.index
-                        editor.looking = true
+                        if (tile.middle)
+                            editor.looking = true
                     }
                 }
             }
@@ -454,7 +414,7 @@ Item {
     // them all.
     Item {
         id: closeUp
-        anchors.fill: grid
+        anchors.fill: carousel
         visible: editor.looking && editor.currentTile !== null
         readonly property var tile: editor.currentTile
         onTileChanged: if (tile && editor.looking) editor.sharpen(tile)

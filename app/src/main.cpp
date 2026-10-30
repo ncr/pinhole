@@ -650,6 +650,8 @@ int main(int argc, char *argv[]) {
         runFavouriteSelfTest(window, grid, viewer, library, test.mid(10));
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("tour:")))
         runTourSelfTest(window, viewer, test.mid(5));
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("series:")))
+        runSeriesSelfTest(window, viewer, test.mid(7));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))

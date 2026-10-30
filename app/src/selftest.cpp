@@ -25,6 +25,7 @@
 #include <QMediaPlayer>
 #include <QVideoFrame>
 #include <QVideoSink>
+#include <QWheelEvent>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTimer>
@@ -1132,6 +1133,99 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
                         });
                     });
                 });
+            });
+        };
+        (*step)(0);
+    });
+    wait->start();
+}
+
+void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    // In a plugin, by the items it shows: a Loader's item is not its child.
+    auto editor = [window] {
+        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == QLatin1String("seriesEditor"))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child))
+                    return found;
+            return nullptr;
+        };
+        return static_cast<QObject *>(find(window->contentItem()));
+    };
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    auto describe = [editor](const QString &name) {
+        QObject *e = editor();
+        return QStringLiteral("%1: %2, on %3 of %4 in the middle, looking %5")
+            .arg(name, e->property("shown").toBool() ? "shown" : "gone")
+            .arg(e->property("flowAt").toInt() + 1)
+            .arg(e->property("flow").toList().size())
+            .arg(e->property("looking").toBool() ? "yes" : "no");
+    };
+    // As the system sends it, to reach Qt Quick's handlers.
+    auto wheel = [window](int delta) {
+        const QPointF at(window->width() / 2.0, window->height() / 2.0);
+        QWindowSystemInterface::handleWheelEvent(window, at, window->mapToGlobal(at), QPoint(0, delta / 8), QPoint(0, delta));
+    };
+    auto wait = std::make_shared<QTimer>();
+    wait->setInterval(250);
+    QObject::connect(wait.get(), &QTimer::timeout, window, [=, &viewer] {
+        window->setProperty("troubleSeen", true);
+        QObject *e = editor();
+        QObject *plugin = e ? e->property("plugin").value<QObject *>() : nullptr;
+        const QVariantList series = plugin ? plugin->property("series").toList() : QVariantList();
+        if (series.isEmpty()) {
+            if (clock->elapsed() > 60000) {
+                say(QStringLiteral("no series found in 60 s"));
+                QCoreApplication::quit();
+            }
+            return;
+        }
+        wait->stop();
+        int longest = 0;
+        for (int k = 1; k < series.size(); ++k)
+            if (series[k].toList().size() > series[longest].toList().size())
+                longest = k;
+        say(QStringLiteral("%1 series, the longest of %2").arg(series.size()).arg(series[longest].toList().size()));
+        // As G on a photo of it does: over the viewer, which leaves the
+        // keys and the wheel to it.
+        const int first = series[longest].toList().first().toInt();
+        viewer.openAt(first, QRectF(0, 0, 100, 100));
+        QMetaObject::invokeMethod(e, "openSeries", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
+        // Each step: what to do, then a moment for it to slide and sharpen.
+        const QList<std::pair<QString, std::function<void()>>> steps = {
+            { QStringLiteral("open"), [] {} },
+            { QStringLiteral("right-1"), [window] { key(window, Qt::Key_Right); } },
+            { QStringLiteral("right-2"), [window] { key(window, Qt::Key_Right); } },
+            { QStringLiteral("right-3"), [window] { key(window, Qt::Key_Right); } },
+            { QStringLiteral("wheel"), [wheel] { wheel(-120); wheel(-120); } },
+            { QStringLiteral("end"), [window] { key(window, Qt::Key_End); } },
+            { QStringLiteral("close-up"), [window] { key(window, Qt::Key_Space); } },
+            { QStringLiteral("home"), [window] { key(window, Qt::Key_Space); key(window, Qt::Key_Home); } },
+        };
+        auto step = std::make_shared<std::function<void(int)>>();
+        *step = [=, &viewer](int n) {
+            if (n == steps.size()) {
+                key(window, Qt::Key_Escape);
+                QTimer::singleShot(600, window, [=, &viewer] {
+                    say(describe(QStringLiteral("after Esc")) + QStringLiteral(", the viewer %1 at %2 and %3")
+                        .arg(viewer.isOpen() ? "open" : "closed").arg(viewer.property("index").toInt() == first ? "the photo it opened on" : "another")
+                        .arg(viewer.zoomed() ? "zoomed" : "not zoomed"));
+                    QCoreApplication::quit();
+                });
+                return;
+            }
+            steps[n].second();
+            QTimer::singleShot(1500, window, [=] {
+                say(describe(steps[n].first));
+                grab(steps[n].first);
+                (*step)(n + 1);
             });
         };
         (*step)(0);
