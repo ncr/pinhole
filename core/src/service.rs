@@ -1430,6 +1430,11 @@ fn sync_round(shared: &Shared) -> Result<()> {
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
     std::fs::create_dir_all(&library)?;
+    // Not while pinhole-sync writes it: this round waits for the next.
+    let Some(_writer) = crate::sync::Writer::try_take(&library)? else {
+        eprintln!("pinholed: sync: pinhole-sync is writing {}; at the next round", library.display());
+        return Ok(());
+    };
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
     crate::sync::claim(source.as_ref(), &mut db, &library)?;
     let first = shared.rounds_shown.swap(shown, Ordering::SeqCst) != shown;

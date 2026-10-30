@@ -79,6 +79,14 @@ fn main() -> Result<()> {
     // source's own library.
     let library = cli.library.unwrap_or_else(|| storage::library_for(&storage::location(), source.as_ref()));
     std::fs::create_dir_all(&library)?;
+    // One writer at a time: pinholed's rounds wait while this writes.
+    let _writer = match sync::Writer::try_take(&library)? {
+        Some(writer) => writer,
+        None => {
+            eprintln!("pinholed is writing this library now; waiting for it to finish…");
+            sync::Writer::take(&library)?
+        }
+    };
     let mut conn = db::open(&library.join("library.sqlite"))?;
     let source = source.as_ref();
     sync::claim(source, &mut conn, &library)?;

@@ -194,7 +194,9 @@ token yet, or one the source no longer accepts, the whole library is
 listed again, which is also how a new library is first made. A library
 holds one source's photos and is never written by another
 (`sync::claim`). `pinhole-sync changes [--dry-run]` does the same from the
-command line. Windows hear when each round ran and the next will
+command line. The two never write one library at once (`sync::Writer`, a
+lock on `.writing` in it): a round that finds pinhole-sync writing waits
+for the next, and pinhole-sync waits for a round under way. Windows hear when each round ran and the next will
 (`rounds`).
 
 iCloud also tells the service of a change as it happens, as icloud.com

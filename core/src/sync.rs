@@ -27,6 +27,36 @@ pub struct SyncReport {
     pub seconds: f64,
 }
 
+/// A library's writer. Whoever lists into it, follows its changes or makes
+/// its thumbnails holds this, the service's rounds and pinhole-sync alike,
+/// so one never lists into a library while the other is halfway through:
+/// an advisory lock on `.writing` in the library, let go as it drops or as
+/// the process ends, however it ends.
+pub struct Writer(#[allow(dead_code)] std::fs::File);
+
+impl Writer {
+    fn open(library: &Path) -> Result<std::fs::File> {
+        Ok(std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(library.join(".writing"))?)
+    }
+
+    /// Taken, or None while another holds it.
+    pub fn try_take(library: &Path) -> Result<Option<Writer>> {
+        let file = Self::open(library)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Writer(file))),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+        }
+    }
+
+    /// Taken, once another lets go.
+    pub fn take(library: &Path) -> Result<Writer> {
+        let file = Self::open(library)?;
+        file.lock()?;
+        Ok(Writer(file))
+    }
+}
+
 /// Make sure the index is this source's before anything is written to it:
 /// a new one becomes it, and one from another source is never touched.
 /// iCloud's 50,000 photos must not be listed away because a folder was
@@ -627,6 +657,20 @@ mod tests {
         assert!(library.join(medium_cover_path(&thumb)).exists());
         // Made once, never again, however dull.
         assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_writer_at_a_time_and_the_next_once_it_lets_go() {
+        let dir = std::env::temp_dir().join(format!("pinhole-writer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = Writer::try_take(&dir).unwrap().expect("free");
+        // Another open of it, as another process's would be, waits.
+        assert!(Writer::try_take(&dir).unwrap().is_none());
+        drop(first);
+        let again = Writer::take(&dir).unwrap();
+        assert!(Writer::try_take(&dir).unwrap().is_none());
+        drop(again);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
