@@ -12,7 +12,9 @@ nothing on the other side changes.
 The core starts the provider and talks to it over stdin and stdout, one JSON
 object per line. Every request carries an `id`, and the matching reply echoes
 it. Log output goes to stderr and is never parsed. The provider keeps no
-state between runs beyond its own session store.
+state between runs beyond its own session store. A provider that has not
+answered in two minutes is taken to be stuck: it is stopped, and another
+is started for the next request.
 
 ```json
 {"id": 1, "method": "session"}

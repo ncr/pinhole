@@ -1,7 +1,9 @@
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
@@ -39,17 +41,36 @@ impl fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
+/// How long the provider may take to answer: Apple's sign-in itself can take
+/// a while, but a provider that says nothing for this long is stuck, and
+/// whoever asked (a sync round, a window signing in) must not wait for ever.
+const ANSWER_WITHIN: Duration = Duration::from_secs(120);
+
 /// A sign-in provider running as a child process, speaking JSON lines.
 pub struct ProcessProvider {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// Its lines, read on a thread of their own, so an answer can be
+    /// waited for no longer than ANSWER_WITHIN.
+    lines: mpsc::Receiver<std::io::Result<String>>,
     next_id: u64,
+    /// How it was started, to start it again: one that stopped answering
+    /// was stopped, and the next call starts another.
+    program: PathBuf,
+    state_dir: Option<PathBuf>,
+    stopped: bool,
+    answer_within: Duration,
 }
 
 impl ProcessProvider {
     pub fn spawn(program: PathBuf, state_dir: Option<PathBuf>) -> Result<Self> {
-        let mut command = Command::new(&program);
+        let (child, stdin, lines) = Self::start(&program, state_dir.as_ref())?;
+        Ok(Self { child, stdin, lines, next_id: 1, program, state_dir, stopped: false, answer_within: ANSWER_WITHIN })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn start(program: &PathBuf, state_dir: Option<&PathBuf>) -> Result<(Child, ChildStdin, mpsc::Receiver<std::io::Result<String>>)> {
+        let mut command = Command::new(program);
         if let Some(dir) = state_dir {
             command.arg("--state-dir").arg(dir);
         }
@@ -61,20 +82,47 @@ impl ProcessProvider {
             .with_context(|| format!("starting sign-in provider {}", program.display()))?;
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
-        Ok(Self { child, stdin, stdout, next_id: 1 })
+        let (tx, lines) = mpsc::channel();
+        // Ends as the provider does (its stdout closes).
+        std::thread::spawn(move || {
+            for line in stdout.lines() {
+                if tx.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        Ok((child, stdin, lines))
     }
 
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+        if std::mem::take(&mut self.stopped) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            (self.child, self.stdin, self.lines) = Self::start(&self.program, self.state_dir.as_ref())?;
+        }
         let id = self.next_id;
         self.next_id += 1;
         let request = json!({"id": id, "method": method, "params": params});
         writeln!(self.stdin, "{request}").context("writing to sign-in provider")?;
         self.stdin.flush()?;
 
-        let mut line = String::new();
-        if self.stdout.read_line(&mut line)? == 0 {
-            return Err(anyhow!("sign-in provider exited"));
-        }
+        let line = match self.lines.recv_timeout(self.answer_within) {
+            Ok(line) => line?,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.stopped = true;
+                return Err(anyhow!("sign-in provider exited"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Stuck: it goes, and is started again when next needed.
+                let _ = self.child.kill();
+                self.stopped = true;
+                return Err(ProviderError {
+                    code: "unavailable".into(),
+                    message: format!("the sign-in provider did not answer within {} s", self.answer_within.as_secs()),
+                }
+                .into());
+            }
+        };
         let reply: Value = serde_json::from_str(&line).context("sign-in provider sent something other than JSON")?;
         if reply["id"].as_u64() != Some(id) {
             return Err(anyhow!("sign-in provider answered out of order"));
@@ -158,4 +206,36 @@ pub fn default_provider() -> PathBuf {
         }
     }
     PathBuf::from("pinhole-auth")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_provider_that_stops_answering_is_given_up_on_and_started_again() {
+        let dir = std::env::temp_dir().join(format!("pinhole-provider-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Answers anything at once, but "hang" never.
+        let program = dir.join("provider");
+        std::fs::write(&program, r#"#!/bin/sh
+while read -r line; do
+  case "$line" in
+    *'"hang"'*) sleep 30 ;;
+    *) id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/'); echo "{\"id\":$id,\"ok\":true,\"result\":{\"pid\":$$}}" ;;
+  esac
+done
+"#).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut provider = ProcessProvider::spawn(program, None).unwrap();
+        provider.answer_within = Duration::from_millis(500);
+        let first = provider.call("status", Value::Null).unwrap()["pid"].clone();
+        let error = provider.call("hang", Value::Null).unwrap_err();
+        assert_eq!(error.downcast_ref::<ProviderError>().map(|e| e.code.as_str()), Some("unavailable"), "{error:#}");
+        // The next call has another one answer.
+        let again = provider.call("status", Value::Null).unwrap()["pid"].clone();
+        assert_ne!(first, again);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
