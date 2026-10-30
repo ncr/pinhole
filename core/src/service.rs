@@ -100,9 +100,12 @@ impl Reply {
     }
 }
 
-/// One file to bring into the cache.
+/// One file to bring into the cache: from the source, and by the
+/// library, it was asked of, whichever is shown by the time it is got.
 #[derive(Clone)]
 struct Job {
+    source: Arc<dyn Source>,
+    library: PathBuf,
     stored: Stored,
     path: PathBuf,
     /// Once the source has got it ready.
@@ -1092,8 +1095,11 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
         }
     }
     let (rendition, file_type) = (stored.name.clone(), stored.file_type.clone());
+    // From here on the source and library it was asked of, whatever is
+    // shown by the time it comes.
+    let (source, library) = (shared.source(), shared.storage.library());
     // On this computer already: served as it is.
-    if let Some(path) = shared.source().local(&stored) {
+    if let Some(path) = source.local(&stored) {
         return reply.send(if path.exists() {
             Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true}))
         } else {
@@ -1126,7 +1132,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     shared.in_flight.fetch_add(1, Ordering::Relaxed);
     drop(waiting);
 
-    let _ = shared.lookups.lock().unwrap().send(Job { stored, path, ticket: None, retried: false });
+    let _ = shared.lookups.lock().unwrap().send(Job { source, library, stored, path, ticket: None, retried: false });
 }
 
 /// Where in the cache a file of this kind and key goes. The effects go
@@ -1213,8 +1219,7 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
         eprintln!("pinholed: {} is not ready yet: {e:#}", shared.source().name());
         shared.failed(&e);
     }
-    let mut db: Option<Connection> = None;
-    let mut db_generation = 0;
+    let mut dbs: HashMap<PathBuf, (u64, Connection)> = HashMap::new();
     while let Ok(first) = rx.recv() {
         std::thread::sleep(BATCH_WINDOW);
         let mut batch = vec![first];
@@ -1224,43 +1229,69 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
                 Err(_) => break,
             }
         }
-        // The source may keep what it learns in the index (iCloud its fresh
-        // links), so the next request needs no lookup.
-        let generation = shared.storage.library_generation.load(Ordering::Relaxed);
-        if db.is_none() || generation != db_generation {
-            db_generation = generation;
-            db = crate::db::open(&shared.storage.library().join("library.sqlite")).ok();
+        // Each source by the library it was asked of: almost always the one
+        // shown, unless another was shown as these were asked.
+        let mut groups: Vec<Vec<Job>> = Vec::new();
+        for job in batch {
+            match groups.iter_mut().find(|g| g[0].source.id() == job.source.id() && g[0].library == job.library) {
+                Some(group) => group.push(job),
+                None => groups.push(vec![job]),
+            }
         }
-        let Some(db) = &db else {
+        for group in groups {
+            lookup(&shared, &mut dbs, group);
+        }
+    }
+}
+
+/// Get a batch of one source's jobs ready (`prepare`), and hand them to
+/// the downloads.
+fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch: Vec<Job>) {
+    let (source, library) = (batch[0].source.clone(), batch[0].library.clone());
+    // Only the source shown says how the source is doing.
+    let shown = source.id() == shared.source().id();
+    let failed = |e: &anyhow::Error| if shown { shared.failed(e) } else { "unavailable" };
+    // The source may keep what it learns in the index (iCloud its fresh
+    // links), so the next request needs no lookup. Opened again once the
+    // library has moved.
+    let generation = shared.storage.library_generation.load(Ordering::Relaxed);
+    if dbs.get(&library).is_none_or(|(g, _)| *g != generation) {
+        dbs.remove(&library);
+        if let Ok(db) = crate::db::open(&library.join("library.sqlite")) {
+            dbs.insert(library.clone(), (generation, db));
+        }
+    }
+    let Some((_, db)) = dbs.get(&library) else {
+        for job in batch {
+            shared.finish(&job.path, Err(("not_found", "there is no library yet".into())));
+        }
+        return;
+    };
+    let stored: Vec<Stored> = batch.iter().map(|j| j.stored.clone()).collect();
+    let tickets = match source.prepare(db, &stored) {
+        Ok(t) => t,
+        Err(e) => {
+            let code = failed(&e);
             for job in batch {
-                shared.finish(&job.path, Err(("not_found", "there is no library yet".into())));
+                shared.finish(&job.path, Err((code, format!("{e:#}"))));
             }
-            continue;
-        };
-        let stored: Vec<Stored> = batch.iter().map(|j| j.stored.clone()).collect();
-        let tickets = match shared.source().prepare(db, &stored) {
-            Ok(t) => t,
-            Err(e) => {
-                let code = shared.failed(&e);
-                for job in batch {
-                    shared.finish(&job.path, Err((code, format!("{e:#}"))));
-                }
-                continue;
-            }
-        };
+            return;
+        }
+    };
+    if shown {
         shared.set_health(Health::Fine);
-        for (mut job, ticket) in batch.into_iter().zip(tickets) {
-            match ticket {
-                Ok(ticket) => {
-                    job.ticket = Some(ticket);
-                    let _ = shared.downloads.lock().unwrap().send(job);
-                }
-                Err(FetchError::Failed(e)) => {
-                    let code = shared.failed(&e);
-                    shared.finish(&job.path, Err((code, format!("{e:#}"))))
-                }
-                Err(e) => shared.finish(&job.path, Err(("not_found", e.to_string()))),
+    }
+    for (mut job, ticket) in batch.into_iter().zip(tickets) {
+        match ticket {
+            Ok(ticket) => {
+                job.ticket = Some(ticket);
+                let _ = shared.downloads.lock().unwrap().send(job);
             }
+            Err(FetchError::Failed(e)) => {
+                let code = failed(&e);
+                shared.finish(&job.path, Err((code, format!("{e:#}"))))
+            }
+            Err(e) => shared.finish(&job.path, Err(("not_found", e.to_string()))),
         }
     }
 }
@@ -1292,7 +1323,7 @@ fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
 }
 
 fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
-    let source = shared.source();
+    let source = job.source.clone();
     let ticket = job.ticket.clone().ok_or_else(|| FetchError::Failed(anyhow!("not got ready")))?;
     let mut body = source.open(&ticket, None)?;
     if let Some(dir) = job.path.parent() {

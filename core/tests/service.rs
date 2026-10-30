@@ -86,6 +86,13 @@ fn photo(path: &Path, rgb: [u8; 3]) {
     image::RgbImage::from_pixel(64, 48, image::Rgb(rgb)).save(path).unwrap();
 }
 
+/// The colour in the middle of a picture, give or take JPEG.
+fn colour(path: &str) -> [u8; 3] {
+    let picture = image::open(path).unwrap_or_else(|e| panic!("{path}: {e}")).to_rgb8();
+    let p = picture.get_pixel(picture.width() / 2, picture.height() / 2).0;
+    p.map(|c| (c as u32 + 10) as u8 / 20 * 20)
+}
+
 fn favourite(library: &Path, id: &str) -> bool {
     let db = rusqlite::Connection::open(library.join("library.sqlite")).unwrap();
     db.query_row("SELECT favorite FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
@@ -180,6 +187,42 @@ fn a_window_meets_the_service_of_a_folder() {
     let changed = window.event(30, |e| e["event"] == "library_changed" && e["removed"] == 1);
     assert_eq!(changed["added"], 0);
     assert!(favourite(&library, "a.jpg"));
+
+    // Another folder with a photo of the same name, shown just as the
+    // first one's medium is being made: that medium is still the first's,
+    // and the other's is its own.
+    let other = root.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    image::RgbImage::from_pixel(80, 60, image::Rgb([40, 40, 200])).save(other.join("a.jpg")).unwrap();
+    std::fs::remove_dir_all(root.join("data/pinhole/cache")).ok();
+    let id = window.next;
+    writeln!(window.out, "{}", json!({"id": id, "method": "fetch", "params": {"asset": "a.jpg", "kind": "medium"}})).unwrap();
+    window.next += 1;
+    let shown = window.ask("set_source", json!({"kind": "folder", "path": other}));
+    assert_eq!(shown["ok"], true, "{shown:#}");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let first = loop {
+        if let Some(i) = window.heard.iter().position(|l| l["id"] == id) {
+            break window.heard.remove(i);
+        }
+        assert!(Instant::now() < deadline, "no medium");
+        if let Some(line) = window.line() {
+            window.heard.push(line);
+        }
+    };
+    assert_eq!(first["ok"], true, "{first:#}");
+    assert_eq!(colour(first["result"]["path"].as_str().unwrap()), [200, 40, 40]);
+    // The other's library made, its medium is its own.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let medium = loop {
+        let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
+        if medium["ok"] == true {
+            break medium;
+        }
+        assert!(Instant::now() < deadline, "{medium:#}");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(colour(medium["result"]["path"].as_str().unwrap()), [40, 40, 200]);
 
     let _ = std::fs::remove_dir_all(&root);
 }
