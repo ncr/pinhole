@@ -190,6 +190,7 @@
   "The Pinhole service is not answering.": "Usługa Pinhole nie odpowiada.",
   "The Pinhole service is not running": "Usługa Pinhole nie działa",
   "The Pinhole service is not running, so full-size photos and videos will not load.": "Usługa Pinhole nie działa, więc pełne zdjęcia i filmy się nie wczytają.",
+  "The Pinhole service running is another version, so some things may not work.": "Działa inna wersja usługi Pinhole, więc nie wszystko może działać.",
   "The Pinhole service running now is older than this window and has to be restarted.": "Działająca usługa Pinhole jest starsza niż to okno i trzeba ją uruchomić ponownie.",
   "This Live Photo has no motion": "To zdjęcie Live nie ma ruchu",
   "This removes %1 of the photos viewed longest ago from this computer. They stay in %2 and come back when you look at them.": "To usunie z tego komputera %1 zdjęć oglądanych najdawniej. Zostają w %2 i wrócą, gdy je otworzysz.",

@@ -27,6 +27,10 @@ use crate::sync::thumb_path;
 const BATCH_WINDOW: Duration = Duration::from_millis(25);
 const BATCH_MAX: usize = 100;
 
+/// The window's and the service's protocol (docs/service.md): raised when
+/// either side would misread what the other says.
+pub const PROTOCOL: u32 = 1;
+
 pub struct Config {
     /// The folder everything is kept in (storage.rs), and in it, unless
     /// given otherwise, the library and the cache.
@@ -771,6 +775,9 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Arc::new(Mutex::new(stream.try_clone()?));
     shared.listeners.lock().unwrap().push(out.clone());
+    // First which protocol this is, for a window of another version to
+    // tell (docs/service.md, Transport).
+    let _ = writeln!(out.lock().unwrap(), "{}", json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
     // A window that connects hears where the photos come from, and if
     // something is wrong, that too.
     let _ = writeln!(out.lock().unwrap(), "{}", source_event(&*shared.source()));

@@ -985,6 +985,41 @@ private:
     };
 
 private slots:
+    void aServiceOfAnotherProtocolIsSaidSoAndItsHealthDoesNotHideIt() {
+        QTemporaryDir dir;
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QSignalSpy announced(&service, &ServiceClient::announced);
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QTRY_VERIFY(service.connected());
+
+        // Its own protocol: nothing to say.
+        fake.send({{"event", "hello"}, {"protocol", ServiceClient::kProtocol}, {"version", "1.0.0"}});
+        fake.send({{"event", "health"}, {"state", "offline"}});
+        QTRY_COMPARE(service.health(), QString("offline"));
+
+        // Another one, from a service of another version that came up
+        // instead: the window says so, whatever its health.
+        fake.peer->disconnectFromServer();
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QTRY_COMPARE(service.health(), QString("fine"));
+        fake.send({{"event", "hello"}, {"protocol", ServiceClient::kProtocol + 1}, {"version", "9.0.0"}});
+        fake.send({{"event", "health"}, {"state", "failing"}});
+        QTRY_COMPARE(service.health(), QString("incompatible"));
+        QTest::qWait(50);
+        QCOMPARE(service.health(), QString("incompatible"));
+        bool said = false;
+        for (const QList<QVariant> &args : std::as_const(announced))
+            said |= args.at(0).toString() == QLatin1String("health")
+                    && args.at(1).toJsonObject().value("state").toString() == QLatin1String("incompatible");
+        QVERIFY(said);
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void aLivePhotosMotionIsAskedForOnceAndSaysWhyItDidNotCome() {
         QTemporaryDir dir;
         makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);

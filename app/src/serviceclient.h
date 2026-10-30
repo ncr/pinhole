@@ -38,10 +38,14 @@ public:
     // "iCloud", or a folder's name: what to call it in messages.
     QString sourceName() const { return m_source.value("name").toString(); }
     // How the source is doing, as the last "health" event said: fine,
-    // needs_sign_in, offline, failing, or no_service of the client's own.
+    // needs_sign_in, offline, failing; or of the client's own, no_service
+    // (none answers: requests are answered so at once) or incompatible (it
+    // speaks another protocol, as its "hello" says).
     QString health() const { return m_health; }
 
     bool connected() const { return m_socket.state() == QLocalSocket::ConnectedState; }
+    // The protocol this window speaks (docs/service.md, Transport).
+    static constexpr int kProtocol = 1;
     // Ask the service to look for changes in the source now.
     void sync();
 
@@ -54,6 +58,9 @@ private:
     void startService();
     void send(const QJsonObject &request);
     void readReplies();
+    void setHealth(const QString &health);
+    // No service, after trying for a while: whatever waits is answered so.
+    void giveUp();
     static QString socketPath();
 
     QString m_library;

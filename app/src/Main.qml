@@ -237,6 +237,7 @@ ApplicationWindow {
                                                              : qsTr("%1 is not there. Is its disk connected?").arg(storage.sourceName)
             case "failing": return qsTr("%1 is not answering properly. Trying again shortly.").arg(storage.sourceName)
             case "no_service": return qsTr("The Pinhole service is not running, so full-size photos and videos will not load.")
+            case "incompatible": return qsTr("The Pinhole service running is another version, so some things may not work.")
             default: return ""
             }
         }

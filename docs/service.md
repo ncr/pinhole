@@ -18,6 +18,18 @@ A Unix socket at `$XDG_RUNTIME_DIR/pinhole.sock`, one JSON object per line
 each way. Requests carry an `id`; replies echo it and may arrive in any
 order, since a cached file answers at once while a download takes a while.
 
+The first line a window hears is which protocol the service speaks, and its
+version:
+
+```json
+{"event": "hello", "protocol": 1, "version": "1.0.0"}
+```
+
+`protocol` goes up whenever either side would misread what the other says.
+A window that speaks another one says so (health `incompatible`, below)
+rather than half work; one that hears no `hello` takes the service for an
+older one of the same protocol.
+
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}
 {"id": 7, "ok": true, "result": {"path": "/home/me/.local/share/pinhole/cache/medium/3f/AWx...jpg", "type": "public.jpeg", "rendition": "JPEGMed", "cached": false}}
@@ -164,7 +176,9 @@ session, or Apple rejected it; `sign_in` again fixes it), `offline`
 (the network, Apple's sign-in service or the folder's disk is out of reach)
 or `failing` (the source answers with errors). A sync round, a lookup or a download that
 works sets it back. The window shows anything but `fine` in a corner, and
-`no_service` of its own when no service answers at all.
+two of its own: `no_service` when no service answers at all (whatever it
+had asked is answered `no_service` then, and so is anything it asks until
+one does), and `incompatible` when the service speaks another protocol.
 
 ## Staying in sync
 

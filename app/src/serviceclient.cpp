@@ -12,9 +12,9 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
     connect(&m_socket, &QLocalSocket::readyRead, this, &ServiceClient::readReplies);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
         m_attempts = 0;
+        m_retry.setInterval(250);
         // Fine until the service says otherwise, which it does at once.
-        m_health = QStringLiteral("fine");
-        emit announced(QStringLiteral("health"), QJsonObject{{"state", "fine"}});
+        setHealth(QStringLiteral("fine"));
         for (const QByteArray &line : std::as_const(m_unsent))
             m_socket.write(line);
         m_unsent.clear();
@@ -26,12 +26,10 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(
             startService();
             m_started = true;
         }
-        if (m_attempts++ < 40)
-            m_retry.start();
-        else {
-            m_health = QStringLiteral("no_service");
-            emit announced(QStringLiteral("health"), QJsonObject{{"state", "no_service"}});
-        }
+        if (m_attempts++ == 40)
+            giveUp();
+        // Then on trying, more slowly, for one started later.
+        m_retry.start();
     });
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         // The service went away: whatever was asked will not be answered.
@@ -60,6 +58,22 @@ QString ServiceClient::socketPath() {
     if (runtime.isEmpty())
         runtime = QDir::homePath() + "/.cache";
     return runtime + "/pinhole.sock";
+}
+
+void ServiceClient::setHealth(const QString &health) {
+    if (health == m_health)
+        return;
+    m_health = health;
+    emit announced(QStringLiteral("health"), QJsonObject{{"state", health}});
+}
+
+void ServiceClient::giveUp() {
+    m_retry.setInterval(5000);
+    setHealth(QStringLiteral("no_service"));
+    m_unsent.clear();
+    const auto waiting = std::exchange(m_waiting, {});
+    for (const Callback &done : waiting)
+        done(false, {}, QStringLiteral("no_service"));
 }
 
 void ServiceClient::connectNow() {
@@ -100,15 +114,18 @@ void ServiceClient::startService() {
 }
 
 void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream) {
-    const qint64 id = m_nextId++;
-    m_waiting.insert(id, std::move(done));
     QJsonObject params{{"asset", QString::fromUtf8(asset)}, {"kind", kind}};
     if (stream)
         params.insert("stream", true);
-    send(QJsonObject{{"id", id}, {"method", "fetch"}, {"params", params}});
+    call(QStringLiteral("fetch"), params, std::move(done));
 }
 
 void ServiceClient::call(const QString &method, const QJsonObject &params, Callback done) {
+    // None to ask: said at once (after this returns, as an answer would be).
+    if (m_health == QLatin1String("no_service") && !connected()) {
+        QTimer::singleShot(0, this, [done = std::move(done)] { done(false, {}, QStringLiteral("no_service")); });
+        return;
+    }
     const qint64 id = m_nextId++;
     m_waiting.insert(id, std::move(done));
     send(QJsonObject{{"id", id}, {"method", method}, {"params", params}});
@@ -130,11 +147,24 @@ void ServiceClient::readReplies() {
     while (m_socket.canReadLine()) {
         const QJsonObject reply = QJsonDocument::fromJson(m_socket.readLine()).object();
         if (reply.contains("event")) {
-            if (reply.value("event").toString() == QLatin1String("source"))
+            const QString event = reply.value("event").toString();
+            if (event == QLatin1String("hello")) {
+                if (const int protocol = reply.value("protocol").toInt(); protocol != kProtocol) {
+                    qWarning("pinhole: the service speaks protocol %d, this window %d", protocol, kProtocol);
+                    setHealth(QStringLiteral("incompatible"));
+                }
+                continue;
+            }
+            if (event == QLatin1String("source"))
                 m_source = reply;
-            else if (reply.value("event").toString() == QLatin1String("health"))
-                m_health = reply.value("state").toString();
-            emit announced(reply.value("event").toString(), reply);
+            else if (event == QLatin1String("health")) {
+                // Whatever the source is doing, a service that speaks
+                // another protocol is the news until another one answers.
+                if (m_health != QLatin1String("incompatible"))
+                    setHealth(reply.value("state").toString());
+                continue;
+            }
+            emit announced(event, reply);
             continue;
         }
         const auto done = m_waiting.take(reply.value("id").toInteger());
