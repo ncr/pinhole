@@ -32,6 +32,11 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
 // either.
 class Keymap;
 void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap);
+// PINHOLE_SELFTEST=inputs:<dir>: on screen, what the keys, the mouse and the
+// touchpad each get now, as images in <dir>: the grid's cursor, the years
+// at the right edge while scrolling, select mode with Range, the undo card
+// and the side panel's focus on a switch.
+void runInputsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir);
 
 // PINHOLE_SELFTEST=copytwice:<folder>: open a photo, click Copy, grab the
 // window; wait; click Copy again, grab again; report the button's phases.

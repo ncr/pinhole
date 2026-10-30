@@ -691,6 +691,8 @@ int main(int argc, char *argv[]) {
         runMouseSelfTest(window, grid, viewer, library);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("keys"))
         runKeysSelfTest(window, grid, viewer, keymap);
+    if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("inputs:")))
+        runInputsSelfTest(window, grid, test.mid(7));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))
         runReloadSelfTest(library, grid, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("outgoing"))

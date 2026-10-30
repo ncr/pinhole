@@ -1395,3 +1395,43 @@ void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keym
     };
     QTimer::singleShot(1500, window, [run] { (*run)(0); });
 }
+
+void runInputsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir) {
+    auto find = [window](const char *name) { return window->findChild<QObject *>(QString::fromLatin1(name)); };
+    auto grab = [window, dir](const char *name) { window->grabWindow().save(dir + '/' + QLatin1String(name) + ".png"); };
+    auto steps = std::make_shared<QList<std::function<void()>>>(QList<std::function<void()>>{
+        // At the oldest photos, so the cursor is at the top left, in any
+        // grab of a window wider than the screen.
+        [=] { key(window, Qt::Key_Home); },
+        [=] { key(window, Qt::Key_Down); },
+        [=] { key(window, Qt::Key_Right); },
+        // A grab on screen comes back with a frame from a moment later: each
+        // has a step of its own, nothing changing just after it.
+        [=] { grab("1-cursor"); },
+        [=] { key(window, Qt::Key_PageDown); },
+        [=] { grab("2-years"); },
+        [=] { key(window, Qt::Key_Home); },
+        [=] { grid->setSelecting(true); key(window, Qt::Key_Space); },
+        [=] { key(window, Qt::Key_Right, Qt::ShiftModifier); },
+        [=] { key(window, Qt::Key_Down, Qt::ShiftModifier); },
+        [=] { grab("3-select"); },
+        [=] {
+            grid->setSelecting(false);
+            if (QObject *notice = find("historyNotice"))
+                QMetaObject::invokeMethod(notice, "show", Q_ARG(QVariant, QStringLiteral("Favourite")), Q_ARG(QVariant, QStringLiteral("undo")));
+        },
+        [=] { grab("4-undo"); },
+        [=] { if (QObject *side = find("sidePanel")) side->setProperty("shown", true); },
+        [=] { for (int i = 0; i < 6; ++i) key(window, Qt::Key_Down); },
+        [=] { grab("5-side"); },
+        [=] { QCoreApplication::quit(); },
+    });
+    auto run = std::make_shared<std::function<void(int)>>();
+    *run = [=](int k) {
+        if (k >= steps->size())
+            return;
+        (*steps)[k]();
+        QTimer::singleShot(700, window, [=] { (*run)(k + 1); });
+    };
+    QTimer::singleShot(2500, window, [run] { (*run)(0); });
+}
