@@ -101,8 +101,10 @@ ThumbnailLoader::~ThumbnailLoader() {
 
 void ThumbnailLoader::setWanted(const std::vector<quint64> &keys) {
     QList<int> ask;
+    quint64 generation;
     {
         std::lock_guard lock(m_mutex);
+        generation = m_generation;
         m_queue.clear();
         for (quint64 key : keys) {
             if (isMediumKey(key)) {
@@ -123,21 +125,25 @@ void ThumbnailLoader::setWanted(const std::vector<quint64> &keys) {
     }
     m_wake.notify_all();
     if (!ask.isEmpty())
-        emit mediumNeeded(ask);
+        emit mediumNeeded(ask, generation);
 }
 
-void ThumbnailLoader::setMediumPath(int index, const QByteArray &path) {
+void ThumbnailLoader::setMediumPath(int index, const QByteArray &path, quint64 generation) {
     std::lock_guard lock(m_mutex);
-    m_mediumPaths[index] = path;
+    if (generation == m_generation)
+        m_mediumPaths[index] = path;
 }
 
-void ThumbnailLoader::setMediumUnavailable(int index) {
+void ThumbnailLoader::setMediumUnavailable(int index, quint64 generation) {
     std::lock_guard lock(m_mutex);
-    m_mediumMissing.insert(index);
+    if (generation == m_generation)
+        m_mediumMissing.insert(index);
 }
 
-void ThumbnailLoader::clearMedium(int index) {
+void ThumbnailLoader::clearMedium(int index, quint64 generation) {
     std::lock_guard lock(m_mutex);
+    if (generation != m_generation)
+        return;
     m_mediumMissing.erase(index);
     m_mediumAsked.erase(index);
 }
@@ -170,6 +176,7 @@ void ThumbnailLoader::reload(const std::function<void()> &swap) {
     m_mediumPaths.clear();
     m_mediumAsked.clear();
     m_mediumMissing.clear();
+    ++m_generation;
     m_signalPending = false;
     m_paused = false;
 }

@@ -58,11 +58,15 @@ public:
     std::vector<DecodedThumb> takeReady(size_t max);
 
     // Where a photo's medium rendition is on disk, once pinholed has it, or
-    // that it has none. Main thread.
-    void setMediumPath(int index, const QByteArray &path);
-    void setMediumUnavailable(int index);
+    // that it has none. Main thread. `generation` is the one it was asked
+    // for in (mediumNeeded): an answer from before a reload is dropped, as
+    // its position means another photo now.
+    void setMediumPath(int index, const QByteArray &path, quint64 generation);
+    void setMediumUnavailable(int index, quint64 generation);
     // Forget about a photo's medium rendition, so it is asked for again.
-    void clearMedium(int index);
+    void clearMedium(int index, quint64 generation);
+    // Counts reloads: positions keep their meaning within one generation.
+    quint64 generation() const { return m_generation; }
 
     // Run `swap` with every decoder idle, then forget everything keyed by
     // position (queued, decoded, failed, medium files): the positions mean
@@ -78,8 +82,8 @@ signals:
     // Emitted from a worker thread, at most once until takeReady().
     void ready();
     // Medium renditions wanted whose files are not known yet: ask pinholed.
-    // Emitted from the render thread.
-    void mediumNeeded(const QList<int> &indexes);
+    // Emitted from the render thread; `generation` as in setMediumPath.
+    void mediumNeeded(const QList<int> &indexes, quint64 generation);
 
 private:
     void run();
@@ -99,6 +103,8 @@ private:
     std::unordered_map<int, QByteArray> m_mediumPaths;
     std::unordered_set<int> m_mediumAsked;
     std::unordered_set<int> m_mediumMissing;
+    // Read under m_mutex off the main thread; written there under it too.
+    quint64 m_generation = 0;
     bool m_stop = false;
     std::vector<std::thread> m_threads;
     std::atomic<bool> m_signalPending{false};

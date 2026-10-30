@@ -833,6 +833,30 @@ private slots:
         QCOMPARE(m.panX(), 0.0);
     }
 
+    void aMediumAnswerFromBeforeAReloadIsNotTakenForAnotherPhoto() {
+        Library library;
+        ThumbnailLoader loader(&library, 1);
+        QSignalSpy asked(&loader, &ThumbnailLoader::mediumNeeded);
+        loader.setWanted({mediumKey(3, 0)});
+        QCOMPARE(asked.size(), 1);
+        const quint64 before = asked.first().at(1).value<quint64>();
+        QCOMPARE(before, loader.generation());
+
+        // The library is read again; the answer for position 3 comes after,
+        // when 3 is another photo: it must not count for that one.
+        loader.reload([] {});
+        QVERIFY(loader.generation() != before);
+        loader.setMediumUnavailable(3, before);
+        loader.setWanted({mediumKey(3, 0)});
+        QCOMPARE(asked.size(), 2);
+        QCOMPARE(asked.last().at(1).value<quint64>(), loader.generation());
+
+        // An answer of this generation counts.
+        loader.setMediumUnavailable(3, loader.generation());
+        loader.setWanted({mediumKey(3, 0)});
+        QCOMPARE(asked.size(), 2);
+    }
+
     void aStackIsOneCardAndStaysWithItsPhotosThroughAReload() {
         QTemporaryDir dir, after;
         makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});

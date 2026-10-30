@@ -263,23 +263,24 @@ int main(int argc, char *argv[]) {
                      [&outgoing, grid](const QList<int> &indexes) { outgoing.drag(grid, indexes); });
 
     // Medium requests arrive from the render thread; the connection queues
-    // them onto this one.
-    QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service, [&](const QList<int> &indexes) {
+    // them onto this one. Positions are those of the generation they were
+    // asked in: a reload since, and they are dropped (and asked again).
+    QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service, [&](const QList<int> &indexes, quint64 generation) {
+        if (generation != loader.generation())
+            return;
         for (int index : indexes) {
             service.fetch(library.at(index).id, QStringLiteral("medium"),
-                          [&loader, grid, index](bool ok, const QJsonObject &result, const QString &code) {
+                          [&loader, grid, index, generation](bool ok, const QJsonObject &result, const QString &code) {
                               if (ok) {
-                                  loader.setMediumPath(index, QFile::encodeName(result.value("path").toString()));
+                                  loader.setMediumPath(index, QFile::encodeName(result.value("path").toString()), generation);
                                   grid->update();
                                   return;
                               }
-                              loader.setMediumUnavailable(index);
+                              loader.setMediumUnavailable(index, generation);
                               // Missing for good, or only for now: try again later.
                               if (code != QLatin1String("not_found"))
-                                  QTimer::singleShot(30000, &loader, [&loader, index] { loader.clearMedium(index); });
+                                  QTimer::singleShot(30000, &loader, [&loader, index, generation] { loader.clearMedium(index, generation); });
                           });
-
-
         }
     });
     QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
