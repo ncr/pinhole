@@ -329,11 +329,14 @@ PinholePlugin {
     }
     // While it shows, G opens that series, the photo among those it could
     // grow into, as the band says.
-    Shortcut {
-        enabled: joining.shown && !plugin.covering
-        sequence: "G"
-        context: Qt.ApplicationShortcut
-        onActivated: editor.openSeries(addAction.k, pinhole.viewer.index)
+    Command {
+        name: "series.joining"
+        keys: ["G"]
+        keyLayer: "viewer"
+        when: joining.shown && !plugin.covering
+        mouse: qsTr("Click the band")
+        touchpad: qsTr("Tap the band")
+        onTriggered: editor.openSeries(addAction.k, pinhole.viewer.index)
     }
 
     Editor {

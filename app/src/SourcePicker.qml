@@ -52,14 +52,46 @@ Item {
             sources.addFolder(s.path)
     }
 
-    Shortcut { enabled: root.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: root.use(0) }
-    Shortcut { enabled: root.shown && root.suggestions.length > 1; sequence: "2"; context: Qt.ApplicationShortcut; onActivated: root.use(1) }
-    Shortcut { enabled: root.shown && root.suggestions.length > 2; sequence: "3"; context: Qt.ApplicationShortcut; onActivated: root.use(2) }
-    Shortcut { enabled: root.shown && root.suggestions.length > 3; sequence: "4"; context: Qt.ApplicationShortcut; onActivated: root.use(3) }
-    Shortcut { enabled: root.shown && root.suggestions.length > 4; sequence: "5"; context: Qt.ApplicationShortcut; onActivated: root.use(4) }
-    Shortcut { enabled: root.shown; sequence: "I"; context: Qt.ApplicationShortcut; onActivated: root.signInRequested(false) }
-    Shortcut { enabled: root.shown; sequence: "F"; context: Qt.ApplicationShortcut; onActivated: sources.chooseFolder() }
-    Shortcut { enabled: root.shown && !root.firstRun; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: root.shown = false }
+    // Its keys, while it is on top (Command.qml): the first run's, or adding
+    // another source's.
+    readonly property string keyLayer: firstRun ? "firstRun" : "addSource"
+    Repeater {
+        model: 5
+        delegate: Command {
+            required property int index
+            name: "pick.use" + (index + 1)
+            keys: index === 0 ? ["Return", "Enter"] : [String(index + 1)]
+            keyLayer: root.keyLayer
+            when: root.shown && index < root.suggestions.length
+            mouse: qsTr("Its Use button")
+            touchpad: qsTr("Its Use button")
+            onTriggered: root.use(index)
+        }
+    }
+    Command {
+        id: signInAction
+        name: "pick.signIn"
+        keys: ["I"]
+        keyLayer: root.keyLayer
+        when: root.shown
+        onTriggered: root.signInRequested(false)
+    }
+    Command {
+        id: folderAction
+        name: "pick.folder"
+        keys: ["F"]
+        keyLayer: root.keyLayer
+        when: root.shown
+        onTriggered: sources.chooseFolder()
+    }
+    Command {
+        id: closeAction
+        name: "pick.close"
+        keys: ["Escape"]
+        keyLayer: root.keyLayer
+        when: root.shown && !root.firstRun
+        onTriggered: root.shown = false
+    }
 
     // As the settings: a scrim, a card with a hairline. The first run has
     // neither, the window being all of it.
@@ -139,8 +171,7 @@ Item {
                         anchors.right: parent.right
                         flat: true
                         text: "✕"
-                        hint: "Esc"
-                        onTapped: root.shown = false
+                        action: closeAction
                     }
                 }
 
@@ -234,13 +265,11 @@ Item {
                         }
                         ShellButton {
                             text: qsTr("Sign in to iCloud")
-                            hint: "I"
-                            onTapped: root.signInRequested(false)
+                            action: signInAction
                         }
                         ShellButton {
                             text: qsTr("Choose a folder…")
-                            hint: "F"
-                            onTapped: sources.chooseFolder()
+                            action: folderAction
                         }
                     }
                 }

@@ -196,16 +196,113 @@ Item {
         return ms === 0 ? qsTr("Not in the series") : ms < 0 ? qsTr("%1 before").arg(span) : qsTr("%1 after").arg(span)
     }
 
-    Shortcut { enabled: editor.keys; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: editor.looking ? editor.looking = false : editor.close() }
-    Shortcut { enabled: editor.keys; sequences: ["Space", "Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: editor.looking = !editor.looking }
-    Shortcut { enabled: editor.keys; sequence: "Left"; context: Qt.ApplicationShortcut; autoRepeat: true; onActivated: editor.move(-1) }
-    Shortcut { enabled: editor.keys; sequence: "Right"; context: Qt.ApplicationShortcut; autoRepeat: true; onActivated: editor.move(1) }
-    Shortcut { enabled: editor.keys; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: editor.move(-editor.tiles.length) }
-    Shortcut { enabled: editor.keys; sequence: "End"; context: Qt.ApplicationShortcut; onActivated: editor.move(editor.tiles.length) }
-    Shortcut { enabled: editor.keys; sequence: "X"; context: Qt.ApplicationShortcut; onActivated: editor.takeOut() }
-    Shortcut { enabled: editor.keys; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: editor.add() }
-    Shortcut { enabled: editor.keys; sequence: "U"; context: Qt.ApplicationShortcut; onActivated: editor.ungroup() }
-    Shortcut { enabled: editor.keys; sequence: "G"; context: Qt.ApplicationShortcut; onActivated: editor.toStudio() }
+    // Its keys, while it is on top (Command.qml).
+    Command {
+        name: "editor.close"
+        keys: ["Escape"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("The ✕ button")
+        touchpad: qsTr("The ✕ button")
+        onTriggered: editor.looking ? editor.looking = false : editor.close()
+    }
+    Command {
+        name: "editor.look"
+        text: qsTr("There: a photo up close")
+        section: "Series"
+        keys: ["Space", "Return", "Enter"]
+        keysText: "Space"
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Click a photo")
+        touchpad: qsTr("Tap a photo")
+        onTriggered: editor.looking = !editor.looking
+    }
+    Command {
+        name: "editor.previous"
+        text: qsTr("Previous, next photo")
+        section: "Series"
+        keys: ["Left"]
+        keysText: "← →"
+        keyLayer: "plugin"
+        when: editor.keys
+        autoRepeat: true
+        mouse: qsTr("Wheel, or point")
+        touchpad: qsTr("Two fingers, or point")
+        onTriggered: editor.move(-1)
+    }
+    Command {
+        name: "editor.next"
+        keys: ["Right"]
+        keyLayer: "plugin"
+        when: editor.keys
+        autoRepeat: true
+        mouse: qsTr("Wheel, or point")
+        touchpad: qsTr("Two fingers, or point")
+        onTriggered: editor.move(1)
+    }
+    Command {
+        name: "editor.first"
+        keys: ["Home"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: editor.move(-editor.tiles.length)
+    }
+    Command {
+        name: "editor.last"
+        keys: ["End"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: editor.move(editor.tiles.length)
+    }
+    Command {
+        name: "editor.takeOut"
+        text: qsTr("Take a photo out of its series")
+        section: "Series"
+        keys: ["X"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: editor.takeOut()
+    }
+    Command {
+        name: "editor.add"
+        text: qsTr("Add a photo to the series beside it")
+        section: "Series"
+        keys: ["A"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: editor.add()
+    }
+    Command {
+        name: "editor.ungroup"
+        text: qsTr("Ungroup")
+        section: "Series"
+        keys: ["U"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: editor.ungroup()
+    }
+    Command {
+        name: "editor.studio"
+        text: qsTr("Series: a GIF or a video")
+        section: "Series"
+        keys: ["G"]
+        keyLayer: "plugin"
+        when: editor.keys
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: editor.toStudio()
+    }
 
     Rectangle {
         anchors.fill: parent

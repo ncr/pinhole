@@ -19,10 +19,15 @@ Item {
     // The one of `items` that is the button, or -1 for a button given as
     // the group's child (Live's, Copy's).
     property int primary: -1
-    // Opens the menu.
+    // Opens the menu; and what the help calls that.
     property string menuKey
+    property string menuText
     // The menu over the bar rather than under it, for a bar at the bottom.
     property bool upward: false
+    // Whose keys its items' are, "grid" or "viewer" (Command.qml); and its
+    // part of the help, for items that do not name one.
+    property string keyLayer: "chrome"
+    property string section
     property bool open: false
     default property alias button: slot.data
 
@@ -166,48 +171,73 @@ Item {
         }
     }
 
-    // Not while the window has its keys for something over it (the help).
-    readonly property bool keysFree: group.visible && (Window.window === null || Window.window.buttonKeys !== false)
+    // Each item's key, with the menu closed or open (while it is, the
+    // menu's layer has the keys), and the menu's own: ⇧ with the button's
+    // key opens it, ↑ ↓ choose, ⏎ presses, Esc closes.
+    readonly property string itemLayer: group.open ? "menu" : group.keyLayer
     Instantiator {
         model: group.items
-        delegate: Shortcut {
+        delegate: Command {
             required property var modelData
-            enabled: group.keysFree && (modelData.key ?? "") !== "" && modelData.shown !== false && modelData.usable !== false
-            sequence: modelData.key ?? ""
-            context: Qt.ApplicationShortcut
-            onActivated: group.press(modelData)
+            name: "menu." + (modelData.text ?? "")
+            text: modelData.text ?? ""
+            section: modelData.section ?? group.section
+            keys: (modelData.key ?? "") !== "" ? [modelData.key] : []
+            // Without a key of its own, by keys through the menu.
+            noKeyboard: keys.length === 0 && group.menuKey !== "" ? qsTr("Through its menu") : ""
+            keyLayer: group.itemLayer
+            when: group.visible && modelData.shown !== false && modelData.usable !== false
+            // In the menu, or the button: a pointer's way either way.
+            buttons: 1
+            onTriggered: group.press(modelData)
         }
     }
-    Shortcut {
-        enabled: group.keysFree && group.menuKey !== "" && group.menuItems.length > 0
-        sequence: group.menuKey
-        context: Qt.ApplicationShortcut
-        onActivated: group.toggle(true)
+    Loader {
+        active: group.menuKey !== ""
+        sourceComponent: Command {
+            name: "menu.open." + group.menuKey
+            text: group.menuText
+            section: group.menuText !== "" ? group.section : ""
+            keys: [group.menuKey]
+            keyLayer: group.keyLayer
+            when: group.visible && group.menuItems.length > 0
+            buttons: 1
+            onTriggered: group.toggle(true)
+        }
     }
-    Shortcut {
-        enabled: group.keysFree && group.open
-        sequence: "Escape"
-        context: Qt.ApplicationShortcut
-        onActivated: group.open = false
+    Command {
+        name: "menu.close"
+        keys: ["Escape"]
+        keyLayer: "menu"
+        when: group.open
+        buttons: 1
+        onTriggered: group.open = false
     }
-    Shortcut {
-        enabled: group.keysFree && group.open
-        sequence: "Up"
-        context: Qt.ApplicationShortcut
+    Command {
+        name: "menu.up"
+        keys: ["Up"]
+        keyLayer: "menu"
+        when: group.open
         autoRepeat: true
-        onActivated: group.current = Math.max(0, group.current - 1)
+        buttons: 1
+        onTriggered: group.current = Math.max(0, group.current - 1)
     }
-    Shortcut {
-        enabled: group.keysFree && group.open
-        sequence: "Down"
-        context: Qt.ApplicationShortcut
+    Command {
+        name: "menu.down"
+        keys: ["Down"]
+        keyLayer: "menu"
+        when: group.open
         autoRepeat: true
-        onActivated: group.current = Math.min(group.menuItems.length - 1, group.current + 1)
+        buttons: 1
+        onTriggered: group.current = Math.min(group.menuItems.length - 1, group.current + 1)
     }
-    Shortcut {
-        enabled: group.keysFree && group.open && group.current >= 0
-        sequences: ["Return", "Enter"]
-        context: Qt.ApplicationShortcut
-        onActivated: group.press(group.menuItems[group.current])
+    Command {
+        name: "menu.press"
+        keys: ["Return", "Enter"]
+        keyLayer: "menu"
+        when: group.open
+        buttons: 1
+        // Opened with a click, nothing is chosen yet: ⏎ takes the first row.
+        onTriggered: group.press(group.menuItems[Math.max(0, group.current)])
     }
 }

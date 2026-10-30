@@ -19,6 +19,8 @@ Rectangle {
     // A key that presses it while it shows, beside the label (see
     // ShellButton.qml).
     property string key
+    property string keyLayer: "chrome"
+    property string section
     property string hint: KeyNames.nameOf(key)
 
     // idle, working, done, failed
@@ -106,13 +108,19 @@ Rectangle {
     }
     HoverHandler { id: hover; cursorShape: button.enabledHere ? Qt.PointingHandCursor : Qt.ArrowCursor }
     TapHandler { id: tap; onTapped: button.copy() }
-    // Not while the window has its keys for something over it (the help).
-    readonly property bool keysFree: Window.window === null || Window.window.buttonKeys !== false
-    Shortcut {
-        enabled: button.key !== "" && button.visible && button.enabledHere && button.keysFree
-        sequence: button.key
-        context: Qt.ApplicationShortcut
-        onActivated: button.copy()
+    // Its key, on `keyLayer`'s keys (Command.qml), in the help's `section`.
+    Loader {
+        active: button.key !== ""
+        sourceComponent: Command {
+            name: "button.copy." + button.keyLayer
+            text: qsTr("Copy")
+            section: button.section
+            keys: [button.key]
+            keyLayer: button.keyLayer
+            when: button.visible && button.enabledHere
+            buttons: 1
+            onTriggered: button.copy()
+        }
     }
     function copy() {
         if (!button.enabledHere || button.phase === "working")

@@ -409,6 +409,9 @@ Item {
                     text: viewer.favorite ? "\uf004" : "\uf08a"
                     labelColor: viewer.favorite ? theme.accent : theme.foreground
                     key: "F"
+                    keyLayer: "viewer"
+                    section: "photo"
+                    helpText: qsTr("Favourite")
                     onTapped: favourites.toggle([viewer.index])
                     transform: Translate { id: favoriteNudge }
                 }
@@ -418,6 +421,9 @@ Item {
             MenuGroup {
                 visible: viewer.live
                 menuKey: "Shift+L"
+                menuText: qsTr("Live effects")
+                keyLayer: "viewer"
+                section: "photo"
                 items: root.effects.map(effect => ({
                     text: root.effectName(effect),
                     hint: effect === viewer.savedEffect && effect !== "live" ? "iPhone" : "",
@@ -434,6 +440,9 @@ Item {
                     flat: true
                     text: root.effectName(viewer.effect)
                     key: "L"
+                    keyLayer: "viewer"
+                    section: "photo"
+                    helpText: qsTr("Play the Live Photo")
                     active: viewer.liveLoading || liveOutput.visible
                     busy: viewer.liveLoading || root.liveBuffering
                     busyDelay: 300
@@ -446,12 +455,15 @@ Item {
                 delegate: PluginGroup {
                     required property var modelData
                     items: modelData
+                    keyLayer: "viewer"
                 }
             }
             // Out of the app: Copy answers with a tick on itself; Export as
             // JPEG or MP4, what opens anywhere, or the original.
             MenuGroup {
                 menuKey: "Shift+C"
+                keyLayer: "viewer"
+                section: "photo"
                 items: [
                     { text: qsTr("Export"), key: "E", triggered: () => outgoing.exportTo([viewer.index], true) },
                     { text: qsTr("Export original"), key: "Shift+E", triggered: () => outgoing.exportTo([viewer.index], false) }
@@ -461,6 +473,8 @@ Item {
                     flat: true
                     photos: () => [viewer.index]
                     key: "C"
+                    keyLayer: "viewer"
+                    section: "photo"
                 }
             }
             // Back to the library; with a menu open, Esc closes that.
@@ -468,8 +482,10 @@ Item {
                 ShellButton {
                     flat: true
                     text: "✕"
-                    key: actionBar.menuOpen ? "" : "Escape"
-                    hint: "Esc"
+                    key: "Escape"
+                    keyLayer: "viewer"
+                    section: "photo"
+                    helpText: qsTr("Back to the library")
                     onTapped: root.closeViewer()
                 }
             }
@@ -579,11 +595,19 @@ Item {
             anchors.bottom: track.top
             anchors.bottomMargin: 10
             text: root.muted ? qsTr("Sound off") : qsTr("Sound on")
-            // The window's key: it works with the button hidden.
-            hint: "M"
+            // Its key works with the button hidden.
+            action: soundAction
             active: root.muted
             floating: true
-            onTapped: root.muted = !root.muted
+        }
+        Command {
+            id: soundAction
+            name: "video.sound"
+            text: qsTr("Sound")
+            section: "video"
+            keys: ["M"]
+            keyLayer: "viewer"
+            onTriggered: root.muted = !root.muted
         }
     }
 

@@ -6,9 +6,11 @@ import "keys.js" as KeyNames
 // when pressed. `active` is the chosen state, filled with the accent.
 // `flat` drops the hairline at rest, for rows inside a bar or menu.
 //
-// Its key beside the label, as Omarchy's menus show theirs: `key` presses
-// it while it shows (a sequence: "C", "Shift+E", "Escape"); `hint` only
-// shows one, for a key the window handles itself.
+// Its key beside the label, as Omarchy's menus show theirs. Given an
+// `action` (Command.qml), it presses that and shows its key; else `key`
+// presses it while it shows (a sequence: "C", "Shift+E", "Escape"), on
+// `keyLayer`'s keys, and `section` and `helpText` put it in the help. `hint`
+// only shows a key, for one the window handles itself.
 //
 // `busy`: on its way, after `busyDelay` an arc turns in the key's place
 // (in the label's, without one), as Spinner.qml turns.
@@ -19,8 +21,12 @@ import "keys.js" as KeyNames
 Rectangle {
     id: control
     property string text
+    property var action: null
     property string key
-    property string hint: KeyNames.nameOf(key)
+    property string keyLayer: "chrome"
+    property string section
+    property string helpText: text
+    property string hint: action ? action.keyName : KeyNames.nameOf(key)
     property bool active: false
     // The label's colour when not active: the theme's text, or the accent
     // for a ♥ that is filled.
@@ -104,14 +110,34 @@ Rectangle {
             ink: label.color
         }
     }
-    // Not while the window has its keys for something over it (the help).
-    readonly property bool keysFree: Window.window === null || Window.window.buttonKeys !== false
-    Shortcut {
-        enabled: control.key !== "" && control.visible && control.usable && control.keysFree
-        sequence: control.key
-        context: Qt.ApplicationShortcut
-        onActivated: control.tapped()
+    // Its own key, when it has no action to press: a Command of its own.
+    Loader {
+        active: control.action === null && control.key !== ""
+        sourceComponent: Command {
+            name: "button." + (control.objectName !== "" ? control.objectName : control.helpText)
+            text: control.helpText
+            section: control.section
+            keys: [control.key]
+            keyLayer: control.keyLayer
+            when: control.visible && control.usable
+            buttons: 1
+            onTriggered: control.tapped()
+        }
     }
+    // The action's way for a pointer, while this shows it.
+    property var counted: null
+    function count() {
+        if (counted === action)
+            return
+        if (counted)
+            --counted.buttons
+        counted = action
+        if (counted)
+            ++counted.buttons
+    }
+    onActionChanged: count()
+    Component.onCompleted: count()
+    Component.onDestruction: if (counted) --counted.buttons
     Rectangle {
         anchors.fill: parent
         z: -1
@@ -120,5 +146,14 @@ Rectangle {
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
     }
     HoverHandler { id: hover; cursorShape: control.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
-    TapHandler { id: tap; onTapped: if (control.usable) control.tapped() }
+    TapHandler {
+        id: tap
+        onTapped: {
+            if (!control.usable)
+                return
+            if (control.action)
+                control.action.trigger()
+            control.tapped()
+        }
+    }
 }

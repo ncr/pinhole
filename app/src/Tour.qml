@@ -277,22 +277,42 @@ Item {
                         visible: root.index > 0
                         flat: true
                         text: qsTr("Back")
-                        hint: "←"
-                        onTapped: root.go(-1)
+                        action: backAction
                     }
                     ShellButton {
                         id: next
                         active: true
                         text: root.last ? qsTr("Done") : qsTr("Next")
-                        hint: root.last ? "⏎" : "→"
-                        onTapped: root.go(1)
+                        action: nextAction
                     }
                 }
             }
         }
     }
 
-    Shortcut { enabled: root.shown; sequences: ["Right", "Return", "Enter", "Space"]; context: Qt.ApplicationShortcut; onActivated: root.go(1) }
-    Shortcut { enabled: root.shown; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: root.go(-1) }
-    Shortcut { enabled: root.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: root.close() }
+    // Its keys, while it is on top (Command.qml).
+    Command {
+        id: nextAction
+        name: "tour.next"
+        keys: ["Right", "Return", "Enter", "Space"]
+        keysText: root.last ? "⏎" : "→"
+        keyLayer: "tour"
+        onTriggered: root.go(1)
+    }
+    Command {
+        id: backAction
+        name: "tour.back"
+        keys: ["Left"]
+        keyLayer: "tour"
+        when: root.index > 0
+        onTriggered: root.go(-1)
+    }
+    Command {
+        name: "tour.close"
+        keys: ["Escape"]
+        keyLayer: "tour"
+        mouse: qsTr("Click beside the card")
+        touchpad: qsTr("Tap beside the card")
+        onTriggered: root.close()
+    }
 }

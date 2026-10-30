@@ -25,6 +25,13 @@ class QQuickWindow;
 // person would (right-click, open, the sides, the wheel, a sideways swipe,
 // the back button, double-click) and report whether each did its job.
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library);
+// PINHOLE_SELFTEST=keys: the window through its states (the grid, select
+// mode and its menu, the viewer, the side panel, the help and sign-in over
+// it, adding a source), saying in each whose the keys are and any key two
+// live commands share; then every command some input cannot do. Fails on
+// either.
+class Keymap;
+void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap);
 
 // PINHOLE_SELFTEST=copytwice:<folder>: open a photo, click Copy, grab the
 // window; wait; click Copy again, grab again; report the button's phases.

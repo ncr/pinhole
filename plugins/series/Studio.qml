@@ -184,27 +184,129 @@ Item {
         onTriggered: studio.time = (studio.time + frameTime) % Math.max(0.05, studio.duration)
     }
 
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: studio.step(-1) }
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: studio.step(1) }
-    Shortcut { enabled: studio.shown; sequences: ["Escape", "G"]; context: Qt.ApplicationShortcut; onActivated: studio.close() }
-    Shortcut { enabled: studio.shown; sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: studio.playing = !studio.playing }
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "P"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("pace", Engine.PACES) }
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("look", Engine.LOOKS) }
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "O"; context: Qt.ApplicationShortcut; onActivated: studio.cycle("shape", Engine.SHAPES) }
-    Shortcut { enabled: studio.shown && studio.making === ""; sequence: "T"; context: Qt.ApplicationShortcut; onActivated: studio.change({ steady: !studio.recipe.steady }) }
-    Shortcut { enabled: studio.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: studio.make("gif") }
-    Shortcut { enabled: studio.shown; sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; onActivated: studio.make("mp4") }
+    // Its keys, while it is on top (Command.qml).
+    Command {
+        name: "studio.previous"
+        text: qsTr("Previous, next series")
+        section: "Series"
+        keys: ["Left"]
+        keysText: "← →"
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("The ‹ › buttons")
+        touchpad: qsTr("The ‹ › buttons")
+        onTriggered: studio.step(-1)
+    }
+    Command {
+        name: "studio.next"
+        keys: ["Right"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("The ‹ › buttons")
+        touchpad: qsTr("The ‹ › buttons")
+        onTriggered: studio.step(1)
+    }
+    Command {
+        name: "studio.close"
+        keys: ["Escape", "G"]
+        keyLayer: "plugin"
+        when: studio.shown
+        mouse: qsTr("The ✕ button")
+        touchpad: qsTr("The ✕ button")
+        onTriggered: studio.close()
+    }
+    Command {
+        name: "studio.pause"
+        text: qsTr("Pause, play")
+        section: "Series"
+        keys: ["Space"]
+        keyLayer: "plugin"
+        when: studio.shown
+        onTriggered: studio.playing = !studio.playing
+    }
+    Command {
+        name: "studio.pace"
+        text: qsTr("Pace")
+        section: "Series"
+        keys: ["P"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.cycle("pace", Engine.PACES)
+    }
+    Command {
+        name: "studio.look"
+        text: qsTr("Look")
+        section: "Series"
+        keys: ["L"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.cycle("look", Engine.LOOKS)
+    }
+    Command {
+        name: "studio.shape"
+        text: qsTr("Shape")
+        section: "Series"
+        keys: ["O"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.cycle("shape", Engine.SHAPES)
+    }
+    Command {
+        name: "studio.steady"
+        text: qsTr("Steady")
+        section: "Series"
+        keys: ["T"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.making === ""
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.change({ steady: !studio.recipe.steady })
+    }
+    Command {
+        name: "studio.gif"
+        text: qsTr("Make a GIF")
+        section: "Series"
+        keys: ["Return", "Enter"]
+        keysText: "⏎"
+        keyLayer: "plugin"
+        when: studio.shown
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.make("gif")
+    }
+    Command {
+        name: "studio.video"
+        text: qsTr("Make a video")
+        section: "Series"
+        keys: ["Shift+Return", "Shift+Enter"]
+        keysText: "⇧ ⏎"
+        keyLayer: "plugin"
+        when: studio.shown
+        mouse: qsTr("Its button")
+        touchpad: qsTr("Its button")
+        onTriggered: studio.make("mp4")
+    }
     Repeater {
         model: Engine.MOTIONS
-        delegate: Item {
+        delegate: Command {
             required property string modelData
             required property int index
-            Shortcut {
-                enabled: studio.shown && studio.making === ""
-                sequence: String(index + 1)
-                context: Qt.ApplicationShortcut
-                onActivated: { studio.change({ motion: modelData }); studio.time = 0 }
-            }
+            name: "studio.motion" + (index + 1)
+            text: qsTr("Motion")
+            section: index === 0 ? "Series" : ""
+            keys: [String(index + 1)]
+            keysText: "1–" + Engine.MOTIONS.length
+            keyLayer: "plugin"
+            when: studio.shown && studio.making === ""
+            mouse: qsTr("Its button")
+            touchpad: qsTr("Its button")
+            onTriggered: { studio.change({ motion: modelData }); studio.time = 0 }
         }
     }
 

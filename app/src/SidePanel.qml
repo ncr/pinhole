@@ -69,9 +69,6 @@ Item {
     property int pluginsLoaded: 0
     // A plugin's tour asked for again.
     signal tourRequested(string id)
-    // Its keys, but for while a tour points into it.
-    property bool keys: true
-    readonly property bool takesKeys: shown && keys
     // A plugin's part of the panel, scrolled into view, for a tour to light;
     // kept there by `keptInView` as the parts above it fill in.
     property string keptInView
@@ -221,53 +218,134 @@ Item {
         return last + "\n" + next
     }
 
-    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "Up"; context: Qt.ApplicationShortcut
-        onActivated: root.focusIndex = Math.max(0, root.focusIndex - 1) }
-    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "Down"; context: Qt.ApplicationShortcut
-        onActivated: root.focusIndex = Math.min(sources.list.length - 1, root.focusIndex + 1) }
-    Shortcut {
-        enabled: root.takesKeys; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut
-        onActivated: {
+    // Its keys, while it is on top (Command.qml); the buttons it shows
+    // press the same.
+    Command {
+        name: "side.up"
+        keys: ["Up"]
+        keyLayer: "side"
+        when: root.confirming < 0
+        autoRepeat: true
+        mouse: qsTr("Point at a row")
+        touchpad: qsTr("Point at a row")
+        onTriggered: root.focusIndex = Math.max(0, root.focusIndex - 1)
+    }
+    Command {
+        name: "side.down"
+        keys: ["Down"]
+        keyLayer: "side"
+        when: root.confirming < 0
+        autoRepeat: true
+        mouse: qsTr("Point at a row")
+        touchpad: qsTr("Point at a row")
+        onTriggered: root.focusIndex = Math.min(sources.list.length - 1, root.focusIndex + 1)
+    }
+    Command {
+        id: enterAction
+        name: "side.enter"
+        keys: ["Return", "Enter"]
+        keyLayer: "side"
+        mouse: qsTr("Click a row, or Yes")
+        touchpad: qsTr("Tap a row, or Yes")
+        onTriggered: {
             if (root.lowering) {
                 root.confirmLimit()
-            } else if (root.confirming >= 0 && root.signingOut) {
-                sources.signOut(root.at(root.confirming).id)
-                root.confirming = -1
             } else if (root.confirming >= 0) {
-                sources.remove(root.at(root.confirming).id)
-                root.confirming = -1
-                root.focusIndex = Math.max(0, Math.min(root.focusIndex, sources.list.length - 2))
+                root.answer(true)
             } else {
                 root.open(root.focusIndex)
             }
         }
     }
-    Shortcut { enabled: root.takesKeys && root.confirming < 0 && sources.list.length > 0; sequences: ["Delete", "Backspace"]; context: Qt.ApplicationShortcut
-        onActivated: {
+    function answer(yes) {
+        if (yes && root.signingOut) {
+            sources.signOut(root.at(root.confirming).id)
+        } else if (yes) {
+            sources.remove(root.at(root.confirming).id)
+            root.focusIndex = Math.max(0, Math.min(root.focusIndex, sources.list.length - 2))
+        }
+        root.confirming = -1
+    }
+    Command {
+        id: removeSource
+        name: "side.remove"
+        keys: ["Delete", "Backspace"]
+        keyLayer: "side"
+        when: root.confirming < 0 && sources.list.length > 0
+        onTriggered: {
             root.signingOut = false
             root.confirming = root.focusIndex
-        } }
+        }
+    }
     // Signing out of an Apple ID keeps its photos here; signed out, the row
     // offers signing in again instead.
-    Shortcut {
-        enabled: root.takesKeys && root.confirming < 0 && root.at(root.focusIndex) !== undefined
-                 && root.at(root.focusIndex).kind === "icloud" && root.trouble(root.at(root.focusIndex)) !== "needs_sign_in"
-        sequence: "O"; context: Qt.ApplicationShortcut
-        onActivated: {
+    function canSignOut(i) {
+        const s = root.at(i)
+        return s !== undefined && s.kind === "icloud" && root.trouble(s) !== "needs_sign_in"
+    }
+    Command {
+        id: signOutSource
+        name: "side.signOut"
+        keys: ["O"]
+        keyLayer: "side"
+        when: root.confirming < 0 && root.canSignOut(root.focusIndex)
+        onTriggered: {
             root.signingOut = true
             root.confirming = root.focusIndex
         }
     }
-    Shortcut { enabled: root.takesKeys && root.confirming < 0; sequence: "A"; context: Qt.ApplicationShortcut; onActivated: root.addRequested() }
-    Shortcut {
-        enabled: root.takesKeys; sequence: "Escape"; context: Qt.ApplicationShortcut
-        onActivated: root.lowering ? root.pending = -1 : root.confirming >= 0 ? root.confirming = -1 : root.shown = false
+    Command {
+        id: addAction
+        name: "side.add"
+        keys: ["A"]
+        keyLayer: "side"
+        when: root.confirming < 0
+        onTriggered: root.addRequested()
+    }
+    Command {
+        id: closeSide
+        name: "side.close"
+        keys: ["Escape"]
+        keyLayer: "side"
+        mouse: qsTr("Click beside it")
+        touchpad: qsTr("Tap beside it")
+        onTriggered: root.lowering ? root.pending = -1 : root.confirming >= 0 ? root.confirming = -1 : root.shown = false
     }
     // Storage.
-    Shortcut { enabled: root.takesKeys && storage.loaded; sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: root.step(-1) }
-    Shortcut { enabled: root.takesKeys && storage.loaded; sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: root.step(1) }
-    Shortcut { enabled: root.takesKeys && storage.outdated; sequence: "R"; context: Qt.ApplicationShortcut; onActivated: storage.restartService() }
-    Shortcut { enabled: root.takesKeys && storage.loaded && !storage.moving; sequence: "L"; context: Qt.ApplicationShortcut; onActivated: storage.chooseLocation() }
+    Command {
+        id: storageLess
+        name: "storage.less"
+        keys: ["Left"]
+        keyLayer: "side"
+        when: storage.loaded
+        autoRepeat: true
+        onTriggered: root.step(-1)
+    }
+    Command {
+        id: storageMore
+        name: "storage.more"
+        keys: ["Right"]
+        keyLayer: "side"
+        when: storage.loaded
+        autoRepeat: true
+        onTriggered: root.step(1)
+    }
+    Command {
+        id: restartAction
+        name: "storage.restart"
+        keys: ["R"]
+        keyLayer: "side"
+        when: storage.outdated
+        onTriggered: storage.restartService()
+    }
+    Command {
+        id: locationAction
+        name: "storage.location"
+        keys: ["L"]
+        keyLayer: "side"
+        when: storage.loaded && !storage.moving
+        onTriggered: storage.chooseLocation()
+    }
 
     // The photos dimmed behind it, as behind Omarchy's menus and the other
     // panels (a scrim of the theme's background at half), coming and going
@@ -417,8 +495,7 @@ Item {
             ShellButton {
                 width: parent.width
                 text: qsTr("Add a source")
-                hint: "A"
-                onTapped: root.addRequested()
+                action: addAction
             }
             // The sources' keys.
             Grid {
@@ -466,8 +543,7 @@ Item {
                     anchors.right: parent.right
                     usable: !storage.moving
                     text: qsTr("Change")
-                    hint: "L"
-                    onTapped: storage.chooseLocation()
+                    action: locationAction
                 }
             }
 
@@ -538,7 +614,7 @@ Item {
                         text: "−"
                         hint: "←"
                         usable: root.steps.length > 0 && root.chosen > root.steps[0]
-                        onTapped: root.step(-1)
+                        action: storageLess
                     }
                     UiText {
                         width: Math.max(implicitWidth, theme.fontSize * 4.5)
@@ -552,7 +628,7 @@ Item {
                         text: "+"
                         hint: "→"
                         usable: root.steps.length > 0 && root.chosen < root.steps[root.steps.length - 1]
-                        onTapped: root.step(1)
+                        action: storageMore
                     }
                 }
             }
@@ -633,8 +709,7 @@ Item {
                 visible: storage.outdated
                 x: Math.round(theme.fontSize * 0.714)
                 text: qsTr("Restart it")
-                hint: "R"
-                onTapped: storage.restartService()
+                action: restartAction
             }
             // What the limit can and cannot do.
             Note {

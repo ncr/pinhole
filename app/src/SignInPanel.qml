@@ -60,8 +60,34 @@ Item {
         }
     }
 
-    Shortcut { enabled: root.shown; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: root.submit() }
-    Shortcut { enabled: root.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: root.shown = false }
+    // Its keys, while it is on top (Command.qml).
+    Command {
+        id: submitAction
+        name: "signIn.submit"
+        keys: ["Return", "Enter"]
+        keysText: "⏎"
+        keyLayer: "signIn"
+        onTriggered: root.submit()
+    }
+    Command {
+        id: closeAction
+        name: "signIn.close"
+        keys: ["Escape"]
+        keyLayer: "signIn"
+        onTriggered: root.shown = false
+    }
+    Command {
+        id: newCodeAction
+        name: "signIn.newCode"
+        keys: ["Ctrl+R"]
+        keyLayer: "signIn"
+        when: root.codeStage && password.text !== "" && !root.busy
+        onTriggered: {
+            code.text = ""
+            sources.signIn(account.text, password.text)
+            code.forceActiveFocus()
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -104,8 +130,7 @@ Item {
                     anchors.right: parent.right
                     flat: true
                     text: "✕"
-                    hint: "Esc"
-                    onTapped: root.shown = false
+                    action: closeAction
                 }
             }
 
@@ -249,20 +274,14 @@ Item {
                     active: root.ready && !root.busy
                     usable: root.ready && !root.busy
                     text: root.fromIcloudpd ? qsTr("Use icloudpd's sign-in") : qsTr("Sign in")
-                    hint: "⏎"
-                    onTapped: root.submit()
+                    action: submitAction
                 }
                 ShellButton {
                     anchors.right: parent.right
                     visible: root.codeStage && password.text !== ""
                     usable: !root.busy
                     text: qsTr("Send a new code")
-                    hint: ""
-                    onTapped: {
-                        code.text = ""
-                        sources.signIn(account.text, password.text)
-                        code.forceActiveFocus()
-                    }
+                    action: newCodeAction
                 }
             }
         }

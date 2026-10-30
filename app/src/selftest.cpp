@@ -1,5 +1,7 @@
 #include "selftest.h"
 
+#include "keymap.h"
+
 #include "incoming.h"
 #include "library.h"
 #include "outgoing.h"
@@ -1309,4 +1311,80 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         (*step)(0);
     });
     wait->start();
+}
+
+void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap) {
+    auto find = [window](const char *name) { return window->findChild<QObject *>(QString::fromLatin1(name)); };
+    auto show = [find](const char *name, bool shown) {
+        if (QObject *o = find(name))
+            o->setProperty("shown", shown);
+    };
+    struct State {
+        const char *what;
+        std::function<void()> enter;
+        const char *layer;
+    };
+    auto openMenu = [find](const char *bar) {
+        // The first group with a menu in the bar: its ▾ as a press would.
+        QObject *actions = find(bar);
+        for (QObject *child : actions ? actions->findChildren<QObject *>() : QList<QObject *>())
+            if (child->property("isGroup").toBool() && child->property("menuItems").toList().size() > 0) {
+                QMetaObject::invokeMethod(child, "toggle", Q_ARG(QVariant, false));
+                return;
+            }
+    };
+    auto closeMenus = [find](const char *bar) {
+        if (QObject *actions = find(bar))
+            QMetaObject::invokeMethod(actions, "closeMenus");
+    };
+    const int first = grid->indexAt(grid->width() / 2, grid->height() / 2);
+    auto states = std::make_shared<QList<State>>(QList<State>{
+        {"the grid", [] {}, "grid"},
+        {"select mode", [grid] { grid->setSelecting(true); }, "grid"},
+        {"select mode's menu", [=] { grid->selectAll(); openMenu("selectBar"); }, "menu"},
+        {"the grid again", [=] { closeMenus("selectBar"); grid->setSelecting(false); }, "grid"},
+        {"the viewer", [=, &viewer] { viewer.openAt(first, grid->rectOf(first)); }, "viewer"},
+        {"the viewer's menu", [=] { openMenu("viewerActions"); }, "menu"},
+        {"the help over the viewer", [=] { closeMenus("viewerActions"); show("help", true); }, "help"},
+        {"the viewer closed", [=] {
+             show("help", false);
+             if (QObject *photoViewer = find("photoViewer"))
+                 QMetaObject::invokeMethod(photoViewer, "closeViewer");
+         }, "grid"},
+        {"the side panel", [=] { show("sidePanel", true); }, "side"},
+        {"the help over the side panel", [=] { show("help", true); }, "help"},
+        {"sign-in over the side panel", [=] { show("help", false); show("signIn", true); }, "signIn"},
+        {"adding a source", [=] { show("signIn", false); show("sidePanel", false); show("addSource", true); }, "addSource"},
+        {"the grid at the end", [=] { show("addSource", false); }, "grid"},
+    });
+    auto failures = std::make_shared<int>(0);
+    auto run = std::make_shared<std::function<void(int)>>();
+    *run = [=, &keymap](int k) {
+        if (k >= states->size()) {
+            const QStringList missing = keymap.uncovered();
+            for (const QString &m : missing)
+                std::printf("selftest: FAIL no way by %s\n", qPrintable(m));
+            *failures += int(missing.size());
+            std::printf("selftest: %d commands; done, %d failed\n", int(keymap.actions().size()), *failures);
+            std::fflush(stdout);
+            QCoreApplication::exit(*failures ? 1 : 0);
+            return;
+        }
+        (*states)[k].enter();
+        // Long enough for the viewer to close.
+        QTimer::singleShot(900, window, [=, &keymap] {
+            const State &state = (*states)[k];
+            const QStringList clashes = keymap.clashes();
+            const bool layerRight = keymap.layer() == QLatin1String(state.layer);
+            const bool ok = clashes.isEmpty() && layerRight;
+            *failures += ok ? 0 : 1;
+            std::printf("selftest: %-4s %s: the keys are %s's%s\n", ok ? "ok" : "FAIL", state.what, qPrintable(keymap.layer()),
+                        layerRight ? "" : qPrintable(QStringLiteral(" (not %1's)").arg(QLatin1String(state.layer))));
+            for (const QString &clash : clashes)
+                std::printf("selftest:      two at once: %s\n", qPrintable(clash));
+            std::fflush(stdout);
+            (*run)(k + 1);
+        });
+    };
+    QTimer::singleShot(1500, window, [run] { (*run)(0); });
 }

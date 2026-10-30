@@ -21,6 +21,7 @@
 
 #include "bench.h"
 #include "framestats.h"
+#include "keymap.h"
 #include "library.h"
 #include "photogrid.h"
 #include "incoming.h"
@@ -182,7 +183,7 @@ int main(int argc, char *argv[]) {
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     // What a plugin's QML imports (docs/plugins.md): its root and its
     // buttons, and Pinhole's own pieces to draw as Pinhole does.
-    for (const char *type : {"PinholePlugin", "PluginAction", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
+    for (const char *type : {"PinholePlugin", "PluginAction", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     FrameStats stats;
     ThumbnailLoader loader(&library, parser.value("decoders").toInt());
@@ -205,12 +206,16 @@ int main(int argc, char *argv[]) {
     // What was done to one source's photos is not undone on another's.
     QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
+    Keymap keymap;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
     engine.addImageProvider(QStringLiteral("mark"), new MarkProvider);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
+    // Every action and its keys, the layer that has them, and how the
+    // window was last used (keymap.h).
+    engine.rootContext()->setContextProperty("keymap", &keymap);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("favourites", &favourites);
@@ -669,6 +674,8 @@ int main(int argc, char *argv[]) {
         runUndoSelfTest(window, viewer, test.mid(5));
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
+    if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("keys"))
+        runKeysSelfTest(window, grid, viewer, keymap);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("reload"))
         runReloadSelfTest(library, grid, viewer);
     if (qEnvironmentVariable("PINHOLE_SELFTEST") == QLatin1String("outgoing"))

@@ -90,8 +90,8 @@ ApplicationWindow {
         // What it opens: a panel at the left (the Nerd Font's
         // layout-sidebar-left, outlined in the weight of the letters).
         text: "\uebf3"
+        action: sidePanel
         hint: "Tab"
-        onTapped: side.shown = true
     }
 
     // The date beside it: the year, month, days or date of what is on
@@ -171,9 +171,14 @@ ApplicationWindow {
         anchors.bottom: buildProgress.visible ? buildProgress.top : parent.bottom
         anchors.bottomMargin: buildProgress.visible ? 8 : grid.selecting ? 72 : 24
     }
-    Shortcut {
-        enabled: addProgress.visible && !incoming.busy && win.inGrid && !grid.selecting && !trouble.visible
-        sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: incoming.dismiss()
+    Command {
+        name: "add.dismiss"
+        keys: ["Escape"]
+        keyLayer: "grid"
+        when: addProgress.visible && !incoming.busy && !grid.selecting && !trouble.visible
+        mouse: qsTr("Click it")
+        touchpad: qsTr("Tap it")
+        onTriggered: incoming.dismiss()
     }
 
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
@@ -237,9 +242,20 @@ ApplicationWindow {
         width: Math.min(parent.width - 32, label.implicitWidth + 2 * theme.fontSize)
         label.width: width - 2 * theme.fontSize
         label.elide: Text.ElideRight
-        // Signing in again, from here too.
+        // Signing in again, from here too, or with I.
         HoverHandler { enabled: serviceHealth === "needs_sign_in"; cursorShape: Qt.PointingHandCursor }
-        TapHandler { enabled: serviceHealth === "needs_sign_in"; onTapped: signIn.open(storage.sourceAccount) }
+        TapHandler { enabled: serviceHealth === "needs_sign_in"; onTapped: signInAgain.trigger() }
+    }
+    Command {
+        id: signInAgain
+        name: "health.signIn"
+        text: qsTr("Sign in again")
+        keys: ["I"]
+        keyLayer: "grid"
+        when: serviceHealth === "needs_sign_in" && healthNotice.visible
+        mouse: qsTr("Click the notice at the foot")
+        touchpad: qsTr("Tap the notice at the foot")
+        onTriggered: signIn.open(storage.sourceAccount)
     }
 
     // The Apple ID shown is not signed in to (Apple wants it again, or it was
@@ -295,19 +311,32 @@ ApplicationWindow {
                 ShellButton {
                     active: true
                     text: qsTr("Sign in")
-                    hint: "⏎"
-                    onTapped: signIn.open(storage.sourceAccount)
+                    action: troubleSignIn
                 }
                 ShellButton {
                     text: qsTr("Look around first")
-                    hint: "Esc"
-                    onTapped: win.troubleSeen = true
+                    action: troubleLater
                 }
             }
         }
     }
-    Shortcut { enabled: trouble.visible; sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; onActivated: signIn.open(storage.sourceAccount) }
-    Shortcut { enabled: trouble.visible && !tour.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: win.troubleSeen = true }
+    Command {
+        id: troubleSignIn
+        name: "trouble.signIn"
+        keys: ["Return", "Enter"]
+        keysText: "⏎"
+        keyLayer: "grid"
+        when: trouble.visible
+        onTriggered: signIn.open(storage.sourceAccount)
+    }
+    Command {
+        id: troubleLater
+        name: "trouble.later"
+        keys: ["Escape"]
+        keyLayer: "grid"
+        when: trouble.visible
+        onTriggered: win.troubleSeen = true
+    }
 
     // Back to the newest photos, whenever the grid is away from them.
     ShellButton {
@@ -326,8 +355,17 @@ ApplicationWindow {
         opacity: shown * win.chrome
         visible: opacity > 0
         text: "↓ " + qsTr("Newest")
-        key: "N"
-        onTapped: grid.glideToNewest()
+        action: newest
+    }
+    Command {
+        id: newest
+        name: "grid.newest"
+        text: qsTr("Newest")
+        section: "library"
+        keys: ["N"]
+        keyLayer: "grid"
+        when: grid.count > 0 && !grid.atNewest
+        onTriggered: grid.glideToNewest()
     }
 
     // Every key, on ? or this. Settings are in the side panel (Tab or ",").
@@ -345,9 +383,9 @@ ApplicationWindow {
                               ? 20 + selectBar.height + 8 : 16
         text: "?"
         width: height
-        // The window's key: it also puts the help away.
+        action: helpToggle
+        // Its label is the key.
         hint: ""
-        onTapped: help.shown = true
     }
 
     // What the corner button takes of the bottom right.
@@ -365,9 +403,18 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.margins: 16
         text: grid.selecting ? qsTr("Done") : qsTr("Select")
-        key: "S"
+        action: selectToggle
         active: grid.selecting
-        onTapped: grid.selecting = !grid.selecting
+    }
+    Command {
+        id: selectToggle
+        name: "select.toggle"
+        text: qsTr("Select, Done")
+        section: "select"
+        keys: ["S"]
+        keyLayer: "grid"
+        when: grid.count > 0
+        onTriggered: grid.selecting = !grid.selecting
     }
 
     // Plugins' buttons for the grid, before Select (not in select mode,
@@ -393,6 +440,7 @@ ApplicationWindow {
                 busy: modelData.busy
                 text: modelData.text
                 key: modelData.key
+                keyLayer: "grid"
                 onTapped: modelData.triggered()
                 onHoveredChanged: modelData.hovered = hovered
                 Component.onCompleted: modelData.button = gridAction
@@ -481,8 +529,10 @@ ApplicationWindow {
                 usable: grid.selectionCount > 0
                 text: all ? "\uf004" : "\uf08a"
                 labelColor: all ? theme.accent : theme.foreground
-                // The viewer's F, while a photo is open over select mode.
-                key: win.viewerShown ? "" : "F"
+                key: "F"
+                keyLayer: "grid"
+                section: "select"
+                helpText: qsTr("Favourite")
                 hint: selectBar.hints ? "F" : ""
                 onTapped: favourites.toggle(grid.selection())
             }
@@ -491,6 +541,8 @@ ApplicationWindow {
         MenuGroup {
             upward: true
             menuKey: "Shift+C"
+            keyLayer: "grid"
+            section: "select"
             items: [
                 { text: qsTr("Export"), key: "E", usable: grid.selectionCount > 0,
                   triggered: () => outgoing.exportTo(grid.selection(), true) },
@@ -502,6 +554,8 @@ ApplicationWindow {
                 enabledHere: grid.selectionCount > 0
                 flat: true
                 key: "C"
+                keyLayer: "grid"
+                section: "select"
                 hint: selectBar.hints ? "C" : ""
             }
         }
@@ -511,6 +565,7 @@ ApplicationWindow {
                 required property var modelData
                 items: modelData
                 upward: true
+                keyLayer: "grid"
                 hints: selectBar.hints
             }
         }
@@ -625,7 +680,6 @@ ApplicationWindow {
         health: serviceHealth
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
-        keys: !tour.shown
         onTourRequested: id => win.startTour(id)
         onAddRequested: {
             side.shown = false
@@ -671,12 +725,18 @@ ApplicationWindow {
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
-    // The grid has its keys: not while a menu of select mode's bar is open.
-    readonly property bool gridKeys: inGrid && !selectBar.menuOpen
-    // The viewer has the keys: not while the help or a plugin is over it.
-    readonly property bool inViewer: viewerShown && !help.shown && !pluginCovering && !tour.shown && !(photoViewer?.menuOpen ?? false)
-    // The buttons' own keys (ShellButton.qml), but for while a panel is up.
-    readonly property bool buttonKeys: !panelUp && !firstRun && !tour.shown
+    // Whose the keys are (keymap.h): the one on top, so two never share one.
+    readonly property string keyLayer: signIn.shown ? "signIn"
+        : tour.shown ? "tour"
+        : help.shown ? "help"
+        : addPicker.shown ? "addSource"
+        : firstRun ? "firstRun"
+        : side.shown ? "side"
+        : pluginCovering ? "plugin"
+        : selectBar.menuOpen || (photoViewer?.menuOpen ?? false) ? "menu"
+        : viewerShown ? "viewer"
+        : "grid"
+    Binding { target: keymap; property: "layer"; value: win.keyLayer }
 
     // What Copy and Export act on: the selection, else the photo in view.
     // What Copy and Export take: the photo on screen in the viewer, else the
@@ -706,13 +766,25 @@ ApplicationWindow {
     // Undo and redo (history.h): favourites, and what plugins change, as
     // Series does with a series put right. What was undone says so at the
     // foot of the window, over the viewer and a plugin's screen too.
-    Shortcut {
-        enabled: win.historyKeys; sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut
-        onActivated: history.undo()
+    Command {
+        id: undo
+        name: "history.undo"
+        text: qsTr("Undo")
+        section: "pinhole"
+        keys: ["Ctrl+Z"]
+        keyLayer: "any"
+        when: win.historyKeys
+        onTriggered: history.undo()
     }
-    Shortcut {
-        enabled: win.historyKeys; sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut
-        onActivated: history.redo()
+    Command {
+        id: redo
+        name: "history.redo"
+        text: qsTr("Redo")
+        section: "pinhole"
+        keys: ["Ctrl+Shift+Z"]
+        keyLayer: "any"
+        when: win.historyKeys
+        onTriggered: history.redo()
     }
     // Not while typing (an Apple ID, a code), nor while a tour shows.
     readonly property bool historyKeys: !signIn.shown && !addPicker.shown && !tour.shown
@@ -739,72 +811,283 @@ ApplicationWindow {
         }
     }
 
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { enabled: !signIn.shown && !tour.shown; sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.shown = !help.shown }
-    Shortcut { enabled: help.shown; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: help.shown = false }
+    // The window's own keys.
+    Command {
+        name: "app.quit"
+        text: qsTr("Quit")
+        section: "pinhole"
+        keys: ["Q"]
+        keyLayer: "any"
+        noMouse: qsTr("Closed as any window is")
+        noTouchpad: qsTr("Closed as any window is")
+        onTriggered: Qt.quit()
+    }
+    Command {
+        id: helpToggle
+        name: "help.toggle"
+        text: qsTr("Keys and gestures")
+        section: "pinhole"
+        keys: ["?"]
+        keyLayer: "any"
+        when: keymap.layer !== "signIn" && keymap.layer !== "tour"
+        onTriggered: help.shown = !help.shown
+    }
+    Command {
+        name: "help.close"
+        keys: ["Escape"]
+        keyLayer: "help"
+        mouse: qsTr("Click beside it")
+        touchpad: qsTr("Tap beside it")
+        onTriggered: help.shown = false
+    }
     // Frame times, for working on the grid: a key nobody presses by chance.
-    Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; onActivated: grid.statsVisible = !grid.statsVisible }
+    Command {
+        name: "dev.stats"
+        keys: ["Ctrl+Shift+F"]
+        keyLayer: "any"
+        noMouse: qsTr("For working on Pinhole")
+        noTouchpad: qsTr("For working on Pinhole")
+        onTriggered: grid.statsVisible = !grid.statsVisible
+    }
     // The side panel: sources, storage and plugins, on Tab or ",", and any
     // of the first nine sources shown on its number, from the grid or the
     // panel.
-    Shortcut {
-        enabled: (win.inGrid || side.takesKeys) && sources.known; sequences: ["Tab", ","]; context: Qt.ApplicationShortcut
-        onActivated: side.shown = !side.shown
+    Command {
+        id: sidePanel
+        name: "side.toggle"
+        text: qsTr("Sources and settings")
+        section: "pinhole"
+        keys: ["Tab", ","]
+        keyLayer: "any"
+        when: (keymap.layer === "grid" || keymap.layer === "side") && sources.known
+        onTriggered: side.shown = !side.shown
     }
     Repeater {
         model: 9
-        delegate: Item {
-            id: digit
+        delegate: Command {
             required property int index
-            Shortcut {
-                enabled: (win.inGrid || side.takesKeys) && digit.index < sources.list.length
-                sequence: String(digit.index + 1)
-                context: Qt.ApplicationShortcut
-                onActivated: sources.showAt(digit.index)
-            }
+            name: "side.show" + (index + 1)
+            text: qsTr("Show a source")
+            // Once in the help, for all nine.
+            section: index === 0 ? "pinhole" : ""
+            keys: [String(index + 1)]
+            keysText: "1–9"
+            keyLayer: "any"
+            when: (keymap.layer === "grid" || keymap.layer === "side") && index < sources.list.length
+            mouse: qsTr("Its row in the side panel")
+            touchpad: qsTr("Its row in the side panel")
+            onTriggered: sources.showAt(index)
         }
     }
 
-    // Every button presses on its own key too, shown beside it, while it
-    // shows: Newest N, Select S, Copy C, Export (as JPEG and MP4) E,
-    // originals ⇧E, Live L, close Esc; ⇧ with a button's key opens the
-    // menu beside it (MenuGroup.qml). The keys here are the rest.
-
     // The grid.
-    Shortcut { enabled: win.gridKeys; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(-1) }
-    Shortcut { enabled: win.gridKeys; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: grid.zoomStep(1) }
-    Shortcut { enabled: win.gridKeys; sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: grid.scrollToStart() }
+    Command {
+        name: "grid.zoomIn"
+        text: qsTr("Zoom in")
+        section: "library"
+        keys: ["+", "="]
+        keyLayer: "grid"
+        mouse: qsTr("Ctrl + wheel, or the thumb wheel")
+        touchpad: qsTr("Pinch out")
+        onTriggered: grid.zoomStep(-1)
+    }
+    Command {
+        name: "grid.zoomOut"
+        text: qsTr("Zoom out")
+        section: "library"
+        keys: ["-"]
+        keyLayer: "grid"
+        mouse: qsTr("Ctrl + wheel, or the thumb wheel")
+        touchpad: qsTr("Pinch in")
+        onTriggered: grid.zoomStep(1)
+    }
+    Command {
+        name: "grid.oldest"
+        text: qsTr("Oldest")
+        section: "library"
+        keys: ["Home"]
+        keyLayer: "grid"
+        onTriggered: grid.scrollToStart()
+    }
     // Up and down a row, held a steady glide; with Shift a half screen,
     // held faster.
-    Shortcut { enabled: win.gridKeys; sequence: "Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, false) }
-    Shortcut { enabled: win.gridKeys; sequence: "Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, false) }
-    Shortcut { enabled: win.gridKeys; sequence: "Shift+Up"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(-1, true) }
-    Shortcut { enabled: win.gridKeys; sequence: "Shift+Down"; context: Qt.ApplicationShortcut; onActivated: grid.scrollByKey(1, true) }
-    Shortcut { enabled: win.gridKeys; sequence: "PgUp"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(-1) }
-    Shortcut { enabled: win.gridKeys; sequence: "PgDown"; context: Qt.ApplicationShortcut; onActivated: grid.scrollPages(1) }
-    Shortcut { enabled: win.gridKeys && !trouble.visible; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut; onActivated: win.openCurrent() }
-
-    Shortcut { enabled: win.gridKeys && grid.selecting && !trouble.visible; sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: grid.selecting = false }
-
-    // Out of the app, from the grid or the viewer.
-    Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; onActivated: outgoing.copy(win.chosen()) }
-    Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), true) }
-    Shortcut { sequence: "Ctrl+Shift+E"; context: Qt.ApplicationShortcut; onActivated: outgoing.exportTo(win.chosen(), false) }
-
-    // The viewer.
-    Shortcut {
-        enabled: win.inViewer; sequences: ["Space", "Return"]; context: Qt.ApplicationShortcut
-        // Space plays and pauses a video; on a photo it closes, like Quick Look.
-        onActivated: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
+    Command {
+        name: "grid.up"
+        text: qsTr("Scroll")
+        section: "library"
+        keys: ["Up"]
+        keysText: "↑ ↓"
+        keyLayer: "grid"
+        autoRepeat: true
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: grid.scrollByKey(-1, false)
     }
-    // ← and →, with Shift or not, are the viewer's own: it reads them
-    // pressed and let go, to move on while one is held. On a video, Shift
-    // with them skips ten seconds instead.
-    Binding { target: viewer; property: "takesInput"; value: win.inViewer }
-    Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(-10) }
-    Shortcut { enabled: win.inViewer && viewer.video; sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: photoViewer.skip(10) }
-    Shortcut { enabled: win.inViewer; sequence: "M"; context: Qt.ApplicationShortcut; onActivated: photoViewer.muted = !photoViewer.muted }
-    Shortcut { enabled: win.inViewer; sequences: ["+", "="]; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(1) }
-    Shortcut { enabled: win.inViewer; sequence: "-"; context: Qt.ApplicationShortcut; onActivated: viewer.zoomStep(-1) }
-    Shortcut { enabled: win.inViewer; sequence: "0"; context: Qt.ApplicationShortcut; onActivated: viewer.resetZoom() }
+    Command {
+        name: "grid.down"
+        keys: ["Down"]
+        keyLayer: "grid"
+        autoRepeat: true
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: grid.scrollByKey(1, false)
+    }
+    Command {
+        name: "grid.fastUp"
+        text: qsTr("Faster")
+        section: "library"
+        keys: ["Shift+Up"]
+        keysText: "⇧ ↑ ↓"
+        keyLayer: "grid"
+        autoRepeat: true
+        mouse: qsTr("Spin the wheel")
+        touchpad: qsTr("Flick with two fingers")
+        onTriggered: grid.scrollByKey(-1, true)
+    }
+    Command {
+        name: "grid.fastDown"
+        keys: ["Shift+Down"]
+        keyLayer: "grid"
+        autoRepeat: true
+        mouse: qsTr("Spin the wheel")
+        touchpad: qsTr("Flick with two fingers")
+        onTriggered: grid.scrollByKey(1, true)
+    }
+    Command {
+        name: "grid.pageUp"
+        text: qsTr("A screen up, down")
+        section: "library"
+        keys: ["PgUp"]
+        keysText: "PgUp PgDn"
+        keyLayer: "grid"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: grid.scrollPages(-1)
+    }
+    Command {
+        name: "grid.pageDown"
+        keys: ["PgDown"]
+        keyLayer: "grid"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: grid.scrollPages(1)
+    }
+    Command {
+        name: "grid.open"
+        text: qsTr("Open")
+        section: "library"
+        keys: ["Space", "Return"]
+        keyLayer: "grid"
+        when: !trouble.visible
+        mouse: qsTr("Click a photo")
+        touchpad: qsTr("Tap a photo")
+        onTriggered: win.openCurrent()
+    }
+    Command {
+        name: "select.leave"
+        keys: ["Escape"]
+        keyLayer: "grid"
+        when: grid.selecting && !trouble.visible
+        mouse: qsTr("Done")
+        touchpad: qsTr("Done")
+        onTriggered: grid.selecting = false
+    }
+
+    // Out of the app, from the grid or the viewer: the selection, else the
+    // photo open, else the one under the pointer.
+    Command {
+        name: "share.copy"
+        mouse: qsTr("In the viewer, or in select mode")
+        touchpad: qsTr("In the viewer, or in select mode")
+        text: qsTr("Copy")
+        section: "share"
+        keys: ["Ctrl+C"]
+        keyLayer: "chrome"
+        onTriggered: outgoing.copy(win.chosen())
+    }
+    Command {
+        name: "share.export"
+        mouse: qsTr("In the viewer, or in select mode")
+        touchpad: qsTr("In the viewer, or in select mode")
+        text: qsTr("Export JPEG")
+        section: "share"
+        keys: ["Ctrl+E"]
+        keyLayer: "chrome"
+        onTriggered: outgoing.exportTo(win.chosen(), true)
+    }
+    Command {
+        name: "share.exportOriginal"
+        mouse: qsTr("In the viewer, or in select mode")
+        touchpad: qsTr("In the viewer, or in select mode")
+        text: qsTr("Export original")
+        section: "share"
+        keys: ["Ctrl+Shift+E"]
+        keyLayer: "chrome"
+        onTriggered: outgoing.exportTo(win.chosen(), false)
+    }
+
+    // The viewer. ← and →, with Shift or not, are its own: it reads them
+    // pressed and let go, to move on while one is held.
+    Binding { target: viewer; property: "takesInput"; value: keymap.layer === "viewer" }
+    Command {
+        name: "viewer.space"
+        text: qsTr("Play, pause; close a photo")
+        section: "video"
+        keys: ["Space", "Return"]
+        keyLayer: "viewer"
+        mouse: qsTr("Click the video")
+        touchpad: qsTr("Tap the video")
+        // Space plays and pauses a video; on a photo it closes, like Quick Look.
+        onTriggered: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
+    }
+    Command {
+        name: "video.back"
+        text: qsTr("10 seconds back, on")
+        section: "video"
+        keys: ["Shift+Left"]
+        keysText: "⇧ ← →"
+        keyLayer: "viewer"
+        when: viewer.video
+        mouse: qsTr("Click the bar at the foot")
+        touchpad: qsTr("Tap the bar at the foot")
+        onTriggered: photoViewer.skip(-10)
+    }
+    Command {
+        name: "video.on"
+        keys: ["Shift+Right"]
+        keyLayer: "viewer"
+        when: viewer.video
+        mouse: qsTr("Click the bar at the foot")
+        touchpad: qsTr("Tap the bar at the foot")
+        onTriggered: photoViewer.skip(10)
+    }
+    Command {
+        name: "viewer.zoomIn"
+        text: qsTr("Zoom in, out")
+        section: "photo"
+        keys: ["+", "="]
+        keysText: "+ −"
+        keyLayer: "viewer"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Pinch")
+        onTriggered: viewer.zoomStep(1)
+    }
+    Command {
+        name: "viewer.zoomOut"
+        keys: ["-"]
+        keyLayer: "viewer"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Pinch")
+        onTriggered: viewer.zoomStep(-1)
+    }
+    Command {
+        name: "viewer.fit"
+        text: qsTr("Fit")
+        section: "photo"
+        keys: ["0"]
+        keyLayer: "viewer"
+        mouse: qsTr("Double-click")
+        touchpad: qsTr("Double-tap")
+        onTriggered: viewer.resetZoom()
+    }
 }
