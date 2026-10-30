@@ -2,7 +2,11 @@
 
 #include <QStringList>
 
+class Incoming;
+class Keymap;
 class Library;
+class PhotoGrid;
+class QQuickWindow;
 class Viewer;
 class Outgoing;
 class QString;
@@ -85,3 +89,19 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
 // again, Ctrl+Z twice, the second with nothing left to undo. Check the
 // series' length after each and grab the window, its notice, into <dir>.
 void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
+
+// What a self-test drives.
+struct SelfTestContext {
+    QQuickWindow *window;
+    PhotoGrid *grid;
+    Library &library;
+    Viewer &viewer;
+    Incoming &incoming;
+    Outgoing &outgoing;
+    Keymap &keymap;
+};
+
+// PINHOLE_SELFTEST: start the self-test it names, `name` or `name:argument`
+// (selftestrun.cpp has those that are only pictures of the window). False,
+// and a line saying which there are, for a name that is none.
+bool runSelfTest(const QString &test, const SelfTestContext &context);

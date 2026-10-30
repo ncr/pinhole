@@ -66,6 +66,7 @@ SOURCES += \
     src/incoming.cpp \
     src/portal.cpp \
     src/selftest.cpp \
+    src/selftestrun.cpp \
     src/theme.cpp \
     src/translator.cpp \
     src/framestats.cpp \
