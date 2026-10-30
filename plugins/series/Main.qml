@@ -293,16 +293,7 @@ PinholePlugin {
         ["A", qsTr("Add a photo to the series beside it")],
         ["U", qsTr("Ungroup")],
         ["G", qsTr("Group what is ticked")],
-        ["G", qsTr("On a photo: its series, whole, to put right")],
-        ["Space", qsTr("There: a photo up close")],
-        ["G", qsTr("Series: a GIF or a video")],
-        ["← →", qsTr("Previous, next series")],
-        ["1–5", qsTr("Motion")],
-        ["P L O", qsTr("Pace, look, shape")],
-        ["T", qsTr("Steady")],
-        ["Space", qsTr("Pause")],
-        ["⏎", qsTr("Make a GIF")],
-        ["⇧ ⏎", qsTr("Make a video")]
+        ["G", qsTr("On a photo: its series, whole, to put right")]
     ]
 
     settings: Component {

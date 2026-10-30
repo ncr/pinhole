@@ -1,7 +1,10 @@
 import QtQuick
 
-// The keys, on ? or the ? button: as few words as will do, in as many
-// columns as fit, scrolling only if the window is too short for them.
+// The keys and gestures, on ? or the ? button: made from the window's
+// commands (Command.qml, keymap.h), so it says what Pinhole does and no
+// more. Three tabs, the keyboard's, the mouse's and the touchpad's, opening
+// on the one used last; as few words as will do, in as many columns as
+// fit, scrolling only if the window is too short for them.
 Item {
     id: root
     anchors.fill: parent
@@ -10,48 +13,116 @@ Item {
     Behavior on opacity { NumberAnimation { duration: 120 } }
 
     property bool shown: false
-    // The plugins' keys: [{title, keys}], after Pinhole's own.
+    // Keys plugins list without commands of their own: [{title, keys}].
     property var pluginSections: []
 
-    readonly property var sections: builtIn.concat(pluginSections)
-    readonly property var builtIn: [
-        { title: qsTr("Library"), keys: [
-            ["↑ ↓", qsTr("Scroll")],
-            ["⇧ ↑ ↓", qsTr("Faster")],
-            ["N", qsTr("Newest")],
-            ["+ −", qsTr("Zoom")],
-            ["Space", qsTr("Open")],
-            ["S", qsTr("Select")],
-            ["F", qsTr("Favourite the selected")],
-            [qsTr("Drag"), qsTr("Select a range")]
-        ] },
-        { title: qsTr("Photo"), keys: [
-            ["← →", qsTr("Previous, next")],
-            ["⇧ ← →", qsTr("Faster")],
-            ["Esc", qsTr("Back")],
-            [qsTr("Drag") + " ↑ ↓", qsTr("Back")],
-            ["+ − 0", qsTr("Zoom")],
-            ["F", qsTr("Favourite")],
-            ["L", qsTr("Live")],
-            ["⇧ L", qsTr("Live effects")],
-            ["M", qsTr("Sound")]
-        ] },
-        { title: qsTr("Share"), keys: [
-            ["C", qsTr("Copy")],
-            ["E", qsTr("Export JPEG")],
-            ["⇧ E", qsTr("Export original")],
-            [qsTr("Drop files"), qsTr("Add to the library")]
-        ] },
-        { title: "Pinhole", keys: [
-            ["⇧ " + qsTr("key"), qsTr("The menu beside a button")],
-            ["Tab", qsTr("Sources, settings")],
-            ["1–9", qsTr("Show a source")],
-            ["Ctrl Z", qsTr("Undo")],
-            ["Ctrl ⇧ Z", qsTr("Redo")],
-            ["?", qsTr("Keys")],
-            ["Q", qsTr("Quit")]
-        ] }
+    // "keyboard", "mouse" or "touchpad".
+    property string tab: "keyboard"
+    onShownChanged: if (shown) tab = keymap.input
+    readonly property var tabs: [
+        { id: "keyboard", name: qsTr("Keyboard") },
+        { id: "mouse", name: qsTr("Mouse") },
+        { id: "touchpad", name: qsTr("Touchpad") }
     ]
+    function turn(direction) {
+        const at = tabs.findIndex(t => t.id === tab)
+        tab = tabs[(at + direction + tabs.length) % tabs.length].id
+        scroller.contentY = 0
+    }
+
+    // Pinhole's parts first, in this order, then each plugin's.
+    readonly property var order: ["library", "select", "photo", "video", "share", "pinhole"]
+    readonly property var titles: ({
+        "library": qsTr("Library"),
+        "select": qsTr("Select mode"),
+        "photo": qsTr("Photo"),
+        "video": qsTr("Video"),
+        "share": qsTr("Share"),
+        "pinhole": "Pinhole"
+    })
+    // Each part's rows, [how, what]: the keys, or how with the mouse or
+    // the touchpad, as each command says.
+    readonly property var sections: {
+        keymap.revision
+        const rows = {}
+        const add = (section, how, what) => {
+            const list = rows[section] ?? (rows[section] = [])
+            if (!list.some(r => r[0] === how && r[1] === what))
+                list.push([how, what])
+        }
+        const commands = keymap.actions().slice().sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line)
+        for (const c of commands) {
+            if (!c.section || !c.text)
+                continue
+            if (tab === "keyboard") {
+                if (c.keyHelp && c.keyName !== "")
+                    add(c.section, c.keyName, c.text)
+            } else if (c.pointerHelp) {
+                const how = tab === "mouse" ? c.mouse : c.touchpad
+                if (how)
+                    add(c.section, how, c.text)
+            }
+        }
+        if (tab === "keyboard")
+            for (const s of pluginSections)
+                for (const k of s.keys)
+                    add(s.title, k[0], k[1])
+        const known = order.filter(s => rows[s] !== undefined)
+        const others = Object.keys(rows).filter(s => order.indexOf(s) < 0).sort()
+        return known.concat(others).map(s => ({ title: titles[s] ?? s, keys: rows[s] }))
+    }
+
+    // Its keys, while it is on top (Command.qml).
+    Command {
+        name: "help.previousTab"
+        keys: ["Left", "Shift+Tab", "Backtab"]
+        keyLayer: "help"
+        mouse: qsTr("Click a tab")
+        touchpad: qsTr("Tap a tab")
+        onTriggered: root.turn(-1)
+    }
+    Command {
+        name: "help.nextTab"
+        keys: ["Right", "Tab"]
+        keyLayer: "help"
+        mouse: qsTr("Click a tab")
+        touchpad: qsTr("Tap a tab")
+        onTriggered: root.turn(1)
+    }
+    Command {
+        name: "help.up"
+        keys: ["Up"]
+        keyLayer: "help"
+        autoRepeat: true
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: scroller.contentY = Math.max(0, scroller.contentY - 3 * theme.fontSize)
+    }
+    Command {
+        name: "help.down"
+        keys: ["Down"]
+        keyLayer: "help"
+        autoRepeat: true
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + 3 * theme.fontSize))
+    }
+    Command {
+        name: "help.pageUp"
+        keys: ["PgUp"]
+        keyLayer: "help"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: scroller.contentY = Math.max(0, scroller.contentY - scroller.height * 0.9)
+    }
+    Command {
+        name: "help.pageDown"
+        keys: ["PgDown"]
+        keyLayer: "help"
+        mouse: qsTr("Wheel")
+        touchpad: qsTr("Two fingers")
+        onTriggered: scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + scroller.height * 0.9))
+    }
 
     // As Omarchy's menus: a scrim of the theme's background at half, and a
     // card of it with a hairline in the text colour.
@@ -95,21 +166,67 @@ Item {
         Math.floor((width - 32 - 2 * padding + 2 * gap) / (columnWidth + 2 * gap))))
 
     Rectangle {
+        id: card
         anchors.centerIn: parent
-        width: Math.min(parent.width - 32, flow.width + 2 * root.padding)
-        height: Math.min(parent.height - 32, flow.height + 2 * root.padding)
+        width: Math.min(parent.width - 32, Math.max(flow.width, head.implicitWidth) + 2 * root.padding)
+        height: Math.min(parent.height - 32, head.height + theme.fontSize + flow.height + 2 * root.padding)
         radius: Math.min(4, theme.radius)
         color: theme.background
         border.color: theme.foreground
         border.width: 1
         clip: true
+        // Clicks inside stay inside.
+        MouseArea { anchors.fill: parent }
+
+        // The tabs, and what goes for every button.
+        Column {
+            id: head
+            x: root.padding
+            y: root.padding
+            width: card.width - 2 * root.padding
+            spacing: Math.round(theme.fontSize * 0.6)
+            Row {
+                spacing: 6
+                Repeater {
+                    model: root.tabs
+                    delegate: ShellButton {
+                        required property var modelData
+                        flat: root.tab !== modelData.id
+                        active: root.tab === modelData.id
+                        text: modelData.name
+                        hint: ""
+                        onTapped: {
+                            root.tab = modelData.id
+                            scroller.contentY = 0
+                        }
+                    }
+                }
+                UiText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    leftPadding: theme.fontSize
+                    text: "← →"
+                    color: theme.darkForeground
+                }
+            }
+            UiText {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: theme.darkForeground
+                text: root.tab === "keyboard" ? qsTr("Each button shows its key beside it.")
+                    : root.tab === "mouse" ? qsTr("Every button works with a click, as its key does.")
+                    : qsTr("Every button works with a tap, as its key does. A tap with two fingers only stops what moves.")
+            }
+        }
 
         Flickable {
+            id: scroller
             anchors.fill: parent
             anchors.margins: root.padding
+            anchors.topMargin: head.y + head.height + theme.fontSize
             contentWidth: flow.width
             contentHeight: flow.height
             boundsBehavior: Flickable.StopAtBounds
+            clip: true
             Flow {
                 id: flow
                 width: root.columns * root.columnWidth + (root.columns - 1) * 2 * root.gap

@@ -369,16 +369,6 @@ ApplicationWindow {
         text: "↓ " + qsTr("Newest")
         action: newest
     }
-    Command {
-        id: newest
-        name: "grid.newest"
-        text: qsTr("Newest")
-        section: "library"
-        keys: ["N"]
-        keyLayer: "grid"
-        when: grid.count > 0
-        onTriggered: grid.cursorToEnd()
-    }
 
     // Every key, on ? or this. Settings are in the side panel (Tab or ",").
     ShellButton {
@@ -596,7 +586,7 @@ ApplicationWindow {
                 labelColor: all ? theme.accent : theme.foreground
                 key: "F"
                 keyLayer: "grid"
-                section: "select"
+                section: "photo"
                 helpText: qsTr("Favourite")
                 hint: selectBar.hints ? "F" : ""
                 onTapped: favourites.toggle(grid.selection())
@@ -607,11 +597,11 @@ ApplicationWindow {
             upward: true
             menuKey: "Shift+C"
             keyLayer: "grid"
-            section: "select"
+            section: "share"
             items: [
-                { text: qsTr("Export"), key: "E", usable: grid.selectionCount > 0,
+                { text: qsTr("Export"), helpText: qsTr("Export JPEG"), key: "E", usable: grid.selectionCount > 0,
                   triggered: () => outgoing.exportTo(grid.selection(), true) },
-                { text: qsTr("Export originals"), key: "Shift+E", usable: grid.selectionCount > 0,
+                { text: qsTr("Export originals"), helpText: qsTr("Export original"), key: "Shift+E", usable: grid.selectionCount > 0,
                   triggered: () => outgoing.exportTo(grid.selection(), false) }
             ]
             CopyButton {
@@ -620,7 +610,7 @@ ApplicationWindow {
                 flat: true
                 key: "C"
                 keyLayer: "grid"
-                section: "select"
+                section: "share"
                 hint: selectBar.hints ? "C" : ""
             }
         }
@@ -986,43 +976,12 @@ ApplicationWindow {
             when: (keymap.layer === "grid" || keymap.layer === "side") && index < sources.list.length
             mouse: qsTr("Its row in the side panel")
             touchpad: qsTr("Its row in the side panel")
+            pointerHelp: false
             onTriggered: sources.showAt(index)
         }
     }
 
     // The grid.
-    Command {
-        id: gridZoomIn
-        name: "grid.zoomIn"
-        text: qsTr("Zoom in")
-        section: "library"
-        keys: ["+", "="]
-        keyLayer: "grid"
-        mouse: qsTr("The + button, the thumb wheel, or Ctrl + wheel")
-        touchpad: qsTr("Pinch out, or the + button")
-        onTriggered: grid.zoomStep(-1)
-    }
-    Command {
-        id: gridZoomOut
-        name: "grid.zoomOut"
-        text: qsTr("Zoom out")
-        section: "library"
-        keys: ["-"]
-        keyLayer: "grid"
-        mouse: qsTr("The − button, the thumb wheel, or Ctrl + wheel")
-        touchpad: qsTr("Pinch in, or the − button")
-        onTriggered: grid.zoomStep(1)
-    }
-    Command {
-        name: "grid.oldest"
-        text: qsTr("Oldest")
-        section: "library"
-        keys: ["Home"]
-        keyLayer: "grid"
-        mouse: qsTr("The top of the years at the right edge")
-        touchpad: qsTr("The top of the years at the right edge")
-        onTriggered: grid.cursorToStart()
-    }
     // The cursor: a photo across, a row down, held a steady pace; the view
     // glides to keep it in sight.
     Command {
@@ -1035,6 +994,7 @@ ApplicationWindow {
         autoRepeat: true
         mouse: qsTr("Point")
         touchpad: qsTr("Point")
+        pointerHelp: false
         onTriggered: grid.moveCursor(-1, 0, false)
     }
     Command {
@@ -1053,6 +1013,9 @@ ApplicationWindow {
         autoRepeat: true
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
+        section: "library"
+        text: qsTr("Scroll")
+        keyHelp: false
         onTriggered: grid.moveCursor(0, -1, false)
     }
     Command {
@@ -1064,7 +1027,7 @@ ApplicationWindow {
         touchpad: qsTr("Two fingers")
         onTriggered: grid.moveCursor(0, 1, false)
     }
-    // With Shift: a half screen, held faster; in select mode, ticking.
+    // With Shift: a half screen, held faster (in select mode, ticking).
     Command {
         name: "grid.fastUp"
         text: qsTr("Faster")
@@ -1097,6 +1060,7 @@ ApplicationWindow {
         keyLayer: "grid"
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
+        pointerHelp: false
         onTriggered: grid.cursorPages(-1)
     }
     Command {
@@ -1108,11 +1072,52 @@ ApplicationWindow {
         onTriggered: grid.cursorPages(1)
     }
     Command {
+        name: "grid.oldest"
+        text: qsTr("Oldest; any year")
+        section: "library"
+        keys: ["Home"]
+        keyLayer: "grid"
+        mouse: qsTr("The years at the right")
+        touchpad: qsTr("The years at the right")
+        onTriggered: grid.cursorToStart()
+    }
+    Command {
+        id: newest
+        name: "grid.newest"
+        text: qsTr("Newest")
+        section: "library"
+        keys: ["N"]
+        keyLayer: "grid"
+        when: grid.count > 0
+        onTriggered: grid.cursorToEnd()
+    }
+    Command {
+        id: gridZoomIn
+        name: "grid.zoomIn"
+        text: qsTr("Zoom in, out")
+        section: "library"
+        keys: ["+", "="]
+        keyLayer: "grid"
+        mouse: qsTr("Thumb wheel, or − +")
+        touchpad: qsTr("Pinch, or − +")
+        keysText: "+ −"
+        onTriggered: grid.zoomStep(-1)
+    }
+    Command {
+        id: gridZoomOut
+        name: "grid.zoomOut"
+        keys: ["-"]
+        keyLayer: "grid"
+        mouse: qsTr("Thumb wheel, or − +")
+        touchpad: qsTr("Pinch, or − +")
+        onTriggered: grid.zoomStep(1)
+    }
+    Command {
         name: "grid.open"
         text: qsTr("Open")
         section: "library"
         keys: ["Return", "Enter"]
-        keysText: "⏎"
+        keysText: "Space ⏎"
         keyLayer: "grid"
         when: !trouble.visible
         mouse: qsTr("Click a photo")
@@ -1122,20 +1127,21 @@ ApplicationWindow {
     // Space opens too, but ticks in select mode.
     Command {
         name: "grid.space"
-        text: qsTr("Open; in select mode, tick")
-        section: "library"
+        text: qsTr("Tick")
+        section: "select"
         keys: ["Space"]
         keyLayer: "grid"
         when: !trouble.visible
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
+        keysText: "Space"
+        pointerHelp: false
         onTriggered: grid.selecting ? grid.tickCursor() : win.openCurrent()
     }
     Command {
         id: selectRange
         name: "select.range"
         text: qsTr("Range: the next photo ends it")
-        section: "select"
         keys: ["R"]
         keyLayer: "grid"
         when: grid.selecting
@@ -1151,7 +1157,7 @@ ApplicationWindow {
         when: grid.selecting
         autoRepeat: true
         mouse: qsTr("Drag across, or ⇧ click")
-        touchpad: qsTr("Drag with three fingers, or Range")
+        touchpad: qsTr("Three fingers, or Range")
         onTriggered: grid.moveCursor(0, -1, true)
     }
     Command {
@@ -1198,33 +1204,98 @@ ApplicationWindow {
     // photo open, else the one under the pointer.
     Command {
         name: "share.copy"
-        mouse: qsTr("In the viewer, or in select mode")
-        touchpad: qsTr("In the viewer, or in select mode")
+        mouse: qsTr("Viewer, select mode")
+        touchpad: qsTr("Viewer, select mode")
         text: qsTr("Copy")
         section: "share"
         keys: ["Ctrl+C"]
         keyLayer: "chrome"
+        keyHelp: false
         onTriggered: outgoing.copy(win.chosen())
     }
     Command {
         name: "share.export"
-        mouse: qsTr("In the viewer, or in select mode")
-        touchpad: qsTr("In the viewer, or in select mode")
+        mouse: qsTr("Viewer, select mode")
+        touchpad: qsTr("Viewer, select mode")
         text: qsTr("Export JPEG")
         section: "share"
         keys: ["Ctrl+E"]
         keyLayer: "chrome"
+        keyHelp: false
         onTriggered: outgoing.exportTo(win.chosen(), true)
     }
     Command {
         name: "share.exportOriginal"
-        mouse: qsTr("In the viewer, or in select mode")
-        touchpad: qsTr("In the viewer, or in select mode")
+        mouse: qsTr("Viewer, select mode")
+        touchpad: qsTr("Viewer, select mode")
         text: qsTr("Export original")
         section: "share"
         keys: ["Ctrl+Shift+E"]
         keyLayer: "chrome"
+        keyHelp: false
         onTriggered: outgoing.exportTo(win.chosen(), false)
+    }
+
+    // What only a pointer does, for the help's mouse and touchpad tabs.
+    Command {
+        name: "gesture.stop"
+        text: qsTr("Stop a coast")
+        section: "library"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("The keys move it a step at a time")
+        mouse: qsTr("Click")
+        touchpad: qsTr("Rest a finger, or tap two")
+    }
+    Command {
+        name: "gesture.drag"
+        text: qsTr("Into another app")
+        section: "share"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("Ctrl+C, then paste there")
+        mouse: qsTr("Drag photos out")
+        touchpad: qsTr("Drag out with three fingers")
+    }
+    Command {
+        name: "gesture.drop"
+        text: qsTr("Add to the library")
+        section: "share"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("Files come in by being dropped")
+        mouse: qsTr("Drop files on it")
+        touchpad: qsTr("Drop files on it")
+    }
+    Command {
+        name: "gesture.close"
+        text: qsTr("Back to the library")
+        section: "photo"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("Esc")
+        mouse: qsTr("Drag up or down, Back")
+        touchpad: qsTr("Swipe up or down, pinch in")
+    }
+    Command {
+        name: "gesture.play"
+        text: qsTr("Play, pause")
+        section: "video"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("Space")
+        mouse: qsTr("Click the video")
+        touchpad: qsTr("Tap the video")
+    }
+    Command {
+        name: "gesture.seek"
+        text: qsTr("Seek")
+        section: "video"
+        bound: false
+        keyHelp: false
+        noKeyboard: qsTr("[ ]")
+        mouse: qsTr("The bar at the foot")
+        touchpad: qsTr("The bar at the foot")
     }
 
     // The viewer. ← and →, with Shift or not, are its own: it reads them
@@ -1239,6 +1310,7 @@ ApplicationWindow {
         mouse: qsTr("Click the video")
         touchpad: qsTr("Tap the video")
         // Space plays and pauses a video; on a photo it closes, like Quick Look.
+        pointerHelp: false
         onTriggered: if (!photoViewer.togglePlay()) photoViewer.closeViewer()
     }
     Command {
@@ -1251,6 +1323,7 @@ ApplicationWindow {
         when: viewer.video
         mouse: qsTr("Click the bar at the foot")
         touchpad: qsTr("Tap the bar at the foot")
+        pointerHelp: false
         onTriggered: photoViewer.skip(-10)
     }
     Command {
@@ -1271,7 +1344,7 @@ ApplicationWindow {
         keysText: "← →"
         keyLayer: "viewer"
         bound: false
-        mouse: qsTr("Thumb wheel, a side, or drag across")
+        mouse: qsTr("Thumb wheel, a side, drag")
         touchpad: qsTr("Swipe with two fingers")
     }
     Command {
@@ -1282,8 +1355,8 @@ ApplicationWindow {
         keysText: "⇧ ← →"
         keyLayer: "viewer"
         bound: false
-        mouse: qsTr("Spin the thumb wheel, or the strip")
-        touchpad: qsTr("Drag the strip")
+        mouse: qsTr("The strip at the foot")
+        touchpad: qsTr("The strip at the foot")
     }
     Command {
         name: "viewer.pan"
@@ -1305,6 +1378,7 @@ ApplicationWindow {
         keyLayer: "viewer"
         mouse: qsTr("The strip at the foot")
         touchpad: qsTr("The strip at the foot")
+        pointerHelp: false
         onTriggered: viewer.jumpTo(0)
     }
     Command {
@@ -1324,6 +1398,7 @@ ApplicationWindow {
         keyLayer: "viewer"
         mouse: qsTr("The strip at the foot")
         touchpad: qsTr("The strip at the foot")
+        pointerHelp: false
         onTriggered: viewer.goTo(viewer.index - 10)
     }
     Command {

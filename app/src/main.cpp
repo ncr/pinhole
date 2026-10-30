@@ -416,8 +416,9 @@ int main(int argc, char *argv[]) {
             });
         });
     }
-    // PINHOLE_SELFTEST=help:<file>: the shortcut overlay as an image, to check
-    // its layout (and each language's) without a screen.
+    // PINHOLE_SELFTEST=help:<file>: the help as images, to check its layout
+    // (and each language's) without a screen: <file> its keyboard tab, and
+    // beside it <file>-mouse and <file>-touchpad.
     // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST"); test.startsWith(QLatin1String("shot:"))) {
         // PINHOLE_SELFTEST_DELAY: how long to wait first, in ms.
@@ -435,8 +436,22 @@ int main(int argc, char *argv[]) {
             if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
                 help->setProperty("shown", true);
             QTimer::singleShot(400, window, [window, test] {
-                window->grabWindow().save(test.mid(5));
-                QCoreApplication::quit();
+                QObject *help = window->findChild<QObject *>(QStringLiteral("help"));
+                const QString file = test.mid(5);
+                const QString stem = file.left(file.lastIndexOf('.')), suffix = file.mid(file.lastIndexOf('.'));
+                help->setProperty("tab", QStringLiteral("keyboard"));
+                QTimer::singleShot(200, window, [=] {
+                    window->grabWindow().save(file);
+                    help->setProperty("tab", QStringLiteral("mouse"));
+                    QTimer::singleShot(200, window, [=] {
+                        window->grabWindow().save(stem + "-mouse" + suffix);
+                        help->setProperty("tab", QStringLiteral("touchpad"));
+                        QTimer::singleShot(200, window, [=] {
+                            window->grabWindow().save(stem + "-touchpad" + suffix);
+                            QCoreApplication::quit();
+                        });
+                    });
+                });
             });
         });
     }

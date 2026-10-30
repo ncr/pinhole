@@ -6,7 +6,9 @@
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
+#include <QQmlContext>
 #include <QWheelEvent>
+#include <private/qqmldata_p.h>
 
 Keymap::Keymap(QObject *parent) : QObject(parent) {
     if (QCoreApplication::instance())
@@ -30,6 +32,12 @@ void Keymap::setInput(const QString &input) {
 void Keymap::add(QObject *action) {
     if (!action || m_actions.contains(action))
         return;
+    // Where it is written, for the help to keep that order: bindings are
+    // evaluated in no order to go by.
+    if (const QQmlContext *context = qmlContext(action))
+        action->setProperty("file", context->baseUrl().toString());
+    if (const QQmlData *data = QQmlData::get(action))
+        action->setProperty("line", int(data->lineNumber));
     m_actions.append(action);
     ++m_revision;
     emit actionsChanged();

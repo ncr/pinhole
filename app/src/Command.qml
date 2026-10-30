@@ -41,6 +41,13 @@ Item {
     // False for keys read elsewhere (the viewer's arrows, timed as they are
     // held): listed, but no shortcut of its own.
     property bool bound: true
+    // Which of the help's tabs list it: the keys', and the mouse's and the
+    // touchpad's (where its `mouse` and `touchpad` say how, briefly).
+    property bool keyHelp: true
+    property bool pointerHelp: true
+    // Where it is written (keymap.h sets them), for the help's order.
+    property string file
+    property int line: 0
     // ShellButtons showing it now (they count themselves).
     property int buttons: 0
 

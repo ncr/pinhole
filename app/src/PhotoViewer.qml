@@ -465,9 +465,9 @@ Item {
             MenuGroup {
                 menuKey: "Shift+C"
                 keyLayer: "viewer"
-                section: "photo"
+                section: "share"
                 items: [
-                    { text: qsTr("Export"), key: "E", triggered: () => outgoing.exportTo([viewer.index], true) },
+                    { text: qsTr("Export"), helpText: qsTr("Export JPEG"), key: "E", triggered: () => outgoing.exportTo([viewer.index], true) },
                     { text: qsTr("Export original"), key: "Shift+E", triggered: () => outgoing.exportTo([viewer.index], false) }
                 ]
                 CopyButton {
@@ -476,7 +476,7 @@ Item {
                     photos: () => [viewer.index]
                     key: "C"
                     keyLayer: "viewer"
-                    section: "photo"
+                    section: "share"
                 }
             }
             // The keys and gestures, as the grid's ? button shows them.

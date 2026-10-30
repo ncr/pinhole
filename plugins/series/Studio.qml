@@ -195,6 +195,7 @@ Item {
         when: studio.shown && studio.making === ""
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("The ‹ › buttons")
+        pointerHelp: false
         onTriggered: studio.step(-1)
     }
     Command {
@@ -234,6 +235,7 @@ Item {
         when: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.cycle("pace", Engine.PACES)
     }
     Command {
@@ -245,6 +247,7 @@ Item {
         when: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.cycle("look", Engine.LOOKS)
     }
     Command {
@@ -256,6 +259,7 @@ Item {
         when: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.cycle("shape", Engine.SHAPES)
     }
     Command {
@@ -267,6 +271,7 @@ Item {
         when: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.change({ steady: !studio.recipe.steady })
     }
     Command {
@@ -279,6 +284,7 @@ Item {
         when: studio.shown
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.make("gif")
     }
     Command {
@@ -291,6 +297,7 @@ Item {
         when: studio.shown
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: studio.make("mp4")
     }
     Repeater {
@@ -307,6 +314,7 @@ Item {
             when: studio.shown && studio.making === ""
             mouse: qsTr("Its button")
             touchpad: qsTr("Its button")
+            pointerHelp: false
             onTriggered: { studio.change({ motion: modelData }); studio.time = 0 }
         }
     }
@@ -335,7 +343,7 @@ Item {
             when: studio.shown && studio.making === ""
             autoRepeat: true
             mouse: qsTr("Drag the picture")
-            touchpad: qsTr("Drag it with three fingers")
+            touchpad: qsTr("Three fingers on it")
             onTriggered: studio.nudgeCrop(modelData[1], modelData[2])
         }
     }
@@ -362,6 +370,7 @@ Item {
         mouse: qsTr("Point at the strip")
         touchpad: qsTr("Point at the strip")
         onTriggered: studio.shotCursor = Math.max(0, studio.shotCursor - 1)
+        pointerHelp: false
     }
     Command {
         name: "studio.shotOn"

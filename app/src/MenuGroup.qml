@@ -180,7 +180,7 @@ Item {
         delegate: Command {
             required property var modelData
             name: "menu." + (modelData.text ?? "")
-            text: modelData.text ?? ""
+            text: modelData.helpText ?? modelData.text ?? ""
             section: modelData.section ?? group.section
             keys: (modelData.key ?? "") !== "" ? [modelData.key] : []
             // Without a key of its own, by keys through the menu.

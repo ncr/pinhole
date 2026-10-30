@@ -268,6 +268,7 @@ Item {
         when: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: editor.takeOut()
     }
     Command {
@@ -279,6 +280,7 @@ Item {
         when: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: editor.add()
     }
     Command {
@@ -290,6 +292,7 @@ Item {
         when: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: editor.ungroup()
     }
     Command {
@@ -301,6 +304,7 @@ Item {
         when: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
+        pointerHelp: false
         onTriggered: editor.toStudio()
     }
 
