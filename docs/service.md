@@ -377,17 +377,25 @@ The window's settings panel changes the folder and the limit with
 (`location`, `limit_bytes`) and reads them as it starts, as `pinhole-sync`
 does to find the library. `--library` and `--cache` override them. A lower
 limit than is kept frees space at once, down to the limit itself. A new
-folder takes new photos at once and everything moves over in the
-background: first the library, with syncing paused, renamed on one disk or
-copied across two, after which every window is told
+folder has everything move over in the background: first the libraries,
+with nothing writing them meanwhile (no round, favourite or lookup here,
+no pinhole-sync), renamed on one disk or copied across two, after which
+every window is told
 
 ```json
 {"event": "library_moved", "library": "/new/folder/library/icloud/me@example.com"}
 ```
 
 and reads it from there (the old copy goes 30 seconds later); then the
-photos, each served from the old folder until it has moved, keeping when it
-was last used. The old folders go once empty. A folder inside the current
+photos, new ones into the new folder at once and those kept each served
+from the old folder until it has moved, keeping when it was last used. The
+old folders go once empty.
+
+The settings say the new folder only once the libraries are over; until
+then a move is kept in them as `moving` (from, to, which half). A move cut
+short (the service stopped, the computer off) is put right as the service
+starts again: if the libraries had not got over, it is undone and
+everything stays in the old folder; if they had, the photos go on moving. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.

@@ -703,6 +703,9 @@ pub fn run(config: Config) -> Result<()> {
         let storage = shared.storage.clone();
         std::thread::spawn(move || storage.evict_loop());
     }
+    // A move of the folder cut short, put right before anything reads the
+    // library.
+    shared.storage.resume();
     {
         if let Some(old) = shared.config.adopt.clone() {
             shared.storage.adopt(old);
@@ -1012,7 +1015,9 @@ fn set_favorite(shared: &Shared, params: &Value) -> std::result::Result<Value, (
     };
     let source = shared.source();
     // Not under the library's lock, which a sync round holds throughout:
-    // SQLite has the index's own writes wait for each other.
+    // SQLite has the index's own writes wait for each other. Not while the
+    // library is copied elsewhere, though, where it would be lost.
+    let _moving = shared.storage.library_moving.read().unwrap();
     let path = shared.storage.library().join("library.sqlite");
     if !path.exists() {
         return Err(("not_found", "there is no library yet".into()));
@@ -1268,7 +1273,11 @@ fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch:
         return;
     };
     let stored: Vec<Stored> = batch.iter().map(|j| j.stored.clone()).collect();
-    let tickets = match source.prepare(db, &stored) {
+    // What it keeps of the links is not lost to a copy under way.
+    let moving = shared.storage.library_moving.read().unwrap();
+    let tickets = source.prepare(db, &stored);
+    drop(moving);
+    let tickets = match tickets {
         Ok(t) => t,
         Err(e) => {
             let code = failed(&e);

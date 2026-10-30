@@ -225,6 +225,9 @@ pub struct Storage {
     pub library_lock: Mutex<()>,
     /// Bumped as the library moves: whoever holds it open opens it again.
     pub library_generation: AtomicU64,
+    /// Written for a moment (a favourite, fresh links) under its read side;
+    /// copied elsewhere under its write side, which waits for those.
+    pub library_moving: std::sync::RwLock<()>,
     /// Told where the library went once it has moved.
     on_library_moved: Mutex<Option<Box<dyn Fn(&Path) + Send>>>,
 }
@@ -239,6 +242,9 @@ struct State {
     moving: bool,
     moving_from: Option<PathBuf>,
     moving_total: u64,
+    /// While the libraries go over, the folder they are going to: the
+    /// window is told that one, as it is where everything will be.
+    moving_to: Option<PathBuf>,
 }
 
 impl Storage {
@@ -246,13 +252,14 @@ impl Storage {
         let (tx, rx) = mpsc::channel();
         Storage {
             settings,
-            state: Mutex::new(State { location, library, cache, limit, moving: false, moving_from: None, moving_total: 0 }),
+            state: Mutex::new(State { location, library, cache, limit, moving: false, moving_from: None, moving_total: 0, moving_to: None }),
             evict_now: Mutex::new(tx),
             evict_rx: Mutex::new(Some(rx)),
             freeing: AtomicBool::new(false),
             moved: AtomicU64::new(0),
             library_lock: Mutex::new(()),
             library_generation: AtomicU64::new(0),
+            library_moving: std::sync::RwLock::new(()),
             on_library_moved: Mutex::new(None),
         }
     }
@@ -311,8 +318,8 @@ impl Storage {
     pub fn report(&self) -> Value {
         let (location, library, cache, limit_set, moving, moving_from, moving_total) = {
             let s = self.state.lock().unwrap();
-            (s.location.clone(), s.library.clone(), s.cache.clone(), s.limit.is_some(), s.moving, s.moving_from.clone(),
-             s.moving_total)
+            (s.moving_to.clone().unwrap_or_else(|| s.location.clone()), s.library.clone(), s.cache.clone(), s.limit.is_some(),
+             s.moving, s.moving_from.clone(), s.moving_total)
         };
         let library_bytes = size_of(&library);
         let mut kinds = serde_json::Map::new();
@@ -389,35 +396,125 @@ impl Storage {
         if new_libraries.exists() {
             return Err(anyhow!("{} already has a library", folder.display()));
         }
-        let new_cache = folder.join("cache");
         let total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum::<u64>()
             + if library_moves { size_of(&old_libraries) } else { 0 };
         {
             let mut state = self.state.lock().unwrap();
-            state.location = folder.clone();
-            state.cache = new_cache.clone();
             state.moving = true;
-            state.moving_from = Some(old_cache.clone());
+            state.moving_from = None;
             state.moving_total = total;
+            state.moving_to = Some(folder.clone());
         }
         self.moved.store(0, Ordering::Relaxed);
-        self.save()?;
+        // The plan first, so a move cut short (the service stopped, the
+        // computer off) is put right as the service starts again
+        // (`resume`): until the libraries are over, the settings still say
+        // the old folder, which keeps everything.
+        if let Err(e) = self.plan(Some((&from, &folder, &old_cache, "library"))) {
+            let mut state = self.state.lock().unwrap();
+            state.moving = false;
+            state.moving_to = None;
+            return Err(e);
+        }
         let this = self.clone();
         std::thread::spawn(move || {
             if library_moves {
                 if let Err(e) = this.move_library(&old_libraries, &new_libraries, &new_library) {
-                    eprintln!("pinholed: the libraries stay in {}: {e:#}", old_libraries.display());
+                    // All of it stays where it was, the settings too.
+                    eprintln!("pinholed: the move to {} is given up; everything stays in {}: {e:#}", folder.display(), from.display());
+                    let _ = std::fs::remove_dir_all(new_libraries.with_extension("part"));
+                    let _ = this.plan(None);
+                    let mut state = this.state.lock().unwrap();
+                    state.moving = false;
+                    state.moving_to = None;
+                    return;
                 }
             }
-            this.move_files(&old_cache, &new_cache);
-            // The old folder goes too once nothing else is in it.
-            let _ = std::fs::remove_dir(&from);
-            let mut state = this.state.lock().unwrap();
-            state.moving = false;
-            state.moving_from = None;
-            eprintln!("pinholed: moved from {} to {}", from.display(), folder.display());
+            this.photos_over(&from, &folder, &old_cache);
         });
         Ok(())
+    }
+
+    /// The second half of a move, the libraries over: the new folder in
+    /// the settings and in force, new photos there at once, and the photos
+    /// kept moved over in the background (each served from the old folder
+    /// until it has moved). Then the old folder goes, and the plan.
+    fn photos_over(&self, from: &Path, to: &Path, old_cache: &Path) {
+        let (old_cache, new_cache) = (old_cache.to_owned(), to.join("cache"));
+        {
+            let mut state = self.state.lock().unwrap();
+            state.location = to.to_owned();
+            state.cache = new_cache.clone();
+            state.moving_to = None;
+            state.moving = true;
+            state.moving_from = Some(old_cache.clone());
+        }
+        if let Err(e) = self.save().and_then(|()| self.plan(Some((from, to, &old_cache, "photos")))) {
+            eprintln!("pinholed: keeping the new folder in the settings: {e:#}");
+        }
+        self.move_files(&old_cache, &new_cache);
+        // The old folder goes too once nothing else is in it.
+        let _ = std::fs::remove_dir(from);
+        let _ = self.plan(None);
+        let mut state = self.state.lock().unwrap();
+        state.moving = false;
+        state.moving_from = None;
+        eprintln!("pinholed: moved from {} to {}", from.display(), to.display());
+    }
+
+    /// A move under way, kept in the settings as `moving`: from, to, the
+    /// photos' old folder, and which half (`library` or `photos`); None,
+    /// done.
+    fn plan(&self, plan: Option<(&Path, &Path, &Path, &str)>) -> Result<()> {
+        update_settings(&self.settings, |settings| match plan {
+            Some((from, to, cache, phase)) => {
+                settings["moving"] = json!({"from": from, "to": to, "cache": cache, "phase": phase})
+            }
+            None => drop(settings.as_object_mut().and_then(|s| s.remove("moving"))),
+        })
+    }
+
+    /// A move cut short, put right as the service starts, before anything
+    /// reads the library. Its libraries half either got all the way (the
+    /// rename into the new folder is one step) and the photos are moved
+    /// on, or it did not and is undone, everything staying in the old
+    /// folder; the photos half is gone on with.
+    pub fn resume(self: &std::sync::Arc<Self>) {
+        let written = std::fs::read_to_string(&self.settings)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .unwrap_or(Value::Null);
+        let plan = &written["moving"];
+        let (Some(from), Some(to)) = (plan["from"].as_str().map(PathBuf::from), plan["to"].as_str().map(PathBuf::from)) else {
+            return;
+        };
+        let old_cache = plan["cache"].as_str().map_or_else(|| from.join("cache"), PathBuf::from);
+        let (old_libraries, new_libraries) = (from.join("library"), to.join("library"));
+        let libraries_over = plan["phase"] == "photos" || (!old_libraries.exists() && new_libraries.exists());
+        if !libraries_over {
+            eprintln!("pinholed: a move to {} was cut short; everything stays in {}", to.display(), from.display());
+            let _ = std::fs::remove_dir_all(new_libraries.with_extension("part"));
+            let _ = std::fs::remove_dir(&to);
+            let _ = self.plan(None);
+            return;
+        }
+        eprintln!("pinholed: going on with the move from {} to {}", from.display(), to.display());
+        {
+            let mut state = self.state.lock().unwrap();
+            // The library in use, if it was among them: its place there.
+            if let Ok(inside) = state.library.strip_prefix(&from) {
+                state.library = to.join(inside);
+            }
+            state.moving = true;
+            state.moving_total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum();
+        }
+        // The old libraries, if a copy of them was left behind.
+        if old_libraries.exists() && new_libraries.exists() {
+            let _ = std::fs::remove_dir_all(&old_libraries);
+        }
+        self.moved.store(0, Ordering::Relaxed);
+        let this = self.clone();
+        std::thread::spawn(move || this.photos_over(&from, &to, &old_cache));
     }
 
     /// Photos in a folder the cache used to be in (before it moved in with
@@ -467,7 +564,19 @@ impl Storage {
     /// Whoever reads the one in use (`library`, there now) is told, and the
     /// old copy goes a little later, once they have let go of it.
     fn move_library(&self, from: &Path, to: &Path, library: &Path) -> Result<()> {
+        // Nothing writes them meanwhile: not a round (library_lock), not a
+        // favourite or a lookup (library_moving), not pinhole-sync (each
+        // library's writer).
         let _writing = self.library_lock.lock().unwrap();
+        let _moving = self.library_moving.write().unwrap();
+        let mut writers = Vec::new();
+        for kind in std::fs::read_dir(from).into_iter().flatten().flatten() {
+            for one in std::fs::read_dir(kind.path()).into_iter().flatten().flatten() {
+                if one.path().join("library.sqlite").exists() {
+                    writers.push(crate::sync::Writer::take(&one.path())?);
+                }
+            }
+        }
         let bytes = size_of(from);
         let copied = if std::fs::rename(from, to).is_ok() {
             false
@@ -724,6 +833,9 @@ mod tests {
         assert_eq!(*told.lock().unwrap(), Some(to.join("library/icloud")));
         assert_eq!(storage.library_generation.load(Ordering::Relaxed), 1);
         assert_eq!(read_settings(&dir.join("settings.json")).location, Some(to));
+        // And no plan left.
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert!(written.get("moving").is_none());
     }
 
     #[test]
@@ -746,6 +858,53 @@ mod tests {
         let saved = read_settings(&settings);
         assert_eq!(saved.location, Some(to));
         assert_eq!(saved.source, Some(json!({"kind": "folder", "path": "/photos"})));
+    }
+
+    #[test]
+    fn a_move_cut_short_before_the_libraries_were_over_leaves_everything_where_it_was() {
+        let dir = temp("cut-library");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        file(&from.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("cache/full/aa/one.jpg"), 100, 0);
+        // Half a copy beside the new place, and the plan, as a service
+        // stopped while copying across disks leaves them.
+        file(&to.join("library.part/icloud/library.sqlite"), 20, 0);
+        let settings = dir.join("settings.json");
+        std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
+            "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
+        let storage = storage_in(&from, &settings);
+        storage.resume();
+        assert!(!storage.state.lock().unwrap().moving);
+        assert_eq!(storage.library(), from.join("library/icloud"));
+        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert!(from.join("cache/full/aa/one.jpg").exists());
+        assert!(!to.exists());
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(written.get("moving").is_none());
+        assert_eq!(read_settings(&settings).location, Some(from));
+    }
+
+    #[test]
+    fn a_move_cut_short_once_the_libraries_were_over_goes_on_with_the_photos() {
+        let dir = temp("cut-photos");
+        let (from, to) = (dir.join("old"), dir.join("new"));
+        // The libraries renamed over, the settings not told yet.
+        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("cache/full/aa/one.jpg"), 100, 0);
+        let settings = dir.join("settings.json");
+        std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
+            "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
+        let storage = storage_in(&from, &settings);
+        storage.resume();
+        // The library is read from its new place at once.
+        assert_eq!(storage.library(), to.join("library/icloud"));
+        until_moved(&storage);
+        assert!(to.join("cache/full/aa/one.jpg").exists());
+        assert!(!from.exists());
+        assert_eq!(storage.cache(), to.join("cache"));
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(written.get("moving").is_none());
+        assert_eq!(read_settings(&settings).location, Some(to));
     }
 
     #[test]

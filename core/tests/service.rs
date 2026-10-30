@@ -224,5 +224,26 @@ fn a_window_meets_the_service_of_a_folder() {
     };
     assert_eq!(colour(medium["result"]["path"].as_str().unwrap()), [40, 40, 200]);
 
+    // Everything to another folder: the library first, every window told,
+    // then the photos; the settings say the new one, and no move is left.
+    let moved_to = root.join("moved");
+    let set = window.ask("set_storage", json!({"location": moved_to}));
+    assert_eq!(set["ok"], true, "{set:#}");
+    assert_eq!(set["result"]["location"], json!(moved_to));
+    let into = moved_to.to_str().unwrap().to_owned();
+    window.event(30, |e| e["event"] == "library_moved" && e["library"].as_str().is_some_and(|l| l.starts_with(&into)));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !window.ask("storage", json!({}))["result"]["moving"].is_null() {
+        assert!(Instant::now() < deadline, "still moving");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(root.join("config/pinhole/settings.json")).unwrap()).unwrap();
+    assert_eq!(written["location"], json!(moved_to));
+    assert!(written.get("moving").is_none(), "{written:#}");
+    assert!(!root.join("data/pinhole/library").exists());
+    let after = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
+    assert_eq!(after["ok"], true, "{after:#}");
+    assert!(after["result"]["path"].as_str().unwrap().starts_with(moved_to.to_str().unwrap()), "{after:#}");
+
     let _ = std::fs::remove_dir_all(&root);
 }
