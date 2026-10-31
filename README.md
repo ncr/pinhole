@@ -54,6 +54,11 @@ when it was taken, the camera, lens and exposure, its size and format (a
 video's codec, frame rate and length), and where, with W to open the place
 on OpenStreetMap. It stays open from photo to photo.
 
+Colours finds photos by colour (H): pick one on a wheel, or on a photo the
+ones closest to its colour, or lay the library out by hue as a rainbow wall
+(W). It goes by each photo's average colour, so it finds what is mostly one
+colour (a sunset, the sea, a forest) and not a red coat on a grey street.
+
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
@@ -117,6 +122,7 @@ plugins/calendar/         the Year calendar plugin: photos per day, a year a row
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe)
+plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 ```
 
 ## Trying the grid

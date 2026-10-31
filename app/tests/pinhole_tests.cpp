@@ -1339,6 +1339,7 @@ private slots:
         fake.greet();
         PluginLibrary api(&library);
         QCOMPARE(api.key(), QString("folder:/a"));
+        QCOMPARE(api.item(0).value("avgColor").toString(), QString("#000000"));
         // The service says another source is shown; its library is not
         // read yet: the key is still the photos' own.
         fake.send({{"event", "source"}, {"kind", "folder"}, {"name", "b"}, {"path", "/b"}});

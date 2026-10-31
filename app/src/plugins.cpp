@@ -9,6 +9,7 @@
 #include "viewer.h"
 
 #include <QClipboard>
+#include <QColor>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -64,6 +65,8 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
         {"video", item.video},
         {"live", item.live},
         {"favorite", item.favorite},
+        // The thumbnail's average colour, "#rrggbb"; "" before it has one.
+        {"avgColor", item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name()},
     };
 }
 
