@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "api": 2,
+  "id": "pinhole.frame",
+  "name": "Photo frame",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Your photos one after another, full window, slowly moving and fading into each other: a frame for a laptop left open.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

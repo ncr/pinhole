@@ -81,6 +81,12 @@ Theme) sets it, the photo as the background and its colours on the whole
 desktop, Pinhole too, the text always readable; Ctrl+Z goes back to the
 theme before.
 
+Photo frame (P on a photo, or in select mode for what is ticked) shows
+photos one after another, full window, each slowly panned and zoomed and
+faded into the next: favourites, all, or those taken on this day in other
+years, shuffled or in order, videos and Live Photos moving. Esc or a click
+stops it, ← → step, and a two-finger tap or Space holds it still.
+
 ## Install
 
 ```bash
@@ -134,6 +140,8 @@ plugins/info/             the Info plugin; pinhole-info reads an original's EXIF
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
+
+plugins/frame/            the Photo frame plugin
 ```
 
 ## Trying the grid
