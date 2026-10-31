@@ -247,7 +247,9 @@ fn a_window_meets_the_service_of_a_folder() {
     assert_eq!(set["ok"], true, "{set:#}");
     assert_eq!(set["result"]["location"], json!(moved_to));
     let into = moved_to.to_str().unwrap().to_owned();
-    window.event(30, |e| e["event"] == "library_moved" && e["library"].as_str().is_some_and(|l| l.starts_with(&into)));
+    let moved = window.event(30, |e| e["event"] == "library_moved" && e["library"].as_str().is_some_and(|l| l.starts_with(&into)));
+    // And where they all went, for a window keeping to another's.
+    assert_eq!(moved["libraries"]["to"], json!(moved_to.join("library")), "{moved:#}");
     let deadline = Instant::now() + Duration::from_secs(30);
     while !window.ask("storage", json!({}))["result"]["moving"].is_null() {
         assert!(Instant::now() < deadline, "still moving");

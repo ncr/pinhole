@@ -302,13 +302,14 @@ int main(int argc, char *argv[]) {
     QObject::connect(&reloader, &LibraryReloader::aboutToSwap, grid, [grid] { grid->rememberAnchor(); });
     QObject::connect(&reloader, &LibraryReloader::reloaded, grid,
                      [&, grid](const std::vector<int> &moved, const std::vector<int> &textures, bool toNewest) {
+        // First: whatever follows may ask for these photos already.
+        service.setShown(library.source());
         grid->libraryReloaded(moved, &textures);
         if (toNewest)
             grid->scrollToEnd();
         viewer.libraryReloaded(moved);
         plugins.libraryReloaded();
         favourites.reloaded();
-        service.setShown(library.source());
     });
     // Undone on another source's photos of the same ids, a step would
     // change photos it was never done to.
@@ -329,10 +330,18 @@ int main(int argc, char *argv[]) {
         } else if (name == QLatin1String("library_moved")) {
             // Read from its new place from now on (the old one goes soon),
             // or, as the window connects, the one the service chose. A
-            // library given is kept to, but followed where it moves.
+            // library given is kept to, but followed where it moves: it is
+            // the one named, if it says it is the same source's, else where
+            // the folder of them all went it is in.
             const QString dir = details.value("library").toString();
-            if (!libraryGiven || Storage::libraryOwner(dir) == library.source())
+            const QJsonObject libraries = details.value("libraries").toObject();
+            const QString from = libraries.value("from").toString(), here = reloader.dir();
+            if (!libraryGiven)
                 reloader.moveTo(dir);
+            else if (!library.source().isEmpty() && Storage::libraryOwner(dir) == library.source())
+                reloader.moveTo(dir);
+            else if (!from.isEmpty() && here.startsWith(from + '/'))
+                reloader.moveTo(libraries.value("to").toString() + here.mid(from.size()));
         }
     });
     // New photos since the window last looked: ask now rather than within

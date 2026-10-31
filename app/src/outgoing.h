@@ -26,15 +26,19 @@ public:
     Outgoing(const Library *library, ServiceClient *service, QObject *parent = nullptr);
 
     using Done = std::function<void(const QStringList &files, int failed)>;
+    // Photos as they were chosen, and whose they are (Library::source).
+    struct Chosen : QList<LibraryItem> {
+        QString source;
+    };
     // The photos at these positions, as they are now. Everything that waits
     // (a download, the folder picker, a drag) carries these rather than
-    // positions, which a library reload in the meantime would move.
-    QList<LibraryItem> snapshot(const QList<int> &indexes) const;
+    // positions, which a library reload in the meantime would move, and
+    // asks for them as that source's, which another shown since is not.
+    Chosen snapshot(const QList<int> &indexes) const;
     // Prepare the files, into `folder` (a staging folder if empty); `done`
     // gets them once all have arrived or failed.
     // `quiet`: no "Preparing…" status (the caller shows progress itself).
-    void prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done,
-                 bool quiet = false);
+    void prepare(const Chosen &items, bool compatible, const QString &folder, Done done, bool quiet = false);
 
     // What the window shows while files are on their way: "Preparing 3
     // photos…", "Exported 12 photos", and so on.
@@ -51,7 +55,7 @@ public:
     void drag(QObject *source, const QList<int> &indexes);
     // What such a drag carries: the files' URLs, made when a drop target
     // asks for them once the drag is under way.
-    QMimeData *dragData(const QList<LibraryItem> &items);
+    QMimeData *dragData(const Chosen &items);
     // Put these photos on the clipboard (compatible form), as files, and for
     // a single photo as an image too, so pasting into a chat works.
     // copied() at once; the clipboard gets the files when they are ready.

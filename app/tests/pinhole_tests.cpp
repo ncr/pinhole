@@ -1028,17 +1028,19 @@ private slots:
     void whatGoesOutIsWhatWasChosenThroughAReload() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir before, after;
-        makeLibrary(before.path(), {{"a", 1000}, {"b", 2000}});
-        makeLibrary(after.path(), {{"new", 500}, {"a", 1000}, {"b", 2000}});
+        makeLibrary(before.path(), {{"a", 1000}, {"b", 2000}}, false, "folder:/before");
+        makeLibrary(after.path(), {{"new", 500}, {"a", 1000}, {"b", 2000}}, false, "folder:/after");
         Library library, reloaded;
         QString error;
         QVERIFY(library.open(before.path(), &error));
         QVERIFY(reloaded.open(after.path(), &error));
 
         Outgoing outgoing(&library, nullptr);
-        const QList<LibraryItem> chosen = outgoing.snapshot({1, 7});
+        const Outgoing::Chosen chosen = outgoing.snapshot({1, 7});
         QCOMPARE(chosen.size(), 1); // a position past the end is left out
         library.swap(reloaded);
+        // Still asked for as the photos of the library they were chosen in.
+        QCOMPARE(chosen.source, QString("folder:/before"));
         QCOMPARE(library.at(1).id, QByteArray("a"));
         QCOMPARE(chosen.first().id, QByteArray("b"));
         QCOMPARE(chosen.first().filename, QString("b.HEIC"));
@@ -1474,6 +1476,8 @@ private slots:
         QCOMPARE(Storage::library(), next);
         makeLibrary(next, {{"x.jpg", 1}}, false, "folder:/a/b/c");
         QVERIFY(QDir(former).removeRecursively());
+        QCOMPARE(Storage::library(), next);
+        QVERIFY(QDir(byId).removeRecursively());
         QCOMPARE(Storage::library(), next);
         QFile::remove(settingsPath);
     }

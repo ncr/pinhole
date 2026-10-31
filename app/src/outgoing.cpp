@@ -57,7 +57,7 @@ namespace {
 // the list itself is produced when asked for, waiting for the files.
 class PromisedFiles : public QMimeData {
 public:
-    PromisedFiles(Outgoing *outgoing, QList<LibraryItem> items) : m_outgoing(outgoing), m_items(std::move(items)) {
+    PromisedFiles(Outgoing *outgoing, Outgoing::Chosen items) : m_outgoing(outgoing), m_items(std::move(items)) {
         // Under way once the drag's own event loop turns.
         QTimer::singleShot(0, this, [this] { m_started = true; });
     }
@@ -104,7 +104,7 @@ protected:
 
 private:
     Outgoing *m_outgoing;
-    QList<LibraryItem> m_items;
+    Outgoing::Chosen m_items;
     bool m_started = false;
     mutable bool m_ready = false;
     mutable QStringList m_files;
@@ -112,8 +112,9 @@ private:
 
 } // namespace
 
-QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
-    QList<LibraryItem> items;
+Outgoing::Chosen Outgoing::snapshot(const QList<int> &indexes) const {
+    Chosen items;
+    items.source = m_library->source();
     for (int index : indexes) {
         if (index >= 0 && index < m_library->count())
             items.append(m_library->at(index));
@@ -121,10 +122,10 @@ QList<LibraryItem> Outgoing::snapshot(const QList<int> &indexes) const {
     return items;
 }
 
-QMimeData *Outgoing::dragData(const QList<LibraryItem> &items) { return new PromisedFiles(this, items); }
+QMimeData *Outgoing::dragData(const Chosen &items) { return new PromisedFiles(this, items); }
 
 void Outgoing::drag(QObject *source, const QList<int> &indexes) {
-    const QList<LibraryItem> items = snapshot(indexes);
+    const Chosen items = snapshot(indexes);
     if (items.isEmpty())
         return;
     auto *drag = new QDrag(source);
@@ -140,7 +141,7 @@ void Outgoing::drag(QObject *source, const QList<int> &indexes) {
 }
 
 void Outgoing::copy(const QList<int> &indexes, bool quiet) {
-    const QList<LibraryItem> items = snapshot(indexes);
+    const Chosen items = snapshot(indexes);
     if (items.isEmpty())
         return;
     // The button answers at once; the clipboard gets the files the moment
@@ -214,7 +215,7 @@ void Outgoing::copy(const QList<int> &indexes, bool quiet) {
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {
-    const QList<LibraryItem> items = snapshot(indexes);
+    const Chosen items = snapshot(indexes);
     if (items.isEmpty())
         return;
     auto *picker = new PortalFolderPicker(this);
@@ -249,8 +250,7 @@ QString Outgoing::uniqueName(const QString &folder, const QString &name) {
     return candidate;
 }
 
-void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const QString &folder, Done done,
-                       bool quiet) {
+void Outgoing::prepare(const Chosen &items, bool compatible, const QString &folder, Done done, bool quiet) {
     QString target = folder;
     if (target.isEmpty()) {
         // A fresh staging folder per request: dropped files must not be
@@ -293,7 +293,7 @@ void Outgoing::prepare(const QList<LibraryItem> &items, bool compatible, const Q
                                  return finishOne({});
                              place(result.value("path").toString(), result.value("type").toString(), item, compatible,
                                    target, finishOne);
-                         });
+                         }, false, items.source);
     }
 }
 

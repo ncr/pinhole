@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QStorageInfo>
@@ -160,8 +161,12 @@ QString Storage::library() {
     const QString preferred = under + name;
     const auto byId = [&](int n) { return preferred + stableHash(id) + (n == 0 ? QString() : '-' + QString::number(n)); };
     QStringList own = QStringList{preferred} + former;
-    for (int n = 0; QFileInfo::exists(byId(n)); ++n)
-        own.append(byId(n));
+    // Every one there by its id, whichever came free since.
+    const QString hash = name + stableHash(id);
+    static const QRegularExpression numbered(QStringLiteral("^-\\d+$"));
+    for (const QString &entry : QDir(under).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        if (entry == hash || (entry.startsWith(hash) && numbered.match(entry.mid(hash.size())).hasMatch()))
+            own.append(under + entry);
     for (const QString &dir : std::as_const(own))
         if (libraryOwner(dir) == id)
             return dir;

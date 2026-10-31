@@ -179,11 +179,18 @@ pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathB
     let id = source.id();
     let name = source.library_name();
     // By its id: the first, and more should even that be another's.
-    let by_id = |n: usize| {
-        let hash = format!("{name}~{:016x}", stable_hash(id.as_bytes()));
-        kind.join(if n == 0 { hash } else { format!("{hash}-{n}") })
-    };
-    let by_ids = (0..).map(by_id).take_while(|dir| dir.exists());
+    let hash = format!("{name}~{:016x}", stable_hash(id.as_bytes()));
+    let by_id = |n: usize| kind.join(if n == 0 { hash.clone() } else { format!("{hash}-{n}") });
+    // Every one there by its id, whichever came free since.
+    let mut by_ids: Vec<PathBuf> = std::fs::read_dir(&kind)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|n| *n == hash || n.strip_prefix(&format!("{hash}-")).is_some_and(|k| k.parse::<usize>().is_ok()))
+        .map(|n| kind.join(n))
+        .collect();
+    by_ids.sort();
     let formers = source.former_library_names().into_iter().map(|former| kind.join(former));
     if let Some(own) = std::iter::once(kind.join(&name))
         .chain(formers)
@@ -270,7 +277,7 @@ pub struct Storage {
     /// copied elsewhere under its write side, which waits for those.
     pub library_moving: std::sync::RwLock<()>,
     /// Told where the library went once it has moved.
-    on_library_moved: Mutex<Option<Box<dyn Fn(&Path) + Send>>>,
+    on_library_moved: Mutex<Option<Box<dyn Fn(&Path, Option<(&Path, &Path)>) + Send>>>,
 }
 
 struct State {
@@ -312,11 +319,11 @@ impl Storage {
         self.state.lock().unwrap().library = library.clone();
         self.library_generation.fetch_add(1, Ordering::Relaxed);
         if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
-            tell(&library);
+            tell(&library, None);
         }
     }
 
-    pub fn on_library_moved(&self, tell: impl Fn(&Path) + Send + 'static) {
+    pub fn on_library_moved(&self, tell: impl Fn(&Path, Option<(&Path, &Path)>) + Send + 'static) {
         *self.on_library_moved.lock().unwrap() = Some(Box::new(tell));
     }
 
@@ -697,7 +704,7 @@ impl Storage {
             self.state.lock().unwrap().library = library.clone();
             self.library_generation.fetch_add(1, Ordering::Relaxed);
             if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
-                tell(library);
+                tell(library, Some((from, to)));
             }
         }
         if copied {
@@ -886,10 +893,13 @@ mod tests {
         claimed(&by_id, "folder:/a/b/c~43215282df502c0e");
         let next = location.join("library/folder/a-b-c~43215282df502c0e-1");
         assert_eq!(for_path("/a/b/c"), next);
-        // Its own there, it is kept to, even once its name is no one's.
+        // Its own there, it is kept to, even once its name, and the one by
+        // its id before it, are no one's.
         claimed(&next, "folder:/a/b/c");
         assert_eq!(for_path("/a/b/c"), next);
         std::fs::remove_dir_all(&own).unwrap();
+        assert_eq!(for_path("/a/b/c"), next);
+        std::fs::remove_dir_all(&by_id).unwrap();
         assert_eq!(for_path("/a/b/c"), next);
         let _ = std::fs::remove_dir_all(&location);
     }
@@ -967,7 +977,7 @@ mod tests {
         let told = Arc::new(Mutex::new(None));
         {
             let told = told.clone();
-            storage.on_library_moved(move |at| *told.lock().unwrap() = Some(at.to_owned()));
+            storage.on_library_moved(move |at, _| *told.lock().unwrap() = Some(at.to_owned()));
         }
         assert!(storage.set_location(from.join("inside")).is_err());
         assert!(storage.set_location(PathBuf::from("relative")).is_err());

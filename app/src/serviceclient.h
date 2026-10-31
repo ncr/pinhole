@@ -7,6 +7,7 @@
 #include <QTimer>
 
 #include <functional>
+#include <optional>
 
 // The window's line to pinholed (docs/service.md): JSON lines over a Unix
 // socket. Requests made before the service answers are queued; if nothing
@@ -25,7 +26,10 @@ public:
     // `kind` as in docs/service.md: medium, full, original, video, live. With
     // `stream`, a video is answered as soon as it starts downloading, with a
     // `stream` URL to play it from.
-    void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false);
+    // `source`: whose photo it is, if not the library shown now's (see
+    // setShown), as for photos chosen before.
+    void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false,
+               const std::optional<QString> &source = std::nullopt);
     // The source of the library the window shows (Library::source): each
     // fetch says it, so a service showing another's (switched from
     // elsewhere, not yet read here) answers other_source rather than its

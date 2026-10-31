@@ -764,9 +764,15 @@ pub fn run(config: Config) -> Result<()> {
         }
         // Every window reads the library from its new place.
         let weak = Arc::downgrade(&shared);
-        shared.storage.on_library_moved(move |library| {
+        // With the folder of them all, when it moved: a window keeping to
+        // another source's library (given --library) finds it there too.
+        shared.storage.on_library_moved(move |library, libraries| {
             if let Some(shared) = weak.upgrade() {
-                shared.broadcast(json!({"event": "library_moved", "library": library}));
+                let mut event = json!({"event": "library_moved", "library": library});
+                if let Some((from, to)) = libraries {
+                    event["libraries"] = json!({"from": from, "to": to});
+                }
+                shared.broadcast(event);
             }
         });
     }
@@ -1099,7 +1105,7 @@ fn set_favorite(shared: &Shared, params: &Value) -> std::result::Result<Value, (
     // Asked of one source's photos (a window's undo, say): never done to
     // another's of the same ids, shown since.
     if let Some(asked) = params["source"].as_str() {
-        if crate::db::meta(&db, "source").unwrap_or_default() != asked {
+        if asked.is_empty() || crate::db::meta(&db, "source").as_deref() != Some(asked) {
             return Err(("other_source", format!("{asked} is not the source shown")));
         }
     }
@@ -1154,8 +1160,9 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     };
     // Asked of one source's photo (the window's library, as it says): never
     // another's of the same id, shown since.
+    // One that says whose it is not, "", is taken for no one's.
     if let Some(asked) = params["source"].as_str() {
-        if crate::db::meta(db, "source").unwrap_or_default() != asked {
+        if asked.is_empty() || crate::db::meta(db, "source").as_deref() != Some(asked) {
             return reply.send(Err(("other_source", format!("{asked:?} is not the source shown"))));
         }
     }
