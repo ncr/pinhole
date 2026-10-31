@@ -1,5 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
+import "Days.js" as Days
 
 // Year calendar: every day of every year as a square, lit in the theme's
 // accent by how many photos were taken that day, one row of weeks a year,
@@ -7,39 +8,31 @@ import Pinhole.Plugin
 // the photo the grid is on; a day, clicked or picked with the arrows and
 // Enter, is shown in the grid.
 //
-// The library is counted into days once, a few thousand photos a frame so
-// the grid never waits, and again whenever it is read again.
+// The library is counted into days (Days.js) once, a little a frame so the
+// grid never waits, and again whenever it is read again.
 PinholePlugin {
     id: plugin
     covering: calendar.shown
 
-    // Every year with a photo, oldest first: {year, days (365 or 366),
-    // offset (the weekday row of 1 January), counts and first (each day's
-    // photos and its first photo's position, -1 for none), total}.
+    // What was counted (Days.js finish): every year with a photo, oldest
+    // first, each year's row by the year, and how many photos light a
+    // square fully and make it glow: most days stay below.
     property var years: []
-    // A year's row in `years`, by the year.
     property var rowOf: ({})
-    // The photos a day has for its square to be lit fully, and from which
-    // it glows: most days stay below.
-    property int full: 1
-    property int glowing: 1
+    property int full: 2
+    property int glowing: 3
     property int total: 0
     property int dayCount: 0
     property bool counted: false
 
-    // A day of its year, from 0.
-    function dayOf(date) {
-        const y = date.getFullYear()
-        return Math.round((Date.UTC(y, date.getMonth(), date.getDate()) - Date.UTC(y, 0, 1)) / 86400000)
-    }
     // The week's rows start on the locale's first day.
     readonly property int firstWeekday: Qt.locale().firstDayOfWeek
-    function weekdayRow(date) { return (date.getDay() - firstWeekday + 7) % 7 }
 
-    // Counting under way: where it is and what it has so far.
+    // Counting, a few milliseconds a frame so the grid never waits; what it
+    // has so far.
     property var counting: null
     function count() {
-        counting = { at: 0, n: pinhole.library.count, byYear: ({}) }
+        counting = Days.start(pinhole.library.count, firstWeekday)
         stepping.restart()
     }
     Timer {
@@ -54,52 +47,17 @@ PinholePlugin {
             stepping.stop()
             return
         }
-        const end = Math.min(c.n, c.at + 3000)
-        for (let i = c.at; i < end; ++i) {
-            const ms = pinhole.library.item(i).date
-            if (!(ms > 0))
-                continue
-            const date = new Date(ms)
-            const y = date.getFullYear()
-            let year = c.byYear[y]
-            if (!year) {
-                const leap = new Date(y, 1, 29).getMonth() === 1
-                year = c.byYear[y] = { year: y, days: leap ? 366 : 365, offset: weekdayRow(new Date(y, 0, 1)),
-                                       counts: new Array(366).fill(0), first: new Array(366).fill(-1), total: 0 }
-            }
-            const day = dayOf(date)
-            // The library is in time order: a day's first is its earliest.
-            if (year.counts[day]++ === 0)
-                year.first[day] = i
-            ++year.total
-        }
-        c.at = end
-        if (end < c.n)
+        if (!Days.count(c, i => pinhole.library.item(i), 3))
             return
         stepping.stop()
         counting = null
-        finish(c.byYear)
-    }
-    function finish(byYear) {
-        const list = Object.keys(byYear).map(y => byYear[y]).sort((a, b) => a.year - b.year)
-        const rows = {}
-        const busy = []
-        let sum = 0
-        list.forEach((year, row) => {
-            rows[year.year] = row
-            sum += year.total
-            for (let d = 0; d < year.days; ++d)
-                if (year.counts[d] > 0)
-                    busy.push(year.counts[d])
-        })
-        busy.sort((a, b) => a - b)
-        const at = q => busy.length > 0 ? busy[Math.min(busy.length - 1, Math.floor(busy.length * q))] : 1
-        full = Math.max(2, at(0.97))
-        glowing = Math.max(full + 1, at(0.995))
-        total = sum
-        dayCount = busy.length
-        rowOf = rows
-        years = list
+        const done = Days.finish(c)
+        full = done.full
+        glowing = done.glowing
+        total = done.total
+        dayCount = done.dayCount
+        rowOf = done.rowOf
+        years = done.years
         counted = true
     }
 
@@ -117,7 +75,7 @@ PinholePlugin {
             place: "grid"
             text: qsTr("Calendar")
             key: "Y"
-            shown: plugin.years.length > 0
+            shown: pinhole.library.count > 0
             onTriggered: calendar.open()
         }
     ]

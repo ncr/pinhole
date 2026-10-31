@@ -1,5 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
+import "Days.js" as Days
 
 // The calendar, full window: a row of weeks for each year, oldest at the
 // top as in the grid, each day a square in the accent, as bright as it has
@@ -18,13 +19,29 @@ Item {
     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
     // The cursor: a day of a year. Its row follows the year as the library
-    // is counted again.
+    // is counted again; if the year goes (another source is shown), the
+    // nearest that stays.
     property int cursorYear: 0
     property int day: 0
     readonly property int row: plugin.rowOf[cursorYear] ?? -1
     readonly property var year: row >= 0 ? plugin.years[row] : null
     readonly property int photos: year ? year.counts[day] : 0
-    readonly property var date: new Date(cursorYear, 0, 1 + day)
+    readonly property var date: Days.dateOf(cursorYear, 0, 1 + day)
+    Connections {
+        target: calendar.plugin
+        function onYearsChanged() {
+            if (!calendar.shown)
+                return
+            if (calendar.plugin.years.length === 0)
+                calendar.close()
+            else if (calendar.waiting)
+                calendar.place()
+            else if (calendar.row < 0) {
+                const y = calendar.plugin.years[Days.nearest(calendar.plugin.years, calendar.cursorYear)]
+                calendar.set(y.year, Math.min(calendar.day, y.days - 1))
+            }
+        }
+    }
 
     // Opening: the squares come in, rippling out from the year it opens on.
     property int openRow: 0
@@ -37,17 +54,30 @@ Item {
         return Math.max(0, Math.min(1, t))
     }
 
+    // Opened before the library is counted: on its way, and placed once it is.
+    property bool waiting: false
     function open() {
-        if (plugin.years.length === 0)
+        today = new Date()
+        shown = true
+        waiting = !plugin.counted
+        if (!waiting)
+            place()
+    }
+    // On the day of the photo the grid is on, else the last day with photos.
+    function place() {
+        waiting = false
+        if (plugin.years.length === 0) {
+            close()
             return
+        }
         const at = pinhole.currentIndex()
-        const date = at >= 0 ? new Date(pinhole.library.item(at).date) : null
+        const ms = at >= 0 ? pinhole.library.item(at).date : 0
+        const date = ms !== 0 ? new Date(ms) : null
         if (date && plugin.rowOf[date.getFullYear()] !== undefined)
-            set(date.getFullYear(), plugin.dayOf(date))
+            set(date.getFullYear(), Days.dayOf(date))
         else
             end(1)
         openRow = row
-        shown = true
         sweeping.restart()
         Qt.callLater(() => {
             years.forceLayout()
@@ -56,10 +86,12 @@ Item {
     }
     function close() {
         shown = false
+        waiting = false
     }
     // That day's first photo, in the grid.
     function jump() {
-        const at = year ? year.first[day] : -1
+        const id = year ? year.first[day] : ""
+        const at = id !== "" ? pinhole.library.indexOf(id) : -1
         if (at < 0) {
             nudge.restart()
             return
@@ -78,9 +110,9 @@ Item {
     function move(delta) {
         if (!year)
             return
-        const to = new Date(cursorYear, 0, 1 + day + delta)
+        const to = Days.dateOf(cursorYear, 0, 1 + day + delta)
         if (plugin.rowOf[to.getFullYear()] !== undefined) {
-            set(to.getFullYear(), plugin.dayOf(to))
+            set(to.getFullYear(), Days.dayOf(to))
             return
         }
         const next = row + (delta > 0 ? 1 : -1)
@@ -97,11 +129,9 @@ Item {
     }
     // The first day with photos (`way` -1) or the last (1).
     function end(way) {
-        const y = plugin.years[way < 0 ? 0 : plugin.years.length - 1]
-        let d = way < 0 ? 0 : y.days - 1
-        while (d > 0 && d < y.days - 1 && y.counts[d] === 0)
-            d -= way
-        set(y.year, d)
+        const at = Days.edge(plugin.years, way)
+        if (at)
+            set(at.year, at.day)
     }
     // The cursor's year in view, gliding there.
     function follow() {
@@ -154,7 +184,19 @@ Item {
             return 8
         return 1 + Math.floor(Math.min(1, Math.log(n) / Math.log(plugin.full)) * 6.99)
     }
-    readonly property var today: new Date()
+    // Days after today are drawn faint, unless they have photos (a camera's
+    // clock set wrong). Today again on opening, and as midnight passes.
+    property var today: new Date()
+    Timer {
+        interval: 60000
+        repeat: true
+        running: calendar.shown
+        onTriggered: {
+            const now = new Date()
+            if (now.toDateString() !== calendar.today.toDateString())
+                calendar.today = now
+        }
+    }
 
     // Its keys, while it is open (Command.qml).
     Command {
@@ -231,8 +273,8 @@ Item {
         keyLayer: "plugin"
         when: calendar.shown
         autoRepeat: true
-        mouse: qsTr("Wheel")
-        touchpad: qsTr("Two fingers")
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
         onTriggered: calendar.moveYear(-1)
     }
     Command {
@@ -241,8 +283,8 @@ Item {
         keyLayer: "plugin"
         when: calendar.shown
         autoRepeat: true
-        mouse: qsTr("Wheel")
-        touchpad: qsTr("Two fingers")
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
         onTriggered: calendar.moveYear(1)
     }
     Command {
@@ -253,8 +295,8 @@ Item {
         keysText: "Home End"
         keyLayer: "plugin"
         when: calendar.shown
-        mouse: qsTr("Wheel")
-        touchpad: qsTr("Two fingers")
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
         onTriggered: calendar.end(-1)
     }
     Command {
@@ -262,8 +304,8 @@ Item {
         keys: ["End"]
         keyLayer: "plugin"
         when: calendar.shown
-        mouse: qsTr("Wheel")
-        touchpad: qsTr("Two fingers")
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
         onTriggered: calendar.end(1)
     }
 
@@ -417,7 +459,7 @@ Item {
                 model: 12
                 UiText {
                     required property int index
-                    readonly property int first: calendar.plugin.dayOf(new Date(yearRow.modelData.year, index, 1))
+                    readonly property int first: Days.dayOf(Days.dateOf(yearRow.modelData.year, index, 1))
                     x: calendar.squaresX + Math.floor((first + yearRow.modelData.offset) / 7) * calendar.cell
                     y: Math.round((calendar.monthHeight - height) / 2) - Math.round(calendar.gap / 2)
                     text: Qt.locale().standaloneMonthName(index, Locale.ShortFormat)
@@ -445,7 +487,7 @@ Item {
                 width: 54 * calendar.cell
                 height: 7 * calendar.cell
                 // Painted again when any of these changes.
-                readonly property var looks: [calendar.ramp, calendar.cell, calendar.sweep, yearRow.modelData,
+                readonly property var looks: [calendar.ramp, calendar.cell, calendar.sweep, yearRow.modelData, calendar.today,
                                               calendar.plugin.full, calendar.plugin.glowing]
                 onLooksChanged: requestPaint()
                 onPaint: {
@@ -455,7 +497,7 @@ Item {
                     const c = calendar.cell, size = c - calendar.gap
                     const ramp = calendar.ramp
                     const now = calendar.today
-                    const future = y.year > now.getFullYear() ? 0 : y.year < now.getFullYear() ? y.days : calendar.plugin.dayOf(now) + 1
+                    const future = y.year > now.getFullYear() ? 0 : y.year < now.getFullYear() ? y.days : Days.dayOf(now) + 1
                     const glowing = []
                     const square = (d, shrink) => {
                         const at = d + y.offset
@@ -472,7 +514,7 @@ Item {
                         return true
                     }
                     for (let d = 0; d < y.days; ++d) {
-                        const l = d >= future ? 9 : calendar.level(y.counts[d])
+                        const l = y.counts[d] > 0 ? calendar.level(y.counts[d]) : d >= future ? 9 : 0
                         if (l === 8) {
                             glowing.push(d)
                             continue
@@ -572,6 +614,24 @@ Item {
                     color: calendar.photos > 0 ? calendar.accent : theme.muted
                 }
             }
+        }
+    }
+
+    // Opened before the library is counted.
+    Row {
+        anchors.centerIn: parent
+        visible: calendar.waiting
+        spacing: Math.round(theme.fontSize * 0.6)
+        Spinner {
+            anchors.verticalCenter: parent.verticalCenter
+            busy: calendar.waiting
+            delay: 0
+            bare: true
+        }
+        UiText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Counting the days…")
+            color: theme.muted
         }
     }
 
