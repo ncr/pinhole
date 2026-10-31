@@ -4,6 +4,10 @@
 #include <QSaveFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQmlPropertyMap>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -85,6 +89,65 @@ private:
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(contents);
     }
+
+    // Plugins as the window has them, each of `manifests` (its id, and
+    // what its manifest.json says besides) a folder with a Main.qml, and
+    // `pinhole` in the engine's JavaScript the first one's host. Settings
+    // go to the test's own config folder, started empty.
+    struct PluginBench {
+        QTemporaryDir dir;
+        Library library;
+        std::unique_ptr<ServiceClient> service;
+        std::unique_ptr<Viewer> viewer;
+        std::unique_ptr<Translator> translator;
+        History history;
+        QQmlEngine engine;
+        std::unique_ptr<Plugins> plugins;
+        PluginHost *host = nullptr;
+
+        explicit PluginBench(const QList<std::pair<QString, QJsonObject>> &manifests) {
+            QStandardPaths::setTestModeEnabled(true);
+            QFile::remove(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+            makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/x");
+            QString error;
+            library.open(dir.path(), &error);
+            qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
+            service = std::make_unique<ServiceClient>(dir.path());
+            viewer = std::make_unique<Viewer>(&library, service.get());
+            translator = std::make_unique<Translator>(dir.path() + "/language", PINHOLE_I18N);
+            QDir(dir.path()).mkdir("plugins");
+            for (const auto &[id, extra] : manifests) {
+                QJsonObject manifest{{"schemaVersion", 1}, {"id", id}, {"name", id}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+                for (auto it = extra.begin(); it != extra.end(); ++it)
+                    manifest.insert(it.key(), it.value());
+                QDir(dir.path() + "/plugins").mkdir(id);
+                write(dir.path() + "/plugins/" + id + "/manifest.json", QJsonDocument(manifest).toJson());
+                write(dir.path() + "/plugins/" + id + "/Main.qml", "import QtQuick\nItem {}\n");
+            }
+            qputenv("PINHOLE_BUILTIN_PLUGINS", (dir.path() + "/plugins").toUtf8());
+            plugins = std::make_unique<Plugins>(&library, service.get(), viewer.get(), translator.get(), &history);
+            plugins->setEngine(&engine);
+            if (!manifests.isEmpty()) {
+                host = qobject_cast<PluginHost *>(plugins->at(manifests.first().first).value("host").value<QObject *>());
+                QQmlEngine::setObjectOwnership(host, QQmlEngine::CppOwnership);
+                engine.globalObject().setProperty("pinhole", engine.newQObject(host));
+                engine.globalObject().setProperty("said", engine.newArray());
+            }
+        }
+        ~PluginBench() {
+            plugins.reset();
+            qunsetenv("PINHOLE_BUILTIN_PLUGINS");
+            qunsetenv("PINHOLE_SOCKET");
+        }
+        QJSValue js(const QString &code) {
+            const QJSValue result = engine.evaluate(code);
+            if (result.isError())
+                qWarning("%s", qPrintable(result.toString()));
+            return result;
+        }
+        // What the JavaScript pushed onto `said`, in order.
+        QStringList said() { return engine.globalObject().property("said").toVariant().toStringList(); }
+    };
 
 private slots:
     // A client that finds no service starts one: never a real pinholed
@@ -1288,6 +1351,120 @@ private slots:
         QCOMPARE(api.key(), QString("folder:/b"));
         QCOMPARE(api.count(), 2);
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    void aPluginsProgramsArePromisesThatSayHowTheyEnded() {
+        PluginBench bench({{"t", {}}});
+        QVERIFY(bench.host);
+        bench.js(R"(
+            const say = what => said.push(what)
+            pinhole.run("sh", ["-c", "echo hi"]).then(r => say("ok " + r.stdout.trim() + " " + r.code))
+            pinhole.run("sh", ["-c", "echo bad >&2; exit 3"]).then(null, e => say(e.code + " " + e.exitCode + " " + e.message))
+            pinhole.run("cat", [], { input: "fed" }).then(r => say("cat " + r.stdout))
+            pinhole.run("sh", ["-c", "echo $X"], { env: { X: "y" } }).then(r => say("env " + r.stdout.trim()))
+            pinhole.run("/no/such/program", []).then(null, e => say(e.code))
+            pinhole.run("sleep", ["5"], { timeout: 50 }).then(null, e => say(e.code))
+            const p = pinhole.run("sleep", ["5"])
+            p.then(null, e => say(e.code))
+            p.cancel()
+        )");
+        QTRY_COMPARE(bench.said().size(), 7);
+        QStringList said = bench.said();
+        said.sort();
+        QCOMPARE(said, QStringList({"cancelled", "cat fed", "env y", "exit 3 bad", "ok hi 0", "start", "timeout"}));
+        // As before API 2: a callback in place of the options.
+        bench.js(R"(pinhole.run("sh", ["-c", "echo old; exit 2"], (code, out) => said.push("old " + code + " " + out.trim())))");
+        QTRY_COMPARE(bench.said().size(), 8);
+        QCOMPARE(bench.said().last(), QString("old 2 old"));
+    }
+
+    void whatAPluginStartedEndsWithItAndAnswersNoMore() {
+        PluginBench bench({{"t", {}}});
+        const QString marker = bench.dir.path() + "/marker";
+        bench.js(QStringLiteral(R"(
+            pinhole.run("sh", ["-c", "sleep 0.5; touch %1"]).then(() => said.push("promise"), () => said.push("rejected"))
+            pinhole.run("sh", ["-c", "sleep 0.5"], () => said.push("callback"))
+            pinhole.fetch(0, "medium").then(() => said.push("fetched"), () => said.push("not fetched"))
+        )").arg(marker));
+        // Turned off: the program is stopped, and nothing it started says
+        // anything to it.
+        bench.plugins->setEnabled("t", false);
+        QTest::qWait(1500);
+        QVERIFY(!QFile::exists(marker));
+        QCOMPARE(bench.said(), QStringList());
+    }
+
+    void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {
+        PluginBench bench({{"t", {}}, {"u", {}}});
+        bench.js(R"(pinhole.run("true", [], () => { throw new Error("boom") }))");
+        QTRY_VERIFY(bench.host->problem().contains("boom"));
+        QTRY_VERIFY(bench.plugins->at("t").value("problem").toString().contains("boom"));
+        QCOMPARE(bench.plugins->at("u").value("problem").toString(), QString());
+        // What the engine warns of in one of its files.
+        QQmlError warning;
+        warning.setUrl(QUrl::fromLocalFile(bench.dir.path() + "/plugins/u/sub/Editor.qml"));
+        warning.setLine(7);
+        warning.setDescription("TypeError: nope");
+        emit bench.engine.warnings({warning});
+        QTRY_COMPARE(bench.plugins->at("u").value("problem").toString(), QString("sub/Editor.qml:7: TypeError: nope"));
+        // What a promise's chain throws, ended with .catch(pinhole.warn).
+        bench.js(R"(Promise.resolve().then(() => { throw new Error("in a then") }).catch(pinhole.warn))");
+        QTRY_VERIFY(bench.host->problem().contains("in a then"));
+        // Loaded again (turned off): forgotten.
+        bench.plugins->setEnabled("t", false);
+        QTRY_COMPARE(bench.plugins->at("t").value("problem").toString(), QString());
+    }
+
+    void aPluginsSettingsAreLivePropertiesKeptAtOnce() {
+        PluginBench bench({{"t", {}}});
+        auto *settings = qobject_cast<QQmlPropertyMap *>(bench.host->settings());
+        QVERIFY(settings);
+        bench.js(R"(
+            pinhole.settings.size = 3
+            pinhole.settings["edits:folder:/x"] = { manual: [["a", "b"]], apart: [] }
+        )");
+        QCOMPARE(bench.host->setting("size").toInt(), 3);
+        QCOMPARE(bench.host->setting("edits:folder:/x").toMap().value("manual").toList().first().toStringList(),
+                 QStringList({"a", "b"}));
+        QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll())["settings"]["t"]["size"].toInt(), 3);
+        // setSetting is the same thing, and what is bound to it follows.
+        bench.engine.rootContext()->setContextProperty("pinhole", bench.host);
+        QQmlComponent component(&bench.engine);
+        component.setData("import QtQml\nQtObject { property int size: pinhole.settings.size }", QUrl());
+        std::unique_ptr<QObject> bound(component.create());
+        QVERIFY2(bound, qPrintable(component.errorString()));
+        QCOMPARE(bound->property("size").toInt(), 3);
+        QVERIFY(bench.host->setSetting("size", 4));
+        QCOMPARE(bound->property("size").toInt(), 4);
+        QCOMPARE(bench.js("pinhole.settings.size").toInt(), 4);
+    }
+
+    void aPluginAskingForANewerApiSaysSo() {
+        PluginBench bench({{"t", {{"api", 99}}}, {"u", {{"api", Plugins::api}}}});
+        QVERIFY(bench.plugins->at("t").value("error").toString().contains("99"));
+        QVERIFY(!bench.plugins->at("t").value("enabled").toBool());
+        QCOMPARE(bench.plugins->at("u").value("error").toString(), QString());
+        QCOMPARE(bench.js("pinhole.api").toInt(), Plugins::api);
+    }
+
+    void aPluginNamesAPhotoByItsPositionOrItsId() {
+        PluginBench bench({{"t", {}}});
+        QCOMPARE(bench.js("pinhole.library.item('b').index").toInt(), 1);
+        QCOMPARE(bench.js("pinhole.library.item(2).id").toString(), QString("c"));
+        QVERIFY(bench.js("pinhole.library.item('zz').id").isUndefined());
+        QVERIFY(bench.js("pinhole.library.item(3).id").isUndefined());
+        bench.js(R"(pinhole.fetch("zz", "medium").then(null, e => said.push(e.code)))");
+        QTRY_COMPARE(bench.said(), QStringList({"not_found"}));
+    }
+
+    void aPluginsNoticeIsSaidAsItsOwn() {
+        PluginBench bench({{"t", {}}});
+        QSignalSpy notice(bench.plugins.get(), &Plugins::notice);
+        bench.js(R"(pinhole.notify("Saved to Pictures"))");
+        QCOMPARE(notice.size(), 1);
+        QCOMPARE(notice.first(), QVariantList({"t", "Saved to Pictures"}));
     }
 
     void aLivePhotosMotionIsAskedForOnceAndSaysWhyItDidNotCome() {

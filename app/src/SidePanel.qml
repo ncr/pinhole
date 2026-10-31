@@ -1034,6 +1034,17 @@ Item {
                                     opacity: pluginRow.on || pluginRow.info.error !== "" ? 1 : 0.75
                                     font.pixelSize: Math.round(theme.fontSize * 0.857)
                                 }
+                                // What went wrong in it as it ran: its QML not
+                                // loading, an error thrown, a warning from one
+                                // of its files, each with the file and line.
+                                UiText {
+                                    width: parent.width
+                                    visible: pluginRow.on && text !== ""
+                                    text: pluginRow.info.problem ?? ""
+                                    wrapMode: Text.WrapAnywhere
+                                    color: theme.red
+                                    font.pixelSize: Math.round(theme.fontSize * 0.786)
+                                }
                             }
                             Toggle {
                                 id: pluginSwitch

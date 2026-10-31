@@ -40,6 +40,8 @@ With no command, the window opens. A command asks the Pinhole service
   storage [--limit <GB>] [--move-to <folder>]
                          where Pinhole keeps its files, and how much room
                          they may take
+  plugin new <id>        begin a plugin of your own (docs/plugins.md)
+  plugin check [folder]  look a plugin over as Pinhole would load it
   help                   this
 )";
 

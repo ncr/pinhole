@@ -90,6 +90,9 @@ bool vulkanUsable() {
 } // namespace
 
 int main(int argc, char *argv[]) {
+    // pinhole plugin new …: a plugin begun or looked over, no window.
+    if (const int code = runPluginCommand(argc, argv); code >= 0)
+        return code;
     // pinhole status, pinhole add …: a command for the service, no window.
     if (const int code = runCommand(argc, argv); code >= 0)
         return code;
@@ -186,10 +189,8 @@ int main(int argc, char *argv[]) {
     std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
-    // What a plugin's QML imports (docs/plugins.md): its root and its
-    // buttons, and Pinhole's own pieces to draw as Pinhole does.
-    for (const char *type : {"PinholePlugin", "PluginAction", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
-        qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
+    // What a plugin's QML imports (docs/plugins.md).
+    Plugins::registerTypes();
     FrameStats stats;
     ThumbnailLoader loader(&library, parser.value("decoders").toInt());
     // Before the window, so it outlives the grid that polls it.

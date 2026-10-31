@@ -12,6 +12,8 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QQmlContext>
+#include <QQmlEngine>
 #include <QQuickWindow>
 #include <QTimer>
 #include <QWheelEvent>
@@ -25,7 +27,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -166,6 +168,34 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                         window->grabWindow().save(dir + "/3-freed.png");
                         QCoreApplication::quit();
                     });
+                });
+            });
+        });
+    }
+    // PINHOLE_SELFTEST=plugins:<dir>: the side panel's plugins, the one
+    // PINHOLE_SELFTEST_PLUGIN names (Series, else) in view, as an image in
+    // <dir>: what each says of itself and what went wrong in it
+    // (PINHOLE_BUILTIN_PLUGINS for some that go wrong).
+    if (name == QLatin1String("plugins")) {
+        QTimer::singleShot(2500, window, [window, arg] {
+            QObject *panel = window->findChild<QObject *>(QStringLiteral("sidePanel"));
+            panel->setProperty("shown", true);
+            QTimer::singleShot(800, window, [=] {
+                const QString id = qEnvironmentVariable("PINHOLE_SELFTEST_PLUGIN", QStringLiteral("pinhole.series"));
+                QVariant row;
+                QMetaObject::invokeMethod(panel, "showPlugin", Q_RETURN_ARG(QVariant, row), Q_ARG(QVariant, id));
+                QTimer::singleShot(1500, window, [=] {
+                    window->grabWindow().save(arg + "/plugins.png");
+                    // What the panel says of each, as Plugins::at has it.
+                    if (QObject *plugins = qvariant_cast<QObject *>(QQmlEngine::contextForObject(panel)->contextProperty("plugins")))
+                        for (const QString &each : plugins->property("ids").toStringList()) {
+                            QVariantMap info;
+                            QMetaObject::invokeMethod(plugins, "at", Q_RETURN_ARG(QVariantMap, info), Q_ARG(QString, each));
+                            const QString problem = info.value("error").toString() + info.value("problem").toString();
+                            std::printf("selftest: %s: %s\n", qPrintable(each), problem.isEmpty() ? "fine" : qPrintable(problem));
+                        }
+                    std::fflush(stdout);
+                    QCoreApplication::quit();
                 });
             });
         });

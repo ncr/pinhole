@@ -629,7 +629,13 @@ ApplicationWindow {
             onMainChanged: if (completed) load()
             Component.onCompleted: { completed = true; load() }
             onLoaded: win.collectPlugins()
-            onStatusChanged: if (status === Loader.Null || status === Loader.Error) win.collectPlugins()
+            onStatusChanged: {
+                // What kept it from loading, said under it in the side panel.
+                if (status === Loader.Error)
+                    plugins.loadFailed(modelData)
+                if (status === Loader.Null || status === Loader.Error)
+                    win.collectPlugins()
+            }
             Connections {
                 target: pluginLoader.item
                 ignoreUnknownSignals: true
@@ -807,7 +813,8 @@ ApplicationWindow {
 
     // Undo and redo (history.h): favourites, and what plugins change, as
     // Series does with a series put right. What was undone says so at the
-    // foot of the window, over the viewer and a plugin's screen too.
+    // foot of the window, over the viewer and a plugin's screen too, where
+    // a plugin's own notices show as well.
     Command {
         id: undo
         name: "history.undo"
@@ -895,6 +902,11 @@ ApplicationWindow {
             function onUndone(name) { historyNotice.show(qsTr("Undone: %1").arg(name), "redo") }
             function onRedone(name) { historyNotice.show(qsTr("Redone: %1").arg(name), "undo") }
             function onNothing(undo) { historyNotice.show(undo ? qsTr("Nothing to undo") : qsTr("Nothing to redo"), "") }
+        }
+        // A plugin's few words (pinhole.notify), said the same way.
+        Connections {
+            target: plugins
+            function onNotice(id, text) { historyNotice.show(text, "") }
         }
     }
 

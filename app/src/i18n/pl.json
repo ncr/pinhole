@@ -93,6 +93,8 @@
   "Freeing space…": "Zwalnianie miejsca…",
   "Full size": "Pełny rozmiar",
   "Hide": "Schowaj",
+  "It needs a newer Pinhole: plugin API %1, and this one has %2.": "Potrzebuje nowszego Pinhole: API pluginów %1, a ten ma %2.",
+  "Its setting “%1” could not be kept.": "Nie udało się zapisać jego ustawienia „%1”.",
   "iCloud cannot be reached. Is this computer online?": "Nie da się połączyć z iCloud. Czy ten komputer jest w sieci?",
   "iCloud Photos": "Zdjęcia iCloud",
   "icloudpd is signed in on this computer, so no password is needed": "icloudpd jest zalogowany na tym komputerze, więc hasło nie jest potrzebne",
