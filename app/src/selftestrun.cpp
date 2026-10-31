@@ -27,7 +27,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -380,6 +380,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runSeriesSelfTest(window, viewer, arg);
     if (name == QLatin1String("otherseries"))
         runOtherSeriesSelfTest(window, library, context.reloader, arg);
+    if (name == QLatin1String("sheet"))
+        runSheetSelfTest(window, grid, arg);
     if (name == QLatin1String("undo"))
         runUndoSelfTest(window, viewer, arg);
     if (name == QLatin1String("mouse"))

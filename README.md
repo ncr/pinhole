@@ -39,6 +39,11 @@ at a time, the latest first: D in the grid, where its button says how many
 years there are. In the side panel, the day alone or a few days around it,
 and whether videos and screenshots count.
 
+Contact sheet makes the photos ticked in select mode one picture to send
+(K): an even grid, or a collage that keeps each photo whole, with a gap, a
+background, a size and the dates if you like; Enter copies it and keeps it
+in Pictures/Pinhole.
+
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
@@ -99,6 +104,7 @@ plugins/series/           the Series plugin; finder/ is pinhole-series, which fi
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
+plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 ```
 
 ## Trying the grid

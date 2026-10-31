@@ -33,5 +33,8 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/onthisday/i18n" plugins/onthisday
 install -d "$PREFIX/lib/pinhole/plugins/calendar/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/calendar" plugins/calendar/manifest.json plugins/calendar/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/calendar/i18n" plugins/calendar/i18n/*.json
+install -d "$PREFIX/lib/pinhole/plugins/sheet/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/sheet" plugins/sheet/manifest.json plugins/sheet/*.qml plugins/sheet/Layout.js
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/sheet/i18n" plugins/sheet/i18n/*.json
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"
 install -Dm644 pkgbuild/pinhole.desktop "$PREFIX/share/applications/pinhole.desktop"

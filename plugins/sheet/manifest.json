@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "pinhole.sheet",
+  "name": "Contact sheet",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Makes the photos ticked in select mode one picture to send: an even grid, or a collage that keeps each photo whole.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

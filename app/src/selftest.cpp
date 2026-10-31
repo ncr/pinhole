@@ -1262,6 +1262,111 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
     wait->start();
 }
 
+void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &folder) {
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    // In the plugin, by the items it shows, as Series' test finds its own.
+    auto studio = [window] {
+        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == QLatin1String("sheetStudio"))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child))
+                    return found;
+            return nullptr;
+        };
+        return static_cast<QObject *>(find(window->contentItem()));
+    };
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    auto describe = [studio](const QString &name) {
+        QObject *s = studio();
+        const QVariantMap sheet = s->property("sheet").toMap();
+        const QVariantMap recipe = s->property("recipe").toMap();
+        return QStringLiteral("%1: %2, %3 photos, %4 %5x%6, gap %7, %8, dates %9")
+            .arg(name, s->property("shown").toBool() ? "shown" : "gone")
+            .arg(s->property("photos").toList().size())
+            .arg(recipe.value("layout").toString()).arg(sheet.value("w").toInt()).arg(sheet.value("h").toInt())
+            .arg(recipe.value("gap").toString(), recipe.value("background").toString(), recipe.value("dates").toBool() ? "on" : "off");
+    };
+    QTimer::singleShot(2500, window, [=] {
+        window->setProperty("troubleSeen", true);
+        if (!studio()) {
+            say(QStringLiteral("FAIL no Contact sheet plugin"));
+            QCoreApplication::exit(1);
+            return;
+        }
+        // Seven photos from the middle of the screen, ticked as Space does.
+        grid->setSelecting(true);
+        const int first = grid->indexAt(grid->width() / 2, grid->height() / 2);
+        for (int i = first; i < first + 7; ++i) {
+            grid->putCursorOn(i);
+            grid->tickCursor();
+        }
+        say(QStringLiteral("%1 ticked").arg(grid->selection().size()));
+        const QList<std::pair<QString, std::function<void()>>> steps = {
+            { QStringLiteral("0-ticked"), [] {} },
+            { QStringLiteral("1-open"), [window] { key(window, Qt::Key_K, Qt::NoModifier, "k"); } },
+            { QStringLiteral("2-collage"), [window] { key(window, Qt::Key_2, Qt::NoModifier, "2"); } },
+            { QStringLiteral("3-dates"), [window] { key(window, Qt::Key_D, Qt::NoModifier, "d"); } },
+            { QStringLiteral("4-grid"), [window] { key(window, Qt::Key_1, Qt::NoModifier, "1"); } },
+            { QStringLiteral("5-white-wide"), [window] {
+                  key(window, Qt::Key_B, Qt::NoModifier, "b");
+                  key(window, Qt::Key_G, Qt::NoModifier, "g");
+              } },
+        };
+        auto step = std::make_shared<std::function<void(int)>>();
+        *step = [=](int n) {
+            if (n == steps.size()) {
+                // Enter: fetched, put together, copied; how far as it goes.
+                key(window, Qt::Key_Return);
+                auto clock = std::make_shared<QElapsedTimer>();
+                clock->start();
+                auto poll = std::make_shared<QTimer>();
+                poll->setInterval(250);
+                auto last = std::make_shared<QString>();
+                QObject::connect(poll.get(), &QTimer::timeout, window, [=] {
+                    QObject *s = studio();
+                    const QString making = s->property("making").toString();
+                    const QString now = QStringLiteral("%1 %2").arg(making).arg(s->property("fetched").toInt());
+                    if (now != *last && making != "") {
+                        *last = now;
+                        say(QStringLiteral("making: %1, %2 fetched").arg(making).arg(s->property("fetched").toInt()));
+                        if (making == QLatin1String("fetching") && s->property("fetched").toInt() == 0)
+                            grab(QStringLiteral("6-fetching"));
+                    }
+                    const QVariantMap made = s->property("made").toMap();
+                    const QString error = s->property("error").toString();
+                    if ((making != "" || (made.isEmpty() && error.isEmpty())) && clock->elapsed() < 180000)
+                        return;
+                    poll->stop();
+                    grab(QStringLiteral("7-made"));
+                    if (!made.isEmpty())
+                        say(QStringLiteral("made %1 (%2) in %3 ms").arg(made.value("path").toString(), made.value("size").toString())
+                                .arg(clock->elapsed()));
+                    else
+                        say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 180 s") : error));
+                    key(window, Qt::Key_Escape);
+                    QTimer::singleShot(600, window, [=] {
+                        say(describe(QStringLiteral("after Esc")));
+                        QCoreApplication::exit(made.isEmpty() ? 1 : 0);
+                    });
+                });
+                poll->start();
+                return;
+            }
+            steps[n].second();
+            QTimer::singleShot(1500, window, [=] {
+                say(describe(steps[n].first));
+                grab(steps[n].first);
+                (*step)(n + 1);
+            });
+        };
+        (*step)(0);
+    });
+}
+
 void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
     auto clock = std::make_shared<QElapsedTimer>();
     clock->start();

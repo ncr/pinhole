@@ -85,6 +85,12 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // <dir>; check the viewer beneath took none of it.
 void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
+// PINHOLE_SELFTEST=sheet:<dir>: seven photos ticked in select mode, K for
+// the Contact sheet; a collage, the dates, a grid, white with wide gaps,
+// each grabbed into <dir>; then Enter, which fetches them and makes the
+// file, copied and kept in Pictures/Pinhole; and Esc.
+void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &folder);
+
 // PINHOLE_SELFTEST=undo:<dir>: the longest series on its screen to put it
 // right; X takes a photo out, Ctrl+Z puts it back, Ctrl+⇧Z takes it out
 // again, Ctrl+Z twice, the second with nothing left to undo. Check the
