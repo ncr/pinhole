@@ -23,5 +23,9 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/series" plugins/series/manifest.j
   plugins/series/Engine.js plugins/series/grain.png
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/series/i18n" plugins/series/i18n/*.json
 install -Dm755 plugins/series/finder/target/release/pinhole-series "$PREFIX/lib/pinhole/plugins/series/pinhole-series"
+install -d "$PREFIX/lib/pinhole/plugins/background/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/manifest.json plugins/background/*.qml
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background/i18n" plugins/background/i18n/*.json
+install -Dm755 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/keep
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"
 install -Dm644 pkgbuild/pinhole.desktop "$PREFIX/share/applications/pinhole.desktop"

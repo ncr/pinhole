@@ -1,0 +1,23 @@
+#!/bin/sh
+# keep <file> <kept>: a photo or video from the service's cache kept where it
+# lasts, as a background Omarchy can show. A .jpg is the photo as it looks
+# (HEIC and the rest made a JPEG, turned upright: the shell draws with Qt's
+# image readers, which know neither); a .mkv a video's picture, without its
+# sound (a background is silent), in a container mpv reads whatever it came
+# in; anything else the file as it is, linked where it can be. Written aside
+# and renamed, so the shell never reads half a file; kept already, left be.
+set -eu
+from=$1
+kept=$2
+[ -s "$kept" ] && exit 0
+mkdir -p "$(dirname -- "$kept")"
+part="$kept.part"
+trap 'rm -f -- "$part"' EXIT
+case "$kept" in
+  *.jpg) magick "$from" -auto-orient -quality 92 "jpg:$part" ;;
+  *.mkv) ffmpeg -v error -y -i "$from" -map 0:v:0 -c copy -f matroska "$part" ;;
+  # A hard link where the cache and Pictures share a disk: instant, no room
+  # taken twice, and it stays when the cache lets its name go.
+  *) ln -- "$from" "$part" 2>/dev/null || cp -- "$from" "$part" ;;
+esac
+mv -f -- "$part" "$kept"

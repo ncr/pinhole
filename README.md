@@ -36,6 +36,11 @@ on unless turned off in the side panel. A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
+Background: B on a photo shown full window makes it the desktop background;
+a video becomes a moving one, and a Live Photo's ▾ (⇧B) its motion, as taken
+or bouncing. Each is kept in Pictures/Pinhole/Backgrounds; Ctrl+Z puts the
+one before back.
+
 ## Install
 
 ```bash
@@ -80,6 +85,7 @@ core/src/bin/daemon.rs    pinholed, the background service: larger renditions on
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
+plugins/background/       the Background plugin: a photo or video as the desktop background
 ```
 
 ## Trying the grid
