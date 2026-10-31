@@ -4,6 +4,7 @@
 
 #include "incoming.h"
 #include "library.h"
+#include "libraryreloader.h"
 #include "outgoing.h"
 #include "photogrid.h"
 #include "photoprovider.h"
@@ -18,6 +19,11 @@
 #include <QPointingDevice>
 #include <QProcess>
 #include <QQmlContext>
+#include <QQmlEngine>
+#include <QJSValue>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 #include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -33,6 +39,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 
@@ -1441,4 +1448,117 @@ void runInputsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir
         QTimer::singleShot(700, window, [=] { (*run)(k + 1); });
     };
     QTimer::singleShot(2500, window, [run] { (*run)(0); });
+}
+
+void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, LibraryReloader &reloader, const QString &dir) {
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    // As the window shows it: a plugin's items are the window's items'
+    // children, not its objects'.
+    auto plugin = [window]() -> QObject * {
+        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == QLatin1String("seriesEditor"))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child))
+                    return found;
+            return nullptr;
+        };
+        QQuickItem *editor = find(window->contentItem());
+        return editor ? editor->property("plugin").value<QObject *>() : nullptr;
+    };
+    QObject *history = qmlEngine(window)->rootContext()->contextProperty("history").value<QObject *>();
+    // A QML var: a QJSValue, or already a QVariant.
+    auto plain = [](const QVariant &v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; };
+    auto manual = [=]() {
+        QList<QStringList> series;
+        for (const QVariant &ids : plain(plugin()->property("edits")).toMap().value("manual").toList())
+            series.append(ids.toStringList());
+        return series;
+    };
+    auto keptFor = [=](const QString &key) {
+        QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+        if (!file.open(QIODevice::ReadOnly))
+            return QList<QStringList>();
+        QList<QStringList> series;
+        const QJsonObject edits = QJsonDocument::fromJson(file.readAll()).object()["settings"].toObject()["pinhole.series"].toObject()[key].toObject();
+        for (const QVariant &ids : edits.toVariantMap().value("manual").toList())
+            series.append(ids.toStringList());
+        return series;
+    };
+    auto failed = std::make_shared<bool>(false);
+    auto check = [=](const QString &what, bool ok) {
+        say(QStringLiteral("%1: %2").arg(what, ok ? "as it should" : "WRONG"));
+        *failed = *failed || !ok;
+    };
+    // Calls `then` once `ready` holds, polled; gives up after 60 s.
+    auto when = [=](const QString &what, std::function<bool()> ready, std::function<void()> then) {
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto poll = new QTimer(window);
+        poll->setInterval(100);
+        QObject::connect(poll, &QTimer::timeout, window, [=] {
+            if (ready()) {
+                poll->deleteLater();
+                then();
+            } else if (clock->elapsed() > 60000) {
+                poll->deleteLater();
+                QObject *p = plugin();
+                say(QStringLiteral("no %1 in 60 s (Series %2, its edits' key \"%3\"); FAILED")
+                        .arg(what, p ? "loaded" : "not loaded", p ? p->property("editsKey").toString() : QString()));
+                QCoreApplication::exit(1);
+            }
+        });
+        poll->start();
+    };
+    const QString first = library.dir(), firstSource = library.source();
+    auto shown = [=, &library](const QString &source) {
+        return [=, &library] {
+            return library.source() == source && plugin() && plugin()->property("editsKey").toString() == "edits:" + source;
+        };
+    };
+    when(QStringLiteral("library with Series"), [=, &library] { return library.count() >= 3 && shown(firstSource)(); }, [=, &library, &reloader] {
+        const QStringList ids{library.at(0).id, library.at(1).id, library.at(2).id};
+        const QVariant indexes = QVariantList{0, 1, 2}, name = QStringLiteral("grouping");
+        QMetaObject::invokeMethod(plugin(), "group", Q_ARG(QVariant, indexes), Q_ARG(QVariant, name));
+        check(QStringLiteral("grouped in %1").arg(firstSource), manual() == QList<QStringList>{ids});
+        check(QStringLiteral("to undo"), history->property("canUndo").toBool());
+        // Shown from elsewhere: no Sources::switched in this window.
+        Library other;
+        QString error;
+        if (!other.open(dir, &error) || other.source() == firstSource || other.count() < 3 || other.at(0).id != library.at(0).id) {
+            say(QStringLiteral("%1 is not another source's library of the same photos; FAILED").arg(dir));
+            QCoreApplication::exit(1);
+            return;
+        }
+        const QString otherSource = other.source();
+        reloader.moveTo(dir);
+        when(QStringLiteral("other library"), shown(otherSource), [=, &reloader] {
+            check(QStringLiteral("nothing grouped in %1").arg(otherSource), manual().isEmpty());
+            check(QStringLiteral("nothing to undo there"), !history->property("canUndo").toBool());
+            QMetaObject::invokeMethod(history, "undo");
+            QTimer::singleShot(500, window, [=, &reloader] {
+                check(QStringLiteral("still nothing grouped after Ctrl+Z"), manual().isEmpty());
+                check(QStringLiteral("%1 keeps its group").arg(firstSource), keptFor("edits:" + firstSource) == QList<QStringList>{ids});
+                check(QStringLiteral("%1 has no edits kept").arg(otherSource), keptFor("edits:" + otherSource).isEmpty());
+                reloader.moveTo(first);
+                when(QStringLiteral("first library again"), shown(firstSource), [=] {
+                    QTimer::singleShot(500, window, [=] {
+                        check(QStringLiteral("grouped again in %1").arg(firstSource), manual() == QList<QStringList>{ids});
+                        const QVariantList series = plain(plugin()->property("series")).toList();
+                        check(QStringLiteral("shown as a series"), std::any_of(series.begin(), series.end(), [](const QVariant &s) {
+                            QList<int> at;
+                            for (const QVariant &i : s.toList())
+                                at.append(i.toInt());
+                            return at == QList<int>{0, 1, 2};
+                        }));
+                        say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
+                        QCoreApplication::exit(*failed ? 1 : 0);
+                    });
+                });
+            });
+        });
+    });
 }

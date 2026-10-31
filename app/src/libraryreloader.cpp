@@ -26,6 +26,8 @@ struct LibraryReloader::Read {
     QString dir;
     Library fresh;
     std::vector<int> moved, textures;
+    // The same source's library as the one shown.
+    bool same = true;
     qint64 readMs = 0;
 };
 
@@ -93,6 +95,7 @@ void LibraryReloader::reload() {
         const bool same = !fresh.source().isEmpty() && !library->source().isEmpty()
                               ? fresh.source() == library->source()
                               : sourceOf(fresh.dir()) == sourceOf(library->dir());
+        read->same = same;
         if (same)
             for (int i = 0; i < library->count(); ++i)
                 read->moved[size_t(i)] = positions.value(library->at(i).id, -1);
@@ -121,6 +124,8 @@ void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
     emit aboutToSwap();
     m_loader->reload([&] { m_library->swap(read->fresh); });
     emit reloaded(read->moved, read->textures, std::exchange(m_toNewest, false));
+    if (!read->same)
+        emit otherSource();
     std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                  m_library->count(), before, read->readMs, swapping.elapsed());
     m_reading = false;

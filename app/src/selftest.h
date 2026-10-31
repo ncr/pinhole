@@ -5,6 +5,7 @@
 class Incoming;
 class Keymap;
 class Library;
+class LibraryReloader;
 class PhotoGrid;
 class QQuickWindow;
 class Viewer;
@@ -90,6 +91,14 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
 // series' length after each and grab the window, its notice, into <dir>.
 void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
+// PINHOLE_SELFTEST=otherseries:<dir>: Series' edits and another source's
+// library of the same ids, shown from elsewhere (as another window or a
+// terminal would): photos 0-2 grouped in the library shown, the library in
+// <dir> swapped in, and Ctrl+Z, which has nothing left to undo there; the
+// first one shown again, still grouped. Its config is plugins.json, so
+// with XDG_CONFIG_HOME a folder of its own.
+void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, LibraryReloader &reloader, const QString &dir);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;
@@ -99,6 +108,7 @@ struct SelfTestContext {
     Incoming &incoming;
     Outgoing &outgoing;
     Keymap &keymap;
+    LibraryReloader &reloader;
 };
 
 // PINHOLE_SELFTEST: start the self-test it names, `name` or `name:argument`

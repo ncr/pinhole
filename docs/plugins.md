@@ -108,7 +108,7 @@ type, so a plugin can look like the rest.
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
 | `setting(key, fallback)`, `setSetting(key, value)` | its settings, kept in `~/.config/pinhole/plugins.json`; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |
-| `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again |
+| `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
 
 Strings in `qsTr()` are translated from `i18n/<language>.json` in the
 plugin's folder, as Pinhole's own are (`app/src/i18n`).

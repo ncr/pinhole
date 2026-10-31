@@ -43,6 +43,11 @@ signals:
     // -1: its old one must not stay on screen). `toNewest` as in
     // showNewestNext. Delivered directly, on this thread.
     void reloaded(const std::vector<int> &moved, const std::vector<int> &textures, bool toNewest);
+    // After `reloaded`, when what was swapped in is another source's
+    // library, however it came to be shown (this window, another, a
+    // terminal): nothing done to the last one's photos is to be undone on
+    // these, though a photo here has the same id.
+    void otherSource();
 
 private:
     struct Read;

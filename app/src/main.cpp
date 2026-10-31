@@ -305,6 +305,9 @@ int main(int argc, char *argv[]) {
         plugins.libraryReloaded();
         favourites.reloaded();
     });
+    // Undone on another source's photos of the same ids, a step would
+    // change photos it was never done to.
+    QObject::connect(&reloader, &LibraryReloader::otherSource, &history, &History::clear);
     // What the service says that the window as a whole follows.
     QObject::connect(&service, &ServiceClient::announced, &service, [&](const QString &name, const QJsonObject &details) {
         if (name == QLatin1String("library_changed")) {
@@ -328,7 +331,7 @@ int main(int argc, char *argv[]) {
         reloader.waitForLibrary();
 
     if (const QString test = qEnvironmentVariable("PINHOLE_SELFTEST");
-        !test.isEmpty() && !runSelfTest(test, {window, grid, library, viewer, incoming, outgoing, keymap}))
+        !test.isEmpty() && !runSelfTest(test, {window, grid, library, viewer, incoming, outgoing, keymap, reloader}))
         return 2;
 
     Bench bench(grid, &stats, &loader);

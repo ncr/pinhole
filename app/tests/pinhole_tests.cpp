@@ -922,8 +922,8 @@ private slots:
     }
 
     void aLibrarySaysWhoseItIsAndAMovedOneIsTheSameOne() {
-        // Two folders' libraries named alike (a-b/c and a/b-c both make
-        // folder/a-b-c), and the first one moved elsewhere.
+        // Two folders' libraries named alike (as a-b/c and a/b-c both were
+        // folder/a-b-c once), and the first one moved elsewhere.
         QTemporaryDir root;
         const QString first = root.path() + "/one/library/folder/a-b-c", other = root.path() + "/two/library/folder/a-b-c",
                       moved = root.path() + "/three/library/folder/a-b-c";
@@ -941,14 +941,18 @@ private slots:
         std::vector<std::vector<int>> moves;
         connect(&reloader, &LibraryReloader::reloaded, this,
                 [&](const std::vector<int> &moved, const std::vector<int> &, bool) { moves.push_back(moved); });
+        int others = 0;
+        connect(&reloader, &LibraryReloader::otherSource, this, [&] { ++others; });
         // The same source's library moved: the photos follow.
         reloader.moveTo(moved);
         QTRY_COMPARE(moves.size(), size_t(1));
         QCOMPARE(moves[0], (std::vector<int>{0, 1}));
+        QCOMPARE(others, 0);
         // Another source's, though named alike: nothing carries over.
         reloader.moveTo(other);
         QTRY_COMPARE(moves.size(), size_t(2));
         QCOMPARE(moves[1], (std::vector<int>{-1, -1}));
+        QCOMPARE(others, 1);
         QCOMPARE(library.source(), QString("folder:/a/b-c"));
     }
 
