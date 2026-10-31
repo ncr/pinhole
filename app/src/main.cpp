@@ -191,8 +191,8 @@ int main(int argc, char *argv[]) {
     TouchpadHold hold;
 
     // Larger renditions come from pinholed.
-    // A library given (pinhole-fake's, say) is the one shown, whatever the
-    // service says; else the service's choice is (library_moved).
+    // A library given (pinhole-fake's, say) is the one shown whatever source
+    // the service shows; else the service's choice is (library_moved).
     const bool libraryGiven = parser.isSet("library");
     ServiceClient service(libraryGiven ? QDir(libraryDir).absolutePath() : QString());
     // What to call the source until the service says.
@@ -243,6 +243,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("service", &service);
     engine.load(QUrl("qrc:/Main.qml"));
     opening.join();
+    service.setShown(library.source());
     if (!haveLibrary)
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));
     std::fprintf(stderr, "pinhole: %d items from %s in %lld ms\n", library.count(), qPrintable(library.dir()),
@@ -307,6 +308,7 @@ int main(int argc, char *argv[]) {
         viewer.libraryReloaded(moved);
         plugins.libraryReloaded();
         favourites.reloaded();
+        service.setShown(library.source());
     });
     // Undone on another source's photos of the same ids, a step would
     // change photos it was never done to.
@@ -324,10 +326,13 @@ int main(int argc, char *argv[]) {
                 reloader.showNewestNext();
                 history.clear();
             }
-        } else if (name == QLatin1String("library_moved") && !libraryGiven) {
+        } else if (name == QLatin1String("library_moved")) {
             // Read from its new place from now on (the old one goes soon),
-            // or, as the window connects, the one the service chose.
-            reloader.moveTo(details.value("library").toString());
+            // or, as the window connects, the one the service chose. A
+            // library given is kept to, but followed where it moves.
+            const QString dir = details.value("library").toString();
+            if (!libraryGiven || Storage::libraryOwner(dir) == library.source())
+                reloader.moveTo(dir);
         }
     });
     // New photos since the window last looked: ask now rather than within

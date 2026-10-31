@@ -47,7 +47,7 @@ up on; it connects again and starts afresh.
 
 | Method | Params | Result |
 |---|---|---|
-| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
+| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source` (the id of the source whose photo it is: else `other_source`) | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
@@ -119,7 +119,10 @@ in `sources`), `needs_sign_in` whether it is one that can need signing in,
 and an iCloud source's `account` (its Apple ID) or a folder's `path`. Right
 after it, as a window connects, comes `library_moved` with the library to
 read: the one this service chose (never another source's, `library_for`),
-whatever the window guessed.
+whatever the window guessed. Both are sent before any switch or move made
+after, which is then told in turn, never before them. A window given a
+library of its own (`--library`) keeps to it, following it only where it
+moves.
 `accepts` is the extensions of the files `add` takes for it, lower case
 (empty: nothing can be added). With no
 source at all (none added yet, or every one removed) `kind` is null and
@@ -337,7 +340,8 @@ change feed brings the same `isFavorite` back. Requests are done one after
 another in the order they came, so a photo made a favourite and back again
 quickly ends as it began. Those already as asked are left alone (`changed`
 counts the rest). With `source`, they are done only if the library shown is
-that source's: else `other_source`, and nothing changes (a window's undo,
+that source's (`""` for one that does not say whose it is): else
+`other_source`, and nothing changes (a window's undo,
 made after another source was shown from elsewhere, never reaches another
 source's photos of the same ids).
 

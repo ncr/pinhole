@@ -186,6 +186,15 @@ fn a_window_meets_the_service_of_a_folder() {
     let elsewhere = window.ask("set_favorite", json!({"assets": ["a.jpg"], "favorite": false, "source": "folder:/elsewhere"}));
     assert_eq!(elsewhere["error"]["code"], "other_source", "{elsewhere:#}");
     assert!(favourite(&library, "a.jpg"));
+    // A photo asked for as another source's (or of a library that says
+    // whose it is not): not this one's.
+    let own = format!("folder:{}", photos.display());
+    let asked = window.ask("fetch", json!({"asset": "a.jpg", "kind": "original", "source": own}));
+    assert_eq!(asked["ok"], true, "{asked:#}");
+    for other in ["folder:/elsewhere", ""] {
+        let asked = window.ask("fetch", json!({"asset": "a.jpg", "kind": "original", "source": other}));
+        assert_eq!(asked["error"]["code"], "other_source", "{asked:#}");
+    }
 
     // A file gone from the folder goes from the library at the round a
     // window asks for.

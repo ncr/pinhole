@@ -843,12 +843,17 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
     // First which protocol this is, for a window of another version to
     // tell (docs/service.md, Transport): before it hears any news.
     out.send(json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
-    shared.listeners.lock().unwrap().push(out.clone());
-    // A window that connects hears where the photos come from, and if
-    // something is wrong, that too.
-    out.send(source_event(&*shared.source()));
-    // And which library to read: the window's own guess may be another.
-    out.send(json!({"event": "library_moved", "library": shared.storage.library()}));
+    {
+        // A window that connects hears where the photos come from, and which
+        // library to read (its own guess may be another): told before any
+        // switch or move after, which is told it in turn, never after one
+        // it would undo.
+        let _context = shared.storage.library_moving.read().unwrap();
+        shared.listeners.lock().unwrap().push(out.clone());
+        out.send(source_event(&*shared.source()));
+        out.send(json!({"event": "library_moved", "library": shared.storage.library()}));
+    }
+    // And if something is wrong, that too.
     out.send(sources_event(&shared));
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
@@ -1094,7 +1099,7 @@ fn set_favorite(shared: &Shared, params: &Value) -> std::result::Result<Value, (
     // Asked of one source's photos (a window's undo, say): never done to
     // another's of the same ids, shown since.
     if let Some(asked) = params["source"].as_str() {
-        if crate::db::meta(&db, "source").as_deref() != Some(asked) {
+        if crate::db::meta(&db, "source").unwrap_or_default() != asked {
             return Err(("other_source", format!("{asked} is not the source shown")));
         }
     }
@@ -1147,6 +1152,13 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     let Some(want) = Want::parse(kind).filter(|w| *w != Want::Thumb) else {
         return reply.send(Err(("bad_request", format!("unknown kind {kind}"))));
     };
+    // Asked of one source's photo (the window's library, as it says): never
+    // another's of the same id, shown since.
+    if let Some(asked) = params["source"].as_str() {
+        if crate::db::meta(db, "source").unwrap_or_default() != asked {
+            return reply.send(Err(("other_source", format!("{asked:?} is not the source shown"))));
+        }
+    }
 
     // The rendition that serves this kind, as the catalog chose it.
     let row = db.query_row(

@@ -49,10 +49,9 @@ void Favourites::set(const QList<QByteArray> &ids, bool favorite, const QString 
     for (const QByteArray &id : ids)
         assets.append(QString::fromUtf8(id));
     apply(ids, favorite);
-    QJsonObject params{{"assets", assets}, {"favorite", favorite}};
-    // And the service, which may have another source's library already.
-    if (!source.isEmpty())
-        params.insert("source", source);
+    // And the service, which may have another source's library already
+    // (one that says whose it is not, "", is no other's either).
+    const QJsonObject params{{"assets", assets}, {"favorite", favorite}, {"source", source}};
     m_service->call(QStringLiteral("set_favorite"), params, [this, ids, favorite, source](bool ok, const QJsonObject &, const QString &code) {
         if (ok)
             return;

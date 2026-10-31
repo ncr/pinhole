@@ -26,6 +26,14 @@ public:
     // `stream`, a video is answered as soon as it starts downloading, with a
     // `stream` URL to play it from.
     void fetch(const QByteArray &asset, const QString &kind, Callback done, bool stream = false);
+    // The source of the library the window shows (Library::source): each
+    // fetch says it, so a service showing another's (switched from
+    // elsewhere, not yet read here) answers other_source rather than its
+    // photo of the same id.
+    void setShown(const QString &source) {
+        m_shown = source;
+        m_shownKnown = true;
+    }
 
     // Any other method of docs/service.md, such as storage and set_storage.
     void call(const QString &method, const QJsonObject &params, Callback done);
@@ -66,6 +74,8 @@ private:
     static QString socketPath();
 
     QString m_library;
+    QString m_shown;
+    bool m_shownKnown = false;
     QJsonObject m_source;
     QString m_health = QStringLiteral("fine");
     QLocalSocket m_socket;

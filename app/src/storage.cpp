@@ -92,11 +92,7 @@ QJsonObject Storage::configuredSource() {
     return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}, {"account", account}};
 }
 
-namespace {
-
-// storage::library_owner: which source a library holds the photos of;
-// empty for none yet, or no library there.
-QString libraryOwner(const QString &dir) {
+QString Storage::libraryOwner(const QString &dir) {
     const QString path = dir + "/library.sqlite";
     if (!QFileInfo::exists(path))
         return {};
@@ -114,6 +110,8 @@ QString libraryOwner(const QString &dir) {
     QSqlDatabase::removeDatabase("owner");
     return owner;
 }
+
+namespace {
 
 // storage::stable_hash, as a name's tilde and sixteen hex digits.
 QString stableHash(const QString &text) {
@@ -156,14 +154,22 @@ QString Storage::library() {
         id = "icloud:" + source.value("account").toString();
         name = source.value("account").toString();
     }
+    // Its own wherever it is: its name, a former one, or one by its id it
+    // was given when its name was another's; else the first that is no
+    // one's.
     const QString preferred = under + name;
-    for (const QString &dir : QStringList{preferred} + former)
+    const auto byId = [&](int n) { return preferred + stableHash(id) + (n == 0 ? QString() : '-' + QString::number(n)); };
+    QStringList own = QStringList{preferred} + former;
+    for (int n = 0; QFileInfo::exists(byId(n)); ++n)
+        own.append(byId(n));
+    for (const QString &dir : std::as_const(own))
         if (libraryOwner(dir) == id)
             return dir;
     if (libraryOwner(preferred).isEmpty())
         return preferred;
-    // A library made under another's former name has this one's.
-    return preferred + stableHash(id);
+    for (int n = 0;; ++n)
+        if (libraryOwner(byId(n)).isEmpty())
+            return byId(n);
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {

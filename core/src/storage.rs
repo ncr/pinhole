@@ -168,8 +168,9 @@ pub fn remove_source(path: &Path, id: &str) -> Result<Option<Value>> {
 /// source, under its kind: `library/icloud/<apple-id>`,
 /// `library/folder/home-me-Pictures`; with no source, an empty one in
 /// `library/none`. Never another source's (by what each says it is,
-/// `library_owner`): one of its own made under a former name is kept to,
-/// and where its name is another's it has one by its id.
+/// `library_owner`), and always the same one: its own wherever it is (its
+/// name, a former one, or one by its id it was given when its name was
+/// another's), else the first of those that is no one's.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
     if source.kind() == "none" {
         return location.join("library/none");
@@ -177,18 +178,24 @@ pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathB
     let kind = location.join("library").join(source.kind());
     let id = source.id();
     let name = source.library_name();
-    let preferred = kind.join(&name);
-    if let Some(own) = std::iter::once(preferred.clone())
-        .chain(source.former_library_names().into_iter().map(|former| kind.join(former)))
+    // By its id: the first, and more should even that be another's.
+    let by_id = |n: usize| {
+        let hash = format!("{name}~{:016x}", stable_hash(id.as_bytes()));
+        kind.join(if n == 0 { hash } else { format!("{hash}-{n}") })
+    };
+    let by_ids = (0..).map(by_id).take_while(|dir| dir.exists());
+    let formers = source.former_library_names().into_iter().map(|former| kind.join(former));
+    if let Some(own) = std::iter::once(kind.join(&name))
+        .chain(formers)
+        .chain(by_ids)
         .find(|dir| library_owner(dir).as_deref() == Some(id.as_str()))
     {
         return own;
     }
-    if library_owner(&preferred).is_none() {
-        return preferred;
-    }
-    // A library made under another's former name has this one's.
-    kind.join(format!("{name}~{:016x}", stable_hash(id.as_bytes())))
+    std::iter::once(kind.join(&name))
+        .chain((0..).map(by_id))
+        .find(|dir| library_owner(dir).is_none())
+        .expect("a name no library has")
 }
 
 /// Which source a library holds the photos of (`sync::claim`); None for
@@ -869,6 +876,21 @@ mod tests {
         assert_ne!(for_path("/a-b/c"), own);
         // One with no owner yet is anyone's to claim.
         assert_eq!(for_path("/x/y"), location.join("library/folder/x-y"));
+        // That name by its id another's too (as a path with a tilde and no
+        // dash had it before): the next.
+        let claimed = |dir: &Path, owner: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            crate::db::set_meta(&crate::db::open(&dir.join("library.sqlite")).unwrap(), "source", owner).unwrap();
+        };
+        let by_id = location.join("library/folder/a-b-c~43215282df502c0e");
+        claimed(&by_id, "folder:/a/b/c~43215282df502c0e");
+        let next = location.join("library/folder/a-b-c~43215282df502c0e-1");
+        assert_eq!(for_path("/a/b/c"), next);
+        // Its own there, it is kept to, even once its name is no one's.
+        claimed(&next, "folder:/a/b/c");
+        assert_eq!(for_path("/a/b/c"), next);
+        std::fs::remove_dir_all(&own).unwrap();
+        assert_eq!(for_path("/a/b/c"), next);
         let _ = std::fs::remove_dir_all(&location);
     }
 

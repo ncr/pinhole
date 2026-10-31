@@ -1113,6 +1113,11 @@ private slots:
         QTest::qWait(100);
         QCOMPARE(heard(), 2);
         QVERIFY(!library.at(0).favorite);
+        // A photo asked for says whose it is too, once the window says.
+        service.setShown(library.source());
+        service.fetch("x.jpg", "medium", [](bool, const QJsonObject &, const QString &) {});
+        QTRY_COMPARE(heard(), 3);
+        QCOMPARE(fake.asked.last().value("params").toObject().value("source").toString(), QString("folder:/b"));
     }
 
     void aServiceOfAnotherProtocolIsSaidSoAndItsHealthDoesNotHideIt() {
@@ -1460,6 +1465,16 @@ private slots:
         QCOMPARE(Storage::library(), former + "~43215282df502c0e");
         shown("/a-b/c");
         QVERIFY(Storage::library() != former);
+        // That name by its id another's too: the next; its own there is
+        // kept to, even once its name is no one's.
+        const QString byId = former + "~43215282df502c0e", next = byId + "-1";
+        QVERIFY(QDir().mkpath(byId) && QDir().mkpath(next));
+        makeLibrary(byId, {{"x.jpg", 1}}, false, "folder:/a/b/c~43215282df502c0e");
+        shown("/a/b/c");
+        QCOMPARE(Storage::library(), next);
+        makeLibrary(next, {{"x.jpg", 1}}, false, "folder:/a/b/c");
+        QVERIFY(QDir(former).removeRecursively());
+        QCOMPARE(Storage::library(), next);
         QFile::remove(settingsPath);
     }
 

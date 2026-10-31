@@ -123,6 +123,8 @@ void ServiceClient::fetch(const QByteArray &asset, const QString &kind, Callback
     QJsonObject params{{"asset", QString::fromUtf8(asset)}, {"kind", kind}};
     if (stream)
         params.insert("stream", true);
+    if (m_shownKnown)
+        params.insert("source", m_shown);
     call(QStringLiteral("fetch"), params, std::move(done));
 }
 
