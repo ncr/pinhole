@@ -191,7 +191,10 @@ int main(int argc, char *argv[]) {
     TouchpadHold hold;
 
     // Larger renditions come from pinholed.
-    ServiceClient service(QDir(libraryDir).absolutePath());
+    // A library given (pinhole-fake's, say) is the one shown, whatever the
+    // service says; else the service's choice is (library_moved).
+    const bool libraryGiven = parser.isSet("library");
+    ServiceClient service(libraryGiven ? QDir(libraryDir).absolutePath() : QString());
     // What to call the source until the service says.
     service.setSource(Storage::configuredSource());
     Viewer viewer(&library, &service);
@@ -313,11 +316,17 @@ int main(int argc, char *argv[]) {
         if (name == QLatin1String("library_changed")) {
             reloader.reload();
         } else if (name == QLatin1String("source")) {
-            // Another source's library comes next.
-            reloader.showNewestNext();
-        } else if (name == QLatin1String("library_moved")) {
-            // Read from its new place from now on (the old one goes soon).
-            service.setLibrary(details.value("library").toString());
+            // Another source than the one shown (switched to from here or
+            // from elsewhere): its library comes next, and nothing done to
+            // these photos is undone on its photos of the same ids, even
+            // before it is read.
+            if (details.value("id").toString() != library.source()) {
+                reloader.showNewestNext();
+                history.clear();
+            }
+        } else if (name == QLatin1String("library_moved") && !libraryGiven) {
+            // Read from its new place from now on (the old one goes soon),
+            // or, as the window connects, the one the service chose.
             reloader.moveTo(details.value("library").toString());
         }
     });

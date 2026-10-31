@@ -1540,6 +1540,13 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
             return;
         }
         const QString otherSource = other.source();
+        // The service says it shows the other, before the window has read
+        // its library: nothing to undo already.
+        QObject *service = qmlEngine(window)->rootContext()->contextProperty("service").value<QObject *>();
+        const QJsonObject said{{"event", "source"}, {"id", otherSource}};
+        QMetaObject::invokeMethod(service, "announced", Q_ARG(QString, QStringLiteral("source")), Q_ARG(QJsonObject, said));
+        check(QStringLiteral("nothing to undo once %1 is shown, before it is read").arg(otherSource),
+              library.source() == firstSource && !history->property("canUndo").toBool());
         reloader.moveTo(dir);
         when(QStringLiteral("other library"), shown(otherSource), [=, &reloader] {
             check(QStringLiteral("nothing grouped in %1").arg(otherSource), manual().isEmpty());

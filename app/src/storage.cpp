@@ -13,6 +13,8 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QProcess>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QStorageInfo>
 
 #include <cmath>
@@ -90,39 +92,78 @@ QJsonObject Storage::configuredSource() {
     return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}, {"account", account}};
 }
 
+namespace {
+
+// storage::library_owner: which source a library holds the photos of;
+// empty for none yet, or no library there.
+QString libraryOwner(const QString &dir) {
+    const QString path = dir + "/library.sqlite";
+    if (!QFileInfo::exists(path))
+        return {};
+    QString owner;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "owner");
+        db.setDatabaseName(path);
+        db.setConnectOptions("QSQLITE_OPEN_READONLY");
+        if (db.open()) {
+            QSqlQuery q(db);
+            if (q.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'source'")) && q.next())
+                owner = q.value(0).toString();
+        }
+    }
+    QSqlDatabase::removeDatabase("owner");
+    return owner;
+}
+
+// storage::stable_hash, as a name's tilde and sixteen hex digits.
+QString stableHash(const QString &text) {
+    quint64 hash = 0xcbf29ce484222325ULL;
+    for (const char byte : text.toUtf8())
+        hash = (hash ^ quint8(byte)) * 0x100000001b3ULL;
+    return '~' + QString::number(hash, 16).rightJustified(16, '0');
+}
+
+} // namespace
+
 QString Storage::library() {
-    // As the service names it (storage::library_for): library/icloud/<apple
-    // id>, library/folder/home-me-Pictures.
+    // As the service chooses it (storage::library_for), which says which
+    // it is once the window has connected: library/icloud/<apple id>,
+    // library/folder/home-me-Pictures, never another source's.
     const QJsonObject source = configuredSource();
     const QString kind = source.value("kind").toString();
     if (kind.isEmpty())
         return folder() + "/library/none";
     const QString under = folder() + "/library/" + kind + '/';
-    if (kind != QLatin1String("folder"))
-        return under + source.value("account").toString();
-    // FolderSource::library_name: the path with dashes, and a hash of it
-    // after a tilde if it has a dash of its own.
-    const QString path = source.value("path").toString();
-    QString name = path;
-    while (name.startsWith('/'))
-        name.remove(0, 1);
-    while (name.endsWith('/'))
-        name.chop(1);
-    name.replace('/', '-');
-    const QString former = under + (name.isEmpty() ? QStringLiteral("root") : name);
-    if (name.isEmpty()) {
-        name = QStringLiteral("-");
-    } else if (path.contains('-')) {
-        quint64 hash = 0xcbf29ce484222325ULL;
-        for (const char byte : path.toUtf8())
-            hash = (hash ^ quint8(byte)) * 0x100000001b3ULL;
-        name += '~' + QString::number(hash, 16).rightJustified(16, '0');
+    QString id, name;
+    QStringList former;
+    if (kind == QLatin1String("folder")) {
+        // FolderSource::library_name: the path with dashes, and a hash of
+        // it after a tilde if it has a dash or a tilde of its own.
+        const QString path = source.value("path").toString();
+        id = "folder:" + path;
+        name = path;
+        while (name.startsWith('/'))
+            name.remove(0, 1);
+        while (name.endsWith('/'))
+            name.chop(1);
+        name.replace('/', '-');
+        former.append(under + (name.isEmpty() ? QStringLiteral("root") : name));
+        if (name.isEmpty())
+            name = QStringLiteral("-");
+        else if (path.contains('-') || path.contains('~'))
+            name += stableHash(path);
+    } else {
+        id = "icloud:" + source.value("account").toString();
+        name = source.value("account").toString();
     }
-    // One made before the names changed is where it was; were it another
-    // folder's, the service says so and the window reads the right one.
-    if (!QFileInfo::exists(under + name) && QFileInfo::exists(former + "/library.sqlite"))
-        return former;
-    return under + name;
+    const QString preferred = under + name;
+    for (const QString &dir : QStringList{preferred} + former)
+        if (libraryOwner(dir) == id)
+            return dir;
+    if (libraryOwner(preferred).isEmpty())
+        return preferred;
+    // A library made under another's former name has this one's.
+    return preferred + stableHash(id);
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {

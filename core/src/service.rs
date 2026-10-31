@@ -250,8 +250,8 @@ fn source_info(source: &dyn Source) -> Value {
     if source.kind() == "none" {
         return json!({"kind": null, "name": "", "needs_sign_in": false, "accepts": []});
     }
-    let mut info = json!({"kind": source.kind(), "name": source.name(), "needs_sign_in": source.needs_sign_in(),
-                          "accepts": source.accepts()});
+    let mut info = json!({"kind": source.kind(), "id": source.id(), "name": source.name(),
+                          "needs_sign_in": source.needs_sign_in(), "accepts": source.accepts()});
     if let Some(path) = source.id().strip_prefix("folder:") {
         info["path"] = json!(path);
     }
@@ -377,10 +377,15 @@ fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Va
         shared.signing_in.lock().unwrap().remove(account);
         let _ = std::fs::remove_dir_all(crate::icloud::auth::state_dir(account));
     }
-    // Only ever a folder under library/, never the library shown now.
+    // Only ever a folder under library/ that holds this source's photos,
+    // never the library shown now.
     let library = crate::storage::library_for(&shared.storage.location(), &*source);
     let libraries = shared.storage.location().join("library");
-    if library.starts_with(&libraries) && library != libraries && library != shared.storage.library() {
+    if library.starts_with(&libraries)
+        && library != libraries
+        && library != shared.storage.library()
+        && crate::storage::library_owner(&library).as_deref() == Some(id)
+    {
         let _writing = shared.storage.library_lock.lock().unwrap();
         if let Err(e) = std::fs::remove_dir_all(&library) {
             if e.kind() != std::io::ErrorKind::NotFound {
@@ -842,6 +847,8 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
     // A window that connects hears where the photos come from, and if
     // something is wrong, that too.
     out.send(source_event(&*shared.source()));
+    // And which library to read: the window's own guess may be another.
+    out.send(json!({"event": "library_moved", "library": shared.storage.library()}));
     out.send(sources_event(&shared));
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
@@ -1072,16 +1079,25 @@ fn set_favorite(shared: &Shared, params: &Value) -> std::result::Result<Value, (
     let (false, Some(favorite)) = (ids.is_empty(), params["favorite"].as_bool()) else {
         return Err(("bad_request", "set_favorite needs assets and favorite".into()));
     };
-    let source = shared.source();
     // Not under the library's lock, which a sync round holds throughout:
     // SQLite has the index's own writes wait for each other. Not while the
-    // library is copied elsewhere, though, where it would be lost.
+    // library is copied elsewhere, though, where it would be lost, nor
+    // while another source is switched to: the source and its library are
+    // the same one's.
     let _moving = shared.storage.library_moving.read().unwrap();
+    let source = shared.source();
     let path = shared.storage.library().join("library.sqlite");
     if !path.exists() {
         return Err(("not_found", "there is no library yet".into()));
     }
     let db = crate::db::open(&path).map_err(|e| ("unavailable", format!("{e:#}")))?;
+    // Asked of one source's photos (a window's undo, say): never done to
+    // another's of the same ids, shown since.
+    if let Some(asked) = params["source"].as_str() {
+        if crate::db::meta(&db, "source").as_deref() != Some(asked) {
+            return Err(("other_source", format!("{asked} is not the source shown")));
+        }
+    }
     let mut wanted = Vec::with_capacity(ids.len());
     for id in ids {
         let now: Option<bool> = db.query_row("SELECT favorite FROM assets WHERE id = ?1", [&id], |r| r.get(0)).ok();

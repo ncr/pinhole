@@ -454,16 +454,16 @@ impl Source for FolderSource {
     }
 
     /// Its path, readable: /home/me/Pictures is home-me-Pictures. A path
-    /// with a dash of its own is told apart by a hash of it after a tilde
-    /// (/a-b/c and /a/b-c are not both a-b-c); without one, each dash is a
-    /// slash and no two paths share a name.
+    /// with a dash or a tilde of its own is told apart by a hash of it after
+    /// a tilde (/a-b/c and /a/b-c are not both a-b-c); without one, each
+    /// dash is a slash, there is no tilde, and no two paths share a name.
     fn library_name(&self) -> String {
         let path = self.root.to_string_lossy();
         let name = path.trim_matches('/').replace('/', "-");
         if name.is_empty() {
             "-".into()
-        } else if path.contains('-') {
-            format!("{name}~{:016x}", fnv1a(path.as_bytes()))
+        } else if path.contains(['-', '~']) {
+            format!("{name}~{:016x}", crate::storage::stable_hash(path.as_bytes()))
         } else {
             name
         }
@@ -703,11 +703,6 @@ fn probe_video(path: &Path) -> Probe {
         }))
         .map(|t| t.timestamp_millis());
     Probe { taken, duration }
-}
-
-/// A hash that is the same in every build, unlike std's.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |hash, &b| (hash ^ b as u64).wrapping_mul(0x100000001b3))
 }
 
 #[cfg(test)]

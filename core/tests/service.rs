@@ -145,6 +145,9 @@ fn a_window_meets_the_service_of_a_folder() {
     let shown = window.event(5, |e| e["event"] == "source");
     assert_eq!(shown["kind"], "folder");
     assert_eq!(shown["path"], json!(photos));
+    assert_eq!(shown["id"], format!("folder:{}", photos.display()));
+    let read = window.event(5, |e| e["event"] == "library_moved");
+    assert_eq!(read["library"], json!(library));
 
     // The library is made from the folder, thumbnails and all (perhaps
     // before this window was there to hear of it).
@@ -179,6 +182,10 @@ fn a_window_meets_the_service_of_a_folder() {
     window.event(5, |e| e["event"] == "library_changed");
     let again = window.ask("set_favorite", json!({"assets": ["a.jpg"], "favorite": true}));
     assert_eq!(again["result"]["changed"], 0);
+    // Asked of another source's photos of the same id: not done here.
+    let elsewhere = window.ask("set_favorite", json!({"assets": ["a.jpg"], "favorite": false, "source": "folder:/elsewhere"}));
+    assert_eq!(elsewhere["error"]["code"], "other_source", "{elsewhere:#}");
+    assert!(favourite(&library, "a.jpg"));
 
     // A file gone from the folder goes from the library at the round a
     // window asks for.

@@ -16,8 +16,8 @@ class ServiceClient : public QObject {
     // As health(), for the window (the corner that says what is wrong).
     Q_PROPERTY(QString health READ health NOTIFY healthChanged)
 public:
-    // `library` is the directory the window shows; a service this client
-    // starts serves that one.
+    // `library`: the directory a service this client starts is to serve
+    // (the window's --library); empty, the service finds the source's own.
     explicit ServiceClient(const QString &library, QObject *parent = nullptr);
     ~ServiceClient() override;
 
@@ -29,9 +29,6 @@ public:
 
     // Any other method of docs/service.md, such as storage and set_storage.
     void call(const QString &method, const QJsonObject &params, Callback done);
-
-    // The library moved: a service this client starts from now on serves it there.
-    void setLibrary(const QString &library) { m_library = library; }
 
     // Where the photos come from, as the service last said (its "source"
     // event: kind, name, needs_sign_in, path), else as the settings say.

@@ -93,10 +93,11 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 
 // PINHOLE_SELFTEST=otherseries:<dir>: Series' edits and another source's
 // library of the same ids, shown from elsewhere (as another window or a
-// terminal would): photos 0-2 grouped in the library shown, the library in
-// <dir> swapped in, and Ctrl+Z, which has nothing left to undo there; the
-// first one shown again, still grouped. Its config is plugins.json, so
-// with XDG_CONFIG_HOME a folder of its own.
+// terminal would): photos 0-2 grouped in the library shown; the service
+// taken to say it shows the other, which leaves nothing to undo before its
+// library is read; the library in <dir> swapped in, and Ctrl+Z, which
+// changes nothing; the first one shown again, still grouped. Its config is
+// plugins.json, so with XDG_CONFIG_HOME a folder of its own.
 void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, LibraryReloader &reloader, const QString &dir);
 
 // What a self-test drives.

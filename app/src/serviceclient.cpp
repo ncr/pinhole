@@ -109,7 +109,10 @@ void ServiceClient::startService() {
     QDir().mkpath(state);
     QProcess process;
     process.setProgram(program);
-    process.setArguments({QStringLiteral("--library"), m_library, QStringLiteral("--socket"), socketPath()});
+    QStringList arguments{QStringLiteral("--socket"), socketPath()};
+    if (!m_library.isEmpty())
+        arguments << QStringLiteral("--library") << m_library;
+    process.setArguments(arguments);
     process.setStandardInputFile(QProcess::nullDevice());
     process.setStandardOutputFile(state + "/pinholed.log", QIODevice::Append);
     process.setStandardErrorFile(state + "/pinholed.log", QIODevice::Append);

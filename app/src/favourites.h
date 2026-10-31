@@ -37,8 +37,9 @@ signals:
     void failed(const QString &message);
 
 private:
-    // Set these here and in the source.
-    void set(const QList<QByteArray> &ids, bool favorite);
+    // Set these here and in the source, those of `source`'s library (as
+    // Library::source says): of no other's, though it has the same ids.
+    void set(const QList<QByteArray> &ids, bool favorite, const QString &source);
     // Set these in memory, wherever they are now.
     void apply(const QList<QByteArray> &ids, bool favorite);
 

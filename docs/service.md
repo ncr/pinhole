@@ -51,7 +51,7 @@ up on; it connects again and starts afresh.
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
-| `set_favorite` | `assets` (ids from the index), `favorite` (true or false) | `changed`: how many were not so already; see Favourites |
+| `set_favorite` | `assets` (ids from the index), `favorite` (true or false), and `source` (the id of the source they are of, optional) | `changed`: how many were not so already; see Favourites |
 | `sources` | | every source added, as the `sources` event |
 | `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
 | `remove_source` | `id` | the `sources` left; see Sources |
@@ -108,14 +108,18 @@ in place of a black or blank thumbnail: `cover.rs`); the thumbnails of new
 photos are already on disk. A window reads the index again.
 
 ```json
-{"event": "source", "kind": "folder", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures",
+{"event": "source", "kind": "folder", "id": "folder:/home/me/Pictures", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures",
  "accepts": ["jpg", "jpeg", "heic", "...", "mov", "mp4"]}
 ```
 
 Where the photos come from, sent to a window as it connects and when it
-changes: `name` is what to call it ("iCloud", or the folder's name as in
-`sources`), `needs_sign_in` whether it is one that can need signing in, and
-an iCloud source's `account` (its Apple ID) or a folder's `path`.
+changes: `id` is the one its library says it holds the photos of (its
+`meta.source`), `name` what to call it ("iCloud", or the folder's name as
+in `sources`), `needs_sign_in` whether it is one that can need signing in,
+and an iCloud source's `account` (its Apple ID) or a folder's `path`. Right
+after it, as a window connects, comes `library_moved` with the library to
+read: the one this service chose (never another source's, `library_for`),
+whatever the window guessed.
 `accepts` is the extensions of the files `add` takes for it, lower case
 (empty: nothing can be added). With no
 source at all (none added yet, or every one removed) `kind` is null and
@@ -332,7 +336,10 @@ the viewer show it before the next round, which then agrees: iCloud's
 change feed brings the same `isFavorite` back. Requests are done one after
 another in the order they came, so a photo made a favourite and back again
 quickly ends as it began. Those already as asked are left alone (`changed`
-counts the rest).
+counts the rest). With `source`, they are done only if the library shown is
+that source's: else `other_source`, and nothing changes (a window's undo,
+made after another source was shown from elsewhere, never reaches another
+source's photos of the same ids).
 
 An error leaves the index as it was: `not_found` for an asset the library
 does not have, `unsupported` for a source that keeps no favourites,

@@ -10,6 +10,7 @@
 #include <QtTest>
 
 #include "encoder.h"
+#include "favourites.h"
 #include "history.h"
 #include "library.h"
 #include "libraryreloader.h"
@@ -1071,6 +1072,49 @@ private:
     };
 
 private slots:
+    // A favourite made in one source's library, undone once another's of
+    // the same ids is shown: not on those, and the service is told whose
+    // they are, should it have the other's already.
+    void aFavouriteIsUndoneOnlyOnTheSourceItWasMadeIn() {
+        QTemporaryDir dir, a, b;
+        makeLibrary(a.path(), {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/a");
+        makeLibrary(b.path(), {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/b");
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        Library library, other;
+        QString error;
+        QVERIFY(library.open(a.path(), &error));
+        QVERIFY(other.open(b.path(), &error));
+        History history;
+        Favourites favourites(&library, &service, &history);
+        favourites.toggle({0});
+        QVERIFY(library.at(0).favorite);
+        const auto heard = [&] {
+            fake.read();
+            return fake.asked.size();
+        };
+        QTRY_COMPARE(heard(), 1);
+        const QJsonObject asked = fake.asked.first();
+        QCOMPARE(asked.value("method").toString(), QString("set_favorite"));
+        QCOMPARE(asked.value("params").toObject().value("source").toString(), QString("folder:/a"));
+        // Answered as by a service already showing the other.
+        fake.send({{"id", asked.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "other_source"}, {"message", "no"}}}});
+        QTRY_VERIFY(!library.at(0).favorite);
+        favourites.toggle({0});
+        QTRY_COMPARE(heard(), 2);
+        library.swap(other);
+        QVERIFY(history.canUndo());
+        history.undo();
+        QTest::qWait(100);
+        QCOMPARE(heard(), 2);
+        QVERIFY(!library.at(0).favorite);
+    }
+
     void aServiceOfAnotherProtocolIsSaidSoAndItsHealthDoesNotHideIt() {
         QTemporaryDir dir;
         FakeService fake;
@@ -1402,11 +1446,20 @@ private slots:
         // The same hash as core's folder test of this path.
         shown("/home/me/My-Photos");
         QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-My-Photos~7f094097f3a39b1b");
-        QDir().mkpath(location.path() + "/library/folder/home-me-My-Photos");
-        QFile former(location.path() + "/library/folder/home-me-My-Photos/library.sqlite");
-        QVERIFY(former.open(QIODevice::WriteOnly));
-        former.close();
-        QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-My-Photos");
+        // A tilde of its own is told apart from the hash's.
+        shown("/home/me/My/Photos~7f094097f3a39b1b");
+        QVERIFY(Storage::library() != location.path() + "/library/folder/home-me-My-Photos~7f094097f3a39b1b");
+        // The same as core's: one made under a former name is kept to, and
+        // a folder whose name another's former one is has one by its id.
+        const QString former = location.path() + "/library/folder/a-b-c";
+        QVERIFY(QDir().mkpath(former));
+        makeLibrary(former, {{"x.jpg", 1}}, false, "folder:/a/b-c");
+        shown("/a/b-c");
+        QCOMPARE(Storage::library(), former);
+        shown("/a/b/c");
+        QCOMPARE(Storage::library(), former + "~43215282df502c0e");
+        shown("/a-b/c");
+        QVERIFY(Storage::library() != former);
         QFile::remove(settingsPath);
     }
 

@@ -167,30 +167,40 @@ pub fn remove_source(path: &Path, id: &str) -> Result<Option<Value>> {
 /// A source's library in the folder Pinhole keeps everything in, one to a
 /// source, under its kind: `library/icloud/<apple-id>`,
 /// `library/folder/home-me-Pictures`; with no source, an empty one in
-/// `library/none`.
+/// `library/none`. Never another source's (by what each says it is,
+/// `library_owner`): one of its own made under a former name is kept to,
+/// and where its name is another's it has one by its id.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
     if source.kind() == "none" {
         return location.join("library/none");
     }
     let kind = location.join("library").join(source.kind());
-    let library = kind.join(source.library_name());
-    if library.exists() {
-        return library;
-    }
-    // A library made before its name changed, and still its own (not a
-    // namesake's), is kept where it is.
     let id = source.id();
-    source
-        .former_library_names()
-        .into_iter()
-        .map(|name| kind.join(name))
-        .find(|former| {
-            rusqlite::Connection::open_with_flags(former.join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .ok()
-                .and_then(|db| crate::db::meta(&db, "source"))
-                .is_some_and(|owner| owner == id)
-        })
-        .unwrap_or(library)
+    let name = source.library_name();
+    let preferred = kind.join(&name);
+    if let Some(own) = std::iter::once(preferred.clone())
+        .chain(source.former_library_names().into_iter().map(|former| kind.join(former)))
+        .find(|dir| library_owner(dir).as_deref() == Some(id.as_str()))
+    {
+        return own;
+    }
+    if library_owner(&preferred).is_none() {
+        return preferred;
+    }
+    // A library made under another's former name has this one's.
+    kind.join(format!("{name}~{:016x}", stable_hash(id.as_bytes())))
+}
+
+/// Which source a library holds the photos of (`sync::claim`); None for
+/// none yet, or no library there.
+pub fn library_owner(library: &Path) -> Option<String> {
+    let db = rusqlite::Connection::open_with_flags(library.join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    crate::db::meta(&db, "source")
+}
+
+/// FNV-1a: the same in every build, unlike std's hasher, for names on disk.
+pub fn stable_hash(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf29ce484222325, |hash, &b| (hash ^ b as u64).wrapping_mul(0x100000001b3))
 }
 
 /// Where Pinhole keeps everything now.
@@ -840,19 +850,25 @@ mod tests {
         let for_path = |p: &str| library_for(&location, &FolderSource::new(PathBuf::from(p)));
         assert_ne!(for_path("/a-b/c"), for_path("/a/b-c"));
         assert_ne!(for_path("/root"), for_path("/"));
+        // A tilde of its own is told apart from the hash's.
+        assert_ne!(for_path("/home/me/My-Photos"), for_path("/home/me/My/Photos~7f094097f3a39b1b"));
         assert_eq!(for_path("/home/me/Pictures"), location.join("library/folder/home-me-Pictures"));
         // The same as the window's (Storage::library) test of this path.
         assert_eq!(for_path("/home/me/My-Photos"), location.join("library/folder/home-me-My-Photos~7f094097f3a39b1b"));
 
-        // One made under the name a path with a dash had before is kept,
-        // but not a namesake's.
+        // One made under the name a path with a dash had before is kept;
+        // another folder whose name that is now has one by its id, and one
+        // that only had it before has its new one.
         let own = location.join("library/folder/a-b-c");
         std::fs::create_dir_all(&own).unwrap();
         let db = crate::db::open(&own.join("library.sqlite")).unwrap();
         crate::db::set_meta(&db, "source", "folder:/a/b-c").unwrap();
         drop(db);
         assert_eq!(for_path("/a/b-c"), own);
+        assert_eq!(for_path("/a/b/c"), location.join("library/folder/a-b-c~43215282df502c0e"));
         assert_ne!(for_path("/a-b/c"), own);
+        // One with no owner yet is anyone's to claim.
+        assert_eq!(for_path("/x/y"), location.join("library/folder/x-y"));
         let _ = std::fs::remove_dir_all(&location);
     }
 

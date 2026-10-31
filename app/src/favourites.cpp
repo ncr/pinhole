@@ -33,22 +33,32 @@ void Favourites::toggle(const QList<int> &indexes) {
     }
     if (ids.isEmpty())
         return;
-    set(ids, favorite);
+    const QString source = m_library->source();
+    set(ids, favorite, source);
     // Undone, those it changed go back; the rest were so already.
     m_history->did({}, favorite ? tr("adding to favourites") : tr("removing from favourites"),
-                   [this, ids, favorite] { set(ids, !favorite); }, [this, ids, favorite] { set(ids, favorite); });
+                   [this, ids, favorite, source] { set(ids, !favorite, source); },
+                   [this, ids, favorite, source] { set(ids, favorite, source); });
 }
 
-void Favourites::set(const QList<QByteArray> &ids, bool favorite) {
+void Favourites::set(const QList<QByteArray> &ids, bool favorite, const QString &source) {
+    // Another's shown since: not these photos.
+    if (m_library->source() != source)
+        return;
     QJsonArray assets;
     for (const QByteArray &id : ids)
         assets.append(QString::fromUtf8(id));
     apply(ids, favorite);
-    m_service->call(QStringLiteral("set_favorite"), QJsonObject{{"assets", assets}, {"favorite", favorite}},
-                    [this, ids, favorite](bool ok, const QJsonObject &, const QString &code) {
+    QJsonObject params{{"assets", assets}, {"favorite", favorite}};
+    // And the service, which may have another source's library already.
+    if (!source.isEmpty())
+        params.insert("source", source);
+    m_service->call(QStringLiteral("set_favorite"), params, [this, ids, favorite, source](bool ok, const QJsonObject &, const QString &code) {
         if (ok)
             return;
-        apply(ids, !favorite);
+        // Put back as they were, if they are still the ones shown.
+        if (m_library->source() == source)
+            apply(ids, !favorite);
         const QString source = m_service->sourceName();
         QString message;
         if (code == QLatin1String("needs_sign_in"))

@@ -3,6 +3,7 @@
 #include "library.h"
 #include "thumbnailloader.h"
 
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
@@ -50,6 +51,9 @@ LibraryReloader::~LibraryReloader() {
 }
 
 void LibraryReloader::moveTo(const QString &dir) {
+    // Said again as a window connects: read already.
+    if (QDir(dir).absolutePath() == QDir(m_dir).absolutePath())
+        return;
     m_dir = dir;
     reload();
 }
