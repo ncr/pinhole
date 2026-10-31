@@ -32,8 +32,10 @@ below), and whatever it asks is answered `incompatible` until another
 service answers. A service whose first line is not a `hello` speaks
 protocol 0, from before there was one.
 
-A window that does not read what it is sent for five seconds is hung up
-on, so it holds up no other; it connects again and starts afresh.
+Lines to each window wait in a queue of its own, so a window slow to read
+holds up no other, nor anything the service is doing. One that does not
+read what it is sent for five seconds, or falls 4096 lines behind, is hung
+up on; it connects again and starts afresh.
 
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}

@@ -274,5 +274,24 @@ fn a_window_meets_the_service_of_a_folder() {
     let red = window.ask("fetch", json!({"asset": "a.jpg", "kind": "original"}));
     assert_eq!(red["result"]["path"], json!(photos.join("a.jpg")), "{red:#}");
 
+    // A window that asks and asks and never reads: no other waits on it,
+    // and it is hung up on.
+    let stalled = Window::connect(&socket);
+    let mut asking = stalled.out.try_clone().unwrap();
+    std::thread::spawn(move || {
+        let pings: String = (0..20_000).map(|id| format!("{}\n", json!({"id": id, "method": "ping"}))).collect();
+        let _ = asking.write_all(pings.as_bytes());
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let asked = Instant::now();
+    let set = window.ask("set_favorite", json!({"assets": ["a.jpg"], "favorite": false}));
+    assert_eq!(set["result"]["changed"], 1, "{set:#}");
+    window.event(5, |e| e["event"] == "library_changed");
+    assert!(asked.elapsed() < Duration::from_secs(2), "waited {:?} on a window that does not read", asked.elapsed());
+    let mut lines = stalled.lines;
+    lines.get_ref().set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let mut rest = Vec::new();
+    assert!(std::io::Read::read_to_end(&mut lines, &mut rest).is_ok(), "not hung up on");
+
     let _ = std::fs::remove_dir_all(&root);
 }

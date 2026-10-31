@@ -35,6 +35,10 @@ pub const PROTOCOL: u32 = 1;
 /// this long is hung up on.
 const WRITE_WITHIN: Duration = Duration::from_secs(5);
 
+/// How many lines may wait for a window: one that falls further behind is
+/// hung up on.
+const QUEUE_MAX: usize = 4096;
+
 pub struct Config {
     /// The folder everything is kept in (storage.rs), and in it, unless
     /// given otherwise, the library and the cache.
@@ -71,18 +75,56 @@ struct Reply {
 /// one (an effect from the motion).
 #[derive(Clone)]
 enum Out {
-    Window(Arc<Mutex<UnixStream>>),
+    Window(Arc<Window>),
     Service(mpsc::Sender<std::result::Result<Value, (String, String)>>),
+}
+
+/// A connected window's way out. Lines join its queue and a thread of its
+/// own writes them, so whoever has news or an answer for it never waits on
+/// how fast it reads: not a download, not another window.
+struct Window {
+    queue: mpsc::SyncSender<String>,
+    /// To hang up on it.
+    stream: UnixStream,
+}
+
+impl Window {
+    fn open(stream: &UnixStream) -> Result<Arc<Window>> {
+        // A window that stops reading is hung up on, not waited for.
+        stream.set_write_timeout(Some(WRITE_WITHIN))?;
+        let (queue, lines) = mpsc::sync_channel::<String>(QUEUE_MAX);
+        let mut out = stream.try_clone()?;
+        std::thread::spawn(move || {
+            for line in lines {
+                if out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_err() {
+                    // Cut off, maybe halfway through a line: it starts
+                    // afresh with a connection of its own.
+                    let _ = out.shutdown(std::net::Shutdown::Both);
+                    return;
+                }
+            }
+        });
+        Ok(Arc::new(Window { queue, stream: stream.try_clone()? }))
+    }
+
+    /// Queue a line; false once the window has gone, or fallen so far
+    /// behind that it is hung up on.
+    fn send(&self, line: impl std::fmt::Display) -> bool {
+        match self.queue.try_send(format!("{line}\n")) {
+            Ok(()) => true,
+            Err(_) => {
+                let _ = self.stream.shutdown(std::net::Shutdown::Both);
+                false
+            }
+        }
+    }
 }
 
 impl Reply {
     /// A line of news for this window alone, before the answer.
     fn event(&self, event: Value) {
         let Out::Window(out) = &self.out else { return };
-        if let Ok(mut out) = out.lock() {
-            let _ = writeln!(out, "{event}");
-            let _ = out.flush();
-        }
+        out.send(event);
     }
 
     fn send(&self, result: std::result::Result<Value, (&str, String)>) {
@@ -97,10 +139,7 @@ impl Reply {
             Ok(r) => json!({"id": self.id, "ok": true, "result": r}),
             Err((code, message)) => json!({"id": self.id, "ok": false, "error": {"code": code, "message": message}}),
         };
-        if let Ok(mut out) = out.lock() {
-            let _ = writeln!(out, "{line}");
-            let _ = out.flush();
-        }
+        out.send(line);
     }
 }
 
@@ -131,7 +170,7 @@ struct Shared {
     waiting: Mutex<HashMap<PathBuf, (Value, Vec<Reply>)>>,
     in_flight: AtomicUsize,
     /// Every connected window, to tell when the library changed.
-    listeners: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
+    listeners: Mutex<Vec<Arc<Window>>>,
     /// Wakes the sync thread before its next round is due.
     sync_now: Mutex<mpsc::Sender<()>>,
     streams: Arc<Streams>,
@@ -596,29 +635,9 @@ impl Shared {
 
     /// Send an event line to every window; ones that have gone are dropped.
     fn broadcast(&self, event: Value) {
-        let line = format!("{event}\n");
-        // Written to each outside the list's lock: a window slow to read
-        // holds up only its own line (WRITE_WITHIN at most), not every
-        // other window's, nor the next to connect.
-        let listeners = self.listeners.lock().unwrap().clone();
-        let gone: Vec<_> = listeners
-            .into_iter()
-            .filter(|out| {
-                let Ok(mut out) = out.lock() else { return true };
-                out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_err()
-            })
-            .collect();
-        if gone.is_empty() {
-            return;
-        }
-        // Cut off, maybe halfway through a line: hung up on, so it starts
-        // afresh with a connection of its own.
-        for out in &gone {
-            if let Ok(out) = out.lock() {
-                let _ = out.shutdown(std::net::Shutdown::Both);
-            }
-        }
-        self.listeners.lock().unwrap().retain(|out| !gone.iter().any(|g| Arc::ptr_eq(g, out)));
+        // Only queued: a window slow to read holds up no other.
+        let line = event.to_string();
+        self.listeners.lock().unwrap().retain(|out| out.send(&line));
     }
 }
 
@@ -807,25 +826,23 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 }
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
-    // A window that stops reading does not hold up whoever writes to it.
-    stream.set_write_timeout(Some(WRITE_WITHIN))?;
-    let out = Arc::new(Mutex::new(stream.try_clone()?));
+    let out = Window::open(&stream)?;
     // First which protocol this is, for a window of another version to
     // tell (docs/service.md, Transport): before it hears any news.
-    let _ = writeln!(out.lock().unwrap(), "{}", json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
+    out.send(json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
     shared.listeners.lock().unwrap().push(out.clone());
     // A window that connects hears where the photos come from, and if
     // something is wrong, that too.
-    let _ = writeln!(out.lock().unwrap(), "{}", source_event(&*shared.source()));
-    let _ = writeln!(out.lock().unwrap(), "{}", sources_event(&shared));
+    out.send(source_event(&*shared.source()));
+    out.send(sources_event(&shared));
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
-        let _ = writeln!(out.lock().unwrap(), "{}", health_event(health));
+        out.send(health_event(health));
     }
     if let Some(progress) = shared.progress.lock().unwrap().clone() {
-        let _ = writeln!(out.lock().unwrap(), "{progress}");
+        out.send(progress);
     }
-    let _ = writeln!(out.lock().unwrap(), "{}", shared.rounds_event());
+    out.send(shared.rounds_event());
     // Opened when first needed: before pinhole-sync has built the library
     // there is none, and the connection must stay up regardless.
     // Opened again once the library has moved.
