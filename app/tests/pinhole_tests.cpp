@@ -1,6 +1,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QSaveFile>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSqlDatabase>
@@ -18,6 +19,7 @@
 #include "thumbnailloader.h"
 #include "scrollphysics.h"
 #include "serviceclient.h"
+#include "storage.h"
 #include "theme.h"
 #include "translator.h"
 #include "viewer.h"
@@ -1373,6 +1375,34 @@ private slots:
         QVERIFY(QFileInfo::exists(urls.first().toLocalFile()));
         QCOMPARE(data->data("text/uri-list"), urls.first().toEncoded() + "\r\n");
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // Storage::library names a folder's library as the service does
+    // (storage::library_for); one made under its former name is kept to.
+    void aFoldersLibraryIsNamedAsTheServiceNamesIt() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir location;
+        const QString settingsPath = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/settings.json";
+        QDir().mkpath(QFileInfo(settingsPath).path());
+        const auto shown = [&](const QString &path) {
+            QSaveFile file(settingsPath);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(QJsonDocument(QJsonObject{{"location", location.path()},
+                                                 {"source", QJsonObject{{"kind", "folder"}, {"path", path}}}})
+                           .toJson());
+            QVERIFY(file.commit());
+        };
+        shown("/home/me/Pictures");
+        QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-Pictures");
+        // The same hash as core's folder test of this path.
+        shown("/home/me/My-Photos");
+        QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-My-Photos~7f094097f3a39b1b");
+        QDir().mkpath(location.path() + "/library/folder/home-me-My-Photos");
+        QFile former(location.path() + "/library/folder/home-me-My-Photos/library.sqlite");
+        QVERIFY(former.open(QIODevice::WriteOnly));
+        former.close();
+        QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-My-Photos");
+        QFile::remove(settingsPath);
     }
 };
 

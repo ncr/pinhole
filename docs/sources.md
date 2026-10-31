@@ -212,7 +212,8 @@ only Apple ID signed in to, if there is just one.
 Every source has a library of its own in the one folder Pinhole keeps
 everything in, under its kind: `library/icloud/<apple-id>/` for each Apple
 ID, `library/folder/home-me-Pictures/` for each folder (its path, with
-dashes). Switching between them rebuilds nothing, and a library is only
+dashes; one with a dash of its own also gets a hash of it after a tilde,
+so `/a-b/c` and `/a/b-c` are not both `a-b-c`). Switching between them rebuilds nothing, and a library is only
 ever written by its own source (`sync::claim`). All of them share `cache/`
 (files named by their keys, which do not clash) and the one limit, and a
 move of the folder takes `library/` as a whole. Removing a source deletes

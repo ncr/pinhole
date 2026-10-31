@@ -172,7 +172,25 @@ pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathB
     if source.kind() == "none" {
         return location.join("library/none");
     }
-    location.join("library").join(source.kind()).join(source.library_name())
+    let kind = location.join("library").join(source.kind());
+    let library = kind.join(source.library_name());
+    if library.exists() {
+        return library;
+    }
+    // A library made before its name changed, and still its own (not a
+    // namesake's), is kept where it is.
+    let id = source.id();
+    source
+        .former_library_names()
+        .into_iter()
+        .map(|name| kind.join(name))
+        .find(|former| {
+            rusqlite::Connection::open_with_flags(former.join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .ok()
+                .and_then(|db| crate::db::meta(&db, "source"))
+                .is_some_and(|owner| owner == id)
+        })
+        .unwrap_or(library)
 }
 
 /// Where Pinhole keeps everything now.
@@ -813,6 +831,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn folders_whose_paths_differ_have_libraries_apart() {
+        use crate::folder::FolderSource;
+        let location = temp("names");
+        let for_path = |p: &str| library_for(&location, &FolderSource::new(PathBuf::from(p)));
+        assert_ne!(for_path("/a-b/c"), for_path("/a/b-c"));
+        assert_ne!(for_path("/root"), for_path("/"));
+        assert_eq!(for_path("/home/me/Pictures"), location.join("library/folder/home-me-Pictures"));
+        // The same as the window's (Storage::library) test of this path.
+        assert_eq!(for_path("/home/me/My-Photos"), location.join("library/folder/home-me-My-Photos~7f094097f3a39b1b"));
+
+        // One made under the name a path with a dash had before is kept,
+        // but not a namesake's.
+        let own = location.join("library/folder/a-b-c");
+        std::fs::create_dir_all(&own).unwrap();
+        let db = crate::db::open(&own.join("library.sqlite")).unwrap();
+        crate::db::set_meta(&db, "source", "folder:/a/b-c").unwrap();
+        drop(db);
+        assert_eq!(for_path("/a/b-c"), own);
+        assert_ne!(for_path("/a-b/c"), own);
+        let _ = std::fs::remove_dir_all(&location);
     }
 
     fn file(path: &Path, bytes: usize, age_secs: u64) {

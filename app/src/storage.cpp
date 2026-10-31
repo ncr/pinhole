@@ -97,18 +97,32 @@ QString Storage::library() {
     const QString kind = source.value("kind").toString();
     if (kind.isEmpty())
         return folder() + "/library/none";
-    QString name = source.value("account").toString();
-    if (kind == QLatin1String("folder")) {
-        name = source.value("path").toString();
-        while (name.startsWith('/'))
-            name.remove(0, 1);
-        while (name.endsWith('/'))
-            name.chop(1);
-        name.replace('/', '-');
-        if (name.isEmpty())
-            name = QStringLiteral("root");
+    const QString under = folder() + "/library/" + kind + '/';
+    if (kind != QLatin1String("folder"))
+        return under + source.value("account").toString();
+    // FolderSource::library_name: the path with dashes, and a hash of it
+    // after a tilde if it has a dash of its own.
+    const QString path = source.value("path").toString();
+    QString name = path;
+    while (name.startsWith('/'))
+        name.remove(0, 1);
+    while (name.endsWith('/'))
+        name.chop(1);
+    name.replace('/', '-');
+    const QString former = under + (name.isEmpty() ? QStringLiteral("root") : name);
+    if (name.isEmpty()) {
+        name = QStringLiteral("-");
+    } else if (path.contains('-')) {
+        quint64 hash = 0xcbf29ce484222325ULL;
+        for (const char byte : path.toUtf8())
+            hash = (hash ^ quint8(byte)) * 0x100000001b3ULL;
+        name += '~' + QString::number(hash, 16).rightJustified(16, '0');
     }
-    return folder() + "/library/" + kind + '/' + name;
+    // One made before the names changed is where it was; were it another
+    // folder's, the service says so and the window reads the right one.
+    if (!QFileInfo::exists(under + name) && QFileInfo::exists(former + "/library.sqlite"))
+        return former;
+    return under + name;
 }
 
 Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {

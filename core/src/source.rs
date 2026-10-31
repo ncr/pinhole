@@ -325,6 +325,12 @@ pub trait Source: Send + Sync {
     /// sources of its kind (an Apple ID, a folder's path).
     fn library_name(&self) -> String;
 
+    /// Names its library went by in earlier versions, kept to while a
+    /// library of its own is there under one of them.
+    fn former_library_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// How often to look for changes.
     fn rounds_every(&self) -> Duration {
         Duration::from_secs(60)
