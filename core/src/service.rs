@@ -827,6 +827,14 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Window::open(&stream)?;
+    let served = talk(shared.clone(), stream, out.clone());
+    // Gone, however it went: no more news for it.
+    shared.listeners.lock().unwrap().retain(|other| !Arc::ptr_eq(other, &out));
+    served
+}
+
+/// A window's requests, answered until it hangs up (or is hung up on).
+fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()> {
     // First which protocol this is, for a window of another version to
     // tell (docs/service.md, Transport): before it hears any news.
     out.send(json!({"event": "hello", "protocol": PROTOCOL, "version": env!("CARGO_PKG_VERSION")}));
@@ -873,6 +881,7 @@ fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
                 "cache": shared.storage.cache(),
                 "cache_bytes": shared.storage.report()["used_bytes"],
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
+                "windows": shared.listeners.lock().unwrap().len(),
                 "health": shared.health.lock().unwrap().name(),
                 "source": source_info(&*shared.source()),
                 "progress": shared.progress.lock().unwrap().clone().map(|mut p| {

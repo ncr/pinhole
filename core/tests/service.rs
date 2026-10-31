@@ -292,6 +292,12 @@ fn a_window_meets_the_service_of_a_folder() {
     lines.get_ref().set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     let mut rest = Vec::new();
     assert!(std::io::Read::read_to_end(&mut lines, &mut rest).is_ok(), "not hung up on");
+    // Gone from those told the news.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while window.ask("status", json!({}))["result"]["windows"] != 1 {
+        assert!(Instant::now() < deadline, "the window hung up on is still told the news");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 
     let _ = std::fs::remove_dir_all(&root);
 }
