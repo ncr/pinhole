@@ -140,7 +140,6 @@ plugins/info/             the Info plugin; pinhole-info reads an original's EXIF
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
-
 plugins/frame/            the Photo frame plugin
 ```
 
