@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "pinhole.onthisday",
+  "name": "On this day",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "The photos taken on today's date in earlier years, a year at a time.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

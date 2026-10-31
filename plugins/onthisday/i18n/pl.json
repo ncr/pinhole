@@ -1,0 +1,62 @@
+{
+  "± 1 day": "± 1 dzień",
+  "± 3 days": "± 3 dni",
+  "± a week": "± tydzień",
+  "Choose a photo": "Wybierz zdjęcie",
+  "Click it": "Kliknij je",
+  "d MMMM": "d MMMM",
+  "D shows this day in every year with photos of it, the latest first. A photo opens full window; Esc comes back here.": "D pokazuje ten dzień w każdym roku, z którego są jego zdjęcia, od najnowszego. Zdjęcie otwiera się na całe okno; Esc wraca tutaj.",
+  "Every year": "Każdy rok",
+  "Here, in the side panel (Tab): the day alone or a few days around it, for the years with fewer photos, and whether videos and screenshots count.": "Tu, w panelu bocznym (Tab): sam ten dzień albo kilka dni wokół niego, dla lat z mniejszą liczbą zdjęć, i czy liczą się filmy i zrzuty ekranu.",
+  "In the grid": "W siatce",
+  "In the grid, beside its year": "„W siatce” przy jego roku",
+  "%n days": {
+    "one": "%n dzień",
+    "few": "%n dni",
+    "many": "%n dni",
+    "other": "%n dni"
+  },
+  "%n photos": {
+    "one": "%n zdjęcie",
+    "few": "%n zdjęcia",
+    "many": "%n zdjęć",
+    "other": "%n zdjęć"
+  },
+  "%n years": {
+    "one": "%n rok",
+    "few": "%n lata",
+    "many": "%n lat",
+    "other": "%n lat"
+  },
+  "%n years ago": {
+    "one": "%n rok temu",
+    "few": "%n lata temu",
+    "many": "%n lat temu",
+    "other": "%n lat temu"
+  },
+  "Nothing from this day in earlier years.": "Nic z tego dnia we wcześniejszych latach.",
+  "On this day": "Tego dnia",
+  "On this day, in earlier years": "Ten dzień we wcześniejszych latach",
+  "Open the photo": "Otwórz zdjęcie",
+  "Point at it": "Wskaż je",
+  "Reading the library…": "Czytam bibliotekę…",
+  "Screenshots": "Zrzuty ekranu",
+  "Settings": "Ustawienia",
+  "Show the photo in the grid": "Pokaż zdjęcie w siatce",
+  "Taken %n years ago today, in %1.": {
+    "one": "Zrobione dziś rok temu, w %1.",
+    "few": "Zrobione dziś %n lata temu, w %1.",
+    "many": "Zrobione dziś %n lat temu, w %1.",
+    "other": "Zrobione dziś %n lat temu, w %1."
+  },
+  "Tap it": "Stuknij je",
+  "The day": "Ten dzień",
+  "This day in %n earlier years: D in the grid.": {
+    "one": "Ten dzień w %n wcześniejszym roku: D w siatce.",
+    "few": "Ten dzień w %n wcześniejszych latach: D w siatce.",
+    "many": "Ten dzień w %n wcześniejszych latach: D w siatce.",
+    "other": "Ten dzień w %n wcześniejszych latach: D w siatce."
+  },
+  "Videos": "Filmy",
+  "Years ago today": "Dziś, przed laty"
+}

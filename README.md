@@ -32,7 +32,14 @@ undoes any of it, as it does a favourite, and Ctrl+⇧Z does it again. It
 also (G in the grid, or on a photo of one) makes a series a short GIF or
 video to send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
 shape, held steady; Enter copies it and keeps it in Pictures/Pinhole. It is
-on unless turned off in the side panel. A plugin of your own is a folder in
+on unless turned off in the side panel.
+
+On this day shows the photos taken on today's date in earlier years, a year
+at a time, the latest first: D in the grid, where its button says how many
+years there are. In the side panel, the day alone or a few days around it,
+and whether videos and screenshots count.
+
+A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
@@ -86,6 +93,7 @@ core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background
+plugins/onthisday/        the On this day plugin
 ```
 
 ## Trying the grid

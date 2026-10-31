@@ -1,0 +1,26 @@
+{
+  "%n days": {
+    "one": "%n day",
+    "other": "%n days"
+  },
+  "%n photos": {
+    "one": "%n photo",
+    "other": "%n photos"
+  },
+  "%n years": {
+    "one": "%n year",
+    "other": "%n years"
+  },
+  "%n years ago": {
+    "one": "%n year ago",
+    "other": "%n years ago"
+  },
+  "Taken %n years ago today, in %1.": {
+    "one": "Taken a year ago today, in %1.",
+    "other": "Taken %n years ago today, in %1."
+  },
+  "This day in %n earlier years: D in the grid.": {
+    "one": "This day in %n earlier year: D in the grid.",
+    "other": "This day in %n earlier years: D in the grid."
+  }
+}
