@@ -20,6 +20,9 @@ Item {
     // positions: the card stands where the first is and shows it, with the
     // mark for several photos. Opening it opens that photo.
     property var stacks: []
+    // Photos not shown in the grid at all, library positions: no cell, out
+    // of any stack, and passed over by the viewer's ← and → and its strip.
+    property var hidden: []
     // A few steps that show what it does, on the photos and its buttons as
     // they are (Tour.qml): shown by itself the first time it is on, once
     // `tourReady`, and again from the side panel.

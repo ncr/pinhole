@@ -11,6 +11,7 @@
 #include <QNativeGestureEvent>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -287,7 +288,63 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
     return true;
 }
 
-int Viewer::count() const { return m_library->count(); }
+void Viewer::setHidden(const QVariantList &hidden) {
+    if (hidden == m_hiddenGiven)
+        return;
+    m_hiddenGiven = hidden;
+    m_hiddenList.clear();
+    m_hiddenList.reserve(size_t(hidden.size()));
+    for (const QVariant &index : hidden)
+        m_hiddenList.push_back(index.toInt());
+    rebuildRow();
+    emit hiddenChanged();
+}
+
+void Viewer::rebuildRow() {
+    const int n = m_library->count();
+    std::vector<char> hidden;
+    for (int i : m_hiddenList) {
+        if (i < 0 || i >= n)
+            continue;
+        if (hidden.empty())
+            hidden.assign(size_t(n), 0);
+        hidden[size_t(i)] = 1;
+    }
+    m_rowMapped = !hidden.empty();
+    m_row.clear();
+    if (m_rowMapped) {
+        m_row.reserve(size_t(n));
+        for (int i = 0; i < n; ++i)
+            if (!hidden[size_t(i)])
+                m_row.push_back(i);
+    }
+    m_jumpFrom = -1;
+    if (m_open)
+        fitPhoto();
+    emit indexChanged();
+    emit motionChanged();
+}
+
+int Viewer::count() const { return m_rowMapped ? int(m_row.size()) : m_library->count(); }
+
+int Viewer::placeOf(int index) const {
+    if (!m_rowMapped)
+        return index;
+    return int(std::lower_bound(m_row.begin(), m_row.end(), index) - m_row.begin());
+}
+
+int Viewer::place() const { return m_index < 0 ? -1 : placeOf(m_index); }
+
+int Viewer::placeFrom(int direction) const {
+    const int p = placeOf(m_index);
+    return direction > 0 && photoAt(p) != m_index ? p - 1 : p;
+}
+
+int Viewer::photoAt(int place) const {
+    if (place < 0 || place >= count())
+        return -1;
+    return m_rowMapped ? m_row[size_t(place)] : place;
+}
 
 QUrl Viewer::thumbnailAt(int index) const {
     if (index < 0 || index >= m_library->count())
@@ -324,7 +381,7 @@ void Viewer::fitPhoto() {
     const double a = aspect();
     const double w = std::min(m_viewport.width(), m_viewport.height() * a);
     m_motion.setPhoto(w, w / std::max(0.01, a), !isVideo());
-    m_motion.setNeighbours(m_index > 0, m_index < m_library->count() - 1);
+    m_motion.setNeighbours(placeFrom(-1) > 0, placeFrom(1) < count() - 1);
 }
 
 void Viewer::setViewport(qreal width, qreal height) {
@@ -338,8 +395,8 @@ void Viewer::advance(qreal seconds) {
     m_motion.advance(seconds);
     // A held key brought the next photo; the carousel is already on its way.
     if (const int delta = m_motion.takeSteps()) {
-        const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
-        if (next != m_index) {
+        const int next = photoAt(std::clamp(placeFrom(delta) + delta, 0, count() - 1));
+        if (next >= 0 && next != m_index) {
             m_jumpFrom = -1;
             show(next);
         }
@@ -434,9 +491,12 @@ void Viewer::close() {
     emit motionChanged();
 }
 
-void Viewer::goTo(int index) {
-    index = std::clamp(index, 0, m_library->count() - 1);
-    const int delta = index - m_index;
+void Viewer::goTo(int place) {
+    place = std::clamp(place, 0, count() - 1);
+    const int index = photoAt(place);
+    if (index < 0 || index == m_index)
+        return;
+    const int delta = place - placeFrom(index > m_index ? 1 : -1);
     if (std::abs(delta) <= 1) {
         step(delta);
         return;
@@ -457,33 +517,41 @@ int Viewer::beside(int k) const {
             return m_jumpFrom;
         return -1;
     }
-    const int i = m_index + k;
-    return i >= 0 && i < m_library->count() ? i : -1;
+    if (k == 0)
+        return m_index;
+    return photoAt(placeFrom(k) + k);
 }
 
 void Viewer::step(int delta) {
-    const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
-    if (next == m_index)
+    if (!delta || count() == 0)
+        return;
+    const int to = std::clamp(placeFrom(delta) + delta, 0, count() - 1);
+    const int next = photoAt(to);
+    if (next < 0 || next == m_index)
         return;
     m_jumpFrom = -1;
-    m_motion.jumped(next - m_index);
+    m_motion.jumped(to - placeFrom(delta));
     show(next);
     emit motionChanged();
 }
 
 void Viewer::slide(int delta) {
-    const int next = std::clamp(m_index + delta, 0, m_library->count() - 1);
-    if (next == m_index)
+    if (!delta || count() == 0)
+        return;
+    const int to = std::clamp(placeFrom(delta) + delta, 0, count() - 1);
+    const int next = photoAt(to);
+    if (next < 0 || next == m_index)
         return;
     // The new photo slides in from where it lay beside the old one.
     m_jumpFrom = -1;
-    m_motion.stepped(next - m_index);
+    m_motion.stepped(to - placeFrom(delta));
     show(next);
     emit motionChanged();
 }
 
-void Viewer::jumpTo(int index) {
-    if (index < 0 || index >= m_library->count() || index == m_index)
+void Viewer::jumpTo(int place) {
+    const int index = photoAt(place);
+    if (index < 0 || index == m_index)
         return;
     m_motion.reset();
     m_jumpFrom = -1;
@@ -677,17 +745,21 @@ void Viewer::setEffect(const QString &effect) {
 }
 
 void Viewer::libraryReloaded(const std::vector<int> &moved) {
-    if (m_index < 0)
-        return;
-    const int now = m_index < int(moved.size()) ? moved[size_t(m_index)] : -1;
-    if (now >= 0) {
-        // The same photo: nothing on screen changes, only its position,
-        // and maybe whether it is a favourite.
-        m_index = now;
-        m_jumpFrom = -1;
-        emit favoriteChanged();
-        return;
+    auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
+    for (int &i : m_hiddenList)
+        i = mapped(i);
+    std::erase(m_hiddenList, -1);
+    if (m_index >= 0) {
+        if (const int now = mapped(m_index); now >= 0) {
+            // The same photo: nothing on screen changes, only its position,
+            // and maybe whether it is a favourite.
+            m_index = now;
+            m_jumpFrom = -1;
+            emit favoriteChanged();
+        } else {
+            m_index = -1;
+            close();
+        }
     }
-    m_index = -1;
-    close();
+    rebuildRow();
 }

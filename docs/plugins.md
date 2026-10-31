@@ -112,6 +112,12 @@ own. It sets:
   it opens that photo, selecting or dragging it takes them all, and the
   strip under a photo shown full window underlines a stack's photos. A
   photo in another plugin's stack already stays there.
+- `hidden`: photos not in the grid at all, a list of library positions,
+  as Screenshots hides screenshots. They leave any stack they are in, the
+  viewer's ← and →, its strip and Home/End pass over them, and Ctrl+A and a
+  range leave them out; a plugin can still `openPhoto` one. Keep it short
+  of the whole library, and say somewhere how many are away and how to
+  have them back.
 - `tour`: a few steps that show what it does, on the photos and buttons as
   they are: `[{ title, text, photo, open, action, settings }, ...]`.
   `photo` is a library position (or a function giving one) the grid goes to

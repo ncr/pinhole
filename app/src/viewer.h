@@ -8,6 +8,9 @@
 #include <QRectF>
 #include <QTimer>
 #include <QUrl>
+#include <QVariant>
+
+#include <vector>
 
 class Library;
 class ServiceClient;
@@ -63,7 +66,13 @@ class Viewer : public QObject {
     // (ViewerMotion::hold()).
     Q_PROPERTY(bool takesInput READ takesInput WRITE setTakesInput NOTIFY takesInputChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
+    // The row the photos lie in: the library's, without the photos hidden
+    // from the grid (library positions, Main.qml), so ←, →, the carousel
+    // and the ends pass over those. `count` is the photos in it, `place`
+    // the shown one's place there.
+    Q_PROPERTY(QVariantList hidden READ hidden WRITE setHidden NOTIFY hiddenChanged)
     Q_PROPERTY(int count READ count NOTIFY indexChanged)
+    Q_PROPERTY(int place READ place NOTIFY indexChanged)
     // During a far jump (goTo()), the photo sliding out beside the new one;
     // -1 otherwise. Which photo shows at each place in the row: beside().
     Q_PROPERTY(int jumpFrom READ jumpFrom NOTIFY motionChanged)
@@ -104,7 +113,12 @@ public:
     bool takesInput() const { return m_takesInput; }
     void setTakesInput(bool takes);
     bool zoomed() const { return m_motion.zoomed(); }
+    QVariantList hidden() const { return m_hiddenGiven; }
+    void setHidden(const QVariantList &hidden);
     int count() const;
+    int place() const;
+    // The photo at a place in the row, -1 for none.
+    Q_INVOKABLE int photoAt(int place) const;
     int revision() const { return m_revision; }
     int jumpFrom() const { return m_jumpFrom; }
     // The photo at place `k` of the row (0: the shown one), -1 for none:
@@ -143,11 +157,12 @@ public:
     // once with no slide, so two neighbours can be compared by flicking
     // between them; the carousel glides after it.
     Q_INVOKABLE void step(int delta);
-    // Straight to a photo, no slide (scrubbing the carousel).
-    Q_INVOKABLE void jumpTo(int index);
-    // To a photo, sliding, the carousel with it (a tap on the carousel); a
-    // neighbour at once, as step() does.
-    Q_INVOKABLE void goTo(int index);
+    // Straight to the photo at a place in the row, no slide (scrubbing the
+    // carousel, the ends).
+    Q_INVOKABLE void jumpTo(int place);
+    // To the photo at a place in the row, sliding, the carousel with it (a
+    // tap on the carousel); a neighbour at once, as step() does.
+    Q_INVOKABLE void goTo(int place);
     // Plays the motion as the effect shows it: once for Live and a long
     // exposure, from the start for a loop or a bounce.
     Q_INVOKABLE void playLive();
@@ -158,6 +173,7 @@ public:
 
 signals:
     void takesInputChanged();
+    void hiddenChanged();
     void openChanged();
     void indexChanged();
     // Another photo shown, or this one's favourite changed (favourites.h)
@@ -183,6 +199,13 @@ protected:
 
 private:
     void show(int index);
+    // The row's places: a photo's (a hidden one's, the place of the next
+    // shown after it), and the place `direction` steps go from. A hidden
+    // photo shown (a plugin opened it) lies between two places.
+    int placeOf(int index) const;
+    int placeFrom(int direction) const;
+    // The row again, from the hidden photos given and the library.
+    void rebuildRow();
     // The held arrow let go (or lost track of): the photos stop moving on.
     void letGo();
     // Asks pinholed for the shown photo and its neighbours.
@@ -207,6 +230,12 @@ private:
 
     const Library *m_library;
     ServiceClient *m_service;
+    // The library positions in the row, in order, while any is hidden
+    // (`m_rowMapped`); the hidden ones as given, through any reload since.
+    QVariantList m_hiddenGiven;
+    std::vector<int> m_hiddenList;
+    std::vector<int> m_row;
+    bool m_rowMapped = false;
     bool m_open = false;
     int m_index = -1;
     // Replies for a photo no longer shown are dropped: each show() starts a

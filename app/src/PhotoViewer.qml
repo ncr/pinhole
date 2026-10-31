@@ -352,7 +352,7 @@ Item {
             text: modelData < 0 ? "‹" : "›"
             label.font.pixelSize: theme.fontSize * 2
             width: height
-            readonly property bool can: modelData < 0 ? viewer.index > 0 : viewer.index < viewer.count - 1
+            readonly property bool can: viewer.beside(modelData) >= 0
             opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
             y: (root.areaHeight - height) / 2
             Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -622,8 +622,9 @@ Item {
         }
     }
 
-    // The carousel: the library's thumbnails in a row under the photo, the
-    // shown one in the middle, sliding along as the photos do. Dragging it
+    // The carousel: the library's thumbnails in a row under the photo (the
+    // viewer's row, without the photos hidden from the grid), the shown one
+    // in the middle, sliding along as the photos do. Dragging it
     // scrubs through the library; clicking one shows it. A stack's photos
     // (a series) have a line under them; those of the shown photo's stack
     // a line in the accent, and the rest dim. Drawn directly: a
@@ -641,16 +642,16 @@ Item {
         clip: true
         readonly property real cell: 38
         readonly property real thumb: 36
-        // Where the row is, in photos: the shown one, plus how far the
+        // Where the row is, in places: the shown one's, plus how far the
         // photos still have to slide (all the way, for a long step).
-        readonly property real position: viewer.index - viewer.stripOffset / viewer.pageWidth
+        readonly property real position: viewer.place - viewer.stripOffset / viewer.pageWidth
         readonly property int slots: Math.ceil(width / cell) + 3
         readonly property int first: Math.floor(position - width / 2 / cell) - 1
-        // The photo at a point of the strip.
+        // The place at a point of the strip.
         function indexAt(x) { return Math.round(position + (x - width / 2) / cell) }
         // The stack the shown photo is in, by its card's photo, or -1.
         readonly property int stack: (root.grid.stacks, viewer.open ? root.grid.stackOf(viewer.index) : -1)
-        function stackOf(i) { return i >= 0 && i < viewer.count ? (root.grid.stacks, root.grid.stackOf(i)) : -1 }
+        function stackOf(i) { return i >= 0 ? (root.grid.stacks, root.grid.stackOf(i)) : -1 }
         // The middle, where the shown photo sits: thumbnails grow as they
         // pass it, and the marker stays there while they slide under it.
         readonly property real middle: width / 2
@@ -670,17 +671,19 @@ Item {
             model: carousel.slots
             delegate: Item {
                 required property int index
-                // The photo in [first, first + slots) that falls to this slot.
-                readonly property int photo: {
+                // The place in [first, first + slots) that falls to this slot,
+                // and its photo.
+                readonly property int place: {
                     const n = carousel.slots
                     return carousel.first + ((index - carousel.first) % n + n) % n
                 }
+                readonly property int photo: (viewer.count, viewer.photoAt(place))
                 // 1 at the middle, 0 a cell or more away.
                 readonly property real nearness: Math.max(0, 1 - Math.abs(x + width / 2 - carousel.middle) / carousel.cell)
                 readonly property int stack: visible ? carousel.stackOf(photo) : -1
                 readonly property bool shownStack: stack >= 0 && stack === carousel.stack
-                visible: photo >= 0 && photo < viewer.count
-                x: carousel.width / 2 + (photo - carousel.position) * carousel.cell - carousel.cell / 2
+                visible: photo >= 0
+                x: carousel.width / 2 + (place - carousel.position) * carousel.cell - carousel.cell / 2
                 width: carousel.cell
                 height: carousel.height
                 z: nearness
@@ -705,8 +708,8 @@ Item {
                 }
                 // The stack's line: one across its photos, rounded at its ends.
                 Rectangle {
-                    readonly property bool first: carousel.stackOf(parent.photo - 1) !== parent.stack
-                    readonly property bool last: carousel.stackOf(parent.photo + 1) !== parent.stack
+                    readonly property bool first: carousel.stackOf(viewer.photoAt(parent.place - 1)) !== parent.stack
+                    readonly property bool last: carousel.stackOf(viewer.photoAt(parent.place + 1)) !== parent.stack
                     visible: parent.stack >= 0
                     // A pixel over into the next, so the line has no seams.
                     x: first ? 3 : 0
@@ -740,7 +743,7 @@ Item {
             property bool scrubbed: false
             onPressed: mouse => {
                 pressX = mouse.x
-                pressIndex = viewer.index
+                pressIndex = viewer.place
                 scrubbed = false
             }
             onPositionChanged: mouse => {

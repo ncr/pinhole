@@ -424,17 +424,37 @@ void PhotoGrid::setStacks(const QVariantList &stacks) {
             photos.push_back(index.toInt());
         m_stackLists.push_back(std::move(photos));
     }
+    relayCells();
+    emit stacksChanged();
+}
+
+void PhotoGrid::setHidden(const QVariantList &hidden) {
+    if (hidden == m_hiddenGiven)
+        return;
+    m_hiddenGiven = hidden;
+    m_hiddenList.clear();
+    m_hiddenList.reserve(size_t(hidden.size()));
+    for (const QVariant &index : hidden)
+        m_hiddenList.push_back(index.toInt());
+    relayCells();
+    emit hiddenChanged();
+}
+
+void PhotoGrid::relayCells() {
     // The photo at the top of the view stays where it is, as across a
-    // reload, or the view at the newest end.
+    // reload, or the next one still shown; or the view at the newest end.
     const Anchor before = anchor();
     const QList<int> selectedBefore = selection();
     rebuildCells();
-    emit stacksChanged();
     emit cellsChanged();
+    int index = before.index;
+    if (index >= 0)
+        while (index < (m_library ? m_library->count() : 0) && cellOf(index) < 0)
+            ++index;
     if (before.atEnd)
         scrollToEnd();
-    else if (before.index >= 0)
-        setScroll(m_scroll + rectOf(before.index).top() - before.offset);
+    else if (index >= 0 && cellOf(index) >= 0)
+        setScroll(m_scroll + rectOf(index).top() - before.offset);
     else
         setScroll(m_scroll);
     if (selection() != selectedBefore)
@@ -458,7 +478,7 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         i = mapped(i);
     // Cells as they were (a reload has already changed the library).
     auto photoAt = [&](int cell) {
-        return cell < 0 ? -1 : m_cells.empty() ? cell : cell < int(m_cells.size()) ? m_cells[size_t(cell)] : -1;
+        return cell < 0 ? -1 : m_cellOf.empty() ? cell : cell < int(m_cells.size()) ? m_cells[size_t(cell)] : -1;
     };
     const int anchorPhoto = mapped(photoAt(m_selectionAnchor));
     const int zoomPhoto = m_zoom.active ? mapped(photoAt(m_zoom.index)) : -1;
@@ -468,19 +488,32 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
                 i = mapped(i);
             std::erase(stack, -1);
         }
+        for (int &i : m_hiddenList)
+            i = mapped(i);
+        std::erase(m_hiddenList, -1);
     }
 
     m_cells.clear();
     m_cellOf.clear();
     m_stackOf.clear();
     const int n = m_library ? m_library->count() : 0;
+    // The photos hidden, by position: none of a stack's, and no cell.
+    std::vector<char> hidden;
+    for (int i : m_hiddenList) {
+        if (i < 0 || i >= n)
+            continue;
+        if (hidden.empty())
+            hidden.assign(size_t(n), 0);
+        hidden[size_t(i)] = 1;
+    }
+    auto isHidden = [&](int i) { return !hidden.empty() && hidden[size_t(i)]; };
     // Each photo's card, by the card's position: the first stack to claim a
     // photo keeps it.
     std::vector<int> card;
     for (const auto &stack : m_stackLists) {
         std::vector<int> photos;
         for (int i : stack) {
-            if (i < 0 || i >= n)
+            if (i < 0 || i >= n || isHidden(i))
                 continue;
             if (card.empty())
                 card.assign(size_t(n), -1);
@@ -495,18 +528,19 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         std::sort(photos.begin(), photos.end());
         m_stackOf.emplace(cover, std::move(photos));
     }
-    if (!m_stackOf.empty()) {
+    if (!m_stackOf.empty() || !hidden.empty()) {
+        auto cardOf = [&](int i) { return card.empty() ? -1 : card[size_t(i)]; };
         m_cellOf.assign(size_t(n), -1);
         m_cells.reserve(size_t(n));
         for (int i = 0; i < n; ++i) {
-            if (card[size_t(i)] < 0 || card[size_t(i)] == i) {
+            if (!isHidden(i) && (cardOf(i) < 0 || cardOf(i) == i)) {
                 m_cellOf[size_t(i)] = int(m_cells.size());
                 m_cells.push_back(i);
             }
         }
         for (int i = 0; i < n; ++i)
-            if (card[size_t(i)] >= 0 && card[size_t(i)] != i)
-                m_cellOf[size_t(i)] = m_cellOf[size_t(card[size_t(i)])];
+            if (cardOf(i) >= 0 && cardOf(i) != i)
+                m_cellOf[size_t(i)] = m_cellOf[size_t(cardOf(i))];
     }
 
     m_selected.clear();
@@ -677,8 +711,13 @@ void PhotoGrid::setAccent(const QColor &accent) {
 }
 
 QList<int> PhotoGrid::selection() const {
-    if (m_stackOf.empty())
-        return QList<int>(m_selected.begin(), m_selected.end());
+    if (m_stackOf.empty()) {
+        QList<int> photos;
+        photos.reserve(qsizetype(m_selected.size()));
+        for (int cell : m_selected)
+            photos.append(libraryAt(cell));
+        return photos;
+    }
     QList<int> photos;
     for (int cell : m_selected)
         appendPhotos(cell, photos);
@@ -732,7 +771,7 @@ void PhotoGrid::clearSelection() {
 int PhotoGrid::count() const {
     if (!m_library)
         return 0;
-    return m_cells.empty() ? m_library->count() : int(m_cells.size());
+    return m_cellOf.empty() ? m_library->count() : int(m_cells.size());
 }
 
 void PhotoGrid::setStatsVisible(bool visible) {

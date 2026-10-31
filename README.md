@@ -59,6 +59,10 @@ ones closest to its colour, or lay the library out by hue as a rainbow wall
 (W). It goes by each photo's average colour, so it finds what is mostly one
 colour (a sunset, the sea, a forest) and not a red coat on a grey street.
 
+Screenshots keeps an iPhone's and a desktop's screenshots from crowding out
+the photos: each day's one card, or (⇧S, or the side panel) not in the grid
+at all, with a button saying how many are away.
+
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
@@ -129,6 +133,7 @@ plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's pr
 plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe)
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
+plugins/screenshots/      the Screenshots plugin
 ```
 
 ## Trying the grid

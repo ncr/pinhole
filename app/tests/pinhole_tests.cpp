@@ -1088,6 +1088,142 @@ private slots:
         QCOMPARE(grid.rectOf(4).left(), 400.0);
     }
 
+    void aHiddenPhotoHasNoCellLeavesItsStackAndStaysHiddenThroughAReload() {
+        QTemporaryDir dir, after;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        makeLibrary(after.path(), {{"new", 0}, {"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        Library library, reloaded;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        QVERIFY(reloaded.open(after.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700)); // 7 columns of 100
+        grid.setSources(&library, &loader, nullptr);
+
+        // a and c hidden: the rest close up, and nothing shows them.
+        grid.setHidden({0, 2});
+        QCOMPARE(grid.count(), 4);
+        QCOMPARE(grid.indexAt(50, 50), 1);
+        QCOMPARE(grid.indexAt(150, 50), 3);
+        QVERIFY(grid.rectOf(0).isEmpty());
+        QCOMPARE(grid.rectOf(4).left(), 200.0);
+        // Ctrl+A ticks only what shows.
+        grid.selectAll();
+        QCOMPARE(grid.selection(), (QList<int>{1, 3, 4, 5}));
+        QCOMPARE(grid.selectionCount(), 4);
+        grid.setSelecting(false);
+
+        // Hidden is out of any stack: b, c, d stack as b and d.
+        grid.setStacks(QVariantList{QVariant(QVariantList{1, 2, 3})});
+        QCOMPARE(grid.count(), 3);
+        QCOMPARE(grid.rectOf(3), grid.rectOf(1));
+        QCOMPARE(grid.stackOf(2), -1);
+        // A stack whose card is hidden stands where its next photo is.
+        grid.setHidden({1});
+        QCOMPARE(grid.count(), 4);
+        QCOMPARE(grid.indexAt(150, 50), 2);
+        QCOMPARE(grid.rectOf(3), grid.rectOf(2));
+        grid.setStacks({});
+
+        // Everything hidden: no cells.
+        grid.setHidden({0, 1, 2, 3, 4, 5});
+        QCOMPARE(grid.count(), 0);
+        QCOMPARE(grid.indexAt(50, 50), -1);
+
+        // A photo comes in first: what is hidden follows its photos.
+        grid.setHidden({0, 2});
+        grid.rememberAnchor();
+        std::vector<int> moved{1, 2, 3, 4, 5, 6};
+        loader.reload([&] { library.swap(reloaded); });
+        grid.libraryReloaded(moved);
+        QCOMPARE(grid.count(), 5);
+        QCOMPARE(grid.indexAt(50, 50), 0);
+        QCOMPARE(grid.indexAt(150, 50), 2);
+        QCOMPARE(grid.indexAt(250, 50), 4);
+
+        // Nothing hidden: a cell to each photo again.
+        grid.setHidden({});
+        QCOMPARE(grid.count(), 7);
+        QCOMPARE(grid.rectOf(1).left(), 100.0);
+    }
+
+    void hidingPhotosKeepsTheViewAtTheNewestEnd() {
+        QTemporaryDir dir;
+        QList<std::pair<QByteArray, int>> rows;
+        for (int i = 0; i < 200; ++i)
+            rows.append({QByteArray::number(i), i});
+        makeLibrary(dir.path(), rows);
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&library, &loader, nullptr);
+        QVERIFY(grid.atNewest());
+        QVariantList hidden;
+        for (int i = 150; i < 200; i += 2)
+            hidden.append(i);
+        grid.setHidden(hidden);
+        // Every other one of the newest hidden: the last row closes up.
+        QCOMPARE(grid.scrollFraction(), 1.0);
+        QCOMPARE(grid.indexAt(650, 650), 199);
+        QCOMPARE(grid.indexAt(550, 650), 197);
+        grid.setHidden({});
+        QCOMPARE(grid.scrollFraction(), 1.0);
+        QCOMPARE(grid.indexAt(350, 650), 199); // 200 photos, a row of 4 last
+    }
+
+    void theViewersRowPassesOverHiddenPhotos() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
+        ServiceClient service(dir.path());
+        Viewer viewer(&library, &service);
+        viewer.setViewport(800, 600);
+        viewer.setHidden({1, 2});
+        QCOMPARE(viewer.count(), 3);
+        QCOMPARE(viewer.photoAt(1), 3);
+
+        viewer.openAt(0, {});
+        QCOMPARE(viewer.place(), 0);
+        QCOMPARE(viewer.beside(1), 3);
+        QCOMPARE(viewer.beside(-1), -1);
+        viewer.step(1);
+        QCOMPARE(viewer.index(), 3);
+        QCOMPARE(viewer.place(), 1);
+        QCOMPARE(viewer.beside(-1), 0);
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 0);
+        // The ends are the row's.
+        viewer.jumpTo(viewer.count() - 1);
+        QCOMPARE(viewer.index(), 4);
+        viewer.goTo(0);
+        QCOMPARE(viewer.index(), 0);
+
+        // A hidden photo opened all the same (a plugin's) lies between the
+        // photos either side of it.
+        viewer.openAt(2, {});
+        QCOMPARE(viewer.beside(-1), 0);
+        QCOMPARE(viewer.beside(1), 3);
+        viewer.step(1);
+        QCOMPARE(viewer.index(), 3);
+        viewer.openAt(2, {});
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 0);
+
+        // Shown again, they are in the row again.
+        viewer.setHidden({});
+        QCOMPARE(viewer.count(), 5);
+        QCOMPARE(viewer.beside(1), 1);
+        viewer.close();
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void whatGoesOutIsWhatWasChosenThroughAReload() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir before, after;

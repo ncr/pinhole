@@ -1,0 +1,33 @@
+{
+  "%n hidden": {
+    "one": "%n ukryty",
+    "few": "%n ukryte",
+    "many": "%n ukrytych",
+    "other": "%n ukrytych"
+  },
+  "%n screenshots hidden.": {
+    "one": "%n zrzut ekranu ukryty.",
+    "few": "%n zrzuty ekranu ukryte.",
+    "many": "%n zrzutów ekranu ukrytych.",
+    "other": "%n zrzutów ekranu ukrytych."
+  },
+  "%n screenshots, each day's one card.": {
+    "one": "%n zrzut ekranu.",
+    "few": "%n zrzuty ekranu, z każdego dnia jedna karta.",
+    "many": "%n zrzutów ekranu, z każdego dnia jedna karta.",
+    "other": "%n zrzutów ekranu, z każdego dnia jedna karta."
+  },
+  "Hide them from the grid": "Ukryj je w siatce",
+  "Here, in the side panel (Tab), they are hidden or stacked, and this tour can be shown again.": "Tu, w panelu bocznym (Tab), ukryjesz je albo złożysz w karty i obejrzysz ten samouczek jeszcze raz.",
+  "Looking for screenshots…": "Szukam zrzutów ekranu…",
+  "No screenshots here.": "Nie ma tu zrzutów ekranu.",
+  "Or not there at all": "Albo wcale",
+  "Out of the way": "Z drogi",
+  "Screenshots, from an iPhone or a desktop, are one card for each day's, so they leave room for the photos.": "Zrzuty ekranu, z iPhone'a czy z komputera, są jedną kartą na każdy dzień, by zostawić miejsce zdjęciom.",
+  "Screenshots: hide them, or show them again, each day's one card": "Zrzuty ekranu: ukryj albo pokaż znów, z każdego dnia jedna karta",
+  "Settings": "Ustawienia",
+  "The side panel": "Panel boczny",
+  "hiding screenshots": "ukrycie zrzutów ekranu",
+  "showing screenshots": "pokazanie zrzutów ekranu",
+  "⇧S hides them from the grid, and the viewer passes over them; a button at the top says how many are away, and ⇧S again brings them back. Ctrl+Z undoes either.": "⇧S ukrywa je w siatce, a przeglądarka je pomija; przycisk u góry mówi, ile ich ukryto, a ⇧S znów je przywraca. Ctrl+Z cofa jedno i drugie."
+}

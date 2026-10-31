@@ -26,6 +26,7 @@ ApplicationWindow {
         accent: theme.accent
         background: win.color
         stacks: win.pluginStacks
+        hidden: win.pluginHidden
         marks: side.marks
         markColours: [theme.cyan, theme.yellow, theme.red, theme.magenta]
         // The keyboard's cursor, while the keyboard is what is in use.
@@ -33,6 +34,8 @@ ApplicationWindow {
         cursorColor: theme.brightForeground
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
+    // The viewer's row passes over the photos the grid hides.
+    Binding { target: viewer; property: "hidden"; value: win.pluginHidden }
     // Back from the viewer, on the photo it closed on.
     Connections {
         target: viewer
@@ -643,15 +646,17 @@ ApplicationWindow {
                 function onActionsChanged() { win.collectPlugins() }
                 function onHelpChanged() { win.collectPlugins() }
                 function onStacksChanged() { win.collectPlugins() }
+                function onHiddenChanged() { win.collectPlugins() }
                 function onTourReadyChanged() { tourDue.restart() }
             }
         }
     }
     // What the plugins loaded add: their buttons, their keys for the help,
-    // the photos they stack into one card, and whether one is over the
-    // photos.
+    // the photos they stack into one card or hide, and whether one is over
+    // the photos.
     property var pluginActions: []
     property var pluginStacks: []
+    property var pluginHidden: []
     property var pluginHelp: []
     property bool pluginCovering: false
     property int pluginsLoaded: 0
@@ -665,7 +670,7 @@ ApplicationWindow {
     }
     function collectPlugins() {
         const actions = [], help = []
-        let stacks = []
+        let stacks = [], hidden = []
         let covering = false
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -678,11 +683,14 @@ ApplicationWindow {
                 help.push({ title: loader.info.name, keys: item.help })
             if (item.stacks && item.stacks.length > 0)
                 stacks = stacks.concat(item.stacks)
+            if (item.hidden && item.hidden.length > 0)
+                hidden = hidden.concat(item.hidden)
             covering = covering || item.covering === true
         }
         pluginActions = actions
         pluginHelp = help
         pluginStacks = stacks
+        pluginHidden = hidden
         pluginCovering = covering
         ++pluginsLoaded
         // A plugin turned off, or loaded again, takes its tour with it.
@@ -1398,7 +1406,7 @@ ApplicationWindow {
         mouse: qsTr("The strip at the foot")
         touchpad: qsTr("The strip at the foot")
         pointerHelp: false
-        onTriggered: viewer.goTo(viewer.index - 10)
+        onTriggered: viewer.goTo(viewer.place - 10)
     }
     Command {
         name: "viewer.pageOn"
@@ -1406,7 +1414,7 @@ ApplicationWindow {
         keyLayer: "viewer"
         mouse: qsTr("The strip at the foot")
         touchpad: qsTr("The strip at the foot")
-        onTriggered: viewer.goTo(viewer.index + 10)
+        onTriggered: viewer.goTo(viewer.place + 10)
     }
     Command {
         name: "viewer.zoomIn"

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "pinhole.screenshots",
+  "name": "Screenshots",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Keeps screenshots, an iPhone's or a desktop's, from crowding out the photos: each day's one card, or hidden from the grid.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

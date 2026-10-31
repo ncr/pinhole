@@ -51,5 +51,9 @@ install -d "$PREFIX/lib/pinhole/plugins/theme/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/theme" plugins/theme/manifest.json plugins/theme/*.qml plugins/theme/Palette.js
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/theme/i18n" plugins/theme/i18n/*.json
 install -Dm755 plugins/theme/pinhole-theme "$PREFIX/lib/pinhole/plugins/theme/pinhole-theme"
+install -d "$PREFIX/lib/pinhole/plugins/screenshots/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/screenshots" plugins/screenshots/manifest.json plugins/screenshots/*.qml \
+  plugins/screenshots/Find.js
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/screenshots/i18n" plugins/screenshots/i18n/*.json
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"
 install -Dm644 pkgbuild/pinhole.desktop "$PREFIX/share/applications/pinhole.desktop"

@@ -45,7 +45,8 @@ struct GridRenderState;
 // (a series): the grid then lays out cells, each showing the library
 // position it stands for, and everything it says to the rest of Pinhole
 // (indexAt, rectOf, activated, selection) is in library positions, a
-// stacked photo's being its card's.
+// stacked photo's being its card's. A plugin can also hide photos (as
+// Screenshots does): they have no cell at all.
 // PINHOLE_INPUT_LOG=<file>: append a line about an input event there.
 void logInput(const QString &line);
 
@@ -57,6 +58,9 @@ class PhotoGrid : public QQuickItem {
     // stands where its first one is and shows it. A photo already in an
     // earlier stack stays there. Plugins' stacks, gathered (Main.qml).
     Q_PROPERTY(QVariantList stacks READ stacks WRITE setStacks NOTIFY stacksChanged)
+    // Photos not in the grid at all, library positions: no cell, and out of
+    // any stack. Plugins' hidden photos, gathered (Main.qml).
+    Q_PROPERTY(QVariantList hidden READ hidden WRITE setHidden NOTIFY hiddenChanged)
     // The marks drawn on cells (marks.h: Mark), or-ed.
     Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
     // The marks' colours, the Omarchy theme's: a video's, a Live Photo's, a
@@ -124,6 +128,8 @@ public:
     int count() const;
     QVariantList stacks() const { return m_stacksGiven; }
     void setStacks(const QVariantList &stacks);
+    QVariantList hidden() const { return m_hiddenGiven; }
+    void setHidden(const QVariantList &hidden);
     int marks() const { return m_marks; }
     void setMarks(int marks);
     QVariantList markColours() const;
@@ -261,6 +267,7 @@ signals:
     void statsVisibleChanged();
     void statsTextChanged();
     void stacksChanged();
+    void hiddenChanged();
     void marksChanged();
     void markColoursChanged();
     // The cells changed: the library's photos, or how they are stacked.
@@ -295,17 +302,20 @@ private:
     std::vector<Layer> layers() const;
     QRectF cellRect(int index, const Layer &layer) const;
     // Cells and library positions: the photo a cell shows, the cell a photo
-    // is in (its card's, when stacked), the cell at a point, and a cell's
-    // photos (one, or a stack's).
-    int libraryAt(int cell) const { return m_cells.empty() ? cell : m_cells[size_t(cell)]; }
+    // is in (its card's, when stacked; -1 when hidden), the cell at a point,
+    // and a cell's photos (one, or a stack's).
+    int libraryAt(int cell) const { return m_cellOf.empty() ? cell : m_cells[size_t(cell)]; }
     int cellOf(int index) const;
     int cellAt(qreal x, qreal y) const;
     void appendPhotos(int cell, QList<int> &out) const;
     QList<int> photosOf(int cell) const;
-    // Lay the cells out again from m_stacksGiven, positions mapped through
-    // `moved` (a reload's) first when given; the selection and the photo at
-    // the top of the view stay with their photos.
+    // Lay the cells out again from the stacks and hidden photos given,
+    // positions mapped through `moved` (a reload's) first when given; the
+    // selection and the photo at the top of the view stay with their photos.
     void rebuildCells(const std::vector<int> *moved = nullptr);
+    // The stacks or the hidden photos given changed: the cells again, the
+    // view staying on the photo at its top.
+    void relayCells();
     double strideFor(int columns) const;
     double maxScroll(int columns) const;
     // Put the view at `y`, within the ends, stopping any motion.
@@ -342,13 +352,16 @@ private:
 
     const Library *m_library = nullptr;
     ThumbnailLoader *m_loader = nullptr;
-    // Cell to library position, empty while every cell is one photo; and
-    // back. Each stack's photos by its card's position, the card's first.
+    // Cell to library position, and back (-1: hidden); both empty while
+    // every cell is one photo. Each stack's photos by its card's position,
+    // the card's first.
     std::vector<int> m_cells;
     std::vector<int> m_cellOf;
     std::unordered_map<int, std::vector<int>> m_stackOf;
     QVariantList m_stacksGiven;
     std::vector<std::vector<int>> m_stackLists; // as given, through any reload since
+    QVariantList m_hiddenGiven;
+    std::vector<int> m_hiddenList; // as given, through any reload since
     int m_marks = 13; // all but Live, as the side panel starts
     // By Mark's bit: video, live, favourite, stack. Counted up on every
     // change, for the render thread to draw them again.
