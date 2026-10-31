@@ -48,17 +48,16 @@ PinholePlugin {
         if (pinhole.library.count === 0)
             return
         finding = true
-        pinhole.run(finder, ["find", pinhole.library.dir, pinhole.cacheDir], (code, out, error) => {
-            finding = false
-            if (code === 0)
-                take(out)
-            else
-                console.warn("Series: " + error)
-            if (findAgain) {
-                findAgain = false
-                find()
-            }
-        })
+        pinhole.run(finder, ["find", pinhole.library.dir, pinhole.cacheDir])
+            .then(result => take(result.stdout))
+            .catch(pinhole.warn)
+            .then(() => {
+                finding = false
+                if (findAgain) {
+                    findAgain = false
+                    find()
+                }
+            })
     }
     // The finder's lines, each a series' ids.
     function take(out) {
@@ -117,7 +116,7 @@ PinholePlugin {
     }
     function setEdits(key, state) {
         if (!pinhole.setSetting(key, state))
-            console.warn("Series: the edits could not be kept")
+            pinhole.warn(qsTr("The edits could not be kept."))
         if (key !== editsKey)
             return
         edits = state
@@ -132,13 +131,13 @@ PinholePlugin {
         if (editsKey !== "")
             foundIds = []
         editsKey = key
-        let kept = pinhole.setting(key, null)
+        let kept = pinhole.settings[key]
         // From before they were kept for each library: the one shown then.
-        const old = pinhole.setting("edits", null)
+        const old = pinhole.settings.edits
         if (!kept && old) {
             kept = old
             if (pinhole.setSetting(key, old))
-                pinhole.setSetting("edits", null)
+                pinhole.settings.edits = null
         }
         edits = kept || { manual: [], apart: [] }
         if (found)

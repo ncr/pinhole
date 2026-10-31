@@ -90,13 +90,11 @@ Item {
         const s = Object.assign({}, sharp)
         s[tile.id] = ""
         sharp = s
-        pinhole.fetch(tile.index, "medium", (path, error) => {
-            if (path === "")
-                return
+        pinhole.fetch(tile.id, "medium").then(path => {
             const now = Object.assign({}, editor.sharp)
             now[tile.id] = "file://" + path
             editor.sharp = now
-        })
+        }, () => {}).catch(pinhole.warn)
     }
 
     // `from`: the photo it opens on, in the series or beside it.

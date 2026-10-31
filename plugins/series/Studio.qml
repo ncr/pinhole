@@ -32,12 +32,12 @@ Item {
     readonly property var shots: all.filter(s => skipped.indexOf(s.index) < 0)
 
     // How the clip is made; all but the crop is kept for next time.
-    property var recipe: Object.assign({}, Engine.DEFAULT_RECIPE, pinhole.setting("recipe", {}), { pan: { x: 0, y: 0 } })
+    property var recipe: Object.assign({}, Engine.DEFAULT_RECIPE, pinhole.settings.recipe, { pan: { x: 0, y: 0 } })
     function change(part) {
         recipe = Object.assign({}, recipe, part)
         const kept = Object.assign({}, recipe)
         delete kept.pan
-        pinhole.setSetting("recipe", kept)
+        pinhole.settings.recipe = kept
     }
     function cycle(name, list) {
         const at = list.indexOf(recipe[name])
@@ -83,33 +83,43 @@ Item {
             return { index: i, id: item.id, thumbnail: item.thumbnail, sharp: "",
                      aspect: item.width > 0 && item.height > 0 ? item.width / item.height : 4 / 3, shift: { x: 0, y: 0 } }
         })
-        // The sharper pictures, as each comes.
+        // The sharper pictures, as each comes; a thumbnail stays where one
+        // does not.
         for (const i of positions) {
-            pinhole.fetch(i, "medium", (path, error) => {
-                if (studio.k !== k || path === "")
-                    return
-                studio.all = studio.all.map(s => s.index === i ? Object.assign({}, s, { sharp: "file://" + path }) : s)
-            })
+            pinhole.fetch(i, "medium").then(path => {
+                if (studio.k === k)
+                    studio.all = studio.all.map(s => s.index === i ? Object.assign({}, s, { sharp: "file://" + path }) : s)
+            }, () => {}).catch(pinhole.warn)
         }
-        // How each is moved against the first, for Steady.
-        pinhole.run(plugin.finder, ["steady", pinhole.library.dir].concat(all.map(s => s.id)), (code, out) => {
-            if (studio.k !== k || code !== 0)
-                return
-            const lines = out.trim().split("\n")
+        // How each is moved against the first, for Steady: the last
+        // series' no longer wanted.
+        if (steadying)
+            steadying.cancel()
+        steadying = pinhole.run(plugin.finder, ["steady", pinhole.library.dir].concat(all.map(s => s.id)))
+        steadying.then(result => {
+            const lines = result.stdout.trim().split("\n")
             studio.all = studio.all.map((s, n) => {
                 const parts = (lines[n] || "0 0").split(" ")
                 return Object.assign({}, s, { shift: { x: Number(parts[0]) || 0, y: Number(parts[1]) || 0 } })
             })
-        })
+        }, error => {
+            if (error.code !== "cancelled")
+                throw error
+        }).catch(pinhole.warn)
     }
+    property var steadying: null
     function step(delta) {
         const next = k + delta
         if (next >= 0 && next < plugin.series.length)
             show(next)
     }
     function close() {
-        if (making !== "")
+        // Escape while a file is made stops making it.
+        if (making !== "") {
+            if (recording)
+                recording.cancel()
             return
+        }
         shown = false
         if (fromGrid && positions.length > 0)
             pinhole.reveal(positions[0])
@@ -153,6 +163,8 @@ Item {
         recordWhenReady.path = path
         recordWhenReady.restart()
     }
+    // The file on its way (pinhole.record), to cancel.
+    property var recording: null
     Timer {
         id: recordWhenReady
         property var plan
@@ -164,18 +176,22 @@ Item {
                 return
             stop()
             const fps = plan.fps
-            studio.pinhole.record(recorder, {
+            studio.recording = studio.pinhole.record(recorder, {
                 path: path, format: studio.making, width: plan.w, height: plan.h, fps: fps, frames: plan.frames,
-                seek: frame => recorder.time = frame / fps
-            }, fraction => studio.progress = fraction, (file, error) => {
+                seek: frame => recorder.time = frame / fps,
+                progress: fraction => studio.progress = fraction
+            })
+            studio.recording.then(file => {
                 studio.making = ""
-                if (file === "") {
-                    studio.error = error
-                    return
-                }
+                studio.recording = null
                 studio.pinhole.copyFile(file)
                 studio.made = { path: file, name: file.split("/").pop(), size: studio.pinhole.sizeText(studio.pinhole.fileSize(file)) }
-            })
+            }, error => {
+                studio.making = ""
+                studio.recording = null
+                if (error.code !== "cancelled")
+                    studio.error = error.message
+            }).catch(studio.pinhole.warn)
         }
     }
 
