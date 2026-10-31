@@ -9,6 +9,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "encoder.h"
 #include "history.h"
 #include "library.h"
 #include "libraryreloader.h"
@@ -1403,6 +1404,61 @@ private slots:
         former.close();
         QCOMPARE(Storage::library(), location.path() + "/library/folder/home-me-My-Photos");
         QFile::remove(settingsPath);
+    }
+
+    // An encoder slow to read (ffmpeg making a GIF) is given frames as it
+    // takes them, and the window's thread never waits on it meanwhile.
+    void framesGoToASlowEncoderWithoutTheWindowWaiting() {
+        QTemporaryDir dir;
+        const QSize size(400, 300);
+        const int frames = 30;
+        FrameEncoder encoder("sh", {"-c", "sleep 1; cat > \"$0\"", dir.filePath("out")}, size);
+        QImage frame(size, QImage::Format_RGB32);
+        frame.fill(Qt::red);
+        int added = 0, heldBack = 0;
+        QString error = "not finished";
+        // A frame a turn, as a recording's come (one grab after another).
+        std::function<void()> more = [&] {
+            if (added == frames)
+                return encoder.end();
+            ++added;
+            if (encoder.add(frame))
+                QTimer::singleShot(0, this, more);
+            else
+                ++heldBack;
+        };
+        connect(&encoder, &FrameEncoder::ready, this, more);
+        connect(&encoder, &FrameEncoder::finished, this, [&](const QString &e) { error = e; });
+        QElapsedTimer clock;
+        qint64 last = 0, longest = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&] {
+            longest = std::max(longest, clock.elapsed() - last);
+            last = clock.elapsed();
+        });
+        clock.start();
+        tick.start(10);
+        encoder.start();
+        // Once it is running (and asleep).
+        QTimer::singleShot(200, this, more);
+        QTRY_VERIFY_WITH_TIMEOUT(error != "not finished", 20000);
+        QCOMPARE(error, QString());
+        QCOMPARE(added, frames);
+        QVERIFY2(longest < 300, qPrintable(QString("the window waited %1 ms").arg(longest)));
+        QVERIFY(heldBack > 0);
+        QCOMPARE(QFileInfo(dir.filePath("out")).size(), qint64(frames) * size.width() * size.height() * 4);
+
+        // One that fails says how, and one that is not there says so.
+        FrameEncoder failing("sh", {"-c", "echo broken >&2; exit 3"}, size);
+        QString failed;
+        connect(&failing, &FrameEncoder::finished, this, [&](const QString &e) { failed = e; });
+        failing.start();
+        QTRY_COMPARE(failed, QString("broken"));
+        FrameEncoder missing("/nonexistent/ffmpeg", {}, size);
+        QString absent;
+        connect(&missing, &FrameEncoder::finished, this, [&](const QString &e) { absent = e; });
+        missing.start();
+        QTRY_VERIFY(absent.contains("did not start"));
     }
 };
 

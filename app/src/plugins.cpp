@@ -1,5 +1,6 @@
 #include "plugins.h"
 
+#include "encoder.h"
 #include "history.h"
 #include "library.h"
 #include "photogrid.h"
@@ -105,17 +106,17 @@ public:
             args << "-c:v" << "libx264" << "-preset" << "medium" << "-crf" << "23" << "-pix_fmt" << "yuv420p"
                  << "-movflags" << "+faststart" << "-f" << "mp4";
         args << part();
-        connect(&m_ffmpeg, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
-            if (status != QProcess::NormalExit || code != 0)
-                return fail(QString::fromUtf8(m_ffmpeg.readAllStandardError()).trimmed());
+        m_encoder = new FrameEncoder(QStringLiteral("ffmpeg"), args, m_size, this);
+        connect(m_encoder, &FrameEncoder::ready, this, &Recording::next);
+        connect(m_encoder, &FrameEncoder::finished, this, [this](const QString &error) {
+            if (!error.isEmpty())
+                return fail(error);
             QFile::remove(m_path);
             if (!QFile::rename(part(), m_path))
                 return fail(QStringLiteral("could not write %1").arg(m_path));
             finish(m_path, {});
         });
-        m_ffmpeg.start(QStringLiteral("ffmpeg"), args);
-        if (!m_ffmpeg.waitForStarted())
-            return fail(QStringLiteral("ffmpeg did not start"));
+        m_encoder->start();
         next();
     }
 
@@ -123,10 +124,10 @@ private:
     QString part() const { return m_path + QStringLiteral(".part"); }
 
     void next() {
-        if (m_ended)
+        if (m_ended || m_grab)
             return;
         if (m_at == m_frames) {
-            m_ffmpeg.closeWriteChannel();
+            m_encoder->end();
             return;
         }
         if (!m_item)
@@ -137,27 +138,22 @@ private:
         if (!m_grab)
             return fail(QStringLiteral("the picture could not be taken"));
         connect(m_grab.data(), &QQuickItemGrabResult::ready, this, [this] {
-            QImage frame = m_grab->image();
+            const QImage frame = m_grab->image();
             m_grab.reset();
-            if (frame.size() != m_size)
-                frame = frame.scaled(m_size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            frame = frame.convertToFormat(QImage::Format_RGB32);
-            for (int y = 0; y < frame.height(); ++y)
-                m_ffmpeg.write(reinterpret_cast<const char *>(frame.constScanLine(y)), qint64(frame.width()) * 4);
             ++m_at;
             if (m_progress.isCallable())
                 m_progress.call({double(m_at) / m_frames});
-            // Not ahead of ffmpeg by more than a few frames.
-            if (m_ffmpeg.bytesToWrite() > qint64(m_size.width()) * m_size.height() * 4 * 8)
-                m_ffmpeg.waitForBytesWritten(10000);
-            next();
+            // The next once ffmpeg has caught up (ready), if it is behind.
+            if (m_encoder->add(frame))
+                next();
         });
     }
 
     void fail(const QString &error) {
         if (m_ended)
             return;
-        m_ffmpeg.kill();
+        if (m_encoder)
+            m_encoder->stop();
         QFile::remove(part());
         finish({}, error.isEmpty() ? QStringLiteral("ffmpeg failed") : error);
     }
@@ -175,7 +171,7 @@ private:
     QSize m_size;
     int m_fps = 20, m_frames = 1, m_at = 0;
     bool m_ended = false;
-    QProcess m_ffmpeg;
+    FrameEncoder *m_encoder = nullptr;
     QSharedPointer<QQuickItemGrabResult> m_grab;
 };
 

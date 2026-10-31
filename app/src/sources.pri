@@ -35,6 +35,7 @@ HEADERS += \
     $$PWD/outgoing.h \
     $$PWD/favourites.h \
     $$PWD/history.h \
+    $$PWD/encoder.h \
     $$PWD/plugins.h \
     $$PWD/incoming.h \
     $$PWD/portal.h \
@@ -62,6 +63,7 @@ SOURCES += \
     $$PWD/outgoing.cpp \
     $$PWD/favourites.cpp \
     $$PWD/history.cpp \
+    $$PWD/encoder.cpp \
     $$PWD/plugins.cpp \
     $$PWD/incoming.cpp \
     $$PWD/portal.cpp \
