@@ -47,7 +47,7 @@ up on; it connects again and starts afresh.
 
 | Method | Params | Result |
 |---|---|---|
-| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source` (the id of the source whose photo it is: else `other_source`) | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
+| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source` (the id of the source whose photo it is: else `other_source`, as for `""`, no one's). A library read that is not the source shown's (one given with `--library`) has nothing fetched: `other_source` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
