@@ -340,8 +340,8 @@ change feed brings the same `isFavorite` back. Requests are done one after
 another in the order they came, so a photo made a favourite and back again
 quickly ends as it began. Those already as asked are left alone (`changed`
 counts the rest). With `source`, they are done only if the library shown is
-that source's (`""` for one that does not say whose it is): else
-`other_source`, and nothing changes (a window's undo,
+that source's (`""`, for a library that does not say whose it is, is
+taken for no one's): else `other_source`, and nothing changes (a window's undo,
 made after another source was shown from elsewhere, never reaches another
 source's photos of the same ids).
 
@@ -399,10 +399,12 @@ no pinhole-sync), renamed on one disk or copied across two, after which
 every window is told
 
 ```json
-{"event": "library_moved", "library": "/new/folder/library/icloud/me@example.com"}
+{"event": "library_moved", "library": "/new/folder/library/icloud/me@example.com",
+ "libraries": {"from": "/old/folder/library", "to": "/new/folder/library"}}
 ```
 
-and reads it from there (the old copy goes 30 seconds later); then the
+and reads it from there (a window keeping to another source's library, given
+`--library`, finds it under `to` as it was under `from`) (the old copy goes 30 seconds later); then the
 photos, new ones into the new folder at once and those kept each served
 from the old folder until it has moved, keeping when it was last used. The
 old folders go once empty.
