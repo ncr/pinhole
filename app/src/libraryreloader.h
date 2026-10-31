@@ -31,8 +31,8 @@ public:
     // The next reload is another source's library: shown from its newest
     // photos, not from where the last one was (see `reloaded`).
     void showNewestNext() { m_toNewest = true; }
-    // No library yet: look for one every few seconds (pinhole-sync, or the
-    // service, may be making it) and read it once it is there.
+    // No library yet: look for one every few seconds (the service may be
+    // making it) and read it once it is there.
     void waitForLibrary();
 
 signals:

@@ -40,12 +40,24 @@ again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
 ```bash
 bin/install                  # builds the package and installs it (asks for your password)
-pinhole-sync sign-in         # Apple ID, password, two-factor code; or --from-icloudpd <apple-id>
-pinhole-sync all             # the index (~5 min) and every thumbnail (~6 min)
 ```
 
-Then open Pinhole from the launcher. Without a library it says what to do
-and opens the library as soon as it is there. `?` lists every shortcut.
+Then open Pinhole from the launcher and add a source in the side panel
+(Tab): an Apple ID (password and two-factor code, or the session icloudpd
+already has) or a folder. The library builds in the background, the index
+in about 5 minutes and every thumbnail in about 6 more for 50,000 photos,
+and the grid fills as it does. `?` lists every shortcut.
+
+The same from a terminal, without the window:
+
+```bash
+pinhole sign-in              # Apple ID, then the password and code, or icloudpd's session
+pinhole status               # the source shown, its library, how far it is built
+pinhole help                 # every command: sources, show, remove, sync, add, storage…
+```
+
+Each asks the Pinhole service, `pinholed`, and starts it if it is not
+running; only the service writes the library.
 
 Working on Pinhole, `bin/install-local` builds the checkout into `~/.local`
 instead, with no password and no package, and stops a running window so the
@@ -64,19 +76,18 @@ auth/PROTOCOL.md          the sign-in provider protocol: JSON lines over stdio
 auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
 core/                     the Rust core: session, CloudKit client, index
 core/src/bin/probe.rs     pinhole-probe, which measures the API
-core/src/bin/sync.rs      pinhole-sync, which builds the local library
 core/src/bin/daemon.rs    pinholed, the background service: larger renditions on demand
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
-app/                      the window: Qt Quick, with the grid in C++
+app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 ```
 
 ## Trying the grid
 
-On your own library (after `pinhole-sync sign-in`):
+On your own library (after `pinhole sign-in`, once `pinhole status` says
+it is built):
 
 ```bash
-core/target/release/pinhole-sync all   # index (~5 min) then thumbnails (~6 min) into ~/.local/share/pinhole/library/icloud/<apple-id>
 app/bin/build
 app/build/pinhole            # ? lists every key and gesture; S toggles the frame stats
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
@@ -91,9 +102,9 @@ with synthetic events and reports each step.
 Videos play without sound in a selftest and in the bench; `PINHOLE_SILENT=1`
 does the same for any other run.
 
-`pinhole-sync` only fetches what is missing, so running it again is quick.
-After that, `pinholed` keeps the library in step with iCloud on its own:
-new, deleted and edited photos appear within a minute, without a restart.
+`pinholed` keeps the library in step with iCloud on its own: new, deleted
+and edited photos appear within a minute (at once when Apple pushes the
+change), without a restart; `pinhole sync` asks it to look now.
 
 When cells grow past what the 480 px thumbnails can fill, the window asks
 `pinholed` for the 2048 px rendition. The window starts the service if it is
@@ -117,8 +128,8 @@ own.
 reports how long every stage took.
 
 Drop photos and videos (or folders of them) from a file manager on the
-window to add them to the source shown, as `pinhole-sync add <files>`
-does from a terminal; `PINHOLE_SELFTEST=drop:<dir>` with
+window to add them to the source shown, as `pinhole add <files>` does
+from a terminal; `PINHOLE_SELFTEST=drop:<dir>` with
 `PINHOLE_SELFTEST_DROP=<file>:<file>` drops files on the window and
 reports, for a scratch source only, since they really are added.
 

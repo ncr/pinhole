@@ -1,5 +1,5 @@
 //! Adding photos and videos to a library from files on this computer
-//! (dropped on the window, or `pinhole-sync add`). The files are grouped
+//! (dropped on the window, or `pinhole add`). The files are grouped
 //! into the assets they make, a Live Photo's photo and motion together,
 //! and handed to the source one asset at a time (`Source::add`): a folder
 //! copies them in, iCloud uploads them. The files themselves stay as they

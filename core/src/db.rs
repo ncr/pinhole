@@ -148,15 +148,13 @@ pub struct Index<'a> {
     /// is gone.
     pub seen: HashSet<String>,
     pub changes: Changes,
-    /// Nothing is written: only `changes` says what would be.
-    pub dry_run: bool,
     /// Asked before each `put`: true gives up with `Stopped`.
     pub stop: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
 
 impl<'a> Index<'a> {
     pub fn new(conn: &'a mut Connection) -> Self {
-        Index { conn, seen: HashSet::new(), changes: Changes::default(), dry_run: false, stop: None }
+        Index { conn, seen: HashSet::new(), changes: Changes::default(), stop: None }
     }
 
     /// Whoever listed into this should give up (see `stop`).
@@ -221,9 +219,6 @@ impl<'a> Index<'a> {
                     }
                 }
                 self.seen.insert(a.id.clone());
-                if self.dry_run {
-                    continue;
-                }
                 asset_stmt.execute(params![
                     a.id, a.item_type, a.filename, a.taken, a.added, a.favorite, a.duration, a.orientation,
                     a.has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect,
@@ -253,9 +248,7 @@ impl<'a> Index<'a> {
             if had && !self.changes.removed.contains(id) {
                 self.changes.removed.push(id.clone());
             }
-            if !self.dry_run {
-                tx.execute("DELETE FROM assets WHERE id = ?1", [id])?;
-            }
+            tx.execute("DELETE FROM assets WHERE id = ?1", [id])?;
         }
         tx.commit()?;
         Ok(())

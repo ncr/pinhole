@@ -208,11 +208,10 @@ announce nothing. For a folder it is a fresh look at the files. With no
 token yet, or one the source no longer accepts, the whole library is
 listed again, which is also how a new library is first made. A library
 holds one source's photos and is never written by another
-(`sync::claim`). `pinhole-sync changes [--dry-run]` does the same from the
-command line. The two never write one library at once (`sync::Writer`, a
-lock on `.writing` in it): a round that finds pinhole-sync writing waits
-for the next, and pinhole-sync waits for a round under way. Windows hear when each round ran and the next will
-(`rounds`).
+(`sync::claim`). Nothing but the service writes a library: the window,
+and `pinhole <command>` from a terminal, ask it (`pinhole sync` sends
+`sync` and follows the round to its end). Windows hear when each round
+ran and the next will (`rounds`).
 
 iCloud also tells the service of a change as it happens, as icloud.com
 is told (`icloud::push`): a WebSocket to `websocket.push.apple.com` with
@@ -237,8 +236,8 @@ its own library in the one folder: `library/icloud/<apple-id>/`,
 `library/folder/home-me-Pictures/`.
 
 `set_source` shows another source, adding it first if it is new. The
-service also switches when the settings change under it, as
-`pinhole-sync sign-in` does. Every window hears the new `source`, then
+service also switches when the settings change under it, edited by
+hand. Every window hears the new `source`, then
 `library_moved` with the library to read, then `library_changed` as it
 fills, and `sources`.
 
@@ -255,8 +254,8 @@ provider says so without asking Apple.
 `sign_in` signs in to an Apple ID through the sign-in provider (one
 provider process to an Apple ID while it waits for the code, so
 `submit_code` reaches the same sign-in). Without a `password` it takes
-over the session icloudpd has for that Apple ID, as `pinhole-sync sign-in
---from-icloudpd` does. Signed in, the Apple ID is added and shown. Errors
+over the session icloudpd has for that Apple ID, as `pinhole sign-in`
+does when icloudpd has one (`discover`). Signed in, the Apple ID is added and shown. Errors
 carry the provider's codes: `wrong_password`, `try_again`, `wrong_code`,
 `rate_limited`, `unavailable`, `needs_sign_in` (no icloudpd session for it).
 
@@ -324,7 +323,7 @@ source does not take), `too_large`, `over_quota` (iCloud storage is full),
 `needs_sign_in`, `unavailable` (the source or the network failed), or
 `failed` (anything else, in the message). The request itself fails with
 `unsupported` when nothing is shown, and `bad_request` without `files`.
-`pinhole-sync add <files>` does the same from a terminal.
+`pinhole add <files>` does the same from a terminal.
 
 ## Favourites
 
@@ -376,8 +375,7 @@ A cached file is answered with `path` alone.
 
 Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
 the window chose another: each source's library in `library/<kind>/<name>/`
-(`library.sqlite` and `thumbs/`, built by `pinhole-sync` or the service and
-kept by the service) and the photos fetched from the
+(`library.sqlite` and `thumbs/`, built and kept by the service) and the photos fetched from the
 source in `cache/<kind>/`, named by the rendition's key (iCloud's checksum
 of the file), so a re-edited photo gets a new name and duplicates share
 one.
@@ -390,12 +388,11 @@ recently used go, every two minutes, down to nine tenths of it.
 
 The window's settings panel changes the folder and the limit with
 `set_storage`; the service keeps them in `~/.config/pinhole/settings.json`
-(`location`, `limit_bytes`) and reads them as it starts, as `pinhole-sync`
-does to find the library. `--library` and `--cache` override them. A lower
+(`location`, `limit_bytes`) and reads them as it starts, as the window
+does to guess the library before the service names it. `--library` and `--cache` override them. A lower
 limit than is kept frees space at once, down to the limit itself. A new
 folder has everything move over in the background: first the libraries,
-with nothing writing them meanwhile (no round, favourite or lookup here,
-no pinhole-sync), renamed on one disk or copied across two, after which
+with nothing writing them meanwhile (no round, favourite or lookup), renamed on one disk or copied across two, after which
 every window is told
 
 ```json
@@ -417,8 +414,7 @@ short (the service stopped, the computer off) is put right as the service
 starts again: committed, the photos go on moving; not, it is undone and
 everything stays in the old folder (a copy already in the new one was
 never written, and goes), unless the libraries were renamed over whole,
-which is committed then. pinhole-sync asks where the library is again
-once it may write, in case it moved while it waited. A folder inside the current
+which is committed then. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.

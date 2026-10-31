@@ -27,6 +27,7 @@
 #include "incoming.h"
 #include "outgoing.h"
 #include "favourites.h"
+#include "commands.h"
 #include "history.h"
 #include "marks.h"
 #include "photoprovider.h"
@@ -89,6 +90,9 @@ bool vulkanUsable() {
 } // namespace
 
 int main(int argc, char *argv[]) {
+    // pinhole status, pinhole add …: a command for the service, no window.
+    if (const int code = runCommand(argc, argv); code >= 0)
+        return code;
     // On Asahi, Vulkan stalls far less than OpenGL when many small textures
     // are uploaded per frame: zoomed-out fast scrolling went from 96 to
     // 119 fps and the worst frame from 385 to 66 ms. So Vulkan when there is
@@ -148,6 +152,7 @@ int main(int argc, char *argv[]) {
     const QString defaultLibrary = Storage::library();
 
     QCommandLineParser parser;
+    parser.setApplicationDescription("The window. pinhole help lists the commands for the service.");
     parser.addHelpOption();
     parser.addOption({"library", "Library directory (library.sqlite and thumbs/).", "dir", defaultLibrary});
     parser.addOption({"bench", "Run the scripted benchmark, print the results and quit."});
@@ -348,7 +353,7 @@ int main(int argc, char *argv[]) {
     // the minute.
     service.sync();
 
-    // Without a library, look for one: pinhole-sync may be building it
+    // Without a library, look for one: the service may be building it
     // right now.
     if (!haveLibrary)
         reloader.waitForLibrary();

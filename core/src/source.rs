@@ -278,7 +278,7 @@ impl std::error::Error for Unsupported {}
 pub struct Listing {
     /// Where `changes` picks up from next.
     pub token: Option<String>,
-    /// A line about how it went, for pinhole-sync to print.
+    /// A line about how it went, for the service's log.
     pub summary: String,
 }
 
@@ -344,7 +344,7 @@ pub trait Source: Send + Sync {
         None
     }
 
-    /// Whether it needs signing in (pinhole-sync sign-in).
+    /// Whether it needs signing in (`sign_in`, docs/service.md).
     fn needs_sign_in(&self) -> bool {
         false
     }

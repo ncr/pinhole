@@ -249,7 +249,8 @@ fn write_settings(path: &Path, change: impl FnOnce(&mut Value)) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Named for this process: pinhole-sync may be writing them too.
+    // Named for this process: another pinholed, coming up as this one goes,
+    // may be writing them too.
     let part = path.with_extension(format!("json.{}.part", std::process::id()));
     std::fs::write(&part, serde_json::to_vec_pretty(&settings)?)?;
     std::fs::rename(&part, path)?;
@@ -659,18 +660,10 @@ impl Storage {
     /// old copy goes a little later, once they have let go of it.
     fn move_library(&self, from: &Path, to: &Path, commit: impl FnOnce() -> Result<()>) -> Result<()> {
         // Nothing writes them meanwhile: not a round (library_lock), not a
-        // favourite or a lookup (library_moving), not pinhole-sync (each
-        // library's writer).
+        // favourite or a lookup (library_moving). Nothing else writes them
+        // at all: the window and pinhole's commands ask this service.
         let _writing = self.library_lock.lock().unwrap();
         let _moving = self.library_moving.write().unwrap();
-        let mut writers = Vec::new();
-        for kind in std::fs::read_dir(from).into_iter().flatten().flatten() {
-            for one in std::fs::read_dir(kind.path()).into_iter().flatten().flatten() {
-                if one.path().join("library.sqlite").exists() {
-                    writers.push(crate::sync::Writer::take(&one.path())?);
-                }
-            }
-        }
         // The library in use now, under these locks (another source's may
         // have been shown since the move was asked for): its place there.
         let library = {

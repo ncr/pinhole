@@ -31,9 +31,5 @@ name = "pinholed"
 path = "src/bin/daemon.rs"
 
 [[bin]]
-name = "pinhole-sync"
-path = "src/bin/sync.rs"
-
-[[bin]]
 name = "pinhole-fake"
 path = "src/bin/fake.rs"

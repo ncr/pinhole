@@ -22,6 +22,8 @@ public:
     explicit ServiceClient(const QString &library, QObject *parent = nullptr);
     ~ServiceClient() override;
 
+    // Not ok: `result` is the service's error (code and message), empty for
+    // the client's own (no_service, incompatible).
     using Callback = std::function<void(bool ok, const QJsonObject &result, const QString &errorCode)>;
     // `kind` as in docs/service.md: medium, full, original, video, live. With
     // `stream`, a video is answered as soon as it starts downloading, with a

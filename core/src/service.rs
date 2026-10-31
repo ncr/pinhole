@@ -585,8 +585,7 @@ fn watch(shared: &Arc<Shared>, source: &dyn Source) {
     }
 }
 
-/// The source the settings name, if pinhole-sync changed it (signing in to
-/// an Apple ID makes it the source): switched to.
+/// The source the settings name, if they were changed by hand: switched to.
 fn follow_settings(shared: &Arc<Shared>) {
     // A window changing it now: its own change is under way.
     let Ok(_changing) = shared.changing.try_lock() else { return };
@@ -869,8 +868,8 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
         out.send(progress);
     }
     out.send(shared.rounds_event());
-    // Opened when first needed: before pinhole-sync has built the library
-    // there is none, and the connection must stay up regardless.
+    // Opened when first needed: before the first round has built the
+    // library there is none, and the connection must stay up regardless.
     // Opened again once the library has moved.
     let mut db: Option<Connection> = None;
     let mut db_generation = shared.storage.library_generation.load(Ordering::Relaxed);
@@ -1572,11 +1571,6 @@ fn sync_round(shared: &Shared) -> Result<()> {
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
     std::fs::create_dir_all(&library)?;
-    // Not while pinhole-sync writes it: this round waits for the next.
-    let Some(_writer) = crate::sync::Writer::try_take(&library)? else {
-        eprintln!("pinholed: sync: pinhole-sync is writing {}; at the next round", library.display());
-        return Ok(());
-    };
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
     crate::sync::claim(source.as_ref(), &mut db, &library)?;
     let first = shared.rounds_shown.swap(shown, Ordering::SeqCst) != shown;

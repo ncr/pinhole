@@ -778,7 +778,7 @@ mod tests {
         };
         // The file edited: put again, still a favourite.
         std::fs::write(dir.join("IMG_1.JPG"), b"xy").unwrap();
-        let report = crate::sync::follow(&source, &mut conn, false).unwrap();
+        let report = crate::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(report.changes.updated, ["IMG_1.JPG"]);
         assert!(favourite(&conn, "IMG_1.JPG"));
         // Listed afresh.
@@ -787,10 +787,10 @@ mod tests {
         assert!(!favourite(&conn, "IMG_2.JPG"));
         // Gone, and back: not a favourite any more.
         std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
-        crate::sync::follow(&source, &mut conn, false).unwrap();
+        crate::sync::follow(&source, &mut conn).unwrap();
         assert!(favorites(&conn).is_empty());
         touch(&dir.join("IMG_1.JPG"));
-        crate::sync::follow(&source, &mut conn, false).unwrap();
+        crate::sync::follow(&source, &mut conn).unwrap();
         assert!(!favourite(&conn, "IMG_1.JPG"));
         // And not one again once taken back.
         source.set_favorite(&conn, &["IMG_2.JPG".into()], true).unwrap();
@@ -821,7 +821,7 @@ mod tests {
         // elsewhere still goes.
         std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o000)).unwrap();
         std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
-        let report = crate::sync::follow(&source, &mut conn, false).unwrap();
+        let report = crate::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(report.changes.removed, ["IMG_1.JPG"]);
         assert!(report.summary.contains("could not be read"), "{}", report.summary);
         crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
@@ -830,7 +830,7 @@ mod tests {
         // Readable again, and the file in it gone: now that is seen.
         std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::remove_file(dir.join("2026/IMG_2.JPG")).unwrap();
-        crate::sync::follow(&source, &mut conn, false).unwrap();
+        crate::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(ids(&conn), ["2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -881,13 +881,13 @@ mod tests {
         // and it is a Live Photo still, its motion where it was.
         let mut unread = FolderSource::new(dir.clone());
         unread.unread_too = vec!["IMG_1.MOV".into()];
-        crate::sync::follow(&unread, &mut conn, false).unwrap();
+        crate::sync::follow(&unread, &mut conn).unwrap();
         assert_eq!(live(&conn), before);
         crate::sync::list(&unread, &mut conn, &|_, _| {}, &|| false).unwrap();
         assert_eq!(live(&conn), before);
         // Gone for good: a photo alone.
         std::fs::remove_file(dir.join("IMG_1.MOV")).unwrap();
-        crate::sync::follow(&FolderSource::new(dir.clone()), &mut conn, false).unwrap();
+        crate::sync::follow(&FolderSource::new(dir.clone()), &mut conn).unwrap();
         assert_eq!(live(&conn), (false, None));
         let _ = std::fs::remove_dir_all(&dir);
     }

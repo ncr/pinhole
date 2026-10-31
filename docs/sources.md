@@ -122,7 +122,7 @@ its tables, so the core never names them.
 A rendition's `key` is what its cached file and thumbnail are named by.
 For iCloud it is the file's checksum.
 
-## The service and pinhole-sync
+## The service
 
 `service.rs` holds one `Arc<dyn Source>`. `fetch` finds the rendition in
 `renditions`, serves `local` files as they are, else the cached file by
@@ -134,12 +134,10 @@ with two additions: `status` and a new `source` event say the source's
 The sync thread asks the catalog for changes every minute (every ten
 seconds for a folder): `changes` from the saved token, or `list` when there
 is none or the token has expired, and makes thumbnails for whatever lacks
-one. With no library yet it builds one from scratch; for iCloud that used to
-be `pinhole-sync`'s job only.
-
-`pinhole-sync` does the same from a terminal for whichever source the
-settings name: `index`, `thumbs`, `all`, `changes`. `sign-in` is iCloud's,
-whichever source is shown: it adds the Apple ID and shows it.
+one. With no library yet it builds one from scratch. It is the only
+writer of a library: `pinhole <command>` from a terminal asks it, as the
+window does (`pinhole sync` for a round now, `pinhole sign-in` to add an
+Apple ID and show it).
 
 ## The iCloud source
 
@@ -222,10 +220,9 @@ its library, and an Apple ID's session.
 Each Apple ID's session is kept apart too, in
 `~/.local/state/pinhole/auth/<apple-id>/` (the provider's `--state-dir`),
 with the owner's name as Apple gives it, which the window calls the source
-by. The service signs in for the window (`sign_in`, `submit_code`), and
-`pinhole-sync sign-in` does from a terminal; either adds the Apple ID and
-shows it, and a running service sees the settings change and switches,
-listing its library if it has none yet.
+by. The service signs in for the window and for `pinhole sign-in` alike
+(`sign_in`, `submit_code`): either way the Apple ID is added and shown, and
+its library listed if it has none yet.
 
 ## The window
 

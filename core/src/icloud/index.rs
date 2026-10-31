@@ -72,9 +72,6 @@ pub fn create(db: &Connection) -> Result<()> {
 pub fn store(index: &mut Index, assets: &[CloudAsset], first_rank: Option<u64>, fetched_at: i64) -> Result<()> {
     let neutral: Vec<Asset> = assets.iter().map(CloudAsset::neutral).collect();
     index.put(&neutral)?;
-    if index.dry_run {
-        return Ok(());
-    }
     create(index.conn)?;
     let tx = index.conn.transaction()?;
     {

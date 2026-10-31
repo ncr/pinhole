@@ -201,6 +201,6 @@ void ServiceClient::readReplies() {
         if (reply.value("ok").toBool())
             done(true, reply.value("result").toObject(), {});
         else
-            done(false, {}, reply.value("error").toObject().value("code").toString());
+            done(false, reply.value("error").toObject(), reply.value("error").toObject().value("code").toString());
     }
 }

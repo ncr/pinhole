@@ -10,7 +10,9 @@ cd "$ROOT"
 
 install -Dm755 app/build/pinhole "$PREFIX/bin/pinhole"
 install -Dm755 core/target/release/pinholed "$PREFIX/bin/pinholed"
-install -Dm755 core/target/release/pinhole-sync "$PREFIX/bin/pinhole-sync"
+# pinhole-sync was the commands before `pinhole <command>`, and wrote the
+# library itself: gone, so nothing but pinholed writes it.
+rm -f "$PREFIX/bin/pinhole-sync"
 # The sign-in provider: a uv script that fetches icloudpd into uv's cache
 # on first use (see auth/PROTOCOL.md).
 install -Dm755 auth/pyicloud/pinhole-auth "$PREFIX/bin/pinhole-auth"
