@@ -3,46 +3,81 @@
 #
 # pinhole-info index <library.sqlite> <id> <cache folder>
 #   The index's row for it as JSON (what its original is: size, width and
-#   height, type, and whether it has a location), then a line "--" and the
-#   cache file for what is read of that original; then, if that was read
-#   before, what was.
-# pinhole-info read <image|video> <original> <cache file>
-#   The original's details, kept in the cache file and printed: "image" and
-#   ImageMagick's EXIF, or "video" and ffprobe's JSON. Both only read the
-#   headers: a 12 MP HEIC takes some 20 ms, a video 60.
+#   height, type, its key, whether it has a location), then a line "--",
+#   then what was read of that original before, as Main.qml kept it, or an
+#   empty line.
+# pinhole-info read <image|video> <original>
+#   The original's details: "image" and ImageMagick's format, size and the
+#   orientation it applied, then its EXIF; or "video" and ffprobe's JSON.
+#   Both read only the headers: a 12 MP HEIC takes some 20 ms, a video 60.
+# pinhole-info keep <cache folder> <id> <key>
+#   What was read (on stdin, a line of JSON) kept for the photo, over what
+#   was kept for it before, its original then perhaps another.
+# pinhole-info located <library.sqlite> <date in ms>
+#   The id of the photo with a location taken nearest that date, if any.
+#
+# What is kept is one file for each source's library (the cache folder is
+# its own), a line a photo: its id, its original's key and the facts, by
+# tabs. Some 300 bytes a photo, a few MB for a whole library.
 set -eu
 
-case "$1" in
+# A string as SQL writes one.
+quoted() { printf "'%s'" "$(printf %s "$1" | sed "s/'/''/g")"; }
+
+case "${1:-}" in
 index)
   db="$2" id="$3" cache="$4"
-  quoted=$(printf %s "$id" | sed "s/'/''/g")
   row=$(sqlite3 -readonly -json "$db" "SELECT a.size, a.has_location AS location, a.duration, a.orientation,
       a.item_type AS type, r.width, r.height, r.file_type AS fileType, r.key
     FROM assets a LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'original'
-    WHERE a.id = '$quoted'")
-  printf '%s\n' "${row:-[]}"
-  # Named by the original's key too, which changes when the file does.
+    WHERE a.id = $(quoted "$id")" | tr -d '\n')
+  printf '%s\n--\n' "${row:-[]}"
   key=$(printf '%s' "$row" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')
-  file="$cache/$(printf '%s:%s' "$id" "$key" | md5sum | cut -c1-32).txt"
-  printf -- '--\n%s\n' "$file"
-  cat "$file" 2>/dev/null || true
+  if [ -f "$cache/facts.tsv" ]; then
+    ID="$id" KEY="$key" awk -F '\t' '$1 == ENVIRON["ID"] && $2 == ENVIRON["KEY"] { print $3; found = 1; exit }
+      END { if (!found) print "" }' "$cache/facts.tsv"
+  else
+    echo
+  fi
   ;;
 read)
-  kind="$2" original="$3" file="$4"
-  mkdir -p "$(dirname "$file")"
+  kind="$2" original="$3"
   if [ "$kind" = video ]; then
-    { echo video; ffprobe -v error -print_format json -show_format -show_streams "$original"; } > "$file.part" ||
-      { rm -f "$file.part"; exit 1; }
+    echo video
+    ffprobe -v error -print_format json -show_format -show_streams "$original"
   else
-    # The first picture of the file: a HEIC can hold several.
-    { echo image; magick identify -ping -format '%m %w %h\n%[EXIF:*]' "$original[0]"; } > "$file.part" ||
-      { rm -f "$file.part"; exit 1; }
+    echo image
+    # The first picture of the file (a HEIC can hold several), and the
+    # orientation ImageMagick applied: libheif turns a HEIC itself, so its
+    # size is as shown and its EXIF's Orientation is no longer to do.
+    magick identify -ping -format '%m %w %h %[orientation]\n%[EXIF:*]' "$original[0]"
   fi
-  mv "$file.part" "$file"
-  cat "$file"
+  ;;
+keep)
+  cache="$2" id="$3" key="$4"
+  mkdir -p "$cache"
+  facts=$(head -n 1 | tr -d '\t')
+  file="$cache/facts.tsv"
+  touch "$file"
+  # Two at once (photos stepped through quickly) each write a whole file
+  # of their own; the one later may leave out the other's line, read
+  # again the next time.
+  {
+    ID="$id" awk -F '\t' '$1 != ENVIRON["ID"]' "$file"
+    printf '%s\t%s\t%s\n' "$id" "$key" "$facts"
+  } > "$file.$$"
+  mv "$file.$$" "$file"
+  # Before, each photo's was a file of its own, the tools' whole output.
+  find "$cache" -maxdepth 1 -name '*.txt' -delete
+  ;;
+located)
+  db="$2" date="$3"
+  case "$date" in *[!0-9]*) exit 2 ;; esac
+  sqlite3 -readonly "$db" "SELECT id FROM assets WHERE has_location = 1 AND is_video = 0
+    ORDER BY abs(asset_date - $date) LIMIT 1"
   ;;
 *)
-  echo "pinhole-info index <library.sqlite> <id> <cache folder> | read <image|video> <original> <cache file>" >&2
+  echo "pinhole-info index <library.sqlite> <id> <cache folder> | read <image|video> <original> | keep <cache folder> <id> <key> | located <library.sqlite> <date>" >&2
   exit 2
   ;;
 esac

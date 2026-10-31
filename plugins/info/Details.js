@@ -45,7 +45,8 @@ const raw = ["DNG", "CR2", "CR3", "NEF", "NRW", "ARW", "SR2", "RAF", "ORF", "RW2
 function isRaw(format) { return raw.indexOf(format) >= 0 }
 
 // What pinhole-info read prints: "image" and ImageMagick's lines, or
-// "video" and ffprobe's JSON.
+// "video" and ffprobe's JSON. The facts are kept, so only the facts: a few
+// hundred bytes.
 function fromOriginal(text) {
     const newline = text.indexOf("\n")
     const kind = text.slice(0, newline), rest = text.slice(newline + 1)
@@ -66,17 +67,21 @@ function numbers(text) {
 
 function fromImage(text) {
     const lines = text.split("\n")
-    const [format, width, height] = lines[0].split(" ")
+    // "HEIC 4284 5712 TopLeft": the orientation ImageMagick applied, not
+    // EXIF's. libheif turns a HEIC as its own box says, so its size is
+    // already as shown (TopLeft) whatever its EXIF's Orientation is; a JPEG
+    // is not turned, and says how it is to be (RightTop, for one shot
+    // upright).
+    const [format, width, height, orientation] = lines[0].split(" ")
     const exif = {}
     for (const line of lines.slice(1)) {
         const equals = line.indexOf("=")
         if (line.startsWith("exif:") && equals > 0)
             exif[line.slice(5, equals)] = line.slice(equals + 1).trim()
     }
-    const facts = { format: format === "DNG" ? "DNG" : format }
-    const orientation = Number(exif.Orientation)
+    const facts = { format: format }
     if (Number(width) > 0 && Number(height) > 0) {
-        const turned = orientation >= 5 && orientation <= 8
+        const turned = ["LeftTop", "RightTop", "RightBottom", "LeftBottom"].indexOf(orientation) >= 0
         facts.width = Number(turned ? height : width)
         facts.height = Number(turned ? width : height)
     }
@@ -117,14 +122,11 @@ function fromImage(text) {
         const latitude = (lat[0] + lat[1] / 60 + lat[2] / 3600) * (exif.GPSLatitudeRef === "S" ? -1 : 1)
         const longitude = (lon[0] + lon[1] / 60 + lon[2] / 3600) * (exif.GPSLongitudeRef === "W" ? -1 : 1)
         // 0, 0 is a phone that had no fix and wrote it anyway.
+        // No altitude: whether it is above or below the sea is a byte
+        // ImageMagick shows as "." either way.
         if (latitude !== 0 || longitude !== 0) {
             facts.latitude = latitude
             facts.longitude = longitude
-            // The reference is a byte: 0 above sea level (ImageMagick
-            // shows it as "."), 1 below.
-            const altitude = number(exif.GPSAltitude)
-            if (isFinite(altitude))
-                facts.altitude = exif.GPSAltitudeRef === "1" ? -altitude : altitude
         }
     }
     // Only a yes: the index may know a place the file does not hold.
@@ -225,13 +227,6 @@ function merged(first, later) {
     for (const key in later)
         if (later[key] !== undefined && later[key] !== "")
             all[key] = later[key]
-    // The same size both ways round: the index's way, turned as the photo
-    // is shown. A HEIC is turned by a box of its own, which its EXIF does
-    // not say, and ImageMagick gives it as it is stored.
-    if (first.width === later.height && first.height === later.width) {
-        all.width = first.width
-        all.height = first.height
-    }
     return all
 }
 
@@ -241,7 +236,8 @@ function decimal(value, places) {
     return text.indexOf(".") >= 0 ? text.replace(/\.?0+$/, "") : text
 }
 function shutterText(seconds) {
-    if (seconds >= 1)
+    // 0.8 s, not 1/1; from 0.3 s, as cameras write them.
+    if (seconds >= 0.3)
         return decimal(seconds, 1) + " s"
     // 1/46, not 1/45.98.
     return "1/" + Math.round(1 / seconds) + " s"

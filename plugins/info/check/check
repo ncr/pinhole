@@ -1,0 +1,36 @@
+#!/bin/sh
+# Info's reading, checked on real files: plugins/info/check/check [file...]
+# (by default, a few of the originals Pinhole has fetched). Each is read as
+# the panel reads it (pinhole-info, then Details.js in Qt's qml), and a
+# photo's size checked against ImageMagick's own turn of it (-auto-orient,
+# which decodes it: a second or so a photo). Check.qml also checks the
+# numbers the panel writes. Exits 1 if anything is off.
+set -eu
+
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+if [ $# -eq 0 ]; then
+  originals="${XDG_DATA_HOME:-$HOME/.local/share}/pinhole/cache/original"
+  set -- $(find "$originals" -type f \( -iname '*.heic' -o -iname '*.jpg' -o -iname '*.jpeg' \) 2>/dev/null | head -n 12) \
+         $(find "$originals" -type f \( -iname '*.mov' -o -iname '*.mp4' \) 2>/dev/null | head -n 2)
+fi
+
+n=0
+for file in "$@"; do
+  n=$((n + 1))
+  case "$file" in
+  *.[mM][oO][vV] | *.[mM][pP]4 | *.[mM]4[vV])
+    "$HERE/../pinhole-info" read video "$file" > "$work/$n.out"
+    echo "$file" > "$work/$n.want"
+    ;;
+  *)
+    "$HERE/../pinhole-info" read image "$file" > "$work/$n.out"
+    printf '%s\n%s\n' "$file" "$(magick "$file[0]" -auto-orient -format '%w %h' info:)" > "$work/$n.want"
+    ;;
+  esac
+done
+
+QML_XHR_ALLOW_FILE_READ=1 QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+  /usr/lib/qt6/bin/qml "$HERE/Check.qml" -- "$work" "$n"

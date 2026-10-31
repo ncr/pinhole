@@ -1,7 +1,8 @@
 {
   "%1 (RAW)": "%1 (RAW)",
-  "%1 · %2 mm in 35 mm": "%1 · %2 mm dla 35 mm",
+  "%1 · %2 mm in 35 mm": "%1 · %2 mm (ekw. 35 mm)",
   "A photo that knows where it was taken shows the place, and W opens it on OpenStreetMap.": "Zdjęcie, które wie, gdzie zostało zrobione, pokazuje to miejsce, a W otwiera je w OpenStreetMap.",
+  "A big video's details, from its original": "Szczegóły dużego wideo, z jego oryginału",
   "A photo's details": "Szczegóły zdjęcia",
   "Camera": "Aparat",
   "Details": "Szczegóły",
@@ -15,6 +16,7 @@
   "None": "Brak",
   "On a photo, I shows what its original says: when it was taken, the camera, lens and exposure, its size and format. It stays open from photo to photo.": "Na zdjęciu I pokazuje, co mówi jego oryginał: kiedy zostało zrobione, aparat, obiektyw i ekspozycję, rozmiar i format. Zostaje otwarte, gdy przechodzisz od zdjęcia do zdjęcia.",
   "Open map": "Otwórz mapę",
+  "Read the original": "Wczytaj oryginał",
   "Read the original · %1": "Wczytaj oryginał · %1",
   "Size": "Rozmiar",
   "Taken": "Zrobione",

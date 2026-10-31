@@ -52,7 +52,8 @@ HEIC as JPEG (J).
 Info, on I on a photo, shows its details in a small panel over its corner:
 when it was taken, the camera, lens and exposure, its size and format (a
 video's codec, frame rate and length), and where, with W to open the place
-on OpenStreetMap. It stays open from photo to photo.
+on OpenStreetMap. It stays open from photo to photo. A video's original over
+50 MB is read only when asked (⇧I).
 
 Colours finds photos by colour (H): pick one on a wheel, or on a photo the
 ones closest to its colour, or lay the library out by hue as a rainbow wall
@@ -136,7 +137,7 @@ plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
-plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe)
+plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
