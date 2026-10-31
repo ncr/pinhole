@@ -33,7 +33,7 @@ struct LibraryReloader::Read {
 };
 
 LibraryReloader::LibraryReloader(Library *library, ThumbnailLoader *loader, const QString &dir, QObject *parent)
-    : QObject(parent), m_library(library), m_loader(loader), m_dir(dir) {
+    : QObject(parent), m_library(library), m_loader(loader), m_dir(QDir(dir).absolutePath()) {
     m_wait.setInterval(5000);
     connect(&m_wait, &QTimer::timeout, this, [this] {
         if (!QFile::exists(m_dir + "/library.sqlite"))
@@ -52,9 +52,9 @@ LibraryReloader::~LibraryReloader() {
 
 void LibraryReloader::moveTo(const QString &dir) {
     // Said again as a window connects: read already.
-    if (QDir(dir).absolutePath() == QDir(m_dir).absolutePath())
+    if (QDir(dir).absolutePath() == m_dir)
         return;
-    m_dir = dir;
+    m_dir = QDir(dir).absolutePath();
     reload();
 }
 

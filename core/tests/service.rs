@@ -317,5 +317,38 @@ fn a_window_meets_the_service_of_a_folder() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // A service given a library (--library, as a window given one starts
+    // it) of another folder than the one it shows: none of that library's
+    // photos is fetched from this folder, though one has the same name.
+    let given = root.join("given");
+    let theirs = root.join("theirs");
+    std::fs::create_dir_all(&theirs).unwrap();
+    photo(&theirs.join("a.jpg"), [200, 200, 40]);
+    std::fs::create_dir_all(&given).unwrap();
+    let mut conn = pinhole_core::db::open(&given.join("library.sqlite")).unwrap();
+    pinhole_core::sync::list(&FolderSource::new(theirs.clone()), &mut conn, &|_, _| {}, &|| false).unwrap();
+    drop(conn);
+    let socket = root.join("given.sock");
+    let config = Config {
+        library: given.clone(),
+        cache: root.join("given-cache"),
+        location: root.join("given-location"),
+        socket: socket.clone(),
+        source: Arc::new(FolderSource::new(photos.clone())),
+        auth: PathBuf::from("/nonexistent/pinhole-auth"),
+        limit: None,
+        settings: root.join("config/pinhole/given.json"),
+        adopt: None,
+        downloads: 2,
+        sync_every: None,
+    };
+    std::thread::spawn(move || service::run(config));
+    let mut pinned = Window::connect(&socket);
+    let theirs_id = format!("folder:{}", theirs.display());
+    for asked in [json!({"asset": "a.jpg", "kind": "original", "source": theirs_id}), json!({"asset": "a.jpg", "kind": "original"})] {
+        let fetched = pinned.ask("fetch", asked);
+        assert_eq!(fetched["error"]["code"], "other_source", "{fetched:#}");
+    }
+
     let _ = std::fs::remove_dir_all(&root);
 }

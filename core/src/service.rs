@@ -1160,11 +1160,18 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     };
     // Asked of one source's photo (the window's library, as it says): never
     // another's of the same id, shown since.
-    // One that says whose it is not, "", is taken for no one's.
+    // One that says whose it is not, "", is taken for no one's. And the
+    // library read must be the source's it is fetched from: a library given
+    // to this service (--library) may be another's, its names those of
+    // another's files.
+    let owner = crate::db::meta(db, "source");
     if let Some(asked) = params["source"].as_str() {
-        if asked.is_empty() || crate::db::meta(db, "source").as_deref() != Some(asked) {
+        if asked.is_empty() || owner.as_deref() != Some(asked) {
             return reply.send(Err(("other_source", format!("{asked:?} is not the source shown"))));
         }
+    }
+    if owner != Some(shared.source().id()) {
+        return reply.send(Err(("other_source", format!("the library read holds the photos of {}", owner.as_deref().unwrap_or("no one")))));
     }
 
     // The rendition that serves this kind, as the catalog chose it.
