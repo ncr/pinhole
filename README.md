@@ -48,6 +48,10 @@ a video becomes a moving one, and a Live Photo's ▾ (⇧B) its motion, as taken
 or bouncing. Each is kept in Pictures/Pinhole/Backgrounds; Ctrl+Z puts the
 one before back.
 
+Year calendar (Y in the grid) shows every day of every year as a square in
+the theme's accent, brighter the more photos it has, one row of weeks a
+year; a click, or the arrows and Enter, shows that day in the grid.
+
 ## Install
 
 ```bash
@@ -94,6 +98,7 @@ app/                      the window: Qt Quick, with the grid in C++; and `pinho
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
+plugins/calendar/         the Year calendar plugin: photos per day, a year a row
 ```
 
 ## Trying the grid

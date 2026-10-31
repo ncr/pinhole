@@ -1,0 +1,51 @@
+{
+  "%Ln days with photos, from %1 to %2: Y in the grid.": {
+    "few": "%Ln dni ze zdjęciami, od %1 do %2: Y w siatce.",
+    "many": "%Ln dni ze zdjęciami, od %1 do %2: Y w siatce.",
+    "one": "%Ln dzień ze zdjęciami, w %1: Y w siatce.",
+    "other": "%Ln dnia ze zdjęciami, od %1 do %2: Y w siatce."
+  },
+  "%Ln photos": {
+    "few": "%Ln zdjęcia",
+    "many": "%Ln zdjęć",
+    "one": "%Ln zdjęcie",
+    "other": "%Ln zdjęcia"
+  },
+  "A day, a week": "Dzień, tydzień",
+  "A year": "Rok",
+  "Calendar": "Kalendarz",
+  "Click a day": "Kliknij dzień",
+  "Counting the days…": "Liczę dni…",
+  "Every day, year by year": "Każdy dzień, rok po roku",
+  "Fewer": "Mniej",
+  "Here, in the side panel (Tab), this tour can be shown again.": "Tu, w panelu bocznym (Tab), obejrzysz ten samouczek jeszcze raz.",
+  "More": "Więcej",
+  "No photos": "Brak zdjęć",
+  "No photos with a date yet.": "Nie ma jeszcze zdjęć z datą.",
+  "Point": "Wskaż",
+  "Settings": "Ustawienia",
+  "Tap a day": "Stuknij dzień",
+  "The first, the last day with photos": "Pierwszy, ostatni dzień ze zdjęciami",
+  "The ✕ button": "Przycisk ✕",
+  "There: that day in the grid": "Tam: ten dzień w siatce",
+  "Two fingers": "Dwa palce",
+  "Wheel": "Kółko",
+  "Y shows each day of each year as a square, brighter the more photos it has: a click, or the arrows and Enter, shows that day in the grid.": "Y pokazuje każdy dzień każdego roku jako kwadrat, tym jaśniejszy, im więcej ma zdjęć: kliknięcie albo strzałki i Enter pokazują ten dzień w siatce.",
+  "Year calendar: every day's photos": "Kalendarz roku: zdjęcia z każdego dnia",
+  "a day, a week": "dzień, tydzień",
+  "a year": "rok",
+  "close": "zamknij",
+  "on %Ln days": {
+    "few": "w %Ln dniach",
+    "many": "w %Ln dniach",
+    "one": "w %Ln dniu",
+    "other": "w %Ln dnia"
+  },
+  "photos": {
+    "few": "zdjęcia",
+    "many": "zdjęć",
+    "one": "zdjęcie",
+    "other": "zdjęcia"
+  },
+  "show in the grid": "pokaż w siatce"
+}

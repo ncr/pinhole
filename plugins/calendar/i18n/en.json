@@ -1,0 +1,18 @@
+{
+  "%Ln days with photos, from %1 to %2: Y in the grid.": {
+    "one": "%Ln day with photos, in %1: Y in the grid.",
+    "other": "%Ln days with photos, from %1 to %2: Y in the grid."
+  },
+  "%Ln photos": {
+    "one": "%Ln photo",
+    "other": "%Ln photos"
+  },
+  "on %Ln days": {
+    "one": "on %Ln day",
+    "other": "on %Ln days"
+  },
+  "photos": {
+    "one": "photo",
+    "other": "photos"
+  }
+}
