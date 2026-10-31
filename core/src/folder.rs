@@ -36,6 +36,10 @@ const ACCEPTS: &[&str] = &["jpg", "jpeg", "heic", "heif", "png", "gif", "tif", "
 
 pub struct FolderSource {
     root: PathBuf,
+    /// For a test: files there that are taken for ones that could not be
+    /// read.
+    #[cfg(test)]
+    unread_too: Vec<String>,
 }
 
 /// What a file is, by its extension.
@@ -284,7 +288,11 @@ impl Look {
 
 impl FolderSource {
     pub fn new(root: PathBuf) -> Self {
-        FolderSource { root }
+        FolderSource {
+            root,
+            #[cfg(test)]
+            unread_too: Vec::new(),
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -299,7 +307,13 @@ impl FolderSource {
             // Never "everything was deleted": a disk not mounted, say.
             return Err(anyhow!("{} is not there", self.root.display()));
         }
-        let walk = walk(&self.root, None);
+        #[allow(unused_mut)]
+        let mut walk = walk(&self.root, None);
+        #[cfg(test)]
+        {
+            walk.found.retain(|f| !self.unread_too.contains(&f.rel));
+            walk.unread.extend(self.unread_too.iter().cloned());
+        }
         let mut unread = walk.unread;
         unread.sort();
         unread.dedup();
@@ -848,6 +862,39 @@ mod tests {
             let l = look(&[unread], files);
             assert!(!l.motion_unread(&l.entries["2026/IMG_1.HEIC"]), "{unread}");
         }
+    }
+
+    #[test]
+    fn a_live_photo_whose_motion_cannot_be_read_stays_one_in_the_library() {
+        let dir = temp("live");
+        image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(dir.join("IMG_1.JPG")).unwrap();
+        touch(&dir.join("IMG_1.MOV"));
+        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
+        crate::sync::list(&FolderSource::new(dir.clone()), &mut conn, &|_, _| {}, &|| false).unwrap();
+        let live = |conn: &Connection| -> (bool, Option<String>) {
+            conn.query_row(
+                "SELECT a.is_live, r.key FROM assets a LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'live'
+                 WHERE a.id = 'IMG_1.JPG'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        let before = live(&conn);
+        assert!(before.0 && before.1.is_some(), "{before:?}");
+        // Its motion there but not read: a round, then a whole listing,
+        // and it is a Live Photo still, its motion where it was.
+        let mut unread = FolderSource::new(dir.clone());
+        unread.unread_too = vec!["IMG_1.MOV".into()];
+        crate::sync::follow(&unread, &mut conn, false).unwrap();
+        assert_eq!(live(&conn), before);
+        crate::sync::list(&unread, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(live(&conn), before);
+        // Gone for good: a photo alone.
+        std::fs::remove_file(dir.join("IMG_1.MOV")).unwrap();
+        crate::sync::follow(&FolderSource::new(dir.clone()), &mut conn, false).unwrap();
+        assert_eq!(live(&conn), (false, None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
