@@ -1044,13 +1044,24 @@ PinholePlugin {
 }
 
 int checkPlugin(const QString &target) {
-    // A folder, else one of one's own or Pinhole's by its id.
+    // A folder, else one of one's own or Pinhole's by the id its manifest
+    // gives (Series' folder is series, its id pinhole.series).
     QString dir = QFileInfo(target).absoluteFilePath();
     for (const QString &root : {Plugins::personalDir(), Plugins::builtInDir()})
-        if (!QFileInfo::exists(dir + "/manifest.json") && QFileInfo::exists(root + '/' + target + "/manifest.json"))
-            dir = root + '/' + target;
+        for (const QFileInfo &each : QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (QFileInfo::exists(dir + "/manifest.json"))
+                break;
+            QFile file(each.filePath() + "/manifest.json");
+            if (file.open(QIODevice::ReadOnly)
+                && QJsonDocument::fromJson(file.readAll()).object().value("id").toString(each.fileName()) == target)
+                dir = each.filePath();
+        }
     dir = QDir::cleanPath(dir);
 
+    if (!QFileInfo::exists(dir + "/manifest.json")) {
+        err(QStringLiteral("pinhole: no plugin %1: no folder with a manifest.json, nor one of that id").arg(target));
+        return 1;
+    }
     QJsonObject manifest;
     QString main;
     QStringList problems;
