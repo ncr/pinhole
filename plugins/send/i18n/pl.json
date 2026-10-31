@@ -1,0 +1,66 @@
+{
+  "%1 asks for a PIN: send with LocalSend (L).": "%1 prosi o PIN: wyślij przez LocalSend (L).",
+  "%1 declined.": "%1: odmowa.",
+  "%1 is busy with another transfer.": "%1 jest zajęty innym przesyłaniem.",
+  "%n file(s) could not be fetched.": {
+    "one": "Nie udało się pobrać %n pliku.",
+    "few": "Nie udało się pobrać %n plików.",
+    "many": "Nie udało się pobrać %n plików.",
+    "other": "Nie udało się pobrać %n pliku."
+  },
+  "Could not send: %1": "Nie udało się wysłać: %1",
+  "Devices with LocalSend open show as they answer, each on its number. Its owner accepts, and the originals go, or HEIC as JPEG with J. L hands them to LocalSend's own window instead.": "Urządzenia z otwartym LocalSend pojawiają się, gdy odpowiedzą, każde pod swoim numerem. Gdy właściciel przyjmie, idą oryginały albo, z J, HEIC jako JPEG. L przekazuje je zamiast tego do okna LocalSend.",
+  "Fetching and converting…": "Pobieranie i konwersja…",
+  "Fetching the originals…": "Pobieranie oryginałów…",
+  "Fetching the photos for %1…": "Pobieranie zdjęć dla %1…",
+  "HEIC as JPEG": "HEIC jako JPEG",
+  "HEIC as JPEG, or originals": "HEIC jako JPEG albo oryginały",
+  "Here, in the side panel (Tab), this tour can be shown again.": "Tutaj, w panelu bocznym (Tab), można znów obejrzeć ten przewodnik.",
+  "It stopped.": "Przerwano.",
+  "LocalSend has to be open on the phone, on the same network. Sends %1.": "LocalSend musi być otwarty na telefonie, w tej samej sieci. Wysyła %1.",
+  "Looking for devices with LocalSend open, on this network…": "Szukanie urządzeń z otwartym LocalSend w tej sieci…",
+  "No device answered. Open LocalSend on the phone, or send with LocalSend (L).": "Żadne urządzenie nie odpowiedziało. Otwórz LocalSend na telefonie albo wyślij przez LocalSend (L).",
+  "originals": "oryginały",
+  "O sends the photo shown, or what is ticked in select mode, to a phone or computer nearby with LocalSend open on it. A Live Photo goes with its video.": "O wysyła pokazane zdjęcie albo zaznaczone w trybie wyboru na pobliski telefon lub komputer z otwartym LocalSend. Live Photo idzie razem ze swoim filmem.",
+  "Pick a device": "Wybierz urządzenie",
+  "Send": "Wyślij",
+  "Sending": "Wysyłanie",
+  "Sending to %1: %2 of %3": "Wysyłanie do %1: %2 z %3",
+  "Send %n photo(s)": {
+    "one": "Wyślij %n zdjęcie",
+    "few": "Wyślij %n zdjęcia",
+    "many": "Wyślij %n zdjęć",
+    "other": "Wyślij %n zdjęcia"
+  },
+  "Send %n video(s)": {
+    "one": "Wyślij %n film",
+    "few": "Wyślij %n filmy",
+    "many": "Wyślij %n filmów",
+    "other": "Wyślij %n filmu"
+  },
+  "Send to a device": "Wyślij na urządzenie",
+  "Send to a phone or computer nearby (LocalSend)": "Wyślij na pobliski telefon lub komputer (LocalSend)",
+  "Send to that device": "Wyślij na to urządzenie",
+  "Send with LocalSend": "Wyślij przez LocalSend",
+  "Send with LocalSend's own window": "Wyślij przez okno LocalSend",
+  "Sent %n file(s) to %1": {
+    "one": "Wysłano %n plik do %1",
+    "few": "Wysłano %n pliki do %1",
+    "many": "Wysłano %n plików do %1",
+    "other": "Wysłano %n pliku do %1"
+  },
+  "Settings": "Ustawienia",
+  "Stop": "Przerwij",
+  "Stopped.": "Przerwano.",
+  "Stop sending": "Przerwij wysyłanie",
+  "The photos could not be fetched.": "Nie udało się pobrać zdjęć.",
+  "The switch": "Przełącznik",
+  "To your phone": "Na telefon",
+  "Waiting for %1 to accept…": "Czekanie, aż %1 przyjmie…",
+  "With the video of %n Live Photo(s)": {
+    "one": "Z filmem %n Live Photo",
+    "few": "Z filmami %n Live Photo",
+    "many": "Z filmami %n Live Photo",
+    "other": "Z filmami %n Live Photo"
+  }
+}

@@ -140,7 +140,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo; a photo full window |
 | `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path |
-| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's) |
+| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |

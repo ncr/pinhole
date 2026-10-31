@@ -464,12 +464,31 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     // Why it was stopped, if it was: "cancelled", "timeout".
     auto why = std::make_shared<QString>();
     const QPointer<QProcess> running = process;
+    // Asked to end (SIGTERM), so it can tidy up as it goes (pinhole-send
+    // tells the phone); killed if it has not a second later.
     const Deferred deferred = defer([running, why] {
         if (running && running->state() != QProcess::NotRunning) {
             *why = QStringLiteral("cancelled");
-            running->kill();
+            running->terminate();
+            QTimer::singleShot(1000, running.data(), [running] {
+                if (running->state() != QProcess::NotRunning)
+                    running->kill();
+            });
         }
     });
+    // Its whole lines to output(line), as they come: what is left at the
+    // end is the result's stdout.
+    const QJSValue output = options.property("output");
+    auto lines = [this, process, output, generation] {
+        while (process->canReadLine()) {
+            QByteArray line = process->readLine();
+            line.chop(1);
+            if (generation == m_generation)
+                call(output, {QString::fromUtf8(line)});
+        }
+    };
+    if (output.isCallable())
+        connect(process, &QProcess::readyReadStandardOutput, this, lines);
     if (QJSValue env = options.property("env"); env.isObject()) {
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         for (QJSValueIterator it(env); it.hasNext();) {
@@ -485,7 +504,9 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
                 process->kill();
             }
         });
-    connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path](int code, QProcess::ExitStatus status) {
+    connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path, output, lines](int code, QProcess::ExitStatus status) {
+        if (output.isCallable())
+            lines();
         const QString out = QString::fromUtf8(process->readAllStandardOutput());
         const QString err = QString::fromUtf8(process->readAllStandardError());
         process->deleteLater();

@@ -44,6 +44,11 @@ Contact sheet makes the photos ticked in select mode one picture to send
 background, a size and the dates if you like; Enter copies it and keeps it
 in Pictures/Pinhole.
 
+Send to phone (O, on a photo or what is ticked) sends photos to a phone or
+computer nearby with LocalSend open: the devices show as they answer, and
+once its owner accepts, the originals go, a Live Photo with its video, or
+HEIC as JPEG (J).
+
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
@@ -105,6 +110,7 @@ plugins/background/       the Background plugin: a photo or video as the desktop
 plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
+plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 ```
 
 ## Trying the grid

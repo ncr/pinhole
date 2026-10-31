@@ -147,8 +147,10 @@ public:
     // Run a program, its own (in its folder) or any on PATH: a promise of
     // { stdout, stderr, code } once it exits 0, rejected with an Error
     // whose `code` is "exit" (and exitCode, stdout, stderr), "start",
-    // "timeout" or "cancelled". `options`: input (written to its stdin),
-    // timeout (ms), env (added to Pinhole's). With a function in place of
+    // "timeout" or "cancelled" (SIGTERM, then a kill a second later).
+    // `options`: input (written to its stdin), timeout (ms), env (added to
+    // Pinhole's), output(line) for each line it writes, as it comes (the
+    // result's stdout is then what follows the last). With a function in place of
     // options: done(exitCode, stdout, stderr).
     Q_INVOKABLE QJSValue run(const QString &program, const QStringList &arguments, const QJSValue &options = {});
     // An item as it looks over a number of frames, made into a GIF or an

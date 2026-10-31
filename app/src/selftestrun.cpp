@@ -27,7 +27,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -394,5 +394,89 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runReloadSelfTest(library, grid, viewer);
     if (name == QLatin1String("outgoing"))
         runOutgoingSelfTest(library, outgoing, qEnvironmentVariable("PINHOLE_SELFTEST_DIR"));
+    // PINHOLE_SELFTEST=send:<dir>: Send to phone on a Live Photo and a
+    // HEIC, as O over the viewer does; grabbed into <dir> as the devices
+    // answer, then sent to the first, as 1 does, and grabbed when it is
+    // through. A LocalSend device on the network to take it (a phone with
+    // LocalSend open, or the plugin's test receiver) is the run's. With
+    // PINHOLE_SELFTEST_SEND=stop, Stop is pressed while the device decides.
+    if (name == QLatin1String("send")) {
+        QTimer::singleShot(3000, window, [window, &library, &viewer, arg] {
+            auto say = [](const QString &line) {
+                std::printf("selftest: %s\n", qPrintable(line));
+                std::fflush(stdout);
+            };
+            auto grab = [window, arg](const QString &name) { window->grabWindow().save(arg + '/' + name + ".png"); };
+            std::function<QQuickItem *(QQuickItem *)> find = [&find](QQuickItem *item) -> QQuickItem * {
+                if (item->objectName() == QLatin1String("sendPanel"))
+                    return item;
+                for (QQuickItem *child : item->childItems())
+                    if (QQuickItem *found = find(child))
+                        return found;
+                return nullptr;
+            };
+            QQuickItem *panel = find(window->contentItem());
+            if (!panel) {
+                say(QStringLiteral("no Send to phone panel"));
+                return QCoreApplication::quit();
+            }
+            int live = -1, heic = -1;
+            for (int i = library.count() - 1; i >= 0 && (live < 0 || heic < 0); --i) {
+                const LibraryItem &item = library.at(i);
+                if (item.live && live < 0)
+                    live = i;
+                else if (!item.video && !item.live && item.filename.endsWith(QLatin1String(".HEIC"), Qt::CaseInsensitive) && heic < 0)
+                    heic = i;
+            }
+            say(QStringLiteral("a Live Photo at %1, a HEIC at %2").arg(live).arg(heic));
+            viewer.openAt(live >= 0 ? live : heic, QRectF(0, 0, 100, 100));
+            QVariantList indexes;
+            for (int i : {live, heic})
+                if (i >= 0)
+                    indexes.append(i);
+            QTimer::singleShot(1500, window, [=] {
+                QMetaObject::invokeMethod(panel, "open", Q_ARG(QVariant, QVariant(indexes)));
+                QTimer::singleShot(400, window, [=] { grab(QStringLiteral("1-open")); });
+            });
+            auto describe = [panel] {
+                return QStringLiteral("%1 devices, %2 files, phase \"%3\", %4")
+                    .arg(panel->property("devices").toList().size())
+                    .arg(panel->property("files").toList().size())
+                    .arg(panel->property("phase").toString(), panel->property("status").toString());
+            };
+            QTimer::singleShot(9000, window, [=] {
+                grab(QStringLiteral("2-devices"));
+                say(describe());
+                const QVariantList devices = panel->property("devices").toList();
+                if (devices.isEmpty())
+                    return QCoreApplication::quit();
+                QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, devices.first()));
+                QTimer::singleShot(300, window, [=] { grab(QStringLiteral("3-asking")); });
+                if (qEnvironmentVariable("PINHOLE_SELFTEST_SEND") == QLatin1String("stop"))
+                    QTimer::singleShot(500, window, [=] { QMetaObject::invokeMethod(panel, "stopSending"); });
+                auto clock = std::make_shared<QElapsedTimer>();
+                clock->start();
+                auto poll = new QTimer(window);
+                poll->setInterval(200);
+                QObject::connect(poll, &QTimer::timeout, window, [=] {
+                    const QString phase = panel->property("phase").toString();
+                    if (phase == QLatin1String("sending"))
+                        grab(QStringLiteral("4-sending"));
+                    if (phase == QLatin1String("waiting") || phase == QLatin1String("asking") || phase == QLatin1String("sending")) {
+                        if (clock->elapsed() < 60000)
+                            return;
+                    }
+                    poll->stop();
+                    grab(QStringLiteral("5-end"));
+                    say(describe());
+                    QTimer::singleShot(2500, window, [=] {
+                        say(QStringLiteral("panel %1").arg(panel->property("shown").toBool() ? "still shown" : "closed"));
+                        QCoreApplication::quit();
+                    });
+                });
+                poll->start();
+            });
+        });
+    }
     return true;
 }

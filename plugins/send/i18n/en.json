@@ -1,0 +1,22 @@
+{
+  "%n file(s) could not be fetched.": {
+    "one": "%n file could not be fetched.",
+    "other": "%n files could not be fetched."
+  },
+  "Send %n photo(s)": {
+    "one": "Send %n photo",
+    "other": "Send %n photos"
+  },
+  "Send %n video(s)": {
+    "one": "Send %n video",
+    "other": "Send %n videos"
+  },
+  "Sent %n file(s) to %1": {
+    "one": "Sent %n file to %1",
+    "other": "Sent %n files to %1"
+  },
+  "With the video of %n Live Photo(s)": {
+    "one": "With the video of %n Live Photo",
+    "other": "With the videos of %n Live Photos"
+  }
+}

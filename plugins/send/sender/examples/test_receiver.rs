@@ -1,0 +1,103 @@
+// A LocalSend receiver for testing pinhole-send: test_receiver <port> <folder> [decline] [quiet]
+// Accepts (or declines) everything, saves into <folder>, logs to stdout.
+// "quiet": does not announce itself (a phone whose LocalSend has been open a while).
+use localsend::discovery::{DeviceIdentity, DiscoveryConfig, DEFAULT_DISCOVERY_TIMEOUT};
+use localsend::http::server::common::save::FileUploadTarget;
+use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
+use localsend::http::server::{start_with_port, ServerConfigV2, TlsConfig};
+use localsend::http::state::ClientInfo;
+use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
+use localsend::multicast::{MulticastDevice, DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
+use localsend::util::interface::InterfaceFilter;
+use std::path::PathBuf;
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
+
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let port: u16 = args[1].parse().unwrap();
+    let folder = PathBuf::from(&args[2]);
+    let decline = args.iter().any(|a| a == "decline");
+    let quiet = args.iter().any(|a| a == "quiet");
+    std::fs::create_dir_all(&folder).unwrap();
+    let cert = localsend::crypto::cert::generate_self_signed().unwrap();
+    let (tx, mut rx) = mpsc::channel(16);
+    let (_stop, stop_rx) = oneshot::channel();
+    let _server = start_with_port(
+        port,
+        Some(TlsConfig { cert: cert.certificate_pem.clone(), private_key: cert.private_key_pem.clone() }),
+        ClientInfo {
+            alias: "Test phone".into(),
+            version: PROTOCOL_VERSION_V2.into(),
+            device_model: Some("Testphone".into()),
+            device_type: Some(DeviceType::Mobile),
+            token: cert.fingerprint.clone(),
+        },
+        None,
+        Some(ServerConfigV2 { pin: None, verify_checksums: false, event_tx: tx }),
+        None,
+        stop_rx,
+    )
+    .await
+    .unwrap();
+    let (_dstop, dstop_rx) = oneshot::channel();
+    let discovery = localsend::discovery::start(
+        DiscoveryConfig {
+            group: DEFAULT_MULTICAST_GROUP,
+            group_v6: Some(DEFAULT_MULTICAST_GROUP_V6),
+            port: DEFAULT_PORT,
+            interface_filter: InterfaceFilter::default(),
+            device: MulticastDevice {
+                alias: "Test phone".into(),
+                version: PROTOCOL_VERSION_V2.into(),
+                device_model: Some("Testphone".into()),
+                device_type: Some(DeviceType::Mobile),
+                fingerprint: cert.fingerprint.clone(),
+                port,
+                protocol: ProtocolType::Https,
+                download: false,
+            },
+            identity: DeviceIdentity { cert_pem: cert.certificate_pem.clone(), private_key_pem: cert.private_key_pem.clone() },
+            timeout: DEFAULT_DISCOVERY_TIMEOUT,
+            event_tx: None,
+        },
+        dstop_rx,
+    )
+    .await;
+    if !quiet {
+        tokio::spawn(async move {
+            loop {
+                discovery.announce().await;
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
+    } else {
+        std::mem::forget(discovery);
+    }
+    println!("listening on {port}");
+    while let Some(event) = rx.recv().await {
+        match event {
+            ServerEventV2::Register { ip, info } => println!("register {} {ip}", info.alias),
+            ServerEventV2::PrepareUpload { info, files, decision_tx, .. } => {
+                println!("prepare from {} ({} {:?}): {:?}", info.alias, info.device_model.clone().unwrap_or_default(), info.device_type,
+                    files.values().map(|f| (f.file_name.clone(), f.size, f.file_type.clone())).collect::<Vec<_>>());
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let _ = decision_tx.send(if decline {
+                    PrepareUploadDecisionV2::Decline
+                } else {
+                    PrepareUploadDecisionV2::Accept(files.keys().cloned().collect())
+                });
+            }
+            ServerEventV2::FileUpload { file, target_tx, .. } => {
+                let (result_tx, result_rx) = oneshot::channel();
+                let path = folder.join(&file.file_name);
+                println!("upload {}", path.display());
+                let _ = target_tx.send(FileUploadTarget::Path { path, result_tx, progress_tx: None });
+                tokio::spawn(async move { println!("saved {:?}", result_rx.await) });
+            }
+            ServerEventV2::SessionEnd { reason, .. } => println!("end {reason:?}"),
+            _ => {}
+        }
+    }
+}

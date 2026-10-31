@@ -1,0 +1,22 @@
+[package]
+name = "pinhole-send"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Finds LocalSend devices nearby and sends them photos, for the Send to phone plugin"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+futures-util = "0.3"
+gethostname = "1"
+# LocalSend's own protocol, as its app and localsend-cli speak it.
+localsend = { git = "https://github.com/localsend/localsend", tag = "v1.18.2", features = ["discovery"] }
+pem = "4"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[profile.release]
+opt-level = 3
