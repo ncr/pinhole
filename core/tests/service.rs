@@ -326,8 +326,11 @@ fn a_window_meets_the_service_of_a_folder() {
     photo(&theirs.join("a.jpg"), [200, 200, 40]);
     std::fs::create_dir_all(&given).unwrap();
     let mut conn = pinhole_core::db::open(&given.join("library.sqlite")).unwrap();
-    pinhole_core::sync::list(&FolderSource::new(theirs.clone()), &mut conn, &|_, _| {}, &|| false).unwrap();
+    let their_source = FolderSource::new(theirs.clone());
+    pinhole_core::sync::claim(&their_source, &mut conn, &given).unwrap();
+    pinhole_core::sync::list(&their_source, &mut conn, &|_, _| {}, &|| false).unwrap();
     drop(conn);
+    assert_eq!(pinhole_core::storage::library_owner(&given), Some(format!("folder:{}", theirs.display())));
     let socket = root.join("given.sock");
     let config = Config {
         library: given.clone(),
