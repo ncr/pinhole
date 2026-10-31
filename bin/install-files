@@ -40,5 +40,9 @@ install -d "$PREFIX/lib/pinhole/plugins/send/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/send" plugins/send/manifest.json plugins/send/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/send/i18n" plugins/send/i18n/*.json
 install -Dm755 plugins/send/sender/target/release/pinhole-send "$PREFIX/lib/pinhole/plugins/send/pinhole-send"
+install -d "$PREFIX/lib/pinhole/plugins/info/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/info" plugins/info/manifest.json plugins/info/*.qml plugins/info/*.js
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/info/i18n" plugins/info/i18n/*.json
+install -Dm755 plugins/info/pinhole-info "$PREFIX/lib/pinhole/plugins/info/pinhole-info"
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"
 install -Dm644 pkgbuild/pinhole.desktop "$PREFIX/share/applications/pinhole.desktop"

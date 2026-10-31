@@ -49,6 +49,11 @@ computer nearby with LocalSend open: the devices show as they answer, and
 once its owner accepts, the originals go, a Live Photo with its video, or
 HEIC as JPEG (J).
 
+Info, on I on a photo, shows its details in a small panel over its corner:
+when it was taken, the camera, lens and exposure, its size and format (a
+video's codec, frame rate and length), and where, with W to open the place
+on OpenStreetMap. It stays open from photo to photo.
+
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
 again whenever you save it: [docs/plugins.md](docs/plugins.md).
@@ -111,6 +116,7 @@ plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
+plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe)
 ```
 
 ## Trying the grid

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "pinhole.info",
+  "name": "Info",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "A photo's details over it, on I: when, the camera, lens and exposure, its size and format, and where it was taken, with the map.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}
