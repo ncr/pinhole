@@ -72,6 +72,11 @@ Year calendar (Y in the grid) shows every day of every year as a square in
 the theme's accent, brighter the more photos it has, one row of weeks a
 year; a click, or the arrows and Enter, shows that day in the grid.
 
+Theme makes an Omarchy theme from the photo shown full window: T (or
+Theme) sets it, the photo as the background and its colours on the whole
+desktop, Pinhole too, the text always readable; Ctrl+Z goes back to the
+theme before.
+
 ## Install
 
 ```bash
@@ -123,6 +128,7 @@ plugins/sheet/            the Contact sheet plugin: a grid or collage of what is
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe)
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
+plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 ```
 
 ## Trying the grid

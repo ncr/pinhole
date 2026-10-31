@@ -97,6 +97,14 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
 // series' length after each and grab the window, its notice, into <dir>.
 void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
+// PINHOLE_SELFTEST=theme:<dir>: each photo of PINHOLE_SELFTEST_PHOTOS (ids,
+// by commas) full window, T to make the Theme plugin's Omarchy theme from
+// it, then Ctrl+Z; check Omarchy's theme was set and set back each time,
+// and grab the window, retinted and not, into <dir>. Run it with Omarchy in
+// a home of its own (PINHOLE_OMARCHY_HOME, OMARCHY_THEME_HEADLESS=1) and the
+// window watching that (PINHOLE_THEME_DIR), or the desktop's theme changes.
+void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
+
 // PINHOLE_SELFTEST=otherseries:<dir>: Series' edits and another source's
 // library of the same ids, shown from elsewhere (as another window or a
 // terminal would): photos 0-2 grouped in the library shown; the service

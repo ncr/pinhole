@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "pinhole.theme",
+  "name": "Theme",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Makes an Omarchy theme from the photo shown full window, and the whole desktop takes its colours.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

@@ -1,0 +1,68 @@
+#!/bin/bash
+# The Theme plugin's hands on the desktop: Omarchy's theme folder written,
+# and the theme set, as omarchy-theme-set reads one (a user theme is
+# ~/.config/omarchy/themes/<name>/ with colors.toml, backgrounds/ and a
+# preview.png, all copied over the official theme of that name, if any).
+#
+#   pinhole-theme available
+#   pinhole-theme current
+#   pinhole-theme make <name> <photo> <colors.toml text> <icon theme> <swatch>...
+#   pinhole-theme set <name>
+set -euo pipefail
+
+# Launched from the app launcher, Pinhole may not have Omarchy's PATH.
+export OMARCHY_PATH="${OMARCHY_PATH:-$HOME/.local/share/omarchy}"
+[[ -d $OMARCHY_PATH ]] || OMARCHY_PATH=/usr/share/omarchy
+export PATH="$OMARCHY_PATH/bin:$PATH"
+
+# Omarchy's home: the desktop's, or for a test one of its own
+# (PINHOLE_OMARCHY_HOME, with OMARCHY_THEME_HEADLESS=1), so the desktop
+# keeps its theme while Pinhole watches that one (PINHOLE_THEME_DIR).
+OMARCHY_HOME="${PINHOLE_OMARCHY_HOME:-$HOME}"
+THEMES="$OMARCHY_HOME/.config/omarchy/themes"
+
+case "${1:-}" in
+available)
+  command -v omarchy-theme-set >/dev/null
+  ;;
+current)
+  # The folder's name, as omarchy-theme-set takes it.
+  name=$(cat "$OMARCHY_HOME/.local/state/omarchy/current/theme.name" 2>/dev/null || true)
+  [[ -n $name ]] || name=$(HOME="$OMARCHY_HOME" omarchy-theme-current)
+  echo "$name"
+  ;;
+make)
+  name="$2" photo="$3" colors="$4" icons="$5"
+  shift 5
+  [[ $name =~ ^pinhole-[a-z0-9-]+$ ]] || { echo "Not a theme name: $name" >&2; exit 2; }
+  # Built beside it and swapped in, so a theme is never half written.
+  next=$(mktemp -d "$THEMES/.$name.XXXXXX")
+  trap 'rm -rf "$next"' EXIT
+  mkdir -p "$next/backgrounds"
+  printf '%s' "$colors" >"$next/colors.toml"
+  printf '%s\n' "$icons" >"$next/icons.theme"
+  # The photo as the background: upright, at most a 4K screen's size.
+  magick "$photo[0]" -auto-orient -resize '3840x3840>' -quality 92 "$next/backgrounds/$name.jpg"
+  # The preview the theme picker shows: the photo, its palette along the
+  # bottom.
+  swatches=()
+  for colour in "$@"; do
+    swatches+=(-size 100x56 "xc:$colour")
+  done
+  magick "$next/backgrounds/$name.jpg" -resize '1280x720^' -gravity center -extent 1280x720 \
+    \( "${swatches[@]}" +append -resize '1280x56!' \) -gravity south -composite "$next/preview.png"
+  rm -rf "$THEMES/$name.old"
+  [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$THEMES/$name.old"
+  mv "$next" "$THEMES/$name"
+  rm -rf "$THEMES/$name.old"
+  trap - EXIT
+  HOME="$OMARCHY_HOME" omarchy-theme-set "$name"
+  ;;
+set)
+  HOME="$OMARCHY_HOME" omarchy-theme-set "$2"
+  ;;
+*)
+  echo "Usage: pinhole-theme available | current | make <name> <photo> <colors> <icons> <swatch>... | set <name>" >&2
+  exit 2
+  ;;
+esac

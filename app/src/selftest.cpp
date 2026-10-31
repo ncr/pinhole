@@ -12,6 +12,8 @@
 
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -1365,6 +1367,96 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
         };
         (*step)(0);
     });
+}
+
+void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    // Omarchy's theme as omarchy-theme-set leaves it, where the window
+    // watches it.
+    auto current = [] {
+        const QString dir = qEnvironmentVariable("PINHOLE_THEME_DIR", QDir::homePath() + "/.local/state/omarchy/current");
+        QFile file(dir + "/theme.name");
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed() : QString();
+    };
+    auto failed = std::make_shared<bool>(false);
+    // Calls `then` once the theme is `wanted` (or is not `wanted`, with
+    // `away`), a moment later for the window to retint; fails after 90 s.
+    auto waitFor = [=](const std::function<bool(const QString &)> &done, const std::function<void()> &then) {
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto poll = std::make_shared<QTimer>();
+        poll->setInterval(200);
+        QObject::connect(poll.get(), &QTimer::timeout, window, [=] {
+            const QString name = current();
+            if (!done(name) && clock->elapsed() < 90000)
+                return;
+            poll->stop();
+            if (!done(name)) {
+                say(QStringLiteral("the theme stayed %1").arg(name));
+                *failed = true;
+            }
+            QTimer::singleShot(1500, window, [poll, then] { then(); });
+        });
+        poll->start();
+    };
+    // The photos by position, and the theme before, once the library is in.
+    auto photos = std::make_shared<QList<int>>();
+    auto before = std::make_shared<QString>();
+    auto step = std::make_shared<std::function<void(int)>>();
+    *step = [=, &viewer, &library](int n) {
+        if (n == photos->size()) {
+            say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
+            QCoreApplication::exit(*failed ? 1 : 0);
+            return;
+        }
+        const int index = (*photos)[n];
+        viewer.openAt(index, QRectF(0, 0, 100, 100));
+        QTimer::singleShot(2500, window, [=] {
+            grab(QStringLiteral("%1-photo").arg(n));
+            key(window, Qt::Key_T, Qt::NoModifier, QStringLiteral("t"));
+            waitFor([before](const QString &name) { return name.startsWith(QLatin1String("pinhole-")) && name != *before; }, [=] {
+                const QString made = current();
+                say(QStringLiteral("%1: %2").arg(library.at(index).filename, made));
+                grab(QStringLiteral("%1-themed").arg(n));
+                key(window, Qt::Key_Z, Qt::ControlModifier);
+                waitFor([before](const QString &name) { return name == *before; }, [=] {
+                    say(QStringLiteral("undone: %1").arg(current()));
+                    grab(QStringLiteral("%1-undone").arg(n));
+                    (*step)(n + 1);
+                });
+            });
+        });
+    };
+    // The library is read after the window opens; then the plugins load
+    // and the window settles.
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto loaded = std::make_shared<QTimer>();
+    loaded->setInterval(250);
+    QObject::connect(loaded.get(), &QTimer::timeout, window, [=, &library] {
+        if (library.count() == 0 && clock->elapsed() < 60000)
+            return;
+        loaded->stop();
+        for (const QString &id : qEnvironmentVariable("PINHOLE_SELFTEST_PHOTOS").split(',', Qt::SkipEmptyParts))
+            for (int i = 0; i < library.count(); ++i)
+                if (library.at(i).id == id.toUtf8()) {
+                    *photos << i;
+                    break;
+                }
+        if (photos->isEmpty()) {
+            say(QStringLiteral("none of PINHOLE_SELFTEST_PHOTOS is in the library"));
+            QCoreApplication::exit(1);
+            return;
+        }
+        *before = current();
+        say(QStringLiteral("%1 photos; the theme is %2").arg(photos->size()).arg(*before));
+        QTimer::singleShot(3000, window, [loaded, step] { (*step)(0); });
+    });
+    loaded->start();
 }
 
 void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {

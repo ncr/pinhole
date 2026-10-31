@@ -1,0 +1,15 @@
+{
+  "As the photo": "Jak zdjęcie",
+  "Back again": "Z powrotem",
+  "Could not make a theme: %1": "Nie udało się zrobić motywu: %1",
+  "Ctrl+Z sets the theme there was before. Each theme made stays in Omarchy's theme picker as Pinhole and the photo's colour.": "Ctrl+Z przywraca poprzedni motyw. Każdy zrobiony motyw zostaje w wyborze motywów Omarchy jako Pinhole z kolorem zdjęcia.",
+  "Dark": "Ciemny",
+  "Here, in the side panel (Tab): the photo's colours strong or muted, and the theme dark, light or as the photo is.": "Tu, w panelu bocznym (Tab): kolory zdjęcia mocne albo stonowane, a motyw ciemny, jasny albo taki jak zdjęcie.",
+  "Light": "Jasny",
+  "Make the desktop's theme from the photo": "Zrób motyw pulpitu ze zdjęcia",
+  "On a photo shown full window, T makes an Omarchy theme from it: the photo as the background, its colours everywhere, the text kept readable.": "Na zdjęciu otwartym na całe okno T robi z niego motyw Omarchy: zdjęcie jako tło, jego kolory wszędzie, a tekst wciąż czytelny.",
+  "Strong or muted": "Mocne czy stonowane",
+  "The photo's colours strong": "Mocne kolory zdjęcia",
+  "Theme": "Motyw",
+  "Your photo, your desktop": "Twoje zdjęcie, twój pulpit"
+}
