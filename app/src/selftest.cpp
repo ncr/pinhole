@@ -132,11 +132,12 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         {"made long", "a.is_live AND a.live_effect IS NULL", true, "long_exposure"},
     };
     auto next = std::make_shared<std::function<void(int)>>();
-    // Kinds that did not come within a minute: the run fails.
+    // Kinds that did not come within a minute, and pictures that do not
+    // decode: the run fails.
     auto failures = std::make_shared<int>(0);
     *next = [&library, &viewer, cases, next, failures](int k) {
         if (k >= cases.size()) {
-            std::printf("selftest: done, %d timed out\n", *failures);
+            std::printf("selftest: done, %d failed\n", *failures);
             std::fflush(stdout);
             QCoreApplication::exit(*failures ? 1 : 0);
             return;
@@ -160,13 +161,18 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
                 QObject::disconnect(c);
             QTimer::singleShot(0, [next, k] { (*next)(k + 1); });
         };
-        auto report = [clock](const char *name, const char *what, const QString &file) {
+        // A picture shown that does not decode fails the run too.
+        auto report = [clock, failures](const char *name, const char *what, const QString &file) {
             QElapsedTimer decode;
             decode.start();
             const QImage image = file.isEmpty() ? QImage() : decodePhoto(file, QSize());
+            if (!file.isEmpty() && image.isNull())
+                ++*failures;
             std::printf("selftest: %-11s %-9s after %5lld ms%s\n", name, what, clock->elapsed(),
-                        file.isEmpty() ? "" : qPrintable(QStringLiteral("; decodes to %1x%2 in %3 ms")
-                                                             .arg(image.width()).arg(image.height()).arg(decode.elapsed())));
+                        file.isEmpty()     ? ""
+                        : image.isNull()   ? qPrintable(QStringLiteral("; DOES NOT DECODE: %1").arg(file))
+                                           : qPrintable(QStringLiteral("; decodes to %1x%2 in %3 ms")
+                                                            .arg(image.width()).arg(image.height()).arg(decode.elapsed())));
             std::fflush(stdout);
         };
         auto pathOf = [](const QUrl &url) {
