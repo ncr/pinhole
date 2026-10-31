@@ -36,7 +36,8 @@ void FrameEncoder::stop() {
 
 void FrameEncoder::start() { m_process.start(m_program, m_args); }
 
-// Eight frames ahead of it at most.
+// Behind once more than eight frames wait for it: nine at most, the one
+// that made it so among them.
 bool FrameEncoder::behind() const { return m_process.bytesToWrite() > qint64(m_size.width()) * m_size.height() * 4 * 8; }
 
 bool FrameEncoder::add(QImage frame) {
