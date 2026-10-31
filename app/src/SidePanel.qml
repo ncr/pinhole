@@ -16,8 +16,9 @@ import QtCore
 // In the grid: which marks the cells carry (a video, a Live Photo, a
 // favourite, several photos as one card), each with its switch.
 //
-// Plugins: each with its switch, and its own settings under it while on,
-// and its tour again.
+// Plugins: how many are on, then each a row with its switch and what it
+// does, a dozen of them still a short list: its settings and its tour
+// unfold under it, on a tap or ⏎ on the row.
 Item {
     id: root
     anchors.fill: parent
@@ -25,24 +26,36 @@ Item {
 
     property bool shown: false
 
-    // A part's title, in the accent, with a key at the right.
+    // A part's title, in the accent, a hairline from it to its key or count
+    // at the right.
     component Heading: Item {
         property string text
         property string key
         width: parent.width
         height: Math.round(theme.fontSize * 2.333)
         UiText {
+            id: title
             x: Math.round(theme.fontSize * 0.714)
             y: centredIn(parent.height)
             text: parent.text
             color: theme.accent
+            font.weight: Font.DemiBold
         }
         UiText {
+            id: aside
             anchors.right: parent.right
             anchors.rightMargin: Math.round(theme.fontSize * 0.714)
             y: centredIn(parent.height)
             text: parent.key
             color: theme.darkForeground
+        }
+        Rectangle {
+            readonly property int gap: Math.round(theme.fontSize * 0.6)
+            x: title.x + title.implicitWidth + gap
+            width: Math.max(0, (aside.text !== "" ? aside.x - gap : parent.width - title.x) - x)
+            y: Math.round(parent.height / 2)
+            height: 1
+            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.14)
         }
     }
     // Words under a title, inset as the rows' are.
@@ -98,7 +111,17 @@ Item {
     // A plugin's part of the panel, scrolled into view, for a tour to light;
     // kept there by `keptInView` as the parts above it fill in.
     property string keptInView
+    // The plugins unfolded, by id, to their settings and tour; for as long
+    // as the window is open.
+    property var unfolded: ({})
+    function unfold(id, open) {
+        const now = Object.assign({}, unfolded)
+        now[id] = open
+        unfolded = now
+    }
+    readonly property int pluginsOn: (plugins.revision, plugins.ids.filter(id => plugins.at(id).enabled).length)
     function showPlugin(id) {
+        unfold(id, true)
         const k = plugins.ids.indexOf(id)
         const row = k >= 0 ? pluginRows.itemAt(k) : null
         if (row) {
@@ -402,7 +425,7 @@ Item {
 
     Rectangle {
         id: panel
-        width: Math.min(parent.width - 48, theme.fontSize * 24)
+        width: Math.min(parent.width - 48, theme.fontSize * 32)
         height: parent.height
         x: root.shown ? 0 : -width - 1
         Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
@@ -417,6 +440,7 @@ Item {
 
         Flickable {
             id: scroller
+            objectName: "sidePanelScroller"
             anchors.fill: parent
             onContentHeightChanged: if (root.keptInView !== "") root.showPlugin(root.keptInView)
             anchors.margins: Math.round(theme.fontSize * 0.857)
@@ -581,28 +605,33 @@ Item {
                 Component.onDestruction: root.dropStop(addButton)
                 action: addAction
             }
-            // The sources' keys.
-            Grid {
+            // The sources' keys, a pair after another as the line has room.
+            Flow {
                 x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
                 topPadding: 4
-                columns: 2
-                columnSpacing: theme.fontSize
-                rowSpacing: 2
-                // Key, words; key, words.
+                spacing: Math.round(theme.fontSize * 0.3)
                 Repeater {
-                    model: ["↑ ↓", qsTr("Choose"), "⏎", qsTr("Show it"), "1–9", qsTr("Show one, from anywhere"),
-                            "O", qsTr("Sign out"), "Del", qsTr("Remove")]
-                    delegate: UiText {
+                    model: [["↑ ↓", qsTr("Choose")], ["⏎", qsTr("Show it")], ["1–9", qsTr("Show one, from anywhere")],
+                            ["O", qsTr("Sign out")], ["Del", qsTr("Remove")]]
+                    delegate: Row {
                         required property var modelData
-                        required property int index
-                        text: modelData
-                        color: index % 2 === 0 ? theme.foreground : theme.darkForeground
-                        font.pixelSize: Math.round(theme.fontSize * 0.857)
+                        spacing: Math.round(theme.fontSize * 0.4)
+                        rightPadding: Math.round(theme.fontSize * 0.8)
+                        UiText {
+                            text: modelData[0]
+                            font.pixelSize: Math.round(theme.fontSize * 0.857)
+                        }
+                        UiText {
+                            text: modelData[1]
+                            color: theme.darkForeground
+                            font.pixelSize: Math.round(theme.fontSize * 0.857)
+                        }
                     }
                 }
             }
 
-            Item { width: 1; height: theme.fontSize }
+            Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
             Heading { text: qsTr("Storage") }
 
             // Where.
@@ -669,18 +698,34 @@ Item {
                 text: qsTr("%1 of %2 used · %3 free on this disk")
                       .arg(storage.size(storage.used)).arg(storage.size(storage.limit)).arg(storage.size(storage.free))
             }
-            Note {
-                text: {
-                    const parts = []
-                    for (const kind of ["library", "full", "medium", "video", "original", "live"]) {
-                        const bytes = storage.kinds[kind] || 0
-                        if (bytes > 0)
-                            // Kept on one line each.
-                            parts.push((root.kindNames[kind] + " " + storage.size(bytes)).replace(/ /g, "\u00a0"))
+            // Of what: a line each, the sizes lined up at the right.
+            Column {
+                readonly property var kept: ["library", "full", "medium", "video", "original", "live"]
+                    .filter(kind => (storage.kinds[kind] || 0) > 0)
+                visible: storage.loaded && kept.length > 0
+                x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
+                topPadding: 2
+                bottomPadding: 2
+                Repeater {
+                    model: parent.kept
+                    delegate: Item {
+                        required property string modelData
+                        width: parent.width
+                        height: kindName.implicitHeight
+                        UiText {
+                            id: kindName
+                            text: root.kindNames[modelData]
+                            color: theme.darkForeground
+                            font.pixelSize: Math.round(theme.fontSize * 0.857)
+                        }
+                        UiText {
+                            anchors.right: parent.right
+                            text: storage.size(storage.kinds[modelData])
+                            font.pixelSize: Math.round(theme.fontSize * 0.857)
+                        }
                     }
-                    return parts.join(" · ")
                 }
-                visible: storage.loaded && text !== ""
             }
 
             // The limit, stepped with the buttons or ← →.
@@ -809,7 +854,7 @@ Item {
                       .arg(storage.size(storage.minLimit)).arg(storage.size(storage.defaultLimit))
             }
 
-            Item { width: 1; height: theme.fontSize }
+            Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
             Heading { text: qsTr("In the grid") }
             Note { text: qsTr("Marks in the corner of a photo that say what it is.") }
             Repeater {
@@ -863,33 +908,132 @@ Item {
                 }
             }
 
-            Item { width: 1; height: theme.fontSize }
-            Heading { text: qsTr("Plugins") }
+            Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
+            Heading {
+                text: qsTr("Plugins")
+                key: plugins.ids.length > 0 ? qsTr("%1 of %2 on").arg(root.pluginsOn).arg(plugins.ids.length) : ""
+            }
 
+            // Each: its name and switch, what it does under them; on, and
+            // with settings or a tour, a tap on it (or ⏎ or Space) unfolds
+            // them, a line down from its chevron tying them to it.
             Repeater {
                 id: pluginRows
                 model: plugins.ids
                 delegate: Item {
                     id: pluginRow
                     required property string modelData
+                    required property int index
                     readonly property var info: (plugins.revision, plugins.at(modelData))
                     readonly property var item: (root.pluginsLoaded, root.pluginItem(modelData))
-                    x: Math.round(theme.fontSize * 0.714)
-                    width: parent.width - 2 * x
-                    height: pluginColumn.implicitHeight + 6
+                    readonly property bool on: info.enabled === true
+                    readonly property bool hasSettings: on && item !== null && item.settings !== null
+                    readonly property bool hasTour: on && item !== null && (item.tour?.length ?? 0) > 0
+                    readonly property bool open: (hasSettings || hasTour) && root.unfolded[modelData] === true
+                    // The gutter its chevron stands in, as a source's glyph does.
+                    readonly property int gutter: Math.round(theme.fontSize * 0.714) + Math.round(theme.fontSize * 1.429)
+                    width: parent.width
+                    height: pluginColumn.implicitHeight
+
+                    // A hairline from the one before.
+                    Rectangle {
+                        visible: pluginRow.index > 0
+                        x: Math.round(theme.fontSize * 0.714)
+                        width: parent.width - 2 * x
+                        height: 1
+                        color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.08)
+                    }
                     Column {
                         id: pluginColumn
                         width: parent.width
-                        spacing: 2
-                        Item {
+                        Rectangle {
+                            id: pluginHead
                             width: parent.width
-                            height: pluginSwitch.height
+                            height: headText.implicitHeight + 2 * headText.y
+                            radius: Math.min(4, theme.radius)
+                            color: headHover.hovered && unfold.visible
+                                   ? Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.05) : "transparent"
+                            border.width: 1
+                            border.color: root.focusedStop === unfold ? theme.accent : "transparent"
+                            HoverHandler { id: headHover; cursorShape: unfold.visible ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                            // Not a tap on its switch, which does its own.
+                            TapHandler {
+                                onTapped: eventPoint => {
+                                    const p = pluginHead.mapToItem(pluginSwitch, eventPoint.position.x, eventPoint.position.y)
+                                    if (!(pluginSwitch.visible && pluginSwitch.contains(p)))
+                                        unfold.press()
+                                }
+                            }
+                            // A chevron, turned down unfolded: a stop for the keys.
                             UiText {
-                                width: parent.width - pluginSwitch.width - theme.fontSize
-                                y: centredIn(parent.height)
-                                text: pluginRow.info.name
-                                color: theme.brightForeground
-                                wrapMode: Text.WordWrap
+                                id: unfold
+                                visible: pluginRow.hasSettings || pluginRow.hasTour
+                                function press() { root.unfold(pluginRow.modelData, !pluginRow.open) }
+                                Component.onCompleted: root.addStop(unfold)
+                                Component.onDestruction: root.dropStop(unfold)
+                                x: Math.round(theme.fontSize * 0.714)
+                                width: Math.round(theme.fontSize * 1.429)
+                                // On the switch's line, so the keys come to
+                                // it before the switch.
+                                y: pluginSwitch.y
+                                height: pluginSwitch.height
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: "\uf054"
+                                font.pixelSize: Math.round(theme.fontSize * 0.643)
+                                rotation: pluginRow.open ? 90 : 0
+                                Behavior on rotation { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                                color: pluginRow.open ? theme.accent : theme.darkForeground
+                            }
+                            Column {
+                                id: headText
+                                x: pluginRow.gutter
+                                y: Math.round(theme.fontSize * 0.5)
+                                width: pluginSwitch.x - x - theme.fontSize
+                                spacing: 2
+                                Row {
+                                    width: parent.width
+                                    spacing: Math.round(theme.fontSize * 0.5)
+                                    UiText {
+                                        id: name
+                                        width: Math.min(implicitWidth, parent.width - (yours.visible ? yours.width + parent.spacing : 0))
+                                        text: pluginRow.info.name
+                                        color: pluginRow.on ? theme.brightForeground : theme.foreground
+                                        elide: Text.ElideRight
+                                    }
+                                    // One of one's own.
+                                    Rectangle {
+                                        id: yours
+                                        visible: pluginRow.info.personal === true
+                                        anchors.verticalCenter: name.verticalCenter
+                                        width: yoursText.implicitWidth + Math.round(theme.fontSize * 0.8)
+                                        height: yoursText.implicitHeight + 2
+                                        radius: height / 2
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.3)
+                                        UiText {
+                                            id: yoursText
+                                            anchors.centerIn: parent
+                                            text: qsTr("Yours")
+                                            color: theme.darkForeground
+                                            font.pixelSize: Math.round(theme.fontSize * 0.714)
+                                        }
+                                    }
+                                }
+                                // What it does, two lines of it folded; or
+                                // why it did not load.
+                                UiText {
+                                    width: parent.width
+                                    visible: text !== ""
+                                    text: pluginRow.info.error !== "" ? pluginRow.info.error : pluginRow.info.description
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: pluginRow.open || pluginRow.info.error !== "" ? 1000 : 2
+                                    elide: Text.ElideRight
+                                    color: pluginRow.info.error !== "" ? theme.red : theme.darkForeground
+                                    opacity: pluginRow.on || pluginRow.info.error !== "" ? 1 : 0.75
+                                    font.pixelSize: Math.round(theme.fontSize * 0.857)
+                                }
                             }
                             Toggle {
                                 id: pluginSwitch
@@ -897,45 +1041,60 @@ Item {
                                 Component.onCompleted: root.addStop(pluginSwitch)
                                 Component.onDestruction: root.dropStop(pluginSwitch)
                                 anchors.right: parent.right
+                                anchors.rightMargin: Math.round(theme.fontSize * 0.714)
+                                y: headText.y + name.y + Math.round((name.implicitHeight - height) / 2)
                                 visible: pluginRow.info.error === ""
-                                checked: pluginRow.info.enabled
+                                checked: pluginRow.on
                                 onToggled: plugins.setEnabled(pluginRow.modelData, !checked)
                             }
                         }
-                        UiText {
-                            width: parent.width
-                            wrapMode: Text.WordWrap
-                            visible: text !== ""
-                            text: pluginRow.info.error !== "" ? pluginRow.info.error
-                                : (pluginRow.info.personal ? qsTr("Yours.") + " " : "") + pluginRow.info.description
-                            color: pluginRow.info.error !== "" ? theme.red : theme.darkForeground
-                            font.pixelSize: Math.round(theme.fontSize * 0.857)
-                        }
-                        Loader {
-                            width: parent.width
-                            active: pluginRow.info.enabled && pluginRow.item !== null && pluginRow.item.settings !== null
-                            sourceComponent: active ? pluginRow.item.settings : null
-                        }
+                        // Unfolded: its settings, then its tour again.
                         Item {
-                            visible: pluginRow.info.enabled && pluginRow.item !== null && (pluginRow.item.tour?.length ?? 0) > 0
+                            visible: pluginRow.open
                             width: parent.width
-                            height: tourButton.height + Math.round(theme.fontSize * 0.4)
-                            ShellButton {
-                                id: tourButton
-                                lit: root.focusedStop === tourButton
-                                Component.onCompleted: root.addStop(tourButton)
-                                Component.onDestruction: root.dropStop(tourButton)
-                                anchors.bottom: parent.bottom
-                                text: qsTr("Show how it works")
-                                onTapped: root.tourRequested(pluginRow.modelData)
+                            height: visible ? pluginBody.implicitHeight : 0
+                            Rectangle {
+                                x: Math.round(theme.fontSize * 0.714) + Math.round(theme.fontSize * 0.714)
+                                width: 1
+                                height: parent.height - Math.round(theme.fontSize * 0.6)
+                                color: Qt.alpha(theme.accent, 0.4)
+                            }
+                            Column {
+                                id: pluginBody
+                                x: pluginRow.gutter
+                                width: parent.width - x - Math.round(theme.fontSize * 0.714)
+                                spacing: 6
+                                topPadding: 2
+                                bottomPadding: Math.round(theme.fontSize * 0.857)
+                                Loader {
+                                    width: parent.width
+                                    active: pluginRow.open && pluginRow.hasSettings
+                                    visible: active
+                                    sourceComponent: active ? pluginRow.item.settings : null
+                                }
+                                ShellButton {
+                                    id: tourButton
+                                    visible: pluginRow.open && pluginRow.hasTour
+                                    lit: root.focusedStop === tourButton
+                                    Component.onCompleted: root.addStop(tourButton)
+                                    Component.onDestruction: root.dropStop(tourButton)
+                                    text: qsTr("Show how it works")
+                                    onTapped: root.tourRequested(pluginRow.modelData)
+                                }
                             }
                         }
                     }
                 }
             }
             // One's own.
+            Rectangle {
+                x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
+                height: 1
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.08)
+            }
             Note {
-                topPadding: 4
+                topPadding: Math.round(theme.fontSize * 0.5)
                 text: qsTr("Plugins of your own go in %1: a folder with a manifest.json and a QML file. They load again as you save them.")
                       .arg(plugins.personalDir.replace(/^\/home\/[^/]+/, "~"))
             }

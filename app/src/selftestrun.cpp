@@ -136,7 +136,25 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
             QTimer::singleShot(1000, window, [=] {
                 window->grabWindow().save(dir + "/1-open.png");
                 if (qEnvironmentVariable("PINHOLE_SELFTEST_LOWER") != QLatin1String("1")) {
-                    QCoreApplication::quit();
+                    // Then a page further down at a time, to its end, as
+                    // 1-open-2.png and on: the plugins, a dozen of them.
+                    QObject *scroller = window->findChild<QObject *>(QStringLiteral("sidePanelScroller"));
+                    auto page = std::make_shared<std::function<void(int)>>();
+                    *page = [=](int n) {
+                        const double height = scroller->property("height").toDouble();
+                        const double most = scroller->property("contentHeight").toDouble() - height;
+                        const double y = scroller->property("contentY").toDouble();
+                        if (y >= most - 1 || n > 12) {
+                            QCoreApplication::quit();
+                            return;
+                        }
+                        scroller->setProperty("contentY", std::min(most, y + height * 0.9));
+                        QTimer::singleShot(300, window, [=] {
+                            window->grabWindow().save(dir + QStringLiteral("/1-open-%1.png").arg(n));
+                            (*page)(n + 1);
+                        });
+                    };
+                    (*page)(2);
                     return;
                 }
                 QMetaObject::invokeMethod(panel, "step", Q_ARG(QVariant, -1));

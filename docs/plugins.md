@@ -71,7 +71,8 @@ own. It sets:
 - `covering`: true while it is over the photos: the grid's controls fade
   and its keys rest, as for Pinhole's panels. Its own `Shortcut`s should be
   enabled only then.
-- `settings`: a `Component` shown under its switch in the side panel.
+- `settings`: a `Component` shown under its row in the side panel while it
+  is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
 - `help`: its keys for the help (?), as `[["key", "what it does"], ...]`.
 - `stacks`: photos shown in the grid as one card, each a list of library
   positions, as Series does with each series. The card stands where the
