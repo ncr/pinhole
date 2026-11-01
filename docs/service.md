@@ -310,6 +310,19 @@ a plugin on again shows what it showed before, at once and with no listing.
 Windows hear `kinds`, then the switch (`source`, `library_moved`), then
 `sources`.
 
+A plugin may bring a kind of its own, run out of process by its provider
+([source-providers.md](source-providers.md)): `kinds` lists it after the
+built-in ones, with what its manifest says (`needs_sign_in`, `accepts`). It
+follows its plugin's switch as the window does (a plugin of your own is on
+only when turned on), and the plugins' folders are looked through again
+each time the switches are read (`plugins_changed`, or the file changed).
+Its sources are entries `{"kind", "key", …}`, with the id `<kind>:<key>`
+and the fields `key` and `name` in `sources` and `source`; `set_source`
+with its `kind` adds one through the provider's `add_entry`, and `sign_in`
+and `submit_code` with its `kind` go to the provider, whose error codes the
+window gets as they are. A plugin taken away leaves its entries in the
+settings, as one turned off does.
+
 `set_source` shows another source, adding it first if it is new. The
 service also switches when the settings change under it, edited by
 hand. Every window hears the new `source`, then
@@ -343,8 +356,9 @@ from `core/target/release`, else the one installed beside pinholed
 
 `discover` says what could be added, for the first window and the Add
 button, from each kind that is on: under `kinds` by kind
-(`{"icloud": {"icloudpd": […]}, "folder": {"folders": […]}}`), and the
-same fields at the top, as windows before kinds read them: `icloudpd`, the Apple IDs icloudpd is signed in to as the names of
+(`{"icloud": {"icloudpd": […]}, "folder": {"folders": […]}}`, and a
+provider's whatever it says), and the built-in kinds' fields at the top,
+as windows before kinds read them: `icloudpd`, the Apple IDs icloudpd is signed in to as the names of
 its session files (the Apple ID with everything but letters, digits and
 `_` removed: `megmailcom`; the window matches a typed Apple ID against
 them), and `folders`, each with `path`, `name` (as in `sources`),

@@ -69,7 +69,10 @@ phone's screen.
 
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded
-again whenever you save it: [docs/plugins.md](docs/plugins.md).
+again whenever you save it: [docs/plugins.md](docs/plugins.md). It can
+bring a source of photos of its own (Immich, a NAS, a phone) through a
+provider, a program in any language that pinholed talks to in JSON lines:
+[docs/source-providers.md](docs/source-providers.md).
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
@@ -135,6 +138,8 @@ synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
 core/                     the Rust core: the service, the index, the cache, source kinds;
                           the workspace root (Cargo.lock, target/) for all the Rust below
 core/daemon/              pinholed, the background service, with the built-in sources linked in
+core/src/process.rs       sources of plugins' own, run out of process by their providers
+core/daemon/tests/provider/  the test source, a provider in Python (docs/source-providers.md)
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
 plugins/icloud/source/    iCloud as a source (crate pinhole-icloud): session, CloudKit, walk, push, upload
 plugins/icloud/source/src/bin/probe.rs  pinhole-probe, which measures the API

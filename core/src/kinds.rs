@@ -10,13 +10,19 @@
 //! pinhole.folder) and never claimed by a manifest. A kind that is off keeps
 //! its entries in the settings and its libraries on disk; it is only not
 //! listed, not shown and not synced, until it is on again.
+//!
+//! A plugin may also bring a kind of its own, run out of process by its
+//! provider (process.rs, docs/source-providers.md). Those are found in the
+//! plugins' folders at each `refresh`, and come and go with them.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
+use crate::plugins::Places;
+use crate::process::{Limits, ProcessKind};
 use crate::source::{NoSource, Source};
 use crate::storage::Settings;
 
@@ -90,6 +96,10 @@ pub trait Kind: Send + Sync {
     /// Taken out of the sources: what it kept apart goes (pinhole.icloud's
     /// session). Its library is the service's to delete.
     fn removed(&self, _entry: &Value) {}
+
+    /// Its plugin's switch, as `Kinds::refresh` finds it: a provider's
+    /// processes stop when it is turned off (process.rs).
+    fn set_on(&self, _on: bool) {}
 }
 
 /// How a sign-in went: done, with the entry to add and show, or waiting
@@ -129,7 +139,15 @@ impl From<Failure> for (String, String) {
 
 /// Every kind pinholed knows, and which are on.
 pub struct Kinds {
-    all: Vec<Arc<dyn Kind>>,
+    /// Compiled into pinholed.
+    builtin: Vec<Arc<dyn Kind>>,
+    /// Where to look for plugins' providers, and what they may do; none,
+    /// and there are only the built-in kinds.
+    places: Option<(Places, Limits)>,
+    /// The kinds of providers the plugins there declare, as last looked.
+    providers: RwLock<Vec<Arc<ProcessKind>>>,
+    /// Why any declared were refused, as last said in the log.
+    refused: Mutex<Vec<String>>,
     on: RwLock<HashSet<String>>,
 }
 
@@ -138,17 +156,63 @@ impl Kinds {
     /// on until `refresh` says otherwise.
     pub fn new(all: Vec<Arc<dyn Kind>>) -> Kinds {
         let on = all.iter().map(|k| k.kind().to_owned()).collect();
-        Kinds { all, on: RwLock::new(on) }
+        Kinds { builtin: all, places: None, providers: RwLock::default(), refused: Mutex::default(), on: RwLock::new(on) }
+    }
+
+    /// And the kinds of the providers the plugins in `places` declare,
+    /// found at each `refresh` (docs/source-providers.md).
+    pub fn with_providers(mut self, places: Places, limits: Limits) -> Kinds {
+        self.places = Some((places, limits));
+        self
     }
 
     /// Which are on, from the plugins' switches: a built-in kind unless
-    /// its plugin's is `false`. Whether that changed anything.
+    /// its plugin's is `false`; a provider's of a built-in plugin the same,
+    /// and of a plugin of your own only when its switch is `true`, as the
+    /// window has them. The providers are looked for again first: those of
+    /// a plugin gone, or whose manifest changed, are stopped. Whether that
+    /// changed anything.
     pub fn refresh(&self, switches: &HashMap<String, bool>) -> bool {
-        let on: HashSet<String> =
-            self.all.iter().filter(|k| switches.get(k.plugin()) != Some(&false)).map(|k| k.kind().to_owned()).collect();
+        let mut kinds_changed = false;
+        if let Some((places, limits)) = &self.places {
+            let compiled: Vec<&str> = self.builtin.iter().map(|k| k.kind()).collect();
+            let (found, refused) = crate::plugins::provided(places, &compiled);
+            {
+                let mut said = self.refused.lock().unwrap_or_else(|e| e.into_inner());
+                for why in refused.iter().filter(|why| !said.contains(why)) {
+                    eprintln!("pinholed: a source refused: {why}");
+                }
+                *said = refused;
+            }
+            let mut providers = self.providers.write().unwrap_or_else(|e| e.into_inner());
+            let next: Vec<Arc<ProcessKind>> = found
+                .into_iter()
+                .map(|p| match providers.iter().find(|k| *k.provided() == p) {
+                    Some(same) => same.clone(),
+                    None => Arc::new(ProcessKind::new(p, &places.state, *limits)),
+                })
+                .collect();
+            for old in providers.iter().filter(|old| !next.iter().any(|k| Arc::ptr_eq(k, old))) {
+                old.set_on(false);
+                kinds_changed = true;
+            }
+            kinds_changed |= next.iter().any(|new| !providers.iter().any(|k| Arc::ptr_eq(k, new)));
+            *providers = next;
+        }
+        let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
+        let mut on: HashSet<String> =
+            self.builtin.iter().filter(|k| switches.get(k.plugin()) != Some(&false)).map(|k| k.kind().to_owned()).collect();
+        for p in providers.iter() {
+            let switch = switches.get(&p.provided().plugin).copied();
+            let turned_on = if p.provided().builtin { switch != Some(false) } else { switch == Some(true) };
+            p.set_on(turned_on);
+            if turned_on {
+                on.insert(p.kind().to_owned());
+            }
+        }
         let mut current = self.on.write().unwrap_or_else(|e| e.into_inner());
         if *current == on {
-            return false;
+            return kinds_changed;
         }
         *current = on;
         true
@@ -156,7 +220,12 @@ impl Kinds {
 
     /// The kind of that name, on or not.
     pub fn of(&self, kind: &str) -> Option<Arc<dyn Kind>> {
-        self.all.iter().find(|k| k.kind() == kind).cloned()
+        self.all().into_iter().find(|k| k.kind() == kind)
+    }
+
+    /// Whether a kind is a provider's (process.rs), not compiled in.
+    pub fn provided(&self, kind: &str) -> bool {
+        self.providers.read().unwrap_or_else(|e| e.into_inner()).iter().any(|k| k.kind() == kind)
     }
 
     /// An entry's kind, on or not.
@@ -168,19 +237,27 @@ impl Kinds {
         self.on.read().unwrap_or_else(|e| e.into_inner()).contains(kind)
     }
 
-    pub fn all(&self) -> &[Arc<dyn Kind>] {
-        &self.all
+    /// The built-in kinds, then the providers'.
+    pub fn all(&self) -> Vec<Arc<dyn Kind>> {
+        let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
+        self.builtin.iter().cloned().chain(providers.iter().map(|k| k.clone() as Arc<dyn Kind>)).collect()
     }
 
-    /// An entry's source id; "none" for one of no kind known.
+    /// An entry's source id; "none" for one of no kind known, but for one
+    /// a provider gave (`kept`), whose plugin is not here now: its id as
+    /// any provider's is.
     pub fn id_of(&self, entry: &Value) -> String {
-        self.of_entry(entry).map_or_else(|| "none".to_owned(), |k| k.id_of(entry))
+        match self.of_entry(entry) {
+            Some(kind) => kind.id_of(entry),
+            None if kept(entry) => format!("{}:{}", entry["kind"].as_str().unwrap_or(""), entry["key"].as_str().unwrap_or("")),
+            None => "none".to_owned(),
+        }
     }
 
     /// Every kind, with its plugin and whether it is on: the `kinds` event.
     pub fn report(&self) -> Value {
         let kinds: Vec<Value> = self
-            .all
+            .all()
             .iter()
             .map(|k| {
                 json!({"kind": k.kind(), "plugin": k.plugin(), "on": self.on(k.kind()),
@@ -207,4 +284,12 @@ impl Kinds {
         let kind = self.of_entry(entry).ok_or_else(|| anyhow!("unknown source {:?}", entry["kind"].as_str().unwrap_or("")))?;
         kind.source(entry)
     }
+}
+
+/// An entry of a provider's kind, as the settings keep it whether or not
+/// its plugin is there now: a kind and a key. Its plugin gone for a while
+/// (moved, being reinstalled), it stays among the sources, as one turned
+/// off does, and comes back with it.
+pub fn kept(entry: &Value) -> bool {
+    entry["kind"].as_str().is_some_and(|k| !k.is_empty()) && entry["key"].as_str().is_some_and(|k| !k.is_empty())
 }

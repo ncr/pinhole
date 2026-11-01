@@ -158,6 +158,23 @@ folder, in the workspace whose root is `core/` (one `core/Cargo.lock`, and
 `Kind` traits, the index and the sync; `core/daemon` (`pinholed`) depends
 on all three and builds the `Kinds` of the two. The core names neither.
 
+## Sources of your own
+
+Any other source is a plugin's, out of process: its manifest names a
+*provider*, a program in its folder that pinholed starts and talks to in
+JSON lines ([source-providers.md](source-providers.md)). `ProcessKind` and
+`ProcessSource` (`core/src/process.rs`) are its `Kind` and `Source`; the
+plugins' folders are looked through for them as their switches are read
+(`plugins::provided`, `Kinds::refresh`), and a kind must be its plugin's id
+or start with it, so none takes another's, nor `icloud` or `folder`. The
+provider says what there is, in assets as the trait has them; pinholed
+checks each and writes the library itself, and reads the files from the
+`path` or `url` tickets it gives (making thumbnails and mediums it has none
+of with the folder's renderer, `render.rs`). It never writes the library,
+and no bytes pass through it. One that hangs, sends what is not the
+protocol or crashes is stopped and started again at most once in ten
+seconds; its sources' libraries never pay for it.
+
 ## The iCloud source
 
 `plugins/icloud/source` holds what is Apple's: the sign-in provider

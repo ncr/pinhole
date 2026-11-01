@@ -24,12 +24,9 @@ use rusqlite::Connection;
 
 use pinhole_core::add::{Added, Addition};
 use pinhole_core::db::Index;
+use pinhole_core::render::{MEDIUM_EDGE, THUMB_EDGE};
 use pinhole_core::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
 
-/// Long edges of the thumbnail (kept in the library, like iCloud's) and of
-/// the medium size (made into the cache when first asked for).
-const THUMB_EDGE: u32 = 480;
-const MEDIUM_EDGE: u32 = 2048;
 /// Assets put into the index at a time while listing: few enough that
 /// describing them (EXIF, ffprobe) takes well under a second, so a listing
 /// stops soon when another source is shown.
@@ -414,35 +411,11 @@ impl FolderSource {
     }
 
     /// A JPEG of a photo or of a video's frame, at most `edge` on the long
-    /// side, the right way up.
+    /// side, the right way up (pinhole-core's render.rs).
     fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
         let path = self.root.join(rel);
-        // Never more at once than background work may take (background.rs).
-        let _slot = pinhole_core::background::slot();
-        // A video's from its most telling frame (cover.rs).
-        if media_of(&path) == Some(Media::Video) {
-            return pinhole_core::cover::pick(&path, edge).with_context(|| format!("could not make an image of {rel}"));
-        }
-        let fit = format!("{edge}x{edge}>");
-        let mut magick = pinhole_core::background::command("magick");
-        // Decoding a big JPEG at a fraction of its size is much quicker.
-        // Only a big one: the hint lets the decoder enlarge a small one too.
-        let big = image::image_dimensions(&path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
-        if big {
-            magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
-        }
-        // On stdin, as jpeg.rs reads it: a name is never taken for
-        // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
-        let file = File::open(&path).with_context(|| format!("could not make an image of {rel}"))?;
-        let output = magick
-            .args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
-            .stdin(file)
-            .output()
-            .context("running magick")?;
-        if output.stdout.is_empty() {
-            return Err(anyhow!("could not make an image of {rel}: {}", String::from_utf8_lossy(&output.stderr).trim()));
-        }
-        Ok(output.stdout)
+        pinhole_core::render::render(&path, edge, media_of(&path) == Some(Media::Video))
+            .with_context(|| format!("could not make an image of {rel}"))
     }
 }
 

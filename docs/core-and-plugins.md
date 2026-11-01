@@ -590,7 +590,9 @@ impl Kinds {
 - `core/src/plugins.rs`: `plugins_path()` (`$XDG_CONFIG_HOME/pinhole/plugins.json`)
   and `switches() -> HashMap<String, bool>` read `enabled`. A built-in
   kind is on unless its plugin's switch is `false`. A provider kind is on
-  only when its switch is `true` (phase A4).
+  as its plugin is in the window (phase A4, as built): a plugin of your
+  own only when its switch is `true`, a built-in one (there is none yet)
+  unless it is `false`.
 - `sync::source_for` becomes `Kinds::source_for(entry)`. `service.rs`
   keeps no `icloud` or `folder` names: `sign_in` without a `kind` is the
   first kind that `needs_sign_in`.
@@ -629,9 +631,46 @@ impl Kinds {
 
 A provider is a program in a plugin's folder. It talks JSON lines over
 stdio, as `auth/PROTOCOL.md` does. It is started as `<provider>
---state-dir <dir>`, one process per source added (and one more for
-`discover` and signing in). `ProcessKind` and `ProcessSource`
-(`core/src/process.rs`) implement `Kind` and `Source` with it.
+--state-dir <dir>`, one process per source in use (as built: the one
+shown, started by its first request and stopped when it is no longer
+shown, removed or turned off), and one of its own for each of
+`add_entry`, `discover`, `sign_out` and `removed`, and for a sign-in until
+it is done. `ProcessKind` and `ProcessSource` (`core/src/process.rs`)
+implement `Kind` and `Source` with it. `docs/source-providers.md` is the
+protocol as built, for plugin authors; this section is the design, with
+what changed as it was built:
+
+- **No `describe`.** What it was to say is static, and pinholed needs it
+  without starting anything (the `kinds` event goes to every window as it
+  connects; `Source::name` is asked everywhere). So the manifest's
+  `sources` entry says `needs_sign_in`, `accepts` and `rounds_every_secs`,
+  the entry's own `name` names the source, and push is a `watch` that is
+  not answered `unsupported`.
+- **`unsupported` is an answer** for every optional method: `start` so is
+  ready, `changes` so lists again, `watch` so has no push. The least
+  provider is `add_entry`, `list` and `prepare` (the doc has one in Python
+  and one in sh with jq, both run through pinholed as written).
+- **Keys** are prefixed by pinholed with a hash of the source id and `~`
+  (`f783eec2~<key>`, `f783eec2m~<key>` for one to make), so a provider's
+  keys need only be its own and never meet another source's in the shared
+  cache, and a made rendition is known by its key alone.
+- **What is not the protocol stops it:** a stdout line that is not a JSON
+  object with an `id` or a `note`, an answer with neither `"ok": true` nor
+  `false`, a line over 4 MB. A line pinholed cannot attribute could have
+  been a `put` of a listing, after which `remove_unseen` would take those
+  assets away; so the request fails instead and nothing is removed. A put
+  over 1,000 assets fails its request. An asset that is not right is left
+  out and logged, and its id, if that much is right, counts as seen: what
+  the library had of it stays.
+- **Silence** is measured from the request or the provider's last line,
+  whichever is later (an idle provider is not silent). Its stderr is at
+  most 200 lines in 10 s in the log. `PINHOLE_PROVIDER_SILENCE_SECS`
+  shortens the two minutes for the tests.
+- **A plugin gone** (its folder moved away): its kind goes, with its
+  processes, and its entries stay in the settings (`kinds::kept`: a kind
+  and a key), as a kind turned off does, so it comes back with them.
+- **A plugin whose manifest changed** gets a new `ProcessKind`; the source
+  shown of it is made afresh, quietly (`follow`).
 
 - Requests carry `id`. Lines with that `id` and `note` come before the
   answer. Lines with `note` and no `id` are the provider's own news.
@@ -641,7 +680,7 @@ stdio, as `auth/PROTOCOL.md` does. It is started as `<provider>
 
 | Method | Params | Result, and notes before it |
 |---|---|---|
-| `describe` | `entry` | `{name, needs_sign_in, accepts, rounds_every_secs, push}` |
+| ~~`describe`~~ | | in the manifest instead (above) |
 | `start` | `entry` | `{}` |
 | `list` | `entry` | notes `{"note": "put", "assets": [Asset…]}`, `{"note": "progress", "done", "total"}`; then `{token, summary}` |
 | `changes` | `entry`, `token` | notes `put` and `{"note": "removed", "ids": […]}`; then `{token}`, or error `token_expired` |
@@ -911,6 +950,34 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   - a kind not namespaced by its id refused;
   - turned off: no process left running.
 - Works alone: no built-in uses it.
+- As built:
+  - The test source is a plugin folder, `core/daemon/tests/provider/`
+    (manifest, an empty `Main.qml`, the script), so B7's `pinhole plugin
+    check` has a folder to check. Its thumbnails are `url` tickets from a
+    web server of its own that wants the header it gives (or `path`, by
+    the entry), its mediums `make: true`, its originals `path`. It asks a
+    code for the password "two-factor", keeps favourites, takes files
+    added, and misbehaves on request (a `.misbehave` file in its folder).
+  - `provider.rs` runs pinholed itself (`CARGO_BIN_EXE_pinholed`) with
+    every folder in a scratch one and a socket of its own, and drives it
+    as a window: 300 photos listed with thumbnails by `url` and `path`,
+    mediums made, originals and fulls fetched, changes pushed and followed
+    (5 new, 3 gone, 1 edited, with no listing), a file added, a favourite,
+    sign-in with `wrong_password`, `needs_code`, `wrong_code` and the
+    code, nothing of it in the log, a second source added and removed
+    (its library gone, the provider told), sign-out; the provider hanging
+    (stopped after the silence), crashing (started at most once in 10 s,
+    health `failing`), sending a line that is not JSON, one over 4 MB, a
+    put of 1,001, lines for other requests, a removal in a listing, and
+    ten assets that are not right: the library byte for byte as it was
+    (`PRAGMA integrity_check` too) where nothing could be written, and
+    only what is right where it could; its stderr flooding the log; kinds
+    outside their plugins' names refused; the plugin turned off (no
+    process left, library and state untouched, `turned_off`), on with no
+    listing, taken away and back; and 50,000 assets through the protocol
+    (0.6 s), the provider never holding a file of the library open.
+  - `render.rs` takes the file and whether it is a video; the folder
+    crate's `render` calls it.
 
 ### B1: marks from plugins (API 3 begins)
 

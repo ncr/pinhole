@@ -89,13 +89,20 @@ fn written(path: &Path) -> Value {
 }
 
 /// The settings as written, each entry in its kind's usual form (one of
-/// no kind known left out): without `sources`, every kind's implicit ones
+/// no kind known left out, unless it is a provider's): without `sources`, every kind's implicit ones
 /// (pinhole.icloud's: the accounts signed in to on this computer), then the
 /// source shown if its kind has none of those (a folder); without `source`,
 /// the first of them (`null` is none). Whether a kind is on changes nothing
 /// here: its entries stay (`Kinds::shown` passes over them).
 pub fn resolve(v: &Value, kinds: &Kinds) -> Settings {
-    let normal = |entry: &Value| -> Option<Value> { kinds.of_entry(entry)?.normal(entry) };
+    // One of a provider whose plugin is not here now stays as it is
+    // (`kinds::kept`).
+    let normal = |entry: &Value| -> Option<Value> {
+        match kinds.of_entry(entry) {
+            Some(kind) => kind.normal(entry),
+            None => crate::kinds::kept(entry).then(|| entry.clone()),
+        }
+    };
     let shown = match v.get("source") {
         None => None,
         Some(Value::Null) => Some(None),

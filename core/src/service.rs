@@ -452,7 +452,9 @@ fn discover(shared: &Shared) -> Value {
     let mut found = json!({"kinds": {}});
     for kind in shared.config.kinds.all().iter().filter(|k| shared.config.kinds.on(k.kind())) {
         let said = kind.discover(&added);
-        if let Some(fields) = said.as_object() {
+        // At the top only the built-in kinds' fields, which windows from
+        // before kinds read: a provider's never take their names.
+        if let Some(fields) = said.as_object().filter(|_| !shared.config.kinds.provided(kind.kind())) {
             for (key, value) in fields {
                 found[key.as_str()] = value.clone();
             }
@@ -578,7 +580,8 @@ fn follow(shared: &Arc<Shared>, switches: bool) {
     let kinds = &shared.config.kinds;
     let turned = shared.refresh_kinds(switches);
     if turned {
-        let on: Vec<&str> = kinds.all().iter().map(|k| k.kind()).filter(|k| kinds.on(k)).collect();
+        let all = kinds.all();
+        let on: Vec<&str> = all.iter().map(|k| k.kind()).filter(|k| kinds.on(k)).collect();
         eprintln!("pinholed: source kinds on: {}", if on.is_empty() { "none".to_owned() } else { on.join(", ") });
         shared.broadcast(kinds_event(kinds));
     }
@@ -588,6 +591,17 @@ fn follow(shared: &Arc<Shared>, switches: bool) {
                 eprintln!("pinholed: switching source: {e:#}");
             }
             true
+        }
+        // The same source, of a provider whose plugin changed (its
+        // manifest, say): its old kind stopped its process, so it is made
+        // afresh of the new one, quietly, as after a panic.
+        Ok(source) if turned && kinds.provided(source.kind()) => {
+            {
+                let _context = shared.storage.library_moving.write().unwrap();
+                *shared.source.write().unwrap() = source.clone();
+            }
+            watch(shared, &*source);
+            false
         }
         Ok(_) => false,
         Err(e) => {

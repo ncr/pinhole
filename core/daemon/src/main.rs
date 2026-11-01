@@ -46,9 +46,11 @@ fn main() -> Result<()> {
     // in it unless given.
     let settings = storage::settings_path();
     // The kinds of source there are, those whose plugins are on (in
-    // plugins.json, as the window keeps them) on.
+    // plugins.json, as the window keeps them) on: the built-in ones, and
+    // those of the plugins' providers (docs/source-providers.md).
     let auth = cli.auth.unwrap_or_else(pinhole_icloud::auth::default_provider);
-    let kinds = pinholed::builtin_kinds(auth);
+    let kinds = pinholed::builtin_kinds(auth)
+        .with_providers(pinhole_core::plugins::Places::found(), pinhole_core::process::Limits::from_env());
     let plugins = pinhole_core::plugins::plugins_path();
     kinds.refresh(&pinhole_core::plugins::switches_in(&plugins));
     let saved = storage::read_settings(&settings, &kinds);

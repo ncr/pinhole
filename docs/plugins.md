@@ -57,7 +57,9 @@ out); a Pinhole older than that says it needs a newer one and does not load
 it. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
-`pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`.
+`pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
+and `sources` in the manifest: a source of photos of the plugin's own,
+whose provider pinholed runs ([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
 

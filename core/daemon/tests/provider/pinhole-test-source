@@ -1,0 +1,432 @@
+#!/usr/bin/env -S python3 -I
+"""A source of photos for Pinhole's tests, and an example of a provider
+(docs/source-providers.md): a folder of JPEGs, served as a source of a
+plugin's own would serve its photos.
+
+- Signing in takes any folder and the password "ok" ("two-factor" asks for a code,
+  which is 123456). What it keeps, it keeps in its --state-dir.
+- Originals and full sizes are `path` tickets. Thumbnails are `url` tickets
+  from a small web server of its own on 127.0.0.1, which wants the header it
+  gives with them; with "tickets": "path" in the entry, they are files too.
+  Mediums say "make": pinholed makes them from the original.
+- It pushes `changed` when the folder changes, while watched.
+- "fake": N in the entry lists N made-up photos, for measuring.
+
+For the tests it also misbehaves on request: a file `.misbehave` in the
+folder, {"<method>": "<how>"}, read at each request (see `misbehave`).
+"""
+
+import hashlib
+import http.server
+import json
+import os
+import shutil
+import sys
+import threading
+import time
+
+KIND = "test.source"
+STATE = sys.argv[sys.argv.index("--state-dir") + 1] if "--state-dir" in sys.argv else "."
+OUT = threading.Lock()
+SECRET = hashlib.sha256(os.urandom(16)).hexdigest()
+server = None
+hung = False
+
+
+def say(line):
+    """One line on stdout, the protocol's: never anything else there."""
+    text = json.dumps(line, separators=(",", ":"))
+    with OUT:
+        sys.stdout.write(text + "\n")
+        sys.stdout.flush()
+
+
+def log(*words):
+    """stderr goes to pinholed's log."""
+    print(*words, file=sys.stderr, flush=True)
+
+
+class Refused(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def state(*parts):
+    return os.path.join(STATE, *parts)
+
+
+def signed_in(key):
+    return os.path.exists(state("signed-in", key))
+
+
+def entry_for(params):
+    folder = os.path.abspath(params.get("folder") or "")
+    if not os.path.isdir(folder):
+        raise Refused("bad_request", f"{folder} is not a folder")
+    entry = {
+        "kind": KIND,
+        "key": hashlib.sha1(folder.encode()).hexdigest()[:16],
+        "name": os.path.basename(folder) or folder,
+        "folder": folder,
+        "tickets": params.get("tickets", "url"),
+    }
+    if params.get("fake"):
+        entry["fake"] = int(params["fake"])
+    return entry
+
+
+def keep_signed_in(entry):
+    os.makedirs(state("signed-in"), exist_ok=True)
+    with open(state("signed-in", entry["key"]), "w") as f:
+        json.dump(entry, f)
+
+
+def checked(entry):
+    """The entry's folder, there and signed in to."""
+    if not signed_in(entry["key"]):
+        raise Refused("needs_sign_in", f"not signed in to {entry['name']}")
+    if not os.path.isdir(entry["folder"]):
+        raise Refused("offline", f"{entry['folder']} is not there")
+    return entry["folder"]
+
+
+def files(folder):
+    """{relative path: (size, mtime_ns)} of every JPEG in it."""
+    found = {}
+    for root, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(names):
+            if name.startswith(".") or not name.lower().endswith((".jpg", ".jpeg")):
+                continue
+            path = os.path.join(root, name)
+            st = os.stat(path)
+            found[os.path.relpath(path, folder)] = (st.st_size, st.st_mtime_ns)
+    return found
+
+
+def favourites(entry):
+    try:
+        with open(state(f"favourites-{entry['key']}.json")) as f:
+            return set(json.load(f))
+    except OSError:
+        return set()
+
+
+def asset(entry, rel, size, mtime, favourite):
+    sig = hashlib.sha1(f"{rel}\0{size}\0{mtime}".encode()).hexdigest()[:16]
+    return {
+        "id": rel,
+        "filename": os.path.basename(rel),
+        "item_type": "public.jpeg",
+        "taken": mtime // 1_000_000,
+        "added": mtime // 1_000_000,
+        "kind": "photo",
+        "favorite": rel in favourite,
+        "size": size,
+        "renditions": [
+            {"kind": "thumb", "name": rel, "key": "t" + sig, "file_type": "public.jpeg"},
+            {"kind": "medium", "name": rel, "key": "m" + sig, "make": True},
+            {"kind": "full", "name": rel, "key": "o" + sig, "size": size, "file_type": "public.jpeg"},
+            {"kind": "original", "name": rel, "key": "o" + sig, "size": size, "file_type": "public.jpeg"},
+        ],
+    }
+
+
+def put(request, assets, batch=200):
+    for i in range(0, len(assets), batch):
+        say({"id": request, "note": "put", "assets": assets[i:i + batch]})
+
+
+def snapshot(entry, found):
+    """Keep what was seen, under a token of its own."""
+    token = f"{time.time_ns()}"
+    os.makedirs(state("seen"), exist_ok=True)
+    with open(state("seen", f"{entry['key']}-{token}.json"), "w") as f:
+        json.dump(found, f)
+    return token
+
+
+def misbehave(entry, method):
+    try:
+        with open(os.path.join(entry["folder"], ".misbehave")) as f:
+            return json.load(f).get(method)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def mischief(request, how, entry, found):
+    """What the tests ask of it: True when it answered (or never will)."""
+    global hung
+    if how == "hang":
+        hung = True
+        return True
+    if how == "crash":
+        put(request, [asset(entry, rel, *found[rel], set()) for rel in list(found)[:3]])
+        log("crashing, as asked")
+        os._exit(3)
+    if how == "garbage":
+        put(request, [asset(entry, rel, *found[rel], set()) for rel in list(found)[:3]])
+        with OUT:
+            sys.stdout.write("this is not JSON\n")
+            sys.stdout.flush()
+        return True
+    if how == "long_line":
+        say({"id": request, "note": "put", "assets": [], "padding": "x" * (5 << 20)})
+        return True
+    if how == "big_batch":
+        fake = [{"id": f"flood-{i}", "kind": "photo"} for i in range(1001)]
+        say({"id": request, "note": "put", "assets": fake})
+        return True
+    if how == "spam_stderr":
+        for i in range(5000):
+            print(f"noise {i}", file=sys.stderr)
+        sys.stderr.flush()
+        return False
+    return False
+
+
+def hostile(request, entry, found):
+    """Lines that are the protocol, but not what was asked: none of them may
+    reach the library."""
+    rel = sorted(found)[0]
+    good = asset(entry, rel, *found[rel], set())
+    say({"id": request + 1000, "ok": True, "result": {"token": "not yours"}})
+    say({"id": request + 1000, "note": "put", "assets": [dict(good, id="from-another-request")]})
+    say({"note": "put", "assets": [dict(good, id="from-no-request")]})
+    say({"id": request, "note": "removed", "ids": sorted(found)})
+    say({"id": request, "note": "put", "assets": [
+        dict(good, id="x'); DROP TABLE assets; --"),
+        dict(good, id="../../../etc/passwd", renditions=[dict(good["renditions"][0], key="../../../../x")]),
+        dict(good, id="bad-kind", kind="gif"),
+        dict(good, id="two-thumbs", renditions=[good["renditions"][0], good["renditions"][0]]),
+        dict(good, id="no-original", renditions=[good["renditions"][1]]),
+        dict(good, id="nul\u0000id"),
+        dict(good, id="jpeg-kind", renditions=[dict(good["renditions"][0], kind="jpeg")]),
+        {"id": 7, "kind": "photo"},
+        "not an asset",
+        dict(good, taken="yesterday"),
+    ]})
+
+
+def serve(folder):
+    """Thumbnails over HTTP, only to whoever sends the header given."""
+    global server
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.headers.get("Authorization") != f"Bearer {SECRET}":
+                self.send_error(403)
+                return
+            rel = self.path.split("?")[0].lstrip("/")
+            path = os.path.join(server.folder, *rel.split("/"))
+            if ".." in rel.split("/") or not os.path.isfile(path):
+                self.send_error(404)
+                return
+            with open(path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    if server is None:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    server.folder = folder
+    return server.server_address[1]
+
+
+def ticket(entry, want):
+    folder = entry["folder"]
+    path = os.path.join(folder, want["name"])
+    if not os.path.isfile(path):
+        return {"error": {"code": "not_found", "message": f"{want['name']} is gone"}}
+    if want["kind"] == "thumb" and entry.get("tickets") == "url":
+        port = serve(folder)
+        url = f"http://127.0.0.1:{port}/" + "/".join(want["name"].split(os.sep))
+        return {"url": url, "headers": {"Authorization": f"Bearer {SECRET}"}}
+    return {"path": path}
+
+
+watching = {}
+
+
+def watch(entry):
+    """Pushes `changed` while the folder changes."""
+    if entry["key"] in watching:
+        return
+
+    def look():
+        before = files(entry["folder"])
+        while True:
+            time.sleep(0.3)
+            try:
+                now = files(entry["folder"])
+            except OSError:
+                continue
+            if now != before:
+                before = now
+                say({"note": "changed"})
+
+    watching[entry["key"]] = threading.Thread(target=look, daemon=True)
+    watching[entry["key"]].start()
+    say({"note": "listening", "on": True})
+
+
+def answer(request, method, params):
+    entry = params.get("entry") or {}
+    if entry and entry.get("kind") != KIND:
+        raise Refused("bad_request", "not an entry of mine")
+    how = misbehave(entry, method) if entry.get("folder") else None
+    if method in ("sign_in", "submit_code"):
+        if method == "sign_in" and params.get("password") == "two-factor":
+            with open(state("waiting-for-code.json"), "w") as f:
+                json.dump(params, f)
+            return {"state": "needs_code"}
+        if method == "submit_code":
+            if params.get("code") != "123456":
+                raise Refused("wrong_code", "that is not the code")
+            with open(state("waiting-for-code.json")) as f:
+                params = json.load(f)
+        elif params.get("password") != "ok":
+            raise Refused("wrong_password", "the password is \"ok\"")
+        made = entry_for(params)
+        keep_signed_in(made)
+        return {"state": "signed_in", "entry": made}
+    if method == "add_entry":
+        made = entry_for(params)
+        if not signed_in(made["key"]):
+            raise Refused("needs_sign_in", "sign in first")
+        return {"entry": made}
+    if method == "sign_out":
+        if os.path.exists(state("signed-in", entry["key"])):
+            os.remove(state("signed-in", entry["key"]))
+        return {}
+    if method == "removed":
+        for name in [state("signed-in", entry["key"])]:
+            if os.path.exists(name):
+                os.remove(name)
+        return {}
+    if method == "discover":
+        return {"added": len(params.get("added", []))}
+    folder = checked(entry)
+    if method == "start":
+        if how == "crash":
+            log("crashing, as asked")
+            os._exit(3)
+        if how == "hang":
+            mischief(request, how, entry, {})
+            return None
+        return {}
+    if method == "list":
+        if entry.get("fake"):
+            n = entry["fake"]
+            for start in range(0, n, 1000):
+                # As a phone's photo would be, but with no thumbnail, which
+                # would have pinholed fetch 50,000 of them.
+                batch = [{"id": f"fake-{i:07d}", "kind": "photo", "taken": 1_600_000_000_000 + i * 60_000,
+                          "added": 1_600_000_000_000 + i * 60_000, "filename": f"IMG_{i:07d}.HEIC",
+                          "item_type": "public.heic", "size": 2_000_000, "orientation": 1, "has_location": True,
+                          "renditions": [
+                              {"kind": "medium", "name": f"IMG_{i:07d}.HEIC", "key": f"m{i:07d}", "make": True},
+                              {"kind": "full", "name": f"IMG_{i:07d}.HEIC", "key": f"f{i:07d}", "width": 4032,
+                               "height": 3024, "size": 2_000_000, "file_type": "public.heic"},
+                              {"kind": "original", "name": f"IMG_{i:07d}.HEIC", "key": f"f{i:07d}", "width": 4032,
+                               "height": 3024, "size": 2_000_000, "file_type": "public.heic"}]}
+                         for i in range(start, min(n, start + 1000))]
+                put(request, batch, 1000)
+                say({"id": request, "note": "progress", "done": min(n, start + 1000), "total": n})
+            return {"token": None, "summary": f"{n} made up"}
+        found = files(folder)
+        if mischief(request, how, entry, found):
+            return None
+        if how == "hostile":
+            hostile(request, entry, found)
+        if how == "bad_assets":
+            rels = sorted(found)
+            good = [asset(entry, rel, *found[rel], set()) for rel in rels[1:]]
+            broken = asset(entry, rels[0], *found[rels[0]], set())
+            broken["renditions"][0]["key"] = "not a key"
+            put(request, [broken] + good + [{"id": "no-kind"}, {"kind": "photo"}])
+            return {"token": snapshot(entry, found), "summary": f"{len(found)} files, one broken"}
+        favourite = favourites(entry)
+        assets = [asset(entry, rel, size, mtime, favourite) for rel, (size, mtime) in found.items()]
+        total = len(assets)
+        for i in range(0, total, 200):
+            put(request, assets[i:i + 200])
+            say({"id": request, "note": "progress", "done": min(total, i + 200), "total": total})
+        return {"token": snapshot(entry, found), "summary": f"{total} files in {folder}"}
+    if method == "changes":
+        try:
+            with open(state("seen", f"{entry['key']}-{params['token']}.json")) as f:
+                before = {rel: tuple(v) for rel, v in json.load(f).items()}
+        except (OSError, ValueError):
+            raise Refused("token_expired", "no such token")
+        found = files(folder)
+        if mischief(request, how, entry, found):
+            return None
+        favourite = favourites(entry)
+        changed = [asset(entry, rel, *found[rel], favourite) for rel in found if before.get(rel) != found[rel]]
+        put(request, changed)
+        gone = sorted(set(before) - set(found))
+        if gone:
+            say({"id": request, "note": "removed", "ids": gone})
+        return {"token": snapshot(entry, found), "summary": f"{len(changed)} changed, {len(gone)} gone"}
+    if method == "prepare":
+        if mischief(request, how, entry, {}):
+            return None
+        return {"tickets": [ticket(entry, want) for want in params["wanted"]]}
+    if method == "watch":
+        watch(entry)
+        return {}
+    if method == "set_favorite":
+        favourite = favourites(entry)
+        favourite = favourite | set(params["ids"]) if params["favorite"] else favourite - set(params["ids"])
+        with open(state(f"favourites-{entry['key']}.json"), "w") as f:
+            json.dump(sorted(favourite), f)
+        return {}
+    if method == "add":
+        source = params["file"]
+        name = os.path.basename(source)
+        if not name.lower().endswith((".jpg", ".jpeg")):
+            raise Refused("unsupported", f"{name} is not a JPEG")
+        target = os.path.join(folder, name)
+        if os.path.exists(target):
+            return {"id": name, "duplicate": True}
+        size = os.path.getsize(source)
+        shutil.copyfile(source, target + ".part")
+        say({"id": request, "note": "sent", "sent": size, "bytes": size})
+        os.rename(target + ".part", target)
+        return {"id": name, "duplicate": False}
+    raise Refused("unsupported", f"no {method} here")
+
+
+def main():
+    os.makedirs(STATE, exist_ok=True)
+    with open(state("starts.log"), "a") as f:
+        f.write(f"{time.time():.3f} {os.getpid()}\n")
+    for line in sys.stdin:
+        if hung:
+            continue
+        try:
+            request = json.loads(line)
+        except ValueError:
+            continue
+        rid, method, params = request.get("id"), request.get("method"), request.get("params") or {}
+        try:
+            result = answer(rid, method, params)
+            if result is not None:
+                say({"id": rid, "ok": True, "result": result})
+        except Refused as e:
+            say({"id": rid, "ok": False, "error": {"code": e.code, "message": str(e)}})
+        except Exception as e:  # a bug of its own: said, and it goes on
+            log(f"{method}: {e!r}")
+            say({"id": rid, "ok": False, "error": {"code": "failing", "message": repr(e)}})
+
+
+main()
