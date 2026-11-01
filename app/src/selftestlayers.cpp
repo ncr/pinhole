@@ -95,8 +95,6 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
 
     at(0, [=, &viewer, &library] {
         check(plugin() != nullptr, QStringLiteral("the test plugin test.layers is loaded"));
-        if (!plugin())
-            return;
         for (int i = library.count() - 1; i >= 0 && *shown < 0; --i)
             if (!library.at(i).video)
                 *shown = i;
@@ -154,7 +152,7 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
     at(5800, [=] { press(window, Qt::Key_F9); });
     at(6200, [=] {
         QQuickItem *said = saying(window, QStringLiteral("Could not test"));
-        check(plugin()->property("triggered").toInt() == 1, QStringLiteral("F9 presses the viewer's test action"));
+        check(plugin() && plugin()->property("triggered").toInt() == 1, QStringLiteral("F9 presses the viewer's test action"));
         check(said != nullptr, QStringLiteral("F9: the viewer action complains under its button"));
         grab(QStringLiteral("layers-complaint"));
         if (said) {
@@ -197,7 +195,16 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
         QCoreApplication::exit(*failures ? 1 : 0);
     });
 
-    QTimer::singleShot(2000, window, [window, steps] {
+    QTimer::singleShot(2000, window, [window, steps, plugin] {
+        // Without the test plugin there is nothing to test.
+        if (!plugin()) {
+            std::printf("selftest: FAIL the test plugin test.layers is not loaded: put app/tests/layers among the plugins "
+                        "(a copy in PINHOLE_BUILTIN_PLUGINS, or in ~/.config/pinhole/plugins, turned on)\n"
+                        "selftest: done, 1 failed\n");
+            std::fflush(stdout);
+            QCoreApplication::exit(1);
+            return;
+        }
         for (const auto &[ms, f] : *steps)
             QTimer::singleShot(ms, window, f);
     });
