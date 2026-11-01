@@ -442,6 +442,73 @@ impl FolderSource {
     }
 }
 
+/// Folders as a kind of source (kinds.rs), `pinhole.folder`'s: an entry is
+/// a folder's absolute path (`{"kind": "folder", "path": …}`).
+pub struct FolderKind;
+
+impl crate::kinds::Kind for FolderKind {
+    fn kind(&self) -> &str {
+        "folder"
+    }
+
+    fn plugin(&self) -> &str {
+        "pinhole.folder"
+    }
+
+    fn normal(&self, entry: &serde_json::Value) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"kind": "folder", "path": entry["path"].as_str()?}))
+    }
+
+    fn id_of(&self, entry: &serde_json::Value) -> String {
+        format!("folder:{}", entry["path"].as_str().unwrap_or(""))
+    }
+
+    fn source(&self, entry: &serde_json::Value) -> Result<std::sync::Arc<dyn Source>> {
+        let path = entry["path"].as_str().ok_or_else(|| anyhow!("a folder source needs a path"))?;
+        if !Path::new(path).is_absolute() {
+            return Err(anyhow!("not an absolute path: {path}"));
+        }
+        Ok(std::sync::Arc::new(FolderSource::new(PathBuf::from(path))))
+    }
+
+    /// Its path, and its name as `display_name` gives it.
+    fn describe(&self, entry: &serde_json::Value) -> serde_json::Value {
+        let path = entry["path"].as_str().unwrap_or("");
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        serde_json::json!({"path": path, "name": display_name(Path::new(path), &home)})
+    }
+
+    /// `path`: an absolute folder, without a slash at the end.
+    fn entry_for(&self, params: &serde_json::Value) -> Result<serde_json::Value, crate::kinds::Failure> {
+        let bad = |m: &str| crate::kinds::Failure::bad_request(m);
+        let path = params["path"].as_str().ok_or_else(|| bad("a folder needs its path"))?;
+        let path = path.trim_end_matches('/');
+        if !Path::new(path).is_absolute() || !Path::new(path).is_dir() {
+            return Err(bad(&format!("{path} is not a folder")));
+        }
+        Ok(serde_json::json!({"kind": "folder", "path": if path.is_empty() { "/" } else { path }}))
+    }
+
+    /// Folders of photos not added yet (discover.rs): every DCIM folder on
+    /// a disk under /run/media/$USER, the folders in Pictures, then
+    /// Pictures itself.
+    fn discover(&self, added: &[serde_json::Value]) -> serde_json::Value {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
+        let user = std::env::var("USER")
+            .unwrap_or_else(|_| home.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        let added: HashSet<PathBuf> =
+            added.iter().filter(|e| e["kind"] == "folder").filter_map(|e| e["path"].as_str()).map(PathBuf::from).collect();
+        let pictures = crate::discover::pictures_dir(&home, &config);
+        let candidates = crate::discover::candidates(&pictures, &Path::new("/run/media").join(user));
+        serde_json::json!({"folders": crate::discover::folders(candidates, &added, &home, crate::discover::BUDGET)})
+    }
+
+    fn accepts(&self) -> &'static [&'static str] {
+        ACCEPTS
+    }
+}
+
 impl Source for FolderSource {
     fn name(&self) -> String {
         display_name(&self.root, Path::new(&std::env::var_os("HOME").unwrap_or_default()))
@@ -453,6 +520,10 @@ impl Source for FolderSource {
 
     fn id(&self) -> String {
         format!("folder:{}", self.root.display())
+    }
+
+    fn details(&self) -> serde_json::Value {
+        serde_json::json!({"path": self.root.display().to_string()})
     }
 
     /// Its path, readable: /home/me/Pictures is home-me-Pictures. A path

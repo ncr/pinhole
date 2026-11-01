@@ -1,6 +1,7 @@
 //! What could be added as a source, for a window's first run and its Add
-//! button: the Apple IDs icloudpd is signed in to, and the folders of
-//! photos a person is likely to have. See docs/service.md, `discover`.
+//! button: the Apple IDs icloudpd is signed in to (iCloud's kind asks), and
+//! the folders of photos a person is likely to have (the folder kind's).
+//! See docs/service.md, `discover`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -74,9 +75,9 @@ pub fn candidates(pictures: &Path, media: &Path) -> Vec<PathBuf> {
     list
 }
 
-/// What `discover` answers: `icloudpd` and `folders` (docs/service.md),
-/// the folders in `added` left out, and those without photos.
-pub fn discover(stems: Vec<String>, candidates: Vec<PathBuf>, added: &HashSet<PathBuf>, home: &Path, budget: Duration) -> Value {
+/// The folders `discover` offers (docs/service.md), those in `added` left
+/// out, and those without photos.
+pub fn folders(candidates: Vec<PathBuf>, added: &HashSet<PathBuf>, home: &Path, budget: Duration) -> Vec<Value> {
     let deadline = Instant::now() + budget;
     let mut folders = Vec::new();
     for path in candidates {
@@ -96,7 +97,7 @@ pub fn discover(stems: Vec<String>, candidates: Vec<PathBuf>, added: &HashSet<Pa
             "partial": count.partial,
         }));
     }
-    json!({"icloudpd": stems, "folders": folders})
+    folders
 }
 
 #[cfg(test)]
@@ -158,9 +159,8 @@ mod tests {
         assert_eq!(list, vec![media.join("T7/DCIM"), pictures.join("Empty"), pictures.join("iCloud"), pictures.clone()]);
 
         let added: HashSet<PathBuf> = [pictures.clone()].into();
-        let found = discover(vec!["meexamplecom".into()], list, &added, &home, BUDGET);
-        assert_eq!(found["icloudpd"], json!(["meexamplecom"]));
-        assert_eq!(found["folders"], json!([
+        let found = folders(list, &added, &home, BUDGET);
+        assert_eq!(json!(found), json!([
             {"path": media.join("T7/DCIM"), "name": "T7/DCIM", "assets": 1, "live": 0, "bytes": 7, "partial": false},
             {"path": pictures.join("iCloud"), "name": "Pictures/iCloud", "assets": 2, "live": 1, "bytes": 180, "partial": false},
         ]));

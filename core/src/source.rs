@@ -325,6 +325,13 @@ pub trait Source: Send + Sync {
         self.kind().to_owned()
     }
 
+    /// What says which of its kind it is, for the window: `{"account":
+    /// <apple id>}`, `{"path": <folder>}`; nothing when it is not yet
+    /// known.
+    fn details(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+
     /// The folder its library is in, under `library/<kind>/`: unique among
     /// sources of its kind (an Apple ID, a folder's path).
     fn library_name(&self) -> String;

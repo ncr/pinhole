@@ -9,6 +9,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use pinhole_core::folder::FolderSource;
+use pinhole_core::kinds::Kinds;
 use pinhole_core::service::{self, Config};
 use serde_json::{json, Value};
 
@@ -88,9 +89,10 @@ fn start(root: &Path, name: &str, library: &Path, source: &Path, linger: Duratio
         location: root.join("location"),
         socket: socket.clone(),
         source: Arc::new(FolderSource::new(source.to_path_buf())),
-        auth: PathBuf::from("/nonexistent/pinhole-auth"),
+        kinds: Kinds::builtin(PathBuf::from("/nonexistent/pinhole-auth")),
         limit: None,
         settings: root.join("config/pinhole/settings.json"),
+        plugins: root.join("config/pinhole/plugins.json"),
         adopt: Some(root.join("old-cache")),
         downloads: 2,
         sync_every: Some(1),

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pinhole_core::folder::FolderSource;
+use pinhole_core::kinds::Kinds;
 use pinhole_core::service::{self, Config, PROTOCOL};
 use pinhole_core::source::Source;
 use serde_json::{json, Value};
@@ -185,9 +186,10 @@ fn a_window_meets_the_service_of_a_folder() {
         location,
         socket: socket.clone(),
         source,
-        auth: PathBuf::from("/nonexistent/pinhole-auth"),
+        kinds: Kinds::builtin(PathBuf::from("/nonexistent/pinhole-auth")),
         limit: None,
         settings,
+        plugins: root.join("config/pinhole/plugins.json"),
         adopt: None,
         downloads: 2,
         sync_every: None,
@@ -449,9 +451,10 @@ fn a_window_meets_the_service_of_a_folder() {
         location: root.join("given-location"),
         socket: socket.clone(),
         source: Arc::new(FolderSource::new(photos.clone())),
-        auth: PathBuf::from("/nonexistent/pinhole-auth"),
+        kinds: Kinds::builtin(PathBuf::from("/nonexistent/pinhole-auth")),
         limit: None,
         settings: root.join("config/pinhole/given.json"),
+        plugins: root.join("config/pinhole/plugins.json"),
         adopt: None,
         downloads: 2,
         sync_every: None,

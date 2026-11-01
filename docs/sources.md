@@ -124,7 +124,16 @@ For iCloud it is the file's checksum.
 
 ## The service
 
-`service.rs` holds one `Arc<dyn Source>`. `fetch` finds the rendition in
+`service.rs` holds one `Arc<dyn Source>`, and names no kind of source: what
+it knows of each apart from the trait is the kind's (`core/src/kinds.rs`,
+the `Kind` trait): what its settings entries look like and their source
+id, making its source, its sources implied without settings (the Apple IDs
+signed in to), describing one for `sources`, the entry `set_source` adds,
+`discover`, and signing in and out. `IcloudKind` (`icloud/kind.rs`) and
+`FolderKind` (`folder.rs`) are compiled in; each follows the switch of its
+plugin, `pinhole.icloud` or `pinhole.folder`, in `plugins.json`
+(`core/src/plugins.rs`), and a kind that is off is not listed or shown,
+with nothing of it deleted (docs/service.md, Kinds). `fetch` finds the rendition in
 `renditions`, serves `local` files as they are, else the cached file by
 key, else gathers requests for 25 ms and hands them to `prepare`, and the
 download threads to `open`. Its protocol (docs/service.md) is unchanged,
@@ -207,7 +216,13 @@ the one shown:
 Without `sources` they are the Apple IDs signed in to, then the folder
 shown if it is one; without `source`, the first of them; `"source": null`
 is none, as on a first run. An iCloud entry without an `account` is the
-only Apple ID signed in to, if there is just one.
+only Apple ID signed in to, if there is just one. With no settings.json at
+all, then, one Apple ID signed in to is the one source, and shown.
+`storage::resolve` says this for every kind through its `Kind` (`normal`,
+`implicit`), and a test holds it to what it said before there were kinds,
+input for input. The source shown is the one named while its kind's
+plugin is on, else the first added whose kind is on (`Kinds::shown`); the
+settings are not written for that.
 
 Every source has a library of its own in the one folder Pinhole keeps
 everything in, under its kind: `library/icloud/<apple-id>/` for each Apple

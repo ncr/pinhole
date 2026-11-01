@@ -72,13 +72,15 @@ up on; it connects again and starts afresh.
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
 | `set_favorite` | `assets` (ids from the index), `favorite` (true or false), and `source` (the id of the source they are of, optional) | `changed`: how many were not so already; see Favourites |
-| `sources` | | every source added, as the `sources` event |
-| `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
+| `sources` | | every source added whose kind is on, as the `sources` event |
+| `kinds` | | every kind of source, as the `kinds` event |
+| `plugins_changed` | | `{}`: plugins.json was written (a plugin turned on or off), read again now; see Kinds |
+| `set_source` | an `id` from `sources`, or `kind` (`icloud` or `folder`, one that is on) and an iCloud `account` (Apple ID) or a folder's `path` | the source, as the `source` event: added to the sources if new, and shown; see Sources |
 | `remove_source` | `id` | the `sources` left; see Sources |
 | `sign_out` | an Apple ID's `id` | the `sources`, that one still among them; see Sources |
-| `discover` | | what could be added: `icloudpd` and `folders`; see Sources |
-| `sign_in` | `apple_id`, and `password` unless icloudpd is signed in to it | `state`: `signed_in` (added and shown) or `needs_code` |
-| `submit_code` | `apple_id`, `code` (six digits) | `state`: `signed_in` (added and shown) |
+| `discover` | | what could be added: `icloudpd` and `folders`, and each kind's under `kinds`; see Sources |
+| `sign_in` | `kind` (`icloud` unless said), `apple_id`, and `password` unless icloudpd is signed in to it | `state`: `signed_in` (added and shown) or `needs_code` |
+| `submit_code` | `kind` (`icloud` unless said), `apple_id`, `code` (six digits) | `state`: `signed_in` (added and shown) |
 | `storage` | | where and how much: `location` (the one folder), `library`, `cache`, `limit_bytes`, `min_limit_bytes`, `default_limit_bytes`, `limit_set`, `used_bytes` (all of it), `kinds` (bytes of `library` and of each kind of photo), `freeing`, `moving` (`done_bytes`, `total_bytes`, or null) |
 | `set_storage` | `limit_bytes` and/or `location` (an absolute folder) | as `storage`, after the change (see Storage) |
 | `ping` | | `{}` |
@@ -141,15 +143,16 @@ in place of a black or blank thumbnail: `cover.rs`); the thumbnails of new
 photos are already on disk. A window reads the index again.
 
 ```json
-{"event": "source", "kind": "folder", "id": "folder:/home/me/Pictures", "name": "Pictures", "needs_sign_in": false, "path": "/home/me/Pictures",
- "accepts": ["jpg", "jpeg", "heic", "...", "mov", "mp4"]}
+{"event": "source", "kind": "folder", "plugin": "pinhole.folder", "id": "folder:/home/me/Pictures", "name": "Pictures", "needs_sign_in": false,
+ "path": "/home/me/Pictures", "accepts": ["jpg", "jpeg", "heic", "...", "mov", "mp4"]}
 ```
 
 Where the photos come from, sent to a window as it connects and when it
 changes: `id` is the one its library says it holds the photos of (its
-`meta.source`), `name` what to call it ("iCloud", or the folder's name as
-in `sources`), `needs_sign_in` whether it is one that can need signing in,
-and an iCloud source's `account` (its Apple ID) or a folder's `path`. Right
+`meta.source`), `plugin` the plugin its kind is of (see Kinds), `name`
+what to call it ("iCloud", or the folder's name as in `sources`),
+`needs_sign_in` whether it is one that can need signing in, and an iCloud
+source's `account` (its Apple ID) or a folder's `path`. Right
 after it, as a window connects, comes `library_moved` with the library to
 read: the one this service chose (never another source's, `library_for`),
 whatever the window guessed. Both are sent before any switch or move made
@@ -158,18 +161,22 @@ library of its own (`--library`) keeps to it, following it only where it
 moves.
 `accepts` is the extensions of the files `add` takes for it, lower case
 (empty: nothing can be added). With no
-source at all (none added yet, or every one removed) `kind` is null and
-`name` empty, and the library is an empty one in `library/none`.
+source at all (none added yet, every one removed, or the plugins of those
+added all off) `kind` and `plugin` are null and `name` empty, and the
+library is an empty one in `library/none`.
 
 ```json
 {"event": "sources", "current": "icloud:me@example.com", "sources": [
-  {"id": "icloud:me@example.com", "kind": "icloud", "name": "Jacek Becela", "account": "me@example.com", "count": 49024, "thumbs": 49022},
-  {"id": "folder:/home/me/Pictures/iCloud", "kind": "folder", "name": "Pictures/iCloud", "path": "/home/me/Pictures/iCloud", "count": 654, "thumbs": 320}
+  {"id": "icloud:me@example.com", "kind": "icloud", "plugin": "pinhole.icloud", "name": "Jacek Becela", "account": "me@example.com",
+   "count": 49024, "thumbs": 49022},
+  {"id": "folder:/home/me/Pictures/iCloud", "kind": "folder", "plugin": "pinhole.folder", "name": "Pictures/iCloud",
+   "path": "/home/me/Pictures/iCloud", "count": 654, "thumbs": 320}
 ]}
 ```
 
-Every source added, in the order they were added (the window numbers them
-1 to 9 in it), and the one shown (`current`, null when there is none):
+Every source added whose kind is on (see Kinds), in the order they were
+added (the window numbers them 1 to 9 in it), and the one shown
+(`current`, null when there is none):
 sent to a window as it connects, and whenever the list, the one shown or a
 library's counts change. `name` is what to call it: an Apple ID's owner as
 Apple gives it (the Apple ID itself until known), a folder's name with the
@@ -212,6 +219,20 @@ round that worked ended, null before one has since the service started
 another source is shown or the source says something changed, so `next`
 is when it will be at the latest. `push` is whether the source tells of
 its changes as they happen (also sent when that changes).
+A round that panics (a bug in a source, or data it trips over) is a round
+that failed: it is logged, the health is `failing`, the source is made
+afresh from its settings entry, and the next round goes on as usual.
+
+```json
+{"event": "kinds", "kinds": [
+  {"kind": "icloud", "plugin": "pinhole.icloud", "on": true, "needs_sign_in": true, "accepts": ["heic", "jpg", "..."]},
+  {"kind": "folder", "plugin": "pinhole.folder", "on": false, "needs_sign_in": false, "accepts": ["jpg", "jpeg", "..."]}
+]}
+```
+
+Every kind of source the service knows, the plugin whose switch it
+follows, and whether it is on: sent to a window as it connects (after
+`sources`) and whenever a plugin is turned on or off. See Kinds.
 
 ```json
 {"event": "health", "state": "offline"}
@@ -268,6 +289,25 @@ Apple IDs signed in to, then the folder shown if it is one. Each source has
 its own library in the one folder: `library/icloud/<apple-id>/`,
 `library/folder/home-me-Pictures/`.
 
+### Kinds
+
+Each kind of source is a plugin's: `icloud` is `pinhole.icloud`'s and
+`folder` is `pinhole.folder`'s (`core/src/kinds.rs`), tied in the service
+and never claimed by a manifest. A kind is on unless its plugin is turned
+off in `~/.config/pinhole/plugins.json` (`"enabled": {"pinhole.icloud":
+false}`), which the window writes and the service only reads: the window
+sends `plugins_changed` after writing it, and each sync round looks at the
+file again in case it was edited by hand. A kind that is off keeps
+everything: its entries stay in the settings, its libraries and sessions
+on disk. It is only not listed in `sources`, not shown, not synced and not
+watched, and `set_source`, `remove_source`, `sign_out`, `sign_in` and
+`submit_code` for it are answered `turned_off`. Which source is shown is
+the one the settings name while its kind is on, else the first added whose
+kind is on, else none; the settings are never written for this, so turning
+a plugin on again shows what it showed before, at once and with no listing.
+Windows hear `kinds`, then the switch (`source`, `library_moved`), then
+`sources`.
+
 `set_source` shows another source, adding it first if it is new. The
 service also switches when the settings change under it, edited by
 hand. Every window hears the new `source`, then
@@ -293,7 +333,9 @@ carry the provider's codes: `wrong_password`, `try_again`, `wrong_code`,
 `rate_limited`, `unavailable`, `needs_sign_in` (no icloudpd session for it).
 
 `discover` says what could be added, for the first window and the Add
-button: `icloudpd`, the Apple IDs icloudpd is signed in to as the names of
+button, from each kind that is on: under `kinds` by kind
+(`{"icloud": {"icloudpd": […]}, "folder": {"folders": […]}}`), and the
+same fields at the top, as windows before kinds read them: `icloudpd`, the Apple IDs icloudpd is signed in to as the names of
 its session files (the Apple ID with everything but letters, digits and
 `_` removed: `megmailcom`; the window matches a typed Apple ID against
 them), and `folders`, each with `path`, `name` (as in `sources`),
@@ -404,6 +446,7 @@ A cached file is answered with `path` alone.
 | `unavailable` | the source or the network failed; trying again later may work |
 | `bad_request` | unknown method or missing params |
 | `read_only` | a change asked of the service of a library given to a window (`--given`) |
+| `turned_off` | a source kind whose plugin is off (see Kinds) |
 
 ## Storage
 

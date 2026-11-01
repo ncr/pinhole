@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -495,27 +495,6 @@ fn make_cover(source: &dyn Source, conn: &Connection, video: &Stored, cover: &Pa
     write_beside(Path::new(&medium_cover_path(&cover.to_string_lossy())), &medium)?;
     write_beside(cover, &thumb)?;
     Ok(())
-}
-
-/// A source from its settings entry, `{"kind": "icloud", "account": apple
-/// id}` or `{"kind": "folder", "path": ...}` (`storage::read_settings` has
-/// filled in an iCloud one's Apple ID); none is `NoSource`.
-pub fn source_for(entry: Option<&serde_json::Value>, auth: PathBuf) -> Result<Arc<dyn Source>> {
-    let Some(entry) = entry else { return Ok(Arc::new(crate::source::NoSource)) };
-    match entry["kind"].as_str().unwrap_or("") {
-        "icloud" => {
-            let account = entry["account"].as_str().map(str::to_owned);
-            Ok(Arc::new(crate::icloud::IcloudSource::new(auth, account)))
-        }
-        "folder" => {
-            let path = entry["path"].as_str().ok_or_else(|| anyhow!("a folder source needs a path"))?;
-            if !Path::new(path).is_absolute() {
-                return Err(anyhow!("not an absolute path: {path}"));
-            }
-            Ok(Arc::new(crate::folder::FolderSource::new(PathBuf::from(path))))
-        }
-        other => Err(anyhow!("unknown source {other:?}")),
-    }
 }
 
 #[cfg(test)]

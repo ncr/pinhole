@@ -14,6 +14,8 @@ pub mod effects;
 pub mod folder;
 pub mod icloud;
 pub mod jpeg;
+pub mod kinds;
+pub mod plugins;
 pub mod service;
 pub mod source;
 pub mod storage;

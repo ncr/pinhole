@@ -506,6 +506,9 @@ pub trait Kind: Send + Sync {
     fn id_of(&self, entry: &Value) -> String;
     /// Entries known without the settings naming them: the Apple IDs signed in to here.
     fn implicit(&self) -> Vec<Value> { Vec::new() }
+    /// Without a list, its sources are only its implicit ones: one shown
+    /// that is not among them is not added (iCloud true; a folder's is added).
+    fn implicit_only(&self) -> bool { false }
     fn source(&self, entry: &Value) -> Result<Arc<dyn Source>>;
     /// The `sources` event's own fields for it: name, and account or path.
     fn describe(&self, entry: &Value) -> Value;
@@ -514,9 +517,12 @@ pub trait Kind: Send + Sync {
     /// What `discover` found that could be added.
     fn discover(&self, added: &[Value]) -> Value { Value::Null }
     fn needs_sign_in(&self) -> bool { false }
-    fn sign_in(&self, params: &Value) -> Result<SignedIn, Failure> { Err(Failure::unsupported()) }
-    fn submit_code(&self, params: &Value) -> Result<SignedIn, Failure> { Err(Failure::unsupported()) }
-    fn sign_out(&self, entry: &Value) -> Result<(), Failure> { Err(Failure::unsupported()) }
+    /// The extensions `add` takes, for the `kinds` event.
+    fn accepts(&self) -> &'static [&'static str] { &[] }
+    fn sign_in(&self, params: &Value) -> Result<SignedIn, Failure> { Err(Failure::unsupported(…)) }
+    fn submit_code(&self, params: &Value) -> Result<SignedIn, Failure> { Err(Failure::unsupported(…)) }
+    /// bad_request, as `sign_out` of a folder was before kinds.
+    fn sign_out(&self, entry: &Value) -> Result<(), Failure> { Err(Failure::bad_request(…)) }
     /// Taken out of the sources: what it kept apart goes (an Apple ID's session).
     fn removed(&self, entry: &Value) {}
 }
@@ -525,11 +531,17 @@ pub struct Failure { pub code: String, pub message: String }
 
 pub struct Kinds { all: Vec<Arc<dyn Kind>>, on: RwLock<HashSet<String>> }
 impl Kinds {
+    pub fn new(all: Vec<Arc<dyn Kind>>) -> Kinds;      // all on until refreshed
     pub fn builtin(auth: PathBuf) -> Kinds;            // IcloudKind, FolderKind
     pub fn refresh(&self, switches: &HashMap<String, bool>) -> bool; // changed?
     pub fn of(&self, kind: &str) -> Option<Arc<dyn Kind>>; // on or not
+    pub fn of_entry(&self, entry: &Value) -> Option<Arc<dyn Kind>>;
     pub fn on(&self, kind: &str) -> bool;
+    pub fn all(&self) -> &[Arc<dyn Kind>];
+    pub fn id_of(&self, entry: &Value) -> String;      // "none" for no kind known
     pub fn report(&self) -> Value;                     // the `kinds` event
+    pub fn shown(&self, settings: &Settings) -> Option<Value>;
+    pub fn source_for(&self, entry: Option<&Value>) -> Result<Arc<dyn Source>>;
 }
 ```
 
@@ -548,19 +560,37 @@ impl Kinds {
 - `storage::read_settings(path, &Kinds)`. `resolve` normalises entries
   through `Kinds::of(kind).normal()`, and fills a missing `sources` from
   every kind's `implicit()`, in registry order (iCloud first, as now),
-  then the folder shown. It keeps entries of kinds that are off.
+  then the source shown if its kind is not `implicit_only` (the folder
+  shown, as before). It keeps entries of kinds that are off.
+  `source_entry`, `show_source` and `remove_source` take the `Kinds` too,
+  for `id_of`.
 - **Which source is shown**: `Kinds::shown(&Settings) -> Option<Value>`.
   That is `settings.source` if its kind is on, else the first source whose
-  kind is on, else none. settings.json is never rewritten for this, so
-  turning a plugin back on shows what was shown before.
+  kind is on, else none. `"source": null` stays none, as before kinds.
+  settings.json is never rewritten for this, so turning a plugin back on
+  shows what was shown before.
 - `core/src/plugins.rs`: `plugins_path()` (`$XDG_CONFIG_HOME/pinhole/plugins.json`)
   and `switches() -> HashMap<String, bool>` read `enabled`. A built-in
   kind is on unless its plugin's switch is `false`. A provider kind is on
   only when its switch is `true` (phase A4).
 - `sync::source_for` becomes `Kinds::source_for(entry)`. `service.rs`
-  keeps no `icloud` or `folder` names.
+  keeps no `icloud` or `folder` names: `sign_in` without a `kind` is the
+  first kind that `needs_sign_in`.
+- `service::Config` loses `auth` (the provider is `IcloudKind`'s) and
+  gains `kinds: Kinds` and `plugins: PathBuf` (plugins.json, as `settings`
+  is a path given, so a test has its own). `Shared` reads both from its
+  config, and keeps `plugins::stamp` (mtime and size) of the file last
+  read.
 - `sync_round` runs under `std::panic::catch_unwind`. A panic is logged,
-  the health becomes `failing`, and the loop goes on.
+  the health becomes `failing`, and the loop goes on. The round held
+  `library_lock`, which the panic poisons, so it is cleared
+  (`clear_poison`; the index's own transactions roll back what was half
+  written). A `progress` under way says `done`. The source, whose own
+  locks a panic may have poisoned too (iCloud's clients), is made afresh
+  from its settings entry and put in place quietly (the same id: no
+  `source` event). `core/tests/panic.rs` proves it with a source whose
+  first listing panics: `failing`, then `sync`, and the next round lists
+  and makes the thumbnail.
 
 ### Protocol (still `protocol: 1`; additive)
 
@@ -569,11 +599,11 @@ impl Kinds {
 | event `kinds` | `{"event": "kinds", "kinds": [{"kind": "icloud", "plugin": "pinhole.icloud", "on": true, "needs_sign_in": true, "accepts": […]}, …]}`, sent to a window as it connects (after `sources`) and when a switch changes |
 | method `kinds` | the same, as a result |
 | method `plugins_changed` | `{}`. Reads plugins.json again; if a kind went off, shows `Kinds::shown`; broadcasts `kinds`, then `source`, `library_moved`, `sources` if they changed. The window sends it after `Plugins::setEnabled`. Each sync round also checks the file's mtime, for edits by hand |
-| `sources` entries | add `plugin`. Only sources of kinds that are on are listed. `current` is `Kinds::shown` |
+| `sources` entries | add `plugin`. Only sources of kinds that are on are listed. `current` is the source shown, which is `Kinds::shown` once the switches are followed |
 | `source` event | adds `plugin`. The rest comes from `details()` |
-| `set_source` | `kind` may be any kind that is on; else `turned_off` |
+| `set_source` | `kind` may be any kind that is on; else `turned_off`. So too `set_source`, `remove_source` and `sign_out` by the `id` of a source whose kind is off: nothing of a kind that is off is changed |
 | `sign_in`, `submit_code` | take `kind`; none means `icloud`, so the CLI and older windows keep working. A kind that is off: `turned_off` |
-| `discover` | adds `kinds: {"icloud": {"icloudpd": […]}, "folder": {"folders": […]}}` for kinds that are on; keeps `icloudpd` and `folders` at the top |
+| `discover` | adds `kinds: {"icloud": {"icloudpd": […]}, "folder": {"folders": […]}}` for kinds that are on; keeps `icloudpd` and `folders` at the top, as each kind's fields merged there (a kind that is off has none: a window of today reads a missing one as empty) |
 | `fetch` `kind: "jpeg"` | see Conversion |
 | error `turned_off` | a source kind whose plugin is off |
 
@@ -695,7 +725,9 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
 - `core/src/jpeg.rs`: `magick -[0] -background white -alpha remove -alpha
   off -quality 92 jpg:<part>`, the `full` on stdin. Stdin, because a
   folder's file name can hold what ImageMagick reads as its own syntax
-  (`[1]`, `*`, `heic:`); `[0]` so an animated GIF makes one file, not
+  (`%d` and `%o` are a frame's number: "50%off.jpg" is "500ff.jpg" to
+  it; ImageMagick 7.1 reads `[1]` and `*` in the name of a file that is
+  there as they are); `[0]` so an animated GIF makes one file, not
   `part-0`, `part-1`…; white so a see-through PNG is not black. Two at
   most at once: one ImageMagick of a 24-megapixel HEIC takes every core
   for 0.6–0.9 s, and a window may ask for fifty.
@@ -729,13 +761,41 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
     entries of a kind that is off);
   - `Kinds::shown`;
   - `plugins::switches` (missing file, bad JSON, `false`, `true`);
-  - in `core/tests/service.rs`, a folder source with
+  - in `core/tests/kinds.rs` (a test binary of its own, as it sets HOME
+    and the XDG folders), a folder source with
     `enabled["pinhole.folder"] = false` written to the test's
     `XDG_CONFIG_HOME`. After `plugins_changed`: `sources` is empty, a
     `kinds` event has `on: false`, `current` is null, and the library
     folder and its `change_token` are untouched. Turned on again: shown,
-    with no listing (`listed_at` unchanged);
-  - the real-library check on a copy (Migration, A2).
+    with no listing (`listed_at` unchanged), turned on by a hand edit that
+    the next round finds; and `turned_off` for whatever is asked of it;
+  - the real-library check on a copy (Migration, A2);
+  - `core/tests/panic.rs`: a panicking round, then the next one (above).
+- Also in this phase, a bug A1 found: the folder source gave ImageMagick
+  `"<path>[0]"`, so a file or folder named with a `%` (`50%off.jpg`,
+  `Sale 50%d`) got no thumbnail. Every place a file path reaches
+  ImageMagick or ffmpeg now passes it so its syntax cannot misread it:
+  - stdin (and stdout for what is made), as `jpeg.rs`: `folder.rs`'s
+    thumbnails and mediums, `plugins/info/pinhole-info`,
+    `plugins/theme/pinhole-theme`, `plugins/background/background`,
+    `pinhole-send jpeg`, and `Outgoing::place` (B5 replaces the last two
+    with `fetch "jpeg"`);
+  - with every `%` doubled where magick is given several files on its
+    command line through `pinhole.run`: Sheet (`Layout.magickFile`, its
+    `identify` and its sheet) and Theme's palette (`Palette.magickArgs`);
+  - ffmpeg: the long exposure's vidstab transforms are named in the
+    filter graph by their file name alone, ffmpeg running in their folder,
+    as a cache folder's path (the person's to choose) may hold `,` `;`
+    `[`; and the long exposure is written with `-update 1`, so a `%d` in
+    its path is no frame number. ffmpeg and ffprobe otherwise get absolute
+    paths of files (never a protocol, and the `mov` demuxer reads no
+    patterns), checked with such names.
+  - Tests: `folder::tests::thumbnails_are_made_whatever_the_files_are_called`
+    (`50%off.jpg`, `IMG [1]*.png`, `x%03d.JPG`, `heic:odd.jpg`,
+    `@list.jpg` and a video, in a folder `Sale 50%d [1]` beside a
+    `500ff.jpg` that the old call read instead; it fails on the old code),
+    `effects_are_made_from_the_motion` in a folder
+    `Photos, 50%d [old]; 'x'`, and the theme, background and info checks.
 - Works alone: the window ignores the new fields, and `sign_in` without
   `kind` is iCloud.
 

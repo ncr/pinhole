@@ -9,6 +9,7 @@ pub mod auth;
 pub mod cloudkit;
 pub mod favorite;
 pub mod index;
+pub mod kind;
 pub mod push;
 pub mod records;
 pub mod session;
@@ -162,6 +163,13 @@ impl Source for IcloudSource {
 
     fn id(&self) -> String {
         format!("icloud:{}", self.account.as_deref().unwrap_or(""))
+    }
+
+    fn details(&self) -> serde_json::Value {
+        match self.account.as_deref().filter(|a| !a.is_empty()) {
+            Some(account) => serde_json::json!({"account": account}),
+            None => serde_json::json!({}),
+        }
     }
 
     fn library_name(&self) -> String {

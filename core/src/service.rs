@@ -16,7 +16,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Value};
 
-use crate::icloud::auth::{ProcessProvider, ProviderError};
+use crate::kinds::{Kinds, SignedIn};
 use crate::source::{FetchError, Health, Heard, Source, Stored, Ticket, Unsupported, Want, Watch};
 use crate::storage::Storage;
 use crate::stream::Streams;
@@ -52,12 +52,15 @@ pub struct Config {
     pub socket: PathBuf,
     /// Where the photos come from.
     pub source: Arc<dyn Source>,
-    /// iCloud's sign-in provider, should the window switch to iCloud.
-    pub auth: PathBuf,
+    /// Every kind of source there is, and which are on (kinds.rs).
+    pub kinds: Kinds,
     /// The limit for all of it, if one was set.
     pub limit: Option<u64>,
     /// Where the location and limit are kept when the window changes them.
     pub settings: PathBuf,
+    /// The plugins' switches (plugins.rs), which the kinds follow: only
+    /// read.
+    pub plugins: PathBuf,
     /// A folder of photos from before (the old cache) to move in.
     pub adopt: Option<PathBuf>,
     pub downloads: usize,
@@ -76,7 +79,8 @@ pub struct Config {
 }
 
 /// What a window may not ask of a service of a library given (Config::given).
-const CHANGES: [&str; 8] = ["set_source", "remove_source", "sign_out", "sign_in", "submit_code", "add", "set_favorite", "set_storage"];
+const CHANGES: [&str; 9] =
+    ["set_source", "remove_source", "sign_out", "sign_in", "submit_code", "add", "set_favorite", "set_storage", "plugins_changed"];
 
 /// Where to answer one request.
 #[derive(Clone)]
@@ -196,15 +200,16 @@ struct Shared {
     health: Mutex<Health>,
     /// A library being built, as the last `progress` event said.
     progress: Mutex<Option<Value>>,
-    /// Sign-ins waiting for their two-factor code, by Apple ID: the code
-    /// has to reach the provider that started the sign-in.
-    signing_in: Mutex<HashMap<String, ProcessProvider>>,
+    /// plugins.json as the kinds were last set from it (`plugins::stamp`):
+    /// read again when it changes.
+    plugins_seen: Mutex<Option<(SystemTime, u64)>>,
     /// Bumped as another source is shown, before its library is taken: a
     /// sync round of the one before sees it and gives up, so the switch
     /// does not wait for a library being built.
     shown: std::sync::atomic::AtomicU64,
     /// Held while the source shown changes (set_source, remove_source, a
-    /// sign-in), so the settings and the source shown agree.
+    /// sign-in, a plugin turned on or off), so the settings and the source
+    /// shown agree.
     changing: Mutex<()>,
     /// set_source and remove_source, done one after another in the order
     /// asked (keys pressed in a row: the last is the one shown).
@@ -263,26 +268,34 @@ fn health_event(health: Health) -> Value {
     json!({"event": "health", "state": health.name()})
 }
 
-/// What a window says about the source: its name, and whether it is one
-/// that needs signing in. With none, `kind` is null.
-fn source_info(source: &dyn Source) -> Value {
+/// What a window says about the source: its kind and the plugin it is
+/// of, its name, which of its kind it is (`details`: an Apple ID's
+/// `account`, a folder's `path`), and whether it is one that needs signing
+/// in. With none, `kind` is null.
+fn source_info(kinds: &Kinds, source: &dyn Source) -> Value {
     if source.kind() == "none" {
-        return json!({"kind": null, "name": "", "needs_sign_in": false, "accepts": []});
+        return json!({"kind": null, "plugin": null, "name": "", "needs_sign_in": false, "accepts": []});
     }
-    let mut info = json!({"kind": source.kind(), "id": source.id(), "name": source.name(),
+    let plugin = kinds.of(source.kind()).map(|k| k.plugin().to_owned());
+    let mut info = json!({"kind": source.kind(), "plugin": plugin, "id": source.id(), "name": source.name(),
                           "needs_sign_in": source.needs_sign_in(), "accepts": source.accepts()});
-    if let Some(path) = source.id().strip_prefix("folder:") {
-        info["path"] = json!(path);
-    }
-    if let Some(account) = source.id().strip_prefix("icloud:").filter(|a| !a.is_empty()) {
-        info["account"] = json!(account);
+    if let (Some(info), Some(details)) = (info.as_object_mut(), source.details().as_object()) {
+        info.extend(details.clone());
     }
     info
 }
 
-fn source_event(source: &dyn Source) -> Value {
-    let mut event = source_info(source);
+fn source_event(kinds: &Kinds, source: &dyn Source) -> Value {
+    let mut event = source_info(kinds, source);
     event["event"] = json!("source");
+    event
+}
+
+/// Which kinds of source there are, the plugins they are of, and which
+/// are on (docs/service.md, `kinds`).
+fn kinds_event(kinds: &Kinds) -> Value {
+    let mut event = kinds.report();
+    event["event"] = json!("kinds");
     event
 }
 
@@ -296,27 +309,25 @@ fn library_counts(library: &Path) -> (i64, i64) {
         .unwrap_or((0, 0))
 }
 
-/// Every source added, in order, with what is in its library, and the
-/// one shown (docs/service.md, `sources`).
+/// Every source added whose kind is on, in order, with what is in its
+/// library, and the one shown (docs/service.md, `sources`).
 fn sources_report(shared: &Shared) -> Value {
-    let settings = crate::storage::read_settings(&shared.config.settings);
+    let kinds = &shared.config.kinds;
+    let settings = shared.settings();
     let location = shared.storage.location();
     let current = shared.source().id();
     let sources: Vec<Value> = settings
         .sources
         .iter()
         .filter_map(|entry| {
-            let source = crate::sync::source_for(Some(entry), shared.config.auth.clone()).ok()?;
+            let kind = kinds.of_entry(entry).filter(|k| kinds.on(k.kind()))?;
+            let source = kind.source(entry).ok()?;
             let id = source.id();
             let library = if id == current { shared.storage.library() } else { crate::storage::library_for(&location, &*source) };
             let (count, thumbs) = library_counts(&library);
-            let mut info = json!({"id": id, "kind": source.kind(), "count": count, "thumbs": thumbs});
-            if let Some(account) = entry["account"].as_str() {
-                info["account"] = json!(account);
-                info["name"] = json!(crate::icloud::auth::account_name(account).unwrap_or_else(|| account.to_owned()));
-            } else {
-                info["path"] = entry["path"].clone();
-                info["name"] = json!(source.name());
+            let mut info = json!({"id": id, "kind": kind.kind(), "plugin": kind.plugin(), "count": count, "thumbs": thumbs});
+            if let (Some(info), Some(described)) = (info.as_object_mut(), kind.describe(entry).as_object()) {
+                info.extend(described.clone());
             }
             Some(info)
         })
@@ -330,72 +341,71 @@ fn sources_event(shared: &Shared) -> Value {
     event
 }
 
-/// A failed request's error code and message: a sign-in provider's own
-/// code passes through.
-fn failure(e: &anyhow::Error, otherwise: &'static str) -> (String, String) {
-    match e.downcast_ref::<ProviderError>() {
-        Some(p) => (p.code.clone(), p.message.clone()),
-        None => (otherwise.to_owned(), format!("{e:#}")),
+/// A request's error: its code and why.
+type Refused = (String, String);
+
+fn bad(message: impl Into<String>) -> Refused {
+    ("bad_request".to_owned(), message.into())
+}
+
+/// The kind of that name, if it is on: one that is off is `turned_off`,
+/// one there is none of a bad request.
+fn kind_on(shared: &Shared, kind: &str) -> std::result::Result<Arc<dyn crate::kinds::Kind>, Refused> {
+    let kinds = &shared.config.kinds;
+    let found = kinds.of(kind).ok_or_else(|| bad(format!("unknown source {kind:?}")))?;
+    if !kinds.on(kind) {
+        return Err(("turned_off".to_owned(), format!("{kind} sources are turned off: {} is off", found.plugin())));
     }
+    Ok(found)
+}
+
+/// A source added before, by its id, with its kind, which must be on.
+fn added(shared: &Shared, id: &str) -> std::result::Result<(Value, Arc<dyn crate::kinds::Kind>), Refused> {
+    let entry = crate::storage::source_entry(&shared.settings(), &shared.config.kinds, id).ok_or_else(|| bad(format!("no source {id}")))?;
+    let kind = kind_on(shared, entry["kind"].as_str().unwrap_or(""))?;
+    Ok((entry, kind))
 }
 
 /// Show another source: one added before, by its `id`, or a new one by
-/// `kind` and its Apple ID or folder, added first. Kept in the settings,
-/// the library switched to that source's own (made from scratch if it has
-/// none yet), and every window told to read it.
-fn set_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
-    let bad = |m: String| ("bad_request".to_owned(), m);
+/// `kind` and what that kind needs (an Apple ID signed in to, a folder's
+/// path), added first. Kept in the settings, the library switched to that
+/// source's own (made from scratch if it has none yet), and every window
+/// told to read it.
+fn set_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, Refused> {
+    let kinds = &shared.config.kinds;
     let entry = match params["id"].as_str() {
-        Some(id) => crate::storage::source_entry(&crate::storage::read_settings(&shared.config.settings), id)
-            .ok_or_else(|| bad(format!("no source {id}")))?,
-        None => match params["kind"].as_str() {
-            Some("folder") => {
-                let path = params["path"].as_str().ok_or_else(|| bad("a folder needs its path".into()))?;
-                let path = path.trim_end_matches('/');
-                if !Path::new(path).is_absolute() || !Path::new(path).is_dir() {
-                    return Err(bad(format!("{path} is not a folder")));
-                }
-                json!({"kind": "folder", "path": if path.is_empty() { "/" } else { path }})
-            }
-            Some("icloud") => {
-                let account = params["account"].as_str().ok_or_else(|| bad("iCloud needs an Apple ID".into()))?;
-                if !crate::icloud::auth::accounts().iter().any(|a| a == account) {
-                    return Err(("needs_sign_in".into(), format!("{account} is not signed in to")));
-                }
-                json!({"kind": "icloud", "account": account})
-            }
-            other => return Err(bad(format!("unknown source {other:?}"))),
-        },
+        Some(id) => added(shared, id)?.0,
+        None => {
+            let kind = params["kind"].as_str().ok_or_else(|| bad("set_source needs an id or a kind"))?;
+            kind_on(shared, kind)?.entry_for(params)?
+        }
     };
-    let source = crate::sync::source_for(Some(&entry), shared.config.auth.clone()).map_err(|e| bad(format!("{e:#}")))?;
+    let source = kinds.source_for(Some(&entry)).map_err(|e| bad(format!("{e:#}")))?;
     let _changing = shared.changing.lock().unwrap();
-    crate::storage::show_source(&shared.config.settings, Some(&entry)).map_err(|e| bad(format!("{e:#}")))?;
+    crate::storage::show_source(&shared.config.settings, kinds, Some(&entry)).map_err(|e| bad(format!("{e:#}")))?;
     if source.id() != shared.source().id() {
         switch(shared, source.clone()).map_err(|e| bad(format!("{e:#}")))?;
     }
     shared.broadcast(sources_event(shared));
-    Ok(source_info(&*source))
+    Ok(source_info(kinds, &*source))
 }
 
 /// Take a source out: its library deleted (never the photos themselves),
-/// an Apple ID's session too, and if it was the one shown, the first left
-/// shown instead, or none.
-fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
-    let bad = |m: String| ("bad_request".to_owned(), m);
-    let id = params["id"].as_str().ok_or_else(|| bad("remove_source needs an id".into()))?;
+/// and whatever its kind kept for it apart (an Apple ID's session); if it
+/// was the one shown, the first left whose kind is on is shown instead, or
+/// none.
+fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, Refused> {
+    let kinds = &shared.config.kinds;
+    let id = params["id"].as_str().ok_or_else(|| bad("remove_source needs an id"))?;
     let _changing = shared.changing.lock().unwrap();
-    let settings = crate::storage::read_settings(&shared.config.settings);
-    let entry = crate::storage::source_entry(&settings, id).ok_or_else(|| bad(format!("no source {id}")))?;
-    let source = crate::sync::source_for(Some(&entry), shared.config.auth.clone()).map_err(|e| bad(format!("{e:#}")))?;
-    let shown = crate::storage::remove_source(&shared.config.settings, id).map_err(|e| bad(format!("{e:#}")))?;
+    let (entry, kind) = added(shared, id)?;
+    let source = kind.source(&entry).map_err(|e| bad(format!("{e:#}")))?;
+    crate::storage::remove_source(&shared.config.settings, kinds, id).map_err(|e| bad(format!("{e:#}")))?;
     if shared.source().id() == id {
-        let next = crate::sync::source_for(shown.as_ref(), shared.config.auth.clone()).map_err(|e| bad(format!("{e:#}")))?;
+        let next = kinds.source_for(kinds.shown(&shared.settings()).as_ref()).map_err(|e| bad(format!("{e:#}")))?;
         switch(shared, next).map_err(|e| bad(format!("{e:#}")))?;
     }
-    if let Some(account) = entry["account"].as_str() {
-        shared.signing_in.lock().unwrap().remove(account);
-        let _ = std::fs::remove_dir_all(crate::icloud::auth::state_dir(account));
-    }
+    kind.removed(&entry);
     // Only ever a folder under library/ that holds this source's photos,
     // never the library shown now.
     let library = crate::storage::library_for(&shared.storage.location(), &*source);
@@ -417,119 +427,67 @@ fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Va
     Ok(sources_report(shared))
 }
 
-/// Sign out of an Apple ID: its session deleted, nothing else. It stays
-/// among the sources with its library (and its owner's name), which shows
-/// what is on this computer until it is signed in to again, at once.
-fn sign_out(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
-    let bad = |m: String| ("bad_request".to_owned(), m);
-    let id = params["id"].as_str().ok_or_else(|| bad("sign_out needs an id".into()))?;
+/// Sign out of a source (an Apple ID): its session deleted, nothing else.
+/// It stays among the sources with its library (and its owner's name),
+/// which shows what is on this computer until it is signed in to again, at
+/// once.
+fn sign_out(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, Refused> {
+    let id = params["id"].as_str().ok_or_else(|| bad("sign_out needs an id"))?;
     let _changing = shared.changing.lock().unwrap();
-    let settings = crate::storage::read_settings(&shared.config.settings);
-    let entry = crate::storage::source_entry(&settings, id).ok_or_else(|| bad(format!("no source {id}")))?;
-    let account = entry["account"].as_str().ok_or_else(|| bad(format!("{id} is not an Apple ID")))?;
-    shared.signing_in.lock().unwrap().remove(account);
-    // The provider keeps the whole session there (docs: auth/PROTOCOL.md).
-    let cookies = crate::icloud::auth::state_dir(account).join("cookies");
-    if let Err(e) = std::fs::remove_dir_all(&cookies) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(("unavailable".into(), format!("removing {}: {e}", cookies.display())));
-        }
-    }
+    let (entry, kind) = added(shared, id)?;
+    kind.sign_out(&entry)?;
     // Shown: a fresh source, which has no session to go on.
     if shared.source().id() == id {
-        let source = crate::sync::source_for(Some(&entry), shared.config.auth.clone()).map_err(|e| bad(format!("{e:#}")))?;
+        let source = kind.source(&entry).map_err(|e| bad(format!("{e:#}")))?;
         switch(shared, source).map_err(|e| bad(format!("{e:#}")))?;
     }
-    eprintln!("pinholed: signed out of {account}");
     shared.broadcast(sources_event(shared));
     Ok(sources_report(shared))
 }
 
-/// What could be added (docs/service.md, `discover`).
+/// What could be added (docs/service.md, `discover`): each kind that is
+/// on says, under `kinds`, and what each says is at the top as well.
 fn discover(shared: &Shared) -> Value {
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    let user = std::env::var("USER").unwrap_or_else(|_| home.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    let settings = crate::storage::read_settings(&shared.config.settings);
-    let added: std::collections::HashSet<PathBuf> =
-        settings.sources.iter().filter_map(|e| e["path"].as_str()).map(PathBuf::from).collect();
-    // Where icloudpd keeps its sessions, as the provider's import reads them.
-    let stems = crate::discover::icloudpd_stems(&home.join(".config/icloudpd"), &crate::icloud::auth::accounts());
-    let pictures = crate::discover::pictures_dir(&home, &config);
-    let candidates = crate::discover::candidates(&pictures, &Path::new("/run/media").join(user));
-    crate::discover::discover(stems, candidates, &added, &home, crate::discover::BUDGET)
+    let added = shared.settings().sources;
+    let mut found = json!({"kinds": {}});
+    for kind in shared.config.kinds.all().iter().filter(|k| shared.config.kinds.on(k.kind())) {
+        let said = kind.discover(&added);
+        if let Some(fields) = said.as_object() {
+            for (key, value) in fields {
+                found[key.as_str()] = value.clone();
+            }
+        }
+        found["kinds"][kind.kind()] = said;
+    }
+    found
 }
 
-/// Sign in to an Apple ID with its password, or without one by taking
-/// over icloudpd's session for it. Signed in, it is added and shown.
-fn sign_in(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
-    let apple_id = params["apple_id"].as_str().map(str::trim).filter(|a| !a.is_empty())
-        .ok_or_else(|| ("bad_request".to_owned(), "sign_in needs an apple_id".to_owned()))?;
-    let password = params["password"].as_str().filter(|p| !p.is_empty());
-    let state_dir = crate::icloud::auth::state_dir(apple_id);
-    let known = state_dir.join("account.json").exists();
-    // A sign-in that fails leaves no trace of an Apple ID that was not
-    // signed in to before.
-    let forget = |e: (String, String)| {
-        if !known {
-            let _ = std::fs::remove_dir_all(&state_dir);
-        }
-        e
+/// Sign in to a source of `kind`: signed in, it is added and shown. None
+/// said is the first kind that signs in (iCloud), as older windows and
+/// `pinhole sign-in` ask.
+fn sign_in(shared: &Arc<Shared>, method: &str, params: &Value) -> std::result::Result<Value, Refused> {
+    let kind = match params["kind"].as_str() {
+        Some(kind) => kind.to_owned(),
+        None => shared.config.kinds.all().iter().find(|k| k.needs_sign_in()).map(|k| k.kind().to_owned()).unwrap_or_default(),
     };
-    shared.signing_in.lock().unwrap().remove(apple_id);
-    let mut provider = ProcessProvider::spawn(shared.config.auth.clone(), Some(state_dir.clone()))
-        .map_err(|e| forget(failure(&e, "unavailable")))?;
-    match password {
-        None => {
-            provider.call("import_icloudpd", json!({"apple_id": apple_id})).map_err(|e| forget(failure(&e, "unavailable")))?;
-            let status = provider.call("status", Value::Null).map_err(|e| forget(failure(&e, "unavailable")))?;
-            if status["state"] != "signed_in" {
-                return Err(forget(("needs_sign_in".into(), format!("icloudpd's session for {apple_id} is no longer valid"))));
-            }
-        }
-        Some(password) => {
-            let state = provider
-                .call("sign_in", json!({"apple_id": apple_id, "password": password}))
-                .map_err(|e| forget(failure(&e, "unavailable")))?;
-            if state["state"] == "needs_code" {
-                shared.signing_in.lock().unwrap().insert(apple_id.to_owned(), provider);
-                return Ok(json!({"state": "needs_code"}));
-            }
-        }
+    let kind = kind_on(shared, &kind)?;
+    let signed = if method == "submit_code" { kind.submit_code(params)? } else { kind.sign_in(params)? };
+    match signed {
+        SignedIn::NeedsCode => Ok(json!({"state": "needs_code"})),
+        SignedIn::Entry(entry) => signed_in(shared, &entry),
     }
-    signed_in(shared, apple_id)
 }
 
-/// The two-factor code for a sign-in waiting for it. A wrong code can be
-/// tried again.
-fn submit_code(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (String, String)> {
-    let bad = |m: &str| ("bad_request".to_owned(), m.to_owned());
-    let apple_id = params["apple_id"].as_str().ok_or_else(|| bad("submit_code needs an apple_id"))?;
-    let code = params["code"].as_str().map(str::to_owned).or_else(|| params["code"].as_u64().map(|c| format!("{c:06}")))
-        .ok_or_else(|| bad("submit_code needs the code"))?;
-    let mut provider = shared.signing_in.lock().unwrap().remove(apple_id)
-        .ok_or_else(|| bad("no sign-in is waiting for a code for that Apple ID"))?;
-    if let Err(e) = provider.call("submit_code", json!({"code": code})) {
-        let (code, message) = failure(&e, "unavailable");
-        if code == "wrong_code" {
-            shared.signing_in.lock().unwrap().insert(apple_id.to_owned(), provider);
-        }
-        return Err((code, message));
-    }
-    drop(provider);
-    signed_in(shared, apple_id)
-}
-
-/// An Apple ID signed in to: added to the sources and shown, from a fresh
-/// source so its new session is used even when it was shown already.
-fn signed_in(shared: &Arc<Shared>, apple_id: &str) -> std::result::Result<Value, (String, String)> {
-    let entry = json!({"kind": "icloud", "account": apple_id});
+/// Signed in: added to the sources and shown, from a fresh source so its
+/// new session is used even when it was shown already.
+fn signed_in(shared: &Arc<Shared>, entry: &Value) -> std::result::Result<Value, Refused> {
+    let kinds = &shared.config.kinds;
     let fail = |e: anyhow::Error| ("unavailable".to_owned(), format!("{e:#}"));
     let _changing = shared.changing.lock().unwrap();
-    crate::storage::show_source(&shared.config.settings, Some(&entry)).map_err(fail)?;
-    let source = crate::sync::source_for(Some(&entry), shared.config.auth.clone()).map_err(fail)?;
-    switch(shared, source).map_err(fail)?;
-    eprintln!("pinholed: signed in to {apple_id}");
+    crate::storage::show_source(&shared.config.settings, kinds, Some(entry)).map_err(fail)?;
+    let source = kinds.source_for(Some(entry)).map_err(fail)?;
+    switch(shared, source.clone()).map_err(fail)?;
+    eprintln!("pinholed: signed in to {}", source.id());
     shared.broadcast(sources_event(shared));
     Ok(json!({"state": "signed_in"}))
 }
@@ -552,7 +510,7 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         *shared.progress.lock().unwrap() = None;
         let shown = if source.kind() == "none" { "nowhere".to_owned() } else { source.id() };
         eprintln!("pinholed: photos from {shown} now");
-        shared.broadcast(source_event(&*source));
+        shared.broadcast(source_event(&shared.config.kinds, &*source));
         shared.broadcast(health_event(Health::Fine));
         // There before windows are told to read it, if only empty.
         let library = crate::storage::library_for(&shared.storage.location(), &*source);
@@ -604,16 +562,40 @@ fn watch(shared: &Arc<Shared>, source: &dyn Source) {
     }
 }
 
-/// The source the settings name, if they were changed by hand: switched to.
+/// The settings or the plugins' switches changed under it (edited by
+/// hand, a plugin turned on or off): the source they say is shown now, if
+/// another. A window changing the source now is left to it.
 fn follow_settings(shared: &Arc<Shared>) {
-    // A window changing it now: its own change is under way.
     let Ok(_changing) = shared.changing.try_lock() else { return };
-    let settings = crate::storage::read_settings(&shared.config.settings);
-    let Ok(source) = crate::sync::source_for(settings.source.as_ref(), shared.config.auth.clone()) else { return };
-    if source.id() != shared.source().id() {
-        if let Err(e) = switch(shared, source) {
-            eprintln!("pinholed: switching source: {e:#}");
+    follow(shared, false);
+}
+
+/// The source the settings and the switches say, shown if it is not
+/// (`Kinds::shown`), the caller holding `changing`. `switches`: the
+/// plugins' switches read now, else only if plugins.json changed since.
+/// Windows hear `kinds` if those changed, then the switch, then `sources`.
+fn follow(shared: &Arc<Shared>, switches: bool) {
+    let kinds = &shared.config.kinds;
+    let turned = shared.refresh_kinds(switches);
+    if turned {
+        let on: Vec<&str> = kinds.all().iter().map(|k| k.kind()).filter(|k| kinds.on(k)).collect();
+        eprintln!("pinholed: source kinds on: {}", if on.is_empty() { "none".to_owned() } else { on.join(", ") });
+        shared.broadcast(kinds_event(kinds));
+    }
+    let switched = match kinds.source_for(kinds.shown(&shared.settings()).as_ref()) {
+        Ok(source) if source.id() != shared.source().id() => {
+            if let Err(e) = switch(shared, source) {
+                eprintln!("pinholed: switching source: {e:#}");
+            }
+            true
         }
+        Ok(_) => false,
+        Err(e) => {
+            eprintln!("pinholed: the source the settings name: {e:#}");
+            false
+        }
+    };
+    if turned || switched {
         shared.broadcast(sources_event(shared));
     }
 }
@@ -621,6 +603,24 @@ fn follow_settings(shared: &Arc<Shared>) {
 impl Shared {
     fn source(&self) -> Arc<dyn Source> {
         self.source.read().unwrap().clone()
+    }
+
+    /// The settings, as the kinds read them.
+    fn settings(&self) -> crate::storage::Settings {
+        crate::storage::read_settings(&self.config.settings, &self.config.kinds)
+    }
+
+    /// The kinds on as the plugins' switches say: read now (`now`), or
+    /// only if plugins.json changed since they last were. Whether that
+    /// turned any.
+    fn refresh_kinds(&self, now: bool) -> bool {
+        let stamp = crate::plugins::stamp(&self.config.plugins);
+        let mut seen = self.plugins_seen.lock().unwrap();
+        if !now && *seen == stamp {
+            return false;
+        }
+        *seen = stamp;
+        self.config.kinds.refresh(&crate::plugins::switches_in(&self.config.plugins))
     }
 
     /// Note how the last exchange with the source went; windows hear of
@@ -766,7 +766,7 @@ pub fn run(config: Config) -> Result<()> {
         playable: Mutex::new(HashMap::new()),
         health: Mutex::new(Health::Fine),
         progress: Mutex::new(None),
-        signing_in: Mutex::new(HashMap::new()),
+        plugins_seen: Mutex::new(None),
         shown: std::sync::atomic::AtomicU64::new(0),
         rounds_shown: std::sync::atomic::AtomicU64::new(u64::MAX),
         rounds: Mutex::new(Rounds::default()),
@@ -778,6 +778,9 @@ pub fn run(config: Config) -> Result<()> {
         connections: Mutex::new((0, std::time::Instant::now())),
     });
     let given = shared.config.given;
+    // Which kinds are on, before anything is listed or shown: the source
+    // given was chosen by them already (bin/daemon.rs).
+    shared.refresh_kinds(true);
     // A move of the folder cut short, put right before anything reads or
     // writes the library; one that cannot be, and the service does not
     // start, rather than work on a library not where the settings say.
@@ -832,6 +835,13 @@ pub fn run(config: Config) -> Result<()> {
                 let result = match method.as_str() {
                     "set_source" => set_source(&shared, &params),
                     "sign_out" => sign_out(&shared, &params),
+                    // A plugin turned on or off in a window: what is
+                    // listed and shown follows at once.
+                    "plugins_changed" => {
+                        let _changing = shared.changing.lock().unwrap();
+                        follow(&shared, true);
+                        Ok(json!({}))
+                    }
                     _ => remove_source(&shared, &params),
                 };
                 match result {
@@ -937,11 +947,12 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
         // it would undo.
         let _context = shared.storage.library_moving.read().unwrap();
         shared.listeners.lock().unwrap().push(out.clone());
-        out.send(source_event(&*shared.source()));
+        out.send(source_event(&shared.config.kinds, &*shared.source()));
         out.send(json!({"event": "library_moved", "library": shared.storage.library()}));
     }
     // And if something is wrong, that too.
     out.send(sources_event(&shared));
+    out.send(kinds_event(&shared.config.kinds));
     let health = *shared.health.lock().unwrap();
     if health != Health::Fine {
         out.send(health_event(health));
@@ -988,7 +999,7 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
                 "windows": shared.listeners.lock().unwrap().len(),
                 "health": shared.health.lock().unwrap().name(),
-                "source": source_info(&*shared.source()),
+                "source": source_info(&shared.config.kinds, &*shared.source()),
                 "progress": shared.progress.lock().unwrap().clone().map(|mut p| {
                     p.as_object_mut().map(|o| o.remove("event"));
                     p
@@ -999,9 +1010,10 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
                 }),
             }))),
             Some("sources") => reply.send(Ok(sources_report(&shared))),
+            Some("kinds") => reply.send(Ok(shared.config.kinds.report())),
             // A switch may wait a moment for a library being built to
             // give up: done in turn, off this connection's thread.
-            Some(method @ ("set_source" | "remove_source" | "sign_out")) => {
+            Some(method @ ("set_source" | "remove_source" | "sign_out" | "plugins_changed")) => {
                 let _ = shared.changes.lock().unwrap().send((method.to_owned(), request["params"].clone(), reply));
             }
             // These take a while (the sign-in provider starts, Apple
@@ -1024,23 +1036,8 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
                 let (shared, params, method) = (shared.clone(), request["params"].clone(), method.to_owned());
                 std::thread::spawn(move || {
                     let result = match method.as_str() {
-                        "sign_in" | "submit_code" => {
-                            // Each step and how it ended, in the log: what
-                            // went wrong a first time is otherwise lost.
-                            // Never the password or the code.
-                            let apple_id = params["apple_id"].as_str().unwrap_or("?");
-                            let how = if method == "submit_code" { "the code" }
-                                      else if params["password"].as_str().is_some_and(|p| !p.is_empty()) { "a password" }
-                                      else { "icloudpd's session" };
-                            eprintln!("pinholed: {method} {apple_id} with {how}");
-                            let result = if method == "sign_in" { sign_in(&shared, &params) } else { submit_code(&shared, &params) };
-                            match &result {
-                                Ok(r) => eprintln!("pinholed: {method} {apple_id}: {}", r["state"].as_str().unwrap_or("done")),
-                                Err((code, message)) => eprintln!("pinholed: {method} {apple_id}: {code}: {message}"),
-                            }
-                            result
-                        }
-                        _ => Ok(discover(&shared)),
+                        "discover" => Ok(discover(&shared)),
+                        _ => sign_in(&shared, &method, &params),
                     };
                     match result {
                         Ok(value) => reply.send(Ok(value)),
@@ -1616,18 +1613,21 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         shared.rounds.lock().unwrap().next = None;
         shared.broadcast(shared.rounds_event());
         let (source, shown) = (shared.source(), shared.shown.load(Ordering::SeqCst));
-        match sync_round(&shared) {
-            Ok(()) => {
+        // A round that panics (a bug in a source, bad data it trips on) is
+        // a round that failed, not the end of every round after it.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync_round(&shared))) {
+            Ok(Ok(())) => {
                 shared.set_health(Health::Fine);
                 // Not a round given up as another source was shown.
                 if shared.shown.load(Ordering::SeqCst) == shown {
                     shared.rounds.lock().unwrap().last.insert(source.id(), SystemTime::now());
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 eprintln!("pinholed: sync: {e:#}");
                 shared.failed(&e);
             }
+            Err(panic) => panicked(&shared, &*source, shown, &*panic),
         }
         // Until the next round, or a window asking for one now.
         let every = shared.config.sync_every.map_or_else(|| shared.source().rounds_every(), Duration::from_secs);
@@ -1640,6 +1640,34 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         }
         // Several asks at once make one round.
         while wake.try_recv().is_ok() {}
+    }
+}
+
+/// A sync round panicked: logged, the health `failing`, and what the panic
+/// left behind put right for the next round. The library's lock it held
+/// is taken as free (the index's own transactions roll back what was half
+/// written); a library being built says it is done for now; and the
+/// source, whose own state it may have left half changed (a lock held
+/// mid-listing), is made afresh from its entry, quietly: it is the same
+/// source, so windows have nothing to read again.
+fn panicked(shared: &Arc<Shared>, source: &dyn Source, shown: u64, panic: &(dyn std::any::Any + Send)) {
+    let what = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("no message");
+    eprintln!("pinholed: sync: the round for {} panicked ({what}); the next one goes on", source.id());
+    shared.storage.library_lock.clear_poison();
+    if shared.progress.lock().unwrap_or_else(|e| e.into_inner()).take().is_some() {
+        shared.broadcast(json!({"event": "progress", "source": source.id(), "phase": "done"}));
+    }
+    shared.set_health(Health::Failing);
+    let kinds = &shared.config.kinds;
+    let Some(entry) = kinds.shown(&shared.settings()).filter(|e| kinds.id_of(e) == source.id()) else { return };
+    let Ok(fresh) = kinds.source_for(Some(&entry)) else { return };
+    let _context = shared.storage.library_moving.write().unwrap_or_else(|e| e.into_inner());
+    if shared.shown.load(Ordering::SeqCst) == shown {
+        *shared.source.write().unwrap_or_else(|e| e.into_inner()) = fresh;
     }
 }
 
