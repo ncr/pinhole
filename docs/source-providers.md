@@ -53,7 +53,7 @@ PinholePlugin {
 
 | Field | | |
 |---|---|---|
-| `kind` | required | Its name in the settings. The plugin's `id`, or the id, a dot and more (`me.immich.shared`): a plugin can never take another's kind, nor `icloud` or `folder`. Letters, digits, `.`, `_` and `-`. |
+| `kind` | required | Its name in the settings. The plugin's `id`, or the id, a dot and more (`me.immich.shared`): a plugin can never take another's kind, nor `icloud` or `folder`. A kind is the plugin's with the longest id that names it: with plugins `me` and `me.jpegs` installed, `me.jpegs` and `me.jpegs.raw` are only `me.jpegs`'s. Letters, digits, `.`, `_` and `-`. |
 | `provider` | required | The program, a path inside the plugin's folder (no `..`, not absolute), executable. |
 | `needs_sign_in` | `false` | Its sources can need signing in: the window offers to. |
 | `accepts` | `[]` | The extensions of files it takes when they are dropped on the window (`add`), in lower case. None: nothing can be added. |

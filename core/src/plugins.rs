@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -20,20 +21,51 @@ pub fn plugins_path() -> PathBuf {
 
 /// The switches turned one way or the other, by plugin id. A plugin
 /// with no entry is not in it: whether it is on is the caller's to say
-/// (a built-in is, a plugin of your own is not). No file, or one that is
-/// not JSON, turns nothing either way.
+/// (a built-in is, a plugin of your own is not). No file turns nothing
+/// either way. A file there that cannot be read as a JSON object (caught
+/// half written, or broken by hand) changes nothing: the switches stay as
+/// they were last read from it, so a plugin turned off is not turned on
+/// by it. That is logged once, until it reads again.
 pub fn switches() -> HashMap<String, bool> {
     switches_in(&plugins_path())
 }
 
 pub fn switches_in(path: &Path) -> HashMap<String, bool> {
-    let Some(written) = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
-        return HashMap::new();
+    /// The switches last read from each file, and whether it was said
+    /// that it could not be read since.
+    static LAST: Mutex<Option<HashMap<PathBuf, (HashMap<String, bool>, bool)>>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let last = last.get_or_insert_with(HashMap::new);
+    let text = match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            last.remove(path);
+            return HashMap::new();
+        }
+        text => text,
     };
-    written["enabled"]
+    let written = text.map_err(|e| e.to_string()).and_then(|t| {
+        serde_json::from_str::<Value>(&t).map_err(|e| e.to_string()).and_then(|v| match v {
+            Value::Object(_) => Ok(v),
+            _ => Err("not a JSON object".to_owned()),
+        })
+    });
+    let written = match written {
+        Ok(written) => written,
+        Err(why) => {
+            let (kept, said) = last.entry(path.to_owned()).or_default();
+            if !*said {
+                *said = true;
+                eprintln!("pinholed: {} cannot be read ({why}): the plugins' switches stay as they were", path.display());
+            }
+            return kept.clone();
+        }
+    };
+    let switches: HashMap<String, bool> = written["enabled"]
         .as_object()
         .map(|enabled| enabled.iter().filter_map(|(id, on)| Some((id.clone(), on.as_bool()?))).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    last.insert(path.to_owned(), (switches.clone(), false));
+    switches
 }
 
 /// When the file last changed, and its size: read again only when these
@@ -121,14 +153,16 @@ pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<Strin
             plugins.push((id, dir, manifest, builtin));
         }
     }
+    let ids: Vec<String> = plugins.iter().map(|(id, ..)| id.clone()).collect();
     let mut found: Vec<Provided> = Vec::new();
     let mut problems = Vec::new();
-    for (id, dir, manifest, builtin) in plugins {
+    for (id, dir, manifest, builtin) in &plugins {
         let Some(sources) = manifest["sources"].as_array() else { continue };
         for declared in sources {
             let Some(provider) = declared.get("provider") else { continue };
             let kind = declared["kind"].as_str().unwrap_or("");
-            match check(&id, &dir, &manifest, kind, provider, declared, compiled, &found) {
+            let builtin = *builtin;
+            match check(id, dir, manifest, kind, provider, declared, compiled, &ids, &found) {
                 Ok(provided) => found.push(Provided { builtin, ..provided }),
                 Err(why) => problems.push(format!("{id}: source {kind:?}: {why}")),
             }
@@ -147,6 +181,7 @@ fn check(
     provider: &Value,
     declared: &Value,
     compiled: &[&str],
+    ids: &[String],
     found: &[Provided],
 ) -> Result<Provided, String> {
     // As the window takes a manifest at all (Plugins::manifestProblem).
@@ -174,6 +209,12 @@ fn check(
     }
     if compiled.contains(&kind) {
         return Err("that kind is pinholed's own".into());
+    }
+    // The kind is the plugin's whose id is the longest that names it: a
+    // plugin `me` never takes `me.jpegs` from a plugin `me.jpegs`,
+    // whichever is found first.
+    if let Some(owner) = owner_of(kind, ids).filter(|owner| *owner != id) {
+        return Err(format!("that kind is {owner}'s"));
     }
     if let Some(other) = found.iter().find(|p| p.kind == kind) {
         return Err(format!("{} has that kind already", other.plugin));
@@ -215,6 +256,15 @@ fn check(
     })
 }
 
+/// The plugin a kind belongs to, of those installed: the one with the
+/// longest id that is the kind, or that it starts with and a dot.
+fn owner_of<'a>(kind: &str, ids: &'a [String]) -> Option<&'a str> {
+    ids.iter()
+        .filter(|id| kind == id.as_str() || kind.strip_prefix(id.as_str()).is_some_and(|rest| rest.starts_with('.')))
+        .max_by_key(|id| id.len())
+        .map(String::as_str)
+}
+
 /// A path inside a plugin's folder: relative, and never out of it.
 fn safe_relative(path: &str) -> bool {
     !path.is_empty()
@@ -247,6 +297,50 @@ mod tests {
         assert_eq!(s.get("pinhole.folder"), Some(&true));
         assert_eq!(s.len(), 2);
         assert!(stamp(&path).is_some());
+        // Caught half written, or broken by hand: the switches stay as they
+        // were, and a plugin turned off is not turned on by it.
+        for broken in [r#"{"enabled": {"pinhole.series": fal"#, "", "[]"] {
+            std::fs::write(&path, broken).unwrap();
+            assert_eq!(switches_in(&path), s, "{broken:?}");
+        }
+        std::fs::write(&path, r#"{"enabled": {"pinhole.series": true}}"#).unwrap();
+        assert_eq!(switches_in(&path).get("pinhole.series"), Some(&true));
+        // No file at all: nothing turned.
+        std::fs::remove_file(&path).unwrap();
+        assert!(switches_in(&path).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_kind_is_the_plugins_with_the_longest_id_that_names_it_whatever_the_folders_order() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("pinhole-owners-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let places = Places { builtin: dir.join("builtin"), personal: dir.join("personal"), state: dir.join("state") };
+        let plugin = |folder: &str, id: &str, kinds: &[&str]| {
+            let at = places.personal.join(folder);
+            std::fs::create_dir_all(&at).unwrap();
+            std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
+            let sources: Vec<Value> = kinds.iter().map(|k| serde_json::json!({"kind": k, "provider": "run"})).collect();
+            let manifest = serde_json::json!({"schemaVersion": 1, "api": 3, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources});
+            std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
+            std::fs::write(at.join("run"), "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(at.join("run"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        // `me`, found first, claims what `me.jpegs` and `me.jpegs.raw`
+        // name; `me.jpegs` claims `me.jpegs.raw`, which is another's too.
+        plugin("a-me", "me", &["me", "me.jpegs", "me.jpegs.raw", "me.jpegsx"]);
+        plugin("jpegs", "me.jpegs", &["me.jpegs", "me.jpegs.raw", "me.jpegs.small"]);
+        plugin("raw", "me.jpegs.raw", &[]);
+        let (found, problems) = provided(&places, &[]);
+        let kinds: Vec<(&str, &str)> = found.iter().map(|p| (p.plugin.as_str(), p.kind.as_str())).collect();
+        assert_eq!(kinds, [("me", "me"), ("me", "me.jpegsx"), ("me.jpegs", "me.jpegs"), ("me.jpegs", "me.jpegs.small")]);
+        let said = problems.join("\n");
+        for why in ["me: source \"me.jpegs\": that kind is me.jpegs's", "me: source \"me.jpegs.raw\": that kind is me.jpegs.raw's",
+                    "me.jpegs: source \"me.jpegs.raw\": that kind is me.jpegs.raw's"] {
+            assert!(said.contains(why), "{why} not in:\n{said}");
+        }
+        assert_eq!(problems.len(), 3, "{said}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -299,7 +299,9 @@ never claimed by a manifest. A kind is on unless its plugin is turned
 off in `~/.config/pinhole/plugins.json` (`"enabled": {"pinhole.icloud":
 false}`), which the window writes and the service only reads: the window
 sends `plugins_changed` after writing it, and each sync round looks at the
-file again in case it was edited by hand. A kind that is off keeps
+file again in case it was edited by hand. A file there that cannot be read
+as a JSON object (caught half written, or broken by hand) changes no
+switch: they stay as last read, and the log says so once. A kind that is off keeps
 everything: its entries stay in the settings, its libraries and sessions
 on disk. It is only not listed in `sources`, not shown, not synced and not
 watched, and `set_source`, `remove_source`, `sign_out`, `sign_in` and
