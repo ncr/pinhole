@@ -27,6 +27,8 @@ PinholePlugin {
     // The photo the panel is about, what the library says of it, and what
     // is known so far of its original.
     property string photoId
+    // The key of its original the index gave, once it has.
+    property string photoKey
     property var item: ({})
     property var facts: ({})
     // Its original to come (asked for, or waited for a moment first), on
@@ -55,11 +57,20 @@ PinholePlugin {
         target: pinhole.library
         // Read again, as on every iCloud change: the photo shown, if it is
         // still the one at its place, only taken again, what is under way
-        // for it going on; else positions moved, and it is looked up again.
+        // for it going on, unless it came with another original (edited
+        // on the phone): then read again from that one; else positions
+        // moved, and it is looked up again.
         function onChanged() {
             const it = plugin.at >= 0 ? pinhole.library.item(plugin.at) : {}
             if (it.id !== undefined && it.id === plugin.photoId) {
                 plugin.item = it
+                const id = it.id
+                plugin.indexed(id, plugin.track).then(found => {
+                    if (id === plugin.photoId && found.key !== plugin.photoKey) {
+                        plugin.photoId = ""
+                        plugin.look()
+                    }
+                }).catch(error => plugin.failed(id, error, qsTr("The index could not be read: %1")))
                 return
             }
             plugin.photoId = ""
@@ -116,6 +127,7 @@ PinholePlugin {
             return
         leave()
         photoId = it.id
+        photoKey = ""
         item = it
         trouble = ""
         // What was read of it before shows at once, kept if its original is
@@ -127,6 +139,7 @@ PinholePlugin {
         indexed(id, track).then(found => {
             if (id !== photoId)
                 return
+            photoKey = found.key
             // Read meanwhile (the tour reads ahead), or kept in the cache.
             const now = known[id]
             if (now && now.key === found.key) {
@@ -329,16 +342,45 @@ PinholePlugin {
     // too, as the panel reads them, for the button to be there as the step
     // comes, not seconds after.
     property string placeId
+    // Looked for still; and the step on the place come before it was
+    // found, which then opens it once it is.
+    property bool findingPlace: false
+    property bool placeWanted: false
+    property int placeAsked: 0
     function findPlace(index) {
+        const asked = ++placeAsked
         placeId = ""
+        placeWanted = false
+        findingPlace = false
         const date = pinhole.library.item(index).date
         if (date === undefined)
             return
+        findingPlace = true
         pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))]).then(result => {
+            if (asked !== placeAsked)
+                return
             placeId = result.stdout.trim()
             if (placeId !== "")
                 readAhead(placeId)
-        }).catch(pinhole.warn)
+            const at = placeId !== "" ? pinhole.library.indexOf(placeId) : -1
+            if (placeWanted && touring && pinhole.viewer.open && at >= 0 && pinhole.viewer.index !== at)
+                pinhole.openPhoto(at)
+        }).catch(pinhole.warn).then(() => {
+            if (asked !== placeAsked)
+                return
+            findingPlace = false
+            placeWanted = false
+        })
+    }
+    // The tour's step on the place: the photo found, or until it is, the
+    // one shown.
+    function placeStep() {
+        touring = true
+        const at = placeId !== "" ? pinhole.library.indexOf(placeId) : -1
+        if (at >= 0)
+            return at
+        placeWanted = findingPlace
+        return pinhole.viewer.open ? pinhole.viewer.index : pinhole.currentIndex()
     }
     function readAhead(id) {
         if (known[id])
@@ -376,11 +418,7 @@ PinholePlugin {
         {
             title: qsTr("Where"),
             text: qsTr("A photo that knows where it was taken shows the place, and W opens it on OpenStreetMap."),
-            open: () => {
-                plugin.touring = true
-                const index = plugin.placeId !== "" ? pinhole.library.indexOf(plugin.placeId) : -1
-                return index >= 0 ? index : pinhole.currentIndex()
-            },
+            open: () => plugin.placeStep(),
             action: mapLight
         }
     ]
