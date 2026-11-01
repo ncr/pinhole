@@ -118,6 +118,8 @@ class PluginHost : public QObject {
     Q_PROPERTY(QObject *settings READ settings CONSTANT)
     // Photos ticked in the grid's select mode (a card's all of them).
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
+    // How many photos the grid hides now, all plugins' `hidden` together.
+    Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenChanged)
     // What last went wrong in it, for the side panel: its QML not loading,
     // an error thrown, a warning from one of its files. Empty when loaded
     // again.
@@ -140,8 +142,14 @@ public:
     // The photos ticked, by position, oldest first.
     Q_INVOKABLE QList<int> selection() const;
     int selectionCount() const;
+    // Whether a photo (a position or an id) is hidden from the grid, by any
+    // plugin's `hidden`: what a plugin counting or showing photos leaves
+    // out, as the grid does.
+    Q_INVOKABLE bool isHidden(const QJSValue &photo) const;
+    int hiddenCount() const;
     // Scroll the grid to a photo (a position or an id), if it is not on
-    // screen.
+    // screen, and mark it there: the keyboard's cursor on it, and a ring
+    // that fades. A hidden photo: the next one shown, where it would be.
     Q_INVOKABLE void reveal(const QJSValue &photo) const;
     // Open a photo (a position or an id) full window.
     Q_INVOKABLE void openPhoto(const QJSValue &photo) const;
@@ -208,6 +216,8 @@ public:
 signals:
     void cacheDirChanged();
     void selectionChanged();
+    // What the grid hides changed (or moved, the library read again).
+    void hiddenChanged();
     void problemChanged();
     void notified(const QString &text);
 
@@ -315,8 +325,11 @@ public:
 signals:
     void idsChanged();
     void changed();
-    // The grid's selection.
+    // The grid's selection, and the photos it hides.
     void selectionChanged();
+    void hiddenChanged();
+    // A plugin revealed a photo: the window marks where it is.
+    void revealed(int index);
     // A plugin's few words for the foot of the window (notify).
     void notice(const QString &id, const QString &text);
 

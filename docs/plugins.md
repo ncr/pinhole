@@ -115,9 +115,10 @@ own. It sets:
 - `hidden`: photos not in the grid at all, a list of library positions,
   as Screenshots hides screenshots. They leave any stack they are in, the
   viewer's ← and →, its strip and Home/End pass over them, and Ctrl+A and a
-  range leave them out; a plugin can still `openPhoto` one. Keep it short
-  of the whole library, and say somewhere how many are away and how to
-  have them back.
+  range leave them out; a plugin can still `openPhoto` one. Say somewhere
+  how many are away and how to have them back; with every photo hidden,
+  the window says so, and names the plugin. Other plugins see what is
+  hidden with `pinhole.isHidden`.
 - `tour`: a few steps that show what it does, on the photos and buttons as
   they are: `[{ title, text, photo, open, action, settings }, ...]`.
   `photo` is a library position (or a function giving one) the grid goes to
@@ -144,7 +145,8 @@ positions move when the library is read again, ids do not, so keep ids.
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
-| `reveal(photo)`, `openPhoto(photo)` | the grid to a photo; a photo full window |
+| `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
+| `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes: what a plugin counting or showing photos leaves out, as the grid does |
 | `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |

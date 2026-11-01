@@ -61,6 +61,9 @@ class PhotoGrid : public QQuickItem {
     // Photos not in the grid at all, library positions: no cell, and out of
     // any stack. Plugins' hidden photos, gathered (Main.qml).
     Q_PROPERTY(QVariantList hidden READ hidden WRITE setHidden NOTIFY hiddenChanged)
+    // How many of the library's photos are hidden now: with `count` 0, a
+    // library that is not empty but shows nothing.
+    Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY cellsChanged)
     // The marks drawn on cells (marks.h: Mark), or-ed.
     Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
     // The marks' colours, the Omarchy theme's: a video's, a Live Photo's, a
@@ -130,6 +133,9 @@ public:
     void setStacks(const QVariantList &stacks);
     QVariantList hidden() const { return m_hiddenGiven; }
     void setHidden(const QVariantList &hidden);
+    int hiddenCount() const { return m_hiddenCount; }
+    // Whether a photo has no cell, hidden by a plugin.
+    Q_INVOKABLE bool isHidden(int index) const;
     int marks() const { return m_marks; }
     void setMarks(int marks);
     QVariantList markColours() const;
@@ -157,7 +163,8 @@ public:
     Q_INVOKABLE int indexAt(qreal x, qreal y) const;
     Q_INVOKABLE int currentIndex() const;
     // Where a photo's cell is on screen (it may be off it), and bringing it
-    // into view if it is not.
+    // into view if it is not. A hidden photo's is the next shown one's (the
+    // last's, past the end): where it would be.
     Q_INVOKABLE QRectF rectOf(int index) const;
     // The stack a photo is in, by its card's photo, or -1: the viewer's
     // strip marks a stack's photos.
@@ -306,6 +313,8 @@ private:
     // and a cell's photos (one, or a stack's).
     int libraryAt(int cell) const { return m_cellOf.empty() ? cell : m_cells[size_t(cell)]; }
     int cellOf(int index) const;
+    // A photo's cell, or a hidden one's next shown; -1 with no cells.
+    int nearestCell(int index) const;
     int cellAt(qreal x, qreal y) const;
     void appendPhotos(int cell, QList<int> &out) const;
     QList<int> photosOf(int cell) const;
@@ -362,6 +371,7 @@ private:
     std::vector<std::vector<int>> m_stackLists; // as given, through any reload since
     QVariantList m_hiddenGiven;
     std::vector<int> m_hiddenList; // as given, through any reload since
+    int m_hiddenCount = 0;
     int m_marks = 13; // all but Live, as the side panel starts
     // By Mark's bit: video, live, favourite, stack. Counted up on every
     // change, for the render thread to draw them again.

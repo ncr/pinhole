@@ -1,4 +1,5 @@
 {
+  "All %n photos here are hidden": { "one": "The one photo here is hidden", "other": "All %n photos here are hidden" },
   "Preparing %n photos…": { "one": "Preparing %n photo…", "other": "Preparing %n photos…" },
   "Copied %n photo(s)": { "one": "Copied %n photo", "other": "Copied %n photos" },
   "Copied %n, some could not be fetched": { "one": "Copied %n; some could not be fetched", "other": "Copied %n; some could not be fetched" },

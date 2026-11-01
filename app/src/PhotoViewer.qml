@@ -142,7 +142,7 @@ Item {
             height: width / Math.max(0.01, aspect)
             x: centre - width / 2
             y: (root.areaHeight - height) / 2
-            visible: root.progress === 1 && at >= 0 && at < viewer.count && x < root.width && x + width > 0
+            visible: root.progress === 1 && at >= 0 && x < root.width && x + width > 0
             opacity: root.chrome
             Image {
                 anchors.fill: parent

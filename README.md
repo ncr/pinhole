@@ -60,9 +60,12 @@ ones closest to its colour, or lay the library out by hue as a rainbow wall
 (W). It goes by each photo's average colour, so it finds what is mostly one
 colour (a sunset, the sea, a forest) and not a red coat on a grey street.
 
-Screenshots keeps an iPhone's and a desktop's screenshots from crowding out
-the photos: each day's one card, or (⇧S, or the side panel) not in the grid
-at all, with a button saying how many are away.
+Screenshots keeps screenshots from crowding out the photos: each day's one
+card, or (⇧S, or the side panel) not in the grid at all, with a button
+saying how many are away. A screenshot is what iCloud marks as one (an
+iPhone's or an iPad's), a file named as one (screenshot-…, Screenshot …,
+Zrzut ekranu …, hyprshot's, grim's), or a PNG with no place shaped like a
+phone's screen.
 
 A plugin of your own is a folder in
 `~/.config/pinhole/plugins` with a manifest.json and a QML file, loaded

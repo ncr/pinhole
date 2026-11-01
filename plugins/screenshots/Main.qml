@@ -8,20 +8,25 @@ import "Find.js" as Find
 // the grid saying how many are away and bringing them back.
 //
 // A screenshot is known by what the library says of it (Find.js): iCloud
-// marks an iPhone's or an iPad's as one; a desktop's is named so (Omarchy's
-// screenshot-…, a Mac's Screenshot … or Zrzut ekranu …); and a PNG with no
-// place, the size of an iPhone's screen or a monitor's, is one too.
+// marks an iPhone's or an iPad's as one; one named so is one (Omarchy's
+// screenshot-…, a Mac's Screenshot … or Zrzut ekranu …); and so is a PNG
+// with no place shaped like a phone's screen. What it found last is kept
+// for each source's library, and used at once when Pinhole starts, so the
+// screenshots do not show for a moment and then go.
 PinholePlugin {
     id: plugin
 
     // Hidden from the grid, or each day's one card.
     property bool hiding: pinhole.setting("hide", false) === true
-    // The screenshots, library positions in order, and each day's, those
-    // with two or more.
+    // The screenshots' ids, as last found; their library positions in
+    // order, and each day's, those with two or more.
+    property var ids: []
     property var shots: []
     property var days: []
     property bool finding: false
     property bool findAgain: false
+    // Looked for in this library since it was shown (not only kept from
+    // before).
     property bool found: false
 
     stacks: hiding ? [] : days
@@ -37,8 +42,30 @@ PinholePlugin {
     }
     function keepHiding(hide) {
         if (!pinhole.setSetting("hide", hide))
-            console.warn("Screenshots: the setting could not be kept")
+            pinhole.warn(qsTr("The setting could not be kept"))
         hiding = hide
+        // Never quietly: how many went, and the way back.
+        if (hide && shots.length > 0)
+            pinhole.notify(qsTr("%n screenshots hidden: ⇧S shows them again", "", shots.length))
+    }
+
+    // Where what it found is kept, for this source's library.
+    readonly property string keptFile: pinhole.cacheDir + "/screenshots"
+    function loadKept() {
+        found = false
+        const file = keptFile
+        pinhole.run("cat", [file]).then(result => {
+            // Found afresh meanwhile, or another library shown since.
+            if (!found && file === keptFile)
+                take(result.stdout.split("\n").filter(id => id !== ""))
+        }, () => {}) // none kept yet
+        find()
+    }
+    function keep(list) {
+        if (list.join("\n") === ids.join("\n"))
+            return
+        pinhole.run("sh", ["-c", "mkdir -p \"${1%/*}\" && cat > \"$1\"", "sh", keptFile], { input: list.join("\n") + "\n" })
+            .catch(pinhole.warn)
     }
 
     function find() {
@@ -48,38 +75,36 @@ PinholePlugin {
         }
         if (pinhole.library.count === 0) {
             take([])
+            found = true
             return
         }
         finding = true
         // Which tables there are, then what it can ask of them.
         const library = pinhole.library.dir + "/library.sqlite"
-        pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery], (code, out, error) => {
-            if (code !== 0) {
-                done(error)
-                return
-            }
-            pinhole.run("sqlite3", ["-readonly", library, Find.query(out.split("\n"))], (code, out, error) => {
-                if (code === 0)
-                    take(out.split("\n").filter(id => id !== ""))
-                done(code === 0 ? "" : error)
+        pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery])
+            .then(result => pinhole.run("sqlite3", ["-readonly", library, Find.query(result.stdout.split("\n"))]))
+            .then(result => {
+                const list = result.stdout.split("\n").filter(id => id !== "")
+                keep(list)
+                take(list)
+                found = true
             })
-        })
+            .catch(pinhole.warn)
+            .then(() => {
+                finding = false
+                if (findAgain) {
+                    findAgain = false
+                    find()
+                }
+            })
     }
-    function done(error) {
-        finding = false
-        if (error !== "")
-            console.warn("Screenshots: " + error)
-        if (findAgain) {
-            findAgain = false
-            find()
-        }
-    }
-    // The ids found, as positions, and each day's together.
-    function take(ids) {
-        const list = ids.map(id => pinhole.library.indexOf(id)).filter(i => i >= 0).sort((a, b) => a - b)
+    // The ids, as positions, and each day's together.
+    function take(list) {
+        ids = list
+        const positions = list.map(id => pinhole.library.indexOf(id)).filter(i => i >= 0).sort((a, b) => a - b)
         const byDay = {}
         const order = []
-        for (const i of list) {
+        for (const i of positions) {
             const day = new Date(pinhole.library.item(i).date).toDateString()
             if (!byDay[day]) {
                 byDay[day] = []
@@ -87,25 +112,33 @@ PinholePlugin {
             }
             byDay[day].push(i)
         }
-        shots = list
+        shots = positions
         days = order.map(day => byDay[day]).filter(day => day.length >= 2)
-        found = true
     }
 
-    // The library changed: look again, once it has settled.
+    // The library read again: the same screenshots where they are now at
+    // once, then a look for new ones once it has settled. Another source's
+    // library: what was kept for it.
     Timer { id: later; interval: 1500; onTriggered: plugin.find() }
     Connections {
         target: pinhole.library
-        function onChanged() { later.restart() }
+        function onChanged() {
+            plugin.take(plugin.ids)
+            later.restart()
+        }
     }
-    Component.onCompleted: find()
+    Connections {
+        target: pinhole
+        function onCacheDirChanged() { plugin.loadKept() }
+    }
+    Component.onCompleted: loadKept()
 
     actions: [
         // While they are away, how many, and the way back.
         PluginAction {
             id: hiddenAction
             place: "grid"
-            text: qsTr("%n hidden", "", plugin.shots.length)
+            text: qsTr("%n screenshots hidden", "", plugin.shots.length)
             key: "Shift+S"
             shown: plugin.hiding && plugin.shots.length > 0
             active: true
@@ -125,13 +158,25 @@ PinholePlugin {
 
     help: [["Shift+S", qsTr("Screenshots: hide them, or show them again, each day's one card")]]
 
-    tourReady: found && shots.length > 0
-    tour: [
+    tourReady: shots.length > 0
+    // As it is now: each day's one card, or hidden.
+    tour: hiding ? [
+        {
+            title: qsTr("Out of the way"),
+            text: qsTr("Screenshots, from an iPhone or a desktop, are hidden from the grid, and the viewer passes over them, so they leave room for the photos. This button says how many are away."),
+            action: hiddenAction
+        },
+        {
+            title: qsTr("Or each day's one card"),
+            text: qsTr("⇧S or the button shows them again, each day's one card; ⇧S hides them again. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
+            settings: true
+        }
+    ] : [
         {
             title: qsTr("Out of the way"),
             text: qsTr("Screenshots, from an iPhone or a desktop, are one card for each day's, so they leave room for the photos."),
             photo: () => {
-                if (plugin.hiding || plugin.days.length === 0)
+                if (plugin.days.length === 0)
                     return -1
                 const near = pinhole.currentIndex()
                 let best = plugin.days[0][0]
@@ -143,12 +188,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Or not there at all"),
-            text: qsTr("⇧S hides them from the grid, and the viewer passes over them; a button at the top says how many are away, and ⇧S again brings them back. Ctrl+Z undoes either."),
-            action: hiddenAction
-        },
-        {
-            title: qsTr("Settings"),
-            text: qsTr("Here, in the side panel (Tab), they are hidden or stacked, and this tour can be shown again."),
+            text: qsTr("⇧S hides them from the grid, and the viewer passes over them; a button at the top then says how many are away, and brings them back. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
             settings: true
         }
     ]
@@ -184,9 +224,8 @@ PinholePlugin {
                 wrapMode: Text.WordWrap
                 color: theme.foreground
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: !plugin.found ? qsTr("Looking for screenshots…")
-                    : plugin.shots.length === 0 ? qsTr("No screenshots here.")
-                    : plugin.hiding ? qsTr("%n screenshots hidden.", "", plugin.shots.length)
+                text: plugin.shots.length === 0 ? (plugin.found ? qsTr("No screenshots here.") : qsTr("Looking for screenshots…"))
+                    : plugin.hiding ? qsTr("%n screenshots hidden", "", plugin.shots.length)
                     : qsTr("%n screenshots, each day's one card.", "", plugin.shots.length)
             }
         }

@@ -304,6 +304,8 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved, const std::vector
     std::sort(selectedBefore.begin(), selectedBefore.end());
     m_zoom = {};
     rebuildCells(&moved);
+    if (!m_hiddenList.empty())
+        emit hiddenChanged();
     const bool selectionChanged = selectedBefore != selection();
     m_pendingMoves = std::make_shared<std::vector<int>>(textures ? *textures : moved);
     emit libraryChanged();
@@ -377,7 +379,7 @@ int PhotoGrid::currentIndex() const {
 }
 
 QRectF PhotoGrid::rectOf(int index) const {
-    const int cell = cellOf(index);
+    const int cell = nearestCell(index);
     if (cell < 0)
         return {};
     return cellRect(cell, Layer{m_columns, 1, QPointF(0, m_scroll), QPointF(0, 0), 1});
@@ -397,6 +399,23 @@ int PhotoGrid::cellOf(int index) const {
     if (m_cellOf.empty())
         return index;
     return index >= 0 && index < int(m_cellOf.size()) ? m_cellOf[size_t(index)] : -1;
+}
+
+int PhotoGrid::nearestCell(int index) const {
+    const int n = count();
+    if (index < 0 || n == 0)
+        return -1;
+    if (m_cellOf.empty())
+        return std::min(index, n - 1);
+    if (const int cell = cellOf(index); cell >= 0)
+        return cell;
+    // The cells' photos are in order.
+    const auto next = std::lower_bound(m_cells.begin(), m_cells.end(), index);
+    return std::min(int(next - m_cells.begin()), n - 1);
+}
+
+bool PhotoGrid::isHidden(int index) const {
+    return m_library && index >= 0 && index < m_library->count() && !m_cellOf.empty() && m_cellOf[size_t(index)] < 0;
 }
 
 void PhotoGrid::appendPhotos(int cell, QList<int> &out) const {
@@ -480,8 +499,18 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
     auto photoAt = [&](int cell) {
         return cell < 0 ? -1 : m_cellOf.empty() ? cell : cell < int(m_cells.size()) ? m_cells[size_t(cell)] : -1;
     };
+    const int oldCount = count();
+    auto photoIn = [&](int cell) { return cell >= 0 && cell < oldCount ? mapped(photoAt(cell)) : -1; };
     const int anchorPhoto = mapped(photoAt(m_selectionAnchor));
     const int zoomPhoto = m_zoom.active ? mapped(photoAt(m_zoom.index)) : -1;
+    // The cursor, a press and a sweep under way, by their photos too.
+    const int cursorPhoto = photoIn(m_cursor);
+    const int pressPhoto = photoIn(m_pressIndex);
+    QList<int> sweepBase;
+    for (int cell : m_sweepBase)
+        appendPhotos(cell, sweepBase);
+    for (int &i : sweepBase)
+        i = mapped(i);
     if (moved) {
         for (auto &stack : m_stackLists) {
             for (int &i : stack)
@@ -507,6 +536,7 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         hidden[size_t(i)] = 1;
     }
     auto isHidden = [&](int i) { return !hidden.empty() && hidden[size_t(i)]; };
+    m_hiddenCount = int(std::count(hidden.begin(), hidden.end(), 1));
     // Each photo's card, by the card's position: the first stack to claim a
     // photo keeps it.
     std::vector<int> card;
@@ -550,6 +580,14 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
     m_selectionAnchor = anchorPhoto >= 0 ? cellOf(anchorPhoto) : -1;
     if (zoomPhoto >= 0)
         m_zoom.index = cellOf(zoomPhoto);
+    // The cursor stays on its photo, or on the next one shown; a press on
+    // a photo now hidden opens nothing.
+    m_cursor = cursorPhoto >= 0 ? nearestCell(cursorPhoto) : std::min(m_cursor, count() - 1);
+    m_pressIndex = pressPhoto >= 0 ? cellOf(pressPhoto) : -1;
+    m_sweepBase.clear();
+    for (int i : sweepBase)
+        if (const int cell = cellOf(i); cell >= 0)
+            m_sweepBase.insert(cell);
 }
 
 QVariantList PhotoGrid::markColours() const {
@@ -638,7 +676,8 @@ void PhotoGrid::sweep() {
     const int column = std::clamp(int(m_sweepAt.x() / s), 0, m_columns - 1);
     const int row = std::clamp(int(std::floor((m_scroll + m_sweepAt.y()) / s)), 0, rows - 1);
     const int index = std::min(row * m_columns + column, count() - 1);
-    if (index < 0)
+    // The photo it began on hidden meanwhile: nothing to sweep from.
+    if (index < 0 || m_pressIndex < 0)
         return;
     std::set<int> selected = m_sweepBase;
     for (int i = std::min(index, m_pressIndex); i <= std::max(index, m_pressIndex); ++i)
@@ -935,7 +974,7 @@ void PhotoGrid::tickCursor() {
 }
 
 void PhotoGrid::putCursorOn(int index) {
-    const int cell = cellOf(index);
+    const int cell = nearestCell(index);
     if (cell < 0)
         return;
     m_cursor = cell;

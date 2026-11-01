@@ -204,6 +204,11 @@ private:
     // photo shown (a plugin opened it) lies between two places.
     int placeOf(int index) const;
     int placeFrom(int direction) const;
+    // The photo `k` places from the shown one in the row, -1 for none
+    // (beside(), without a far jump's).
+    int rowBeside(int k) const;
+    // Where a step of `delta` goes: the photo, -1 for nowhere, and its place.
+    int stepTarget(int delta, int *place = nullptr) const;
     // The row again, from the hidden photos given and the library.
     void rebuildRow();
     // The held arrow let go (or lost track of): the photos stop moving on.

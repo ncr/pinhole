@@ -1,5 +1,6 @@
 {
   "%1 h": "%1 godz.",
+  "%1 hides them. Its button at the top, or its settings in the side panel (Tab), shows them again.": "Ukrywa je %1. Pokażesz je znów jego przyciskiem u góry albo w jego ustawieniach w panelu bocznym (Tab).",
   "%1 is not answering properly. Trying again shortly.": "%1 nie odpowiada poprawnie. Wkrótce kolejna próba.",
   "%1 is not there. Is its disk connected?": "Nie ma %1. Czy dysk jest podłączony?",
   "%1 min": "%1 min",
@@ -27,6 +28,12 @@
     "other": "Jeszcze około %n minuty."
   },
   "Add a source": "Dodaj źródło",
+  "All %n photos here are hidden": {
+    "one": "Jedyne zdjęcie tutaj jest ukryte",
+    "few": "Wszystkie %n zdjęcia tutaj są ukryte",
+    "many": "Wszystkie %n zdjęć tutaj jest ukrytych",
+    "other": "Wszystkie %n zdjęć tutaj jest ukrytych"
+  },
   "Apple did not accept that Apple ID or password.": "Apple nie przyjął tego Apple ID albo hasła.",
   "Apple ID": "Apple ID",
   "Apple is not taking sign-ins for this Apple ID right now. Try once more in half an hour.": "Apple chwilowo nie przyjmuje logowań na to Apple ID. Spróbuj jeszcze raz za pół godziny.",

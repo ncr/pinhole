@@ -305,6 +305,7 @@ PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
     : QObject(plugins), m_id(id), m_dir(dir), m_plugins(plugins) {
     m_settings = std::make_unique<PluginSettings>(this);
     connect(plugins, &Plugins::selectionChanged, this, &PluginHost::selectionChanged);
+    connect(plugins, &Plugins::hiddenChanged, this, &PluginHost::hiddenChanged);
     connect(this, &PluginHost::notified, plugins, [this](const QString &text) { emit m_plugins->notice(m_id, text); });
 }
 
@@ -331,15 +332,26 @@ QList<int> PluginHost::selection() const { return m_plugins->grid() ? m_plugins-
 
 int PluginHost::selectionCount() const { return m_plugins->grid() ? m_plugins->grid()->selectionCount() : 0; }
 
+bool PluginHost::isHidden(const QJSValue &photo) const {
+    return m_plugins->grid() && m_plugins->grid()->isHidden(m_plugins->library()->positionOf(photo));
+}
+
+int PluginHost::hiddenCount() const { return m_plugins->grid() ? m_plugins->grid()->hiddenCount() : 0; }
+
 void Plugins::setGrid(PhotoGrid *grid) {
     m_grid = grid;
     connect(grid, &PhotoGrid::selectionChanged, this, &Plugins::selectionChanged);
+    connect(grid, &PhotoGrid::hiddenChanged, this, &Plugins::hiddenChanged);
 }
 
 void PluginHost::reveal(const QJSValue &photo) const {
     const int index = m_plugins->library()->positionOf(photo);
-    if (m_plugins->grid() && index >= 0)
-        m_plugins->grid()->reveal(index);
+    PhotoGrid *grid = m_plugins->grid();
+    if (!grid || index < 0)
+        return;
+    grid->reveal(index);
+    grid->putCursorOn(index);
+    emit m_plugins->revealed(index);
 }
 
 void PluginHost::openPhoto(const QJSValue &photo) const {

@@ -36,6 +36,36 @@ ApplicationWindow {
     }
     // The viewer's row passes over the photos the grid hides.
     Binding { target: viewer; property: "hidden"; value: win.pluginHidden }
+    // A photo a plugin went to (pinhole.reveal): a ring around it that
+    // fades, so it shows where it is even when it was on screen already.
+    Rectangle {
+        id: revealMark
+        property int index: -1
+        readonly property rect cell: (grid.scrollFraction, grid.columns, grid.count, index >= 0 ? grid.rectOf(index) : Qt.rect(0, 0, 0, 0))
+        x: cell.x - 3
+        y: cell.y - 3
+        width: cell.width + 6
+        height: cell.height + 6
+        radius: 6
+        color: "transparent"
+        border.color: theme.accent
+        border.width: 3
+        opacity: 0
+        visible: opacity > 0 && index >= 0
+        SequentialAnimation {
+            id: revealFade
+            NumberAnimation { target: revealMark; property: "opacity"; to: 1; duration: 120 }
+            PauseAnimation { duration: 900 }
+            NumberAnimation { target: revealMark; property: "opacity"; to: 0; duration: 600 }
+        }
+        Connections {
+            target: plugins
+            function onRevealed(index) {
+                revealMark.index = index
+                revealFade.restart()
+            }
+        }
+    }
     // Back from the viewer, on the photo it closed on.
     Connections {
         target: viewer
@@ -73,7 +103,8 @@ ApplicationWindow {
     // A source with nothing in it yet, and nothing under way to say so.
     Column {
         anchors.centerIn: parent
-        visible: !win.firstRun && sources.known && grid.count === 0 && !buildProgress.visible && !trouble.visible
+        visible: !win.firstRun && sources.known && grid.count === 0 && grid.hiddenCount === 0 && !buildProgress.visible
+                 && !trouble.visible
         spacing: theme.fontSize
         width: Math.min(parent.width - 48, 520)
         UiText {
@@ -86,6 +117,29 @@ ApplicationWindow {
         UiText {
             width: parent.width
             text: qsTr("Photos show here as soon as they are found.")
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+    }
+
+    // A source whose every photo a plugin hides (Screenshots, on a folder
+    // of screenshots): it is not empty, and the way back is that plugin's.
+    Column {
+        anchors.centerIn: parent
+        visible: !win.firstRun && sources.known && grid.count === 0 && grid.hiddenCount > 0 && !trouble.visible
+        spacing: theme.fontSize
+        width: Math.min(parent.width - 48, 520)
+        UiText {
+            width: parent.width
+            text: qsTr("All %n photos here are hidden", "", grid.hiddenCount)
+            color: theme.brightForeground
+            font.pixelSize: Math.round(theme.fontSize * 1.333)
+            horizontalAlignment: Text.AlignHCenter
+        }
+        UiText {
+            width: parent.width
+            text: qsTr("%1 hides them. Its button at the top, or its settings in the side panel (Tab), shows them again.")
+                  .arg(win.pluginHiders.join(", "))
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
         }
@@ -657,6 +711,8 @@ ApplicationWindow {
     property var pluginActions: []
     property var pluginStacks: []
     property var pluginHidden: []
+    // The names of the plugins hiding any.
+    property var pluginHiders: []
     property var pluginHelp: []
     property bool pluginCovering: false
     property int pluginsLoaded: 0
@@ -670,7 +726,7 @@ ApplicationWindow {
     }
     function collectPlugins() {
         const actions = [], help = []
-        let stacks = [], hidden = []
+        let stacks = [], hidden = [], hiders = []
         let covering = false
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -683,14 +739,17 @@ ApplicationWindow {
                 help.push({ title: loader.info.name, keys: item.help })
             if (item.stacks && item.stacks.length > 0)
                 stacks = stacks.concat(item.stacks)
-            if (item.hidden && item.hidden.length > 0)
+            if (item.hidden && item.hidden.length > 0) {
                 hidden = hidden.concat(item.hidden)
+                hiders.push(loader.info.name)
+            }
             covering = covering || item.covering === true
         }
         pluginActions = actions
         pluginHelp = help
         pluginStacks = stacks
         pluginHidden = hidden
+        pluginHiders = hiders
         pluginCovering = covering
         ++pluginsLoaded
         // A plugin turned off, or loaded again, takes its tour with it.
@@ -727,7 +786,7 @@ ApplicationWindow {
     }
     // Nothing in the way: no panel, the viewer or select mode, nor a source
     // in trouble saying so.
-    readonly property bool tourFree: inGrid && !grid.selecting && grid.count > 0 && !trouble.visible
+    readonly property bool tourFree: inGrid && !grid.selecting && (grid.count > 0 || grid.hiddenCount > 0) && !trouble.visible
     onTourFreeChanged: if (tourFree) tourDue.restart()
 
     SidePanel {

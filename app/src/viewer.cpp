@@ -340,6 +340,20 @@ int Viewer::placeFrom(int direction) const {
     return direction > 0 && photoAt(p) != m_index ? p - 1 : p;
 }
 
+int Viewer::stepTarget(int delta, int *place) const {
+    if (!delta || count() == 0)
+        return -1;
+    const int to = std::clamp(placeFrom(delta) + delta, 0, count() - 1);
+    const int photo = photoAt(to);
+    // Never back the other way: a hidden photo shown past either end of
+    // the row has nothing beyond it.
+    if (photo < 0 || photo == m_index || (photo > m_index) != (delta > 0))
+        return -1;
+    if (place)
+        *place = to;
+    return photo;
+}
+
 int Viewer::photoAt(int place) const {
     if (place < 0 || place >= count())
         return -1;
@@ -381,7 +395,7 @@ void Viewer::fitPhoto() {
     const double a = aspect();
     const double w = std::min(m_viewport.width(), m_viewport.height() * a);
     m_motion.setPhoto(w, w / std::max(0.01, a), !isVideo());
-    m_motion.setNeighbours(placeFrom(-1) > 0, placeFrom(1) < count() - 1);
+    m_motion.setNeighbours(rowBeside(-1) >= 0, rowBeside(1) >= 0);
 }
 
 void Viewer::setViewport(qreal width, qreal height) {
@@ -395,8 +409,7 @@ void Viewer::advance(qreal seconds) {
     m_motion.advance(seconds);
     // A held key brought the next photo; the carousel is already on its way.
     if (const int delta = m_motion.takeSteps()) {
-        const int next = photoAt(std::clamp(placeFrom(delta) + delta, 0, count() - 1));
-        if (next >= 0 && next != m_index) {
+        if (const int next = stepTarget(delta); next >= 0) {
             m_jumpFrom = -1;
             show(next);
         }
@@ -517,17 +530,20 @@ int Viewer::beside(int k) const {
             return m_jumpFrom;
         return -1;
     }
+    return rowBeside(k);
+}
+
+int Viewer::rowBeside(int k) const {
     if (k == 0)
         return m_index;
-    return photoAt(placeFrom(k) + k);
+    const int photo = photoAt(placeFrom(k) + k);
+    return photo >= 0 && (photo > m_index) == (k > 0) ? photo : -1;
 }
 
 void Viewer::step(int delta) {
-    if (!delta || count() == 0)
-        return;
-    const int to = std::clamp(placeFrom(delta) + delta, 0, count() - 1);
-    const int next = photoAt(to);
-    if (next < 0 || next == m_index)
+    int to = 0;
+    const int next = stepTarget(delta, &to);
+    if (next < 0)
         return;
     m_jumpFrom = -1;
     m_motion.jumped(to - placeFrom(delta));
@@ -536,11 +552,9 @@ void Viewer::step(int delta) {
 }
 
 void Viewer::slide(int delta) {
-    if (!delta || count() == 0)
-        return;
-    const int to = std::clamp(placeFrom(delta) + delta, 0, count() - 1);
-    const int next = photoAt(to);
-    if (next < 0 || next == m_index)
+    int to = 0;
+    const int next = stepTarget(delta, &to);
+    if (next < 0)
         return;
     // The new photo slides in from where it lay beside the old one.
     m_jumpFrom = -1;
@@ -597,18 +611,19 @@ void Viewer::fetchShown() {
         request(index, QStringLiteral("medium"));
         showEffect();
     }
-    // The neighbours, two each side: they show beside it while swiping.
+    // The neighbours in the row, two each side: they show beside it while
+    // swiping (not the hidden photos between).
     for (int d : {1, -1, 2, -2}) {
-        const int n = index + d;
-        if (n < 0 || n >= m_library->count() || m_library->at(n).video || m_mediums.contains(m_library->at(n).id))
+        const int n = rowBeside(d);
+        if (n < 0 || m_library->at(n).video || m_mediums.contains(m_library->at(n).id))
             continue;
         const QByteArray id = m_library->at(n).id;
         m_service->fetch(id, QStringLiteral("medium"), [this, id](bool ok, const QJsonObject &result, const QString &) {
             if (!ok || !m_open)
                 return;
             // Found again by its id: the library may have been reloaded.
-            for (int i : {m_index - 2, m_index - 1, m_index + 1, m_index + 2})
-                if (i >= 0 && i < m_library->count() && m_library->at(i).id == id)
+            for (int d : {-2, -1, 1, 2})
+                if (const int i = rowBeside(d); i >= 0 && m_library->at(i).id == id)
                     remember(i, result.value("path").toString());
         });
     }

@@ -149,6 +149,18 @@ private:
         QStringList said() { return engine.globalObject().property("said").toVariant().toStringList(); }
     };
 
+    // A grid whose mouse can be driven from a test.
+    struct ClickableGrid : PhotoGrid {
+        void press(QPointF at) {
+            QMouseEvent e(QEvent::MouseButtonPress, at, at, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            mousePressEvent(&e);
+        }
+        void release(QPointF at) {
+            QMouseEvent e(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            mouseReleaseEvent(&e);
+        }
+    };
+
 private slots:
     // A client that finds no service starts one: never a real pinholed
     // from a test, whose socket a fake service holds.
@@ -1106,7 +1118,11 @@ private slots:
         QCOMPARE(grid.count(), 4);
         QCOMPARE(grid.indexAt(50, 50), 1);
         QCOMPARE(grid.indexAt(150, 50), 3);
-        QVERIFY(grid.rectOf(0).isEmpty());
+        // A hidden photo's cell is where it would be: the next shown.
+        QCOMPARE(grid.rectOf(0), grid.rectOf(1));
+        QCOMPARE(grid.rectOf(2), grid.rectOf(3));
+        QVERIFY(grid.isHidden(2) && !grid.isHidden(3));
+        QCOMPARE(grid.hiddenCount(), 2);
         QCOMPARE(grid.rectOf(4).left(), 200.0);
         // Ctrl+A ticks only what shows.
         grid.selectAll();
@@ -1129,7 +1145,9 @@ private slots:
         // Everything hidden: no cells.
         grid.setHidden({0, 1, 2, 3, 4, 5});
         QCOMPARE(grid.count(), 0);
+        QCOMPARE(grid.hiddenCount(), 6); // not empty: the window says all are hidden
         QCOMPARE(grid.indexAt(50, 50), -1);
+        QVERIFY(grid.rectOf(3).isEmpty());
 
         // A photo comes in first: what is hidden follows its photos.
         grid.setHidden({0, 2});
@@ -1175,6 +1193,133 @@ private slots:
         QCOMPARE(grid.indexAt(350, 650), 199); // 200 photos, a row of 4 last
     }
 
+    void theCursorAndAPressStayOnTheirPhotosWhenTheCellsChange() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&library, &loader, nullptr);
+
+        // The keyboard's cursor on e: still on e as photos before it go,
+        // and on the next one shown when e itself does.
+        grid.setCursorShown(true);
+        grid.putCursorOn(4);
+        QCOMPARE(grid.currentIndex(), 4);
+        grid.setHidden({0, 2});
+        QCOMPARE(grid.currentIndex(), 4);
+        grid.setHidden({0, 2, 4});
+        QCOMPARE(grid.currentIndex(), 5);
+        // Put on a hidden photo, it goes to where that would be.
+        grid.putCursorOn(2);
+        QCOMPARE(grid.currentIndex(), 3);
+        grid.setHidden({});
+        grid.setCursorShown(false);
+
+        // Pressed on d, released after a photo before it was hidden: d
+        // opens, not the photo now in its place.
+        QSignalSpy opened(&grid, &PhotoGrid::activated);
+        grid.press(QPointF(350, 50));
+        grid.setHidden({0});
+        grid.release(QPointF(350, 50));
+        QCOMPARE(opened.count(), 1);
+        QCOMPARE(opened.first().first().toInt(), 3);
+        // Pressed on d, released after d was hidden: nothing opens.
+        grid.setHidden({});
+        grid.press(QPointF(350, 50));
+        grid.setHidden({3});
+        grid.release(QPointF(350, 50));
+        QCOMPARE(opened.count(), 1);
+    }
+
+    void revealingAHiddenPhotoGoesToWhereItWouldBe() {
+        QTemporaryDir dir;
+        QList<std::pair<QByteArray, int>> rows;
+        for (int i = 0; i < 200; ++i)
+            rows.append({QByteArray::number(i), i});
+        makeLibrary(dir.path(), rows);
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&library, &loader, nullptr);
+        QVariantList hidden;
+        for (int i = 10; i < 20; ++i)
+            hidden.append(i);
+        grid.setHidden(hidden);
+        grid.scrollToEnd();
+        grid.reveal(15);
+        const QRectF r = grid.rectOf(15);
+        QCOMPARE(r, grid.rectOf(20));
+        QVERIFY(r.top() >= 0 && r.bottom() <= 700);
+    }
+
+    void aPluginSeesWhatIsHiddenAndARevealMarksThePhoto() {
+        PluginBench bench({{"me.a", {}}});
+        ThumbnailLoader loader(&bench.library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&bench.library, &loader, nullptr);
+        bench.plugins->setGrid(&grid);
+        QSignalSpy changed(bench.host, &PluginHost::hiddenChanged);
+        QCOMPARE(bench.js("pinhole.hiddenCount").toInt(), 0);
+        grid.setHidden({1});
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(bench.js("pinhole.hiddenCount").toInt(), 1);
+        QVERIFY(bench.js("pinhole.isHidden(1)").toBool());
+        QVERIFY(bench.js("pinhole.isHidden('b')").toBool());
+        QVERIFY(!bench.js("pinhole.isHidden(0)").toBool());
+        QVERIFY(!bench.js("pinhole.isHidden(7)").toBool());
+
+        // reveal() marks the photo: the window rings it, and the keyboard's
+        // cursor is on it (a hidden one: the next shown).
+        QSignalSpy revealed(bench.plugins.get(), &Plugins::revealed);
+        grid.setCursorShown(true);
+        bench.js("pinhole.reveal(1)");
+        QCOMPARE(revealed.count(), 1);
+        QCOMPARE(revealed.first().first().toInt(), 1);
+        QCOMPARE(grid.currentIndex(), 2);
+        bench.js("pinhole.reveal('a')");
+        QCOMPARE(grid.currentIndex(), 0);
+    }
+
+    void theViewerFetchesItsRowsNeighboursNotTheHiddenOnes() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}, {"e", 5000}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+
+        Viewer viewer(&library, &service);
+        viewer.setViewport(800, 600);
+        viewer.setHidden({1, 2});
+        viewer.openAt(0, {});
+        auto mediums = [&fake] {
+            fake.read();
+            QStringList assets;
+            for (const QJsonObject &line : std::as_const(fake.asked))
+                if (line.value("params").toObject().value("kind").toString() == QLatin1String("medium"))
+                    assets << line.value("params").toObject().value("asset").toString();
+            return assets;
+        };
+        QTRY_VERIFY(mediums().contains("d") && mediums().contains("e"));
+        QVERIFY(!mediums().contains("b") && !mediums().contains("c"));
+        viewer.close();
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void theViewersRowPassesOverHiddenPhotos() {
         QTemporaryDir dir;
         makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}});
@@ -1216,10 +1361,39 @@ private slots:
         viewer.step(-1);
         QCOMPARE(viewer.index(), 0);
 
+        // The photos beside the shown one are library positions, not
+        // places: the newest ones' neighbours lie past `count`, and are
+        // drawn all the same (PhotoViewer.qml).
+        viewer.openAt(4, {});
+        QCOMPARE(viewer.place(), 2);
+        QCOMPARE(viewer.beside(-1), 3);
+        QVERIFY(viewer.beside(-1) >= viewer.count());
+
         // Shown again, they are in the row again.
         viewer.setHidden({});
         QCOMPARE(viewer.count(), 5);
-        QCOMPARE(viewer.beside(1), 1);
+        QCOMPARE(viewer.place(), 4);
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 3);
+
+        // A hidden photo past the end of the row has nothing after it, and
+        // one before the start nothing before: never a step back the
+        // other way.
+        viewer.setHidden({3, 4});
+        viewer.openAt(4, {});
+        QCOMPARE(viewer.beside(1), -1);
+        QCOMPARE(viewer.beside(-1), 2);
+        viewer.step(1);
+        QCOMPARE(viewer.index(), 4);
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 2);
+        viewer.setHidden({0, 1});
+        viewer.openAt(0, {});
+        QCOMPARE(viewer.beside(-1), -1);
+        viewer.step(-1);
+        QCOMPARE(viewer.index(), 0);
+        viewer.step(1);
+        QCOMPARE(viewer.index(), 2);
         viewer.close();
         qunsetenv("PINHOLE_SOCKET");
     }
