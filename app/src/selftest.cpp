@@ -1299,10 +1299,12 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
             QCoreApplication::exit(1);
             return;
         }
-        // Seven photos from the middle of the screen, ticked as Space does.
+        // Seven photos from the middle of the screen (PINHOLE_SHEET_COUNT
+        // for more), ticked as Space does.
+        const int count = qEnvironmentVariableIsSet("PINHOLE_SHEET_COUNT") ? qEnvironmentVariableIntValue("PINHOLE_SHEET_COUNT") : 7;
         grid->setSelecting(true);
-        const int first = grid->indexAt(grid->width() / 2, grid->height() / 2);
-        for (int i = first; i < first + 7; ++i) {
+        const int first = std::max(0, std::min(grid->indexAt(grid->width() / 2, grid->height() / 2), grid->count() - count));
+        for (int i = first; i < first + count; ++i) {
             grid->putCursorOn(i);
             grid->tickCursor();
         }
@@ -1313,11 +1315,21 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
             { QStringLiteral("2-collage"), [window] { key(window, Qt::Key_2, Qt::NoModifier, "2"); } },
             { QStringLiteral("3-dates"), [window] { key(window, Qt::Key_D, Qt::NoModifier, "d"); } },
             { QStringLiteral("4-grid"), [window] { key(window, Qt::Key_1, Qt::NoModifier, "1"); } },
-            { QStringLiteral("5-white-wide"), [window] {
-                  key(window, Qt::Key_B, Qt::NoModifier, "b");
-                  key(window, Qt::Key_G, Qt::NoModifier, "g");
-              } },
+            { QStringLiteral("5-white"), [window] { key(window, Qt::Key_B, Qt::NoModifier, "b"); } },
+            { QStringLiteral("6-wide"), [window] { key(window, Qt::Key_G, Qt::NoModifier, "g"); } },
         };
+        // How long each key holds the window: until it is handled, until the
+        // frame after it, and the longest the window then stood still while
+        // the step settles (mediums arriving, after K).
+        auto *ticks = new QTimer(window);
+        auto sinceTick = std::make_shared<QElapsedTimer>();
+        auto stall = std::make_shared<qint64>(0);
+        ticks->setInterval(4);
+        QObject::connect(ticks, &QTimer::timeout, window, [=] {
+            *stall = std::max(*stall, sinceTick->restart() - 4);
+        });
+        sinceTick->start();
+        ticks->start();
         auto step = std::make_shared<std::function<void(int)>>();
         *step = [=](int n) {
             if (n == steps.size()) {
@@ -1336,31 +1348,53 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                         *last = now;
                         say(QStringLiteral("making: %1, %2 fetched").arg(making).arg(s->property("fetched").toInt()));
                         if (making == QLatin1String("fetching") && s->property("fetched").toInt() == 0)
-                            grab(QStringLiteral("6-fetching"));
+                            grab(QStringLiteral("7-fetching"));
                     }
                     const QVariantMap made = s->property("made").toMap();
                     const QString error = s->property("error").toString();
-                    if ((making != "" || (made.isEmpty() && error.isEmpty())) && clock->elapsed() < 180000)
+                    if ((making != "" || (made.isEmpty() && error.isEmpty())) && clock->elapsed() < 900000)
                         return;
                     poll->stop();
-                    grab(QStringLiteral("7-made"));
+                    grab(QStringLiteral("8-made"));
                     if (!made.isEmpty())
                         say(QStringLiteral("made %1 (%2) in %3 ms").arg(made.value("path").toString(), made.value("size").toString())
                                 .arg(clock->elapsed()));
                     else
-                        say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 180 s") : error));
-                    key(window, Qt::Key_Escape);
-                    QTimer::singleShot(600, window, [=] {
-                        say(describe(QStringLiteral("after Esc")));
-                        QCoreApplication::exit(made.isEmpty() ? 1 : 0);
+                        say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 900 s") : error));
+                    // Made again, and Esc at once stops it, the studio
+                    // still open; Esc again closes it.
+                    key(window, Qt::Key_Return);
+                    QTimer::singleShot(40, window, [=] {
+                        key(window, Qt::Key_Escape);
+                        QObject *s = studio();
+                        say(QStringLiteral("Esc while making: %1, \"%2\", %3")
+                                .arg(s->property("making").toString().isEmpty() ? "stopped" : "still making",
+                                     s->property("note").toString(), s->property("shown").toBool() ? "open" : "closed"));
+                        key(window, Qt::Key_Escape);
+                        QTimer::singleShot(600, window, [=] {
+                            say(describe(QStringLiteral("after Esc")));
+                            QCoreApplication::exit(made.isEmpty() ? 1 : 0);
+                        });
                     });
                 });
                 poll->start();
                 return;
             }
+            QElapsedTimer handled;
+            handled.start();
             steps[n].second();
-            QTimer::singleShot(1500, window, [=] {
-                say(describe(steps[n].first));
+            const qint64 took = handled.elapsed();
+            // The frame after it, drawn now (a window on a workspace not
+            // shown draws none by itself).
+            handled.restart();
+            window->grabWindow();
+            const qint64 frame = handled.elapsed();
+            sinceTick->restart();
+            *stall = 0;
+            // Opening many: long enough for the first mediums to come.
+            QTimer::singleShot(n == 1 ? 4000 : 1500, window, [=] {
+                say(describe(steps[n].first) + QStringLiteral("; key %1 ms, its frame %2 ms, longest stall after %3 ms")
+                    .arg(took).arg(frame).arg(*stall));
                 grab(steps[n].first);
                 (*step)(n + 1);
             });

@@ -17,12 +17,26 @@ Item {
     opacity: shown ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
-    // The photos, oldest first: {index, aspect, thumbnail, sharp, date, video}.
+    // The photos, oldest first, by id (positions move when the library is
+    // read again): {id, date, video, thumbnail}. At most Layout.MOST; how
+    // many more were ticked.
     property var photos: []
-    // Bumped as it opens again, so what comes for the last ones is let be.
-    property int generation: 0
-    // Files fetched while it is open, by position and kind.
+    property int over: 0
+    // Their shapes, width over height, as the sheet is planned from: set
+    // as it opens, and again only for a photo whose shape was not known.
+    property var aspects: []
+    // Sharper pictures for the preview, by id, as they come.
+    property var sharp: ({})
+    // Files fetched while it is open, by id and kind.
     property var files: ({})
+    // The library it was opened on, by its key.
+    property string libraryKey: ""
+    // Bumped as it opens again or stops, so what comes for before is let be.
+    property int generation: 0
+    // What is on its way (fetches, programs), to cancel.
+    property var pending: []
+    // The thumbnails' decoded size, about a cell's, for a thousand to fit.
+    property int thumbSize: 512
 
     // How it is made, kept for next time.
     property var recipe: Object.assign({}, Layout.DEFAULT_RECIPE, pinhole.setting("recipe", {}))
@@ -36,7 +50,10 @@ Item {
         change(part)
     }
 
-    readonly property var sheet: Layout.plan(recipe, photos.map(p => p.aspect))
+    // What the plan is made from: the background changes nothing in it, so
+    // B plans nothing again (a string is only changed when it differs).
+    readonly property string shape: JSON.stringify({ layout: recipe.layout, gap: recipe.gap, size: recipe.size, dates: recipe.dates })
+    readonly property var sheet: Layout.plan(JSON.parse(shape), aspects)
     readonly property var colours: recipe.background === "white" ? { background: "#ffffff", caption: "#707070" }
         : recipe.background === "black" ? { background: "#000000", caption: "#a0a0a0" }
         : { background: String(theme.background), caption: String(theme.darkForeground) }
@@ -46,13 +63,33 @@ Item {
     readonly property var dates: photos.map(p => oneDay ? Qt.formatTime(new Date(p.date), "HH:mm")
                                                         : new Date(p.date).toLocaleDateString(Qt.locale(), "d MMM yyyy"))
     function day(ms) { return Qt.formatDate(new Date(ms), "yyyy-MM-dd") }
+    // Each date's size, in the file's pixels: half its band, or less where
+    // its cell is too narrow for the longest; none where that would be too
+    // small to read. The preview and the file alike.
+    readonly property var captionPoints: {
+        if (!recipe.dates || sheet.cells.length === 0)
+            return []
+        const perPoint = Math.max(0.01, dateWidth.advanceWidth / dateWidth.font.pixelSize)
+        const most = Math.floor(sheet.cells[0].caption.h * 0.5)
+        return sheet.cells.map(c => {
+            const fits = Math.min(most, Math.floor(c.w * 0.92 / perPoint))
+            return fits >= Math.min(6, most) ? fits : 0
+        })
+    }
+    TextMetrics {
+        id: dateWidth
+        font.family: theme.font
+        font.pixelSize: 100
+        text: studio.dates.reduce((a, b) => b.length > a.length ? b : a, "")
+    }
 
     // Being made: "fetching" the photos (how many are here), then
-    // "making"; the last one made, or why not.
+    // "making"; the last one made, or why not, or a word on what happened.
     property string making: ""
     property int fetched: 0
     property var made: null
     property string error: ""
+    property string note: ""
 
     readonly property var names: ({
         grid: qsTr("Grid"), collage: qsTr("Collage"),
@@ -63,54 +100,141 @@ Item {
     function open(indexes) {
         if (making !== "")
             return
-        ++generation
-        photos = Array.from(indexes).map(i => {
+        stop()
+        let list = Array.from(indexes).map(i => {
             const item = pinhole.library.item(i)
-            return { index: i, aspect: item.width > 0 && item.height > 0 ? item.width / item.height : 4 / 3,
-                     thumbnail: String(item.thumbnail), sharp: "", date: item.date, video: item.video }
-        }).sort((a, b) => a.date - b.date)
+            return { id: item.id, date: item.date, video: item.video, thumbnail: String(item.thumbnail),
+                     aspect: item.width > 0 && item.height > 0 ? item.width / item.height : 0 }
+        }).filter(p => p.id !== undefined).sort((a, b) => a.date - b.date)
+        over = Math.max(0, list.length - Layout.MOST)
+        list = list.slice(0, Layout.MOST)
+        // A photo of no known shape is taken as 4:3 until its medium says.
+        aspects = list.map(p => p.aspect > 0 ? p.aspect : 4 / 3)
+        photos = list.map(p => ({ id: p.id, date: p.date, video: p.video, thumbnail: p.thumbnail }))
+        libraryKey = pinhole.library.key
+        sharp = {}
         files = {}
         made = null
         error = ""
+        note = ""
+        thumbSize = Math.max(64, Math.min(512, Math.ceil(2 * Math.sqrt(width * height / Math.max(1, list.length)) / 64) * 64))
         shown = true
+        const gen = generation
         // The sharper pictures for the preview, as each comes; for a few
         // dozen, past which a cell is small enough for the thumbnail.
-        const gen = generation
-        for (const p of photos.slice(0, 48)) {
-            fetchFile(p, "medium", path => {
-                if (gen !== generation || path === "")
-                    return
-                studio.photos = studio.photos.map(q => q.index === p.index ? Object.assign({}, q, { sharp: "file://" + path }) : q)
-            })
-        }
+        list.slice(0, 48).forEach(p => fetchFile(p.id, "medium").then(path => {
+            if (gen !== generation)
+                return
+            const more = Object.assign({}, sharp)
+            more[p.id] = "file://" + path
+            sharp = more
+        }, () => {}).catch(pinhole.warn))
+        // The shape of those that had none, from their mediums, all at once.
+        const unknown = list.filter(p => !(p.aspect > 0))
+        if (unknown.length > 0)
+            measure(unknown, gen)
     }
+    function measure(unknown, gen) {
+        const paths = {}
+        let left = unknown.length
+        unknown.forEach(p => fetchFile(p.id, "medium").then(path => paths[p.id] = path, () => {}).then(() => {
+            if (--left > 0 || gen !== generation)
+                return
+            const ids = unknown.map(p => p.id).filter(id => paths[id])
+            if (ids.length === 0)
+                return
+            keep(pinhole.run("magick", ["identify", "-ping", "-format", "%w %h %[orientation]\n"].concat(ids.map(id => paths[id] + "[0]")),
+                             { timeout: 60000 })).then(result => {
+                if (gen !== generation)
+                    return
+                const lines = result.stdout.trim().split("\n")
+                const shapes = {}
+                ids.forEach((id, n) => {
+                    const [w, h, orientation] = (lines[n] || "").split(" ")
+                    // Turned a quarter, as LeftTop to LeftBottom are.
+                    const turned = /^(LeftTop|RightTop|RightBottom|LeftBottom)$/.test(orientation)
+                    if (Number(w) > 0 && Number(h) > 0)
+                        shapes[id] = turned ? Number(h) / Number(w) : Number(w) / Number(h)
+                })
+                aspects = photos.map((p, n) => shapes[p.id] || aspects[n])
+            }, () => {}).catch(pinhole.warn)
+        }).catch(pinhole.warn))
+    }
+
+    // Esc, K or ✕: while one is made, stops it, and says so; else closes.
     function close() {
-        if (making === "making")
+        if (making !== "") {
+            stop()
+            note = qsTr("Cancelled")
             return
-        // Fetching is let go; what comes is not waited for.
-        ++generation
-        making = ""
+        }
+        stop()
         shown = false
     }
-    // A photo's file, once: done(path), "" if it could not be had.
-    function fetchFile(p, kind, done) {
-        const key = p.index + ":" + kind
-        if (files[key] !== undefined) {
-            done(files[key])
-            return
-        }
-        pinhole.fetch(p.index, kind, (path, error) => {
-            if (path !== "")
-                files[key] = path
-            done(path)
+    // Whatever is on its way, let go.
+    function stop() {
+        ++generation
+        const was = pending
+        pending = []
+        was.forEach(p => p.cancel())
+        making = ""
+    }
+    // A promise kept, to cancel, until it is answered.
+    function keep(promise) {
+        pending.push(promise)
+        const done = () => { const at = pending.indexOf(promise); if (at >= 0) pending.splice(at, 1) }
+        promise.then(done, done)
+        return promise
+    }
+    // A photo's file, once: a promise of its path.
+    function fetchFile(id, kind) {
+        const key = id + ":" + kind
+        if (files[key] !== undefined)
+            return Promise.resolve(files[key])
+        return keep(pinhole.fetch(id, kind)).then(path => {
+            files[key] = path
+            return path
         })
     }
     function localPath(url) {
         return url.startsWith("file://") ? decodeURIComponent(url.slice(7)) : ""
     }
 
+    // The library read again, as when photos come or go, or another
+    // source's shown: the photos are kept by id, those gone left out.
+    Connections {
+        target: studio.pinhole.library
+        function onChanged() { studio.libraryChanged() }
+    }
+    function libraryChanged() {
+        if (!shown)
+            return
+        if (pinhole.library.key !== libraryKey) {
+            stop()
+            shown = false
+            pinhole.notify(qsTr("Another library is shown, so the contact sheet was closed"))
+            return
+        }
+        const kept = photos.map((p, n) => n).filter(n => pinhole.library.indexOf(photos[n].id) >= 0)
+        if (kept.length === photos.length)
+            return
+        const gone = photos.length - kept.length
+        if (kept.length < 2) {
+            stop()
+            shown = false
+            pinhole.notify(qsTr("The photos ticked are no longer in the library"))
+            return
+        }
+        if (making !== "")
+            stop()
+        aspects = kept.map(n => aspects[n])
+        photos = kept.map(n => photos[n])
+        note = qsTr("%n photo(s) no longer in the library, left out", "", gone)
+    }
+
     // The sheet: each photo fetched as large as its cell needs (the
-    // medium, about 2048 px, unless the cell is near that), then magick.
+    // medium, about 2048 px, unless the cell is near that), a few at a
+    // time, then magick.
     function make() {
         if (making !== "" || photos.length === 0)
             return
@@ -118,38 +242,55 @@ Item {
         const sheet = studio.sheet
         const shot = photos.slice()
         const paths = new Array(shot.length)
+        const points = captionPoints
         making = "fetching"
         fetched = 0
         made = null
         error = ""
-        let left = shot.length
-        shot.forEach((p, n) => {
+        note = ""
+        let next = 0, left = shot.length, blurry = 0
+        const take = (n, path) => {
+            paths[n] = path
+            ++fetched
+            if (--left === 0)
+                render(sheet, shot, paths, points, blurry)
+            else
+                start()
+        }
+        const start = () => {
+            if (gen !== generation || next >= shot.length)
+                return
+            const n = next++
+            const p = shot[n]
             const cell = sheet.cells[n]
             const kind = p.video || Math.max(cell.w, cell.h) <= 1280 ? "medium" : "full"
-            const take = path => {
-                if (gen !== generation)
-                    return
-                paths[n] = path
-                ++fetched
-                if (--left === 0)
-                    render(sheet, shot, paths)
-            }
             // Without the full photo, the medium; without that, the
-            // thumbnail, better than none.
-            fetchFile(p, kind, path => {
-                if (path !== "" || kind === "medium")
-                    take(path !== "" ? path : localPath(p.thumbnail))
-                else
-                    fetchFile(p, "medium", medium => take(medium !== "" ? medium : localPath(p.thumbnail)))
-            })
-        })
+            // thumbnail, better than none, and said.
+            fetchFile(p.id, kind).then(path => path, error => {
+                if (kind === "medium")
+                    throw error
+                return fetchFile(p.id, "medium")
+            }).then(path => {
+                if (gen === generation)
+                    take(n, path)
+            }, error => {
+                if (gen !== generation || error.code === "cancelled")
+                    return
+                ++blurry
+                take(n, localPath(p.thumbnail))
+            }).catch(pinhole.warn)
+        }
+        for (let k = 0; k < 6; ++k)
+            start()
     }
-    function render(sheet, shot, paths) {
-        if (paths.some(path => path === "")) {
-            fail(qsTr("a photo could not be fetched"))
+    function render(sheet, shot, paths, points, blurry) {
+        // Mostly thumbnails is no sheet to send.
+        if (paths.some(path => path === "") || blurry * 2 > shot.length) {
+            fail(qsTr("%1 of %2 photos could not be fetched").arg(blurry).arg(shot.length))
             return
         }
         making = "making"
+        const gen = generation
         const dir = pinhole.picturesDir() + "/Pinhole"
         const base = dir + "/" + day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage"))
         let path = base + ".jpg"
@@ -157,29 +298,30 @@ Item {
             path = base + " " + n + ".jpg"
         // Made beside, then moved in whole.
         const temp = pinhole.cacheDir + "/sheet.jpg"
-        const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], plugin.fontFile, temp)
-        pinhole.run("mkdir", ["-p", dir, pinhole.cacheDir], code => {
-            if (code !== 0) {
-                fail(qsTr("Pictures/Pinhole could not be made"))
+        const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], points, plugin.fontFile,
+                                            pinhole.dir + "/sRGB.icc", temp)
+        keep(pinhole.run("mkdir", ["-p", dir, pinhole.cacheDir])).then(() => {
+            if (gen !== generation)
+                return null
+            // A minute, and more for many.
+            return keep(pinhole.run("magick", args, { timeout: 60000 + 500 * shot.length }))
+        }).then(result => {
+            if (result === null || gen !== generation)
+                return null
+            return keep(pinhole.run("mv", ["-f", temp, path]))
+        }).then(result => {
+            if (result === null || gen !== generation)
                 return
-            }
-            pinhole.run("magick", args, (code, out, err) => {
-                if (code !== 0) {
-                    fail(err.trim().split("\n")[0] || qsTr("magick failed"))
-                    return
-                }
-                pinhole.run("mv", ["-f", temp, path], (code, out, err) => {
-                    making = ""
-                    if (code !== 0) {
-                        error = err.trim()
-                        return
-                    }
-                    pinhole.copyFile(path)
-                    made = { path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
-                             pixels: sheet.w + " × " + sheet.h }
-                })
-            })
-        })
+            making = ""
+            pinhole.copyFile(path)
+            made = { path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
+                     pixels: sheet.w + " × " + sheet.h, blurry: blurry }
+        }, error => {
+            if (gen !== generation || error.code === "cancelled")
+                return
+            fail(error.code === "timeout" ? qsTr("magick took too long")
+                 : (error.message || "").trim().split("\n")[0] || qsTr("magick failed"))
+        }).catch(pinhole.warn)
     }
     function fail(why) {
         making = ""
@@ -304,11 +446,14 @@ Item {
         y: 16
         readonly property var first: studio.photos.length > 0 ? new Date(studio.photos[0].date) : null
         readonly property var last: studio.photos.length > 0 ? new Date(studio.photos[studio.photos.length - 1].date) : null
-        text: (!first ? ""
-               : studio.oneDay ? first.toLocaleDateString(Qt.locale(), "d MMM yyyy")
+        text: !first || !last ? ""
+            : (studio.oneDay ? first.toLocaleDateString(Qt.locale(), "d MMM yyyy")
                : first.toLocaleDateString(Qt.locale(), first.getFullYear() === last.getFullYear() ? "d MMM" : "d MMM yyyy")
                  + " – " + last.toLocaleDateString(Qt.locale(), "d MMM yyyy"))
-              + " <font color=\"" + theme.darkForeground + "\">· " + qsTr("%n photo(s)", "", studio.photos.length) + "</font>"
+              + " <font color=\"" + theme.darkForeground + "\">· "
+              + (studio.over > 0 ? qsTr("the first %1 of %2 ticked").arg(Number(studio.photos.length).toLocaleString(Qt.locale(), "f", 0))
+                                                                  .arg(Number(studio.photos.length + studio.over).toLocaleString(Qt.locale(), "f", 0))
+                 : qsTr("%n photo(s)", "", studio.photos.length)) + "</font>"
         textColor: theme.brightForeground
     }
     ShellButton {
@@ -329,11 +474,13 @@ Item {
         x: beside ? closeButton.x - 6 - width : 16
         y: beside ? 16 : top.y + top.height + 8
         spacing: 6
-        visible: studio.made !== null || studio.error !== ""
+        visible: studio.made !== null || studio.error !== "" || studio.note !== ""
         Chip {
             text: studio.error !== "" ? qsTr("Could not make it: %1").arg(studio.error)
-                : studio.made ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole · %1 · %2").arg(studio.made.pixels).arg(studio.made.size) : ""
-            textColor: studio.error !== "" ? theme.red : theme.foreground
+                : studio.made ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole · %1 · %2").arg(studio.made.pixels).arg(studio.made.size)
+                                + (studio.made.blurry > 0 ? " · " + qsTr("%n from thumbnails, blurrier", "", studio.made.blurry) : "")
+                : studio.note
+            textColor: studio.error !== "" ? theme.red : studio.made && studio.made.blurry > 0 ? theme.yellow : theme.foreground
         }
         ShellButton {
             visible: studio.made !== null
@@ -366,6 +513,9 @@ Item {
             Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
             Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
+            // Many photos move at once without easing: each change a
+            // frame, not an animation of a thousand.
+            readonly property bool easing: studio.photos.length <= 150
             Repeater {
                 model: studio.photos.length
                 delegate: Item {
@@ -378,39 +528,41 @@ Item {
                     y: at.y * s
                     width: at.w * s
                     height: at.h * s
-                    Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    clip: true
-                    Image {
+                    Behavior on x { enabled: paper.easing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on y { enabled: paper.easing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on width { enabled: paper.easing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on height { enabled: paper.easing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Item {
                         anchors.fill: parent
-                        source: cell.photo ? cell.photo.thumbnail : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                    }
-                    Image {
-                        anchors.fill: parent
-                        source: cell.photo ? cell.photo.sharp : ""
-                        sourceSize.width: 1024
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        opacity: status === Image.Ready ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                        clip: true
+                        Image {
+                            anchors.fill: parent
+                            source: cell.photo ? cell.photo.thumbnail : ""
+                            sourceSize: Qt.size(studio.thumbSize, studio.thumbSize)
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                        }
+                        Image {
+                            anchors.fill: parent
+                            source: cell.photo ? studio.sharp[cell.photo.id] || "" : ""
+                            sourceSize.width: 1024
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            opacity: status === Image.Ready ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+                        }
                     }
                     // Its date beneath it, as magick will write it.
                     Text {
-                        parent: paper
-                        visible: studio.recipe.dates
-                        x: cell.x
-                        width: cell.width
-                        y: cell.y + cell.height + (cell.at.caption.h * cell.s - font.pixelSize * 1.2) / 2
+                        readonly property int points: studio.captionPoints[cell.index] || 0
+                        visible: studio.recipe.dates && points > 0
+                        width: parent.width
+                        y: parent.height + (cell.at.caption.h - points * 1.2) / 2 * cell.s
                         horizontalAlignment: Text.AlignHCenter
                         font.family: theme.font
-                        font.pixelSize: Math.max(1, studio.sheet.cells.length > 0 ? studio.sheet.cells[0].caption.h * 0.5 * cell.s : 1)
+                        font.pixelSize: Math.max(1, points * cell.s)
                         color: studio.colours.caption
-                        text: studio.dates[cell.index] || ""
-                        elide: Text.ElideRight
+                        text: visible ? studio.dates[cell.index] || "" : ""
                     }
                 }
             }
@@ -503,6 +655,11 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: studio.making === "making" ? qsTr("Putting it together…")
                     : qsTr("Fetching the photos… %1 of %2").arg(studio.fetched).arg(studio.photos.length)
+            }
+            UiText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                color: theme.darkForeground
+                text: qsTr("Esc stops it")
             }
             Rectangle {
                 width: rows.width - 4 * theme.fontSize

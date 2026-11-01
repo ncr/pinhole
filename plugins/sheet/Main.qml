@@ -11,10 +11,8 @@ PinholePlugin {
 
     // The theme's font as a file, for magick to write the dates in.
     property string fontFile: ""
-    Component.onCompleted: pinhole.run("fc-match", ["-f", "%{file}", theme.font], (code, out) => {
-        if (code === 0)
-            fontFile = out.trim()
-    })
+    Component.onCompleted: pinhole.run("fc-match", ["-f", "%{file}", theme.font])
+        .then(result => fontFile = result.stdout.trim()).catch(pinhole.warn)
 
     actions: [
         PluginAction {

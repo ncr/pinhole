@@ -2,5 +2,13 @@
   "%n photo(s)": {
     "one": "%n photo",
     "other": "%n photos"
+  },
+  "%n photo(s) no longer in the library, left out": {
+    "one": "%n photo no longer in the library, left out",
+    "other": "%n photos no longer in the library, left out"
+  },
+  "%n from thumbnails, blurrier": {
+    "one": "%n from its thumbnail, blurrier",
+    "other": "%n from thumbnails, blurrier"
   }
 }
