@@ -179,7 +179,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own, and Screenshots what it found as `found:` and the `key`, read as it loads |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
-| `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file |
+| `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown) |
@@ -206,7 +206,7 @@ A promise is rejected with an `Error` whose `code` says why:
 | | |
 |---|---|
 | `fetch` | the service's: `not_found` (no such photo in this library), `offline`, … |
-| `copyFile` | `not_found` (no such file) |
+| `copyFile` | `not_found` (no such file), `cancelled` (another copy asked for after it has the clipboard) |
 | `run` | `exit` (it ran and did not exit 0: `exitCode`, `stdout`, `stderr` too, and the message is what it wrote to stderr), `start` (it could not be started), `timeout`, `cancelled` |
 | `record` | `failed` (ffmpeg, or the item gone), `cancelled` |
 

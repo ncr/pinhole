@@ -82,8 +82,11 @@ public:
     // paste from x-special/gnome-copied-files), and `image` as image data.
     static QMimeData *clipboardData(const QStringList &files, const ClipboardImage &image);
     // These files on the clipboard as those two say, a single one's image
-    // read away from the window's thread first; `then` once it is set.
-    static void toClipboard(const QStringList &files, QObject *context, std::function<void()> then = {});
+    // read away from the window's thread first; `then` once it is set. The
+    // last asked for wins: one another was asked for after, while it was
+    // made, is not set, and `dropped` is called instead.
+    static void toClipboard(const QStringList &files, QObject *context, std::function<void()> then = {},
+                            std::function<void()> dropped = {});
 
 signals:
     void statusChanged();

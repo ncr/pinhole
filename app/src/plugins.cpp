@@ -700,8 +700,13 @@ QJSValue PluginHost::copyFile(const QString &path) {
         settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such file: %1").arg(path)));
         return deferred.promise;
     }
-    // As Pinhole's own copy: an image pastes into a chat as one.
-    Outgoing::toClipboard({path}, this, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); });
+    // As Pinhole's own copy: an image pastes into a chat as one. Another
+    // copy asked for while this one was made wins: this one `cancelled`.
+    Outgoing::toClipboard(
+        {path}, this, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); },
+        [this, deferred, generation] {
+            settle(generation, deferred.reject, error(QStringLiteral("cancelled"), tr("another copy came after it")));
+        });
     return deferred.promise;
 }
 

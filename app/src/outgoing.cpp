@@ -213,15 +213,26 @@ QMimeData *Outgoing::clipboardData(const QStringList &files, const ClipboardImag
     return mime;
 }
 
-void Outgoing::toClipboard(const QStringList &files, QObject *context, std::function<void()> then) {
+void Outgoing::toClipboard(const QStringList &files, QObject *context, std::function<void()> then,
+                           std::function<void()> dropped) {
     // Made here as finished bytes: left to Qt, a request for PNG (Omarchy's
     // clipboard history asks at once) encoded the full-size photo then and
     // there, and the window stood still for seconds.
     const QString single = files.size() == 1 ? files.first() : QString();
+    // The last copy asked for wins: each is made on its own thread, and a
+    // big photo's PNG asked for first can be ready after a small one asked
+    // for later, which the clipboard must keep. (The window's thread only.)
+    static quint64 latest = 0;
+    const quint64 generation = ++latest;
     auto *watcher = new QFutureWatcher<ClipboardImage>(context);
-    QObject::connect(watcher, &QFutureWatcherBase::finished, context, [watcher, files, then] {
-        QGuiApplication::clipboard()->setMimeData(clipboardData(files, watcher->result()));
+    QObject::connect(watcher, &QFutureWatcherBase::finished, context, [watcher, files, then, dropped, generation] {
         watcher->deleteLater();
+        if (generation != latest) {
+            if (dropped)
+                dropped();
+            return;
+        }
+        QGuiApplication::clipboard()->setMimeData(clipboardData(files, watcher->result()));
         if (then)
             then();
     });

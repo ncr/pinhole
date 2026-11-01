@@ -340,9 +340,12 @@ Item {
                 if (made === done)
                     made = Object.assign({}, done, { copy: how })
             }
+            // Another copy asked for meanwhile has the clipboard: this one
+            // only kept.
             pinhole.copyFile(path).then(() => copied("copied"), error => {
-                copied("failed")
-                pinhole.warn(error)
+                copied(error.code === "cancelled" ? "kept" : "failed")
+                if (error.code !== "cancelled")
+                    pinhole.warn(error)
             })
         }, error => {
             if (gen !== makeGeneration || error.code === "cancelled")

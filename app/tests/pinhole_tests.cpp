@@ -2333,6 +2333,57 @@ private slots:
         QVERIFY(mimeData()->hasFormat("image/gif"));
     }
 
+    void theLastCopyAskedForWinsTheClipboard() {
+        // A big photo's PNG takes a while; a small one asked for just
+        // after is ready first. The clipboard ends with the small one, and
+        // the big one, never set, is said cancelled, not copied.
+        QTemporaryDir dir;
+        const QString big = dir.path() + "/big.jpg", small = dir.path() + "/small.jpg";
+        QImage noise(6000, 4000, QImage::Format_RGB32);
+        quint32 seed = 1;
+        for (int y = 0; y < noise.height(); ++y) {
+            auto *line = reinterpret_cast<quint32 *>(noise.scanLine(y));
+            for (int x = 0; x < noise.width(); ++x)
+                line[x] = (seed = seed * 1664525u + 1013904223u) | 0xff000000u;
+        }
+        QVERIFY(noise.save(big, "JPEG", 95));
+        QImage dot(4, 4, QImage::Format_RGB32);
+        dot.fill(Qt::blue);
+        QVERIFY(dot.save(small, "JPEG"));
+
+        PluginBench bench({{"t", {}}});
+        QVERIFY(bench.host);
+        QGuiApplication::clipboard()->clear();
+        QStringList set;
+        QObject::connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, &bench.engine, [&] {
+            if (const QMimeData *mime = QGuiApplication::clipboard()->mimeData(); mime && !mime->urls().isEmpty())
+                set << QFileInfo(mime->urls().first().toLocalFile()).fileName();
+        });
+        bench.engine.globalObject().setProperty("big", big);
+        bench.engine.globalObject().setProperty("small", small);
+        bench.js(R"(pinhole.copyFile(big).then(() => said.push("big copied"), e => said.push("big " + e.code));
+                   pinhole.copyFile(small).then(() => said.push("small copied"), e => said.push("small " + e.code)))");
+        QTRY_COMPARE_WITH_TIMEOUT(bench.said().size(), 2, 30000);
+        QStringList said = bench.said();
+        said.sort();
+        QCOMPARE(said, QStringList({"big cancelled", "small copied"}));
+        QCOMPARE(set, QStringList({"small.jpg"}));
+        QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(), QList<QUrl>({QUrl::fromLocalFile(small)}));
+
+        // Pinhole's own, one after another: each set as it is ready.
+        set.clear();
+        Outgoing::toClipboard({small}, &bench.engine);
+        QTRY_COMPARE(set, QStringList({"small.jpg"}));
+        bool dropped = false, then = false;
+        Outgoing::toClipboard({big}, &bench.engine, [&] { then = true; }, [&] { dropped = true; });
+        Outgoing::toClipboard({small, big}, &bench.engine);
+        QTRY_COMPARE_WITH_TIMEOUT(set.size(), 2, 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(dropped, 30000);
+        QVERIFY(!then);
+        QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(),
+                 QList<QUrl>({QUrl::fromLocalFile(small), QUrl::fromLocalFile(big)}));
+    }
+
     void aPluginsNoticeIsSaidAsItsOwn() {
         PluginBench bench({{"t", {}}});
         QSignalSpy notice(bench.plugins.get(), &Plugins::notice);
