@@ -14,14 +14,26 @@ Item {
     visible: opacity > 0
     opacity: shown ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+    // Asleep, the screen would put a screensaver over it, then lock.
+    // Let go by Pinhole too when the plugin is turned off or loaded again.
+    onShownChanged: pinhole.keepAwake(shown)
 
-    // The photos, in the order shown, and where in it the one showing is.
+    // The photos chosen, by id, oldest first; how to choose them again when
+    // the library is read again (the ids of those still there); and the
+    // order they are shown in, by id, a round of them after another, with
+    // where in it the one showing is.
+    property var chosen: []
+    property var choose: null
     property var order: []
     property int at: 0
+    // How many different photos it has: one, and it stays.
+    readonly property int distinct: chosen.length + (order.length > 0 && chosen.indexOf(order[0]) < 0 ? 1 : 0)
     // Started on a photo full window: stopping goes back to the viewer, on
     // the last one shown.
     property bool fromViewer: false
     property bool paused: false
+    // The photos ran out (the library read again without them).
+    signal emptied()
 
     // The slide showing, and the one under it.
     property Slide current: slideA
@@ -31,109 +43,177 @@ Item {
     // A slide moves through its time and its fades.
     readonly property real span: plugin.seconds + 2 * fadeMs / 1000
 
-    function start(list, fromViewer) {
-        if (list.length === 0)
+    // From `first` (an id, of `chosen` or not; "" for the round's own
+    // first), then round and round `chosen`. `choose()` gives them again
+    // as the library changes.
+    function start(first, list, fromViewer, again) {
+        if (list.length === 0 && first === "")
             return
+        emptyLater.stop()
         frame.fromViewer = fromViewer
-        order = list
+        chosen = list
+        choose = again
+        order = first !== "" ? [first].concat(round(first, true)) : round("", false)
         at = 0
         paused = false
         fade.stop()
         waiting.stop()
+        changedLater = false
         current.z = 1
         current.opacity = 1
         next.z = 0
         next.opacity = 1
-        current.load(order[0])
+        current.load(idAt(0))
         current.begin(span)
-        next.load(order.length > 1 ? order[1] : -1)
+        next.load(distinct > 1 ? idAt(1) : "")
         prefetch(2)
-        advance.interval = plugin.seconds * 1000
-        advance.restart()
+        advance.begin(plugin.seconds * 1000)
         shown = true
         pointer.wake()
         // A video open in the viewer would go on beneath, heard.
         if (fromViewer)
             pinhole.viewer.close()
     }
-    // The whole order, found after the first photo was up: it begins with
-    // the one showing. Taken once no fade is under way.
-    function extend(list) {
-        if (fade.running || waiting.running) {
-            extendLater.list = list
-            extendLater.restart()
-            return
+    // A round of `chosen` to follow `after` (the last in the order, or ""):
+    // shuffled anew each time, not beginning with the one just shown, and
+    // without it at all when it was shown before its round (`fresh`: the
+    // first, the one showing when the library changed); in order, on in
+    // time from it and round to the start.
+    function round(after, fresh) {
+        const list = chosen
+        if (list.length === 0)
+            return []
+        if (plugin.shuffle) {
+            const rest = fresh ? list.filter(id => id !== after) : list.slice()
+            for (let k = rest.length - 1; k > 0; --k) {
+                const j = Math.floor(Math.random() * (k + 1))
+                const t = rest[k]
+                rest[k] = rest[j]
+                rest[j] = t
+            }
+            if (rest.length > 1 && rest[0] === after) {
+                const j = 1 + Math.floor(Math.random() * (rest.length - 1))
+                rest[0] = rest[j]
+                rest[j] = after
+            }
+            return rest
         }
-        order = list
-        at = 0
-        if (order.length > 1)
-            next.load(order[1])
-        prefetch(2)
-        // Its time up before the rest was found: on at once.
-        if (!advance.running && !paused)
-            go(1, false)
+        let k = after === "" ? 0 : list.indexOf(after) + 1
+        if (after !== "" && k === 0) {
+            // Not one of them: the first taken after it.
+            const library = pinhole.library
+            let where = library.indexOf(after)
+            if (where < 0 && after === current.photoId)
+                where = current.index
+            let lo = 0, hi = list.length
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1
+                if (library.indexOf(list[mid]) <= where)
+                    lo = mid + 1
+                else
+                    hi = mid
+            }
+            k = lo % list.length
+        }
+        return list.slice(k).concat(list.slice(0, k))
     }
-    Timer {
-        id: extendLater
-        property var list
-        interval: 200
-        onTriggered: frame.extend(list)
+    // The photo `k` on in the order, rounds added as it gets there; "" if
+    // there is none.
+    function idAt(k) {
+        while (order.length <= k && chosen.length > 0)
+            order = order.concat(round(order.length > 0 ? order[order.length - 1] : "", false))
+        return k >= 0 && k < order.length ? order[k] : ""
     }
+
     function stop() {
         if (!shown)
             return
         shown = false
-        extendLater.stop()
-        plugin.scan = null
+        changedLater = false
         advance.stop()
         waiting.stop()
-        fade.stop()
-        const last = current.index
-        slideA.load(-1)
-        slideB.load(-1)
-        if (last < 0)
+        if (fade.running)
+            fade.pause()
+        const last = current.photoId
+        // The photos fade out with the frame; then they are let go.
+        emptyLater.restart()
+        if (last === "" || pinhole.library.indexOf(last) < 0)
             return
         if (fromViewer)
             pinhole.openPhoto(last)
         else
             pinhole.reveal(last)
     }
+    Timer {
+        id: emptyLater
+        interval: 300
+        onTriggered: {
+            fade.stop()
+            slideA.load("")
+            slideB.load("")
+            frame.order = []
+            frame.chosen = []
+        }
+    }
+
+    // Held still: the slides' motion, a fade under way, the wait for the
+    // next and the time to it, all where they are until it goes on.
     function setPaused(on) {
+        if (paused === on)
+            return
         paused = on
-        current.setPaused(on)
-        if (on)
-            advance.stop()
-        else if (!fade.running && !waiting.running) {
-            advance.interval = plugin.seconds * 1000
-            advance.restart()
+        slideA.setPaused(on)
+        slideB.setPaused(on)
+        if (on) {
+            if (fade.running)
+                fade.pause()
+            advance.hold()
+            if (waiting.running && !waiting.byHand) {
+                waiting.stop()
+                waiting.held = true
+            }
+        } else {
+            if (fade.paused)
+                fade.resume()
+            if (waiting.held) {
+                waiting.held = false
+                waiting.since = Date.now()
+                waiting.restart()
+            }
+            advance.release()
         }
         pointer.wake()
     }
 
     // The medium of the photo after next, fetched ahead.
     function prefetch(ahead) {
-        if (order.length > ahead)
-            pinhole.fetch(order[(at + ahead) % order.length], "medium").then(() => {}, () => {})
+        const id = distinct > ahead ? idAt(at + ahead) : ""
+        if (id !== "")
+            pinhole.fetch(id, "medium").then(() => {}, () => {})
     }
 
     // To the photo `delta` on: once the slide beneath has it sharp, or has
     // waited long enough (a step by hand waits less).
     property int target: -1
     function go(delta, byHand) {
-        if (order.length < 2)
+        if (distinct < 2 && !current.gone)
             return
         // A fade under way ends at once.
         if (fade.running) {
             fade.stop()
             swap()
         }
-        target = ((waiting.running ? target : at) + delta + order.length) % order.length
-        if (next.index !== order[target])
-            next.load(order[target])
+        const to = (waiting.running || waiting.held ? target : at) + delta
+        if (to < 0)
+            return
+        target = to
+        if (next.photoId !== idAt(target))
+            next.load(idAt(target))
         advance.stop()
         waiting.forward = delta >= 0
-        waiting.skipped = 0
+        waiting.deferred = 0
         waiting.byHand = byHand
+        waiting.held = false
         waiting.since = Date.now()
         waiting.restart()
         waiting.check()
@@ -142,28 +222,61 @@ Item {
         id: waiting
         property bool byHand: false
         property bool forward: true
-        property int skipped: 0
+        property bool held: false
+        property int deferred: 0
         property double since: 0
         interval: 40
         repeat: true
         function check() {
             if (!running)
                 return
-            // One the service has no medium for is passed over, a few at
-            // most in a row.
-            if (frame.next.missing && skipped < 8 && frame.order.length > 2) {
-                ++skipped
+            const n = frame.next
+            if (frame.skip(n)) {
                 since = Date.now()
-                frame.target = (frame.target + (forward ? 1 : -1) + frame.order.length) % frame.order.length
-                frame.next.load(frame.order[frame.target])
+                // None left to show: the one showing stays.
+                if (frame.idAt(frame.target) === "") {
+                    stop()
+                    return
+                }
+                n.load(frame.idAt(frame.target))
                 return
             }
-            if (frame.next.ready || Date.now() - since > (byHand ? 700 : 6000)) {
+            if (n.ready || Date.now() - since > (byHand ? 700 : 6000)) {
                 stop()
                 frame.cross()
             }
         }
         onTriggered: check()
+    }
+    // Whether the slide beneath is passed over: one not in the library
+    // leaves the order; one whose medium the service could not bring now
+    // (offline, iCloud failing) comes a dozen photos later, while those
+    // already here go first, a few in a row at most, and then it shows as
+    // its thumbnail until the medium comes. With no service at all nothing
+    // would come sooner: each shows so in its turn.
+    function skip(slide) {
+        if (!slide.settled || slide.photoId !== order[target])
+            return false
+        if (slide.missing) {
+            const gone = slide.photoId
+            chosen = chosen.filter(id => id !== gone)
+            order = order.filter((id, k) => k !== target)
+            if (!waiting.forward && target > 0)
+                --target
+            return true
+        }
+        if (slide.failure !== "" && slide.failure !== "no_service" && waiting.forward && waiting.deferred < 8
+                && distinct > 2) {
+            ++waiting.deferred
+            const later = target + 12
+            idAt(later)
+            const put = order.slice()
+            put.splice(later + 1, 0, put[target])
+            put.splice(target, 1)
+            order = put
+            return true
+        }
+        return false
     }
     function cross() {
         at = target
@@ -173,10 +286,7 @@ Item {
         fade.duration = waiting.byHand ? 450 : fadeMs
         fade.target = current
         fade.restart()
-        if (!paused) {
-            advance.interval = plugin.seconds * 1000
-            advance.restart()
-        }
+        advance.begin(plugin.seconds * 1000)
     }
     NumberAnimation {
         id: fade
@@ -194,25 +304,120 @@ Item {
         next = gone
         current.z = 1
         gone.z = 0
-        gone.load(order.length > 1 ? order[(at + 1) % order.length] : -1)
+        // What is far behind is let go.
+        const keep = 50
+        if (at > Math.max(2 * keep, chosen.length + keep)) {
+            order = order.slice(at - keep)
+            at = keep
+        }
+        gone.load(distinct > 1 ? idAt(at + 1) : "")
         gone.opacity = 1
         prefetch(2)
+        if (changedLater)
+            libraryChanged()
     }
 
     // On to the next once its time is up; a video plays to its end first,
-    // for a minute and a half at most.
+    // for a minute and a half at most. Held still, what is left of its
+    // time is kept.
     Timer {
         id: advance
+        property double startedAt: 0
         property double shownAt: 0
-        onRunningChanged: if (running && interval > 1000) shownAt = Date.now()
+        property int left: -1
+        function begin(ms) {
+            shownAt = Date.now()
+            left = -1
+            if (frame.paused) {
+                left = ms
+                return
+            }
+            interval = ms
+            startedAt = Date.now()
+            start()
+        }
+        function hold() {
+            if (!running)
+                return
+            left = Math.max(500, interval - (Date.now() - startedAt))
+            stop()
+        }
+        function release() {
+            if (left < 0)
+                return
+            interval = left
+            left = -1
+            startedAt = Date.now()
+            start()
+        }
         onTriggered: {
             if (frame.current.playingVideo && Date.now() - shownAt < 90000) {
                 interval = 500
-                restart()
+                startedAt = Date.now()
+                start()
                 return
             }
             frame.go(1, false)
         }
+    }
+
+    // The library read again, or photos hidden or shown again: the photos
+    // chosen again, by id, so each slide keeps its photo and the one
+    // showing stays. Gone (deleted,
+    // another source shown), it goes on to the next. Not in the middle of
+    // a fade: after it.
+    property bool changedLater: false
+    function libraryChanged() {
+        if (!shown)
+            return
+        if (fade.running) {
+            changedLater = true
+            return
+        }
+        changedLater = false
+        slideA.relocate()
+        slideB.relocate()
+        const list = choose ? choose() : []
+        if (list.length === 0) {
+            stop()
+            emptied()
+            return
+        }
+        // The same photos chosen (a sync that brought others): the order
+        // stays. Shuffled, those gone leave it and a few new ones come in
+        // anywhere in what is left of it; else a new round from the one
+        // showing.
+        const was = chosen
+        chosen = list
+        if (list.length !== was.length || list.some((id, i) => id !== was[i])) {
+            const before = new Set(was), now = new Set(list)
+            const added = list.filter(id => !before.has(id))
+            if (plugin.shuffle && added.length <= 50) {
+                const rest = order.slice(at + 1).filter(id => now.has(id))
+                for (const id of added)
+                    rest.splice(Math.floor(Math.random() * (rest.length + 1)), 0, id)
+                order = order.slice(0, at + 1).concat(rest)
+            } else {
+                order = order.slice(0, at + 1).concat(round(current.photoId, true))
+            }
+        }
+        const waited = waiting.running || waiting.held
+        if (waited)
+            target = at + 1
+        if (next.photoId !== idAt(at + 1) || next.gone)
+            next.load(distinct > 1 || current.gone ? idAt(at + 1) : "")
+        prefetch(2)
+        if (current.gone && !waited)
+            go(1, false)
+    }
+    Connections {
+        target: frame.pinhole.library
+        function onChanged() { frame.libraryChanged() }
+    }
+    // Photos hidden from the grid, or shown again: chosen again too.
+    Connections {
+        target: frame.pinhole
+        function onHiddenChanged() { frame.libraryChanged() }
     }
 
     Slide {
@@ -239,6 +444,7 @@ Item {
         id: pointer
         anchors.fill: parent
         z: 2
+        enabled: frame.shown
         hoverEnabled: true
         acceptedButtons: Qt.AllButtons
         cursorShape: awake.running || frame.paused ? Qt.ArrowCursor : Qt.BlankCursor
@@ -292,7 +498,7 @@ Item {
             floating: true
             text: "‹"
             action: previousCommand
-            usable: frame.order.length > 1
+            usable: frame.distinct > 1 && frame.at > 0
         }
         ShellButton {
             floating: true
@@ -303,7 +509,7 @@ Item {
             floating: true
             text: "›"
             action: nextCommand
-            usable: frame.order.length > 1
+            usable: frame.distinct > 1
         }
         ShellButton {
             floating: true

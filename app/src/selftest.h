@@ -125,6 +125,13 @@ void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &view
 // plugins.json, so with XDG_CONFIG_HOME a folder of its own.
 void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, LibraryReloader &reloader, const QString &dir);
 
+// PINHOLE_SELFTEST=frame: the Photo frame started from the grid on all the
+// photos: the screen kept on (an idle inhibitor on the window, on
+// Wayland), a fade held still halfway with both photos, going on, then
+// stopped: the screen let go at once, the photo fading out with the frame
+// and only then let go. Exits 1 if any step fails.
+void runFrameSelfTest(QQuickWindow *window);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

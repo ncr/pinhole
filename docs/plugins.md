@@ -55,7 +55,8 @@ plugin uses of an API newer than its manifest asks for.
 out); a Pinhole older than that says it needs a newer one and does not load
 it. `pinhole.api` says which one it is running in. API 2 brought promises,
 `pinhole.settings`, `notify`, `warn`, photos by id, `hidden`, `avgColor`,
-`library.field`, `isHidden`, `run`'s `output` and `pinhole.coveredBy`.
+`library.field`, `isHidden`, `run`'s `output`, `pinhole.coveredBy` and
+`keepAwake`.
 
 `Main.qml` beside it:
 
@@ -165,10 +166,11 @@ positions move when the library is read again, ids do not, so keep ids.
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes: what a plugin counting or showing photos leaves out, as the grid does |
-| `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path |
+| `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize` |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |
+| `keepAwake(on)` | the screen kept on, no screensaver and no lock, while `on`, as the Photo frame does while it shows; `false` lets it go, and so does the plugin turned off or loaded again, and Pinhole quitting or crashing. Whether the screen is kept on now: not where it cannot be (not on Wayland, the window hidden), which it then is once it can |
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |

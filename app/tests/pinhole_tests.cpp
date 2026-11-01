@@ -1871,6 +1871,39 @@ private slots:
         QTRY_VERIFY(QFile::exists(alsoTold));
     }
 
+    void aPluginKeepsTheScreenOnUntilItLetsGoOrEnds() {
+        PluginBench bench({{"t", {}}, {"u", {}}});
+        KeepAwake *awake = bench.plugins->keepAwake();
+        auto *u = qobject_cast<PluginHost *>(bench.plugins->at("u").value("host").value<QObject *>());
+        QVERIFY(!awake->wanted());
+        // Asked for; with no Wayland window here, not held yet.
+        QCOMPARE(bench.js("pinhole.keepAwake(true)").toBool(), false);
+        QVERIFY(awake->wanted());
+        QVERIFY(!awake->inhibiting());
+        // Kept on while any plugin asks.
+        u->keepAwake(true);
+        bench.js("pinhole.keepAwake(false)");
+        QVERIFY(awake->wanted());
+        u->keepAwake(false);
+        QVERIFY(!awake->wanted());
+        // Turned off, it lets go.
+        bench.js("pinhole.keepAwake(true)");
+        bench.plugins->setEnabled("t", false);
+        QVERIFY(!awake->wanted());
+        // Loaded again, its file changed, it lets go.
+        bench.plugins->setEnabled("t", true);
+        bench.js("pinhole.keepAwake(true)");
+        QVERIFY(awake->wanted());
+        write(bench.dir.path() + "/plugins/t/Main.qml", "import QtQuick\nItem { objectName: \"again\" }\n");
+        bench.plugins->rescan();
+        QVERIFY(!awake->wanted());
+        // Gone, it lets go.
+        bench.js("pinhole.keepAwake(true)");
+        QVERIFY(QDir(bench.dir.path() + "/plugins/t").removeRecursively());
+        bench.plugins->rescan();
+        QVERIFY(!awake->wanted());
+    }
+
     void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {
         PluginBench bench({{"t", {}}, {"u", {}}});
         bench.js(R"(pinhole.run("true", [], () => { throw new Error("boom") }))");

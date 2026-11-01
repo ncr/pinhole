@@ -30,6 +30,7 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickItemGrabResult>
+#include <QQuickWindow>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUrl>
@@ -343,6 +344,7 @@ int PluginHost::hiddenCount() const { return m_plugins->grid() ? m_plugins->grid
 
 void Plugins::setGrid(PhotoGrid *grid) {
     m_grid = grid;
+    m_keepAwake.setWindow(grid->window());
     connect(grid, &PhotoGrid::selectionChanged, this, &Plugins::selectionChanged);
     connect(grid, &PhotoGrid::hiddenChanged, this, &Plugins::hiddenChanged);
 }
@@ -420,6 +422,7 @@ void PluginHost::track(QObject *job, std::function<void()> stop) {
 
 void PluginHost::stop() {
     ++m_generation;
+    m_plugins->keepAwake()->hold(this, false);
     for (auto &[job, stop] : std::exchange(m_running, {}))
         if (job)
             stop();
@@ -694,6 +697,11 @@ void PluginHost::notify(const QString &text) {
         emit notified(text);
 }
 
+bool PluginHost::keepAwake(bool on) {
+    m_plugins->keepAwake()->hold(this, on);
+    return on && m_plugins->keepAwake()->inhibiting();
+}
+
 Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator,
                  History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
@@ -958,6 +966,7 @@ QStringList Plugins::apiTwoUses(const QString &dir) {
         {"library.field", QRegularExpression(QStringLiteral("\\blibrary\\.field\\s*\\("))},
         {"pinhole.isHidden", QRegularExpression(QStringLiteral("\\b(isHidden|hiddenCount|hiddenChanged|onHiddenChanged)\\b"))},
         {"run's output", QRegularExpression(QStringLiteral("\\boutput\\s*:"))},
+        {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bkeepAwake\\s*\\("))},
     };
     // Its words, not its comments.
     static const QRegularExpression comments(QStringLiteral("/\\*.*?\\*/|//[^\\n]*"),

@@ -87,11 +87,12 @@ Theme) sets it, the photo as the background and its colours on the whole
 desktop, Pinhole too, the text always readable; Ctrl+Z goes back to the
 theme before.
 
-Photo frame (P on a photo, or in select mode for what is ticked) shows
-photos one after another, full window, each slowly panned and zoomed and
-faded into the next: favourites, all, or those taken on this day in other
-years, shuffled or in order, videos and Live Photos moving. Esc or a click
-stops it, ← → step, and a two-finger tap or Space holds it still.
+Photo frame (Frame, P, in the grid; P on a photo to start from it, or in
+select mode for what is ticked) shows photos one after another, full
+window, each slowly panned and zoomed and faded into the next: favourites,
+all, or those taken on this day in other years, shuffled or in order,
+videos and Live Photos moving. The screen stays on while it shows. Esc or
+a click stops it, ← → step, and a two-finger tap or Space holds it still.
 
 ## Install
 

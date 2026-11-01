@@ -1,110 +1,233 @@
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Window
 import QtMultimedia
 import Pinhole.Plugin
 
 // One photo of the frame, full window: its thumbnail at once, the medium
-// rendition over it once here, and for a video or a Live Photo its motion,
-// once it is shown. Loaded while under the one showing, so it is sharp by
-// the time it comes; `begin()` starts its slow pan and zoom.
+// rendition over it once here, then the full size, decoded at the size it
+// is shown, and for a video or a Live Photo its motion, once it is shown.
+// Loaded while under the one showing, so it is sharp by the time it comes;
+// `begin()` starts its slow pan and zoom.
 Item {
     id: slide
     required property var pinhole
     // Videos and Live Photos play their motion.
     property bool motion: true
 
-    // The library position shown, -1 for none.
+    // The photo shown, by its id ("" for none), where the library has it
+    // (or last had it), and whether it has gone from it since.
+    property string photoId: ""
     property int index: -1
+    property bool gone: false
     property var item: null
     property string sharp: ""
+    property string full: ""
     // The medium came, or will not: showing it now is as sharp as it gets.
     property bool settled: false
-    // The service has no medium for it: shown, it would be blurry.
+    // Not in the library (not_found): shown, it would be its thumbnail
+    // for good.
     property bool missing: false
+    // Why the medium did not come for now ("offline", "no_service", …):
+    // shown as its thumbnail, and asked for again.
+    property string failure: ""
     readonly property bool ready: settled && (sharp === "" || sharpImage.status !== Image.Loading)
     // A video's or Live Photo's file, once fetched.
     property string motionFile: ""
     // Shown, its motion going.
     property bool running: false
     property bool paused: false
+    property bool played: false
     // A video playing to its end, which the frame waits for.
     readonly property bool playingVideo: item !== null && item.video && motion && motionFile !== ""
                                          && player.playbackState === MediaPlayer.PlayingState
-    signal videoEnded()
 
     readonly property real aspect: item && item.width > 0 && item.height > 0 ? item.width / item.height : 4 / 3
     // Filling the window when its shape is near the window's; a tall photo
     // on a wide window shows whole, on a blur of itself.
     readonly property bool fitted: Math.max(aspect / windowAspect, windowAspect / aspect) > 1.3
     readonly property real windowAspect: width > 0 && height > 0 ? width / height : 16 / 10
+    // How far in it goes: a little only for one shown whole, whose top
+    // and bottom are the window's.
+    readonly property real zoomMax: fitted ? 1.05 : 1.2
 
-    // Its files on their way: another photo loaded, they are no longer
-    // wanted.
+    // Its files on their way, and which load they are for: an answer for
+    // one before is dropped (a cancel can come after it was sent).
     property var fetching: []
-    function load(i) {
+    property int serial: 0
+    function load(id) {
         stop()
         fetching.forEach(f => f.cancel())
         fetching = []
-        index = i
-        item = i >= 0 ? pinhole.library.item(i) : null
+        const loading = ++serial
+        photoId = id
+        index = id !== "" ? pinhole.library.indexOf(id) : -1
+        item = index >= 0 ? pinhole.library.item(index) : null
         sharp = ""
+        full = ""
         motionFile = ""
-        settled = i < 0
-        missing = false
-        if (i < 0)
+        played = false
+        failure = ""
+        gone = false
+        retry.stop()
+        settled = index < 0
+        missing = id !== "" && index < 0
+        if (index < 0)
             return
-        const medium = pinhole.fetch(i, "medium")
-        medium.then(path => {
-            slide.sharp = "file://" + path
-            slide.settled = true
-        }, error => {
-            if (error.code === "cancelled")
-                return
-            slide.missing = true
-            slide.settled = true
-        }).catch(pinhole.warn)
-        fetching = [medium]
+        fetchMedium(loading)
         // The motion, fetched now so it can play as the slide comes; a
         // still if it does not.
         if (motion && (item.video || item.live)) {
-            const clip = pinhole.fetch(i, item.video ? "video" : "live")
+            const clip = pinhole.fetch(id, item.video ? "video" : "live")
             clip.then(path => {
+                if (slide.serial !== loading)
+                    return
                 slide.motionFile = "file://" + path
                 if (slide.running)
                     slide.play()
             }, () => {}).catch(pinhole.warn)
-            fetching = [medium, clip]
+            fetching.push(clip)
         }
     }
+    function fetchMedium(loading) {
+        const medium = pinhole.fetch(photoId, "medium")
+        medium.then(path => {
+            if (slide.serial !== loading)
+                return
+            slide.sharp = "file://" + path
+            slide.failure = ""
+            slide.settled = true
+        }, error => {
+            if (slide.serial !== loading || error.code === "cancelled")
+                return
+            // Not in the library: passed over. Anything else (no service,
+            // offline, the service starting again) is for now: its
+            // thumbnail, and the medium asked for again in a while.
+            if (error.code === "not_found")
+                slide.missing = true
+            else {
+                slide.failure = error.code || "failed"
+                retry.restart()
+            }
+            slide.settled = true
+        }).catch(pinhole.warn)
+        fetching.push(medium)
+    }
+    Timer {
+        id: retry
+        interval: 8000
+        onTriggered: if (slide.failure !== "" && slide.photoId !== "") slide.fetchMedium(slide.serial)
+    }
+    // The full size, once the medium is up and smaller than the slide
+    // shows it (a 2048 px medium on a 2× screen): decoded at that size, by
+    // Pinhole's own decoder, as it is mostly HEIC. Not for a video, whose
+    // frames are the medium's size.
+    readonly property size shownSize: Qt.size(Math.ceil(photo.width * zoomMax * Screen.devicePixelRatio),
+                                              Math.ceil(photo.height * zoomMax * Screen.devicePixelRatio))
+    readonly property bool wantsFull: sharpImage.status === Image.Ready && item !== null && !item.video
+                                      && Math.max(sharpImage.implicitWidth, sharpImage.implicitHeight)
+                                         < 0.9 * Math.max(shownSize.width, shownSize.height)
+    onWantsFullChanged: {
+        if (!wantsFull || full !== "")
+            return
+        const loading = serial
+        const big = pinhole.fetch(photoId, "full")
+        big.then(path => {
+            if (slide.serial === loading)
+                slide.full = "image://photo/" + encodeURIComponent(path)
+        }, () => {}).catch(pinhole.warn)
+        fetching.push(big)
+    }
 
-    // The pan and zoom: from one framing to another, over `seconds`.
+    // A pan and zoom, from one framing to another: first through its time
+    // and its fades, steadily; held past that (a video playing on, the
+    // next not here yet), easing out of it and then drifting slowly on,
+    // never stopping dead.
     function begin(seconds) {
         running = true
         paused = false
-        const s0 = 1.0 + Math.random() * 0.04, s1 = 1.08 + Math.random() * 0.07
+        const s0 = 1.0 + Math.random() * (fitted ? 0.01 : 0.04)
+        const s1 = fitted ? 1.03 + Math.random() * 0.02 : 1.08 + Math.random() * 0.07
         const zoomIn = Math.random() < 0.6
-        const from = zoomIn ? s0 : s1, to = zoomIn ? s1 : s0
-        // How far it may go each way at a scale, the window always covered
-        // (or, fitted, a little way only).
-        const room = (s, size, window) => fitted ? window * 0.015 : Math.max(0, (size * s - window) / 2)
-        const fx0 = Math.random() * 1.6 - 0.8, fy0 = Math.random() * 1.6 - 0.8
-        const fx1 = Math.random() * 1.6 - 0.8, fy1 = Math.random() * 1.6 - 0.8
-        zoom.from = from
-        zoom.to = to
-        panX.from = fx0 * room(from, photo.width, slide.width)
-        panX.to = fx1 * room(to, photo.width, slide.width)
-        panY.from = fy0 * room(from, photo.height, slide.height)
-        panY.to = fy1 * room(to, photo.height, slide.height)
-        const ms = Math.round(seconds * 1000)
-        zoom.duration = ms
-        panX.duration = ms
-        panY.duration = ms
-        drift.restart()
+        const fromZoom = zoomIn ? s0 : s1, toZoom = zoomIn ? s1 : s0
+        const at = framing(fromZoom, Math.random() * 1.6 - 0.8, Math.random() * 1.6 - 0.8)
+        zoom.value = fromZoom
+        panX.value = at.x
+        panY.value = at.y
+        const to = framing(toZoom, Math.random() * 1.6 - 0.8, Math.random() * 1.6 - 0.8)
+        legs = 0
+        leg(to.zoom, to.x, to.y, Math.round(seconds * 1000), Easing.Linear)
         if (motionFile !== "")
             play()
     }
+    // How far it may go each way at a scale, the window always covered
+    // (or, shown whole, a little way sideways only).
+    function room(s, size, window) { return Math.max(0, (size * s - window) / 2) }
+    // A framing: at zoom `s`, `fx` and `fy` from -1 to 1 of the way to
+    // each side.
+    function framing(s, fx, fy) {
+        return fitted ? { zoom: s, x: fx * slide.width * 0.015, y: 0 }
+                      : { zoom: s, x: fx * room(s, photo.width, slide.width), y: fy * room(s, photo.height, slide.height) }
+    }
+    function leg(toZoom, toX, toY, ms, easing) {
+        drift.stop()
+        zoomAnimation.from = zoom.value
+        zoomAnimation.to = toZoom
+        panXAnimation.from = panX.value
+        panXAnimation.to = toX
+        panYAnimation.from = panY.value
+        panYAnimation.to = toY
+        for (const a of [zoomAnimation, panXAnimation, panYAnimation]) {
+            a.duration = ms
+            a.easing.type = easing
+        }
+        drift.start()
+        if (paused)
+            drift.pause()
+    }
+    property int legs: 0
+    function onward() {
+        if (!running)
+            return
+        if (legs++ === 0) {
+            // Easing out: on as it was going, slowing to a stop over 12 s,
+            // as far as the edges let it. The same easing and time for
+            // all three keep the window covered on the way.
+            const ms = 12000
+            const per = a => (a.to - a.from) / Math.max(1, a.duration) * ms / 2
+            const s = Math.max(1, Math.min(zoomMax, zoom.value + per(zoomAnimation)))
+            const small = Math.min(s, zoom.value)
+            const clamp = (v, r) => Math.max(-r, Math.min(r, v))
+            const rx = fitted ? slide.width * 0.015 : room(small, photo.width, slide.width)
+            const ry = fitted ? 0 : room(small, photo.height, slide.height)
+            leg(s, clamp(panX.value + per(panXAnimation), rx), clamp(panY.value + per(panYAnimation), ry), ms, Easing.OutQuad)
+            return
+        }
+        // Then, held on, slowly elsewhere and back, a little at a time.
+        const s = fitted ? 1.0 + Math.random() * 0.04 : 1.03 + Math.random() * 0.12
+        const to = framing(Math.min(s, zoomMax), Math.random() * 1.2 - 0.6, Math.random() * 1.2 - 0.6)
+        leg(to.zoom, to.x, to.y, 20000, Easing.InOutSine)
+    }
+    // The window resized (tiled beside another, made full screen): what it
+    // was moving to may no longer cover it, or cut a photo now shown
+    // whole. From where it is to a framing that fits, then drifting on.
+    onWidthChanged: if (running) resized.restart()
+    onHeightChanged: if (running) resized.restart()
+    Timer {
+        id: resized
+        interval: 150
+        onTriggered: {
+            if (!slide.running)
+                return
+            const to = slide.framing(Math.max(1, Math.min(slide.zoomMax, zoom.value)), Math.random() * 1.2 - 0.6,
+                                     Math.random() * 1.2 - 0.6)
+            slide.legs = 1
+            slide.leg(to.zoom, to.x, to.y, 1500, Easing.InOutSine)
+        }
+    }
     function stop() {
         running = false
+        resized.stop()
         paused = false
         drift.stop()
         player.stop()
@@ -122,13 +245,27 @@ Item {
             drift.resume()
             if (player.playbackState === MediaPlayer.PausedState)
                 player.play()
+            else if (!played && motionFile !== "")
+                play()
         }
     }
     function play() {
         if (!motion || motionFile === "" || paused)
             return
+        played = true
         player.source = motionFile
         player.play()
+    }
+    // The library read again: where the photo is now, if anywhere.
+    function relocate() {
+        if (photoId === "")
+            return
+        const now = pinhole.library.indexOf(photoId)
+        gone = now < 0
+        if (gone)
+            return
+        index = now
+        item = pinhole.library.item(now)
     }
 
     clip: true
@@ -173,13 +310,12 @@ Item {
         height: width / slide.aspect
         transform: [
             Scale {
-                id: scale
                 origin.x: photo.width / 2
                 origin.y: photo.height / 2
                 xScale: zoom.value
                 yScale: zoom.value
             },
-            Translate { id: shift; x: panX.value; y: panY.value }
+            Translate { x: panX.value; y: panY.value }
         ]
         Image {
             anchors.fill: parent
@@ -188,16 +324,34 @@ Item {
             smooth: true
             fillMode: Image.PreserveAspectCrop
         }
+        // Sharper ones, each fading in over the one before once decoded
+        // (at once while the slide is beneath, unseen). Sharp frames come
+        // and go all day: none kept in the cache.
         Image {
             id: sharpImage
             anchors.fill: parent
-            source: slide.sharp
+            // Let go under the full size, once that is up.
+            source: fullImage.status === Image.Ready ? "" : slide.sharp
             asynchronous: true
             smooth: true
-            // Sharp frames come and go all day: none kept in the cache.
             cache: false
             fillMode: Image.PreserveAspectCrop
-            visible: status === Image.Ready
+            opacity: status === Image.Ready ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { enabled: slide.running; NumberAnimation { duration: 500 } }
+        }
+        Image {
+            id: fullImage
+            anchors.fill: parent
+            source: slide.full
+            sourceSize: slide.shownSize
+            asynchronous: true
+            smooth: true
+            cache: false
+            fillMode: Image.PreserveAspectCrop
+            opacity: status === Image.Ready ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { enabled: slide.running; NumberAnimation { duration: 500 } }
         }
         VideoOutput {
             id: clipOutput
@@ -233,15 +387,21 @@ Item {
         }
     }
 
+    // Where its pan and zoom are, and its sharpest image up, for the
+    // self-test (PINHOLE_SELFTEST=frame).
+    readonly property vector3d framed: Qt.vector3d(zoom.value, panX.value, panY.value)
+    readonly property string sharpest: fullImage.status === Image.Ready ? "full"
+                                       : sharpImage.status === Image.Ready ? "medium" : "thumbnail"
     // Its own values, which the animations move and the transform follows.
-    QtObject { id: zoom; property real value: 1; property real from: 1; property real to: 1; property int duration: 8000 }
-    QtObject { id: panX; property real value: 0; property real from: 0; property real to: 0; property int duration: 8000 }
-    QtObject { id: panY; property real value: 0; property real from: 0; property real to: 0; property int duration: 8000 }
+    QtObject { id: zoom; property real value: 1 }
+    QtObject { id: panX; property real value: 0 }
+    QtObject { id: panY; property real value: 0 }
     ParallelAnimation {
         id: drift
-        NumberAnimation { target: zoom; property: "value"; from: zoom.from; to: zoom.to; duration: zoom.duration }
-        NumberAnimation { target: panX; property: "value"; from: panX.from; to: panX.to; duration: panX.duration }
-        NumberAnimation { target: panY; property: "value"; from: panY.from; to: panY.to; duration: panY.duration }
+        NumberAnimation { id: zoomAnimation; target: zoom; property: "value" }
+        NumberAnimation { id: panXAnimation; target: panX; property: "value" }
+        NumberAnimation { id: panYAnimation; target: panY; property: "value" }
+        onFinished: slide.onward()
     }
 
     // No sound: a frame plays quietly.
@@ -259,11 +419,7 @@ Item {
             // frame as the next comes.
             if (slide.item && slide.item.live && !slide.item.video)
                 clipOutput.visible = false
-            slide.videoEnded()
         }
-        onErrorOccurred: {
-            clipOutput.visible = false
-            slide.videoEnded()
-        }
+        onErrorOccurred: clipOutput.visible = false
     }
 }

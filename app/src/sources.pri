@@ -14,8 +14,13 @@ GENERATED = $$OUT_PWD/generated
 system(mkdir -p $$GENERATED && \
     wayland-scanner client-header $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-client-protocol.h && \
     wayland-scanner private-code $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-protocol.c)
+# And idle-inhibit, for the screen kept on while a plugin asks (keepawake.h).
+IDLE_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
+system(wayland-scanner client-header $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-client-protocol.h && \
+    wayland-scanner private-code $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-protocol.c)
 INCLUDEPATH += $$GENERATED
-SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c
+SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
+    $$GENERATED/idle-inhibit-unstable-v1-protocol.c
 
 HEADERS += \
     $$PWD/library.h \
@@ -28,6 +33,7 @@ HEADERS += \
     $$PWD/photogrid.h \
     $$PWD/scrollphysics.h \
     $$PWD/touchpadhold.h \
+    $$PWD/keepawake.h \
     $$PWD/serviceclient.h \
     $$PWD/photoprovider.h \
     $$PWD/viewer.h \
@@ -57,6 +63,7 @@ SOURCES += \
     $$PWD/photogrid.cpp \
     $$PWD/scrollphysics.cpp \
     $$PWD/touchpadhold.cpp \
+    $$PWD/keepawake.cpp \
     $$PWD/serviceclient.cpp \
     $$PWD/photoprovider.cpp \
     $$PWD/viewer.cpp \
@@ -72,6 +79,7 @@ SOURCES += \
     $$PWD/selftest.cpp \
     $$PWD/selftestrun.cpp \
     $$PWD/selftestcovering.cpp \
+    $$PWD/selftestframe.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

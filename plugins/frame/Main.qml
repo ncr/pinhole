@@ -3,11 +3,13 @@ import Pinhole.Plugin
 
 // Photo frame: photos one after another, full window, each slowly panned
 // and zoomed and cross-faded into the next, for a laptop left open. P on a
-// photo starts it from there, with the photos its settings choose
-// (favourites, all, or those taken on this day in other years); P in select
-// mode shows what is ticked. Each comes as its thumbnail and is shown only
-// once its medium rendition is here, loaded under the one showing, so no
-// slide is ever blurry while it is up.
+// photo starts it from there, and its button in the grid (P there too)
+// with the photos its settings choose: favourites, all, or those taken on
+// this day in other years. P in select mode shows what is ticked. Each
+// comes as its thumbnail and is shown only once its medium rendition is
+// here, loaded under the one showing, so no slide is blurry while it is
+// up; the full size follows where the screen has the pixels for it. While
+// it shows, the screen stays on.
 PinholePlugin {
     id: plugin
     covering: frame.shown
@@ -21,79 +23,72 @@ PinholePlugin {
     function keep(name, value) { pinhole.settings[name] = value }
     readonly property var secondsChoices: [5, 8, 12, 20, 30]
 
-    // The library positions its settings choose, oldest first: looked
-    // for a few milliseconds a frame, so the window never waits on it (a
-    // pass over 50,000 photos takes about half a second), and given to
-    // `done` once all are seen.
-    property var scan: null
-    function choose(kind, done) {
-        const n = pinhole.library.count
-        if (kind === "all") {
-            scan = null
-            done(Array.from({ length: n }, (_, i) => i))
-            return
+    // The photos its settings choose, by id, oldest first, none hidden
+    // from the grid (Screenshots' screenshots): a few milliseconds over the
+    // whole library. On this day: its month and day in the years before;
+    // failing any, the week around it.
+    function choose(kind) {
+        kind = kind ?? photos
+        const library = pinhole.library
+        const ids = library.field("id")
+        const shown = pinhole.hiddenCount > 0 ? i => !pinhole.isHidden(i) : i => true
+        if (kind === "all")
+            return pinhole.hiddenCount > 0 ? ids.filter((id, i) => shown(i)) : ids
+        if (kind !== "onthisday") {
+            const favourite = library.field("favorite")
+            return ids.filter((id, i) => favourite[i] && shown(i))
         }
-        // On this day: its month and day in the years before; failing any,
-        // the week around it.
+        const days = library.field("day")
         const now = new Date()
-        const dayOf = date => date.getMonth() * 32 + date.getDate()
+        const monthDay = date => (date.getMonth() + 1) * 100 + date.getDate()
+        const today = monthDay(now)
         const near = new Set()
         for (let d = -3; d <= 3; ++d)
             if (d !== 0)
-                near.add(dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + d)))
-        scan = { kind: kind, done: done, i: 0, n: n, list: [], week: [], year: now.getFullYear(), day: dayOf(now), near: near }
-    }
-    FrameAnimation {
-        running: plugin.scan !== null
-        onTriggered: {
-            const s = plugin.scan
-            const library = plugin.pinhole.library
-            const until = Date.now() + 3
-            while (s.i < s.n && (s.i % 64 !== 0 || Date.now() < until)) {
-                const item = library.item(s.i)
-                if (s.kind === "favourites") {
-                    if (item.favorite)
-                        s.list.push(s.i)
-                } else {
-                    const date = new Date(item.date)
-                    if (date.getFullYear() < s.year) {
-                        const day = date.getMonth() * 32 + date.getDate()
-                        if (day === s.day)
-                            s.list.push(s.i)
-                        else if (s.near.has(day))
-                            s.week.push(s.i)
-                    }
-                }
-                ++s.i
-            }
-            if (s.i < s.n)
-                return
-            plugin.scan = null
-            s.done(s.list.length > 0 || s.kind !== "onthisday" ? s.list : s.week)
+                near.add(monthDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + d)))
+        const list = [], week = []
+        for (let i = 0; i < days.length; ++i) {
+            const day = days[i]
+            if (day === 0 || Math.floor(day / 10000) >= now.getFullYear() || !shown(i))
+                continue
+            if (day % 10000 === today)
+                list.push(ids[i])
+            else if (near.has(day % 10000))
+                week.push(ids[i])
         }
+        return list.length > 0 ? list : week
     }
-    // `list` as it will be shown, beginning at `first` (one of it, or not):
-    // shuffled, or on through time from there, round to the start.
-    function arrange(list, first) {
-        if (list.length === 0)
-            return first >= 0 ? [first] : []
-        if (shuffle) {
-            const rest = list.filter(i => i !== first)
-            for (let k = rest.length - 1; k > 0; --k) {
-                const j = Math.floor(Math.random() * (k + 1))
-                const t = rest[k]
-                rest[k] = rest[j]
-                rest[j] = t
-            }
-            return first >= 0 ? [first].concat(rest) : rest
+    function nothing() {
+        say(photos === "onthisday" ? qsTr("Nothing taken on this day in other years") : qsTr("No favourites to show"))
+    }
+    // Of `list` (ids, oldest first), the first taken at `position` in the
+    // library or after it; round to the first.
+    function from(list, position) {
+        let lo = 0, hi = list.length
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            if (pinhole.library.indexOf(list[mid]) < position)
+                lo = mid + 1
+            else
+                hi = mid
         }
-        if (first < 0)
-            return list
-        let at = list.findIndex(i => i >= first)
-        if (at < 0)
-            at = 0
-        const round = list.slice(at).concat(list.slice(0, at))
-        return round[0] === first ? round : [first].concat(round)
+        return list.length > 0 ? list[lo % list.length] : ""
+    }
+
+    // Showing what was ticked, not what the settings choose.
+    property bool ticked: false
+
+    // From the grid, with the photos its settings choose (or `kind`'s, for
+    // its self-test): shuffled from anywhere; in order, from the photo in
+    // the middle of the grid (or under the pointer) on.
+    function begin(kind) {
+        const list = choose(kind)
+        if (list.length === 0) {
+            nothing()
+            return
+        }
+        ticked = false
+        frame.start(shuffle ? "" : from(list, pinhole.currentIndex()), list, false, () => choose(kind))
     }
 
     // A word on the photos when nothing could be shown.
@@ -104,25 +99,27 @@ PinholePlugin {
 
     actions: [
         PluginAction {
+            id: gridAction
+            place: "grid"
+            text: qsTr("Frame")
+            key: "P"
+            usable: pinhole.library.count > 0
+            onTriggered: plugin.begin()
+        },
+        PluginAction {
             id: viewerAction
             place: "viewer"
             text: qsTr("Frame")
             key: "P"
             onTriggered: {
-                // The photo shown at once, and the rest as they are found.
-                const from = pinhole.viewer.index
-                frame.start([from], true)
-                plugin.choose(plugin.photos, list => {
-                    if (!frame.shown || !frame.fromViewer)
-                        return
-                    if (list.length === 0) {
-                        frame.stop()
-                        plugin.say(plugin.photos === "onthisday" ? qsTr("Nothing taken on this day in other years")
-                                   : qsTr("No favourites to show"))
-                        return
-                    }
-                    frame.extend(plugin.arrange(list, frame.current.index))
-                })
+                // The photo shown first, once, and then the photos chosen.
+                const list = plugin.choose()
+                if (list.length === 0) {
+                    plugin.nothing()
+                    return
+                }
+                plugin.ticked = false
+                frame.start(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
             }
         },
         PluginAction {
@@ -131,14 +128,21 @@ PinholePlugin {
             key: "P"
             usable: pinhole.selectionCount > 0
             onTriggered: {
-                const ticked = Array.from(pinhole.selection())
-                frame.start(plugin.arrange(ticked, plugin.shuffle ? -1 : ticked[0]), false)
+                const library = pinhole.library
+                const ticked = Array.from(pinhole.selection()).map(i => library.item(i).id)
+                plugin.ticked = true
+                // Those still there and not hidden since.
+                frame.start(plugin.shuffle ? "" : ticked[0], ticked, false, () => ticked.filter(id => {
+                    const i = library.indexOf(id)
+                    return i >= 0 && !pinhole.isHidden(i)
+                }))
             }
         }
     ]
 
     help: [
         ["P", qsTr("From this photo on")],
+        ["P", qsTr("The photos chosen, from the grid")],
         ["P", qsTr("Of what is ticked")]
     ]
 
@@ -146,9 +150,8 @@ PinholePlugin {
     tour: [
         {
             title: qsTr("A photo frame"),
-            text: qsTr("P on a photo shows your photos from there, one after another and slowly moving, full window: for a laptop left open. In select mode, P shows what is ticked."),
-            open: () => pinhole.currentIndex(),
-            action: viewerAction
+            text: qsTr("Frame (P) shows your photos one after another, slowly moving, full window, and keeps the screen on: for a laptop left open. On a photo, P starts from it; in select mode, P shows what is ticked."),
+            action: gridAction
         },
         {
             title: qsTr("While it shows"),
@@ -240,15 +243,19 @@ PinholePlugin {
             }
             Label {
                 topPadding: 4
-                text: qsTr("P on a photo starts it from there; in select mode, P shows what is ticked.")
+                text: qsTr("Frame (P) in the grid starts it; P on a photo starts from it; in select mode, P shows what is ticked. While it shows, the screen stays on.")
             }
         }
     }
 
     Frame {
         id: frame
+        objectName: "photoFrame"
         anchors.fill: parent
         plugin: plugin
+        // The library read again without any of them; what was ticked
+        // gone needs no word.
+        onEmptied: if (!plugin.ticked) plugin.nothing()
     }
 
     Chip {

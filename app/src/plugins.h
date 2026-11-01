@@ -15,6 +15,8 @@
 #include <memory>
 #include <vector>
 
+#include "keepawake.h"
+
 class History;
 class Library;
 class PhotoGrid;
@@ -201,6 +203,12 @@ public:
     // A few words at the foot of the window, for a while: "Saved to
     // Pictures".
     Q_INVOKABLE void notify(const QString &text);
+    // The screen kept on, no screensaver and no lock, while `on`, as a
+    // photo frame left running wants; false lets it go. Let go by itself
+    // when the plugin is turned off or loaded again, and with Pinhole.
+    // Whether the screen is kept on now: not where Pinhole cannot (not on
+    // Wayland, the window hidden), which it then does once it can.
+    Q_INVOKABLE bool keepAwake(bool on);
     // Something gone wrong, said under the plugin in the side panel and on
     // stderr: an Error (where it was thrown is said too) or a few words.
     // A promise's chain ends with .catch(pinhole.warn), as what a then()
@@ -337,6 +345,8 @@ public:
     Viewer *viewerObject() const { return m_viewer; }
     PhotoGrid *grid() const { return m_grid; }
     History *history() const { return m_history; }
+    // The screen kept on for plugins that ask (PluginHost::keepAwake).
+    KeepAwake *keepAwake() { return &m_keepAwake; }
     QJsonObject settingsOf(const QString &id) const;
     bool setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
     // A plugin's problem changed: the side panel says, once things settle.
@@ -380,6 +390,8 @@ private:
     PhotoGrid *m_grid = nullptr;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
+    // Before the plugins, so it outlives their hosts, which let it go.
+    KeepAwake m_keepAwake;
     std::vector<std::unique_ptr<Plugin>> m_plugins;
     QStringList m_ids;
     int m_revision = 0;
