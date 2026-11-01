@@ -233,6 +233,11 @@ public:
     // Loaded again or turned off: what it started stops, nothing answers
     // its old self, and what went wrong before is forgotten.
     void stop();
+    // Going with the window: stopped, and its programs still ending handed
+    // over, to wait for with every other plugin's (endPrograms).
+    std::vector<QProcess *> close();
+    // Programs asked to end, given a second all told, then killed.
+    static void endPrograms(const std::vector<QProcess *> &programs);
     // A callback of the plugin's, unless it has since stopped; what it
     // throws is reported.
     void call(const QJSValue &function, const QJSValueList &args = {});

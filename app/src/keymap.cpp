@@ -7,6 +7,8 @@
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
 #include <QQmlContext>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QWheelEvent>
 #include <private/qqmldata_p.h>
 
@@ -103,12 +105,38 @@ QStringList Keymap::uncovered() const {
     return missing;
 }
 
+bool Keymap::lostField(QObject *watched, QEvent *event) {
+    // What has the keys: the item a key is for, or the window's.
+    auto *item = qobject_cast<QQuickItem *>(watched);
+    if (auto *window = qobject_cast<QQuickWindow *>(watched))
+        item = window->activeFocusItem();
+    if (!item || !item->hasActiveFocus() || (item->isVisible() && item->isEnabled()))
+        return false;
+    QQuickWindow *window = item->window();
+    if (!window || item == window->contentItem())
+        return false;
+    // Hidden or turned off with the keys, a field (a panel's, a plugin's)
+    // would go on taking them, each of Pinhole's a shortcut it takes first,
+    // until a restart: they go back to the photos.
+    if (auto *grid = window->findChild<QQuickItem *>(QStringLiteral("grid")); grid && grid->isVisible())
+        grid->forceActiveFocus();
+    if (item->hasActiveFocus())
+        item->setFocus(false);
+    if (watched == window)
+        return false;
+    // Not this item's to take: a shortcut goes ahead, a key goes nowhere.
+    event->ignore();
+    return true;
+}
+
 bool Keymap::eventFilter(QObject *watched, QEvent *event) {
     switch (event->type()) {
     // A key that is a shortcut never arrives as a key press: Qt asks
     // whether anything wants it first (ShortcutOverride), then triggers it.
     case QEvent::KeyPress:
     case QEvent::ShortcutOverride:
+        setInput(QStringLiteral("keyboard"));
+        return lostField(watched, event);
     case QEvent::Shortcut:
         setInput(QStringLiteral("keyboard"));
         break;

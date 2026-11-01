@@ -26,7 +26,8 @@ Item {
     onNeedsCodeChanged: if (needsCode) {
         codeStage = true
         code.text = ""
-        code.forceActiveFocus()
+        if (shown)
+            code.forceActiveFocus()
     }
     onShownChanged: {
         if (shown) {
@@ -35,10 +36,17 @@ Item {
             account.text = appleId
             password.text = ""
             code.text = ""
-            Qt.callLater(() => (appleId === "" ? account.input : password.input).forceActiveFocus())
+            Qt.callLater(() => {
+                if (shown)
+                    (appleId === "" ? account.input : password.input).forceActiveFocus()
+            })
         } else {
             sources.cancelSignIn()
             appleId = ""
+            // Its fields let go of the keys: one hidden with them would
+            // take Pinhole's (each a shortcut a field takes first).
+            for (const field of [account.input, password.input, code])
+                field.focus = false
         }
     }
     Connections {

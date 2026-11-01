@@ -65,7 +65,10 @@ Item {
                 chosen = list
                 files = []
             }
-            phase = ""
+            // A PIN asked for while it was closed is still asked for, the
+            // photos it then sends those it shows.
+            if (!askingPin)
+                phase = ""
         }
         shown = true
         look()
@@ -73,6 +76,22 @@ Item {
     function close() {
         shown = false
         stopLooking()
+    }
+    // The PIN's field has the keys only while it shows and asks: left with
+    // them, hidden, Pinhole's keys would type into it (each a shortcut a
+    // field takes first).
+    onShownChanged: pinFocus()
+    onAskingPinChanged: pinFocus()
+    function pinFocus() {
+        if (shown && askingPin)
+            Qt.callLater(() => {
+                if (shown && askingPin)
+                    pinField.forceActiveFocus()
+            })
+        else
+            pinField.focus = false
+        if (!askingPin)
+            pinField.text = ""
     }
 
     // The files, then done(files): originals as taken; HEIC as JPEG, the
@@ -259,9 +278,10 @@ Item {
             return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
         phase = "asking"
         // What it says is heard as it goes; ended any way but by saying so,
-        // it failed.
-        const run = pinhole.run(plugin.sender, ["send", JSON.stringify(target)].concat(pin !== "" ? [pin] : []),
-                                { input: JSON.stringify(list), output: line => heard(line) })
+        // it failed. The PIN with the files, on its stdin: an argument any
+        // process can read.
+        const run = pinhole.run(plugin.sender, ["send", JSON.stringify(target)],
+                                { input: JSON.stringify({ files: list, pin: pin }), output: line => heard(line) })
         sending = run
         run.then(() => {}, error => {
             // Stopped before it could say so (the host kills a second
@@ -379,6 +399,7 @@ Item {
         case "busy": return qsTr("%1 is busy with another transfer.").arg(name)
         case "pin": return qsTr("%1 asks for a PIN.").arg(name)
         case "wrongpin": return qsTr("Not the PIN %1 asks for.").arg(name)
+        case "blocked": return qsTr("%1 won't take files from this computer after three wrong PINs: close and reopen LocalSend on it.").arg(name)
         case "nothing": return qsTr("%1 took none of them.").arg(name)
         case "stalled": return qsTr("%1 stopped taking them.").arg(name)
         case "unreachable": return qsTr("%1 could not be reached. Is LocalSend still open on it?").arg(name)
@@ -539,6 +560,8 @@ Item {
                                 : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
                     TextInput {
                         id: pinField
+                        objectName: "send.pin"
+                        enabled: panel.shown && panel.askingPin
                         anchors.fill: parent
                         anchors.leftMargin: Math.round(theme.fontSize * 0.6)
                         anchors.rightMargin: anchors.leftMargin
@@ -571,13 +594,6 @@ Item {
                     }
                 }
             }
-            Connections {
-                target: panel
-                function onAskingPinChanged() {
-                    if (panel.askingPin)
-                        pinField.forceActiveFocus()
-                }
-            }
 
             Rectangle {
                 width: parent.width
@@ -598,6 +614,8 @@ Item {
                     anchors.right: parent.right
                     hint: jpegCommand.keyName
                     checked: plugin.compatible
+                    // Not while a PIN is typed or a send goes.
+                    usable: jpegCommand.when
                     onToggled: jpegCommand.trigger()
                 }
             }

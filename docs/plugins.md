@@ -165,6 +165,12 @@ its settings, is there as the window first shows. It sets:
 and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
+Pinhole's keys are application shortcuts, and a field with the keys takes
+letters, Space and the arrows first: a plugin's `TextInput` takes focus only
+while it shows, and lets go (`focus = false`, or `enabled: false`) as its
+panel closes. One hidden or turned off with the keys anyway gives them back
+to the photos at the next key, never typed into.
+
 ### `pinhole`
 
 `pinhole` is the plugin's way into Pinhole. A photo is named by its

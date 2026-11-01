@@ -11,13 +11,16 @@
 //!     known over HTTPS is never taken over by one claiming its fingerprint
 //!     over plain HTTP, which proves nothing.
 //!
-//! `pinhole-send send <device> [<pin>]`, stdin `[{"path", "name"}, ...]`
-//!     The files to the device, each under its name: `asking` while its
-//!     owner decides, `accepted <files> <bytes>`, `progress <sent> <total>`
-//!     as it goes, and `sent <files>`. Else, exiting 1, one of: `declined`,
-//!     `busy`, `pin` (it wants one), `wrongpin`, `nothing` (it took none),
-//!     `stalled` (nothing went for 30 s), `unreachable` (nothing answered
-//!     at its address in 10 s), `mismatch` (not the certificate it answered
+//! `pinhole-send send <device>`, stdin `{"files": [{"path", "name"}, ...], "pin"}`
+//!     The files to the device, each under its name, with the PIN it asked
+//!     for if there is one (on stdin, where no other process reads it):
+//!     `asking` while its owner decides, `accepted <files> <bytes>`,
+//!     `progress <sent> <total>` as it goes, and `sent <files>`. Else,
+//!     exiting 1, one of: `declined`, `busy`, `pin` (it wants one),
+//!     `wrongpin`, `blocked` (it takes nothing from here after three wrong
+//!     PINs, until it is opened again), `nothing` (it took none), `stalled`
+//!     (nothing went for 30 s), `unreachable` (nothing answered at its
+//!     address in 16 s), `mismatch` (not the certificate it answered
 //!     with before), `rejected <status>`, `failed`, or `cancelled` at once
 //!     when stopped (SIGTERM), the device then told within 0.7 s.
 //!
@@ -78,8 +81,9 @@ const CANCEL_WAIT: Duration = Duration::from_secs(2);
 const STOPPED_WAIT: Duration = Duration::from_millis(700);
 /// How long a device's address is given to answer at all: one gone from
 /// the network would otherwise be waited for as long as the system tries,
-/// minutes.
-const CONNECT: Duration = Duration::from_secs(10);
+/// minutes. Past the fourth of Linux's tries again (at 1, 3, 7 and 15 s),
+/// for a phone whose Wi-Fi wakes slowly.
+const CONNECT: Duration = Duration::from_secs(16);
 /// HEICs made JPEGs at once.
 const CONVERSIONS: usize = 3;
 
@@ -97,7 +101,7 @@ fn main() {
             Some("stage") => stage(&args[1..]),
             Some("jpeg") => jpeg(&args[1..]).await,
             Some("tidy") => tidy(&args[1..]),
-            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> [<pin>] | stage <folder> | jpeg <folder> | tidy <folder>"),
+            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> | stage <folder> | jpeg <folder> | tidy <folder>"),
         }
     });
     if let Err(err) = result {
@@ -150,7 +154,10 @@ fn input() -> Result<Value> {
 
 /// `[{"path", "name"}, ...]` from stdin.
 fn files_in() -> Result<Vec<(PathBuf, String)>> {
-    let list = input()?;
+    files_of(&input()?)
+}
+
+fn files_of(list: &Value) -> Result<Vec<(PathBuf, String)>> {
     list.as_array()
         .context("stdin is not a list")?
         .iter()
@@ -495,13 +502,29 @@ fn trouble(err: &ClientError) -> String {
     }
 }
 
+/// A device's no to the files, by its HTTP status, as a word for the
+/// plugin.
+fn refusal(status: u16, with_pin: bool) -> String {
+    match status {
+        401 if with_pin => "wrongpin".into(),
+        401 => "pin".into(),
+        403 => "declined".into(),
+        409 => "busy".into(),
+        // LocalSend's answer to this address after three wrong PINs, until
+        // it is opened again.
+        429 => "blocked".into(),
+        status => format!("rejected {status}"),
+    }
+}
+
 async fn send(args: &[String]) -> Result<()> {
     let device: Value = serde_json::from_str(args.first().context("no device")?).context("the device")?;
+    let given = input()?;
     // As a URL's query has it: a PIN of `&`, `#`, `+` or `%` is itself.
-    let pin = args.get(1).filter(|pin| !pin.is_empty()).map(|pin| query_value(pin));
+    let pin = given["pin"].as_str().filter(|pin| !pin.is_empty()).map(query_value);
     let http = channel_of(&device)?;
     let identity = Identity::load()?;
-    let chosen = files_in()?;
+    let chosen = files_of(&given["files"])?;
     if chosen.is_empty() {
         bail!("no files");
     }
@@ -554,13 +577,7 @@ async fn send(args: &[String]) -> Result<()> {
     {
         Ok(prepared) => prepared,
         Err(ClientError::Cancelled) => end("cancelled"),
-        Err(ClientError::StatusCode(err)) => end(match err.status {
-            401 if pin.is_some() => "wrongpin",
-            401 => "pin",
-            403 => "declined",
-            409 | 429 => "busy",
-            status => end(&format!("rejected {status}")),
-        }),
+        Err(ClientError::StatusCode(err)) => end(&refusal(err.status, pin.is_some())),
         Err(err) => {
             let word = trouble(&err);
             eprintln!("pinhole-send: asking: {word}");
@@ -845,6 +862,23 @@ mod tests {
         assert_eq!(query_value("50%"), "50%25");
         assert_eq!(query_value("a b"), "a%20b");
         assert_eq!(query_value("ż"), "%C5%BC");
+    }
+
+    #[test]
+    fn three_wrong_pins_are_not_a_busy_device() {
+        assert_eq!(refusal(401, false), "pin");
+        assert_eq!(refusal(401, true), "wrongpin");
+        assert_eq!(refusal(403, false), "declined");
+        assert_eq!(refusal(409, false), "busy");
+        assert_eq!(refusal(429, true), "blocked");
+        assert_eq!(refusal(500, false), "rejected 500");
+    }
+
+    #[test]
+    fn the_pin_comes_with_the_files() {
+        let given: Value = serde_json::from_str(r#"{"files": [{"path": "/a/IMG_1.HEIC", "name": "../IMG_1.HEIC"}], "pin": "1+2"}"#).unwrap();
+        assert_eq!(files_of(&given["files"]).unwrap(), vec![(PathBuf::from("/a/IMG_1.HEIC"), "IMG_1.HEIC".to_string())]);
+        assert_eq!(given["pin"].as_str().map(query_value).as_deref(), Some("1%2B2"));
     }
 
     #[test]

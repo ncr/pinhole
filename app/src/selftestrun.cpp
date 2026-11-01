@@ -17,6 +17,7 @@
 #include <QQuickWindow>
 #include <QTimer>
 #include <QWheelEvent>
+#include <qpa/qwindowsysteminterface.h>
 
 #include <cmath>
 #include <cstdio>
@@ -412,7 +413,9 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // through. A LocalSend device on the network to take it (a phone with
     // LocalSend open, or the plugin's test receiver) is the run's. With
     // PINHOLE_SELFTEST_SEND=stop, Stop is pressed while the device decides;
-    // =pin, the PIN it asks for is 1234; =closed, the panel is closed as it
+    // =pin, the PIN it asks for is 1234, asked while closed, then typed with
+    // Pinhole's keys checked around it (exit 1 if any fails); =closed, the
+    // panel is closed as it
     // goes, and how it ended shows at the foot of the window; =stopsending,
     // Stop is pressed 2.5 s into the send (the run's device having stopped
     // answering); =localsend, L in place of a device; =jpeg, HEIC as JPEG.
@@ -464,6 +467,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     .arg(panel->property("phase").toString(), panel->property("status").toString())
                     .arg(panel->property("fetched").toInt());
             };
+            Viewer *photos = &viewer;
             QTimer::singleShot(9000, window, [=] {
                 grab(QStringLiteral("2-devices"));
                 say(describe());
@@ -477,11 +481,72 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QTimer::singleShot(300, window, [=] { grab(QStringLiteral("3-asking")); });
                 if (mode == QLatin1String("stop"))
                     QTimer::singleShot(500, window, [=] { QMetaObject::invokeMethod(panel, "stopSending"); });
-                if (mode == QLatin1String("closed"))
+                // =pin: closed too, so the PIN is asked for while it is.
+                if (mode == QLatin1String("closed") || mode == QLatin1String("pin"))
                     QTimer::singleShot(100, window, [=] { QMetaObject::invokeMethod(panel, "close"); });
                 auto clock = std::make_shared<QElapsedTimer>();
                 clock->start();
                 auto stopping = std::make_shared<bool>(false);
+                // =pin: typed as a person does, and Pinhole's keys checked
+                // around it: O opens the panel again on the prompt, the PIN
+                // is typed and the panel closed with Esc, → goes to the next
+                // photo, O again, the PIN still there, ⏎ sends it.
+                auto typing = std::make_shared<bool>(false);
+                auto failures = std::make_shared<int>(0);
+                auto field = panel->findChild<QQuickItem *>(QStringLiteral("send.pin"));
+                auto press = [window](int code, const QString &text = {}) {
+                    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, code, Qt::NoModifier, text);
+                    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, code, Qt::NoModifier, text);
+                };
+                auto check = [say, failures](bool ok, const QString &what) {
+                    *failures += ok ? 0 : 1;
+                    say(QStringLiteral("%1 %2").arg(ok ? "ok  " : "FAIL", what));
+                };
+                auto shown = [panel] { return panel->property("shown").toBool(); };
+                auto focused = [field] { return field && field->hasActiveFocus(); };
+                auto at = std::make_shared<int>(-1);
+                // ← to the photo before (the one shown is the newest), and →
+                // back to it; then `then`.
+                auto arrows = [=](const std::function<void()> &then) {
+                    *at = photos->index();
+                    press(Qt::Key_Left);
+                    QTimer::singleShot(600, window, [=] {
+                        const int before = photos->index();
+                        check(before != *at, QStringLiteral("← goes to the photo before (%1 to %2)").arg(*at).arg(before));
+                        press(Qt::Key_Right);
+                        QTimer::singleShot(600, window, [=] {
+                            check(photos->index() == *at, QStringLiteral("→ comes back (%1 to %2)").arg(before).arg(photos->index()));
+                            then();
+                        });
+                    });
+                };
+                auto pinKeys = [=] {
+                    grab(QStringLiteral("4-pin-closed"));
+                    say(describe());
+                    check(!shown() && !focused(), QStringLiteral("asked while closed, the field has not the keys"));
+                    press(Qt::Key_O, QStringLiteral("o"));
+                    QTimer::singleShot(700, window, [=] {
+                        grab(QStringLiteral("4-pin"));
+                        check(shown() && panel->property("phase").toString() == QLatin1String("pin") && focused(),
+                              QStringLiteral("O opens it on the prompt, the field with the keys"));
+                        for (const char *digit : {"1", "2", "3", "4"})
+                            press(Qt::Key_0 + (digit[0] - '0'), QString::fromLatin1(digit));
+                        check(field && field->property("text").toString() == QLatin1String("1234"), QStringLiteral("the PIN typed"));
+                        press(Qt::Key_Escape);
+                        QTimer::singleShot(500, window, [=] {
+                            check(!shown() && !focused(), QStringLiteral("Esc closes it, and the field lets go of the keys"));
+                            arrows([=] {
+                                press(Qt::Key_O, QStringLiteral("o"));
+                                QTimer::singleShot(700, window, [=] {
+                                    check(shown() && focused() && field->property("text").toString() == QLatin1String("1234"),
+                                          QStringLiteral("O opens it again, the PIN still in its field"));
+                                    *typing = false;
+                                    press(Qt::Key_Return, QStringLiteral("\r"));
+                                });
+                            });
+                        });
+                    });
+                };
                 auto poll = new QTimer(window);
                 poll->setInterval(200);
                 QObject::connect(poll, &QTimer::timeout, window, [=] {
@@ -495,10 +560,11 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                             QMetaObject::invokeMethod(panel, "stopSending");
                         });
                     }
-                    if (phase == QLatin1String("pin") && mode == QLatin1String("pin")) {
-                        grab(QStringLiteral("4-pin"));
-                        say(describe());
-                        QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, panel->property("target")), Q_ARG(QVariant, QStringLiteral("1234")));
+                    if (mode == QLatin1String("pin") && (*typing || phase == QLatin1String("pin")) && clock->elapsed() < 60000) {
+                        if (!*typing && *at < 0) {
+                            *typing = true;
+                            pinKeys();
+                        }
                         return;
                     }
                     if (phase == QLatin1String("fetching") || phase == QLatin1String("asking") || phase == QLatin1String("sending")) {
@@ -510,8 +576,20 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     say(describe());
                     QTimer::singleShot(2500, window, [=] {
                         grab(QStringLiteral("6-later"));
-                        say(QStringLiteral("panel %1").arg(panel->property("shown").toBool() ? "still shown" : "closed"));
-                        QCoreApplication::quit();
+                        say(QStringLiteral("panel %1").arg(shown() ? "still shown" : "closed"));
+                        if (mode != QLatin1String("pin"))
+                            return QCoreApplication::quit();
+                        // Sent with the PIN: Pinhole's keys are its own.
+                        check(phase == QLatin1String("sent"), QStringLiteral("sent with the PIN typed"));
+                        check(!focused(), QStringLiteral("the field has not the keys"));
+                        arrows([=] {
+                            press(Qt::Key_O, QStringLiteral("o"));
+                            QTimer::singleShot(700, window, [=] {
+                                check(shown(), QStringLiteral("O opens it"));
+                                say(QStringLiteral("pin: %1 failed").arg(*failures));
+                                QCoreApplication::exit(*failures ? 1 : 0);
+                            });
+                        });
                     });
                 });
                 poll->start();

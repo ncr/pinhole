@@ -2264,7 +2264,12 @@ void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keym
             const State &state = (*states)[k];
             const QStringList clashes = keymap.clashes();
             const bool layerRight = keymap.layer() == QLatin1String(state.layer);
-            const bool ok = clashes.isEmpty() && layerRight;
+            // Never a field hidden with the keys (sign-in's, closed).
+            QQuickItem *focus = window->activeFocusItem();
+            const bool focusShown = !focus || (focus->isVisible() && focus->isEnabled());
+            if (!focusShown)
+                std::printf("selftest:      the keys are with a hidden %s\n", focus->metaObject()->className());
+            const bool ok = clashes.isEmpty() && layerRight && focusShown;
             *failures += ok ? 0 : 1;
             std::printf("selftest: %-4s %s: the keys are %s's%s\n", ok ? "ok" : "FAIL", state.what, qPrintable(keymap.layer()),
                         layerRight ? "" : qPrintable(QStringLiteral(" (not %1's)").arg(QLatin1String(state.layer))));

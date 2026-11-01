@@ -326,18 +326,28 @@ PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
 }
 
 PluginHost::~PluginHost() {
-    // Its programs asked to end (SIGTERM), as when turned off, and given a
-    // second all told; then killed, here, as nothing would do it later.
+    endPrograms(close());
+}
+
+std::vector<QProcess *> PluginHost::close() {
+    // Its programs asked to end (SIGTERM), as when turned off; waited for
+    // by whoever takes them, as no event loop is left to.
     m_closing = true;
     stop();
+    return std::exchange(m_ending, {});
+}
+
+void PluginHost::endPrograms(const std::vector<QProcess *> &programs) {
+    // A second all told, however many there are; then killed, and reaped.
     QDeadlineTimer second(1000);
-    for (QProcess *process : m_ending)
+    for (QProcess *process : programs)
         process->waitForFinished(int(std::max<qint64>(0, second.remainingTime())));
-    for (QProcess *process : m_ending) {
-        if (process->state() != QProcess::NotRunning) {
+    for (QProcess *process : programs)
+        if (process->state() != QProcess::NotRunning)
             process->kill();
+    for (QProcess *process : programs) {
+        if (process->state() != QProcess::NotRunning)
             process->waitForFinished(1000);
-        }
         delete process;
     }
 }
@@ -781,7 +791,15 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
 }
 
 Plugins::~Plugins() {
-    // Hosts first, while what they stop can still say so to them.
+    // Hosts first, while what they stop can still say so to them: every
+    // one's programs asked to end at once, and given one second together,
+    // not a second each.
+    std::vector<QProcess *> ending;
+    for (auto &plugin : m_plugins)
+        if (plugin->host)
+            for (QProcess *process : plugin->host->close())
+                ending.push_back(process);
+    PluginHost::endPrograms(ending);
     for (auto &plugin : m_plugins)
         plugin->host.reset();
 }

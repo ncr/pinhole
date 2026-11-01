@@ -9,8 +9,14 @@ Item {
     property string hint
     // Chosen with the keys: a ring around it, in the accent.
     property bool lit: false
+    // Not now: dimmed, as a ShellButton is, and taps do nothing.
+    property bool usable: true
     signal toggled()
-    function press() { toggled() }
+    function press() {
+        if (usable)
+            toggled()
+    }
+    opacity: usable ? 1 : 0.4
 
     implicitWidth: track.width + (hintText.visible ? hintText.implicitWidth + Math.round(theme.fontSize * 0.6) : 0)
     implicitHeight: Math.round(theme.fontSize * 2.333)
@@ -32,7 +38,7 @@ Item {
         height: Math.round(theme.fontSize * 1.4)
         radius: height / 2
         color: toggle.checked ? theme.accent
-             : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, hover.hovered ? 0.22 : 0.14)
+             : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, hover.hovered && toggle.usable ? 0.22 : 0.14)
         Behavior on color { ColorAnimation { duration: 120 } }
         Rectangle {
             readonly property real inset: 3
@@ -55,6 +61,6 @@ Item {
         border.width: 2
         border.color: theme.accent
     }
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: toggle.toggled() }
+    HoverHandler { id: hover; cursorShape: toggle.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
+    TapHandler { onTapped: toggle.press() }
 }

@@ -61,6 +61,9 @@ protected:
 
 private:
     void setInput(const QString &input);
+    // A key for an item with the keys that no longer shows (or is turned
+    // off): the keys go back to the photos, never typed into it.
+    bool lostField(QObject *watched, QEvent *event);
 
     QString m_layer = QStringLiteral("grid");
     QString m_plugin;

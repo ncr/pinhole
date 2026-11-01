@@ -6,6 +6,7 @@
   "%1 refused them (%2).": "%1: odrzucono (%2).",
   "%1 stopped taking them.": "%1 przestał odbierać.",
   "%1 took none of them.": "%1: nie przyjęto żadnego.",
+  "%1 won't take files from this computer after three wrong PINs: close and reopen LocalSend on it.": "%1 nie przyjmuje już plików z tego komputera po trzech błędnych PIN-ach: zamknij LocalSend na tym urządzeniu i otwórz go ponownie.",
   "%n could not be fetched": {
     "one": "nie udało się pobrać %n pliku",
     "few": "nie udało się pobrać %n plików",

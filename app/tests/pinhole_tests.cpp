@@ -13,6 +13,8 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQmlPropertyMap>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -2310,6 +2312,174 @@ private slots:
         QVERIFY(::kill(pid, 0) != 0);
         QVERIFY(clock.elapsed() >= 900);
         QVERIFY(clock.elapsed() < 3000);
+    }
+
+    // Two plugins' programs deaf to SIGTERM: a second together, not one
+    // each, before the window is gone.
+    void programsThatWillNotEndGoTogetherWithTheWindow() {
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}, {"u", {}}});
+        auto *u = qobject_cast<PluginHost *>(bench->plugins->at("u").value("host").value<QObject *>());
+        QList<pid_t> pids;
+        for (PluginHost *host : {bench->host, u}) {
+            const QString pidFile = bench->dir.path() + "/pid-" + host->property("id").toString() + QString::number(pids.size());
+            bench->engine.globalObject().setProperty("host", bench->engine.newQObject(host));
+            bench->js(QStringLiteral(R"(host.run("sh", ["-c", "trap '' TERM; echo $$ > %1; exec sleep 30"]))").arg(pidFile));
+            QTRY_VERIFY(QFileInfo(pidFile).size() > 0);
+            QFile file(pidFile);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            pids << file.readAll().trimmed().toInt();
+            QVERIFY(pids.last() > 0 && ::kill(pids.last(), 0) == 0);
+        }
+        QElapsedTimer clock;
+        clock.start();
+        bench->plugins.reset();
+        for (pid_t pid : pids)
+            QVERIFY(::kill(pid, 0) != 0);
+        QVERIFY(clock.elapsed() >= 900);
+        QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
+    }
+
+    // A field that took the keys and was then hidden or turned off: Pinhole's
+    // keys, each an application shortcut a field takes first, reach Pinhole
+    // again, and nothing is typed into it.
+    void aHiddenFieldGivesBackTheKeys() {
+        Keymap keymap;
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"(import QtQuick
+            Window {
+                width: 400; height: 300
+                property int o: 0
+                property int right: 0
+                property alias field: field
+                property alias panel: panel
+                Item { objectName: "grid"; anchors.fill: parent; focus: true }
+                Shortcut { sequences: ["O"]; context: Qt.ApplicationShortcut; onActivated: o++ }
+                Shortcut { sequences: ["Right"]; context: Qt.ApplicationShortcut; onActivated: right++ }
+                Item { id: panel; anchors.fill: parent; TextInput { id: field; width: 100; height: 20 } }
+            })", QUrl());
+        std::unique_ptr<QObject> made(component.create());
+        QVERIFY2(made, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(made.get());
+        window->show();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        auto *field = window->property("field").value<QQuickItem *>();
+        auto *panel = window->property("panel").value<QQuickItem *>();
+        QTest::keyClick(window, Qt::Key_O);
+        QCOMPARE(window->property("o").toInt(), 1);
+        field->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_1);
+        QCOMPARE(field->property("text").toString(), QString("1"));
+        panel->setVisible(false);
+        QTest::keyClick(window, Qt::Key_O);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(window->property("o").toInt(), 2);
+        QCOMPARE(window->property("right").toInt(), 1);
+        QCOMPARE(field->property("text").toString(), QString("1"));
+        QVERIFY(!field->hasActiveFocus());
+        QVERIFY(window->findChild<QQuickItem *>("grid")->hasActiveFocus());
+        // Turned off, the same.
+        panel->setVisible(true);
+        field->forceActiveFocus();
+        field->setEnabled(false);
+        QTest::keyClick(window, Qt::Key_O);
+        QCOMPARE(window->property("o").toInt(), 3);
+        QCOMPARE(field->property("text").toString(), QString("1"));
+    }
+
+    // Send to phone's PIN: its field has the keys while the panel shows and
+    // asks for one, and never once it is closed, or asked while closed;
+    // opened again on the same photos, it still asks.
+    void sendToPhonesPinLetsGoOfTheKeys() {
+        PluginBench bench({{"pinhole.send", {}}});
+        // No pinhole-send beside the bench's plugin: opening it finds no
+        // device, and nothing goes on any network.
+        QVERIFY(!QFile::exists(bench.host->property("dir").toString() + "/sender/target/release/pinhole-send"));
+        QVERIFY(!QFile::exists(bench.host->property("dir").toString() + "/pinhole-send"));
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        QQmlComponent shell(&bench.engine);
+        shell.setData(R"(import QtQuick
+            Window {
+                width: 800; height: 600
+                property int o: 0
+                property int right: 0
+                Item { objectName: "grid"; anchors.fill: parent; focus: true }
+                Shortcut { sequences: ["O"]; context: Qt.ApplicationShortcut; onActivated: o++ }
+                Shortcut { sequences: ["Right"]; context: Qt.ApplicationShortcut; onActivated: right++ }
+            })", QUrl());
+        std::unique_ptr<QObject> made(shell.create());
+        QVERIFY2(made, qPrintable(shell.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(made.get());
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/send/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.send&load=0");
+        std::unique_ptr<QObject> plugin(
+            component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        auto *item = qobject_cast<QQuickItem *>(plugin.get());
+        item->setParentItem(window->contentItem());
+        item->setSize(window->size());
+        window->show();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        auto *panel = item->findChild<QQuickItem *>("sendPanel");
+        auto *field = item->findChild<QQuickItem *>("send.pin");
+        QVERIFY(panel && field);
+        auto count = [window](const char *name) { return window->property(name).toInt(); };
+
+        // Asked for while it shows: typed into.
+        QMetaObject::invokeMethod(panel, "open", Q_ARG(QVariant, QVariantList{0}));
+        QVERIFY(panel->property("shown").toBool());
+        panel->setProperty("phase", "pin");
+        QTRY_VERIFY(field->hasActiveFocus() && field->isVisible());
+        QTest::keyClick(window, Qt::Key_1);
+        QTest::keyClick(window, Qt::Key_2);
+        QCOMPARE(field->property("text").toString(), QString("12"));
+        QCOMPARE(count("o"), 0);
+        // Closed: the keys are Pinhole's again, at once.
+        QMetaObject::invokeMethod(panel, "close");
+        QVERIFY(!field->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_O);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(count("o"), 1);
+        QCOMPARE(count("right"), 1);
+        QCOMPARE(field->property("text").toString(), QString("12"));
+        // Opened again on the same photo: still asked, typed into again.
+        QMetaObject::invokeMethod(panel, "open", Q_ARG(QVariant, QVariantList{0}));
+        QCOMPARE(panel->property("phase").toString(), QString("pin"));
+        QTRY_VERIFY(field->hasActiveFocus() && field->isVisible());
+        QMetaObject::invokeMethod(panel, "close");
+
+        // Asked for while closed (a send that went on): the field never
+        // takes the keys.
+        panel->setProperty("phase", "");
+        panel->setProperty("phase", "wrongpin");
+        QTest::qWait(50);
+        QVERIFY(!field->hasActiveFocus());
+        QVERIFY(!field->isEnabled());
+        QTest::keyClick(window, Qt::Key_O);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(count("o"), 2);
+        QCOMPARE(count("right"), 2);
+        // Opened, on another photo now: still asked, for that one.
+        QMetaObject::invokeMethod(panel, "open", Q_ARG(QVariant, QVariantList{1}));
+        QCOMPARE(panel->property("phase").toString(), QString("wrongpin"));
+        QVariant chosen = panel->property("chosen");
+        if (chosen.canConvert<QJSValue>())
+            chosen = chosen.value<QJSValue>().toVariant();
+        QCOMPARE(chosen.toList().value(0).toMap().value("id").toString(), QString("b"));
+        QTRY_VERIFY(field->hasActiveFocus() && field->isVisible());
+        // Its prompt gone (another device, J), the keys go back at once.
+        panel->setProperty("phase", "");
+        QVERIFY(!field->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(count("right"), 3);
+        QMetaObject::invokeMethod(panel, "close");
     }
 
     void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {
