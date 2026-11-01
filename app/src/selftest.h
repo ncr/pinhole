@@ -58,6 +58,15 @@ void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer,
 // or does not; report the Live button's state at each grab.
 void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
 
+// PINHOLE_SELFTEST=layers:<folder>: with the test plugin app/tests/layers
+// among the plugins (PINHOLE_BUILTIN_PLUGINS), and offscreen, so that its
+// animations run: its layer made once for each photo shown, lying on the
+// photo opened, zoomed and panned, told it is no longer shown on ← and on
+// Esc, gone once the viewer is; none for photos passing quickly; its
+// action's complaint under its button, gone four seconds later; and an
+// action of order -5 before Copy in select mode's bar. Frames in <folder>.
+void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
+
 // PINHOLE_SELFTEST=actionbar:<folder>: the newest Live Photo in a series
 // full window; grab its bar, then with each menu open on its key (and the
 // arrow down in one), Esc between; then select mode's bar and its menus.

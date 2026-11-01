@@ -60,7 +60,8 @@ Item {
     onVisibleChanged: if (!visible) open = false
     onMenuItemsChanged: if (menuItems.length === 0) open = false
 
-    function hintOf(action) { return action.hint ?? KeyNames.nameOf(action.key ?? "") }
+    // A word of its own at the right of its row ("iPhone"), else its key.
+    function hintOf(action) { return (action.hint ?? "") !== "" ? action.hint : KeyNames.nameOf(action.key ?? "") }
     function press(action) {
         open = false
         if (action.usable !== false)
@@ -80,6 +81,16 @@ Item {
         current = Math.max(0, menuItems.indexOf(item))
         open = true
     }
+    // What its button could not do, said under it for a few seconds, the
+    // button shaking (Complaint.qml); and gone again at once.
+    function complain(text) {
+        complaint.active = true
+        complaint.item.say(text)
+    }
+    function hush() {
+        if (complaint.item)
+            complaint.item.hush()
+    }
 
     Row {
         id: row
@@ -98,6 +109,7 @@ Item {
             id: slot
             width: childrenRect.width
             height: childrenRect.height
+            transform: Translate { id: slotNudge }
         }
         ShellButton {
             id: arrow
@@ -108,6 +120,16 @@ Item {
             hint: ""
             active: group.open
             onTapped: group.toggle(false)
+        }
+    }
+
+    Loader {
+        id: complaint
+        active: false
+        sourceComponent: Complaint {
+            button: slot
+            nudged: slotNudge
+            upward: group.upward
         }
     }
 

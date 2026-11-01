@@ -850,7 +850,7 @@ void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewe
         auto *clock = new QElapsedTimer;
         auto state = [window, &viewer] {
             QObject *b = window->findChild<QObject *>(QStringLiteral("liveButton"));
-            QObject *notice = window->findChild<QObject *>(QStringLiteral("liveNotice"));
+            QObject *notice = window->findChild<QObject *>(QStringLiteral("complaint"));
             return QStringLiteral("loading %1, button %2%3, notice \"%4\"")
                 .arg(viewer.liveLoading())
                 .arg(b && b->property("active").toBool() ? "lit" : "plain")

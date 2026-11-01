@@ -13,8 +13,12 @@ Item {
     id: root
 
     required property var grid
-    // Plugins' buttons for a photo (PluginAction), before Copy.
+    // Plugins' buttons for a photo (PluginAction), before Copy, in their
+    // order.
     property var pluginActions: []
+    // Plugins' layers over the photo (PinholePlugin.viewerLayer), each
+    // { plugin, component }, in the plugins' order.
+    property var pluginLayers: []
     // The window's keys and gestures (Main.qml), for its ? button here.
     property var helpAction: null
     property double openedAt: 0
@@ -72,6 +76,7 @@ Item {
         root.cell = root.grid.rectOf(viewer.index)
         videoPlayer.stop()
         livePlayer.stop()
+        layers.hide()
         // Still opening, it would grow again after it closed, and stay.
         growing.stop()
         shrinking.start()
@@ -104,8 +109,9 @@ Item {
             detailImage.source = ""
             liveOutput.visible = false
             livePlayer.stop()
-            liveNotice.hide()
+            actionBar.hush()
             actionBar.closeMenus()
+            layers.photoChanged()
         }
         // Another effect: a loop or a bounce plays once it is here (liveSource).
         function onEffectChanged() {
@@ -125,12 +131,12 @@ Item {
                 livePlayer.play()
             }
         }
-        function onLiveFailed(message) { liveNotice.say(message) }
+        function onLiveFailed(message) { liveGroup.complain(message) }
     }
     Connections {
         target: favourites
         enabled: root.shown
-        function onFailed(message) { liveNotice.say(message, favoriteButton, favoriteNudge) }
+        function onFailed(message) { favoriteGroup.complain(message) }
     }
 
     NumberAnimation {
@@ -182,6 +188,7 @@ Item {
 
     Item {
         id: frame
+        objectName: "viewerFrame"
         // Fitted, zoomed and panned, where the row puts it; growing from
         // the grid's cell while opening.
         readonly property real targetWidth: root.fitWidth * viewer.zoom
@@ -268,7 +275,7 @@ Item {
             onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState) liveOutput.visible = false
             onErrorOccurred: {
                 liveOutput.visible = false
-                liveNotice.say(qsTr("Could not play the motion"))
+                liveGroup.complain(qsTr("Could not play the motion"))
             }
         }
         VideoOutput {
@@ -276,6 +283,90 @@ Item {
             anchors.fill: parent
             visible: false
             fillMode: VideoOutput.PreserveAspectCrop
+        }
+
+        // The plugins' layers, in their order, each made afresh for each
+        // photo shown (`photo`), told `shown` false the moment the photo
+        // changes or the viewer starts to shrink away, and gone once it
+        // has. Photos passing quicker than a person looks at them (a held
+        // key, the carousel scrubbed) get theirs once it stops on one, as
+        // the viewer fetches (viewer.cpp's kPassing).
+        Item {
+            id: layers
+            objectName: "viewerLayers"
+            anchors.fill: parent
+            property double changedAt: 0
+            function each(f) {
+                for (let i = 0; i < layerSlots.count; ++i) {
+                    const slot = layerSlots.itemAt(i)
+                    if (slot)
+                        f(slot)
+                }
+            }
+            function hide() { each(slot => slot.hide()) }
+            function drop() {
+                later.stop()
+                each(slot => slot.drop())
+            }
+            function make() {
+                if (viewer.open && viewer.index >= 0 && !root.closing)
+                    each(slot => slot.make())
+            }
+            function photoChanged() {
+                drop()
+                const now = Date.now()
+                const passing = now - changedAt < 150
+                changedAt = now
+                if (passing) {
+                    later.restart()
+                } else {
+                    later.stop()
+                    Qt.callLater(makeSoon)
+                }
+            }
+            // Not when another photo came meanwhile, passing: then later.
+            function makeSoon() {
+                if (!later.running)
+                    make()
+            }
+            Timer { id: later; interval: 150; onTriggered: layers.make() }
+            Connections {
+                target: viewer
+                function onOpenChanged() {
+                    if (!viewer.open)
+                        layers.drop()
+                }
+            }
+            Repeater {
+                id: layerSlots
+                model: root.pluginLayers
+                delegate: Item {
+                    id: layerSlot
+                    required property var modelData
+                    anchors.fill: parent
+                    property var made: null
+                    function make() {
+                        drop()
+                        made = modelData.component.createObject(layerSlot, { photo: viewer.index, shown: true })
+                        if (made === null)
+                            plugins.layerFailed(modelData.plugin, modelData.component.errorString())
+                    }
+                    function hide() {
+                        if (made)
+                            made.shown = false
+                    }
+                    function drop() {
+                        if (!made)
+                            return
+                        made.shown = false
+                        made.destroy()
+                        made = null
+                    }
+                    // One that came while a photo shows has its layer at once.
+                    Component.onCompleted: if (viewer.open && viewer.index >= 0 && !root.closing) make()
+                    Component.onDestruction: drop()
+                }
+            }
         }
     }
 
@@ -476,6 +567,7 @@ Item {
             // A favourite or not: a filled heart in the accent, or an empty
             // one (Nerd Font's: the typeface's own ♥ is an outline too).
             MenuGroup {
+                id: favoriteGroup
                 ShellButton {
                     id: favoriteButton
                     objectName: "favoriteButton"
@@ -488,12 +580,12 @@ Item {
                     helpText: qsTr("Favourite")
                     hint: actionBar.hints ? "F" : ""
                     onTapped: favourites.toggle([viewer.index])
-                    transform: Translate { id: favoriteNudge }
                 }
             }
             // The effects, as on the iPhone: Live, Loop, Bounce, Long
             // exposure, the one set on the iPhone saying so.
             MenuGroup {
+                id: liveGroup
                 visible: viewer.live
                 menuKey: "Shift+L"
                 menuText: qsTr("Live effects")
@@ -523,7 +615,6 @@ Item {
                     busy: viewer.liveLoading || root.liveBuffering
                     busyDelay: 300
                     onTapped: viewer.playLive()
-                    transform: Translate { id: liveNudge }
                 }
             }
             Repeater {
@@ -584,40 +675,6 @@ Item {
                     onTapped: root.closeViewer()
                 }
             }
-        }
-    }
-
-    // The motion could not be had: said for a moment under the Live button,
-    // which shakes, as Copy does when nothing could be copied.
-    Chip {
-        id: liveNotice
-        objectName: "liveNotice"
-        y: actions.y + actions.height + 6
-        textColor: theme.darkForeground
-        visible: opacity > 0
-        opacity: 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        // Under the button it is about (Live's unless said), which shakes.
-        property var nudged: liveNudge
-        function say(message, button = liveButton, shaken = liveNudge) {
-            text = message
-            x = Math.max(16, Math.min(button.mapToItem(root, 0, 0).x, root.width - 16 - width))
-            opacity = root.progress * root.chrome
-            nudged = shaken
-            noticeShown.restart()
-            nudge.restart()
-        }
-        function hide() {
-            noticeShown.stop()
-            opacity = 0
-        }
-        Timer { id: noticeShown; interval: 4000; onTriggered: liveNotice.opacity = 0 }
-        SequentialAnimation {
-            id: nudge
-            NumberAnimation { target: liveNotice.nudged; property: "x"; to: -5; duration: 50 }
-            NumberAnimation { target: liveNotice.nudged; property: "x"; to: 5; duration: 80 }
-            NumberAnimation { target: liveNotice.nudged; property: "x"; to: -3; duration: 70 }
-            NumberAnimation { target: liveNotice.nudged; property: "x"; to: 0; duration: 60 }
         }
     }
 

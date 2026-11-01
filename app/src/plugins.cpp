@@ -58,6 +58,19 @@ QString PluginLibrary::key() const {
 
 QStringList PluginLibrary::keys() const { return Storage::sourceIds(); }
 
+namespace {
+// A Live Photo's effect as set on the iPhone, as plugins name it.
+QString effectName(LiveEffect effect) {
+    switch (effect) {
+    case LiveEffect::Loop: return QStringLiteral("loop");
+    case LiveEffect::Bounce: return QStringLiteral("bounce");
+    case LiveEffect::LongExposure: return QStringLiteral("long_exposure");
+    case LiveEffect::None: break;
+    }
+    return QString();
+}
+} // namespace
+
 QVariantMap PluginLibrary::item(const QJSValue &photo) const {
     const int index = positionOf(photo);
     if (index < 0)
@@ -74,6 +87,7 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
         {"video", item.video},
         {"live", item.live},
         {"favorite", item.favorite},
+        {"effect", effectName(item.effect)},
         // The thumbnail's average colour, "#rrggbb"; "" before it has one.
         {"avgColor", item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name()},
     };
@@ -118,6 +132,8 @@ QVariantList PluginLibrary::field(const QString &name) const {
         return column([](const LibraryItem &item) { return item.live; });
     if (name == QLatin1String("favorite"))
         return column([](const LibraryItem &item) { return item.favorite; });
+    if (name == QLatin1String("effect"))
+        return column([](const LibraryItem &item) { return effectName(item.effect); });
     if (name == QLatin1String("avgColor"))
         return column([](const LibraryItem &item) {
             return item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name();
@@ -565,6 +581,8 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
     if (const int index = m_plugins->library()->positionOf(photo); index >= 0)
         id = data->at(index).id;
     const int generation = m_generation;
+    // An object in done's place is options (API 3).
+    const bool stream = !done.isCallable() && done.isObject() && done.property(QStringLiteral("stream")).toBool();
 
     if (done.isCallable()) {
         if (id.isEmpty()) {
@@ -590,12 +608,17 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
         settle(generation, deferred->reject, error(QStringLiteral("not_found"), tr("no such photo")));
         return promise;
     }
-    m_plugins->service()->fetch(id, kind, [this, deferred, generation](bool ok, const QJsonObject &result, const QString &code) {
-        if (ok)
-            settle(generation, deferred->resolve, result.value("path").toString());
-        else
+    m_plugins->service()->fetch(id, kind, [this, deferred, generation, stream](bool ok, const QJsonObject &result, const QString &code) {
+        if (!ok) {
             settle(generation, deferred->reject, error(code, result.value("message").toString()));
-    });
+            return;
+        }
+        const QString path = result.value("path").toString();
+        // To play: the service's own URL while it still downloads.
+        const QString streamed = result.value("stream").toString();
+        settle(generation, deferred->resolve,
+               !stream ? path : !streamed.isEmpty() ? streamed : QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded));
+    }, stream);
     return promise;
 }
 
@@ -1552,6 +1575,12 @@ void Plugins::loadFailed(const QString &id) {
             p->host->report(describe(component.errors().first(), p->dir), false);
 }
 
+void Plugins::layerFailed(const QString &id, const QString &message) {
+    for (const auto &p : m_plugins)
+        if (p->id == id && p->host)
+            p->host->report(QStringLiteral("viewerLayer: ") + message.trimmed());
+}
+
 void Plugins::rescan() {
     scan();
 }
@@ -1689,6 +1718,26 @@ qsizetype closing(const QString &code, qsizetype open) {
     return code.size() - 1;
 }
 
+// An object's own lines from its `{` at `open`: what is inside its
+// children, calls and lists left out.
+QString ownLines(const QString &code, qsizetype open) {
+    const qsizetype end = closing(code, open);
+    QString own;
+    int depth = 0;
+    for (qsizetype k = open; k <= end; ++k) {
+        const QChar c = code[k];
+        if (c == '{' || c == '(' || c == '[')
+            ++depth;
+        else if (c == '}' || c == ')' || c == ']')
+            --depth;
+        else if (depth == 1)
+            own += c;
+        if (depth != 1 && !own.endsWith('\n'))
+            own += '\n';
+    }
+    return own;
+}
+
 } // namespace
 
 QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
@@ -1699,7 +1748,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "promises"},      {2, "pinhole.settings"}, {2, "pinhole.notify"},   {2, "pinhole.warn"},
         {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
         {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
-        {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"}};
+        {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
+        {3, "viewerLayer"}, {3, "an action's order, hint or complain"}, {3, "fetch's options"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1719,6 +1769,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
+        {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
+        {"an action's order, hint or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
@@ -1732,6 +1784,12 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     // run's options, in its call.
     static const QRegularExpression run(QStringLiteral("\\bpinhole\\s*\\.\\s*run\\s*\\("));
     static const QRegularExpression output(QStringLiteral("\\boutput\\s*:"));
+    // fetch's, in its call.
+    static const QRegularExpression fetch(QStringLiteral("\\bpinhole\\s*\\.\\s*fetch\\s*\\("));
+    static const QRegularExpression fetchOptions(QStringLiteral("\\bstream\\s*:"));
+    // A PluginAction's own lines that say its order or hint.
+    static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
+    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint)\\s*:"));
     // A file's root object, its id, and its hidden set.
     static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
     static const QRegularExpression rootId(QStringLiteral("(^|[;\\s])id\\s*:\\s*([\\w$]+)"));
@@ -1760,27 +1818,22 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             if (code.mid(open, closing(code, open) - open + 1).contains(output))
                 uses << QStringLiteral("run's output");
         }
+        for (auto match = fetch.globalMatch(code); match.hasNext();) {
+            const qsizetype open = match.next().capturedEnd() - 1;
+            if (code.mid(open, closing(code, open) - open + 1).contains(fetchOptions))
+                uses << QStringLiteral("fetch's options");
+        }
+        for (auto match = action.globalMatch(code); match.hasNext();) {
+            const qsizetype open = match.next().capturedEnd() - 1;
+            if (ownLines(code, open).contains(orderOrHint))
+                uses << QStringLiteral("an action's order, hint or complain");
+        }
         // A PinholePlugin root's hidden: set where it is, or by its id.
         const auto top = root.match(code);
         if (!file.fileName().endsWith(QLatin1String(".qml")) || !top.hasMatch()
             || top.captured(1).section('.', -1) != QLatin1String("PinholePlugin"))
             continue;
-        const qsizetype open = top.capturedEnd() - 1, end = closing(code, open);
-        // Its own lines: what is inside its children, calls and lists left
-        // out.
-        QString own;
-        int depth = 0;
-        for (qsizetype k = open; k <= end; ++k) {
-            const QChar c = code[k];
-            if (c == '{' || c == '(' || c == '[')
-                ++depth;
-            else if (c == '}' || c == ')' || c == ']')
-                --depth;
-            else if (depth == 1)
-                own += c;
-            if (depth != 1 && !own.endsWith('\n'))
-                own += '\n';
-        }
+        const QString own = ownLines(code, top.capturedEnd() - 1);
         const auto id = rootId.match(own);
         if (own.contains(hiddenSet)
             || (id.hasMatch()

@@ -58,8 +58,10 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
-`pinhole.state`, `pinhole.cache`, and `sources` in the manifest: a source
-of photos of the plugin's own, whose provider pinholed runs
+`pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
+`hint` and `complain`, `fetch`'s options and its Live effects, a photo's
+`effect`, and `sources` in the manifest: a source of photos of the
+plugin's own, whose provider pinholed runs
 ([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
@@ -105,12 +107,19 @@ its settings, is there as the window first shows. It sets:
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
   `text`, `key`, `shown`, `usable`, `active`, `busy`, and `onTriggered`.
+  `order` places it among the others of its place, lowest first, then in
+  the plugins' order (0 if left out); in select mode's bar, those below 0
+  come before Copy. Its `complain(text)` says what it could not do in a
+  few words under its button for four seconds, the button shaking, as
+  Copy does (under More ▾ while it is folded there).
   `key` is a sequence as Qt writes one ("F2", "Shift+S", "Ctrl+Return"),
   and the button and the help show it as Pinhole names keys: F2, ⇧ S,
   Ctrl ⏎. In
   the viewer and select mode, actions with the same `group` are one button,
   the first of them shown, with the rest in a menu under ▾ beside it, opened
-  with ⇧ and that button's key. Pinhole sets its `hovered` while the pointer
+  with ⇧ and that button's key; there an action's `hint`, a word, stands
+  at the right of its row in place of its key ("iPhone"). Pinhole sets its
+  `hovered` while the pointer
   is on it, for the plugin to show what pressing it would do, as Series
   shows the series a photo would join. Where the window is too narrow for
   them all, their keys go from the buttons, then the plugins' buttons fold
@@ -137,6 +146,25 @@ its settings, is there as the window first shows. It sets:
   listed under its name with its `Command`s that give a `section` (any
   but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
   Pinhole's are: the heading says whose they are.
+- `viewerLayer`: a `Component` drawn over a photo shown full window,
+  inside it, so it is zoomed, panned, grown from its cell and clipped with
+  the photo, as Live Photos plays its motion there. It is made afresh for
+  each photo shown, given `photo` (its library position) and `shown`, which
+  its root declares:
+
+  ```qml
+  viewerLayer: Item {
+      property int photo
+      property bool shown       // false the moment another photo shows or the viewer starts to close
+      anchors.fill: parent
+      // …stop what it plays on `shown` false
+  }
+  ```
+
+  It goes once that photo is no longer shown. Photos passing quicker than
+  anyone looks at them (an arrow held down, the strip scrubbed) get none:
+  the one it stops on does. Layers stack in the plugins' order, above
+  Pinhole's own picture and video.
 - `stacks`: photos shown in the grid as one card, each a list of library
   positions, as Series does with each series. The card stands where the
   first one is, shows it and carries the mark for several photos; opening
@@ -219,13 +247,15 @@ positions move when the library is read again, ids do not, so keep ids.
 
 | | |
 |---|---|
-| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); and `changed()` when it is read again |
+| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a
+Live Photo's effect as set on the iPhone: `loop`, `bounce`,
+`long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); and `changed()` when it is read again |
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
-| `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize` |
+| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the service makes when the source has none): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize`. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |

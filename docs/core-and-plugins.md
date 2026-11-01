@@ -404,6 +404,18 @@ while that photo is shown, false the moment `closeViewer()` starts
 shrinking or the photo changes. A layer stops its motion on `shown` false.
 Layers stack in plugin order.
 
+As built (B2): not a `Loader` but `Component.createObject(slot, { photo,
+shown: true })` in a `Repeater` slot per plugin, as a Loader cannot give
+a component initial properties, and `photo` must be there before the
+layer's `Component.onCompleted`. The root declares `photo` and `shown`.
+Photos passing quicker than 150 ms apart (an arrow held, the strip
+scrubbed) get no layer until it stops on one, as `Viewer::show` waits to
+fetch (`kPassing`): a layer that fetches as it is made would otherwise
+queue a fetch per photo passed. A layer that cannot be made is said under
+its plugin (`Plugins::layerFailed`). The layers are gathered with the
+actions in `collectPlugins` (`pluginLayers`), and made again only when
+one comes or goes.
+
 `PluginAction` gets:
 
 - `order` (int, 0): actions in one place are sorted by it, then by plugin.
@@ -417,6 +429,17 @@ Layers stack in plugin order.
   button shaking, as `liveNotice` and Copy do now. `PluginGroup.qml` and
   `MoreGroup.qml` draw it, the code moved from `PhotoViewer.qml`'s
   `liveNotice`. Folded into More ▾, it shows under More.
+
+As built (B2): `complain` emits `complained(text)`. The chip is
+`Complaint.qml`, made by a `MenuGroup` the first time one of its buttons
+complains (`MenuGroup.complain`, `hush`), under the bar, or over it for a
+bar at the bottom (`upward`, select mode's); its button shakes by a
+`Translate` on the group's button slot. The viewer's heart and Live
+button use the same, so `liveNotice` is gone already in B2. A grid
+action's complaint shows under its own button. `ActionBar.hush()` takes
+them away when another photo shows. The sort by `order` is by position
+too: V4's `Array.prototype.sort` is not stable, and an unstable sort
+reordered the plugins' buttons and their groups' keys.
 
 `pinhole.fetch(photo, kind, options)`: a third argument that is an object,
 not a function, is `options`. `{ stream: true }` gives a URL for a
@@ -1100,6 +1123,17 @@ API above).
   - `complain` shows and fades;
   - `order` places a test action before Copy in select mode;
   - `PINHOLE_SELFTEST=keys` and `actionbar:` pass as before.
+- As built: the layer, `complain` and `order` need the whole window, so
+  they are a self-test, `PINHOLE_SELFTEST=layers:<dir>`
+  (`selftestlayers.cpp`), run offscreen with the test plugin
+  `app/tests/layers` among the plugins: the layer made once per photo,
+  on the photo opened, zoomed and panned, `shown` false at once on ← and
+  on Esc and gone once closed, none for three photos passed quickly; the
+  complaint under the viewer's button, gone after four seconds; an order
+  -5 action before Copy, its complaint over the bar. The fetch options,
+  `effect` and `apiUses` are unit tests. `keys` gives the same commands
+  and results as main's binary, and `actionbar:`'s frames are the same
+  pixels.
 
 ### B3: the Live Photos plugin
 

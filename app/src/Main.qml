@@ -235,6 +235,7 @@ ApplicationWindow {
             grid: viewerLoader.photoGrid
             helpAction: helpToggle
             pluginActions: win.pluginActions.filter(a => a.place === "viewer")
+            pluginLayers: win.pluginLayers
         }
     }
     readonly property PhotoViewer photoViewer: viewerLoader.item
@@ -577,6 +578,22 @@ ApplicationWindow {
                 keyLayer: "grid"
                 onTapped: modelData.triggered()
                 onHoveredChanged: modelData.hovered = hovered
+                // What it could not do, under it (PluginAction.complain).
+                transform: Translate { id: gridNudge }
+                Connections {
+                    target: gridAction.modelData
+                    function onComplained(text) {
+                        if (!gridAction.visible)
+                            return
+                        gridComplaint.active = true
+                        gridComplaint.item.say(text)
+                    }
+                }
+                Loader {
+                    id: gridComplaint
+                    active: false
+                    sourceComponent: Complaint { button: gridAction; nudged: gridNudge }
+                }
                 // It stands for its action, for a tour to light; back from
                 // More, again.
                 onVisibleChanged: if (visible) modelData.button = gridAction
@@ -632,8 +649,11 @@ ApplicationWindow {
                 return n === 0 ? "" : String(n)
             return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
         }
-        // Plugins' groups for what is ticked, after Copy.
+        // Plugins' groups for what is ticked: those of `order` below 0
+        // before Copy, the rest after it.
         readonly property var pluginGroups: groupsOf(win.pluginActions.filter(a => a.place === "selection"))
+        readonly property var groupsBefore: pluginGroups.filter(group => group[0].order < 0)
+        readonly property var groupsAfter: pluginGroups.filter(group => group[0].order >= 0)
         // What the row is wide at a level, from its words: the count's
         // padding, then each group's button, ▾ and hairline (see
         // ShellButton.qml and MenuGroup.qml).
@@ -694,8 +714,19 @@ ApplicationWindow {
                 onTapped: favourites.toggle(grid.selection())
             }
         }
+        Repeater {
+            model: selectBar.groupsBefore
+            delegate: PluginGroup {
+                required property var modelData
+                items: modelData
+                upward: true
+                keyLayer: "grid"
+                hints: selectBar.hints
+            }
+        }
         // As JPEG and MP4, what opens anywhere; the originals on Shift.
         MenuGroup {
+            objectName: "selectCopyGroup"
             upward: true
             menuKey: "Shift+C"
             keyLayer: "grid"
@@ -717,7 +748,7 @@ ApplicationWindow {
             }
         }
         Repeater {
-            model: selectBar.pluginGroups
+            model: selectBar.groupsAfter
             delegate: PluginGroup {
                 required property var modelData
                 items: modelData
@@ -785,6 +816,7 @@ ApplicationWindow {
                     function onCoveringChanged() { win.collectPlugins() }
                     function onActionsChanged() { win.collectPlugins() }
                     function onHelpChanged() { win.collectPlugins() }
+                    function onViewerLayerChanged() { win.collectPlugins() }
                     function onStacksChanged() { win.collectPlugins([], [modelData]) }
                     function onHiddenChanged() { win.collectPlugins([modelData], []) }
                     function onMarksChanged() { plugins.setMarks(pluginLoader.modelData, pluginLoader.item.marks) }
@@ -813,6 +845,8 @@ ApplicationWindow {
     // the photos they stack into one card or hide, and whether one is over
     // the photos.
     property var pluginActions: []
+    // Their layers over a photo shown full window: { plugin, component }.
+    property var pluginLayers: []
     property var pluginStacks: []
     property var pluginHidden: []
     // The names of the plugins hiding any.
@@ -858,7 +892,7 @@ ApplicationWindow {
                     loadedMeanwhile.push(id)
             return
         }
-        const actions = [], help = [], covering = []
+        const actions = [], help = [], covering = [], layers = []
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -869,6 +903,8 @@ ApplicationWindow {
                 actions.push(item.actions[k])
             if (item.help && item.help.length > 0)
                 help.push({ plugin: loader.modelData, keys: item.help })
+            if (item.viewerLayer)
+                layers.push({ plugin: loader.modelData, component: item.viewerLayer })
             const stacked = plugins.stacksOf(loader.modelData, item.stacks || [], freshStacks.indexOf(loader.modelData) >= 0)
             if (stacked.length > 0)
                 stacks = stacks.concat(stacked)
@@ -880,7 +916,15 @@ ApplicationWindow {
             if (item.covering === true)
                 covering.push(loader.modelData)
         }
-        pluginActions = actions
+        // By their order, then as the plugins list them (V4's sort is not
+        // stable: by position too).
+        pluginActions = actions.map((a, i) => ({ a: a, i: i }))
+            .sort((x, y) => (x.a.order || 0) - (y.a.order || 0) || x.i - y.i)
+            .map(x => x.a)
+        // Made again only when one comes or goes: a photo's layers stay.
+        if (layers.length !== pluginLayers.length
+                || layers.some((l, i) => l.plugin !== pluginLayers[i].plugin || l.component !== pluginLayers[i].component))
+            pluginLayers = layers
         pluginHelp = help
         pluginStacks = stacks
         pluginHidden = hidden

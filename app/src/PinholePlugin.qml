@@ -29,6 +29,12 @@ Item {
     // whose library field is true, or those it lists, with a switch of
     // their own in the side panel. Four at most.
     property list<QtObject> marks
+    // Drawn over a photo shown full window, inside it: zoomed, panned,
+    // grown from its cell and clipped with it. Made afresh for each photo
+    // shown, with `photo` (its library position) and `shown` (true while
+    // that photo is shown, false the moment it changes or the viewer
+    // starts closing), which its root declares.
+    property Component viewerLayer
     // A few steps that show what it does, on the photos and its buttons as
     // they are (Tour.qml): shown by itself the first time it is on, once
     // `tourReady`, and again from the side panel.

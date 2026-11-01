@@ -183,9 +183,13 @@ public:
     Q_INVOKABLE void reveal(const QJSValue &photo) const;
     // Open a photo (a position or an id) full window.
     Q_INVOKABLE void openPhoto(const QJSValue &photo) const;
-    // A photo's file of `kind` (medium, full, original, video, live) from
-    // the service: a promise of its path, rejected with an Error whose
-    // `code` is the service's. With `done`, done(path) or done("", code).
+    // A photo's file of `kind` (medium, full, original, video, live, and
+    // a Live Photo's loop, bounce or long_exposure) from the service: a
+    // promise of its path, rejected with an Error whose `code` is the
+    // service's. With `done`, done(path) or done("", code). An object in
+    // its place is `options`: `{ stream: true }` gives a URL for a
+    // MediaPlayer instead of a path, the service's http:// one while it is
+    // still downloading, else the file's.
     Q_INVOKABLE QJSValue fetch(const QJSValue &photo, const QString &kind, const QJSValue &done = {});
     // Run a program, its own (in its folder) or any on PATH: a promise of
     // { stdout, stderr, code } once it exits 0, rejected with an Error
@@ -492,6 +496,8 @@ public:
     Q_INVOKABLE QString idOf(const QString &url) const;
     // Its QML did not load: what the engine says of it is its problem.
     Q_INVOKABLE void loadFailed(const QString &id);
+    // Its viewerLayer could not be made: why, under it.
+    Q_INVOKABLE void layerFailed(const QString &id, const QString &message);
     // A QML error as a plugin's author reads it: the file in its folder,
     // the line, what is wrong.
     static QString describe(const QQmlError &error, const QString &dir);

@@ -37,6 +37,19 @@ MenuGroup {
                 a.button = null
     }
 
+    // What one of them could not do (PluginAction.complain), under More.
+    Instantiator {
+        model: more.items
+        delegate: Connections {
+            required property var modelData
+            target: modelData
+            function onComplained(text) {
+                if (more.visible)
+                    more.complain(text)
+            }
+        }
+    }
+
     ShellButton {
         id: moreButton
         objectName: "moreButton"

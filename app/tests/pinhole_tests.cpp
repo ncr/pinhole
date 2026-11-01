@@ -108,12 +108,40 @@ private:
         return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
     }
 
+    // A stand-in for pinholed: the lines asked, and answers written by hand.
+    struct FakeService {
+        QLocalServer server;
+        QLocalSocket *peer = nullptr;
+        QList<QJsonObject> asked;
+        void read() {
+            while (peer && peer->canReadLine())
+                asked.append(QJsonDocument::fromJson(peer->readLine()).object());
+        }
+        // The `live` fetches asked for so far.
+        QList<QJsonObject> live() {
+            read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(asked))
+                if (line.value("params").toObject().value("kind").toString() == QLatin1String("live"))
+                    found.append(line);
+            return found;
+        }
+        void send(const QJsonObject &line) {
+            peer->write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
+            peer->flush();
+        }
+        // The service's first line, as a service of this window's protocol.
+        void greet() { send({{"event", "hello"}, {"protocol", ServiceClient::kProtocol}, {"version", "1.0.0"}}); }
+    };
+
     // Plugins as the window has them, each of `manifests` (its id, and
     // what its manifest.json says besides) a folder with a Main.qml, and
     // `pinhole` in the engine's JavaScript the first one's host. Settings
-    // go to the test's own config folder, started empty.
+    // go to the test's own config folder, started empty. With `withService`,
+    // a stand-in for pinholed (`fake`) answers.
     struct PluginBench {
         QTemporaryDir dir;
+        FakeService fake;
         Library library;
         std::unique_ptr<ServiceClient> service;
         std::unique_ptr<Viewer> viewer;
@@ -124,7 +152,8 @@ private:
         PluginHost *host = nullptr;
 
         explicit PluginBench(const QList<std::pair<QString, QJsonObject>> &manifests,
-                             const QList<std::pair<QByteArray, qint64>> &photos = {{"a", 1000}, {"b", 2000}, {"c", 3000}}) {
+                             const QList<std::pair<QByteArray, qint64>> &photos = {{"a", 1000}, {"b", 2000}, {"c", 3000}},
+                             bool withService = false) {
             QStandardPaths::setTestModeEnabled(true);
             QFile::remove(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
             forgetKept();
@@ -132,7 +161,14 @@ private:
             QString error;
             library.open(dir.path(), &error);
             qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
+            if (withService)
+                QVERIFY(fake.server.listen(dir.path() + "/none.sock"));
             service = std::make_unique<ServiceClient>(dir.path());
+            if (withService) {
+                QTRY_VERIFY(fake.server.hasPendingConnections());
+                fake.peer = fake.server.nextPendingConnection();
+                fake.greet();
+            }
             viewer = std::make_unique<Viewer>(&library, service.get());
             translator = std::make_unique<Translator>(dir.path() + "/language", PINHOLE_I18N);
             QDir(dir.path()).mkdir("plugins");
@@ -777,6 +813,36 @@ PinholePlugin {
         // So are its state and its cache; its cacheDir is not.
         write(dir.path() + "/Main.qml", "import QtQuick\nItem { property var a: pinhole.state.x; property var b: pinhole.cache [\"y\"]; property string c: pinhole.cacheDir }\n");
         QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"pinhole.state", "pinhole.cache"}}}));
+        // A layer over the viewer's photo, an action's order, hint and
+        // complaint, and fetch's options: API 3's.
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    viewerLayer: Item { property int photo; property bool shown }
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"viewerLayer"}}}));
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    actions: [ PluginAction { text: "a"; order: -10 }, PluginAction { text: "b"; onTriggered: { const p = { order: 1 } } } ]
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint or complain"}}}));
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    actions: [ PluginAction { id: a; text: "a"; onTriggered: { const p = { hint: 1 }; a.complain("no") } } ]
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint or complain"}}}));
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    Component.onCompleted: pinhole.fetch(0, "live", { stream: true }).then(url => {}, error => {})
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{2, {"promises"}}, {3, {"fetch's options"}}}));
         QVERIFY(Plugins::apiUses(builtIn + "/series").value(3).contains("pinhole.state"));
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(3).contains("pinhole.cache"));
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(2).contains("hidden"));
@@ -2546,33 +2612,6 @@ PinholePlugin {
         QVERIFY(Outgoing::compatibleName(a) != edited);
     }
 
-private:
-    // A stand-in for pinholed: the lines asked, and answers written by hand.
-    struct FakeService {
-        QLocalServer server;
-        QLocalSocket *peer = nullptr;
-        QList<QJsonObject> asked;
-        void read() {
-            while (peer && peer->canReadLine())
-                asked.append(QJsonDocument::fromJson(peer->readLine()).object());
-        }
-        // The `live` fetches asked for so far.
-        QList<QJsonObject> live() {
-            read();
-            QList<QJsonObject> found;
-            for (const QJsonObject &line : std::as_const(asked))
-                if (line.value("params").toObject().value("kind").toString() == QLatin1String("live"))
-                    found.append(line);
-            return found;
-        }
-        void send(const QJsonObject &line) {
-            peer->write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
-            peer->flush();
-        }
-        // The service's first line, as a service of this window's protocol.
-        void greet() { send({{"event", "hello"}, {"protocol", ServiceClient::kProtocol}, {"version", "1.0.0"}}); }
-    };
-
 private slots:
     // A favourite made in one source's library, undone once another's of
     // the same ids is shown: not on those, and the service is told whose
@@ -3490,6 +3529,51 @@ private slots:
         QVERIFY(!bench.plugins->at("t").value("enabled").toBool());
         QCOMPARE(bench.plugins->at("u").value("error").toString(), QString());
         QCOMPARE(bench.js("pinhole.api").toInt(), Plugins::api);
+    }
+
+    // `{ stream: true }` in fetch's third place: a URL to play, the
+    // service's own while it still downloads, else the file's; without it
+    // a path, as before. And each photo's Live effect as set on the iPhone.
+    void aPluginFetchesAMotionToPlayAsItComesAndKnowsItsEffect() {
+        PluginBench bench({{"t", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        bench.js(R"(
+            pinhole.fetch(0, "video", { stream: true }).then(url => said.push("a " + url))
+            pinhole.fetch("b", "bounce", { stream: true }).then(url => said.push("b " + url))
+            pinhole.fetch(2, "medium").then(path => said.push("c " + path))
+        )");
+        QList<QJsonObject> asked;
+        QTRY_VERIFY((bench.fake.read(), asked = bench.fake.asked, asked.size() >= 3));
+        auto params = [&](int k) { return asked[k].value("params").toObject(); };
+        QCOMPARE(params(0).value("kind").toString(), QString("video"));
+        QVERIFY(params(0).value("stream").toBool());
+        QCOMPARE(params(1).value("kind").toString(), QString("bounce"));
+        QVERIFY(params(1).value("stream").toBool());
+        QVERIFY(!params(2).contains("stream"));
+        bench.fake.send({{"id", asked[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"path", "/cache/a.mov"}, {"stream", "http://127.0.0.1:1/a"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"a http://127.0.0.1:1/a"}));
+        bench.fake.send({{"id", asked[1].value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/cache/b bounce.mov"}}}});
+        bench.fake.send({{"id", asked[2].value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/cache/c.jpg"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"a http://127.0.0.1:1/a", "b file:///cache/b%20bounce.mov", "c /cache/c.jpg"}));
+
+        // The effects: none in a library the service has given none to.
+        QCOMPARE(bench.js("pinhole.library.item(0).effect").toString(), QString());
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "effects");
+            db.setDatabaseName(bench.dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN live_effect TEXT"));
+            QVERIFY(q.exec("UPDATE assets SET live_effect = 'bounce' WHERE id = 'b'"));
+            QVERIFY(q.exec("UPDATE assets SET live_effect = 'long_exposure' WHERE id = 'c'"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("effects");
+        QString error;
+        QVERIFY(bench.library.open(bench.dir.path(), &error));
+        QCOMPARE(bench.js("pinhole.library.item('b').effect").toString(), QString("bounce"));
+        QCOMPARE(bench.js("pinhole.library.field('effect')").toVariant().toStringList(),
+                 QStringList({"", "bounce", "long_exposure"}));
     }
 
     void aPluginNamesAPhotoByItsPositionOrItsId() {

@@ -20,6 +20,12 @@ Rectangle {
             if (row.children[i].isGroup === true)
                 row.children[i].open = false
     }
+    // What its buttons said they could not do, gone (another photo shown).
+    function hush() {
+        for (let i = 0; i < row.children.length; ++i)
+            if (row.children[i].isGroup === true)
+                row.children[i].hush()
+    }
     // Groups of a place's PluginActions, in their order: those with the same
     // `group` together, each other one alone.
     function groupsOf(actions) {

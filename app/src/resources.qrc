@@ -12,6 +12,7 @@
         <file alias="PluginGroup.qml">PluginGroup.qml</file>
         <file alias="LabelMetrics.qml">LabelMetrics.qml</file>
         <file alias="MoreGroup.qml">MoreGroup.qml</file>
+        <file alias="Complaint.qml">Complaint.qml</file>
         <file alias="Spinner.qml">Spinner.qml</file>
         <file alias="keys.js">keys.js</file>
         <file alias="pinhole.svg">../../pkgbuild/pinhole.svg</file>

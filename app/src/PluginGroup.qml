@@ -1,4 +1,5 @@
 import QtQuick
+import QtQml
 import "keys.js" as KeyNames
 
 // A group of a plugin's actions in an ActionBar: the first one shown is the
@@ -29,6 +30,20 @@ MenuGroup {
         for (const a of items)
             if (a.button === groupButton)
                 a.button = null
+    }
+
+    // What any of them could not do (PluginAction.complain), under the
+    // button while it shows; folded, More ▾ says it.
+    Instantiator {
+        model: group.items
+        delegate: Connections {
+            required property var modelData
+            target: modelData
+            function onComplained(text) {
+                if (group.visible)
+                    group.complain(text)
+            }
+        }
     }
 
     ShellButton {

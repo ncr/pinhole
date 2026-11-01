@@ -26,5 +26,16 @@ QtObject {
     property bool hovered: false
     // Its button, where Pinhole draws it, for a tour step to light it.
     property Item button: null
+    // Where it stands among the actions of its place: lowest first, then
+    // in the plugins' order. In select mode's bar, below 0 is before
+    // Pinhole's Copy, 0 and up after it.
+    property int order: 0
+    // In its group's menu, a word at the right of its row in place of its
+    // key: "iPhone".
+    property string hint
     signal triggered()
+    // What it could not do, in a few words: said under its button (under
+    // More ▾ when folded there) for a few seconds, the button shaking.
+    signal complained(string text)
+    function complain(text) { complained(text) }
 }
