@@ -149,6 +149,7 @@ PinholePlugin {
             place: "viewer"
             group: "background"
             text: qsTr("Moving background")
+            key: "V"
             shown: plugin.shown !== null && plugin.shown.live
             usable: !plugin.working
             onTriggered: plugin.setBackground(pinhole.viewer.index, "live")
@@ -157,6 +158,7 @@ PinholePlugin {
             place: "viewer"
             group: "background"
             text: qsTr("Bounce as background")
+            key: "Shift+V"
             shown: plugin.shown !== null && plugin.shown.live
             usable: !plugin.working
             onTriggered: plugin.setBackground(pinhole.viewer.index, "bounce")
@@ -165,7 +167,8 @@ PinholePlugin {
 
     help: [
         ["B", qsTr("Make the photo or video the desktop background")],
-        ["⇧B", qsTr("A Live Photo's motion as a moving background")]
+        ["V", qsTr("A Live Photo's motion as a moving background")],
+        ["⇧V", qsTr("A Live Photo's Bounce as the background")]
     ]
 
     tour: [
@@ -177,7 +180,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Live Photos move"),
-            text: qsTr("On a Live Photo, the ▾ beside Background (⇧B) makes its motion the background: as taken, or as its Loop if the iPhone set one, or as a Bounce."),
+            text: qsTr("On a Live Photo, V (or the ▾ beside Background, ⇧B) makes its motion the background: as taken, or as its Loop if the iPhone set one; ⇧V as a Bounce."),
             open: () => aLivePhoto(),
             action: stillAction
         },
