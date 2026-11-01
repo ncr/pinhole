@@ -1,0 +1,689 @@
+// PINHOLE_SELFTEST=through: nothing over the photos lets the pointer through
+// to them (selftest.h).
+
+#include "selftest.h"
+
+#include "photogrid.h"
+#include "viewer.h"
+
+#include <QCoreApplication>
+#include <QGuiApplication>
+#include <QMouseEvent>
+#include <QNativeGestureEvent>
+#include <QPointingDevice>
+#include <QQuickItem>
+#include <QQuickWindow>
+#include <QTimer>
+#include <QWheelEvent>
+#include <qpa/qwindowsysteminterface.h>
+
+#include <cmath>
+#include <cstdio>
+#include <functional>
+#include <memory>
+
+namespace {
+
+// The touchpad's eventTime, which synthetic events carry.
+quint64 eventTime = 5000000;
+
+void say(const QString &line) {
+    std::printf("selftest: %s\n", qPrintable(line));
+    std::fflush(stdout);
+}
+
+void mouse(QQuickWindow *window, QEvent::Type type, QPointF at, Qt::MouseButton button, Qt::MouseButtons held) {
+    QMouseEvent event(type, at, window->mapToGlobal(at), button, held, Qt::NoModifier);
+    event.setTimestamp(eventTime += 8);
+    QGuiApplication::sendEvent(window, &event);
+}
+
+void click(QQuickWindow *window, QPointF at, Qt::MouseButton button = Qt::LeftButton) {
+    mouse(window, QEvent::MouseButtonPress, at, button, button);
+    mouse(window, QEvent::MouseButtonRelease, at, button, Qt::NoButton);
+}
+
+void doubleClick(QQuickWindow *window, QPointF at) {
+    click(window, at);
+    mouse(window, QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonDblClick, at, Qt::LeftButton, Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton);
+}
+
+// The left button held at `at`, moved to `to` in ten steps and let go.
+void pressDrag(QQuickWindow *window, QPointF at, QPointF to) {
+    mouse(window, QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton);
+    for (int i = 1; i <= 10; ++i)
+        mouse(window, QEvent::MouseMove, at + (to - at) * (i / 10.0), Qt::NoButton, Qt::LeftButton);
+    mouse(window, QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+}
+
+// A touchpad, as Qt names the one a scroll with phases or pixels alone
+// comes from; a wheel's notches come from the mouse.
+const QPointingDevice *touchpad() {
+    static QPointingDevice *device = [] {
+        auto *d = new QPointingDevice(QStringLiteral("selftest touchpad"), 4712, QInputDevice::DeviceType::TouchPad,
+                                      QPointingDevice::PointerType::Finger,
+                                      QInputDevice::Capability::Position | QInputDevice::Capability::Scroll
+                                          | QInputDevice::Capability::PixelScroll,
+                                      5, 0);
+        QWindowSystemInterface::registerInputDevice(d);
+        return d;
+    }();
+    return device;
+}
+
+void wheel(QQuickWindow *window, QPointF at, QPoint pixels, QPoint angle, Qt::ScrollPhase phase = Qt::NoScrollPhase,
+           Qt::KeyboardModifiers mods = Qt::NoModifier) {
+    const bool pad = phase != Qt::NoScrollPhase || angle.isNull();
+    QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, mods, phase, false, Qt::MouseEventNotSynthesized,
+                      pad ? touchpad() : QPointingDevice::primaryPointingDevice());
+    event.setTimestamp(eventTime += 8);
+    QGuiApplication::sendEvent(window, &event);
+}
+
+// Two fingers on the touchpad, as Wayland reports them: a begin with no
+// movement, `steps` updates `by` px 8 ms apart, an end; lifted while
+// moving, so whatever follows them coasts.
+void swipe(QQuickWindow *window, QPointF at, QPoint by, int steps) {
+    eventTime += 1000;
+    wheel(window, at, {}, {}, Qt::ScrollBegin);
+    for (int i = 0; i < steps; ++i)
+        wheel(window, at, by, by * 8, Qt::ScrollUpdate);
+    wheel(window, at, {}, {}, Qt::ScrollEnd);
+}
+
+// As a Mac's touchpad goes on after the fingers lift: momentum, fading.
+void momentum(QQuickWindow *window, QPointF at, QPoint by) {
+    swipe(window, at, by, 6);
+    for (int i = 0; i < 20; ++i)
+        wheel(window, at, by * (20 - i) / 20, by * 8 * (20 - i) / 20, Qt::ScrollMomentum);
+    wheel(window, at, {}, {}, Qt::ScrollEnd);
+}
+
+void pinch(QQuickWindow *window, QPointF at, double scale) {
+    auto send = [&](Qt::NativeGestureType type, double value) {
+        QNativeGestureEvent event(type, QPointingDevice::primaryPointingDevice(), 2, at, at, window->mapToGlobal(at),
+                                  value, QPointF());
+        QGuiApplication::sendEvent(window, &event);
+    };
+    send(Qt::BeginNativeGesture, 0);
+    for (int i = 0; i < 10; ++i)
+        send(Qt::ZoomNativeGesture, (scale - 1) / 10);
+    send(Qt::EndNativeGesture, 0);
+}
+
+const QPointingDevice *touchScreen() {
+    static QPointingDevice *device = [] {
+        auto *d = new QPointingDevice(QStringLiteral("selftest touch screen"), 4711, QInputDevice::DeviceType::TouchScreen,
+                                      QPointingDevice::PointerType::Finger,
+                                      QInputDevice::Capability::Position | QInputDevice::Capability::Area, 10, 0);
+        QWindowSystemInterface::registerInputDevice(d);
+        return d;
+    }();
+    return device;
+}
+
+// One finger down at the first point, through the others, up at the last.
+void touch(QQuickWindow *window, const QList<QPointF> &path) {
+    for (qsizetype i = 0; i < path.size() + 1; ++i) {
+        const QPointF at = path[std::min(i, path.size() - 1)];
+        QWindowSystemInterface::TouchPoint p;
+        p.id = 1;
+        p.state = i == 0 ? QEventPoint::State::Pressed
+                  : i == path.size() ? QEventPoint::State::Released : QEventPoint::State::Updated;
+        const QPointF global = window->mapToGlobal(at);
+        p.area = QRectF(global - QPointF(3, 3), QSizeF(6, 6));
+        p.normalPosition = QPointF(at.x() / window->width(), at.y() / window->height());
+        p.pressure = p.state == QEventPoint::State::Released ? 0 : 1;
+        QWindowSystemInterface::handleTouchEvent<QWindowSystemInterface::SynchronousDelivery>(window, eventTime += 16, touchScreen(),
+                                                                                            {p});
+    }
+}
+
+void key(QQuickWindow *window, int code) {
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, code, Qt::NoModifier);
+    QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, code, Qt::NoModifier);
+}
+
+// An item by its name, among all the window's: a Repeater's or a
+// Loader's are not their QObject parent's children.
+QQuickItem *findItem(QQuickItem *in, const QString &name) {
+    if (in->objectName() == name)
+        return in;
+    for (QQuickItem *child : in->childItems())
+        if (QQuickItem *found = findItem(child, name))
+            return found;
+    return nullptr;
+}
+
+// A plugin's item (its Main.qml), by the Loader Main.qml loads it in.
+QObject *pluginItem(QQuickItem *in, const QString &id) {
+    if (in->property("pluginId").toString() == id)
+        return in->property("item").value<QObject *>();
+    for (QQuickItem *child : in->childItems())
+        if (QObject *found = pluginItem(child, id))
+            return found;
+    return nullptr;
+}
+
+// The deepest item drawn at a point, past those that only take input
+// (a MouseArea, a Shield, a Scroller), which cover what they guard.
+QQuickItem *deepest(QQuickItem *within, QPointF scene) {
+    QQuickItem *item = within;
+    for (;;) {
+        QQuickItem *deeper = nullptr;
+        const QList<QQuickItem *> children = item->childItems();
+        for (auto it = children.crbegin(); it != children.crend() && !deeper; ++it) {
+            QQuickItem *child = *it;
+            const QString type = QString::fromLatin1(child->metaObject()->className());
+            if (type.contains(QLatin1String("MouseArea")) || type.startsWith(QLatin1String("Shield"))
+                || type.startsWith(QLatin1String("Scroller")))
+                continue;
+            if (child->isVisible() && child->opacity() > 0 && child->contains(child->mapFromScene(scene)))
+                deeper = child;
+        }
+        if (!deeper)
+            return item;
+        item = deeper;
+    }
+}
+
+// What is under a point, as a word or two for the log: the deepest item's
+// type and its text, if it has one.
+QString describe(QQuickItem *within, QPointF scene) {
+    QQuickItem *item = deepest(within, scene);
+    QString type = QString::fromLatin1(item->metaObject()->className());
+    type = type.section(QStringLiteral("_QML"), 0, 0).remove(QStringLiteral("QQuick"));
+    const QString text = item->property("text").toString().left(24);
+    return text.isEmpty() ? type : QStringLiteral("%1 \"%2\"").arg(type, text);
+}
+
+// One kind of input, done at a point.
+struct Kind {
+    QString name;
+    std::function<void(QQuickWindow *, QPointF)> act;
+};
+
+QList<Kind> scrolls() {
+    return {
+        {"a wheel notch down", [](QQuickWindow *w, QPointF at) { wheel(w, at, {0, -15}, {0, -120}); }},
+        {"a wheel notch up", [](QQuickWindow *w, QPointF at) { wheel(w, at, {0, 15}, {0, 120}); }},
+        {"a touchpad swipe down", [](QQuickWindow *w, QPointF at) { swipe(w, at, {0, -14}, 10); }},
+        {"a touchpad swipe up", [](QQuickWindow *w, QPointF at) { swipe(w, at, {0, 14}, 10); }},
+        {"a fast flick, and another while it coasts",
+         [](QQuickWindow *w, QPointF at) {
+             swipe(w, at, {0, -45}, 6);
+             swipe(w, at, {0, -45}, 6);
+         }},
+        {"momentum after the fingers lift", [](QQuickWindow *w, QPointF at) { momentum(w, at, {0, 20}); }},
+        {"smooth pixels without phases", [](QQuickWindow *w, QPointF at) { wheel(w, at, {0, -24}, {}); }},
+        {"Ctrl and the wheel", [](QQuickWindow *w, QPointF at) { wheel(w, at, {0, 15}, {0, 120}, Qt::NoScrollPhase, Qt::ControlModifier); }},
+        {"the sideways wheel", [](QQuickWindow *w, QPointF at) { wheel(w, at, {15, 0}, {120, 0}); }},
+        {"a sideways swipe", [](QQuickWindow *w, QPointF at) { swipe(w, at, {-14, 0}, 10); }},
+        {"a pinch out and in",
+         [](QQuickWindow *w, QPointF at) {
+             pinch(w, at, 2.2);
+             pinch(w, at, 0.4);
+         }},
+        {"a two-finger tap", [](QQuickWindow *w, QPointF at) { click(w, at, Qt::RightButton); }},
+        {"a middle click", [](QQuickWindow *w, QPointF at) { click(w, at, Qt::MiddleButton); }},
+    };
+}
+
+// Clicks and taps that would press a control: only where none is.
+QList<Kind> presses() {
+    return {
+        {"a click", [](QQuickWindow *w, QPointF at) { click(w, at); }},
+        {"a double click", [](QQuickWindow *w, QPointF at) { doubleClick(w, at); }},
+        {"a touch tap", [](QQuickWindow *w, QPointF at) { touch(w, {at}); }},
+    };
+}
+
+} // namespace
+
+void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &dir) {
+    Viewer *view = &viewer;
+    auto failures = std::make_shared<int>(0);
+    auto check = [failures](bool ok, const QString &what) {
+        say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
+        *failures += ok ? 0 : 1;
+    };
+    auto item = [window](const char *name) { return findItem(window->contentItem(), QString::fromLatin1(name)); };
+
+    // Everything the grid does for the pointer, heard as it happens.
+    auto heard = std::make_shared<QStringList>();
+    auto hits = std::make_shared<int>(0);
+    auto hear = [heard, hits](const char *what) {
+        return [heard, hits, what] {
+            ++*hits;
+            if (!heard->contains(QString::fromLatin1(what)))
+                heard->append(QString::fromLatin1(what));
+        };
+    };
+    QObject::connect(grid, &PhotoGrid::scrolled, window, hear("scrolled"));
+    QObject::connect(grid, &PhotoGrid::selectionChanged, window, hear("selected"));
+    QObject::connect(grid, &PhotoGrid::selectingChanged, window, hear("select mode"));
+    QObject::connect(grid, &PhotoGrid::activated, window, hear("opened a photo"));
+    QObject::connect(grid, &PhotoGrid::columnsChanged, window, hear("zoomed"));
+    QObject::connect(grid, &PhotoGrid::zoomingChanged, window, hear("zoomed"));
+    QObject::connect(grid, &PhotoGrid::dragRequested, window, hear("dragged photos out"));
+    QObject::connect(view, &Viewer::openChanged, window, hear("the viewer"));
+    auto top = std::make_shared<double>(0);
+    auto still = [grid, top, heard] {
+        heard->clear();
+        *top = grid->rectOf(0).top();
+    };
+    // Whatever reached the grid since `still`, by its signals and by where
+    // its first photo is.
+    auto untouched = [grid, top, heard] {
+        QStringList all = *heard;
+        if (std::abs(grid->rectOf(0).top() - *top) > 0.01 && !all.contains("scrolled"))
+            all << "moved";
+        return all;
+    };
+
+    // The steps, each run after the one before has settled.
+    struct Step {
+        QString what;
+        std::function<void()> act;
+        int wait = 700;
+    };
+    auto steps = std::make_shared<QList<Step>>();
+    // Longer before the next, once, after undoing what got through.
+    auto extraWait = std::make_shared<int>(0);
+    auto add = [steps](const QString &what, std::function<void()> act, int wait = 700) { steps->append({what, act, wait}); };
+
+    // Each kind of input at each point: none reaches the grid, and the
+    // first point of each that does is named.
+    auto probe = [=](const QString &over, std::function<QList<QPointF>()> points, QList<Kind> kinds,
+                              std::function<QQuickItem *(QQuickWindow *)> within) {
+        for (const Kind &kind : kinds) {
+            add(QStringLiteral("%1 over %2").arg(kind.name, over), [=] {
+                if (grid->animating())
+                    grid->jumpToFraction(grid->scrollFraction());
+                still();
+                QString first;
+                int reached = 0;
+                const QList<QPointF> at = points();
+                for (const QPointF &p : at) {
+                    const int before = *hits;
+                    const bool moving = grid->animating();
+                    kind.act(window, p);
+                    if ((*hits != before || grid->animating() != moving) && ++reached == 1)
+                        first = QStringLiteral(" first at %1,%2 (%3)").arg(qRound(p.x())).arg(qRound(p.y()))
+                                    .arg(describe(within ? within(window) : window->contentItem(), p));
+                }
+                QTimer::singleShot(650, window, [=] {
+                    const QStringList got = untouched();
+                    check(got.isEmpty() && !at.isEmpty(),
+                          QStringLiteral("%1 over %2, at %3 points: %4%5").arg(kind.name, over).arg(at.size())
+                              .arg(got.isEmpty() ? QStringLiteral("the grid took none")
+                                                 : QStringLiteral("the grid %1, %2 times").arg(got.join(", ")).arg(reached),
+                                   first));
+                    // What went through undone, for the next.
+                    if (got.contains(QLatin1String("opened a photo")) && view->isOpen()) {
+                        view->close();
+                        *extraWait = 1000;
+                    }
+                });
+            }, 700);
+        }
+    };
+
+    auto panelItem = [](QQuickWindow *w) {
+        QQuickItem *scroller = w->findChild<QQuickItem *>(QStringLiteral("sidePanelScroller"));
+        return scroller ? scroller->parentItem() : nullptr;
+    };
+    auto panelRect = [window, panelItem] {
+        QQuickItem *panel = panelItem(window);
+        return panel ? QRectF(panel->mapToScene(QPointF(0, 0)), panel->size()) : QRectF();
+    };
+    // Over all of it: a lattice 36 px apart, in from each edge by 2 px.
+    auto lattice = [](QRectF r) {
+        QList<QPointF> points;
+        for (double y = r.top() + 2; y < r.bottom() - 1; y += 36)
+            for (double x : {r.left() + 2, r.left() + r.width() * 0.25, r.center().x(), r.left() + r.width() * 0.75,
+                             r.right() - 2})
+                points << QPointF(x, y);
+        return points;
+    };
+    auto panelEverywhere = [=] { return lattice(panelRect()); };
+    // Where nothing is pressed: the margins, and the gaps between the
+    // rows (the panel itself, or its column, under the point).
+    auto panelBare = [=] {
+        QList<QPointF> bare;
+        QQuickItem *panel = panelItem(window);
+        QQuickItem *flick = panel->findChild<QQuickItem *>(QStringLiteral("sidePanelScroller"));
+        QQuickItem *content = flick->property("contentItem").value<QQuickItem *>();
+        const QList<QQuickItem *> plain = {panel, flick, content, content->childItems().value(0)};
+        for (const QPointF &p : lattice(panelRect()))
+            if (plain.contains(deepest(panel, p)))
+                bare << p;
+        return bare;
+    };
+    auto beside = [=] {
+        const QRectF r = panelRect();
+        return QList<QPointF>{QPointF(r.right() + 30, r.top() + 60), QPointF(window->width() - 40.0, r.center().y()),
+                              QPointF(r.right() + 30, r.bottom() - 40)};
+    };
+    auto scroller = [window] { return window->findChild<QQuickItem *>(QStringLiteral("sidePanelScroller")); };
+    auto contentY = [scroller] { return scroller()->property("contentY").toDouble(); };
+    auto most = [scroller] {
+        return std::max(0.0, scroller()->property("contentHeight").toDouble() - scroller()->height());
+    };
+
+    auto cardOf = [](const char *name) {
+        return [name](QQuickWindow *w) { return findItem(w->contentItem(), QString::fromLatin1(name)); };
+    };
+    auto rectOf = [window](const char *name) {
+        QQuickItem *it = findItem(window->contentItem(), QString::fromLatin1(name));
+        return it && it->isVisible() ? QRectF(it->mapToScene(QPointF(0, 0)), it->size()) : QRectF();
+    };
+    auto inside = [](QRectF r) {
+        if (r.isEmpty())
+            return QList<QPointF>();
+        return QList<QPointF>{r.center(), r.topLeft() + QPointF(3, 3), r.bottomRight() - QPointF(3, 3),
+                              QPointF(r.left() + 3, r.bottom() - 3), QPointF(r.right() - 3, r.top() + 3)};
+    };
+
+    // The date at the top left, and the grid in the middle of the library.
+    auto settleGrid = [=] {
+        key(window, Qt::Key_Escape);
+        grid->setSelecting(false);
+        grid->jumpToFraction(0.5);
+    };
+
+    for (const QSize size : {QSize(850, 900), QSize(1700, 1000)}) {
+        const QString wide = QStringLiteral("%1 wide").arg(size.width());
+        add(QStringLiteral("the window %1, the grid half way").arg(wide), [=] {
+            window->resize(size);
+            settleGrid();
+        }, 1500);
+        add(QStringLiteral("the date shows, %1").arg(wide), [=] {
+            check(!rectOf("dateLabel").isEmpty(), QStringLiteral("the date shows at the top left (%1)").arg(grid->property("dateLabel").toString()));
+        }, 100);
+        auto date = [=] { return inside(rectOf("dateLabel")); };
+        probe(QStringLiteral("the date, ") + wide, date, scrolls() + presses(), nullptr);
+        probe(QStringLiteral("the date, ") + wide, date,
+              {{"a touch drag down onto the photos", [](QQuickWindow *w, QPointF at) {
+                    touch(w, {at, at + QPointF(4, 40), at + QPointF(8, 160), at + QPointF(10, 300)});
+                }},
+               {"a press dragged onto the photos",
+                [](QQuickWindow *w, QPointF at) { pressDrag(w, at, at + QPointF(10, 300)); }}},
+              nullptr);
+        add(QStringLiteral("select mode, %1").arg(wide), [=] { grid->setSelecting(true); }, 300);
+        probe(QStringLiteral("the date in select mode, ") + wide, date, presses(), nullptr);
+        add(QStringLiteral("select mode left, %1").arg(wide), [=] { grid->setSelecting(false); }, 300);
+
+        // The side panel by its button: it opens, and the photo under the
+        // button does not.
+        add(QStringLiteral("the side panel's button, %1").arg(wide), [=] {
+            still();
+            click(window, rectOf("sourcesButton").center());
+            QTimer::singleShot(600, window, [=] {
+                const QStringList got = untouched();
+                check(item("sidePanel")->property("shown").toBool() && got.isEmpty(),
+                      QStringLiteral("a click on the side panel's button opens it, and the grid took %1")
+                          .arg(got.isEmpty() ? QStringLiteral("nothing") : got.join(", ")));
+            });
+        }, 900);
+        // Everything over all of it, at the top, in the middle and at the end.
+        probe(QStringLiteral("the side panel, ") + wide, panelEverywhere, scrolls(), panelItem);
+        probe(QStringLiteral("the side panel's margins and gaps, ") + wide, panelBare, presses(), panelItem);
+        // What scrolls the panel lies over it all, and a click still
+        // reaches its controls: a switch clicked turns, and back.
+        add(QStringLiteral("a switch in the panel, %1").arg(wide), [=] { scroller()->setProperty("contentY", 0); }, 300);
+        add(QStringLiteral("a switch in the panel clicked, %1").arg(wide), [=] {
+            QQuickItem *toggle = item("markSwitch:pinhole/video");
+            if (!toggle) {
+                check(false, QStringLiteral("the Videos switch is in the panel"));
+                return;
+            }
+            const QPointF at = toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2));
+            const bool was = toggle->property("checked").toBool();
+            click(window, at);
+            const bool turned = toggle->property("checked").toBool();
+            click(window, at);
+            const bool back = toggle->property("checked").toBool();
+            check(turned != was && back == was,
+                  QStringLiteral("a click on the Videos switch in the panel turns it %1 and the next back").arg(turned ? "on" : "off"));
+        }, 300);
+        add(QStringLiteral("the panel at its top, %1").arg(wide), [=] {
+            scroller()->setProperty("contentY", 0);
+        }, 300);
+        // A notch glides: under way a frame or two later, there at once
+        // after; it is the panel that moved.
+        add(QStringLiteral("a notch moves the panel, %1").arg(wide), [=] {
+            still();
+            const QPointF at = panelRect().center();
+            wheel(window, at, {0, -15}, {0, -120});
+            QTimer::singleShot(40, window, [=] {
+                const double soon = contentY();
+                QTimer::singleShot(600, window, [=] {
+                    const double later = contentY();
+                    check(later > 30 && soon < later && untouched().isEmpty(),
+                          QStringLiteral("a notch glides the panel down %1 px (%2 after 40 ms), the grid still").arg(qRound(later)).arg(qRound(soon)));
+                });
+            });
+        }, 900);
+        add(QStringLiteral("a touchpad swipe moves the panel and coasts, %1").arg(wide), [=] {
+            scroller()->setProperty("contentY", 0);
+            still();
+            const QPointF at = panelRect().center();
+            swipe(window, at, {0, -12}, 8);
+            const double lifted = contentY();
+            QTimer::singleShot(120, window, [=] {
+                const double coasting = contentY();
+                QTimer::singleShot(1500, window, [=] {
+                    check(lifted > 20 && coasting > lifted && contentY() >= coasting && untouched().isEmpty(),
+                          QStringLiteral("a swipe moves the panel %1 px with the fingers, it coasts on to %2 and %3, the grid still")
+                              .arg(qRound(lifted)).arg(qRound(coasting)).arg(qRound(contentY())));
+                });
+            });
+        }, 1900);
+        // To its end and on: it stops there, and the rest goes nowhere.
+        for (const bool down : {true, false}) {
+            const QString end = down ? QStringLiteral("end") : QStringLiteral("top");
+            add(QStringLiteral("to its %1 and on, by the wheel, %2").arg(end, wide), [=] {
+                still();
+                const QPointF at = panelRect().center();
+                for (int i = 0; i < 60; ++i)
+                    wheel(window, at, {0, down ? -15 : 15}, {0, down ? -120 : 120});
+                QTimer::singleShot(1200, window, [=] {
+                    const double y = contentY(), want = down ? most() : 0;
+                    check(std::abs(y - want) < 0.5 && untouched().isEmpty(),
+                          QStringLiteral("the wheel spun on past the panel's %1 leaves it there (%2 of %3), the grid still")
+                              .arg(end).arg(qRound(y)).arg(qRound(most())));
+                    if (!dir.isEmpty())
+                        window->grabWindow().save(QStringLiteral("%1/panel-%2-%3.png").arg(dir).arg(size.width()).arg(end));
+                });
+            }, 1500);
+            // Fingers pulling on past the end, not yet lifted: how far it
+            // gives, as a frame.
+            if (!dir.isEmpty())
+                add(QStringLiteral("pulled past its %1, %2").arg(end, wide), [=] {
+                    const QPointF at = panelRect().center();
+                    eventTime += 1000;
+                    wheel(window, at, {}, {}, Qt::ScrollBegin);
+                    for (int i = 0; i < 30; ++i)
+                        wheel(window, at, {0, down ? -20 : 20}, {0, down ? -160 : 160}, Qt::ScrollUpdate);
+                    QTimer::singleShot(100, window, [=] {
+                        window->grabWindow().save(QStringLiteral("%1/panel-%2-%3-pulled.png").arg(dir).arg(size.width()).arg(end));
+                        say(QStringLiteral("pulled on past the panel's %1: %2 px past it").arg(end).arg(qRound(down ? contentY() - most() : -contentY())));
+                        eventTime += 600;
+                        wheel(window, at, {}, {}, Qt::ScrollEnd);
+                    });
+                }, 1200);
+            probe(QStringLiteral("the side panel at its %1, %2").arg(end, wide), panelEverywhere, scrolls(), panelItem);
+            // Flung at it from the other end, the fingers going on past it
+            // (they pull it a quarter of its height at most), or let go
+            // short of it to coast there (a bounce of a few lines): back
+            // at the end, the grid still.
+            for (const bool far : {true, false}) {
+                add(QStringLiteral("%1 into its %2, %3").arg(far ? "flicks fast" : "a coast", end, wide), [=] {
+                    const double start = far ? (down ? 0 : most()) : (down ? most() - 700 : 700);
+                    scroller()->setProperty("contentY", start);
+                    still();
+                    const QPointF at = panelRect().center();
+                    if (far) {
+                        for (int i = 0; i < 4; ++i)
+                            swipe(window, at, {0, down ? -50 : 50}, 6);
+                    } else {
+                        swipe(window, at, {0, down ? -14 : 14}, 6);
+                    }
+                    const double lifted = contentY();
+                    auto beyond = std::make_shared<double>(0);
+                    auto watch = std::make_shared<QTimer>();
+                    watch->setInterval(8);
+                    QObject::connect(watch.get(), &QTimer::timeout, window, [=] {
+                        const double y = contentY();
+                        *beyond = std::max(*beyond, down ? y - most() : -y);
+                    });
+                    watch->start();
+                    QTimer::singleShot(2500, window, [=] {
+                        watch->stop();
+                        const double y = contentY(), want = down ? most() : 0;
+                        const double allowed = far ? scroller()->height() / 4 + 50 : 60;
+                        check(std::abs(y - want) < 0.5 && *beyond <= allowed && (far || std::abs(lifted - want) > 50)
+                                  && untouched().isEmpty(),
+                              QStringLiteral("%1 into the panel's %2 (let go at %3) stops there (%4 of %5), %6 px past it at most "
+                                             "(%7 allowed), the grid still")
+                                  .arg(far ? "flicks fast" : "a coast", end).arg(qRound(lifted)).arg(qRound(y))
+                                  .arg(qRound(most())).arg(qRound(*beyond)).arg(qRound(allowed)));
+                    });
+                }, 2800);
+            }
+            // A finger on a touch screen: on past the end it stays there;
+            // back from it the panel follows.
+            for (const bool on : {true, false}) {
+                add(QStringLiteral("a touch drag on the panel, %1").arg(wide), [=] {
+                    still();
+                    const QRectF r = panelRect();
+                    const double from = contentY();
+                    const QPointF a(r.left() + r.width() * 0.3, r.center().y());
+                    const QPointF b(a.x(), a.y() + ((down == on) ? 1 : -1) * 260);
+                    touch(window, {b, b + (a - b) * 0.25, b + (a - b) * 0.5, b + (a - b) * 0.75, a});
+                    QTimer::singleShot(900, window, [=] {
+                        const double moved = std::abs(contentY() - from);
+                        check(untouched().isEmpty() && (on ? moved < 0.5 : moved > 100),
+                              QStringLiteral("a touch drag %1 the panel's %2 (from %3 to %4): the grid still")
+                                  .arg(on ? "on past" : "back from", end).arg(qRound(from)).arg(qRound(contentY())));
+                    });
+                }, 1100);
+            }
+        }
+        probe(QStringLiteral("the photos dimmed beside the panel, ") + wide, beside, scrolls(), nullptr);
+        add(QStringLiteral("a click beside the panel, %1").arg(wide), [=] {
+            still();
+            click(window, beside().first());
+            QTimer::singleShot(600, window, [=] {
+                const QStringList got = untouched();
+                check(!item("sidePanel")->property("shown").toBool() && got.isEmpty(),
+                      QStringLiteral("a click beside the panel puts it away, and the grid took %1")
+                          .arg(got.isEmpty() ? QStringLiteral("nothing") : got.join(", ")));
+            });
+        }, 900);
+
+        // The other panels over the photos.
+        struct Over {
+            QString name;
+            const char *card;
+            std::function<void()> show;
+        };
+        const QList<Over> overs = {
+            {"the help", "helpCard", [=] { item("help")->setProperty("shown", true); }},
+            {"iCloud's sign-in", "signInCard",
+             [=] {
+                 if (QObject *icloud = pluginItem(window->contentItem(), QStringLiteral("pinhole.icloud")))
+                     QMetaObject::invokeMethod(icloud, "openSignIn", Q_ARG(QVariant, QString()));
+             }},
+            {"the new plugins card", "newPluginsCard",
+             [=] { QMetaObject::invokeMethod(item("newPlugins"), "open", Q_ARG(QVariant, QVariant(QStringList{"pinhole.series", "pinhole.colour"}))); }},
+            {"select mode's Copy menu", "selectCopyGroupCard",
+             [=] {
+                 grid->setSelecting(true);
+                 item("selectCopyGroup")->setProperty("open", true);
+             }},
+        };
+        for (const Over &over : overs) {
+            const char *card = over.card;
+            add(QStringLiteral("%1, %2").arg(over.name, wide), [=] {
+                settleGrid();
+                over.show();
+            }, 900);
+            add(QStringLiteral("%1 shows, %2").arg(over.name, wide), [=] {
+                check(!rectOf(card).isEmpty(), QStringLiteral("%1 shows").arg(over.name));
+            }, 50);
+            probe(over.name + ", " + wide, [=] { return lattice(rectOf(card)); }, scrolls(), cardOf(card));
+            probe(QStringLiteral("beside %1, %2").arg(over.name, wide), [=] {
+                const QRectF r = rectOf(card);
+                return QList<QPointF>{QPointF(r.left() / 2, window->height() * 0.6), QPointF(window->width() - 20.0, window->height() * 0.6)};
+            }, scrolls(), nullptr);
+            add(QStringLiteral("a click beside %1, %2").arg(over.name, wide), [=] {
+                still();
+                click(window, QPointF(window->width() - 20.0, window->height() * 0.6));
+                QTimer::singleShot(600, window, [=] {
+                    const QStringList got = untouched();
+                    check(got.isEmpty(), QStringLiteral("a click beside %1: the grid took %2")
+                                             .arg(over.name, got.isEmpty() ? QStringLiteral("nothing") : got.join(", ")));
+                    key(window, Qt::Key_Escape);
+                    key(window, Qt::Key_Escape);
+                });
+            }, 1000);
+        }
+
+        // The viewer: its bars and the photo take what they are given; the
+        // grid beneath, nothing while it is open.
+        add(QStringLiteral("a photo opened, %1").arg(wide), [=] {
+            settleGrid();
+            const int index = grid->indexAt(grid->width() / 2, grid->height() / 2);
+            view->openAt(index, grid->rectOf(index));
+        }, 1200);
+        probe(QStringLiteral("the viewer, ") + wide,
+              [=] {
+                  const double w = window->width(), h = window->height();
+                  return QList<QPointF>{QPointF(w / 2, 24), QPointF(40, 24), QPointF(w - 40, 24), QPointF(w / 2, h - 30),
+                                        QPointF(w / 2, h / 2)};
+              },
+              {{"a pinch out", [](QQuickWindow *w, QPointF at) { pinch(w, at, 2.2); }},
+               {"a two-finger tap", [](QQuickWindow *w, QPointF at) { click(w, at, Qt::RightButton); }},
+               {"a wheel notch", [](QQuickWindow *w, QPointF at) { wheel(w, at, {0, -15}, {0, -120}); }},
+               {"a touchpad swipe up", [](QQuickWindow *w, QPointF at) { swipe(w, at, {0, 3}, 4); }}},
+              nullptr);
+        add(QStringLiteral("the photo closed, %1").arg(wide), [=] { view->close(); }, 1200);
+    }
+    add("done", [=] {
+        say(QStringLiteral("done, %1 failed").arg(*failures));
+        QCoreApplication::exit(*failures ? 1 : 0);
+    });
+
+    auto run = std::make_shared<std::function<void(int)>>();
+    *run = [=](int k) {
+        if (k >= steps->size())
+            return;
+        const Step &step = (*steps)[k];
+        step.act();
+        // Then on once the grid holds still (what got through to it may
+        // have set it moving), within three seconds.
+        QTimer::singleShot(step.wait, window, [=] {
+            auto waited = std::make_shared<int>(0);
+            auto poll = std::make_shared<std::function<void()>>();
+            *poll = [=] {
+                if (*extraWait > 0) {
+                    const int wait = std::exchange(*extraWait, 0);
+                    QTimer::singleShot(wait, window, [poll] { (*poll)(); });
+                    return;
+                }
+                if (grid->animating() && ++*waited < 60) {
+                    QTimer::singleShot(50, window, [poll] { (*poll)(); });
+                    return;
+                }
+                (*run)(k + 1);
+            };
+            (*poll)();
+        });
+    };
+    // Once the photos are in and the window has its size.
+    QTimer::singleShot(2500, window, [=] { (*run)(0); });
+}

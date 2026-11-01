@@ -47,6 +47,11 @@ public:
         // the spring that brings it back.
         double rubber = 0.55;
         double springSeconds = 0.42;
+        // The most speed (px/s) a coast into an end, or fingers lifting
+        // past one, takes on past it before the spring brings it back. The
+        // grid keeps all of it; a panel of a dozen settings gives only a
+        // little (the spring carries a speed v about v / 32 px past).
+        double bounceVelocity = 40000;
         // Mouse wheel: the stiffness (1/s) of the spring that follows it,
         // from its stiffest for a single click or a fast spin, down to its
         // softest for a wheel turned slowly, so a step that comes every

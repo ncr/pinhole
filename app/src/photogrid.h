@@ -109,6 +109,12 @@ class PhotoGrid : public QQuickItem {
     // drag across them.
     Q_PROPERTY(bool rangeNext MEMBER m_rangeNext NOTIFY rangeNextChanged)
     Q_PROPERTY(QColor cursorColor MEMBER m_cursorColor NOTIFY cursorColorChanged)
+    // Something over it has the window (a panel, a card, a menu, the
+    // viewer, a plugin's screen): the pointer is not the grid's then, so
+    // a wheel, a pinch or a click that something over it let through moves,
+    // zooms, selects and opens nothing. A press or a swipe under way when
+    // it comes ends there.
+    Q_PROPERTY(bool covered READ covered WRITE setCovered NOTIFY coveredChanged)
 
 public:
     explicit PhotoGrid(QQuickItem *parent = nullptr);
@@ -188,6 +194,8 @@ public:
     int selectionCount() const;
     bool selecting() const { return m_selecting; }
     void setSelecting(bool selecting);
+    bool covered() const { return m_covered; }
+    void setCovered(bool covered);
     QColor accent() const { return m_accent; }
     void setAccent(const QColor &accent);
     Q_INVOKABLE QList<int> selection() const;
@@ -276,6 +284,7 @@ signals:
     void cursorShownChanged();
     void rangeNextChanged();
     void cursorColorChanged();
+    void coveredChanged();
     void dateLabelChanged();
     void zoomingChanged();
     // The pointer moved far enough from a press on a photo: drag these out.
@@ -423,6 +432,7 @@ private:
     int m_pressIndex = -1;
     bool m_dragged = false;
     bool m_selecting = false;
+    bool m_covered = false;
     // A drag across the photos in select mode (three fingers, with
     // libinput's three-finger drag): every photo from where it started to
     // where it is now ticks, on top of what was ticked before. Near the top

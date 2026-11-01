@@ -345,6 +345,38 @@ private slots:
         QCOMPARE(p.position(), 0.0);
     }
 
+    void aPanelBouncesALittleAtItsEnds() {
+        // Coasting fast into the end, or lifted fast past it: the grid goes
+        // on past it as far as its speed takes it; a panel (Scroller.cpp),
+        // its bounce speed held to 1500 px/s, some 45 px.
+        auto furthest = [](double bounce, bool lifted) {
+            ScrollPhysics p;
+            p.params().bounceVelocity = bounce;
+            p.setBounds(0, 3000, 1000);
+            p.jumpTo(lifted ? 2900 : 0);
+            p.begin(0);
+            for (int i = 1; i <= 6; ++i)
+                p.move(i * 8, 30);
+            p.end(6 * 8 + 8);
+            // How much further than where the fingers left it.
+            const double atLift = std::max(0.0, p.position() - 3000);
+            double most = atLift;
+            for (int i = 0; i < 2000 && p.animating(); ++i) {
+                p.step(1.0 / 120);
+                most = std::max(most, p.position() - 3000);
+            }
+            return std::make_pair(most - atLift, p.position());
+        };
+        for (const bool lifted : {false, true}) {
+            const auto [grid, gridEnd] = furthest(ScrollPhysics::Params().bounceVelocity, lifted);
+            const auto [panel, panelEnd] = furthest(1500, lifted);
+            QVERIFY2(grid > 150, qPrintable(QString::number(grid)));
+            QVERIFY2(panel < 60, qPrintable(QString::number(panel)));
+            QCOMPARE(gridEnd, 3000.0);
+            QCOMPARE(panelEnd, 3000.0);
+        }
+    }
+
     void aWheelNotchStopsAtTheEnd() {
         ScrollPhysics p;
         p.setBounds(0, 1000, 1000);

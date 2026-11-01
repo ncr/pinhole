@@ -156,6 +156,22 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // window grabbed. Needs photos taken on this day in other years.
 void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 
+// PINHOLE_SELFTEST=through[:<dir>] (selftestthrough.cpp): nothing over the photos
+// lets the pointer through to them, at 850 and 1700 wide. Over the date at
+// the top left, over every part of the side panel (at its top, at its end
+// and between, scrolled on past either), over the photos dimmed beside it,
+// over the help, iCloud's sign-in, the New plugins card and select mode's
+// Copy menu and beside each, and over the viewer: the wheel, a touchpad's
+// swipes, flicks and momentum, smooth pixels, Ctrl and the wheel, the
+// sideways wheel, pinches, two-finger taps, middle clicks; and where no
+// control is, clicks, double clicks and touch taps. The grid neither
+// scrolls, zooms, selects, opens nor drags anything out. And the panel
+// itself: a notch glides it, a swipe moves it and coasts, and spun or
+// flicked into either end it stops there, pulled a quarter of its height
+// past it at most, a coast bouncing a few lines. With <dir>, the panel at
+// either end and pulled on past it, as images there. Exits 1 if any fails.
+void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &dir);
+
 // PINHOLE_SELFTEST=series:<dir>: once Series has found its series, open the
 // longest on its screen to put it right, over the viewer, as G does; go
 // through it with → and the wheel, up close and back, grabbing each into

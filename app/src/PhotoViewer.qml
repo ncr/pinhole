@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 import QtQuick.Window
 import QtMultimedia
 import "keys.js" as KeyNames
@@ -448,6 +449,9 @@ Item {
                 text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
                                        : viewer.title
                 textColor: theme.brightForeground
+                // A click on it is not one on the photo's left side,
+                // which steps to the one before.
+                Shield { anchors.fill: parent; z: -1 }
             }
             // The full photo or the video still coming, or what a plugin's
             // layer shows over it (a Live Photo's effect), after a second.
@@ -460,6 +464,7 @@ Item {
             text: viewer.message
             visible: text !== ""
             textColor: theme.darkForeground
+            Shield { anchors.fill: parent; z: -1 }
         }
     }
 

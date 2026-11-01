@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // Where the photos come from, chosen: on the first run the whole window
 // (nothing else to show yet), later a card from the sources bar's Add. What
@@ -75,7 +76,8 @@ Item {
         visible: !root.firstRun
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
     }
-    MouseArea {
+    // A click beside it puts it away; nothing there reaches the photos.
+    Shield {
         anchors.fill: parent
         onClicked: if (!root.firstRun) root.shown = false
     }
@@ -91,9 +93,10 @@ Item {
         border.color: theme.foreground
         border.width: root.firstRun ? 0 : 1
         clip: true
-        MouseArea { anchors.fill: parent }
+        Shield { anchors.fill: parent }
 
         Flickable {
+            id: scroller
             anchors.fill: parent
             anchors.margins: card.padding
             contentHeight: content.implicitHeight
@@ -261,6 +264,10 @@ Item {
                     text: sources.error
                 }
             }
+        }
+        Scroller {
+            anchors.fill: parent
+            flickable: scroller
         }
     }
 }

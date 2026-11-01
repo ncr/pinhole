@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 import "keys.js" as KeyNames
 
 // A button as Omarchy's shell draws one (shell.toml's controls): a faint fill
@@ -152,6 +153,13 @@ Rectangle {
         visible: control.floating
         radius: parent.radius
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
+    }
+    // Floating over the photos, all of it is the button's: the wheel or a
+    // pinch on it, or a click while it cannot be used, reach nothing beneath.
+    Shield {
+        anchors.fill: parent
+        z: -1
+        enabled: control.floating
     }
     HoverHandler { id: hover; cursorShape: control.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
     TapHandler {

@@ -115,9 +115,12 @@ void ScrollPhysics::end(double tMs) {
     m_velocity = std::clamp(v, -m_p.maxVelocity, m_p.maxVelocity);
     m_samples.clear();
 
-    if (overscroll() != 0)
+    if (overscroll() != 0) {
+        // Let go past an end: back from there, carrying no more than a
+        // coast into it would.
         m_mode = Mode::Spring;
-    else if (std::abs(m_velocity) >= m_p.throwAbove)
+        m_velocity = std::clamp(m_velocity, -m_p.bounceVelocity, m_p.bounceVelocity);
+    } else if (std::abs(m_velocity) >= m_p.throwAbove)
         m_mode = Mode::Coasting;
     else
         m_mode = Mode::Idle, m_velocity = 0;
@@ -225,6 +228,7 @@ bool ScrollPhysics::step(double dt) {
             m_velocity *= std::pow(m_p.decayPerMs, s * 1000);
             if (overscroll() != 0) {
                 m_mode = Mode::Spring; // ran into an end: bounce
+                m_velocity = std::clamp(m_velocity, -m_p.bounceVelocity, m_p.bounceVelocity);
             } else if (std::abs(m_velocity) < m_p.stopBelow) {
                 m_velocity = 0;
                 m_mode = Mode::Idle;

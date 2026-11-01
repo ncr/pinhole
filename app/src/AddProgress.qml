@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // Files dropped on the window on their way into the library, at its foot:
 // "Adding 3 files to iCloud…" with how far it has got, then "Added 3
@@ -20,6 +21,8 @@ Rectangle {
     // Put away on a click, once nothing is under way.
     HoverHandler { enabled: !incoming.busy; cursorShape: Qt.PointingHandCursor }
     TapHandler { enabled: !incoming.busy; onTapped: incoming.dismiss() }
+    // Over the photos, not a hole in them; beneath its own tap.
+    Shield { anchors.fill: parent; z: -1 }
 
     Column {
         id: content

@@ -33,6 +33,8 @@ HEADERS += \
     $$PWD/thumbnailloader.h \
     $$PWD/photogrid.h \
     $$PWD/scrollphysics.h \
+    $$PWD/scroller.h \
+    $$PWD/shield.h \
     $$PWD/touchpadhold.h \
     $$PWD/keepawake.h \
     $$PWD/serviceclient.h \
@@ -65,6 +67,8 @@ SOURCES += \
     $$PWD/thumbnailloader.cpp \
     $$PWD/photogrid.cpp \
     $$PWD/scrollphysics.cpp \
+    $$PWD/scroller.cpp \
+    $$PWD/shield.cpp \
     $$PWD/touchpadhold.cpp \
     $$PWD/keepawake.cpp \
     $$PWD/serviceclient.cpp \
@@ -89,6 +93,7 @@ SOURCES += \
     $$PWD/selftestframe.cpp \
     $$PWD/selftesthidden.cpp \
     $$PWD/selfteststacks.cpp \
+    $$PWD/selftestthrough.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

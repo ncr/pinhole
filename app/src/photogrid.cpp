@@ -349,7 +349,7 @@ void PhotoGrid::touched(double timeMs, const char *) {
 
 void PhotoGrid::mouseDoubleClickEvent(QMouseEvent *event) {
     // The first click opened the photo already.
-    event->accept();
+    event->setAccepted(!m_covered);
 }
 
 void PhotoGrid::hoverMoveEvent(QHoverEvent *event) { m_hover = event->position(); }
@@ -681,6 +681,10 @@ void PhotoGrid::reveal(int index) {
 }
 
 void PhotoGrid::mousePressEvent(QMouseEvent *event) {
+    if (m_covered) {
+        event->ignore();
+        return;
+    }
     // A click, or a tap with tap-to-click, is a touch too.
     m_pressStopped = m_physics.animating() || m_zoom.active;
     touched(double(event->timestamp()), "click");
@@ -829,6 +833,28 @@ int PhotoGrid::selectionCount() const {
         n += stack != m_stackOf.end() ? int(stack->second.size()) : 1;
     }
     return n;
+}
+
+void PhotoGrid::setCovered(bool covered) {
+    if (covered == m_covered)
+        return;
+    m_covered = covered;
+    if (covered) {
+        // What the pointer had under way ends where it is: a press opens
+        // nothing on its release, a sweep stops, fingers on the touchpad
+        // are taken as lifted still (an end stretched springs back), a
+        // pinch settles.
+        if (window() && window()->mouseGrabberItem() == this)
+            ungrabMouse();
+        endSweep();
+        m_pressIndex = -1;
+        if (m_physics.tracking()) {
+            m_physics.end(std::numeric_limits<double>::max());
+            updateAnimating();
+        }
+        endContinuousZoom();
+    }
+    emit coveredChanged();
 }
 
 void PhotoGrid::setSelecting(bool selecting) {
@@ -1596,6 +1622,10 @@ void PhotoGrid::geometryChange(const QRectF &newGeometry, const QRectF &oldGeome
 }
 
 void PhotoGrid::wheelEvent(QWheelEvent *event) {
+    if (m_covered) {
+        event->ignore();
+        return;
+    }
     logInput(QStringLiteral("wheel phase=%1 pixel=%2,%3 angle=%4,%5 inverted=%6 device=%7 type=%8 ts=%9 mods=%10")
                  .arg(int(event->phase()))
                  .arg(event->pixelDelta().x()).arg(event->pixelDelta().y())
@@ -1684,6 +1714,10 @@ void PhotoGrid::wheelEvent(QWheelEvent *event) {
 }
 
 bool PhotoGrid::event(QEvent *event) {
+    if (event->type() == QEvent::NativeGesture && m_covered) {
+        event->ignore();
+        return true;
+    }
     if (event->type() == QEvent::NativeGesture) {
         auto *g = static_cast<QNativeGestureEvent *>(event);
         logInput(QStringLiteral("gesture type=%1 value=%2 delta=%3,%4 fingers=%5 pos=%6,%7")

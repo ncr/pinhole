@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // More than one plugin whose tour has not been seen (a first launch, or a
 // few new at once): one card listing them, each with a line of what it
@@ -60,11 +61,9 @@ Item {
         anchors.fill: parent
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
     }
-    MouseArea {
+    Shield {
         anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
         onClicked: root.close()
-        onWheel: wheel => wheel.accepted = true
     }
 
     // The heading and Later stay; the plugins between scroll, in a window
@@ -82,7 +81,7 @@ Item {
         border.color: theme.foreground
         border.width: 1
         clip: true
-        MouseArea { anchors.fill: parent }
+        Shield { anchors.fill: parent }
 
         Column {
             id: head
@@ -168,6 +167,11 @@ Item {
                     }
                 }
             }
+        }
+        // The wheel and the touchpad anywhere on the card scroll the list.
+        Scroller {
+            anchors.fill: parent
+            flickable: scroller
         }
         // Quieter, at the other end: never these tours.
         ShellButton {

@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // A plugin's tour (PinholePlugin.tour): a few steps on a card, each over
 // the photos and buttons as they are, the one it is about lit through a
@@ -245,11 +246,9 @@ Item {
     }
 
     // A click beside the card ends it; the photos under it take nothing.
-    MouseArea {
+    Shield {
         anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
         onClicked: root.close()
-        onWheel: wheel => wheel.accepted = true
     }
 
     Rectangle {
@@ -264,7 +263,7 @@ Item {
         border.color: theme.foreground
         border.width: 1
 
-        MouseArea { anchors.fill: parent }
+        Shield { anchors.fill: parent }
 
         Column {
             id: content

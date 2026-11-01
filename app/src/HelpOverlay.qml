@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 import "keys.js" as KeyNames
 
 // The keys and gestures, on ? or the ? button: made from the window's
@@ -144,7 +145,8 @@ Item {
         anchors.fill: parent
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
     }
-    MouseArea {
+    // A click beside it puts it away; nothing there reaches the photos.
+    Shield {
         anchors.fill: parent
         onClicked: root.shown = false
     }
@@ -187,6 +189,7 @@ Item {
 
     Rectangle {
         id: card
+        objectName: "helpCard"
         anchors.centerIn: parent
         width: Math.min(parent.width - 32, Math.max(board.width, head.implicitWidth) + 2 * root.padding)
         height: Math.min(parent.height - 32, head.height + theme.fontSize + board.height + 2 * root.padding)
@@ -196,7 +199,7 @@ Item {
         border.width: 1
         clip: true
         // Clicks inside stay inside.
-        MouseArea { anchors.fill: parent }
+        Shield { anchors.fill: parent }
 
         // The tabs, and what goes for every button.
         Column {
@@ -369,6 +372,11 @@ Item {
                     }
                 }
             }
+        }
+        // The wheel and the touchpad anywhere on the card scroll it.
+        Scroller {
+            anchors.fill: parent
+            flickable: scroller
         }
     }
 }

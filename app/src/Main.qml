@@ -34,6 +34,10 @@ ApplicationWindow {
         // The keyboard's cursor, while the keyboard is what is in use.
         cursorShown: keymap.input === "keyboard"
         cursorColor: theme.brightForeground
+        // The pointer is the grid's only while its keys are: under a panel,
+        // a card, a menu, the viewer or a plugin's screen nothing that
+        // comes through moves it, zooms it, selects or opens.
+        covered: win.keyLayer !== "grid"
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
     // A mark's colour as a plugin names it (an action's too,
@@ -314,6 +318,9 @@ ApplicationWindow {
         textColor: theme.brightForeground
         border.color: win.switchedTo !== "" ? theme.accent
                     : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+        // Over the photos, not a hole in them: a click, the wheel or a
+        // pinch on it does nothing (a click opened the photo beneath).
+        Shield { anchors.fill: parent; z: -1 }
     }
 
     // A library being built: how far, at the foot.
@@ -357,6 +364,7 @@ ApplicationWindow {
         visible: grid.statsVisible
         text: grid.statsText
         label.horizontalAlignment: Text.AlignRight
+        Shield { anchors.fill: parent; z: -1 }
     }
 
     // Files dropped on the window on their way in, above a library being
@@ -385,6 +393,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: grid.selecting ? 72 : 24
         text: outgoing.status
+        Shield { anchors.fill: parent; z: -1 }
     }
 
     // When the source cannot be reached: what still works, and what to do.
@@ -421,6 +430,8 @@ ApplicationWindow {
         // Signing in again, from here too, or with I.
         HoverHandler { enabled: signInAgain.when; cursorShape: Qt.PointingHandCursor }
         TapHandler { enabled: signInAgain.when; onTapped: signInAgain.trigger() }
+        // Beneath its own tap, which sees a press first.
+        Shield { anchors.fill: parent; z: -1 }
     }
     Command {
         id: signInAgain
@@ -1257,6 +1268,7 @@ ApplicationWindow {
             onTriggered: noticeHover.hovered ? restart() : historyNotice.opacity = 0
         }
         HoverHandler { id: noticeHover }
+        Shield { anchors.fill: parent; z: -1 }
         function show(message, offer) {
             historyNotice.message = message
             historyNotice.offer = offer

@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 import QtQml
 import QtQuick.Window
 import "keys.js" as KeyNames
@@ -137,6 +138,7 @@ Item {
 
     Rectangle {
         id: menu
+        objectName: group.objectName !== "" ? group.objectName + "Card" : ""
         visible: group.open
         anchors.right: row.right
         y: group.upward ? -height - 7 : group.height + 7
@@ -146,6 +148,7 @@ Item {
         color: theme.background
         border.color: theme.foreground
         border.width: 1
+        Shield { anchors.fill: parent; z: -1 }
         // The widest row's, from the words (as ShellButton.qml lays a
         // justified row out), so every row is as wide as the menu.
         readonly property real rowWidth: {

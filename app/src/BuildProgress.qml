@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // A library being built, at the foot of the window while the grid fills
 // above it: what is happening, how far it is, and about how long is left,
@@ -19,6 +20,8 @@ Rectangle {
     color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.94)
     border.width: 1
     border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+    // Over the photos, not a hole in them.
+    Shield { anchors.fill: parent; z: -1 }
 
     // The pace, from where this phase was first seen.
     property double startedAt: 0

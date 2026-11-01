@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 import "keys.js" as KeyNames
 
 // Pinhole's side panel, on Tab or ",": over the photos from the left,
@@ -457,8 +458,8 @@ Item {
         opacity: Math.max(0, Math.min(1, (panel.x + panel.width) / panel.width))
     }
 
-    // A click beside it puts it away.
-    MouseArea {
+    // A click beside it puts it away; nothing else there reaches the photos.
+    Shield {
         anchors.fill: parent
         enabled: root.shown
         onClicked: root.shown = false
@@ -471,7 +472,7 @@ Item {
         x: root.shown ? 0 : -width - 1
         Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         color: Qt.rgba(theme.darkBackground.r, theme.darkBackground.g, theme.darkBackground.b, 0.96)
-        MouseArea { anchors.fill: parent }
+        Shield { anchors.fill: parent }
         Rectangle {
             anchors.right: parent.right
             width: 1
@@ -1191,6 +1192,12 @@ Item {
             }
             Item { width: 1; height: theme.fontSize }
         }
+        }
+        // The wheel and the touchpad anywhere over the panel, its margins
+        // too, scroll it as the photos scroll, and stop at its ends.
+        Scroller {
+            anchors.fill: parent
+            flickable: scroller
         }
     }
 }

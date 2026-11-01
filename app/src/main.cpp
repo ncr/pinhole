@@ -24,6 +24,7 @@
 #include "library.h"
 #include "libraryreloader.h"
 #include "photogrid.h"
+#include "scroller.h"
 #include "incoming.h"
 #include "outgoing.h"
 #include "favourites.h"
@@ -203,6 +204,7 @@ int main(int argc, char *argv[]) {
     ThumbnailLoader loader(&library, parser.value("decoders").toInt());
     // Before the window, so it outlives the grid that polls it.
     TouchpadHold hold;
+    Scroller::setTouchpadHold(&hold);
 
     // Larger renditions come from pinholed.
     // A library given (pinhole-fake's, say) is the one shown whatever source

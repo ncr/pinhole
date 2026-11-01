@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole
 
 // A bar of actions as one Omarchy card: the theme's background with a
 // hairline in the text colour, flat buttons in it, and a hairline between
@@ -49,6 +50,9 @@ Rectangle {
     color: theme.background
     border.color: theme.foreground
     border.width: 1
+    // Between and around its buttons nothing reaches what is beneath (a
+    // photo in select mode, the photo in the viewer).
+    Shield { anchors.fill: parent; z: -1 }
 
     Row {
         id: row
