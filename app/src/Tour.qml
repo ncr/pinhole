@@ -161,6 +161,24 @@ Item {
         return !!b && b.visible && b.opacity > 0 && b.width > 0
     }
     onActionShownChanged: if (shown) moving.restart()
+    // So is one that moves once there: the viewer's bar folding its
+    // plugins into More ▾ as Info's map comes (in Polish, at 850 wide, the
+    // bar under the long date), or wrapping under it. Looked at four times
+    // a second while all is still, and followed again when it is not where
+    // the light is.
+    Timer {
+        interval: 250
+        repeat: true
+        running: root.shown && root.arrived && !moving.running
+        onTriggered: {
+            const t = root.target()
+            const away = t ? Math.abs(t.x - root.pad - root.hx) + Math.abs(t.y - root.pad - root.hy)
+                             + Math.abs(t.width + 2 * root.pad - root.hw) + Math.abs(t.height + 2 * root.pad - root.hh)
+                           : root.hw + root.hh
+            if (away > 1)
+                moving.restart()
+        }
+    }
     FrameAnimation {
         running: root.shown && (moving.running || !root.arrived || root.panelPart !== null)
         onTriggered: root.follow(frameTime)
