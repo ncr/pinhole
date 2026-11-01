@@ -1419,6 +1419,37 @@ private slots:
         QCOMPARE(chosen.first().filename, QString("b.HEIC"));
     }
 
+    // Export's JPEG of a HEIC is kept by the file it came from: two of one
+    // name in two folders, or one written anew, are not given each other's.
+    void aCompatibleJpegIsKeptByItsFileNotItsName() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QDir().mkpath(dir.path() + "/a");
+        QDir().mkpath(dir.path() + "/b");
+        auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            file.write(bytes);
+        };
+        const QString a = dir.path() + "/a/IMG_0001.HEIC", b = dir.path() + "/b/IMG_0001.HEIC";
+        write(a, "one");
+        write(b, "one");
+        const QString nameA = Outgoing::compatibleName(a);
+        QVERIFY(nameA.endsWith(".jpg"));
+        QVERIFY(nameA != Outgoing::compatibleName(b));
+        // Touched (as pinholed does what it serves): the same.
+        QFile(a).setFileTime(QDateTime::currentDateTime().addDays(1), QFileDevice::FileModificationTime);
+        QCOMPARE(Outgoing::compatibleName(a), nameA);
+        // Written over, or replaced by another file: another.
+        write(a, "edited");
+        const QString edited = Outgoing::compatibleName(a);
+        QVERIFY(edited != nameA);
+        write(dir.path() + "/c", "edited");
+        QVERIFY(QFile::remove(a));
+        QVERIFY(QFile::rename(dir.path() + "/c", a));
+        QVERIFY(Outgoing::compatibleName(a) != edited);
+    }
+
 private:
     // A stand-in for pinholed: the lines asked, and answers written by hand.
     struct FakeService {
@@ -1703,6 +1734,31 @@ private slots:
         QTest::qWait(1500);
         QVERIFY(!QFile::exists(marker));
         QCOMPARE(bench.said(), QStringList());
+    }
+
+    void aPluginHearsAProgramALineAtATimeAndStopsItGently() {
+        PluginBench bench({{"t", {}}});
+        const QString told = bench.dir.path() + "/told", alsoTold = bench.dir.path() + "/also";
+        // Each line as it comes; what follows the last is the stdout.
+        bench.js(R"(pinhole.run("sh", ["-c", "echo a; sleep 0.2; echo b; printf c"], { output: line => said.push("line " + line) })
+                        .then(r => said.push("rest " + r.stdout)))");
+        QTRY_COMPARE(bench.said(), QStringList({"line a", "line b", "rest c"}));
+        // Cancelled, it is asked to end (SIGTERM) and can tidy up first.
+        const QString script = bench.dir.path() + "/gently.sh";
+        QFile file(script);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("trap 'touch \"$1\"; exit 0' TERM\nsleep 5 &\nwait\n");
+        file.close();
+        bench.js(QStringLiteral(R"(var p = pinhole.run("sh", ["%1", "%2"]); p.then(null, e => said.push(e.code)))").arg(script, told));
+        QTest::qWait(300);
+        bench.js("p.cancel()");
+        QTRY_VERIFY(QFile::exists(told));
+        QTRY_COMPARE(bench.said().last(), QString("cancelled"));
+        // So too when the plugin is turned off, the program its own.
+        bench.js(QStringLiteral(R"(pinhole.run("sh", ["%1", "%2"]))").arg(script, alsoTold));
+        QTest::qWait(300);
+        bench.plugins->setEnabled("t", false);
+        QTRY_VERIFY(QFile::exists(alsoTold));
     }
 
     void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {

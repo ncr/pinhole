@@ -1,6 +1,8 @@
-// A LocalSend receiver for testing pinhole-send: test_receiver <port> <folder> [decline] [quiet]
+// A LocalSend receiver for testing pinhole-send: test_receiver <port> <folder> [decline] [quiet] [pin=<pin>] [stall] [none]
 // Accepts (or declines) everything, saves into <folder>, logs to stdout.
 // "quiet": does not announce itself (a phone whose LocalSend has been open a while).
+// "pin=1234": asks for that PIN. "stall": takes the files but stops reading them.
+// "none": accepts none of them (204).
 use localsend::discovery::{DeviceIdentity, DiscoveryConfig, DEFAULT_DISCOVERY_TIMEOUT};
 use localsend::http::server::common::save::FileUploadTarget;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
@@ -20,6 +22,9 @@ async fn main() {
     let folder = PathBuf::from(&args[2]);
     let decline = args.iter().any(|a| a == "decline");
     let quiet = args.iter().any(|a| a == "quiet");
+    let stall = args.iter().any(|a| a == "stall");
+    let none = args.iter().any(|a| a == "none");
+    let pin = args.iter().find_map(|a| a.strip_prefix("pin=").map(str::to_string));
     std::fs::create_dir_all(&folder).unwrap();
     let cert = localsend::crypto::cert::generate_self_signed().unwrap();
     let (tx, mut rx) = mpsc::channel(16);
@@ -35,7 +40,7 @@ async fn main() {
             token: cert.fingerprint.clone(),
         },
         None,
-        Some(ServerConfigV2 { pin: None, verify_checksums: false, event_tx: tx }),
+        Some(ServerConfigV2 { pin, verify_checksums: false, event_tx: tx }),
         None,
         stop_rx,
     )
@@ -86,8 +91,15 @@ async fn main() {
                 let _ = decision_tx.send(if decline {
                     PrepareUploadDecisionV2::Decline
                 } else {
-                    PrepareUploadDecisionV2::Accept(files.keys().cloned().collect())
+                    PrepareUploadDecisionV2::Accept(if none { Default::default() } else { files.keys().cloned().collect() })
                 });
+            }
+            ServerEventV2::FileUpload { file, target_tx, .. } if stall => {
+                println!("upload {} (not read)", file.file_name);
+                let (binary_tx, binary_rx) = mpsc::channel(1);
+                let (result_tx, result_rx) = oneshot::channel();
+                let _ = target_tx.send(FileUploadTarget::Stream { binary_tx, result_rx });
+                std::mem::forget((binary_rx, result_tx));
             }
             ServerEventV2::FileUpload { file, target_tx, .. } => {
                 let (result_tx, result_rx) = oneshot::channel();
@@ -97,6 +109,7 @@ async fn main() {
                 tokio::spawn(async move { println!("saved {:?}", result_rx.await) });
             }
             ServerEventV2::SessionEnd { reason, .. } => println!("end {reason:?}"),
+            ServerEventV2::CancelReceived { .. } => println!("cancel received"),
             _ => {}
         }
     }

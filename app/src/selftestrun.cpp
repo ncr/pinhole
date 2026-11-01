@@ -401,7 +401,9 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // answer, then sent to the first, as 1 does, and grabbed when it is
     // through. A LocalSend device on the network to take it (a phone with
     // LocalSend open, or the plugin's test receiver) is the run's. With
-    // PINHOLE_SELFTEST_SEND=stop, Stop is pressed while the device decides.
+    // PINHOLE_SELFTEST_SEND=stop, Stop is pressed while the device decides;
+    // =pin, the PIN it asks for is 1234; =closed, the panel is closed as it
+    // goes, and how it ended shows at the foot of the window.
     if (name == QLatin1String("send")) {
         QTimer::singleShot(3000, window, [window, &library, &viewer, arg] {
             auto say = [](const QString &line) {
@@ -440,11 +442,13 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QMetaObject::invokeMethod(panel, "open", Q_ARG(QVariant, QVariant(indexes)));
                 QTimer::singleShot(400, window, [=] { grab(QStringLiteral("1-open")); });
             });
+            const QString mode = qEnvironmentVariable("PINHOLE_SELFTEST_SEND");
             auto describe = [panel] {
-                return QStringLiteral("%1 devices, %2 files, phase \"%3\", %4")
+                return QStringLiteral("%1 devices, %2 files (%5 fetched), phase \"%3\", %4")
                     .arg(panel->property("devices").toList().size())
                     .arg(panel->property("files").toList().size())
-                    .arg(panel->property("phase").toString(), panel->property("status").toString());
+                    .arg(panel->property("phase").toString(), panel->property("status").toString())
+                    .arg(panel->property("fetched").toInt());
             };
             QTimer::singleShot(9000, window, [=] {
                 grab(QStringLiteral("2-devices"));
@@ -452,10 +456,12 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 const QVariantList devices = panel->property("devices").toList();
                 if (devices.isEmpty())
                     return QCoreApplication::quit();
-                QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, devices.first()));
+                QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, devices.first()), Q_ARG(QVariant, QString()));
                 QTimer::singleShot(300, window, [=] { grab(QStringLiteral("3-asking")); });
-                if (qEnvironmentVariable("PINHOLE_SELFTEST_SEND") == QLatin1String("stop"))
+                if (mode == QLatin1String("stop"))
                     QTimer::singleShot(500, window, [=] { QMetaObject::invokeMethod(panel, "stopSending"); });
+                if (mode == QLatin1String("closed"))
+                    QTimer::singleShot(100, window, [=] { QMetaObject::invokeMethod(panel, "close"); });
                 auto clock = std::make_shared<QElapsedTimer>();
                 clock->start();
                 auto poll = new QTimer(window);
@@ -464,7 +470,13 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     const QString phase = panel->property("phase").toString();
                     if (phase == QLatin1String("sending"))
                         grab(QStringLiteral("4-sending"));
-                    if (phase == QLatin1String("waiting") || phase == QLatin1String("asking") || phase == QLatin1String("sending")) {
+                    if (phase == QLatin1String("pin") && mode == QLatin1String("pin")) {
+                        grab(QStringLiteral("4-pin"));
+                        say(describe());
+                        QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, panel->property("target")), Q_ARG(QVariant, QStringLiteral("1234")));
+                        return;
+                    }
+                    if (phase == QLatin1String("fetching") || phase == QLatin1String("asking") || phase == QLatin1String("sending")) {
                         if (clock->elapsed() < 60000)
                             return;
                     }
@@ -472,6 +484,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     grab(QStringLiteral("5-end"));
                     say(describe());
                     QTimer::singleShot(2500, window, [=] {
+                        grab(QStringLiteral("6-later"));
                         say(QStringLiteral("panel %1").arg(panel->property("shown").toBool() ? "still shown" : "closed"));
                         QCoreApplication::quit();
                     });

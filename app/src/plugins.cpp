@@ -494,13 +494,23 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     auto *process = new QProcess(this);
     process->setWorkingDirectory(m_dir);
     track(process, [this, process] {
-        // Nothing more said of it, and it goes once it has ended.
+        // Nothing more said of it, and it goes once it has ended: asked to
+        // end (SIGTERM) and given a second to tidy up, as cancel() does,
+        // the plugin turned off or loaded again (pinhole-send tells the
+        // phone, Background's helper takes away its part file). Its own,
+        // so that a host going too does not kill it at once.
         disconnect(process, nullptr, this, nullptr);
         connect(process, &QProcess::finished, process, &QObject::deleteLater);
-        if (process->state() == QProcess::NotRunning)
+        if (process->state() == QProcess::NotRunning) {
             process->deleteLater();
-        else
-            process->kill();
+            return;
+        }
+        process->setParent(nullptr);
+        process->terminate();
+        QTimer::singleShot(1000, process, [process] {
+            if (process->state() != QProcess::NotRunning)
+                process->kill();
+        });
     });
 
     if (options.isCallable()) {

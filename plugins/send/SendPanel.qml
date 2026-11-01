@@ -2,10 +2,10 @@ import QtQuick
 import Pinhole.Plugin
 
 // The photos to send and where to: the LocalSend devices nearby as they
-// answer, each on its number, the files fetched meanwhile. Picking one asks
-// its owner, and the files go once they say yes, the bar filling as they
-// do. A send goes on with the panel closed; the button turns while it does,
-// and opens it again.
+// answer, each on its number. Picking one fetches the files, asks its
+// owner, and the files go once they say yes, the bar filling as they do.
+// A send goes on with the panel closed; the button turns while it does,
+// and says how it ended at the foot of the window.
 Item {
     id: panel
     required property var plugin
@@ -18,30 +18,34 @@ Item {
 
     // The photos, as they were when it opened: {id, filename, video, live}.
     property var chosen: []
-    // Their files, once here, in order: {path, name}; a Live Photo's video
-    // after its photo.
+    // Their files once fetched, in order: {path, name}; a Live Photo's video
+    // after its photo. Fetched for a send, kept for the next (a PIN asked
+    // for, another device), as JPEGs or not.
     property var files: []
-    property bool preparing: false
+    property bool filesCompatible: false
+    // Fetching: how many of how many, and what is under way, to stop.
+    property int fetched: 0
+    property int fetching: 0
     property int missing: 0
-    // Fetches of an earlier opening are let go.
+    property var jobs: []
     property int generation: 0
 
-    // The devices that answered, nearest address last said: by
-    // fingerprint, in the order shown.
+    // The devices that answered, by fingerprint, in the order shown.
     property var devices: []
     // The run listening for them, while it does.
     property var looking: null
 
-    // The send: "" none, "waiting" (for the files), "asking", "sending",
-    // "sent", "declined", "busy", "pin", "failed", "cancelled".
+    // The send: "" none; "fetching", "asking", "sending" under way; then
+    // "sent", or what stopped it, as pinhole-send says (outcome()).
     property string phase: ""
     property var target: null
     property real sentBytes: 0
     property real totalBytes: 0
     property int sentFiles: 0
-    property string failure: ""
+    property string detail: ""
     property var sending: null
-    readonly property bool running: phase === "waiting" || phase === "asking" || phase === "sending"
+    readonly property bool running: phase === "fetching" || phase === "asking" || phase === "sending"
+    readonly property bool askingPin: phase === "pin" || phase === "wrongpin"
 
     readonly property int videos: chosen.filter(item => item.live && !item.video).length
 
@@ -55,9 +59,11 @@ Item {
             }
             if (list.length === 0)
                 return
-            chosen = list
+            if (JSON.stringify(list) !== JSON.stringify(chosen)) {
+                chosen = list
+                files = []
+            }
             phase = ""
-            prepare()
         }
         shown = true
         look()
@@ -67,45 +73,88 @@ Item {
         stopLooking()
     }
 
-    // The files: originals as taken; HEIC as JPEG, the photo as it looks
-    // now (an edit, if it has one), as Export does. Videos as they are.
-    function prepare() {
+    // The files, then done(files): originals as taken; HEIC as JPEG, the
+    // photo as it looks now (an edit, if it has one), as Export does.
+    // Videos as they are.
+    function prepare(done) {
+        const compatible = plugin.compatible
+        if (files.length > 0 && filesCompatible === compatible)
+            return done(files)
         const job = ++generation
         const wanted = []
         for (const item of chosen) {
-            wanted.push({ item: item, kind: item.video || !plugin.compatible ? "original" : "full" })
+            wanted.push({ item: item, kind: item.video || !compatible ? "original" : "full" })
             if (item.live && !item.video)
                 wanted.push({ item: item, kind: "live" })
         }
         const got = new Array(wanted.length)
         let left = wanted.length
-        files = []
+        fetched = 0
+        fetching = wanted.length
         missing = 0
-        preparing = true
-        const done = (k, file) => {
+        const fetches = wanted.map((w, k) => {
+            const fetch = pinhole.fetch(w.item.id, w.kind)
+            fetch.then(path => {
+                if (job !== generation)
+                    return
+                got[k] = path
+                ++fetched
+            }, error => {
+                if (job !== generation || error.code === "cancelled")
+                    return
+                pinhole.warn(error)
+                ++missing
+            }).catch(pinhole.warn).then(() => {
+                if (job === generation && --left === 0)
+                    convert()
+            })
+            return fetch
+        })
+        jobs = fetches
+        // HEIC as JPEG: a few at once, by pinhole-send.
+        const convert = () => {
+            const heic = []
+            got.forEach((path, k) => {
+                if (path && compatible && wanted[k].kind !== "live" && /\.hei[cf]$/i.test(path))
+                    heic.push(k)
+            })
+            if (heic.length === 0)
+                return finish()
+            const run = pinhole.run(plugin.sender, ["jpeg", pinhole.cacheDir + "/jpeg"], {
+                input: JSON.stringify(heic.map(k => got[k])),
+                output: line => {
+                    const at = line.indexOf(" ")
+                    const k = heic[Number(line.slice(0, at))]
+                    const path = line.slice(at + 1)
+                    if (path === "!") {
+                        got[k] = null
+                        ++missing
+                    } else {
+                        got[k] = path
+                    }
+                }
+            })
+            jobs = [run]
+            run.then(finish, error => {
+                if (error.code !== "cancelled")
+                    pinhole.warn(error)
+            }).catch(pinhole.warn)
+        }
+        const finish = () => {
             if (job !== generation)
                 return
-            got[k] = file
-            if (!file)
-                ++missing
-            if (--left > 0)
-                return
-            files = got.filter(f => f)
-            preparing = false
-            if (phase === "waiting")
-                start()
+            jobs = []
+            const list = []
+            got.forEach((path, k) => {
+                if (path)
+                    list.push({ path: path, name: nameOf(wanted[k].item.filename, path) })
+            })
+            files = list
+            filesCompatible = compatible
+            done(list)
         }
-        wanted.forEach((w, k) => {
-            pinhole.fetch(w.item.id, w.kind).then(path => {
-                if (w.kind !== "live" && plugin.compatible && /\.hei[cf]$/i.test(path))
-                    return plugin.jpeg(path)
-                return path
-            }).then(path => done(k, { path: path, name: nameOf(w.item.filename, path) }), error => {
-                if (job === generation)
-                    pinhole.warn(error)
-                done(k, null)
-            }).catch(pinhole.warn)
-        })
+        if (wanted.length === 0)
+            finish()
     }
     // The camera's name with the file's own extension (an edit comes as a
     // JPEG, a Live Photo's video as a MOV), in the camera's case.
@@ -139,8 +188,12 @@ Item {
         })
     }
     function stopLooking() {
-        if (looking)
-            looking.cancel()
+        if (!looking)
+            return
+        // Gone at once: opened again straight away, it looks anew.
+        const run = looking
+        looking = null
+        run.cancel()
     }
     function found(line) {
         let device
@@ -154,6 +207,9 @@ Item {
         const list = devices.slice()
         const at = list.findIndex(d => d.fingerprint === device.fingerprint)
         if (at >= 0) {
+            // Never a plain HTTP claim over one proven by its certificate.
+            if (device.protocol === "http" && list[at].protocol !== "http")
+                return
             list[at] = device
         } else {
             // Where it was in the list sent to last, else after the rest.
@@ -165,38 +221,32 @@ Item {
         devices = list
     }
 
-    function sendTo(device) {
+    function sendTo(device, pin) {
         if (running || !device)
             return
         target = device
         sentBytes = 0
         totalBytes = 0
         sentFiles = 0
-        failure = ""
+        detail = ""
         plugin.remember(device)
-        phase = "waiting"
-        if (!preparing)
-            start()
+        phase = "fetching"
+        prepare(list => start(list, pin || ""))
     }
-    function start() {
-        if (files.length === 0) {
-            phase = "failed"
-            failure = qsTr("The photos could not be fetched.")
+    function start(list, pin) {
+        if (phase !== "fetching")
             return
-        }
+        if (list.length === 0)
+            return outcome("unfetched")
         phase = "asking"
-        const args = ["send", JSON.stringify(target)]
-        for (const file of files)
-            args.push(file.path, file.name)
         // What it says is heard as it goes; ended any way but by saying so,
         // it failed.
-        const run = pinhole.run(plugin.sender, args, { output: line => heard(line) })
+        const run = pinhole.run(plugin.sender, ["send", JSON.stringify(target)].concat(pin !== "" ? [pin] : []),
+                                { input: JSON.stringify(list), output: line => heard(line) })
         sending = run
         run.then(() => {}, error => {
-            if (phase === "asking" || phase === "sending") {
-                phase = "failed"
-                failure = error.message || qsTr("It stopped.")
-            }
+            if (running)
+                outcome("failed")
         }).catch(pinhole.warn).then(() => {
             if (sending === run)
                 sending = null
@@ -205,6 +255,8 @@ Item {
     function heard(line) {
         const words = line.split(" ")
         switch (words[0]) {
+        case "asking":
+            break
         case "accepted":
             phase = "sending"
             totalBytes = Number(words[2])
@@ -215,45 +267,60 @@ Item {
         case "sent":
             sentFiles = Number(words[1])
             sentBytes = totalBytes
-            phase = "sent"
-            if (shown)
+            outcome("sent")
+            break
+        default:
+            detail = words.slice(1).join(" ")
+            outcome(words[0])
+        }
+    }
+    // How it ended: in the panel, or at the foot of the window if it is
+    // closed by then.
+    function outcome(how) {
+        phase = how
+        jobs = []
+        if (shown) {
+            if (how === "sent")
                 closing.restart()
-            break
-        case "declined":
-        case "busy":
-        case "pin":
-        case "cancelled":
-            phase = words[0]
-            break
-        case "failed":
-            phase = "failed"
-            failure = words.slice(1).join(" ")
-            break
+        } else if (how !== "cancelled") {
+            pinhole.notify(status)
         }
     }
     function stopSending() {
-        if (phase === "waiting")
-            phase = "cancelled"
-        else if (sending)
+        if (phase === "fetching") {
+            ++generation
+            jobs.forEach(job => job.cancel())
+            outcome("cancelled")
+        } else if (sending) {
             sending.cancel()
+        }
     }
     // A moment to read that they went.
     Timer { id: closing; interval: 1600; onTriggered: if (panel.phase === "sent") panel.close() }
 
     // LocalSend's own window, with the files: for a device that does not
-    // show here, or one with a PIN.
+    // show here. Started apart from Pinhole (uwsm-app, as Omarchy starts
+    // apps), so it outlives it; one already running takes them over.
     function openLocalSend() {
-        if (preparing || files.length === 0)
+        if (running)
             return
-        const folder = pinhole.cacheDir + "/localsend/" + Date.now()
-        const args = ["stage", folder]
-        for (const file of files)
-            args.push(file.path, file.name)
-        pinhole.run(plugin.sender, args).then(result => {
-            // Handed to LocalSend's window, or to the one already running.
-            pinhole.run("localsend", result.stdout.split("\n").filter(l => l !== "")).catch(pinhole.warn)
-            panel.close()
-        }).catch(pinhole.warn)
+        phase = "fetching"
+        target = null
+        prepare(list => {
+            if (phase !== "fetching")
+                return
+            phase = ""
+            if (list.length === 0)
+                return outcome("unfetched")
+            const folder = pinhole.cacheDir + "/localsend/" + Date.now()
+            pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
+                const paths = result.stdout.split("\n").filter(l => l !== "")
+                // The folder for very many, which LocalSend takes as a folder.
+                const given = paths.length > 500 ? [folder] : paths
+                return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
+                                          "sh"].concat(given))
+            }).then(() => panel.close()).catch(pinhole.warn)
+        })
     }
 
     readonly property string what: chosen.every(item => item.video) ? qsTr("Send %n video(s)", "", chosen.length)
@@ -262,22 +329,31 @@ Item {
     readonly property string status: {
         const name = target ? target.alias : ""
         switch (phase) {
-        case "waiting": return qsTr("Fetching the photos for %1…").arg(name)
+        case "fetching":
+            return fetching <= 1 ? qsTr("Fetching…") : qsTr("Fetching %1 of %2…").arg(fetched).arg(fetching)
         case "asking": return qsTr("Waiting for %1 to accept…").arg(name)
         case "sending": return qsTr("Sending to %1: %2 of %3").arg(name).arg(pinhole.sizeText(sentBytes)).arg(pinhole.sizeText(totalBytes))
-        case "sent": return qsTr("Sent %n file(s) to %1", "", sentFiles).arg(name)
+        case "sent":
+            return missing > 0 ? qsTr("Sent %n file(s) to %1; %2 could not be fetched.", "", sentFiles).arg(name).arg(missing)
+                               : qsTr("Sent %n file(s) to %1", "", sentFiles).arg(name)
         case "declined": return qsTr("%1 declined.").arg(name)
         case "busy": return qsTr("%1 is busy with another transfer.").arg(name)
-        case "pin": return qsTr("%1 asks for a PIN: send with LocalSend (L).").arg(name)
+        case "pin": return qsTr("%1 asks for a PIN.").arg(name)
+        case "wrongpin": return qsTr("Not the PIN %1 asks for.").arg(name)
+        case "nothing": return qsTr("%1 took none of them.").arg(name)
+        case "stalled": return qsTr("%1 stopped taking them.").arg(name)
+        case "unreachable": return qsTr("%1 could not be reached. Is LocalSend still open on it?").arg(name)
+        case "mismatch": return qsTr("Something else answered where %1 was: nothing sent.").arg(name)
+        case "rejected": return qsTr("%1 refused them (%2).").arg(name).arg(detail)
+        case "unfetched": return qsTr("The photos could not be fetched.")
         case "cancelled": return qsTr("Stopped.")
-        case "failed": return qsTr("Could not send: %1").arg(failure)
+        case "failed": return target ? qsTr("Could not send to %1.").arg(name) : qsTr("Could not send.")
         }
-        if (preparing)
-            return chosen.some(item => !item.video) && plugin.compatible ? qsTr("Fetching and converting…") : qsTr("Fetching the originals…")
-        if (missing > 0)
-            return qsTr("%n file(s) could not be fetched.", "", missing)
         return ""
     }
+    // A PIN being typed: its keys are its own.
+    readonly property bool typing: askingPin && pinField.activeFocus
+    readonly property bool bad: phase !== "" && !running && phase !== "sent" && phase !== "cancelled" && !askingPin
 
     // Behind the card: the window dimmed, a tap there closes.
     Rectangle {
@@ -292,7 +368,9 @@ Item {
     Rectangle {
         id: card
         readonly property int pad: Math.round(theme.fontSize * 1.4)
-        anchors.centerIn: parent
+        // In the middle, or from the top when the window is short.
+        x: Math.round((parent.width - width) / 2)
+        y: Math.max(pad, Math.round((parent.height - height) / 2))
         width: Math.min(parent.width - 2 * pad, Math.round(theme.fontSize * 30))
         height: column.implicitHeight + 2 * pad
         radius: Math.min(8, theme.radius)
@@ -346,12 +424,17 @@ Item {
                     objectName: "send.device" + (index + 1)
                     width: column.width
                     justified: true
+                    readonly property bool chosen: panel.target !== null && panel.target.fingerprint === modelData.fingerprint
+                                                   && panel.phase !== ""
+                    // Plain HTTP: nothing proves it is the device it says.
                     text: modelData.alias + (modelData.model ? "  ·  " + modelData.model : "")
-                    key: index < 9 ? String(index + 1) : ""
+                          + (modelData.protocol === "http" ? "  ·  " + qsTr("unencrypted") : "")
+                    key: index < 9 && !panel.typing ? String(index + 1) : ""
                     keyLayer: "plugin"
                     helpText: qsTr("Send to a device")
-                    usable: !panel.running
-                    active: panel.target !== null && panel.target.fingerprint === modelData.fingerprint && panel.phase !== ""
+                    // The one sent to stays readable while it goes.
+                    usable: !panel.running || chosen
+                    active: chosen
                     onTapped: panel.sendTo(modelData)
                 }
             }
@@ -382,8 +465,7 @@ Item {
                 UiText {
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    color: panel.phase === "failed" || panel.phase === "declined" ? theme.red
-                         : panel.phase === "sent" ? theme.accent : theme.foreground
+                    color: panel.bad ? theme.red : panel.phase === "sent" ? theme.accent : theme.foreground
                     text: (panel.phase === "sent" ? "✓ " : "") + panel.status
                 }
                 Rectangle {
@@ -399,6 +481,60 @@ Item {
                         width: parent.width * (panel.totalBytes > 0 ? Math.min(1, panel.sentBytes / panel.totalBytes) : 0)
                         Behavior on width { NumberAnimation { duration: 100 } }
                     }
+                }
+            }
+
+            // The PIN the device asks for, sent with Enter.
+            Row {
+                visible: panel.askingPin
+                spacing: Math.round(theme.fontSize * 0.6)
+                Rectangle {
+                    width: Math.round(theme.fontSize * 9)
+                    height: Math.round(theme.fontSize * 2.333)
+                    radius: Math.min(4, theme.radius)
+                    color: "transparent"
+                    border.width: 1
+                    border.color: pinField.activeFocus ? theme.accent
+                                : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+                    TextInput {
+                        id: pinField
+                        anchors.fill: parent
+                        anchors.leftMargin: Math.round(theme.fontSize * 0.6)
+                        anchors.rightMargin: anchors.leftMargin
+                        verticalAlignment: TextInput.AlignVCenter
+                        font.family: theme.font
+                        font.pixelSize: theme.fontSize
+                        color: theme.foreground
+                        selectionColor: theme.accent
+                        clip: true
+                        onAccepted: pinSend.press()
+                        Keys.onEscapePressed: panel.close()
+                    }
+                    UiText {
+                        visible: pinField.text === ""
+                        x: pinField.x
+                        y: centredIn(parent.height)
+                        color: theme.darkForeground
+                        text: qsTr("PIN")
+                    }
+                }
+                ShellButton {
+                    id: pinSend
+                    text: qsTr("Send")
+                    hint: "⏎"
+                    usable: pinField.text !== ""
+                    onTapped: {
+                        const pin = pinField.text
+                        pinField.text = ""
+                        panel.sendTo(panel.target, pin)
+                    }
+                }
+            }
+            Connections {
+                target: panel
+                function onAskingPinChanged() {
+                    if (panel.askingPin)
+                        pinField.forceActiveFocus()
                 }
             }
 
@@ -445,7 +581,7 @@ Item {
         name: "send.close"
         keys: ["Escape", "O"]
         keyLayer: "plugin"
-        when: panel.shown
+        when: panel.shown && !panel.typing
         onTriggered: panel.close()
     }
     Command {
@@ -455,13 +591,12 @@ Item {
         section: "Send to phone"
         keys: ["J"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.running
+        when: panel.shown && !panel.running && !panel.typing
         mouse: qsTr("The switch")
         touchpad: qsTr("The switch")
         onTriggered: {
             plugin.setCompatible(!plugin.compatible)
             panel.phase = ""
-            panel.prepare()
         }
     }
     Command {
@@ -471,7 +606,7 @@ Item {
         section: "Send to phone"
         keys: ["L"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.preparing && panel.files.length > 0 && !panel.running
+        when: panel.shown && panel.chosen.length > 0 && !panel.running && !panel.typing
         onTriggered: panel.openLocalSend()
     }
     Command {

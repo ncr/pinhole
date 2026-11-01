@@ -46,6 +46,11 @@ public:
     void setStatus(const QString &status);
 
     static QString stagingFolder();
+    // The name a file's compatible JPEG is kept under in the cache: its
+    // path, size, inode and birth, hashed, so another file of its name (a
+    // folder's) or the file written anew converts anew. Not its time:
+    // pinholed touches what it serves from its cache, each time.
+    static QString compatibleName(const QString &source);
 
     bool dragging() const { return m_dragging; }
 

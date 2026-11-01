@@ -4,11 +4,12 @@ import Pinhole.Plugin
 // Send to phone: photos to a phone or another computer nearby with
 // LocalSend, which Omarchy has, from a photo shown full window or what is
 // ticked in select mode (O). The devices with LocalSend open show as they
-// answer; picking one asks its owner, and once they say yes the originals
-// go, a Live Photo's video with its photo, or HEIC as JPEG. pinhole-send
-// (sender/) speaks LocalSend's protocol with LocalSend's own code; for a
-// device that does not show, LocalSend's own window takes the files.
-// Nothing is sent but on a press of a device.
+// answer; picking one fetches the files and asks its owner (with its PIN,
+// if it has one), and once they say yes the originals go, a Live Photo's
+// video with its photo, or HEIC as JPEG. pinhole-send (sender/) speaks
+// LocalSend's protocol with LocalSend's own code, and makes the JPEGs; for
+// a device that does not show, LocalSend's own window takes the files.
+// Nothing is fetched or sent but on a press of a device.
 PinholePlugin {
     id: plugin
     covering: panel.shown
@@ -35,17 +36,9 @@ PinholePlugin {
         pinhole.settings.devices = list
     }
 
-    // HEIC made a JPEG once, as Export makes it (ImageMagick keeps the
-    // date, place and camera), kept in the cache by the original's name: a
-    // promise of its path.
-    function jpeg(path) {
-        const out = pinhole.cacheDir + "/jpeg/" + path.replace(/^.*\//, "").replace(/\.[^.]*$/, "") + ".jpg"
-        if (pinhole.exists(out))
-            return out
-        // Written aside and moved, so a half-made one is never taken.
-        return pinhole.run("sh", ["-c", 'mkdir -p "${2%/*}" && magick "$1" -quality 92 "jpg:$2.part" && mv "$2.part" "$2"', "sh", path, out])
-            .then(() => out)
-    }
+    // What it keeps, kept small: folders staged for LocalSend's window go
+    // after a day, JPEGs after thirty, and the oldest past 2 GB.
+    Component.onCompleted: pinhole.run(sender, ["tidy", pinhole.cacheDir]).catch(pinhole.warn)
 
     readonly property string label: panel.running ? qsTr("Sending") : qsTr("Send")
 

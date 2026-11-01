@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QImageReader>
 #include <QFutureWatcher>
@@ -26,6 +27,7 @@
 #include <QTimer>
 
 #include <memory>
+#include <sys/stat.h>
 #include <unistd.h>
 
 Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *parent)
@@ -297,6 +299,16 @@ void Outgoing::prepare(const Chosen &items, bool compatible, const QString &fold
     }
 }
 
+QString Outgoing::compatibleName(const QString &source) {
+    const QFileInfo info(source);
+    struct stat st {};
+    ::stat(QFile::encodeName(source).constData(), &st);
+    const QByteArray identity = QFile::encodeName(info.canonicalFilePath().isEmpty() ? info.absoluteFilePath() : info.canonicalFilePath())
+        + '\0' + QByteArray::number(info.size()) + '\0' + QByteArray::number(quint64(st.st_ino)) + '\0'
+        + QByteArray::number(info.birthTime().toMSecsSinceEpoch());
+    return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32)) + ".jpg";
+}
+
 void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, bool compatible,
                      const QString &folder, std::function<void(const QString &)> placed) {
     QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
@@ -317,11 +329,11 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
 
     if (compatible && type == QLatin1String("public.heic")) {
         const QString out = uniqueName(folder, QFileInfo(name).completeBaseName() + ".jpg");
-        // Converted once and kept in the cache beside the originals, named as
-        // the original is (by its key, iCloud's checksum, so an edit converts anew);
-        // pinholed's size limit covers it like the rest.
+        // Converted once and kept in the cache beside the originals, by the
+        // file it came from (compatibleName); pinholed's size limit covers it
+        // like the rest.
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible";
-        const QString converted = dir + '/' + QFileInfo(source).completeBaseName() + ".jpg";
+        const QString converted = dir + '/' + compatibleName(source);
         if (QFileInfo::exists(converted)) {
             QFile file(converted);
             if (file.open(QIODevice::ReadWrite))
@@ -332,7 +344,8 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
         QDir().mkpath(dir);
         // Written aside and renamed: two at once never clash, and a reader
         // never sees half a file. (pinholed's eviction skips .part files.)
-        const QString part = converted + '.' + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".part";
+        static int parts = 0;
+        const QString part = converted + '.' + QString::number(QDateTime::currentMSecsSinceEpoch()) + '-' + QString::number(++parts) + ".part";
         auto *magick = new QProcess(this);
         connect(magick, &QProcess::finished, this,
                 [magick, part, converted, out, hand, placed](int code, QProcess::ExitStatus status) {

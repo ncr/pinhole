@@ -1,23 +1,38 @@
 //! pinhole-send: the Send to phone plugin's way to LocalSend (plugins/send),
 //! with LocalSend's own protocol code. Each command writes a line for each
-//! thing that happens, as it happens, for the plugin to show:
+//! thing that happens, as it happens, for the plugin to show. Lists of files
+//! come on stdin, as JSON, so there can be any number of them.
 //!
 //! `pinhole-send devices [<device> ...]`
 //!     The LocalSend devices nearby, a JSON line for each as it answers
-//!     (again from a nearer address), until stdin closes or it is stopped. The devices given, as those lines, are where devices were
-//!     last: asked first, since a phone that is already open does not
-//!     announce itself.
+//!     (again from a better address), until it is stopped. The devices
+//!     given, as those lines, are where devices were last: asked first,
+//!     since a phone that is already open does not announce itself. A device
+//!     known over HTTPS is never taken over by one claiming its fingerprint
+//!     over plain HTTP, which proves nothing.
 //!
-//! `pinhole-send send <device> <path> <name> [<path> <name> ...]`
+//! `pinhole-send send <device> [<pin>]`, stdin `[{"path", "name"}, ...]`
 //!     The files to the device, each under its name: `asking` while its
 //!     owner decides, `accepted <files> <bytes>`, `progress <sent> <total>`
-//!     as it goes, and `sent <files>`; or `declined`, `busy`, `pin` or
-//!     `failed <why>`, exiting 1. Stopped (SIGTERM, or stdin closed), it
-//!     tells the device and says `cancelled`.
+//!     as it goes, and `sent <files>`. Else, exiting 1, one of: `declined`,
+//!     `busy`, `pin` (it wants one), `wrongpin`, `nothing` (it took none),
+//!     `stalled` (nothing went for 30 s), `unreachable`, `mismatch` (not the
+//!     certificate it answered with before), `rejected <status>`, `failed`,
+//!     or `cancelled` once stopped (SIGTERM), the device told.
 //!
-//! `pinhole-send stage <folder> <path> <name> [<path> <name> ...]`
+//! `pinhole-send stage <folder>`, stdin `[{"path", "name"}, ...]`
 //!     The files under their names in the folder (linked where they can be,
 //!     else copied), for LocalSend's own window: their paths, a line each.
+//!
+//! `pinhole-send jpeg <folder>`, stdin `["path", ...]`
+//!     Each HEIC as a JPEG in the folder (ImageMagick, which keeps the date,
+//!     place and camera), a few at once: `<k> <path>` for the k-th as it is
+//!     ready, `<k> !` if it could not be. Kept by the original's path, size
+//!     and inode, so another file of its name, or it changed, is made anew.
+//!
+//! `pinhole-send tidy <folder>`
+//!     The plugin's cache kept small: folders staged for LocalSend gone after
+//!     a day, JPEGs after thirty, and the oldest of them past 2 GB.
 //!
 //! This computer is one LocalSend device to the others, whichever command:
 //! its certificate is kept in ~/.config/pinhole/send, so a phone sees the
@@ -41,17 +56,29 @@ use localsend::model::transfer::{FileContent, FileDto};
 use localsend::multicast::{MulticastDevice, DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
 use localsend::util::interface::{local_interface_addresses, InterfaceFilter};
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
+/// With nothing sent for this long, a receiver is taken to have stopped.
+const STALL: Duration = Duration::from_secs(30);
+/// How long the device is given to hear it was stopped.
+const CANCEL_WAIT: Duration = Duration::from_secs(2);
+/// HEICs made JPEGs at once.
+const CONVERSIONS: usize = 3;
+
 fn main() {
+    // Ended with the window, however it goes: SIGTERM, as when stopped.
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let runtime = tokio::runtime::Runtime::new().expect("a tokio runtime");
     let result = runtime.block_on(async {
@@ -59,11 +86,15 @@ fn main() {
             Some("devices") => devices(&args[1..]).await,
             Some("send") => send(&args[1..]).await,
             Some("stage") => stage(&args[1..]),
-            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> <path> <name> ... | stage <folder> <path> <name> ..."),
+            Some("jpeg") => jpeg(&args[1..]).await,
+            Some("tidy") => tidy(&args[1..]),
+            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> [<pin>] | stage <folder> | jpeg <folder> | tidy <folder>"),
         }
     });
     if let Err(err) = result {
-        say(&format!("failed {err:#}"));
+        // For the log: never a URL (it carries the session's token).
+        eprintln!("pinhole-send: {err:#}");
+        say("failed");
         std::process::exit(1);
     }
     // The discovery's and the server's tasks are not waited for.
@@ -77,8 +108,13 @@ fn say(line: &str) {
     let _ = out.flush();
 }
 
-/// Cancelled when the plugin is done with it: SIGTERM, SIGINT, or stdin
-/// closing (the window gone, however it went).
+/// The last word, and out.
+fn end(line: &str) -> ! {
+    say(line);
+    std::process::exit(1);
+}
+
+/// Cancelled when the plugin is done with it: SIGTERM or SIGINT.
 fn stopped() -> CancellationToken {
     let token = CancellationToken::new();
     let on_signal = token.clone();
@@ -93,18 +129,30 @@ fn stopped() -> CancellationToken {
         }
         on_signal.cancel();
     });
-    let on_eof = token.clone();
-    tokio::spawn(async move {
-        let mut stdin = tokio::io::stdin();
-        let mut buffer = [0u8; 256];
-        while let Ok(n) = stdin.read(&mut buffer).await {
-            if n == 0 {
-                break;
-            }
-        }
-        on_eof.cancel();
-    });
     token
+}
+
+/// The JSON on stdin.
+fn input() -> Result<Value> {
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text).context("reading stdin")?;
+    serde_json::from_str(&text).context("stdin is not JSON")
+}
+
+/// `[{"path", "name"}, ...]` from stdin.
+fn files_in() -> Result<Vec<(PathBuf, String)>> {
+    let list = input()?;
+    list.as_array()
+        .context("stdin is not a list")?
+        .iter()
+        .map(|file| {
+            let path = file["path"].as_str().context("a file without a path")?;
+            let name = file["name"].as_str().context("a file without a name")?;
+            // A name, not a path: nothing lands outside where it is put.
+            let name = Path::new(name).file_name().context("a file without a name")?.to_string_lossy().into_owned();
+            Ok((PathBuf::from(path), name))
+        })
+        .collect()
 }
 
 /// This computer as a LocalSend device: named as the computer is, a
@@ -218,6 +266,17 @@ fn channel_of(device: &Value) -> Result<HttpChannel> {
     Ok(HttpChannel { host, port, protocol })
 }
 
+/// How good an address is, best 0: over HTTPS before plain HTTP; then the
+/// local network's own, any other IPv4 (a VPN's), IPv6.
+fn rank(http: &HttpChannel) -> u8 {
+    let near = match http.host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) if ip.is_private() => 0,
+        Ok(std::net::IpAddr::V4(_)) => 1,
+        _ => 2,
+    };
+    near + if http.protocol == ProtocolType::Https { 0 } else { 10 }
+}
+
 async fn devices(known: &[String]) -> Result<()> {
     let identity = Identity::load()?;
     let stop = stopped();
@@ -270,7 +329,7 @@ async fn devices(known: &[String]) -> Result<()> {
         .await,
     );
     if let Some(err) = discovery.multicast_error() {
-        eprintln!("multicast unavailable: {err:#}");
+        eprintln!("pinhole-send: multicast unavailable: {err:#}");
     }
 
     tokio::spawn({
@@ -308,21 +367,25 @@ async fn devices(known: &[String]) -> Result<()> {
     // Announce, ask where devices were, and scan the local networks if
     // nothing answers; then announce again now and then, for a phone whose
     // LocalSend opens in the meantime.
-    let known: Vec<HttpChannel> = known
+    let known: Vec<Value> = known.iter().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect();
+    // Fingerprints proven over HTTPS: a plain HTTP claim to one is not
+    // believed.
+    let mut secure: HashSet<String> = known
         .iter()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter_map(|device| channel_of(&device).ok())
+        .filter(|device| device["protocol"].as_str() != Some("http"))
+        .filter_map(|device| device["fingerprint"].as_str().map(str::to_string))
         .collect();
+    let channels: Vec<HttpChannel> = known.iter().filter_map(|device| channel_of(device).ok()).collect();
     tokio::spawn({
         let discovery = discovery.clone();
         async move {
             let networks = local_interface_addresses(&InterfaceFilter::default()).unwrap_or_default();
             let _ = discovery
-                .discover_staged(known.clone(), networks, DEFAULT_PORT, ProtocolType::Https, Duration::from_secs(2))
+                .discover_staged(channels.clone(), networks, DEFAULT_PORT, ProtocolType::Https, Duration::from_secs(2))
                 .await;
             loop {
                 tokio::time::sleep(Duration::from_secs(10)).await;
-                let _ = discovery.discover_known_http_channels(known.clone()).await;
+                let _ = discovery.discover_known_http_channels(channels.clone()).await;
                 discovery.announce().await;
             }
         }
@@ -336,9 +399,15 @@ async fn devices(known: &[String]) -> Result<()> {
         tokio::select! {
             event = events_rx.recv() => match event {
                 Some(DiscoveryEvent::Discovered { device } | DiscoveryEvent::Updated { device }) => {
-                    // Again only from a nearer address: a phone answers on
+                    let Some(http) = device.channel.http() else { continue };
+                    if http.protocol == ProtocolType::Https {
+                        secure.insert(device.fingerprint.clone());
+                    } else if secure.contains(&device.fingerprint) {
+                        continue;
+                    }
+                    // Again only from a better address: a phone answers on
                     // each network it is on (Wi-Fi, a VPN, IPv6).
-                    let rank = device.channel.http().map(|http| nearness(&http.host)).unwrap_or(u8::MAX);
+                    let rank = rank(http);
                     if said.get(&device.fingerprint).is_some_and(|&said| said <= rank) {
                         continue;
                     }
@@ -347,7 +416,7 @@ async fn devices(known: &[String]) -> Result<()> {
                         say(&line.to_string());
                     }
                 }
-                Some(DiscoveryEvent::MulticastFailed) => eprintln!("multicast stopped"),
+                Some(DiscoveryEvent::MulticastFailed) => eprintln!("pinhole-send: multicast stopped"),
                 None => break,
             },
             _ = stop.cancelled() => break,
@@ -355,16 +424,6 @@ async fn devices(known: &[String]) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// How near an address is, nearest 0: the local network's own, then any
-/// other IPv4 (a VPN's), then IPv6.
-fn nearness(host: &str) -> u8 {
-    match host.parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V4(ip)) if ip.is_private() => 0,
-        Ok(std::net::IpAddr::V4(_)) => 1,
-        _ => 2,
-    }
 }
 
 /// A file's type as LocalSend gives it, by its name: a phone saves images
@@ -387,30 +446,47 @@ fn file_type(name: &str) -> &'static str {
     }
 }
 
+/// What went wrong talking to a device, as a word for the plugin; never
+/// the error itself, whose URL carries the session's token.
+fn trouble(err: &ClientError) -> String {
+    let mut source: Option<&dyn std::error::Error> = Some(err);
+    while let Some(e) = source {
+        if e.to_string().contains("fingerprint mismatch") {
+            return "mismatch".into();
+        }
+        source = e.source();
+    }
+    match err {
+        ClientError::StatusCode(err) => format!("rejected {}", err.status),
+        ClientError::Reqwest(e) if e.is_connect() || e.is_timeout() => "unreachable".into(),
+        _ => "failed".into(),
+    }
+}
+
 async fn send(args: &[String]) -> Result<()> {
     let device: Value = serde_json::from_str(args.first().context("no device")?).context("the device")?;
-    let pairs = &args[1..];
-    if pairs.is_empty() || pairs.len() % 2 != 0 {
-        bail!("files go as <path> <name> pairs");
-    }
+    let pin = args.get(1).filter(|pin| !pin.is_empty()).cloned();
     let http = channel_of(&device)?;
     let identity = Identity::load()?;
+    let chosen = files_in()?;
+    if chosen.is_empty() {
+        bail!("no files");
+    }
     let stop = stopped();
 
     let mut files = HashMap::new();
     let mut paths = HashMap::new();
     let mut order = Vec::new();
-    for (k, pair) in pairs.chunks(2).enumerate() {
-        let path = PathBuf::from(&pair[0]);
+    for (k, (path, name)) in chosen.into_iter().enumerate() {
         let size = std::fs::metadata(&path).with_context(|| format!("reading {}", path.display()))?.len();
         let id = format!("pinhole-{k}");
         files.insert(
             id.clone(),
             FileDto {
                 id: id.clone(),
-                file_name: pair[1].clone(),
+                file_type: file_type(&name).to_string(),
+                file_name: name,
                 size,
-                file_type: file_type(&pair[1]).to_string(),
                 sha256: None,
                 preview: None,
                 metadata: None,
@@ -433,41 +509,60 @@ async fn send(args: &[String]) -> Result<()> {
     say("asking");
     let payload = PrepareUploadRequestDtoV2 { info: identity.register_dto(DEFAULT_PORT), files: files.clone() };
     let prepared = match client
-        .prepare_upload(http.protocol, &http.host, http.port, None, payload, None, stop.clone())
+        .prepare_upload(http.protocol, &http.host, http.port, None, payload, pin.as_deref(), stop.clone())
         .await
     {
         Ok(prepared) => prepared,
-        Err(ClientError::Cancelled) => {
-            say("cancelled");
-            std::process::exit(1);
+        Err(ClientError::Cancelled) => end("cancelled"),
+        Err(ClientError::StatusCode(err)) => end(match err.status {
+            401 if pin.is_some() => "wrongpin",
+            401 => "pin",
+            403 => "declined",
+            409 | 429 => "busy",
+            status => end(&format!("rejected {status}")),
+        }),
+        Err(err) => {
+            let word = trouble(&err);
+            eprintln!("pinhole-send: asking: {word}");
+            end(&word)
         }
-        Err(ClientError::StatusCode(err)) => {
-            say(match err.status {
-                401 => "pin",
-                403 => "declined",
-                409 => "busy",
-                _ => return Err(anyhow!("the device answered {}", err.status)),
-            });
-            std::process::exit(1);
-        }
-        Err(err) => return Err(err.into()),
     };
-    let Some(response) = prepared.response else {
-        say("declined");
-        std::process::exit(1);
-    };
+    // 204: it needs none of them.
+    let Some(response) = prepared.response else { end("nothing") };
 
     let accepted: Vec<&String> = order.iter().filter(|id| response.files.contains_key(*id)).collect();
+    if accepted.is_empty() {
+        end("nothing");
+    }
     let total: u64 = accepted.iter().map(|id| files[*id].size).sum();
     say(&format!("accepted {} {total}", accepted.len()));
+
+    // Stopped, or given up on: the uploads end either way.
+    let abort = stop.child_token();
+    let started = Instant::now();
+    let last = Arc::new(AtomicU64::new(0));
+    tokio::spawn({
+        let abort = abort.clone();
+        let last = last.clone();
+        async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let since = started.elapsed().as_millis() as u64 - last.load(Ordering::Relaxed);
+                if Duration::from_millis(since) >= STALL {
+                    abort.cancel();
+                    return;
+                }
+            }
+        }
+    });
 
     // One file after another, saying how far it is ten times a second.
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<u64>();
     tokio::spawn(async move {
-        let mut last = Instant::now() - Duration::from_secs(1);
+        let mut said = Instant::now() - Duration::from_secs(1);
         while let Some(sent) = progress_rx.recv().await {
-            if last.elapsed() >= Duration::from_millis(100) || sent == total {
-                last = Instant::now();
+            if said.elapsed() >= Duration::from_millis(100) || sent == total {
+                said = Instant::now();
                 say(&format!("progress {sent} {total}"));
             }
         }
@@ -477,25 +572,35 @@ async fn send(args: &[String]) -> Result<()> {
         let token = &response.files[*id];
         let body = {
             let progress_tx = progress_tx.clone();
+            let last = last.clone();
             let base = sent;
             let mut of_file = 0u64;
             let stream = ReceiverStream::new(FileContent::Path(paths[*id].clone()).into_receiver()).map(move |chunk| {
                 of_file += chunk.len() as u64;
+                last.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                 let _ = progress_tx.send(base + of_file);
                 Ok::<Bytes, anyhow::Error>(chunk)
             });
             localsend::reqwest::Body::wrap_stream(stream)
         };
+        last.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
         let result = client
-            .upload(http.protocol, &http.host, http.port, None, &response.session_id, id, token, body, stop.clone())
+            .upload(http.protocol, &http.host, http.port, None, &response.session_id, id, token, body, abort.clone())
             .await;
         if let Err(err) = result {
-            let _ = client.cancel(http.protocol, &http.host, http.port, &response.session_id).await;
-            if matches!(err, ClientError::Cancelled) {
-                say("cancelled");
-                std::process::exit(1);
-            }
-            return Err(anyhow!("{}: {err}", files[*id].file_name));
+            // Told, if it will hear it in a moment; not waited for longer.
+            let _ = tokio::time::timeout(
+                CANCEL_WAIT,
+                client.cancel(http.protocol, &http.host, http.port, &response.session_id),
+            )
+            .await;
+            let word = match err {
+                ClientError::Cancelled if stop.is_cancelled() => "cancelled".to_string(),
+                ClientError::Cancelled => "stalled".to_string(),
+                err => trouble(&err),
+            };
+            eprintln!("pinhole-send: sending: {word}");
+            end(&word);
         }
         sent += files[*id].size;
     }
@@ -508,26 +613,156 @@ async fn send(args: &[String]) -> Result<()> {
 
 fn stage(args: &[String]) -> Result<()> {
     let folder = PathBuf::from(args.first().context("no folder")?);
-    let pairs = &args[1..];
-    if pairs.len() % 2 != 0 {
-        bail!("files go as <path> <name> pairs");
-    }
+    let files = files_in()?;
     std::fs::create_dir_all(&folder).with_context(|| format!("making {}", folder.display()))?;
-    for pair in pairs.chunks(2) {
-        let name = Path::new(&pair[1]).file_name().context("a file without a name")?;
+    for (from, name) in files {
         // Two photos of one name (a camera's counter come round) both go.
-        let mut to = folder.join(name);
+        let mut to = folder.join(&name);
         let mut n = 2;
         while to.exists() {
-            let stem = Path::new(name).file_stem().unwrap_or(name).to_string_lossy();
-            let extension = Path::new(name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let extension = Path::new(&name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
             to = folder.join(format!("{stem} ({n}){extension}"));
             n += 1;
         }
-        if std::fs::hard_link(&pair[0], &to).is_err() {
-            std::fs::copy(&pair[0], &to).with_context(|| format!("copying {}", pair[0]))?;
+        if std::fs::hard_link(&from, &to).is_err() {
+            std::fs::copy(&from, &to).with_context(|| format!("copying {}", from.display()))?;
         }
         say(&to.to_string_lossy());
+    }
+    Ok(())
+}
+
+/// The name a file's JPEG is kept under: its path, size, inode and birth,
+/// hashed (as Export's, Outgoing::compatibleName). Not its time: pinholed
+/// touches what it serves from its cache, each time. A file replaced, or
+/// written over, is another.
+fn jpeg_name(path: &Path) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+    let born = meta.created().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).unwrap_or_default().as_millis();
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut hash = Sha256::new();
+    hash.update(path.to_string_lossy().as_bytes());
+    hash.update(format!("\0{}\0{}\0{born}", meta.len(), meta.ino()).as_bytes());
+    let digest = hash.finalize();
+    Ok(digest[..16].iter().map(|b| format!("{b:02x}")).collect::<String>() + ".jpg")
+}
+
+async fn jpeg(args: &[String]) -> Result<()> {
+    let folder = PathBuf::from(args.first().context("no folder")?);
+    let list = input()?;
+    let paths: Vec<PathBuf> = list
+        .as_array()
+        .context("stdin is not a list")?
+        .iter()
+        .map(|path| path.as_str().map(PathBuf::from).context("a path that is not text"))
+        .collect::<Result<_>>()?;
+    std::fs::create_dir_all(&folder).with_context(|| format!("making {}", folder.display()))?;
+    let stop = stopped();
+    let room = Arc::new(tokio::sync::Semaphore::new(CONVERSIONS));
+    let mut tasks = Vec::new();
+    for (k, path) in paths.into_iter().enumerate() {
+        let folder = folder.clone();
+        let room = room.clone();
+        tasks.push(tokio::spawn(async move {
+            let made = async {
+                let out = folder.join(jpeg_name(&path)?);
+                if out.exists() {
+                    // Recently used, for tidy.
+                    if let Ok(file) = std::fs::File::options().write(true).open(&out) {
+                        let _ = file.set_modified(SystemTime::now());
+                    }
+                    return Ok::<PathBuf, anyhow::Error>(out);
+                }
+                let _turn = room.acquire().await?;
+                // Written aside, under a name of its own, and moved: two at
+                // once never clash, and a half-made one is never taken.
+                let part = out.with_extension(format!("{}.{k}.part", std::process::id()));
+                let mut magick = tokio::process::Command::new("magick");
+                magick.arg(&path).args(["-quality", "92"]).arg(format!("jpg:{}", part.display()));
+                // Gone with this, should it be stopped.
+                unsafe {
+                    magick.pre_exec(|| {
+                        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                        Ok(())
+                    });
+                }
+                let status = magick.kill_on_drop(true).status().await?;
+                if !status.success() {
+                    let _ = std::fs::remove_file(&part);
+                    bail!("magick could not convert {}", path.display());
+                }
+                std::fs::rename(&part, &out)?;
+                Ok(out)
+            };
+            match made.await {
+                Ok(out) => say(&format!("{k} {}", out.display())),
+                Err(err) => {
+                    eprintln!("pinhole-send: {err:#}");
+                    say(&format!("{k} !"));
+                }
+            }
+        }));
+    }
+    tokio::select! {
+        _ = futures_util::future::join_all(tasks) => {}
+        _ = stop.cancelled() => {
+            // The parts being written go with this; tidy takes any left.
+            for entry in std::fs::read_dir(&folder)?.flatten() {
+                if entry.file_name().to_string_lossy().contains(&format!(".{}.", std::process::id())) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            end("cancelled");
+        }
+    }
+    Ok(())
+}
+
+fn tidy(args: &[String]) -> Result<()> {
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+    let folder = PathBuf::from(args.first().context("no folder")?);
+    let age = |path: &Path| -> Duration {
+        std::fs::symlink_metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .unwrap_or_default()
+    };
+    // Staged for LocalSend: links to the originals, which would keep them
+    // on disk past the storage limit.
+    if let Ok(entries) = std::fs::read_dir(folder.join("localsend")) {
+        for entry in entries.flatten() {
+            if age(&entry.path()) > DAY {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    // JPEGs: not used for thirty days, then the oldest past 2 GB; parts
+    // left by a stop an hour on.
+    let mut kept = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(folder.join("jpeg")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let old = age(&path);
+            let part = path.extension().is_some_and(|e| e == "part");
+            if (part && old > Duration::from_secs(3600)) || (!part && old > 30 * DAY) {
+                let _ = std::fs::remove_file(&path);
+            } else if !part {
+                kept.push((old, entry.metadata().map(|m| m.len()).unwrap_or(0), path));
+            }
+        }
+    }
+    kept.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut size: u64 = kept.iter().map(|k| k.1).sum();
+    for (_, bytes, path) in kept {
+        if size <= 2 << 30 {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            size -= bytes;
+        }
     }
     Ok(())
 }
