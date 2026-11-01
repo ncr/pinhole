@@ -150,6 +150,9 @@ void runLiveSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &libra
     auto wraps = std::make_shared<int>(0);
     auto lastPosition = std::make_shared<qint64>(-1);
     auto everPlayed = std::make_shared<bool>(false);
+    // The layer and the button as Bounce could not be had, if so.
+    auto bounceFailed = std::make_shared<QString>();
+    auto bounceFailedRight = std::make_shared<bool>(false);
     auto done = [say, failures, engine] {
         const QStringList fetched = engine->globalObject().property(QStringLiteral("selftestFetched")).toVariant().toStringList();
         for (const QString &f : fetched)
@@ -349,9 +352,44 @@ void runLiveSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &libra
             check(playing() && p && p->property("loops").toInt() < 0,
                   QStringLiteral("a loop set on the iPhone plays round and round as it shows"));
             grab(QStringLiteral("live-loop"));
+            // Bounce chosen as the loop plays: the loop stops at once, and
+            // the bounce plays once here; or, where it cannot be had
+            // (offline, no motion), nothing plays under a plain button and
+            // the button says so.
+            if (QObject *l = layer())
+                onChange(l, "failed", l, [=] {
+                    if (layer() && layer()->property("failed").toString() == QLatin1String("bounce"))
+                        QTimer::singleShot(150, window, [=] {
+                            QQuickItem *b = button();
+                            *bounceFailed = describe() + "; " + state();
+                            *bounceFailedRight = !playing() && b && !b->property("active").toBool()
+                                && complaint(window->contentItem()) == QLatin1String("Could not show this effect");
+                            grab(QStringLiteral("live-bounce-failed"));
+                        });
+                });
+            choose(QStringLiteral("bounce"));
+            QObject *l = layer();
+            check(effect() == QLatin1String("bounce") && l && !playing()
+                      && l->property("sourceKind").toString() != QLatin1String("bounce"),
+                  QStringLiteral("Bounce chosen as the loop plays: the loop stops before the bounce comes (%1)").arg(describe()));
+        });
+        at(41500, [=] {
+            if (looped < 0)
+                return;
+            say(describe());
+            QObject *l = layer();
+            if (bounceFailed->isEmpty()) {
+                check(l && playing() && l->property("sourceKind").toString() == QLatin1String("bounce"),
+                      QStringLiteral("the bounce came, and plays in the loop's place"));
+            } else {
+                say(QStringLiteral("the bounce could not be had: ") + *bounceFailed);
+                check(*bounceFailedRight, QStringLiteral("… so nothing plays, the button is not lit, and it says so"));
+                check(l && !playing(), QStringLiteral("… and nothing plays later either"));
+            }
+            grab(QStringLiteral("live-bounce-after-loop"));
             press(window, Qt::Key_Escape);
         });
-        at(35000, [=] {
+        at(43000, [=] {
             for (const char *kind : {"loop", "bounce", "live"})
                 check(fetchedOk(QString::fromLatin1(kind)), QStringLiteral("Background has the %1").arg(QString::fromLatin1(kind)));
             done();

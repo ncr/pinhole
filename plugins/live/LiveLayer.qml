@@ -75,6 +75,9 @@ Item {
             start()
             return
         }
+        // Another motion playing (a loop, L pressed on Live chosen since)
+        // is not the one asked for.
+        stop()
         source = ""
         sourceKind = ""
         asking = true
@@ -97,6 +100,10 @@ Item {
         }, error => {
             if (error.code === "cancelled" || kind !== photoLayer.motionOf(photoLayer.effect))
                 return
+            // The motion of the effect before (a loop, Bounce chosen) is not
+            // this one: none plays, and the button is not lit for it.
+            if (photoLayer.sourceKind !== kind)
+                photoLayer.stop()
             // Asked for with L: the button says why not.
             if (photoLayer.asking) {
                 photoLayer.asking = false
@@ -199,7 +206,9 @@ Item {
                 motionFetch.cancel()
             motionFetch = null
         }
-        if (!loops(effect))
+        // Not a loop or a bounce, or another one than plays: what plays
+        // stops (a loop does not go on under Bounce while it comes).
+        if (!loops(effect) || sourceKind !== effect)
             stop()
         showEffect()
     }
