@@ -134,12 +134,26 @@ fn a_library_given_is_only_read_and_its_service_ends_with_its_windows() {
     }
     assert_eq!(count(&given), 1);
     photo(&photos.join("b.jpg"), [40, 200, 40]);
+    // Not in WAL mode, as a library copied whole may not be: opened to be
+    // written, it would be switched to it.
+    {
+        let db = rusqlite::Connection::open(given.join("library.sqlite")).unwrap();
+        let mode: String = db.query_row("PRAGMA journal_mode = DELETE", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode, "delete");
+    }
+    let file = given.join("library.sqlite");
+    let before = (std::fs::read(&file).unwrap(), std::fs::metadata(&file).unwrap().modified().unwrap());
 
     let (socket, ended) = start(&root, "given", &given, &photos, Duration::from_millis(1500));
     let mut window = Window::connect(&socket);
     // Its photos are fetched as the shared service's are.
     let fetched = window.ask("fetch", json!({"asset": "a.jpg", "kind": "original", "source": format!("folder:{}", photos.display())}));
     assert_eq!(fetched["ok"], true, "{fetched:#}");
+    // Its medium is made into the cache, as the source is asked for it:
+    // the library itself is only read for that, not written.
+    let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium", "source": format!("folder:{}", photos.display())}));
+    assert_eq!(medium["ok"], true, "{medium:#}");
+    assert!(Path::new(medium["result"]["path"].as_str().unwrap()).exists(), "{medium:#}");
     // No round, even asked for one (sync rounds are a second apart here):
     // b.jpg never comes, nor news of it.
     window.ask("sync", json!({}));
@@ -158,6 +172,11 @@ fn a_library_given_is_only_read_and_its_service_ends_with_its_windows() {
     }
     // Nothing adopted from the old cache.
     assert!(root.join("old-cache/full/x.jpg").exists());
+    // The library file just as it was: no byte of it, nor its time, changed.
+    let after = (std::fs::read(&file).unwrap(), std::fs::metadata(&file).unwrap().modified().unwrap());
+    assert!(before.0 == after.0, "the library given was written");
+    assert_eq!(before.1, after.1, "the library given was written");
+    assert!(!given.join("library.sqlite-wal").exists(), "the library given was put in WAL mode");
     let status = window.ask("status", json!({}));
     assert_eq!(status["result"]["windows"], 1, "{status:#}");
 

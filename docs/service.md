@@ -17,7 +17,9 @@ own, on `$XDG_RUNTIME_DIR/pinhole-<hash of its path>.sock` unless
 started with it, which would show it to every window after.
 
 That service is started with `--given` too: the library is only read and
-fetched for. Nothing is synced into it (no rounds, the source neither
+fetched for. It is opened read-only (no journal mode set, no table made,
+iCloud's fresh download links kept in memory, not written into it), so
+its file is left as it was. Nothing is synced into it (no rounds, the source neither
 followed nor watched: `rounds` names no source), nothing of the cache is
 evicted (the shared service's to do), and a window asking it to change
 anything (`set_source`, `remove_source`, `sign_in`, `submit_code`,
@@ -26,7 +28,9 @@ A library of another source than the settings' (pinhole-fake's) has
 nothing fetched either (`other_source`); a copy of that source's own has
 its photos fetched as the shared service would, into the same cache. It
 logs to `$XDG_STATE_HOME/pinhole/<its socket's name>.log`, begun afresh,
-and ends once no window has been connected to it for 10 seconds.
+and ends once no window has been connected to it for 10 seconds, after
+the downloads under way (half a minute at most: any cut short leave no
+part file in the cache).
 
 ## Transport
 

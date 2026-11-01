@@ -177,6 +177,8 @@ QString Incoming::reason(const QString &code, const QString &message) const {
         return tr("not signed in to %1").arg(place());
     if (code == QLatin1String("unavailable"))
         return tr("%1 could not be reached").arg(place());
+    if (code == QLatin1String("read_only"))
+        return tr("this library is only being looked at here: nothing can be added to it");
     return message.isEmpty() ? tr("could not be added") : message;
 }
 

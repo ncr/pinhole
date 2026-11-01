@@ -328,6 +328,8 @@ void Storage::failed(const QString &code, const QString &) {
                   ? tr("The Pinhole service running now is older than this window and has to be restarted.")
               : code == QLatin1String("bad_request")
                   ? tr("That folder cannot be used.")
+              : code == QLatin1String("read_only")
+                  ? tr("This library is only being looked at here: storage is set in a window of your own library.")
                   : tr("The Pinhole service is not answering.");
     m_poll.stop();
     emit changed();

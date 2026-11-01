@@ -60,7 +60,9 @@ void Favourites::set(const QList<QByteArray> &ids, bool favorite, const QString 
             apply(ids, !favorite);
         const QString source = m_service->sourceName();
         QString message;
-        if (code == QLatin1String("needs_sign_in"))
+        if (code == QLatin1String("read_only"))
+            message = tr("This library is only being looked at here: its favourites cannot be changed");
+        else if (code == QLatin1String("needs_sign_in"))
             message = tr("Not signed in to %1").arg(source);
         else if (code == QLatin1String("no_service") || m_service->health() == QLatin1String("no_service"))
             message = tr("The Pinhole service is not running");

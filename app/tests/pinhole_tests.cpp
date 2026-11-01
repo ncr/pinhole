@@ -2153,6 +2153,37 @@ private slots:
         QCOMPARE(fake.asked.last().value("params").toObject().value("source").toString(), QString("folder:/b"));
     }
 
+    // A library given to the window (--library) is only looked at: F says
+    // so, not that the source would not take the change.
+    void aFavouriteInALibraryOnlyLookedAtSaysSo() {
+        QTemporaryDir dir, a;
+        makeLibrary(a.path(), {{"x.jpg", 1}}, false, "folder:/a");
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(a.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        Library library;
+        QString error;
+        QVERIFY(library.open(a.path(), &error));
+        History history;
+        Favourites favourites(&library, &service, &history);
+        QSignalSpy failed(&favourites, &Favourites::failed);
+        favourites.toggle({0});
+        const auto asked = [&] {
+            fake.read();
+            return !fake.asked.isEmpty();
+        };
+        QTRY_VERIFY(asked());
+        fake.send({{"id", fake.asked.first().value("id")}, {"ok", false},
+                   {"error", QJsonObject{{"code", "read_only"}, {"message", "only read"}}}});
+        QTRY_COMPARE(failed.count(), 1);
+        QVERIFY(failed.first().first().toString().contains("only being looked at"));
+        QVERIFY(!library.at(0).favorite);
+    }
+
     void aServiceOfAnotherProtocolIsSaidSoAndItsHealthDoesNotHideIt() {
         QTemporaryDir dir;
         FakeService fake;

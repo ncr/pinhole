@@ -39,6 +39,10 @@ const WRITE_WITHIN: Duration = Duration::from_secs(5);
 /// hung up on.
 const QUEUE_MAX: usize = 4096;
 
+/// How long a service of a library given waits, once its last window has
+/// gone, for its downloads to end.
+const FINISH_WITHIN: Duration = Duration::from_secs(30);
+
 pub struct Config {
     /// The folder everything is kept in (storage.rs), and in it, unless
     /// given otherwise, the library and the cache.
@@ -682,6 +686,17 @@ impl Shared {
         }
     }
 
+    /// Ending with downloads still under way: their part files go, so
+    /// none is left in the cache.
+    fn abandon(&self) {
+        for path in self.waiting.lock().unwrap().keys() {
+            let _ = std::fs::remove_file(path.with_extension("part"));
+            if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
+                let _ = std::fs::remove_file(path.with_extension(format!("part.{extension}")));
+            }
+        }
+    }
+
     fn finish(&self, path: &Path, result: std::result::Result<(), (&str, String)>) {
         self.playable.lock().unwrap().remove(path);
         let Some((info, replies)) = self.waiting.lock().unwrap().remove(path) else { return };
@@ -867,10 +882,14 @@ pub fn run(config: Config) -> Result<()> {
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 let (count, since) = *shared.connections.lock().unwrap();
-                if count == 0 && since.elapsed() >= linger {
-                    eprintln!("pinholed: no window for {} s: done", linger.as_secs_f32());
+                // Downloads under way end first, half a minute at most: what
+                // they bring is in the shared cache, not left half there.
+                let downloading = shared.in_flight.load(Ordering::Relaxed) > 0;
+                if count == 0 && since.elapsed() >= linger && (!downloading || since.elapsed() >= linger + FINISH_WITHIN) {
+                    eprintln!("pinholed: no window for {} s: done", since.elapsed().as_secs());
                     // A window coming meanwhile finds none, and starts one.
                     let _ = std::fs::remove_file(&shared.config.socket);
+                    shared.abandon();
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -1435,11 +1454,19 @@ fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch:
     let failed = |e: &anyhow::Error| if shown { shared.failed(e) } else { "unavailable" };
     // The source may keep what it learns in the index (iCloud its fresh
     // links), so the next request needs no lookup. Opened again once the
-    // library has moved.
+    // library has moved. A library given is only read: opened so, no
+    // journal mode set nor table made in it, and the source keeps what it
+    // learns in memory.
     let generation = shared.storage.library_generation.load(Ordering::Relaxed);
     if dbs.get(&library).is_none_or(|(g, _)| *g != generation) {
         dbs.remove(&library);
-        if let Ok(db) = crate::db::open(&library.join("library.sqlite")) {
+        let path = library.join("library.sqlite");
+        let db = if shared.config.given.is_some() {
+            Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(anyhow::Error::from)
+        } else {
+            crate::db::open(&path)
+        };
+        if let Ok(db) = db {
             dbs.insert(library.clone(), (generation, db));
         }
     }

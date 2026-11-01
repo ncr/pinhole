@@ -212,6 +212,8 @@ void Sources::setSignIn(const QString &state, const QString &errorCode) {
         m_signInError = tr("icloudpd's sign-in for this Apple ID has run out. Sign in with the password instead.");
     else if (errorCode == QLatin1String("unavailable"))
         m_signInError = tr("iCloud cannot be reached. Is this computer online?");
+    else if (errorCode == QLatin1String("read_only"))
+        m_signInError = tr("This library is only being looked at here: sign in from a window of your own library.");
     else
         m_signInError = tr("Signing in did not work (%1).").arg(errorCode);
     emit signInChanged();
@@ -220,7 +222,9 @@ void Sources::setSignIn(const QString &state, const QString &errorCode) {
 void Sources::setError(const QString &code) {
     const QString error = code.isEmpty() ? QString()
                           : code == QLatin1String("bad_request") ? tr("Photos cannot be shown from there.")
-                                                                 : tr("The Pinhole service is not answering.");
+                          : code == QLatin1String("read_only")
+                              ? tr("This library is only being looked at here: its sources are changed in a window of your own library.")
+                              : tr("The Pinhole service is not answering.");
     if (error != m_error) {
         m_error = error;
         emit errorChanged();

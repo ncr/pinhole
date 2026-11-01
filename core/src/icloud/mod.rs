@@ -59,6 +59,10 @@ pub struct IcloudSource {
     /// handed out again, however fresh the index says they are, so a retry
     /// looks the asset up.
     expired: Mutex<HashSet<String>>,
+    /// Fresh links for an index only read (a library given to a window):
+    /// by asset and rendition, the link and when it was got, kept here
+    /// instead of in the index.
+    fresh: Mutex<HashMap<(String, String), (String, i64)>>,
 }
 
 impl IcloudSource {
@@ -73,6 +77,7 @@ impl IcloudSource {
             links: Mutex::new(None),
             downloader: Mutex::new(None),
             expired: Mutex::new(HashSet::new()),
+            fresh: Mutex::new(HashMap::new()),
         }
     }
 
@@ -225,6 +230,9 @@ impl Source for IcloudSource {
         // A link in the index younger than 20 minutes is used as is.
         let now = now_secs();
         let expired = self.expired.lock().unwrap().clone();
+        // An index only read keeps no links: those got since are here.
+        let read_only = index.is_readonly(rusqlite::DatabaseName::Main).unwrap_or(true);
+        let fresh = self.fresh.lock().unwrap();
         let mut tickets: Vec<Option<Result<Ticket, FetchError>>> = Vec::with_capacity(wanted.len());
         let mut stale: Vec<(String, String)> = Vec::new();
         for w in wanted {
@@ -237,6 +245,10 @@ impl Source for IcloudSource {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
+            let row = row.map(|(master, url, at)| match fresh.get(&(w.asset.clone(), w.name.clone())) {
+                Some((url, at)) => (master, Some(url.clone()), Some(*at)),
+                None => (master, url, at),
+            });
             match row {
                 Some((_, Some(url), Some(at))) if now - at < URL_FRESH_SECS && !expired.contains(&url) => {
                     tickets.push(Some(Ok(Ticket(url))))
@@ -250,6 +262,7 @@ impl Source for IcloudSource {
                 None => tickets.push(Some(Err(FetchError::NotFound(format!("iCloud has no record of {}", w.asset))))),
             }
         }
+        drop(fresh);
         if stale.is_empty() {
             return Ok(tickets.into_iter().map(Option::unwrap).collect());
         }
@@ -258,18 +271,31 @@ impl Source for IcloudSource {
         let by_id: HashMap<&str, &CloudAsset> = assets.iter().map(|a| (a.id.as_str(), a)).collect();
         // Fresh links go back into the index, so the next request for any
         // rendition of these assets needs no lookup. Not being able to write
-        // them down only costs a lookup later.
-        let tx = index.unchecked_transaction();
-        for asset in &assets {
-            for r in &asset.resources {
-                let _ = index.execute(
-                    "UPDATE icloud_resources SET url = ?3, url_fetched_at = ?4 WHERE asset_id = ?1 AND kind = ?2",
-                    params![asset.id, r.kind, r.url, now],
-                );
+        // them down only costs a lookup later. An index only read is left
+        // as it is: they are kept here, until they are stale.
+        if read_only {
+            let mut kept = self.fresh.lock().unwrap();
+            kept.retain(|_, (_, at)| now - *at < URL_FRESH_SECS);
+            for asset in &assets {
+                for r in &asset.resources {
+                    if let Some(url) = &r.url {
+                        kept.insert((asset.id.clone(), r.kind.clone()), (url.clone(), now));
+                    }
+                }
             }
-        }
-        if let Ok(tx) = tx {
-            let _ = tx.commit();
+        } else {
+            let tx = index.unchecked_transaction();
+            for asset in &assets {
+                for r in &asset.resources {
+                    let _ = index.execute(
+                        "UPDATE icloud_resources SET url = ?3, url_fetched_at = ?4 WHERE asset_id = ?1 AND kind = ?2",
+                        params![asset.id, r.kind, r.url, now],
+                    );
+                }
+            }
+            if let Ok(tx) = tx {
+                let _ = tx.commit();
+            }
         }
         Ok(wanted
             .iter()
