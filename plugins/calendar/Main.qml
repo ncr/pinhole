@@ -14,9 +14,18 @@ import "CalendarDays.js" as Days
 // built, read again every few seconds, is not counted each time. What the
 // grid hides (Screenshots' hide mode, say) is not counted, as the grid
 // does not show it.
+//
+// The calendar itself, its rows of squares a few hundred items, is made
+// the first time it opens, and kept: most launches never show it.
 PinholePlugin {
     id: plugin
-    covering: calendar.shown
+    // The calendar once made (Calendar.qml), null before.
+    readonly property var calendar: view.item
+    covering: calendar !== null && calendar.shown
+    function open() {
+        view.active = true
+        view.item.open()
+    }
 
     // What was counted (CalendarDays.js finish): every year with a photo,
     // oldest first, each year's row by the year, and how many photos light
@@ -51,7 +60,7 @@ PinholePlugin {
     // what is hidden; else when it is next needed.
     property bool stale: false
     function recount() {
-        if (calendar.shown) {
+        if (calendar && calendar.shown) {
             Qt.callLater(plugin.count)
         } else {
             stale = true
@@ -78,7 +87,7 @@ PinholePlugin {
             text: qsTr("Calendar")
             key: "Y"
             shown: pinhole.library.count > 0
-            onTriggered: calendar.open()
+            onTriggered: plugin.open()
         }
     ]
 
@@ -112,9 +121,13 @@ PinholePlugin {
         }
     }
 
-    Calendar {
-        id: calendar
+    Loader {
+        id: view
         anchors.fill: parent
-        plugin: plugin
+        active: false
+        // Its `plugin` is this one, the Loader's parent: within the Calendar,
+        // `plugin` would be its own property.
+        sourceComponent: Calendar { plugin: view.parent }
     }
+    CalendarKeys { calendar: plugin.calendar }
 }

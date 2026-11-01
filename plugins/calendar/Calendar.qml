@@ -53,7 +53,8 @@ Item {
     // The list's rows: as many as there are years, each drawing its own
     // from plugin.years, so the years counted again redraw their squares in
     // place, the list where it is. Only a year come or gone makes it
-    // anew, the cursor's year then kept where it was on the screen.
+    // anew, the cursor's year then kept where it was on the screen (where a
+    // glide under way was taking it).
     property int yearCount: 0
     property var listed: []
     readonly property var noYear: ({ year: 0, days: 0, offset: 0, total: 0, counts: [], first: [] })
@@ -61,6 +62,8 @@ Item {
         const now = plugin.years.map(y => y.year)
         const before = listed
         listed = now
+        if (now.length === yearCount && now.every((year, i) => year === before[i]))
+            return
         let y = years.contentY
         if (scrolling.running) {
             y = scrolling.to
@@ -68,9 +71,8 @@ Item {
         }
         if (now.length !== yearCount) {
             yearCount = now.length
+            madeHeight = rowHeight
             years.forceLayout()
-        } else if (now.every((year, i) => year === before[i])) {
-            return
         }
         const from = before.indexOf(cursorYear), to = now.indexOf(cursorYear)
         if (from >= 0 && to >= 0)
@@ -78,7 +80,6 @@ Item {
         const top = years.originY - years.topMargin
         years.contentY = Math.max(top, Math.min(y, years.originY + years.contentHeight + years.bottomMargin - years.height))
     }
-    Component.onCompleted: relist()
 
     // Opening: the squares come in, rippling out from the year it opens on.
     property int openRow: 0
@@ -93,8 +94,21 @@ Item {
 
     // Opened before the library is counted: on its way, and placed once it is.
     property bool waiting: false
+    // The rows' height as they were made: a list hidden does not lay its
+    // rows out again as their height changes (the window resized while the
+    // calendar was closed), so they are made anew as it opens.
+    property real madeHeight: 0
     function open() {
         plugin.fresh()
+        // The first time, its rows made now, at the calendar's size (not
+        // as it is made, before the Loader has given it one).
+        relist()
+        if (madeHeight !== rowHeight) {
+            const count = yearCount
+            yearCount = 0
+            yearCount = count
+            madeHeight = rowHeight
+        }
         today = new Date()
         shown = true
         waiting = !plugin.counted
@@ -234,117 +248,6 @@ Item {
             if (now.toDateString() !== calendar.today.toDateString())
                 calendar.today = now
         }
-    }
-
-    // Its keys, while it is open (Command.qml).
-    Command {
-        name: "calendar.close"
-        keys: ["Escape", "Y"]
-        keysText: "Esc"
-        keyLayer: "plugin"
-        when: calendar.shown
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: calendar.close()
-    }
-    Command {
-        name: "calendar.show"
-        text: qsTr("There: that day in the grid")
-        section: "Year calendar"
-        keys: ["Return", "Enter", "Space"]
-        keysText: "Enter"
-        keyLayer: "plugin"
-        when: calendar.shown
-        mouse: qsTr("Click a day")
-        touchpad: qsTr("Tap a day")
-        onTriggered: calendar.jump()
-    }
-    Command {
-        name: "calendar.previousDay"
-        text: qsTr("A day, a week")
-        section: "Year calendar"
-        keys: ["Up"]
-        keysText: "↑ ↓ ← →"
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Point")
-        touchpad: qsTr("Point")
-        onTriggered: calendar.move(-1)
-    }
-    Command {
-        name: "calendar.nextDay"
-        keys: ["Down"]
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Point")
-        touchpad: qsTr("Point")
-        onTriggered: calendar.move(1)
-    }
-    Command {
-        name: "calendar.previousWeek"
-        keys: ["Left"]
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Point")
-        touchpad: qsTr("Point")
-        onTriggered: calendar.move(-7)
-    }
-    Command {
-        name: "calendar.nextWeek"
-        keys: ["Right"]
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Point")
-        touchpad: qsTr("Point")
-        onTriggered: calendar.move(7)
-    }
-    Command {
-        name: "calendar.previousYear"
-        text: qsTr("A year")
-        section: "Year calendar"
-        keys: ["PgUp"]
-        keysText: "PgUp PgDn"
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Wheel, then point")
-        touchpad: qsTr("Two fingers, then point")
-        onTriggered: calendar.moveYear(-1)
-    }
-    Command {
-        name: "calendar.nextYear"
-        keys: ["PgDown"]
-        keyLayer: "plugin"
-        when: calendar.shown
-        autoRepeat: true
-        mouse: qsTr("Wheel, then point")
-        touchpad: qsTr("Two fingers, then point")
-        onTriggered: calendar.moveYear(1)
-    }
-    Command {
-        name: "calendar.first"
-        text: qsTr("First, last day with photos")
-        section: "Year calendar"
-        keys: ["Home"]
-        keysText: "Home End"
-        keyLayer: "plugin"
-        when: calendar.shown
-        mouse: qsTr("Wheel, then point")
-        touchpad: qsTr("Two fingers, then point")
-        onTriggered: calendar.end(-1)
-    }
-    Command {
-        name: "calendar.last"
-        keys: ["End"]
-        keyLayer: "plugin"
-        when: calendar.shown
-        mouse: qsTr("Wheel, then point")
-        touchpad: qsTr("Two fingers, then point")
-        onTriggered: calendar.end(1)
     }
 
     Rectangle {
