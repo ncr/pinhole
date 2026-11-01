@@ -1148,9 +1148,9 @@ void Plugins::updateMarkKinds() {
         QVariantMap map;
         PluginMark *mark;
     };
-    // Pinhole's own: the video and the stack marks, and until the Live
-    // Photos and Favourites plugins are there, theirs (each gives way to
-    // a plugin's of its id).
+    // Pinhole's own: the video and the stack marks, and until the
+    // Favourites plugin is there, its (which gives way to a plugin's of its
+    // id). Live Photos' is the Live Photos plugin's (plugins/live).
     auto core = [](const QString &id, const QString &icon, const QString &colour, int order, const QString &field,
                    bool shown) {
         return Kind{{{"id", id}, {"plugin", QString()}, {"name", id.section('/', 1)}, {"text", QString()},
@@ -1159,8 +1159,6 @@ void Plugins::updateMarkKinds() {
     };
     std::vector<Kind> kinds{core("pinhole.favourites/favorite", "heart", "red", 10, "favorite", true),
                             core("pinhole/video", "video", "cyan", 20, "video", true),
-                            // Not Live: nearly every iPhone photo is one.
-                            core("pinhole.live/live", "live", "yellow", 30, "live", false),
                             core("pinhole/stack", "stack", "magenta", 90, "stack", true)};
     static const QStringList fields{"", "live", "favorite", "video"};
     static const QStringList colours{"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
@@ -1749,7 +1747,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
         {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
         {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
-        {3, "viewerLayer"}, {3, "an action's order, hint or complain"}, {3, "fetch's options"}};
+        {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay or complain"}, {3, "fetch's options"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1770,7 +1768,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
         {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
-        {"an action's order, hint or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
+        {"an action's order, hint, busyDelay or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
@@ -1787,9 +1785,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     // fetch's, in its call.
     static const QRegularExpression fetch(QStringLiteral("\\bpinhole\\s*\\.\\s*fetch\\s*\\("));
     static const QRegularExpression fetchOptions(QStringLiteral("\\bstream\\s*:"));
-    // A PluginAction's own lines that say its order or hint.
+    // A PluginAction's own lines that say its order, hint or busyDelay.
     static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
-    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint)\\s*:"));
+    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay)\\s*:"));
     // A file's root object, its id, and its hidden set.
     static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
     static const QRegularExpression rootId(QStringLiteral("(^|[;\\s])id\\s*:\\s*([\\w$]+)"));
@@ -1826,7 +1824,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         for (auto match = action.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;
             if (ownLines(code, open).contains(orderOrHint))
-                uses << QStringLiteral("an action's order, hint or complain");
+                uses << QStringLiteral("an action's order, hint, busyDelay or complain");
         }
         // A PinholePlugin root's hidden: set where it is, or by its id.
         const auto top = root.match(code);

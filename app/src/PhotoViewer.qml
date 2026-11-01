@@ -75,7 +75,6 @@ Item {
         root.grid.reveal(viewer.index)
         root.cell = root.grid.rectOf(viewer.index)
         videoPlayer.stop()
-        livePlayer.stop()
         layers.hide()
         // Still opening, it would grow again after it closed, and stay.
         growing.stop()
@@ -107,31 +106,15 @@ Item {
         function onIndexChanged() {
             originalImage.source = ""
             detailImage.source = ""
-            liveOutput.visible = false
-            livePlayer.stop()
             actionBar.hush()
             actionBar.closeMenus()
             layers.photoChanged()
-        }
-        // Another effect: a loop or a bounce plays once it is here (liveSource).
-        function onEffectChanged() {
-            if (!viewer.looping)
-                livePlayer.stop()
         }
         function onImageChanged() {
             if (viewer.stage === "original")
                 originalImage.source = viewer.image
         }
         function onCloseRequested() { root.closeViewer() }
-        function onLiveChanged() {
-            if (viewer.liveSource.toString() !== "") {
-                livePlayer.source = viewer.liveSource
-                liveOutput.visible = true
-                livePlayer.position = 0
-                livePlayer.play()
-            }
-        }
-        function onLiveFailed(message) { liveGroup.complain(message) }
     }
     Connections {
         target: favourites
@@ -241,18 +224,6 @@ Item {
             readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
             onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
-        // A Live Photo shown as a long exposure: its frames as one.
-        Image {
-            id: longExposureImage
-            anchors.fill: parent
-            source: viewer.effect === "long_exposure" ? viewer.longExposure : ""
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
-            opacity: status === Image.Ready ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-        }
-
         MediaPlayer {
             id: videoPlayer
             source: viewer.video ? viewer.videoSource : ""
@@ -264,24 +235,6 @@ Item {
             id: videoOutput
             anchors.fill: parent
             visible: viewer.video && videoPlayer.playbackState !== MediaPlayer.StoppedState
-            fillMode: VideoOutput.PreserveAspectCrop
-        }
-
-        MediaPlayer {
-            id: livePlayer
-            videoOutput: liveOutput
-            // A loop and a bounce go round until another effect or photo.
-            loops: viewer.looping ? MediaPlayer.Infinite : 1
-            onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState) liveOutput.visible = false
-            onErrorOccurred: {
-                liveOutput.visible = false
-                liveGroup.complain(qsTr("Could not play the motion"))
-            }
-        }
-        VideoOutput {
-            id: liveOutput
-            anchors.fill: parent
-            visible: false
             fillMode: VideoOutput.PreserveAspectCrop
         }
 
@@ -330,6 +283,16 @@ Item {
                     make()
             }
             Timer { id: later; interval: 150; onTriggered: layers.make() }
+            // Any of them still bringing what it shows: the spinner turns.
+            readonly property bool loading: {
+                let any = false
+                for (let i = 0; i < layerSlots.count; ++i) {
+                    const slot = layerSlots.itemAt(i)
+                    if (slot && slot.loading)
+                        any = true
+                }
+                return any
+            }
             Connections {
                 target: viewer
                 function onOpenChanged() {
@@ -345,6 +308,8 @@ Item {
                     required property var modelData
                     anchors.fill: parent
                     property var made: null
+                    // What it shows still on its way (a layer's `loading`).
+                    readonly property bool loading: made !== null && made.loading === true
                     function make() {
                         drop()
                         made = modelData.component.createObject(layerSlot, { photo: viewer.index, shown: true })
@@ -489,10 +454,11 @@ Item {
                                        : viewer.title
                 textColor: theme.brightForeground
             }
-            // The full photo or the video still coming, after a second.
+            // The full photo or the video still coming, or what a plugin's
+            // layer shows over it (a Live Photo's effect), after a second.
             Spinner {
                 objectName: "loadingSpinner"
-                busy: viewer.loading
+                busy: viewer.loading || layers.loading
             }
         }
         Chip {
@@ -502,8 +468,8 @@ Item {
         }
     }
 
-    // What can be done with it, as one card: its favourite, Live and its
-    // effects, the plugins' groups, Copy and Export, and back to the
+    // What can be done with it, as one card: its favourite, the plugins'
+    // groups (Live and its effects first), Copy and Export, and back to the
     // library. Right of the date, as much as fits there (`fit`); under it
     // when not even the least does.
     Row {
@@ -541,6 +507,10 @@ Item {
             readonly property bool hints: fit < 1
             readonly property bool folded: fit >= 2
             readonly property var pluginGroups: groupsOf(root.pluginActions)
+            // Those of `order` below 0 (Live Photos', a favourite's) stand
+            // as Pinhole's own buttons do, never folded into More ▾.
+            readonly property var standing: pluginGroups.filter(group => group[0].order < 0)
+            readonly property var folding: pluginGroups.filter(group => group[0].order >= 0)
             function widthAt(level) {
                 const pad = 2 * Math.round(theme.fontSize * 0.833)
                 const arrow = viewerMetrics.of("▾") + 2 * Math.round(theme.fontSize * 0.5)
@@ -548,12 +518,14 @@ Item {
                 const words = text => viewerMetrics.of(text)
                 // Each group's button, ▾ and the hairline before it.
                 const groups = [words("") + key("F") + pad]
-                if (viewer.live)
-                    groups.push(words(root.effectName(viewer.effect)) + key("L") + pad + arrow)
-                const shown = pluginGroups.map(group => group.filter(a => a.shown)).filter(group => group.length > 0)
+                const shownOf = list => list.map(group => group.filter(a => a.shown)).filter(group => group.length > 0)
+                const button = group => words(group[0].text) + key(KeyNames.nameOf(group[0].key)) + pad + (group.length > 1 ? arrow : 0)
+                for (const group of shownOf(standing))
+                    groups.push(button(group))
+                const shown = shownOf(folding)
                 if (level < 2) {
                     for (const group of shown)
-                        groups.push(words(group[0].text) + key(KeyNames.nameOf(group[0].key)) + pad + (group.length > 1 ? arrow : 0))
+                        groups.push(button(group))
                 } else if (shown.length > 0) {
                     groups.push(words(qsTr("More") + " ▾") + pad)
                 }
@@ -582,43 +554,17 @@ Item {
                     onTapped: favourites.toggle([viewer.index])
                 }
             }
-            // The effects, as on the iPhone: Live, Loop, Bounce, Long
-            // exposure, the one set on the iPhone saying so.
-            MenuGroup {
-                id: liveGroup
-                visible: viewer.live
-                menuKey: "Shift+L"
-                menuText: qsTr("Live effects")
-                keyLayer: "viewer"
-                section: "photo"
-                items: root.effects.map(effect => ({
-                    text: root.effectName(effect),
-                    hint: effect === viewer.savedEffect && effect !== "live" ? "iPhone" : "",
-                    active: viewer.effect === effect,
-                    triggered: () => viewer.setEffect(effect)
-                }))
-                // Lit from the click until the motion has played. While it
-                // is on its way (asked for, or a stream before its first
-                // frames) its key turns; a file already here plays at once,
-                // before it would.
-                ShellButton {
-                    id: liveButton
-                    objectName: "liveButton"
-                    flat: true
-                    text: root.effectName(viewer.effect)
-                    key: "L"
+            Repeater {
+                model: actionBar.standing
+                delegate: PluginGroup {
+                    required property var modelData
+                    items: modelData
                     keyLayer: "viewer"
-                    section: "photo"
-                    helpText: qsTr("Play the Live Photo")
-                    hint: actionBar.hints ? "L" : ""
-                    active: viewer.liveLoading || liveOutput.visible
-                    busy: viewer.liveLoading || root.liveBuffering
-                    busyDelay: 300
-                    onTapped: viewer.playLive()
+                    hints: actionBar.hints
                 }
             }
             Repeater {
-                model: actionBar.pluginGroups
+                model: actionBar.folding
                 delegate: PluginGroup {
                     required property var modelData
                     items: modelData
@@ -630,7 +576,7 @@ Item {
             // Or all of them in one, where they do not fit.
             MoreGroup {
                 visible: actionBar.folded && menuItems.length > 0
-                groups: actionBar.pluginGroups
+                groups: actionBar.folding
                 keyLayer: "viewer"
             }
             // Out of the app: Copy answers with a tick on itself; Export as
@@ -903,24 +849,10 @@ Item {
         }
     }
 
-    readonly property var effects: ["live", "loop", "bounce", "long_exposure"]
-    function effectName(effect) {
-        switch (effect) {
-        case "loop": return qsTr("Loop")
-        case "bounce": return qsTr("Bounce")
-        case "long_exposure": return qsTr("Long exposure")
-        default: return qsTr("Live")
-        }
-    }
-
     // Sound stays off from one video to the next until turned on again.
     property bool muted: false
     readonly property real videoPosition: videoPlayer.position
     readonly property real videoDuration: videoPlayer.duration
-    // The motion streaming in, not yet moving.
-    readonly property bool liveBuffering: liveOutput.visible && livePlayer.source.toString().startsWith("http")
-        && (livePlayer.position <= 0 || livePlayer.mediaStatus === MediaPlayer.StalledMedia)
-
     // 75000 → "1:15", 3725000 → "1:02:05".
     function clock(ms) {
         const s = Math.floor(ms / 1000)

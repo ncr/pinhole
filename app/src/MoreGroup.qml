@@ -76,10 +76,13 @@ MenuGroup {
         model: more.groups.filter(group => group.length > 1 && more.keyedOf(group) !== null)
         delegate: Command {
             required property var modelData
-            name: "more.open." + more.keyedOf(modelData).key
-            keys: ["Shift+" + more.keyedOf(modelData).key]
+            // Its actions shown or not one at a time, the group may have
+            // none to go by a moment before the model follows.
+            readonly property var keyed: more.keyedOf(modelData)
+            name: "more.open." + (keyed?.key ?? "")
+            keys: keyed ? ["Shift+" + keyed.key] : []
             keyLayer: more.keyLayer
-            when: more.visible && modelData.some(a => a.shown)
+            when: keyed !== null && more.visible && modelData.some(a => a.shown)
             buttons: 1
             onTriggered: more.openAt(modelData.find(a => a.shown))
         }

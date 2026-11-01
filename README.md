@@ -147,6 +147,7 @@ plugins/icloud/auth/PROTOCOL.md  the sign-in provider protocol: JSON lines over 
 plugins/icloud/auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
 plugins/folder/source/    a folder as a source (crate pinhole-folder)
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
+plugins/live/             the Live Photos plugin: the mark, L and ⇧ L, the motion and effects over the photo
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
@@ -197,7 +198,8 @@ window: the thumbnail at once, the medium rendition in about a second, then
 the original (HEIC through libheif). ← and → step through, Esc or
 Space closes, as does dragging the photo up or down (two fingers on a
 touchpad, the left button with a mouse), Space plays and pauses a video, L
-plays a Live Photo's motion.
+plays a Live Photo's motion (the Live Photos plugin, on unless turned off
+in the side panel; off, a Live Photo shows as its still).
 A Live Photo shows with the effect set on the iPhone (a loop or a bounce
 plays round and round, a long exposure is its frames as one); the ▾ beside
 Live, or ⇧ L, shows it with another, here only: the library keeps its

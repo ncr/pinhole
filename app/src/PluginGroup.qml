@@ -53,6 +53,7 @@ MenuGroup {
         usable: group.action?.usable ?? true
         active: group.action?.active ?? false
         busy: group.action?.busy ?? false
+        busyDelay: group.action?.busyDelay ?? 1000
         text: group.action?.text ?? ""
         hint: group.hints ? KeyNames.nameOf(group.action?.key ?? "") : ""
         onTapped: group.press(group.action)

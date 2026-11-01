@@ -572,6 +572,7 @@ ApplicationWindow {
                 usable: modelData.usable
                 active: modelData.active
                 busy: modelData.busy
+                busyDelay: modelData.busyDelay
                 text: modelData.text
                 key: modelData.key
                 hint: gridActions.fit < 1 ? KeyNames.nameOf(modelData.key) : ""

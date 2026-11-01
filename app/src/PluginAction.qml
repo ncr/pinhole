@@ -19,8 +19,10 @@ QtObject {
     property bool usable: true
     // Lit, in the accent.
     property bool active: false
-    // On its way: an arc turns in its key's place.
+    // On its way: an arc turns in its key's place, once it has been for
+    // `busyDelay` ms (soon, for what is mostly at once: Live's 300).
     property bool busy: false
+    property int busyDelay: 1000
     // The pointer over its button, for a plugin to show what pressing it
     // would do: Pinhole sets it.
     property bool hovered: false

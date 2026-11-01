@@ -1,6 +1,9 @@
 #pragma once
 
+#include <QObject>
 #include <QStringList>
+
+#include <functional>
 
 class Incoming;
 class Keymap;
@@ -16,9 +19,26 @@ class QString;
 // the index's `assets a`; -1 if none.
 int findIndex(const Library &library, const QString &where);
 
+// A slot for a signal a self-test hears by name (a QML property's notify):
+// calls `f` at once, while it lives.
+class Called : public QObject {
+    Q_OBJECT
+public:
+    Called(std::function<void()> f, QObject *parent) : QObject(parent), m_f(std::move(f)) {}
+public slots:
+    void call() { m_f(); }
+
+private:
+    std::function<void()> m_f;
+};
+// Calls `f` whenever `object`'s `property` changes, until `context` goes.
+void onChange(QObject *object, const char *property, QObject *context, std::function<void()> f);
+
 // PINHOLE_SELFTEST=viewer: open a HEIC photo, a JPEG, a video and a Live
-// Photo in the viewer, report each stage's arrival, and quit.
-void runViewerSelfTest(const Library &library, Viewer &viewer);
+// Photo in the viewer, report each stage's arrival, and quit. A Live
+// Photo's motion and effects are the Live Photos plugin's: its layer's,
+// as L and choosing an effect have them; with the plugin off, its still.
+void runViewerSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer);
 
 // PINHOLE_SELFTEST=outgoing: prepare a HEIC photo, a JPEG and a video as
 // originals and in the compatible form, copy one to the clipboard, report.
@@ -55,8 +75,14 @@ void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer,
 
 // PINHOLE_SELFTEST=live:<folder>: open the newest Live Photo, press L (twice,
 // quickly), and grab the window as the motion is asked for, comes and plays
-// or does not; report the Live button's state at each grab.
-void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
+// or does not; report the Live button's state at each grab. Then ⇧ L opens
+// the four effects; Bounce chosen with the keys goes round and round, over
+// the photo zoomed in too; Long exposure shows; Esc stops the motion as the
+// photo shrinks; a loop plays as its photo grows from its cell. With the
+// Live Photos plugin off: no Live button or mark, L does nothing, the
+// photo shows as its still. Either way, the loop, bounce and motion other
+// plugins fetch (Background, Frame, Send) come. Exits 1 if any fails.
+void runLiveSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer, const QString &folder);
 
 // PINHOLE_SELFTEST=layers:<folder>: with the test plugin app/tests/layers
 // among the plugins (PINHOLE_BUILTIN_PLUGINS), and offscreen, so that its

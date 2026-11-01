@@ -156,7 +156,6 @@ Item {
             return kind.text !== "" ? kind.text : plugins.at(kind.plugin).name
         switch (kind.id) {
         case "pinhole/video": return qsTr("Videos")
-        case "pinhole.live/live": return qsTr("Live Photos")
         case "pinhole.favourites/favorite": return qsTr("Favourites")
         case "pinhole/stack": return qsTr("Series and other groups")
         }

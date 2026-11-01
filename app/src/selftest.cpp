@@ -121,9 +121,27 @@ static void playFirstFrame(const QUrl &source, const char *name, std::shared_ptr
     player->play();
 }
 
+void onChange(QObject *object, const char *property, QObject *context, std::function<void()> f) {
+    const QMetaObject *meta = object->metaObject();
+    const QMetaProperty p = meta->property(meta->indexOfProperty(property));
+    auto *called = new Called(std::move(f), context);
+    QObject::connect(object, p.notifySignal(), called, called->metaObject()->method(called->metaObject()->indexOfSlot("call()")));
+}
+
+namespace {
+
+// The Live Photos plugin's root (plugins/live/Main.qml), if it is on.
+QObject *livePlugin(QQuickWindow *window) {
+    QVariant item;
+    QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, item), Q_ARG(QVariant, QStringLiteral("pinhole.live")));
+    return item.value<QObject *>();
+}
+
+} // namespace
+
 // Opens each kind of asset in the viewer, as a person would, and reports
 // how long each stage took to arrive and whether the files decode.
-void runViewerSelfTest(const Library &library, Viewer &viewer) {
+void runViewerSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer) {
     const QList<Case> cases = {
         {"HEIC photo", "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.heic') AND NOT a.is_live"},
         {"JPEG photo", "EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'original' AND r.file_type = 'public.jpeg')"},
@@ -140,7 +158,7 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
     // Kinds that did not come within a minute, and pictures that do not
     // decode: the run fails.
     auto failures = std::make_shared<int>(0);
-    *next = [&library, &viewer, cases, next, failures](int k) {
+    *next = [window, &library, &viewer, cases, next, failures](int k) {
         if (k >= cases.size()) {
             std::printf("selftest: done, %d failed\n", *failures);
             std::fflush(stdout);
@@ -154,16 +172,24 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
             (*next)(k + 1);
             return;
         }
+        QObject *live = livePlugin(window);
+        if (c.live && !live && k == 4)
+            std::printf("selftest: the Live Photos plugin is off: Live Photos show as their stills\n");
+        // Its motion and effects only with the plugin; without, its still.
+        const bool motion = c.live && live;
         auto clock = std::make_shared<QElapsedTimer>();
         clock->start();
         auto connections = std::make_shared<QList<QMetaObject::Connection>>();
+        // What hears the plugin's layer, gone with the case.
+        auto context = std::make_shared<QObject *>(new QObject);
         // Once, whichever comes first: the last stage, or the minute.
         auto finished = std::make_shared<bool>(false);
-        auto finish = [connections, next, k, finished] {
+        auto finish = [connections, next, k, finished, context] {
             if (std::exchange(*finished, true))
                 return;
             for (const auto &c : *connections)
                 QObject::disconnect(c);
+            (*context)->deleteLater();
             QTimer::singleShot(0, [next, k] { (*next)(k + 1); });
         };
         // A picture shown that does not decode fails the run too.
@@ -183,22 +209,18 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
         auto pathOf = [](const QUrl &url) {
             return QUrl::fromPercentEncoding(url.toString().mid(QStringLiteral("image://photo/").size()).toUtf8());
         };
-        connections->append(QObject::connect(&viewer, &Viewer::imageChanged, &viewer, [&viewer, c, report, pathOf, finish] {
+        auto layer = [live]() -> QObject * { return live ? live->property("liveLayer").value<QObject *>() : nullptr; };
+        connections->append(QObject::connect(&viewer, &Viewer::imageChanged, &viewer, [&viewer, c, report, pathOf, finish, motion, layer] {
             if (viewer.image().isEmpty())
                 return;
             report(c.name, qPrintable(viewer.stage()), pathOf(viewer.image()));
-            if (viewer.stage() == QLatin1String("original") && c.effect.isEmpty()) {
-                if (c.live)
-                    viewer.playLive();
+            if (viewer.stage() == QLatin1String("original") && (c.effect.isEmpty() || !motion)) {
+                // L, as pressed once the photo is sharp.
+                if (motion && layer())
+                    QMetaObject::invokeMethod(layer(), "play");
                 else
                     finish();
             }
-        }));
-        connections->append(QObject::connect(&viewer, &Viewer::effectChanged, &viewer, [&viewer, c, report, pathOf, finish] {
-            if (c.effect != QLatin1String("long_exposure") || viewer.longExposure().isEmpty())
-                return;
-            report(c.name, "effect", pathOf(viewer.longExposure()));
-            finish();
         }));
         connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, clock, finish] {
             if (viewer.videoSource().isEmpty())
@@ -206,31 +228,61 @@ void runViewerSelfTest(const Library &library, Viewer &viewer) {
             report(c.name, viewer.videoSource().isLocalFile() ? "file" : "stream", QString());
             playFirstFrame(viewer.videoSource(), c.name, clock, finish);
         }));
-        connections->append(QObject::connect(&viewer, &Viewer::liveChanged, &viewer, [&viewer, c, report, clock, finish] {
-            if (viewer.liveSource().isEmpty())
-                return;
-            report(c.name, c.effect.isEmpty() ? "motion" : "effect", QString());
-            if (c.effect.isEmpty())
-                finish();
-            else
-                playFirstFrame(viewer.liveSource(), c.name, clock, finish);
-        }));
         connections->append(QObject::connect(&viewer, &Viewer::messageChanged, &viewer, [&viewer, c] {
-            if (!viewer.message().isEmpty())
+            if (!viewer.message().isEmpty()) {
                 std::printf("selftest: %-11s says \"%s\"\n", c.name, qPrintable(viewer.message()));
+                std::fflush(stdout);
+            }
         }));
+        // The Live Photos plugin's layer for this photo, as it is made:
+        // its motion, or the effect's, and its long exposure.
+        if (motion) {
+            auto heard = std::make_shared<QObject *>(nullptr);
+            auto hear = [=] {
+                QObject *now = layer();
+                if (!now || now == *heard)
+                    return;
+                *heard = now;
+                onChange(now, "source", *context, [=] {
+                    const QString source = now->property("source").toString();
+                    if (source.isEmpty())
+                        return;
+                    report(c.name, c.effect.isEmpty() ? "motion" : "effect", QString());
+                    if (c.effect.isEmpty())
+                        finish();
+                    else
+                        playFirstFrame(QUrl(source), c.name, clock, finish);
+                });
+                onChange(now, "longExposure", *context, [=] {
+                    const QString image = now->property("longExposure").toString();
+                    if (c.effect != QLatin1String("long_exposure") || image.isEmpty())
+                        return;
+                    report(c.name, "effect", pathOf(QUrl(image)));
+                    finish();
+                });
+                onChange(now, "failed", *context, [=] {
+                    if (!now->property("failed").toString().isEmpty()) {
+                        std::printf("selftest: %-11s its effect could not be had\n", c.name);
+                        std::fflush(stdout);
+                    }
+                });
+            };
+            onChange(live, "liveLayer", *context, hear);
+        }
         // Nothing within a minute is a failure too.
         QTimer::singleShot(60000, &viewer, [c, finish, failures, finished] {
             if (*finished)
                 return;
             std::printf("selftest: %s: timed out\n", c.name);
+            std::fflush(stdout);
             ++*failures;
             finish();
         });
         viewer.openAt(index, QRectF(0, 0, 100, 100));
-        if (!c.effect.isEmpty()) {
-            std::printf("selftest: %-11s set on the iPhone: %s\n", c.name, qPrintable(viewer.savedEffect()));
-            viewer.setEffect(c.effect);
+        if (!c.effect.isEmpty() && live) {
+            std::printf("selftest: %-11s set on the iPhone: %s\n", c.name, qPrintable(live->property("saved").toString()));
+            const QVariant effect = c.effect;
+            QMetaObject::invokeMethod(live, "choose", Q_ARG(QVariant, effect));
         }
     };
     QTimer::singleShot(500, [next] { (*next)(0); });
@@ -836,50 +888,6 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         });
     };
     QTimer::singleShot(1200, window, [run] { (*run)(0); });
-}
-
-void runLiveSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
-    QTimer::singleShot(1500, window, [=, &library, &viewer] {
-        const int index = findIndex(library, QStringLiteral("a.is_live"));
-        if (index < 0) {
-            std::printf("selftest: no Live Photo in the library\n");
-            QCoreApplication::quit();
-            return;
-        }
-        viewer.openAt(index, QRectF(0, 0, 100, 100));
-        auto *clock = new QElapsedTimer;
-        auto state = [window, &viewer] {
-            QObject *b = window->findChild<QObject *>(QStringLiteral("liveButton"));
-            QObject *notice = window->findChild<QObject *>(QStringLiteral("complaint"));
-            return QStringLiteral("loading %1, button %2%3, notice \"%4\"")
-                .arg(viewer.liveLoading())
-                .arg(b && b->property("active").toBool() ? "lit" : "plain")
-                .arg(b && b->property("busy").toBool() ? " busy" : "")
-                .arg(notice && notice->property("opacity").toReal() > 0 ? notice->property("text").toString() : QString());
-        };
-        QObject::connect(&viewer, &Viewer::liveFailed, window, [clock](const QString &message) {
-            std::printf("selftest: %5lld ms: failed: %s\n", clock->elapsed(), qPrintable(message));
-        });
-        // The photo sharp first, as it would be by the time anyone presses.
-        QTimer::singleShot(2500, window, [=] {
-            clock->start();
-            key(window, Qt::Key_L, Qt::NoModifier, QStringLiteral("l"));
-            key(window, Qt::Key_L, Qt::NoModifier, QStringLiteral("l"));
-            std::printf("selftest: pressed L twice: %s\n", qPrintable(state()));
-            for (int ms : {100, 400, 1000, 2000, 3500, 5000, 8000})
-                QTimer::singleShot(ms, window, [=] {
-                    std::printf("selftest: %5lld ms: %s\n", clock->elapsed(), qPrintable(state()));
-                    std::fflush(stdout);
-                    // The top only: a whole window takes long enough to save
-                    // that the timers and animations here fall behind.
-                    const QImage frame = window->grabWindow();
-                    frame.copy(0, 0, frame.width(), frame.height() / 8)
-                        .save(QStringLiteral("%1/live-%2.png").arg(folder).arg(ms, 4, 10, QLatin1Char('0')));
-                    if (ms == 8000)
-                        QCoreApplication::quit();
-                });
-        });
-    });
 }
 
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder) {

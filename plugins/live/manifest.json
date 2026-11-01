@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "api": 3,
+  "id": "pinhole.live",
+  "name": "Live Photos",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "A Live Photo's motion over it on L, and its effects as on the iPhone on ⇧ L: Loop, Bounce and Long exposure; and a mark on Live Photos in the grid.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

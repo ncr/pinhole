@@ -828,14 +828,14 @@ PinholePlugin {
     actions: [ PluginAction { text: "a"; order: -10 }, PluginAction { text: "b"; onTriggered: { const p = { order: 1 } } } ]
 }
 )");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint or complain"}}}));
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay or complain"}}}));
         write(dir.path() + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 PinholePlugin {
     actions: [ PluginAction { id: a; text: "a"; onTriggered: { const p = { hint: 1 }; a.complain("no") } } ]
 }
 )");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint or complain"}}}));
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay or complain"}}}));
         write(dir.path() + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 PinholePlugin {
@@ -2017,12 +2017,18 @@ PinholePlugin {
     // Pinhole's marks and the plugins', in their order; at most 4 of a
     // plugin and 32 in all, and one that is not right left out and said.
     void aPluginsMarksAreKindsInTheirOrderWithinTheLimits() {
-        QList<std::pair<QString, QJsonObject>> manifests;
+        QList<std::pair<QString, QJsonObject>> manifests{{"pinhole.live", {}}, {"pinhole.favourites", {}}};
         for (int k = 0; k < 9; ++k)
             manifests.append(std::pair<QString, QJsonObject>(QStringLiteral("me.p%1").arg(k), {}));
-        manifests.append(std::pair<QString, QJsonObject>(QStringLiteral("pinhole.live"), {}));
         PluginBench bench(manifests);
         Plugins &plugins = *bench.plugins;
+        // Pinhole's own: video, stack, and until the Favourites plugin is
+        // there its stand-in. Live Photos' is its plugin's (off until
+        // turned on, as plugins/live has it).
+        QCOMPARE(kindIds(plugins), (QStringList{"pinhole.favourites/favorite", "pinhole/video", "pinhole/stack"}));
+        auto live = mark("live", "live", "live", "yellow", 30);
+        live->setDefaultShown(false);
+        plugins.setMarks("pinhole.live", {live.get()});
         QSignalSpy kindsChanged(&plugins, &Plugins::markKindsChanged);
         const QStringList pinholes{"pinhole.favourites/favorite", "pinhole/video", "pinhole.live/live", "pinhole/stack"};
         QCOMPARE(kindIds(plugins), pinholes);
@@ -2030,6 +2036,7 @@ PinholePlugin {
         QCOMPARE(video.value("plugin").toString(), QString());
         QCOMPARE(video.value("field").toString(), QStringLiteral("video"));
         QCOMPARE(video.value("colour").toString(), QStringLiteral("cyan"));
+        QCOMPARE(plugins.markKinds()[2].toMap().value("plugin").toString(), QStringLiteral("pinhole.live"));
         QVERIFY(!plugins.markKinds()[2].toMap().value("defaultShown").toBool());
 
         // Two of one plugin's, by their order among Pinhole's.
@@ -2083,9 +2090,12 @@ PinholePlugin {
         QCOMPARE(plugins.markKinds().size(), Plugins::kMaxMarks);
         QVERIFY(plugins.at("me.p1").value("problem").toString().contains("4 marks at most for a plugin"));
         QVERIFY(!kindIds(plugins).contains("me.p1/m4"));
-        // 4 of Pinhole's, 2 of p0's and four each of p1 to p6 are 30: two
-        // of p7's make 32, and the rest of p7's and p8's are left out.
-        QVERIFY(kindIds(plugins).contains("me.p7/m1") && !kindIds(plugins).contains("me.p7/m2"));
+        // 3 of Pinhole's, 2 of p0's and four each of p1 to p6 are 29: three
+        // of p7's make 32, and the rest of p7's, p8's and Live Photos' are
+        // left out (here the plugins go by their ids, all in one folder;
+        // installed, Pinhole's own come before one's own).
+        QVERIFY(kindIds(plugins).contains("me.p7/m2") && !kindIds(plugins).contains("me.p7/m3"));
+        QVERIFY(!kindIds(plugins).contains("pinhole.live/live"));
         QVERIFY(plugins.at("me.p7").value("problem").toString().contains("32 marks at most in all"));
         QVERIFY(!kindIds(plugins).contains("me.p8/m0"));
         // Room made: the next plugin's come in, and are no longer said.
@@ -2107,12 +2117,17 @@ PinholePlugin {
                     return kind.toMap().value("plugin").toString();
             return QStringLiteral("none");
         };
-        auto live = mark("live", "live", "live", "yellow", 30);
-        plugins.setMarks("pinhole.live", {live.get()});
+        auto favourite = mark("favorite", "favorite", "heart", "red", 10);
+        plugins.setMarks("pinhole.favourites", {favourite.get()});
         QCOMPARE(plugins.markKinds().size(), 6);
-        QCOMPARE(pluginOf("pinhole.live/live"), QStringLiteral("pinhole.live"));
+        QCOMPARE(pluginOf("pinhole.favourites/favorite"), QStringLiteral("pinhole.favourites"));
+        plugins.setMarks("pinhole.favourites", {});
+        QCOMPARE(pluginOf("pinhole.favourites/favorite"), QString());
+        // Live Photos' has no stand-in: gone with its plugin's, and back.
         plugins.setMarks("pinhole.live", {});
-        QCOMPARE(pluginOf("pinhole.live/live"), QString());
+        QCOMPARE(pluginOf("pinhole.live/live"), QStringLiteral("none"));
+        plugins.setMarks("pinhole.live", {live.get()});
+        QCOMPARE(pluginOf("pinhole.live/live"), QStringLiteral("pinhole.live"));
 
         // A mark gone with its QML goes; a plugin turned off takes its own.
         lived.reset();
@@ -2214,16 +2229,16 @@ PinholePlugin {
         bench.engine.globalObject().setProperty("item", bench.engine.newQObject(item.get()));
         bench.js("plugins.setMarks('me.a', item.marks)");
         QCOMPARE(kindIds(*bench.plugins), (QStringList{"me.a/loved", "pinhole.favourites/favorite", "pinhole/video",
-                                                       "pinhole.live/live", "me.a/picked", "pinhole/stack"}));
+                                                       "me.a/picked", "pinhole/stack"}));
         const QVariantMap loved = bench.plugins->markKinds()[0].toMap();
         QCOMPARE(loved.value("colour").toString(), QStringLiteral("blue"));
         QVERIFY(!loved.value("defaultShown").toBool());
-        QCOMPARE(bench.plugins->markKinds()[4].toMap().value("text").toString(), QStringLiteral("Picked"));
+        QCOMPARE(bench.plugins->markKinds()[3].toMap().value("text").toString(), QStringLiteral("Picked"));
         QCOMPARE(bench.plugins->marksOf("me.a"), (QVariantMap{{"picked", QVariantList{1}}}));
         bench.js("item.picked = [0, 'c']");
         QCOMPARE(bench.plugins->marksOf("me.a"), (QVariantMap{{"picked", QVariantList{0, 2}}}));
         item.reset();
-        QTRY_COMPARE(bench.plugins->markKinds().size(), 4);
+        QTRY_COMPARE(bench.plugins->markKinds().size(), 3);
     }
 
     // The kinds' shapes: Pinhole's four, one character, and nothing else;
@@ -3709,7 +3724,9 @@ private slots:
         QCOMPARE(notice.first(), QVariantList({"t", "Saved to Pictures"}));
     }
 
-    void aLivePhotosMotionIsAskedForOnceAndSaysWhyItDidNotCome() {
+    // A photo shown is fetched at once, and its neighbours beside it; those
+    // passed under a held key are not, only the one it stops on.
+    void aPhotoShownIsFetchedAtOnceAndThosePassedQuicklyAreNot() {
         QTemporaryDir dir;
         makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         Library library;
@@ -3722,11 +3739,8 @@ private slots:
         QTRY_VERIFY(fake.server.hasPendingConnections());
         fake.peer = fake.server.nextPendingConnection();
         fake.greet();
-        fake.send({{"event", "source"}, {"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}});
-        QTRY_VERIFY(service.sourceName() == QLatin1String("iCloud"));
 
         Viewer viewer(&library, &service);
-        QSignalSpy failed(&viewer, &Viewer::liveFailed);
         viewer.openAt(0, {});
         // A key changes photo at once, with nothing sliding, so two
         // neighbours can be compared; only the carousel glides after it.
@@ -3756,53 +3770,130 @@ private slots:
         QTRY_COMPARE(mediums(), 12);
         QTest::qWait(100);
         QCOMPARE(mediums(), 12);
-        QVERIFY(!viewer.liveLoading());
-        // On its way at once, and asked for once however often it is pressed.
-        viewer.playLive();
-        QVERIFY(viewer.liveLoading());
-        viewer.playLive();
-        viewer.playLive();
-        QTRY_COMPARE(fake.live().size(), 1);
-        QTest::qWait(50);
-        QCOMPARE(fake.live().size(), 1);
-        fake.send({{"id", fake.live()[0].value("id")}, {"ok", true},
-                   {"result", QJsonObject{{"path", "/cache/a.mov"}, {"stream", "http://127.0.0.1:1/a"}}}});
-        QTRY_VERIFY(!viewer.liveLoading());
-        QCOMPARE(viewer.liveSource(), QUrl("http://127.0.0.1:1/a"));
-        // Here: played again without asking.
-        viewer.playLive();
-        QVERIFY(!viewer.liveLoading());
-        QCOMPARE(fake.live().size(), 1);
-
-        // Not signed in: said, in so many words.
-        viewer.step(1);
-        viewer.playLive();
-        QTRY_COMPARE(fake.live().size(), 2);
-        fake.send({{"id", fake.live()[1].value("id")}, {"ok", false},
-                   {"error", QJsonObject{{"code", "needs_sign_in"}, {"message", "no session"}}}});
-        QTRY_COMPARE(failed.size(), 1);
-        QVERIFY(!viewer.liveLoading());
-        QCOMPARE(failed[0][0].toString(), QString("Not signed in to iCloud"));
-
-        // Offline: the service says so before it answers.
-        viewer.playLive();
-        QTRY_COMPARE(fake.live().size(), 3);
-        fake.send({{"event", "health"}, {"state", "offline"}});
-        fake.send({{"id", fake.live()[2].value("id")}, {"ok", false},
-                   {"error", QJsonObject{{"code", "unavailable"}, {"message", "network"}}}});
-        QTRY_COMPARE(failed.size(), 2);
-        QCOMPARE(failed[1][0].toString(), QString("Offline, and the motion is not on this computer"));
-
-        // Moving on drops the wait, and a late answer for the photo left.
-        viewer.playLive();
-        QTRY_COMPARE(fake.live().size(), 4);
-        viewer.step(1);
-        QVERIFY(!viewer.liveLoading());
-        fake.send({{"id", fake.live()[3].value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "not_found"}}}});
-        QTest::qWait(50);
-        QCOMPARE(failed.size(), 2);
-        QVERIFY(viewer.liveSource().isEmpty());
+        // Nothing of a Live Photo's motion: that is the Live Photos plugin's.
+        QCOMPARE(fake.live().size(), 0);
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // plugins/live as the window loads it, over a library of Live Photos
+    // and a stand-in service: L asks for the motion once however often it
+    // is pressed, and plays it as it comes (the service's stream); a
+    // motion that does not come is said, in so many words; a bounce chosen
+    // is asked for and goes round; another photo's layer starts afresh.
+    void theLivePhotosPluginPlaysTheMotionAsItComesAndSaysWhyNot() {
+        PluginBench bench({{"pinhole.live", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "live");
+            db.setDatabaseName(bench.dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE assets SET is_live = 1"));
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN live_effect TEXT"));
+            QVERIFY(q.exec("UPDATE assets SET live_effect = 'loop' WHERE id = 'c'"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("live");
+        QString error;
+        QVERIFY(bench.library.open(bench.dir.path(), &error));
+        Keymap keymap;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/live/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.live&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.js("plugin.playAction.complained.connect(text => said.push('said ' + text))");
+        // What it said, but that the stand-in's URLs do not play.
+        auto told = [&bench] {
+            QStringList said = bench.said();
+            said.removeAll("said Could not play the motion");
+            return said;
+        };
+        auto fetches = [&bench](const QString &kind) {
+            bench.fake.read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(bench.fake.asked))
+                if (line.value("params").toObject().value("kind").toString() == kind)
+                    found.append(line);
+            return found;
+        };
+
+        // Its mark: the library's field, off until turned on.
+        QCOMPARE(bench.js("plugin.marks[0].field").toString(), QString("live"));
+        QVERIFY(!bench.js("plugin.marks[0].defaultShown").toBool());
+        // Nothing to show with no photo open.
+        QVERIFY(!bench.js("plugin.playAction.shown").toBool());
+        bench.viewer->openAt(0, {});
+        QVERIFY(bench.js("plugin.playAction.shown").toBool());
+        QCOMPARE(bench.js("plugin.playAction.text").toString(), QString("Live"));
+        bench.js("layer = plugin.viewerLayer.createObject(null, { photo: 0, shown: true })");
+        QVERIFY(bench.js("plugin.liveLayer === layer").toBool());
+        // On its way at once, and asked for once however often L is pressed.
+        bench.js("plugin.playAction.triggered(); plugin.playAction.triggered(); plugin.playAction.triggered()");
+        QVERIFY(bench.js("plugin.playAction.active && plugin.playAction.busy").toBool());
+        QTRY_COMPARE(fetches("live").size(), 1);
+        QTest::qWait(50);
+        QCOMPARE(fetches("live").size(), 1);
+        QVERIFY(fetches("live")[0].value("params").toObject().value("stream").toBool());
+        bench.fake.send({{"id", fetches("live")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"path", "/cache/a.mov"}, {"stream", "http://127.0.0.1:1/a"}}}});
+        QTRY_VERIFY(!bench.js("layer.asking").toBool());
+        QCOMPARE(bench.js("layer.source").toString(), QString("http://127.0.0.1:1/a"));
+        QCOMPARE(bench.js("layer.sourceKind").toString(), QString("live"));
+        // Here: played again without asking.
+        bench.js("plugin.playAction.triggered()");
+        QTest::qWait(50);
+        QCOMPARE(fetches("live").size(), 1);
+        // Gone as the photo is: stopped, and no longer the plugin's.
+        bench.js("layer.shown = false");
+        QVERIFY(!bench.js("layer.playing").toBool());
+        QVERIFY(bench.js("plugin.liveLayer === null").toBool());
+        bench.js("layer.destroy()");
+
+        // Not there: said under the button, in so many words.
+        bench.viewer->step(1);
+        bench.js("layer = plugin.viewerLayer.createObject(null, { photo: 1, shown: true }); said.length = 0");
+        bench.js("plugin.playAction.triggered()");
+        QTRY_COMPARE(fetches("live").size(), 2);
+        bench.fake.send({{"id", fetches("live")[1].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "not_found"}, {"message", "no motion"}}}});
+        QTRY_COMPARE(told(), QStringList({"said This Live Photo has no motion"}));
+        QVERIFY(!bench.js("plugin.playAction.active").toBool());
+        bench.js("plugin.playAction.triggered()");
+        QTRY_COMPARE(fetches("live").size(), 3);
+        bench.fake.send({{"id", fetches("live")[2].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "needs_sign_in"}, {"message", "no session"}}}});
+        QTRY_COMPARE(told().size(), 2);
+        QCOMPARE(told()[1], QString("said Not signed in to x"));
+
+        // A bounce chosen: asked for to play, round and round, at once.
+        bench.js("plugin.choose('bounce')");
+        QCOMPARE(bench.js("plugin.playAction.text").toString(), QString("Bounce"));
+        QVERIFY(bench.js("layer.loading").toBool());
+        QTRY_COMPARE(fetches("bounce").size(), 1);
+        bench.fake.send({{"id", fetches("bounce")[0].value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/cache/b bounce.mov"}}}});
+        QTRY_COMPARE(bench.js("layer.source").toString(), QString("file:///cache/b%20bounce.mov"));
+        QVERIFY(!bench.js("layer.loading").toBool());
+        QVERIFY(bench.js("layer.looping").toBool());
+        // Only while Pinhole runs, and for that photo: back to Live, it is
+        // forgotten; the next photo has its own.
+        QCOMPARE(bench.js("plugin.chosen['b']").toString(), QString("bounce"));
+        bench.js("layer.shown = false; layer.destroy()");
+
+        // A loop set on the iPhone: "iPhone" in its menu, played as it shows.
+        bench.viewer->step(1);
+        QCOMPARE(bench.js("plugin.saved").toString(), QString("loop"));
+        QCOMPARE(bench.js("plugin.actions[2].hint").toString(), QString("iPhone"));
+        QCOMPARE(bench.js("plugin.actions[3].hint").toString(), QString());
+        bench.js("layer = plugin.viewerLayer.createObject(null, { photo: 2, shown: true })");
+        QTRY_COMPARE(fetches("loop").size(), 1);
+        bench.fake.send({{"id", fetches("loop")[0].value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "unavailable"}}}});
+        QTRY_COMPARE(told().size(), 3);
+        QCOMPARE(told()[2], QString("said Could not show this effect"));
+        QVERIFY(!bench.js("layer.loading").toBool());
+        bench.js("layer.shown = false; layer.destroy()");
     }
 
     void aDragOutGivesItsFilesToTheDropAndNothingAsItStarts() {

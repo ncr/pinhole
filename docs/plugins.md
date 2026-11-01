@@ -59,9 +59,9 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
 `pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
-`hint` and `complain`, `fetch`'s options and its Live effects, a photo's
-`effect`, and `sources` in the manifest: a source of photos of the
-plugin's own, whose provider pinholed runs
+`hint`, `busyDelay` and `complain`, `fetch`'s options and its Live
+effects, a photo's `effect`, and `sources` in the manifest: a source of
+photos of the plugin's own, whose provider pinholed runs
 ([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
@@ -106,12 +106,15 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `shown`, `usable`, `active`, `busy`, and `onTriggered`.
+  `text`, `key`, `shown`, `usable`, `active`, `busy` (its arc turning once
+  it has been for `busyDelay` ms, 1000 unless said), and `onTriggered`.
   `order` places it among the others of its place, lowest first, then in
   the plugins' order (0 if left out); in select mode's bar, those below 0
-  come before Copy. Its `complain(text)` says what it could not do in a
-  few words under its button for four seconds, the button shaking, as
-  Copy does (under More ▾ while it is folded there).
+  come before Copy, and in the viewer's they stand as Pinhole's own
+  buttons do, never folded into More ▾ (Live Photos' is -10). Its
+  `complain(text)` says what it could not do in a few words under its
+  button for four seconds, the button shaking, as Copy does (under More ▾
+  while it is folded there).
   `key` is a sequence as Qt writes one ("F2", "Shift+S", "Ctrl+Return"),
   and the button and the help show it as Pinhole names keys: F2, ⇧ S,
   Ctrl ⏎. In
@@ -164,7 +167,10 @@ its settings, is there as the window first shows. It sets:
   It goes once that photo is no longer shown. Photos passing quicker than
   anyone looks at them (an arrow held down, the strip scrubbed) get none:
   the one it stops on does. Layers stack in the plugins' order, above
-  Pinhole's own picture and video.
+  Pinhole's own picture and video. A layer that declares `loading` turns
+  the arc beside the photo's date while it is true, as the photo still
+  coming does. Live Photos (`plugins/live`) is one: its motion and
+  effects play in its layer.
 - `stacks`: photos shown in the grid as one card, each a list of library
   positions, as Series does with each series. The card stands where the
   first one is, shows it and carries the mark for several photos; opening
@@ -184,7 +190,8 @@ its settings, is there as the window first shows. It sets:
   photos it hid stay hidden where they are now until it gives `hidden`
   again (on `library.changed()`, from the ids it keeps).
 - `marks`: marks in the bottom left corner of grid cells, beside
-  Pinhole's own (a video's, a Live Photo's, a favourite's, a stack's),
+  Pinhole's own (a video's, a favourite's, a stack's) and its plugins'
+  (Live Photos' on a Live Photo),
   each a `PluginMark`, four at most (32 in all, Pinhole's among them; one
   past that is left out, and said under the plugin, as is one that is not
   right). Each has a switch of its own under the side panel's "In the

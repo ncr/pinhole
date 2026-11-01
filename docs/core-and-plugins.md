@@ -1171,6 +1171,71 @@ API above).
 - Tests: the above. `PINHOLE_SELFTEST=live:<dir>` on the real library: L
   plays, ⇧L opens the four, Bounce plays round and round, Long exposure
   shows. First frame within 5 % of the baseline with 12 plugins.
+- As built:
+  - The plugin's layer is `liveLayer`, and `LiveLayer.qml`'s id
+    `photoLayer`: `layer` is every `Item`'s own (its layer effects), a
+    FINAL property, so a root cannot declare it, and inside an `Item`
+    `layer.` reads that, not an id.
+  - One player for the motion, as the viewer had one: `LiveMotion.qml`
+    (its `MediaPlayer` and `VideoOutput`), which the plugin's `Loader`
+    reads the first time a motion plays and lends to the layer of the
+    photo shown, placed inside it (`lendMotion`, `takeBack`). A file of its
+    own, as `import QtMultimedia` in a file the plugin reads as it loads
+    is read before the first frame (the window reads Qt Multimedia on a
+    thread of its own while the grid shows, for the viewer, main.cpp). One
+    player, not one a layer: a player made as a loop or a bounce showed
+    held up the photo's own medium a few ms (`viewer`'s loop and bounce
+    stages).
+  - What runs as the effect changes reads `effect` itself (`loops()`,
+    `motionOf()`), not `looping` and `motionKind`: a handler of
+    `effectChanged` may run before the bindings that follow it, and did,
+    so a bounce chosen was never asked for.
+  - A layer's `loading` (an effect fetched or made) turns the arc beside
+    the date, as `Viewer::loading()` did with the effect coming.
+  - "Could not show this effect" is said under the Live button
+    (`complain`) rather than under the date.
+  - `PluginAction` gains `busyDelay` (1000 ms, as `ShellButton`'s): the
+    Live button's arc turned after 300 ms, and still does
+    (`busyDelay: 300`), not after a second as other plugins' do. `apiUses`
+    counts it with `order` and `hint`.
+  - A loop or a bounce chosen again whose motion is here already plays
+    again; before, it stood still until L.
+  - The plugin's actions have `order: -10`. In the viewer's bar the groups
+    of an order below 0 stand as Pinhole's own buttons and never fold into
+    More ▾, so Live stays beside the heart in a narrow window, as it did.
+  - Why the motion did not come, in Pinhole's words as before: the source's
+    name from `library.key` (`icloud` is "iCloud", a folder its name), and
+    whether it is offline from the window's `service.health`, read where
+    there is one, until `pinhole.sources` (B6) says it.
+  - Strings: those listed, and "Offline, and the motion is not on this
+    computer" and "Could not load the motion from %1", moved to
+    `plugins/live/i18n/pl.json` (no `en.json`: none is counted). "Live
+    Photos" stays in Pinhole's too (the storage panel's name for the
+    motions kept); "Not signed in to %1", "The Pinhole service is not
+    running" and "%1 is not there…" are Pinhole's, which the plugin's
+    files fall back to.
+  - `MoreGroup`'s ⇧ keys for a folded group no longer throw while the
+    group's actions are shown one at a time (Live's five change together
+    as a photo opens), seen in `live:`.
+  - A `MenuGroup` makes its menu's rows as the menu opens, not whenever
+    its items show: Live's four rows, made and unmade as each Live Photo
+    came and went, cost opening one about 30 ms (`openAt` 57 ms against
+    29 without the plugin; 18 with this).
+  - Tests as built: `live:` is `selftestlive.cpp`, run offscreen: L
+    twice (its top frames the same pixels as main's, in English at 1600
+    px and in Polish at 900, folded), ⇧ L's four, Bounce chosen by the
+    keys going round (its position back to the start), on the photo
+    zoomed in, its frames reaching its picture over the photo (counted at
+    the `VideoOutput`'s sink: no grab draws video, offscreen or on a
+    workspace not shown), Long exposure, Esc stopping it as the photo
+    shrinks, a loop playing as its photo grows from its cell; with the plugin off, no mark
+    or button, L and ⇧ L doing nothing, the still shown; either way
+    Background's fetches of the loop, the bounce and the motion. `viewer`
+    plays and chooses through the plugin and reads the layer's `source`
+    and `longExposure` (`onChange`, a `Called` slot for a QML notify).
+    The unit test `theLivePhotosPluginPlaysTheMotionAsItComesAndSaysWhyNot`
+    loads `plugins/live` with a stand-in service. `actionbar:` and `keys`
+    give main's pixels and commands.
 
 ### B4: the Favourites plugin
 

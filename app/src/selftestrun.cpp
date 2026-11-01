@@ -475,11 +475,11 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     if (name == QLatin1String("drop"))
         runDropSelfTest(window, library, incoming, arg, qEnvironmentVariable("PINHOLE_SELFTEST_DROP").split(':', Qt::SkipEmptyParts));
     if (name == QLatin1String("viewer"))
-        runViewerSelfTest(library, viewer);
+        runViewerSelfTest(window, library, viewer);
     if (name == QLatin1String("copytwice"))
         runCopyTwiceSelfTest(window, grid, viewer, arg);
     if (name == QLatin1String("live"))
-        runLiveSelfTest(window, library, viewer, arg);
+        runLiveSelfTest(window, grid, library, viewer, arg);
     if (name == QLatin1String("actionbar"))
         runActionBarSelfTest(window, grid, viewer, library, arg);
     if (name == QLatin1String("layers"))

@@ -162,7 +162,9 @@ Item {
             y: 1
             Repeater {
                 id: rows
-                model: group.menuItems
+                // Made as it opens: a group whose actions show and go with
+                // the photo (Live Photos') makes no rows for a menu closed.
+                model: group.open ? group.menuItems : []
                 delegate: ShellButton {
                     required property var modelData
                     required property int index
