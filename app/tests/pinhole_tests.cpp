@@ -1,4 +1,5 @@
 #include <QClipboard>
+#include <QDirIterator>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
@@ -458,6 +459,93 @@ private slots:
         QVERIFY(translator.translate("Main", "Quit").isNull());
         QCOMPARE(translator.translate("Outgoing", "Copied %n photo(s)", nullptr, 1), QString("Copied %n photo"));
         QCOMPARE(translator.translate("Incoming", "Added %n file(s) to %1", nullptr, 2), QString("Added %n files to %1"));
+    }
+
+    // The English each qsTr() or tr() in a folder's files says, and the
+    // file it is first in. A C++ raw string is another file's words (the
+    // Main.qml `pinhole plugin new` writes), and a plugin's own checks are
+    // not shown.
+    static QMap<QString, QString> saidIn(const QString &folder, const QStringList &patterns) {
+        // (Plain literals: moc takes a raw one with a quote in it for its end.)
+        static const QRegularExpression said(QStringLiteral("\\b(?:qsTr|tr|QT_TR_NOOP)\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+        static const QRegularExpression raw(QStringLiteral("\\bR\"([^(\\s]*)\\(.*?\\)\\1\""),
+                                            QRegularExpression::DotMatchesEverythingOption);
+        QMap<QString, QString> out;
+        QDirIterator files(folder, patterns, QDir::Files, QDirIterator::Subdirectories);
+        while (files.hasNext()) {
+            const QString path = files.next();
+            const QString file = QDir(folder).relativeFilePath(path);
+            if (file.startsWith("check/") || file.startsWith("tests/") || file.contains("target/") || file.contains("build/"))
+                continue;
+            QString text = read(path);
+            // A comment's qsTr("Save") is an example.
+            static const QRegularExpression comment(QStringLiteral("^\\s*//.*$"), QRegularExpression::MultilineOption);
+            text.remove(comment);
+            if (!path.endsWith(".qml") && !path.endsWith(".js"))
+                text.remove(raw);
+            for (auto m = said.globalMatch(text); m.hasNext();) {
+                const QString english = QJsonDocument::fromJson("[\"" + m.next().captured(1).toUtf8() + "\"]").array().at(0).toString();
+                if (!out.contains(english))
+                    out.insert(english, file);
+            }
+        }
+        return out;
+    }
+
+    // Every string Pinhole and its plugins say has its Polish: a plugin's
+    // in its own catalog or else Pinhole's, as Translator looks it up, a
+    // counted one in each of its forms; and no catalog keeps words for
+    // English nothing says any more. A plugin's name and description are
+    // its words too.
+    void everyStringHasItsPolishAndNoneIsLeftOver() {
+        const QString app = QStringLiteral(PINHOLE_I18N "/..");
+        const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
+        const auto catalog = [](const QString &folder, const QString &language) {
+            return QJsonDocument::fromJson(read(folder + "/i18n/" + language + ".json").toUtf8()).object();
+        };
+        QStringList wrong;
+        const auto polishOf = [&](const QString &english, const QJsonValue &polish, const QString &where) {
+            if (polish.isUndefined())
+                wrong << where + ": no Polish for \"" + english + "\"";
+            else if ((english.contains("%n") || english.contains("%Ln"))
+                     && !(polish.isObject() && polish.toObject().contains("one") && polish.toObject().contains("few")
+                          && polish.toObject().contains("many")))
+                wrong << where + ": \"" + english + "\" is counted, and its Polish has not its one, few and many";
+        };
+        const auto leftOver = [&](const QJsonObject &strings, const QSet<QString> &used, const QString &where) {
+            for (auto it = strings.begin(); it != strings.end(); ++it)
+                if (!used.contains(it.key()))
+                    wrong << where + ": \"" + it.key() + "\" is said nowhere";
+        };
+        const QJsonObject pinhole = catalog(app, "pl");
+        const QMap<QString, QString> pinholeSays = saidIn(app, {"*.qml", "*.js", "*.cpp", "*.h"});
+        for (auto it = pinholeSays.begin(); it != pinholeSays.end(); ++it)
+            polishOf(it.key(), pinhole.value(it.key()), "app/src/" + it.value());
+        QSet<QString> pinholeUsed(pinholeSays.keyBegin(), pinholeSays.keyEnd());
+        const QFileInfoList plugins = QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        QVERIFY(plugins.size() > 5);
+        for (const QFileInfo &plugin : plugins) {
+            const QJsonObject own = catalog(plugin.filePath(), "pl");
+            const QJsonObject manifest = QJsonDocument::fromJson(read(plugin.filePath() + "/manifest.json").toUtf8()).object();
+            const QMap<QString, QString> says = saidIn(plugin.filePath(), {"*.qml", "*.js"});
+            QSet<QString> used(says.keyBegin(), says.keyEnd());
+            for (const char *field : {"name", "description"}) {
+                const QString english = manifest.value(field).toString();
+                polishOf(english, own.value(english), "plugins/" + plugin.fileName() + "/manifest.json");
+                used << english;
+            }
+            for (auto it = says.begin(); it != says.end(); ++it) {
+                const bool itsOwn = own.contains(it.key());
+                if (!itsOwn)
+                    pinholeUsed << it.key();
+                polishOf(it.key(), itsOwn ? own.value(it.key()) : pinhole.value(it.key()), "plugins/" + plugin.fileName() + "/" + it.value());
+            }
+            leftOver(own, used, "plugins/" + plugin.fileName() + "/i18n/pl.json");
+            leftOver(catalog(plugin.filePath(), "en"), used, "plugins/" + plugin.fileName() + "/i18n/en.json");
+        }
+        leftOver(pinhole, pinholeUsed, "app/src/i18n/pl.json");
+        leftOver(catalog(app, "en"), QSet<QString>(pinholeSays.keyBegin(), pinholeSays.keyEnd()), "app/src/i18n/en.json");
+        QVERIFY2(wrong.isEmpty(), qPrintable("\n" + wrong.join("\n")));
     }
 
     // Two plugins and Pinhole giving the same English other words: each

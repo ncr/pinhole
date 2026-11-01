@@ -11,6 +11,5 @@
   "Adding %n file(s) to %1…": { "one": "Adding %n file to %1…", "other": "Adding %n files to %1…" },
   "Added %n file(s) to %1": { "one": "Added %n file to %1", "other": "Added %n files to %1" },
   "Add %n file(s) to %1": { "one": "Add %n file to %1", "other": "Add %n files to %1" },
-  "%n file(s) not added": { "one": "%n file not added", "other": "%n files not added" },
-  "%n photo(s) selected": { "one": "%n photo selected", "other": "%n photos selected" }
+  "%n file(s) not added": { "one": "%n file not added", "other": "%n files not added" }
 }
