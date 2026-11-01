@@ -70,9 +70,10 @@ again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
-as its Loop, and ⇧V its Bounce (both also under ▾, ⇧B). In Series' studio, B makes the video just made the
-background. Each is kept in Pictures/Pinhole/.backgrounds, hidden from a
-folder source; Ctrl+Z puts the one before back.
+as its Loop, and ⇧V its Bounce (both also under ▾, ⇧B). In Series' studio,
+B makes the video just made the background. Each is kept in
+Pictures/Pinhole/.backgrounds, hidden from a folder source; Ctrl+Z puts the
+one before back.
 
 Year calendar (Y in the grid) shows every day of every year as a square in
 the theme's accent, brighter the more photos it has, one row of weeks a
