@@ -52,17 +52,44 @@ PinholePlugin {
     // What it found, kept for each source's library in its settings, as
     // Series keeps its edits: read at once as it loads, which is before the
     // grid's first frame, so the screenshots never show for a moment and go.
+    // Not for a library that does not say whose it is (its key ""), which
+    // another such would share; nor more than `keepAtMost`, which would
+    // make the settings long to read and write for every plugin: those
+    // show for a moment as the window opens.
+    readonly property int keepAtMost: 5000
+    // The library shown: its key, or its folder; and where what was found
+    // in it is kept, "" for nowhere.
+    property string shown: ""
     property string keptKey: ""
-    // Another source's library than the last: what was kept for it, and
-    // true.
+    // Another library than the last: what was kept for it, and true.
     function loadKept() {
-        const key = "found:" + pinhole.library.key
-        if (key === keptKey)
+        const key = pinhole.library.key
+        const library = key !== "" ? key : "folder " + pinhole.library.dir
+        if (library === shown)
             return false
-        keptKey = key
+        shown = library
+        keptKey = key !== "" ? "found:" + key : ""
         found = false
-        take(pinhole.setting(key, []))
+        take(keptKey !== "" ? pinhole.setting(keptKey, []) : [])
         return true
+    }
+    // Kept, and what was found of sources no longer added gone: true if
+    // all of it went well.
+    function keep(key, list) {
+        let kept = pinhole.setSetting(key, list.length <= keepAtMost ? list : null)
+        const sources = pinhole.library.keys()
+        for (const other of pinhole.settings.keys())
+            if (other.startsWith("found:") && other !== key && sources.indexOf(other.slice(6)) < 0
+                    && pinhole.setting(other) !== undefined)
+                kept = pinhole.setSetting(other, null) && kept
+        return kept
+    }
+    // Where it kept them before its settings, the cacheDirs of its own:
+    // gone, once.
+    function forgetCacheDirs() {
+        const old = pinhole.cacheDir.replace(/\/[^/]*$/, "")
+        if (old.endsWith("/pinhole/plugins/pinhole.screenshots") && pinhole.exists(old))
+            pinhole.run("rm", ["-r", "--", old]).catch(pinhole.warn)
     }
 
     function find() {
@@ -77,19 +104,19 @@ PinholePlugin {
         }
         finding = true
         // Which tables there are, then what it can ask of them.
-        const key = keptKey, dir = pinhole.library.dir
+        const key = keptKey, showing = shown, dir = pinhole.library.dir
         const library = dir + "/library.sqlite"
         pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery])
             .then(result => pinhole.run("sqlite3", ["-readonly", library, Find.query(result.stdout.split("\n"))]))
             .then(result => {
                 // Another library shown meanwhile: these are the last one's,
                 // neither kept as this one's nor shown; it is looked at next.
-                if (key !== keptKey || dir !== pinhole.library.dir) {
+                if (showing !== shown || dir !== pinhole.library.dir) {
                     findAgain = true
                     return
                 }
                 const list = result.stdout.split("\n").filter(id => id !== "")
-                if (!pinhole.setSetting(key, list))
+                if (key !== "" && !keep(key, list))
                     pinhole.warn(qsTr("The setting could not be kept"))
                 take(list)
                 found = true
@@ -136,6 +163,7 @@ PinholePlugin {
     Component.onCompleted: {
         loadKept()
         find()
+        forgetCacheDirs()
     }
 
     actions: [

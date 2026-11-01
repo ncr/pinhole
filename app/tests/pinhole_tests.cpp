@@ -1715,6 +1715,17 @@ Item {
         screenshot(bench.dir.path(), "b");
         bench.plugins->setSettingOf("pinhole.screenshots", "hide", true);
         bench.plugins->setSettingOf("pinhole.screenshots", "found:folder:/x", QJsonArray{"b"});
+        // And of a source taken out since.
+        bench.plugins->setSettingOf("pinhole.screenshots", "found:folder:/gone", QJsonArray{"z"});
+        // The sources added: both libraries'.
+        const QString settings = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/settings.json";
+        QDir().mkpath(QFileInfo(settings).absolutePath());
+        write(settings, R"({"sources": [{"kind": "folder", "path": "/x"}, {"kind": "folder", "path": "/y"}]})");
+        QCOMPARE(Storage::sourceIds(), (QStringList{"folder:/x", "folder:/y"}));
+        // From before, kept in its cacheDirs: gone as it loads.
+        const QString oldCache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/pinhole.screenshots";
+        QDir().mkpath(oldCache + "/folder-x");
+        write(oldCache + "/folder-x/screenshots", "b\n");
         Keymap keymap;
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
         Plugins::registerTypes();
@@ -1753,9 +1764,38 @@ Item {
         // one's: only what was kept for this one (none), then what it found.
         QCOMPARE(bench.said(), QStringList({"", "y"}));
         QCOMPARE(list("hidden"), QStringList{"1"});
-        const QJsonObject kept = bench.plugins->settingsOf("pinhole.screenshots");
+        QJsonObject kept = bench.plugins->settingsOf("pinhole.screenshots");
         QCOMPARE(kept.value("found:folder:/y").toArray(), QJsonArray{"y"});
         QCOMPARE(kept.value("found:folder:/x").toArray(), QJsonArray{"b"});
+        // What it found of a source no longer added is gone, and so is
+        // what it kept before in its cacheDirs.
+        QVERIFY(!kept.contains("found:folder:/gone"));
+        QTRY_VERIFY(!QFileInfo::exists(oldCache));
+        QVERIFY(bench.js("pinhole.settings['found:folder:/gone']").isUndefined());
+
+        // Too many to keep: none kept for that library, rather than a list
+        // every plugin's settings would be slow with.
+        QVERIFY(bench.js("shots.keep('found:folder:/y', Array.from({ length: 5001 }, (_, i) => 'p' + i))").toBool());
+        kept = bench.plugins->settingsOf("pinhole.screenshots");
+        QVERIFY(!kept.contains("found:folder:/y"));
+        QVERIFY(bench.js("shots.keep('found:folder:/y', Array.from({ length: 5000 }, (_, i) => 'p' + i))").toBool());
+        QCOMPARE(bench.plugins->settingsOf("pinhole.screenshots").value("found:folder:/y").toArray().size(), 5000);
+
+        // A library that does not say whose it is: nothing kept for it, so
+        // another such never shares it.
+        QTemporaryDir nobodys;
+        makeLibrary(nobodys.path(), {{"n", 1}, {"m", 2}}, false, "");
+        screenshot(nobodys.path(), "n");
+        Library none;
+        QVERIFY(none.open(nobodys.path(), &error));
+        bench.library.swap(none);
+        bench.plugins->libraryReloaded({-1, -1});
+        QCOMPARE(plugin->property("keptKey").toString(), QString());
+        QTRY_COMPARE(list("hidden"), QStringList{"0"});
+        kept = bench.plugins->settingsOf("pinhole.screenshots");
+        QVERIFY(!kept.contains("found:"));
+        QCOMPARE(QStringList(kept.keys()), (QStringList{"found:folder:/x", "found:folder:/y", "hide"}));
+        QVERIFY(QFile::remove(settings));
     }
 
     void aSweepStaysOnItsPhotosWhenTheCellsChange() {

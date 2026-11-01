@@ -68,6 +68,9 @@ public:
     // Which source a library holds the photos of (storage::library_owner);
     // empty for none yet, or no library there.
     static QString libraryOwner(const QString &dir);
+    // The ids of the sources added, as each one's library names its own
+    // (icloud:<apple id>, folder:<path>), as the settings say now.
+    static QStringList sourceIds();
     // The Apple IDs signed in to on this computer, each with a library of
     // its own.
     static QStringList accounts();

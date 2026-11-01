@@ -93,6 +93,37 @@ QJsonObject Storage::configuredSource() {
     return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}, {"account", account}};
 }
 
+QStringList Storage::sourceIds() {
+    // As the service reads them (storage::resolve): those added, else the
+    // Apple IDs signed in to and the folder shown; and the one shown.
+    const QJsonObject all = settings();
+    const QStringList signedIn = accounts();
+    const auto idOf = [&](const QJsonObject &entry) -> QString {
+        const QString kind = entry.value("kind").toString();
+        if (kind == QLatin1String("folder"))
+            return entry.contains("path") ? "folder:" + entry.value("path").toString() : QString();
+        if (kind != QLatin1String("icloud"))
+            return {};
+        QString account = entry.value("account").toString();
+        if (account.isEmpty() && signedIn.size() == 1)
+            account = signedIn.first();
+        return account.isEmpty() ? QString() : "icloud:" + account;
+    };
+    QStringList ids;
+    if (all.contains("sources")) {
+        for (const QJsonValue &entry : all.value("sources").toArray())
+            ids.append(idOf(entry.toObject()));
+    } else {
+        for (const QString &account : signedIn)
+            ids.append("icloud:" + account);
+    }
+    if (all.value("source").isObject())
+        ids.append(idOf(all.value("source").toObject()));
+    ids.removeAll(QString());
+    ids.removeDuplicates();
+    return ids;
+}
+
 QString Storage::libraryOwner(const QString &dir) {
     const QString path = dir + "/library.sqlite";
     if (!QFileInfo::exists(path))

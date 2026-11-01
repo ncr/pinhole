@@ -6,6 +6,7 @@
 #include "outgoing.h"
 #include "photogrid.h"
 #include "serviceclient.h"
+#include "storage.h"
 #include "translator.h"
 #include "viewer.h"
 
@@ -54,6 +55,8 @@ QString PluginLibrary::key() const {
     // source would, while this library is still the last one).
     return m_library->source();
 }
+
+QStringList PluginLibrary::keys() const { return Storage::sourceIds(); }
 
 QVariantMap PluginLibrary::item(const QJSValue &photo) const {
     const int index = positionOf(photo);
@@ -502,6 +505,10 @@ void PluginHost::settingsChanged() {
         if (m_settings->value(it.key()) != value)
             m_settings->insert(it.key(), value);
     }
+    // One set to null is gone.
+    for (const QString &key : m_settings->keys())
+        if (!kept.contains(key) && m_settings->value(key).isValid())
+            m_settings->clear(key);
 }
 
 QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJSValue &done) {
@@ -1044,9 +1051,14 @@ bool Plugins::setSettingOf(const QString &id, const QString &key, const QJsonVal
     QJsonObject config = m_config;
     QJsonObject all = config.value("settings").toObject();
     QJsonObject mine = all.value(id).toObject();
-    if (mine.value(key) == value && mine.contains(key))
+    // Null (or undefined) takes it out.
+    const bool gone = value.isNull() || value.isUndefined();
+    if (gone ? !mine.contains(key) : mine.value(key) == value && mine.contains(key))
         return true;
-    mine.insert(key, value);
+    if (gone)
+        mine.remove(key);
+    else
+        mine.insert(key, value);
     all.insert(id, mine);
     config.insert("settings", all);
     if (!writeConfig(config))

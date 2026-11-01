@@ -47,6 +47,9 @@ public:
     int count() const;
     QString dir() const;
     QString key() const;
+    // The key of every source added, as the settings say now: what a
+    // plugin keeps for one no longer there can go.
+    Q_INVOKABLE QStringList keys() const;
     // A photo by its position or its id: index, id, date (ms), filename,
     // thumbnail (a URL), width and height (of the thumbnail), video, live,
     // favorite. Empty if there is no such photo.
