@@ -365,13 +365,12 @@ private slots:
         QCOMPARE(p.position(), 0.0);
     }
 
-    void aPanelBouncesALittleAtItsEnds() {
-        // Coasting fast into the end, or lifted fast past it: the grid goes
-        // on past it as far as its speed takes it; a panel (Scroller.cpp),
-        // its bounce speed held to 1500 px/s, some 45 px.
-        auto furthest = [](double bounce, bool lifted) {
+    void aFastCoastBouncesOnPastTheEnd() {
+        // Coasting fast into the end, or lifted fast past it: it goes on
+        // past it as far as its speed takes it, the grid and every panel
+        // alike (a Scroller has no gentler tuning), and comes back.
+        for (const bool lifted : {false, true}) {
             ScrollPhysics p;
-            p.params().bounceVelocity = bounce;
             p.setBounds(0, 3000, 1000);
             p.jumpTo(lifted ? 2900 : 0);
             p.begin(0);
@@ -385,15 +384,8 @@ private slots:
                 p.step(1.0 / 120);
                 most = std::max(most, p.position() - 3000);
             }
-            return std::make_pair(most - atLift, p.position());
-        };
-        for (const bool lifted : {false, true}) {
-            const auto [grid, gridEnd] = furthest(ScrollPhysics::Params().bounceVelocity, lifted);
-            const auto [panel, panelEnd] = furthest(1500, lifted);
-            QVERIFY2(grid > 150, qPrintable(QString::number(grid)));
-            QVERIFY2(panel < 60, qPrintable(QString::number(panel)));
-            QCOMPARE(gridEnd, 3000.0);
-            QCOMPARE(panelEnd, 3000.0);
+            QVERIFY2(most - atLift > 150, qPrintable(QString::number(most - atLift)));
+            QCOMPARE(p.position(), 3000.0);
         }
     }
 

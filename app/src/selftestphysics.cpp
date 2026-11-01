@@ -219,6 +219,15 @@ QQuickItem *loaderOf(QQuickItem *item, const QString &id) {
     return nullptr;
 }
 
+QQuickItem *named(QQuickItem *in, const QString &objectName) {
+    if (in->objectName() == objectName)
+        return in;
+    for (QQuickItem *child : in->childItems())
+        if (QQuickItem *found = named(child, objectName))
+            return found;
+    return nullptr;
+}
+
 QQuickItem *withProperty(QQuickItem *in, const char *name) {
     if (in->metaObject()->indexOfProperty(name) >= 0)
         return in;
@@ -397,6 +406,37 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid) {
                        },
                        300});
     };
+    // Pinhole's own: the side panel and the help, shown, their Scroller
+    // given the same gestures. Each holds a screen or two, which the grid's
+    // spin crosses in a moment, and a notch's glide eases in short of an
+    // end: given room (4000 px of margin before and after, then taken
+    // back), they are compared on the way, as the grid is in its middle.
+    auto own = [=](const QString &name, const char *objectName) {
+        auto shown = [=](bool on) {
+            if (QQuickItem *item = named(window->contentItem(), QString::fromLatin1(objectName)))
+                item->setProperty("shown", on);
+        };
+        steps->append({QStringLiteral("%1 shown").arg(name), [=] { shown(true); }, 1200});
+        steps->append({name, [=] {
+                           QQuickItem *item = named(window->contentItem(), QString::fromLatin1(objectName));
+                           Scroller *scroller = item ? largest<Scroller>(item) : nullptr;
+                           check(scroller != nullptr, QStringLiteral("%1 scrolls (a Scroller over it)").arg(name));
+                           QQuickItem *f = scroller ? scroller->flickable() : nullptr;
+                           if (f) {
+                               const QVariant before = f->property("topMargin"), after = f->property("bottomMargin");
+                               f->setProperty("topMargin", before.toDouble() + 4000);
+                               f->setProperty("bottomMargin", after.toDouble() + 4000);
+                               compare(scrollerMover(name, scroller));
+                               f->setProperty("topMargin", before);
+                               f->setProperty("bottomMargin", after);
+                               f->setProperty("contentY", -before.toDouble());
+                           }
+                           shown(false);
+                       },
+                       800});
+    };
+    own(QStringLiteral("the side panel"), "sidePanel");
+    own(QStringLiteral("the help"), "help");
     view(QStringLiteral("the Year calendar"), "pinhole.calendar", Qt::Key_Y);
     steps->append({"the calendar closed", [=] { press(window, Qt::Key_Escape); }, 800});
     view(QStringLiteral("On this day"), "pinhole.onthisday", Qt::Key_D);

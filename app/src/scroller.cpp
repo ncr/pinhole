@@ -21,7 +21,6 @@ QPointer<TouchpadHold> theHold;
 // `import Pinhole` has them wherever Pinhole's QML loads (Shield's alike).
 void registerScroller() {
     qmlRegisterType<Scroller>("Pinhole", 1, 0, "Scroller");
-    qmlRegisterType<PanelScroller>("Pinhole", 1, 0, "PanelScroller");
 }
 } // namespace
 Q_COREAPP_STARTUP_FUNCTION(registerScroller)
@@ -40,14 +39,6 @@ Scroller::Scroller(QQuickItem *parent) : QQuickItem(parent) {
             }
         });
     }
-}
-
-PanelScroller::PanelScroller(QQuickItem *parent) : Scroller(parent) { tune(8, 0.25, 1500); }
-
-void Scroller::tune(double wheel, double stretch, double bounce) {
-    m_wheel = wheel;
-    m_stretch = stretch;
-    m_y.physics.params().bounceVelocity = m_x.physics.params().bounceVelocity = bounce;
 }
 
 Scroller::~Scroller() {
@@ -120,9 +111,8 @@ void Scroller::syncBounds(Axis &axis) {
                         + m_flickable->property(axis.after).toDouble() - view(axis);
     axis.low = low;
     axis.high = std::max(low, high);
-    // Pulled past an end it gives as the grid does, for the view's length
-    // (a panel's, for a quarter of it).
-    axis.physics.setBounds(axis.low, axis.high, view(axis) * m_stretch);
+    // Pulled past an end it gives as the grid does, for the view's length.
+    axis.physics.setBounds(axis.low, axis.high, view(axis));
 }
 
 bool Scroller::scrolls(const Axis &axis) const {
@@ -352,7 +342,7 @@ void Scroller::take(const QWheelEvent *event) {
             // wheel goes across.
             Axis &axis = across ? m_x : m_y;
             if (scrolls(axis))
-                axis.physics.wheel(t, -(notchAcross ? dy : d) * m_wheel);
+                axis.physics.wheel(t, -(notchAcross ? dy : d) * kGridWheel);
         }
         break;
     }

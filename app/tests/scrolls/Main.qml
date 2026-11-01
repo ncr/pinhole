@@ -36,6 +36,12 @@ PinholePlugin {
                     text: Array.from({ length: 30 }, (_, i) => qsTr("Line %1 of a long text").arg(i + 1)).join("\n")
                 }
             }
+            // Room below the two, so that with either at its end the panel
+            // can still go on down, whatever comes after these settings.
+            Item {
+                width: parent.width
+                height: 1200
+            }
         }
     }
 }

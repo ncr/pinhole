@@ -4,6 +4,7 @@
 #include "selftest.h"
 
 #include "photogrid.h"
+#include "scrollphysics.h"
 #include "viewer.h"
 
 #include <QCoreApplication>
@@ -603,12 +604,21 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 if (!f)
                     return;
                 f->setProperty("contentY", nestedMost(name));
+                // The panel where it can still go down (the plugin has room
+                // below its two): the step before may have left it at its
+                // end, where no notch moves it. And the plugin's a third of
+                // the way down it, still under the pointer once the notch
+                // has moved the panel, for the notch back.
+                const double top = f->mapToItem(scroller()->property("contentItem").value<QQuickItem *>(), QPointF(0, 0)).y();
+                scroller()->setProperty("contentY", std::clamp(top - scroller()->height() / 3, 0.0, most()));
                 const double panel = contentY();
                 wheel(window, centreOf(name), {0, -15}, {0, -120});
                 QTimer::singleShot(700, window, [=] {
                     check(std::abs(nestedY(name) - nestedMost(name)) < 0.5 && contentY() > panel + 5 && untouched().isEmpty(),
-                          QStringLiteral("at the end of the plugin's %1 (%2 of %3), a notch over it moves the panel (%4 px), the grid still")
-                              .arg(what).arg(qRound(nestedY(name))).arg(qRound(nestedMost(name))).arg(qRound(contentY() - panel)));
+                          QStringLiteral("at the end of the plugin's %1 (%2 of %3), a notch over it moves the panel (%4 px, from %5 of %6), "
+                                         "the grid still")
+                              .arg(what).arg(qRound(nestedY(name))).arg(qRound(nestedMost(name))).arg(qRound(contentY() - panel))
+                              .arg(qRound(panel)).arg(qRound(most())));
                 });
             }, 900);
             add(QStringLiteral("a notch back over the plugin's %1 at its end, %2").arg(what, wide), [=] {
@@ -693,9 +703,10 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 }, 1200);
             probe(QStringLiteral("the side panel at its %1, %2").arg(end, wide), panelEverywhere, scrolls(), panelItem);
             // Flung at it from the other end, the fingers going on past it
-            // (they pull it a quarter of its height at most), or let go
-            // short of it to coast there (a bounce of a few lines): back
-            // at the end, the grid still.
+            // (the rubber band gives less than the panel's height, and the
+            // spring carries the most speed, 40000 px/s, some 1240 px on),
+            // or let go short of it to coast there and bounce as the grid
+            // does (more than a few lines): back at the end, the grid still.
             for (const bool far : {true, false}) {
                 add(QStringLiteral("%1 into its %2, %3").arg(far ? "flicks fast" : "a coast", end, wide), [=] {
                     const double start = far ? (down ? 0 : most()) : (down ? most() - 700 : 700);
@@ -720,8 +731,10 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                     QTimer::singleShot(2500, window, [=] {
                         watch->stop();
                         const double y = contentY(), want = down ? most() : 0;
-                        const double allowed = far ? scroller()->height() / 4 + 50 : 60;
-                        check(std::abs(y - want) < 0.5 && *beyond <= allowed && (far || std::abs(lifted - want) > 50)
+                        const ScrollPhysics::Params grid;
+                        const double spring = grid.maxVelocity * grid.springSeconds / (5 * M_E);
+                        const double allowed = far ? scroller()->height() + spring : spring;
+                        check(std::abs(y - want) < 0.5 && *beyond <= allowed && (far || (std::abs(lifted - want) > 50 && *beyond > 60))
                                   && untouched().isEmpty(),
                               QStringLiteral("%1 into the panel's %2 (let go at %3) stops there (%4 of %5), %6 px past it at most "
                                              "(%7 allowed), the grid still")

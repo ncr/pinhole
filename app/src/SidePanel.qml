@@ -1208,7 +1208,7 @@ Item {
         }
         // The wheel and the touchpad anywhere over the panel, its margins
         // too, scroll it as the photos scroll, and stop at its ends.
-        PanelScroller {
+        Scroller {
             anchors.fill: parent
             flickable: scroller
         }

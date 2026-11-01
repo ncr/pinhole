@@ -435,7 +435,7 @@ Item {
             Board { id: touchpadBoard; help: root; tab: "touchpad" }
         }
         // The wheel and the touchpad anywhere on the card scroll it.
-        PanelScroller {
+        Scroller {
             anchors.fill: parent
             flickable: scroller
         }

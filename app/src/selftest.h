@@ -211,12 +211,14 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // window grabbed. Needs photos taken on this day in other years.
 void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 
-// PINHOLE_SELFTEST=physics (selftestphysics.cpp): a plugin's screens scroll
-// and zoom as the grid does. The same wheel notches, a spin, touchpad
-// swipes with their coast, a drag set down, a Mac's momentum and a flick
-// on a flick, given on one clock frame by frame to the grid and to the
-// Year calendar, On this day and Colours' photos of a colour (each a
-// ScrollList or ScrollGrid), from the middle of each: their curves match
+// PINHOLE_SELFTEST=physics (selftestphysics.cpp): the side panel, the help
+// and a plugin's screens scroll and zoom as the grid does. The same wheel
+// notches, a spin, touchpad swipes with their coast, a drag set down, a
+// Mac's momentum and a flick on a flick, given on one clock frame by frame
+// to the grid and to the side panel and the help (each given 4000 px of
+// room before and after, to be compared away from its ends), the Year
+// calendar, On this day and Colours' photos of a colour (each a ScrollList
+// or ScrollGrid), from the middle of each: their curves match
 // within a pixel and a half until one reaches an end. A pinch out, held
 // and let go, on the grid and on Colours' wall (a PinchZoom): the same size
 // under the fingers, and the same easing to where each lands. Offscreen
@@ -245,8 +247,8 @@ void runExamplesSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &l
 // control is, clicks, double clicks and touch taps. The grid neither
 // scrolls, zooms, selects, opens nor drags anything out. And the panel
 // itself: a notch glides it, a swipe moves it and coasts, and spun or
-// flicked into either end it stops there, pulled a quarter of its height
-// past it at most, a coast bouncing a few lines; a click or a touch tap on
+// flicked into either end it stops there, as the grid does: pulled less
+// than its height past it, a coast bouncing on past it; a click or a touch tap on
 // a switch while it coasts stops it and turns nothing. A plugin's settings
 // with a list and a text of their own, each with a Scroller over it (the
 // test plugin app/tests/scrolls, among the plugins: PINHOLE_BUILTIN_PLUGINS

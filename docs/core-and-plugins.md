@@ -1538,6 +1538,9 @@ would mean writing throwaway code.
     or one within it, can still go their way; a raw `Flickable` within
     gets none (the panel scrolls). Plugins get `Scroller` in
     `Pinhole.Plugin`, the start of their views scrolling as the grid does.
+    The side panel, the help, the source picker and the New plugins card
+    have the same `Scroller`, with no gentler tuning of their own: 180 px
+    a notch, the grid's rubber band and its bounce.
   - `PINHOLE_SELFTEST=sourcesoff:` checks what it says: no photo while off
     (at the start and turned off while open), back on 1, and, on a folder
     source, a round after it comes back with `listed_at` unchanged.

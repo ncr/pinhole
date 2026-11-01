@@ -10,8 +10,9 @@ class TouchpadHold;
 class Zoomer;
 
 // The wheel and the touchpad over a Flickable (a plugin's list, grid or
-// scroll area, a panel), scrolling it exactly as the grid scrolls
-// (ScrollPhysics, PhotoGrid::wheelEvent): the content follows the fingers
+// scroll area; Pinhole's side panel, help and pickers), scrolling it
+// exactly as the grid scrolls (ScrollPhysics, PhotoGrid::wheelEvent), with
+// the grid's notch, rubber band and bounce: the content follows the fingers
 // and coasts on when they lift, fingers resting or a click stop it, a
 // wheel's notches glide, and the ends give and spring back. Up and down,
 // and across too where the content is wider than the view: a sideways
@@ -61,11 +62,6 @@ signals:
     void flickableChanged();
 
 protected:
-    // A panel's own (PanelScroller): `wheel` per pixel of a notch, the
-    // share of the view a pull past an end may stretch, the most speed a
-    // bounce carries.
-    void tune(double wheel, double stretch, double bounce);
-
     void componentComplete() override;
     void wheelEvent(QWheelEvent *event) override;
     bool event(QEvent *event) override;
@@ -111,8 +107,6 @@ private:
     QList<QMetaObject::Connection> m_fitting;
     Axis m_y{"contentY", "originY", "contentHeight", "topMargin", "bottomMargin", false, {}};
     Axis m_x{"contentX", "originX", "contentWidth", "leftMargin", "rightMargin", true, {}};
-    double m_wheel = kGridWheel;
-    double m_stretch = 1;
     bool m_ticking = false;
     QElapsedTimer m_frameClock;
     // The buttons whose press stopped it: their moves and release go
@@ -125,14 +119,4 @@ private:
     QPointer<Scroller> m_inner;
     bool m_swipeDecided = true;
     quint64 m_swipeBegan = 0;
-};
-
-// Pinhole's own panels' (the side panel, the help, the source picker): a
-// notch about three lines (120 px), a pull past an end a quarter of the
-// panel at most, a coast into one bouncing some 45 px. A list of settings is
-// not a library to fling; a plugin's screens scroll as the grid does.
-class PanelScroller : public Scroller {
-    Q_OBJECT
-public:
-    explicit PanelScroller(QQuickItem *parent = nullptr);
 };
