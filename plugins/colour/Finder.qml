@@ -156,6 +156,8 @@ Item {
             if (finder.pinhole.coveredBy !== "" && finder.pinhole.coveredBy !== finder.pinhole.id)
                 finder.returning = false
         }
+        // The plugin over it handed a photo over: closed for good.
+        function onDismissed() { finder.close() }
     }
 
     Command {
