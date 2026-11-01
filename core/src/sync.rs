@@ -99,6 +99,11 @@ pub fn catch_up(
     progress: &(dyn Fn(u64, u64) + Sync),
     stop: &(dyn Fn() -> bool + Sync),
 ) -> Result<SyncReport> {
+    // None yet (a library new, or a source that gives none and is listed
+    // every round): listed, with nothing to say of it.
+    if db::meta(conn, "change_token").is_none() {
+        return list(source, conn, progress, stop);
+    }
     match follow(source, conn) {
         Err(e) if e.downcast_ref::<TokenExpired>().is_some() => {
             eprintln!("pinholed: sync: {e}; listing the whole library");

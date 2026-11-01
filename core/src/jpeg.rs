@@ -22,13 +22,15 @@ static FREED: Condvar = Condvar::new();
 
 /// `full` as a JPEG at `out`. Read from stdin, so no name of a folder's
 /// file is taken for ImageMagick's own syntax (`[0]`, `*`, `format:`);
-/// only its first image (an animated GIF's first frame); see-through
-/// parts on white, not black.
+/// only its first image (an animated GIF's first frame); turned upright
+/// as its orientation says (a TIFF's, a PNG's or a WebP's; a HEIC comes
+/// upright from its decoder, which says so); see-through parts on white,
+/// not black.
 pub fn make(full: &Path, out: &Path) -> Result<()> {
     let input = std::fs::File::open(full).with_context(|| format!("opening {}", full.display()))?;
     let _turn = Turn::wait();
     let output = Command::new("magick")
-        .args(["-[0]", "-background", "white", "-alpha", "remove", "-alpha", "off", "-quality", "92"])
+        .args(["-[0]", "-auto-orient", "-background", "white", "-alpha", "remove", "-alpha", "off", "-quality", "92"])
         .arg(format!("jpg:{}", out.display()))
         .stdin(input)
         .stdout(Stdio::null())
@@ -107,6 +109,28 @@ mod tests {
         magick(&["-size", "8x8", "xc:none"], &clear);
         make(&clear, &out).unwrap();
         assert_eq!(identify(&out, "%[fx:round(minima*9)]"), "9");
+
+        // Turned upright: a TIFF that says its top is on the right
+        // (orientation 6), red on the left as stored, comes out portrait
+        // with red at the top, and says it is upright.
+        let tiff = dir.join("sideways.tif");
+        magick(&["-size", "32x48", "xc:red", "-size", "32x48", "xc:blue", "+append", "-orient", "RightTop"], &tiff);
+        assert_eq!(identify(&tiff, "%wx%h %[orientation]"), "64x48 RightTop");
+        make(&tiff, &out).unwrap();
+        assert_eq!(identify(&out, "%wx%h %[fx:round(p{24,4}.r*9)]%[fx:round(p{24,60}.b*9)]"), "48x64 99");
+        assert!(matches!(identify(&out, "%[orientation]").as_str(), "TopLeft" | "Undefined"));
+        // A HEIC turned by its own transform, as an iPhone's portrait is:
+        // its decoder turns it, and it is not turned again.
+        let heic = dir.join("portrait.heic");
+        let png = dir.join("landscape.png");
+        magick(&["-size", "32x48", "xc:red", "-size", "32x48", "xc:blue", "+append"], &png);
+        let encoded = Command::new("heif-enc").args(["-q", "90", "--rotate-cw", "90"]).arg(&png).arg("-o").arg(&heic)
+            .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if encoded {
+            assert_eq!(identify(&heic, "%wx%h"), "48x64");
+            make(&heic, &out).unwrap();
+            assert_eq!(identify(&out, "%wx%h %[fx:round(p{24,4}.r*9)]%[fx:round(p{24,60}.b*9)]"), "48x64 99");
+        }
 
         // A file that is no picture, or none at all: an error.
         let junk = dir.join("junk.heic");

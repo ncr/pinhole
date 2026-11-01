@@ -814,8 +814,10 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   `core/src/jpeg.rs` at normal priority, renames the part, and answers
   `{path, type: "public.jpeg", rendition: "made"}`. `cached_path` maps
   `Jpeg` to the `full` folder with the `-jpeg` suffix.
-- `core/src/jpeg.rs`: `magick -[0] -background white -alpha remove -alpha
-  off -quality 92 jpg:<part>`, the `full` on stdin. Stdin, because a
+- `core/src/jpeg.rs`: `magick -[0] -auto-orient -background white -alpha
+  remove -alpha off -quality 92 jpg:<part>`, the `full` on stdin
+  (`-auto-orient`: a TIFF, PNG or WebP with an orientation comes out
+  upright; a HEIC comes upright from libheif already, and says so). Stdin, because a
   folder's file name can hold what ImageMagick reads as its own syntax
   (`%d` and `%o` are a frame's number: "50%off.jpg" is "500ff.jpg" to
   it; ImageMagick 7.1 reads `[1]` and `*` in the name of a file that is

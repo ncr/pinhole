@@ -436,6 +436,7 @@ fn a_folder_through_a_provider_listed_with_thumbnails_followed_and_fetched_from(
 
     // Changes: it pushes them, and a round brings them in.
     window.forget();
+    let listed_at = meta(&library, "listed_at");
     let before = ids(&library);
     for gone in ["00/IMG_0000.jpg", "00/IMG_0001.jpg", "01/IMG_0150.jpg"] {
         std::fs::remove_file(folder.join(gone)).unwrap();
@@ -453,8 +454,10 @@ fn a_folder_through_a_provider_listed_with_thumbnails_followed_and_fetched_from(
     assert_eq!(after.len(), before.len() + 2);
     let new_thumb: String = db(&library).query_row("SELECT thumb_path FROM assets WHERE id = '02/IMG_0299.jpg'", [], |r| r.get(0)).unwrap();
     assert_ne!(old_thumb, new_thumb, "an edit has a new thumbnail");
-    // No listing for it, but the first: the change feed.
-    assert_eq!(scratch.logged().matches("listing the whole library").count(), 1, "{}", scratch.logged());
+    // No listing for it, but the first: the change feed. Nor was a
+    // token said to be refused: there was none before the first.
+    assert_eq!(meta(&library, "listed_at"), listed_at);
+    assert!(!scratch.logged().contains("no longer accepted"), "{}", scratch.logged());
 
     // Added through it: copied in by the provider, which says how it went.
     let dropped = scratch.root.join("dropped.jpg");
@@ -862,4 +865,9 @@ fn fifty_thousand_assets_through_the_protocol() {
         n as f64 / took.as_secs_f64(),
         std::fs::metadata(library.join("library.sqlite")).map(|m| m.len() / 1024).unwrap_or(0)
     );
+    // It gives no change token: listed again each round, with nothing
+    // said of a token that never was.
+    let listed_at = meta(&library, "listed_at");
+    assert!(until(60, || meta(&library, "listed_at") != listed_at), "not listed again");
+    assert!(!scratch.logged().contains("change token"), "{}", scratch.logged());
 }
