@@ -5,7 +5,7 @@ import Pinhole.Plugin
 // the whole window. A photo opens full window, and closing it comes back
 // here; "In the grid" shows a year's where it is among the rest. Photos
 // are library positions: the years are counted again, at once, whenever
-// the library is read again.
+// the library is read again while they show, and on opening.
 Item {
     id: days
     required property var plugin
@@ -56,6 +56,18 @@ Item {
         })
         return list
     }
+    // The list's model is how many lines there are, each line taking its
+    // own from `rows`: new years of as many lines leave the list where it
+    // is, and more or fewer keep where it was scrolled to.
+    property int lineCount: 0
+    onRowsChanged: {
+        if (rows.length === lineCount)
+            return
+        const y = list.contentY
+        lineCount = rows.length
+        list.forceLayout()
+        list.contentY = Math.max(list.originY, Math.min(y, list.originY + list.contentHeight - list.height))
+    }
     function rowOf(at) {
         const place = placeOf(at)
         let row = 0
@@ -65,6 +77,7 @@ Item {
     }
 
     function open() {
+        plugin.fresh()
         cursor = 0
         shown = true
         list.positionViewAtBeginning()
@@ -89,9 +102,11 @@ Item {
         target: days.pinhole.viewer
         function onOpenChanged() {
             if (!days.pinhole.viewer.open && days.away) {
-                days.away = false
+                // Its lines kept meanwhile, the list where it was.
+                days.plugin.fresh()
                 // Not while another plugin is over the photos.
                 days.shown = days.pinhole.coveredBy === ""
+                days.away = false
                 days.keepInView()
             }
         }
@@ -104,10 +119,29 @@ Item {
             if (days.pinhole.coveredBy !== "" && days.pinhole.coveredBy !== days.pinhole.id)
                 days.away = false
         }
+        // The plugin over it handed a photo over: closed for good.
+        function onDismissed() { days.close() }
     }
-    // The years changed under it (the library read again, a setting, or
-    // midnight).
-    onTotalChanged: cursor = Math.min(cursor, Math.max(0, total - 1))
+    // The years changed under it (the library read again, a setting,
+    // photos hidden, or midnight): the cursor stays on its photo, by its
+    // id, if it is still among them.
+    property string cursorId: ""
+    onCursorChanged: cursorId = total > 0 ? pinhole.library.item(photoAt(cursor)).id ?? "" : ""
+    onYearsChanged: {
+        // Counted here: `starts` and `total` may not have caught up yet.
+        const at = cursorId !== "" ? pinhole.library.indexOf(cursorId) : -1
+        let k = -1, n = 0
+        for (const year of years) {
+            const i = at >= 0 && k < 0 ? year.photos.indexOf(at) : -1
+            if (i >= 0)
+                k = n + i
+            n += year.photos.length
+        }
+        const id = cursorId
+        cursor = k >= 0 ? k : Math.min(cursor, Math.max(0, n - 1))
+        if (k >= 0)
+            cursorId = id
+    }
 
     // The keys: along a year's rows, and from one year to the next.
     function move(dx, dy) {
@@ -259,15 +293,16 @@ Item {
         anchors.topMargin: 10
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: days.rows
+        model: days.lineCount
         cacheBuffer: Math.max(0, height)
         footer: Item { height: 16 }
         delegate: Item {
             id: line
-            required property var modelData
-            readonly property var year: days.years[modelData.s]
-            readonly property bool heading: modelData.k < 0
-            readonly property real above: heading && modelData.s > 0 ? Math.round(theme.fontSize * 1.4) : 0
+            required property int index
+            readonly property var place: days.rows[index] ?? { s: 0, k: -1 }
+            readonly property var year: days.years[place.s]
+            readonly property bool heading: place.k < 0
+            readonly property real above: heading && place.s > 0 ? Math.round(theme.fontSize * 1.4) : 0
             width: list.width
             height: heading ? above + inGrid.height + 8 : days.cell + days.gap
 
@@ -296,12 +331,12 @@ Item {
                 visible: !line.heading
                 spacing: days.gap
                 Repeater {
-                    model: line.heading || !line.year ? [] : line.year.photos.slice(line.modelData.k, line.modelData.k + days.columns)
+                    model: line.heading || !line.year ? [] : line.year.photos.slice(line.place.k, line.place.k + days.columns)
                     delegate: Item {
                         id: tile
                         required property int modelData
                         required property int index
-                        readonly property int at: days.starts[line.modelData.s] + line.modelData.k + index
+                        readonly property int at: days.starts[line.place.s] + line.place.k + index
                         width: days.cell
                         height: days.cell
                         Rectangle {

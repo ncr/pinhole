@@ -5,12 +5,14 @@ import "../screenshots/Find.js" as Find
 
 // On this day: the photos taken on today's date in earlier years, a year
 // at a time (Days.qml), from a button in the grid that shows only when
-// there are any. The library is read into its days whenever it is read
-// again, at once and whole (its columns of days and of videos, not a
-// photo at a time), before anything can be opened by a position gone or
-// of another library; today's photos, a new day's at midnight and the
-// settings' are then a look-up. What the grid hides is left out, as it
-// is there.
+// there are any. The library is read into its days whole (its columns of
+// days and of videos, not a photo at a time): at once when it is read
+// again while the years show, else ten seconds later, for the button's
+// count, the changes meanwhile with it (a library being built changes
+// every few seconds), and at once on opening, before anything can be
+// opened by a position gone or of another library. Today's photos, a new
+// day's at midnight and the settings' are then a look-up. What the grid
+// hides is left out, as it is there.
 PinholePlugin {
     id: plugin
     covering: days.shown
@@ -36,6 +38,9 @@ PinholePlugin {
     property var isVideo: []
     property int firstYear: 0
     property bool indexed: false
+    // The library read again since: the days are read again by `reindex`,
+    // or at once by fresh() when they are needed.
+    property bool stale: false
     // The screenshots' ids once found, and their positions now.
     property var shotIds: []
     property var shotAt: ({})
@@ -45,12 +50,15 @@ PinholePlugin {
     // [{ year, ago, label, exact, photos }], each year's photos (their
     // positions) in the order they were taken. `label` is the years they
     // were taken in: "2025", or "2025–2026" for days around New Year;
-    // `exact` the very date that year.
+    // `exact` today's very date that year (yyyymmdd), 0 for a year without
+    // it (the 29th of February).
     property var years: []
     property string yearsKey: ""
 
     function dayKey(year, month, day) { return year * 10000 + (month + 1) * 100 + day }
     function index() {
+        stale = false
+        reindex.stop()
         const days = pinhole.library.field("day")
         const map = {}
         let first = 0
@@ -117,8 +125,26 @@ PinholePlugin {
         shotAt = at
     }
 
+    // The days as the library is now, for what is about to use them.
+    function fresh() {
+        if (stale)
+            index()
+    }
+    // Read again ten seconds after the first change: those that come
+    // meanwhile wait with it.
+    Timer {
+        id: reindex
+        interval: 10000
+        onTriggered: plugin.index()
+    }
+
+    // Screenshots hidden from the grid (Screenshots' hide mode): they stay
+    // out here too, whatever the setting says.
+    property bool shotsHidden: false
+
     function recount() {
-        if (!indexed)
+        // Old positions: counted once the days are read again.
+        if (!indexed || stale)
             return
         const now = new Date()
         today = now
@@ -129,12 +155,14 @@ PinholePlugin {
         // What the grid hides (Screenshots' hide mode, say) is left out,
         // as the grid leaves it out.
         const hiding = pinhole.hiddenCount > 0
+        shotsHidden = hiding && shotIds.some(id => pinhole.isHidden(id))
         const list = []
         for (let year = thisYear - 1; firstYear > 0 && year >= firstYear; --year) {
             // This date that year, the 29th of February the 28th when
             // there is none; and the real days around it.
             let centre = new Date(year, month, date)
-            if (centre.getMonth() !== month)
+            const real = centre.getMonth() === month
+            if (!real)
                 centre = new Date(year, month + 1, 0)
             const keys = []
             for (let d = -span; d <= span; ++d) {
@@ -160,7 +188,7 @@ PinholePlugin {
                 year: year,
                 ago: thisYear - year,
                 label: from === to ? String(from) : from + "–" + to,
-                exact: dayKey(year, centre.getMonth(), centre.getDate()),
+                exact: real ? dayKey(year, month, date) : 0,
                 photos: photos
             })
         }
@@ -173,11 +201,20 @@ PinholePlugin {
         years = list
     }
 
-    // Read again: the positions moved, so the days are read again too,
-    // at once, before anything can be opened by an old one.
+    // Read again: the positions moved, so the days are read again too, at
+    // once while the years show, before anything can be opened by an old
+    // one; else within ten seconds, for the button.
     Connections {
         target: pinhole.library
-        function onChanged() { plugin.index() }
+        function onChanged() {
+            if (days.shown) {
+                plugin.index()
+            } else {
+                plugin.stale = true
+                if (!reindex.running)
+                    reindex.start()
+            }
+        }
     }
     // Photos hidden from the grid, or shown again: counted again. After the
     // library's own change, when it is read again too (the grid's comes
@@ -216,13 +253,14 @@ PinholePlugin {
     help: [["D", qsTr("On this day, in earlier years")]]
 
     // A real year of one's own: the latest with photos of this day, a
-    // photo of the very date if it has one.
+    // photo of the very date if it has one (on the 29th of February, a
+    // year with one; the 28th in another is around it).
     tourReady: indexed && years.length > 0
     readonly property var tourPhoto: {
         if (years.length === 0)
             return null
         const year = years[0]
-        const exact = year.photos.find(i => dayOf[i] === year.exact)
+        const exact = year.exact !== 0 ? year.photos.find(i => dayOf[i] === year.exact) : undefined
         return { photo: exact || year.photos[0], exact: exact !== undefined, ago: year.ago }
     }
     tour: [
@@ -232,7 +270,10 @@ PinholePlugin {
                 : (tourPhoto.exact ? qsTr("Taken %n years ago today, in %1.", "", tourPhoto.ago)
                                    : qsTr("Taken around this day %n years ago, in %1.", "", tourPhoto.ago))
                   .arg(Math.floor(dayOf[tourPhoto.photo] / 10000)),
-            photo: () => tourPhoto ? tourPhoto.photo : -1
+            photo: () => {
+                plugin.fresh()
+                return tourPhoto ? tourPhoto.photo : -1
+            }
         },
         {
             title: qsTr("Every year"),
@@ -248,6 +289,7 @@ PinholePlugin {
 
     settings: Component {
         Column {
+            Component.onCompleted: plugin.fresh()
             width: parent ? parent.width : 0
             spacing: 6
             UiText {
@@ -276,21 +318,35 @@ PinholePlugin {
             Repeater {
                 model: [["videos", qsTr("Videos")], ["screenshots", qsTr("Screenshots")]]
                 delegate: Item {
+                    id: row
                     required property var modelData
+                    // Screenshots hidden from the grid stay out whatever
+                    // this says.
+                    readonly property bool held: modelData[0] === "screenshots" && plugin.shotsHidden
                     width: parent.width
                     height: toggle.implicitHeight
                     UiText {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData[1]
-                        color: theme.foreground
+                        text: row.modelData[1]
+                        color: row.held ? theme.darkForeground : theme.foreground
                     }
                     Toggle {
                         id: toggle
                         anchors.right: parent.right
-                        checked: plugin[modelData[0]]
-                        onToggled: plugin.set(modelData[0], !checked)
+                        enabled: !row.held
+                        opacity: row.held ? 0.4 : 1
+                        checked: plugin[row.modelData[0]] && !row.held
+                        onToggled: if (!row.held) plugin.set(row.modelData[0], !checked)
                     }
                 }
+            }
+            UiText {
+                visible: plugin.shotsHidden
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: theme.darkForeground
+                font.pixelSize: Math.round(theme.fontSize * 0.857)
+                text: qsTr("Screenshots are hidden from the grid (Screenshots, ⇧S), so not here either.")
             }
         }
     }
