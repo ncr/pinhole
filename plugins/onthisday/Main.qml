@@ -93,6 +93,15 @@ PinholePlugin {
     function findShots() {
         if (finding)
             finding.cancel()
+        finding = null
+        // No photos, no screenshots: and with no source shown (a first
+        // run, every source's plugin off) no library to ask either.
+        if (pinhole.library.count === 0) {
+            shotIds = []
+            placeShots()
+            recount()
+            return
+        }
         const library = pinhole.library.dir + "/library.sqlite"
         const tables = pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery])
         finding = tables
