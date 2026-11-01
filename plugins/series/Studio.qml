@@ -194,9 +194,12 @@ Item {
                     if (studio.made === done)
                         studio.made = Object.assign({}, done, { copy: how })
                 }
+                // Another copy asked for meanwhile has the clipboard: this
+                // one only kept.
                 studio.pinhole.copyFile(file).then(() => copied("copied"), error => {
-                    copied("failed")
-                    studio.pinhole.warn(error)
+                    copied(error.code === "cancelled" ? "kept" : "failed")
+                    if (error.code !== "cancelled")
+                        studio.pinhole.warn(error)
                 })
             }, error => {
                 studio.making = ""
@@ -212,10 +215,13 @@ Item {
     // Pictures/Pinhole/.backgrounds, where no folder source shows it and no
     // cache clean takes it, and the one before remembered with its theme.
     // Ctrl+Z puts that one back, as the Background plugin's does.
+    // Offered only where that script is: not when Series is a copy among
+    // one's own plugins, or Background is not installed.
     property bool settingBackground: false
-    readonly property string backgroundScript: pinhole.dir + "/../background/background"
+    readonly property string backgroundScript: pinhole.exists(pinhole.dir + "/../background/background")
+                                               ? pinhole.dir + "/../background/background" : ""
     function makeBackground() {
-        if (!made || settingBackground)
+        if (!made || settingBackground || backgroundScript === "")
             return
         let kept = "", before = null
         settingBackground = true
@@ -491,6 +497,7 @@ Item {
         keys: ["B"]
         keyLayer: "plugin"
         when: studio.shown && studio.made !== null && studio.made.path.endsWith(".mp4") && !studio.settingBackground
+              && studio.backgroundScript !== ""
         onTriggered: studio.makeBackground()
     }
 
@@ -679,7 +686,7 @@ Item {
             action: showCommand
         }
         ShellButton {
-            visible: studio.made !== null && studio.made.path.endsWith(".mp4")
+            visible: studio.made !== null && studio.made.path.endsWith(".mp4") && studio.backgroundScript !== ""
             floating: true
             text: qsTr("Background")
             busy: studio.settingBackground
