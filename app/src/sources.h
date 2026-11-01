@@ -68,6 +68,9 @@ public:
     Q_INVOKABLE void remove(const QString &id);
     // Look again for what could be added.
     Q_INVOKABLE void discover();
+    // The kinds of the sources added, whether their plugins are on or not
+    // (the settings'): the window says which plugin to turn on for them.
+    Q_INVOKABLE QStringList addedKinds() const;
 
     // What a kind's plugin asks (PluginSources), answered with the
     // service's result, or its error code and message.

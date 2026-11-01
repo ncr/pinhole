@@ -86,7 +86,9 @@ Item {
     function complain(text) {
         complaint.active = true
         complaint.item.say(text)
+        complained()
     }
+    signal complained()
     function hush() {
         if (complaint.item)
             complaint.item.hush()

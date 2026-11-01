@@ -167,7 +167,9 @@ impl Kinds {
     }
 
     /// Which are on, from the plugins' switches: a built-in kind unless
-    /// its plugin's is `false`; a provider's of a built-in plugin the same,
+    /// its plugin's is `false` (only when it is `true` while a plugin of
+    /// your own has that plugin's id: your copy of it, off in the window
+    /// until turned on); a provider's of a built-in plugin the same,
     /// and of a plugin of your own only when its switch is `true`, as the
     /// window has them. The providers are looked for again first: those of
     /// a plugin gone, or whose manifest changed, are stopped. Whether that
@@ -200,8 +202,16 @@ impl Kinds {
             *providers = next;
         }
         let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
-        let mut on: HashSet<String> =
-            self.builtin.iter().filter(|k| switches.get(k.plugin()) != Some(&false)).map(|k| k.kind().to_owned()).collect();
+        let copies = self.places.as_ref().map(|(places, _)| crate::plugins::personal_ids(places)).unwrap_or_default();
+        let mut on: HashSet<String> = self
+            .builtin
+            .iter()
+            .filter(|k| {
+                let switch = switches.get(k.plugin()).copied();
+                if copies.contains(k.plugin()) { switch == Some(true) } else { switch != Some(false) }
+            })
+            .map(|k| k.kind().to_owned())
+            .collect();
         for p in providers.iter() {
             let switch = switches.get(&p.provided().plugin).copied();
             let turned_on = if p.provided().builtin { switch != Some(false) } else { switch == Some(true) };

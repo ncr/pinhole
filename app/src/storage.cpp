@@ -93,6 +93,22 @@ QJsonObject Storage::configuredSource() {
     return {{"kind", "icloud"}, {"name", "iCloud"}, {"needs_sign_in", true}, {"account", account}};
 }
 
+QStringList Storage::sourceKinds() {
+    const QJsonObject all = settings();
+    QStringList kinds;
+    if (all.contains("sources")) {
+        for (const QJsonValue &entry : all.value("sources").toArray())
+            kinds.append(entry.toObject().value("kind").toString());
+    } else if (!accounts().isEmpty()) {
+        kinds.append(QStringLiteral("icloud"));
+    }
+    if (all.value("source").isObject())
+        kinds.append(all.value("source").toObject().value("kind").toString());
+    kinds.removeAll(QString());
+    kinds.removeDuplicates();
+    return kinds;
+}
+
 QStringList Storage::sourceIds() {
     // As the service reads them (storage::resolve): those added, else the
     // Apple IDs signed in to and the folder shown; and the one shown.

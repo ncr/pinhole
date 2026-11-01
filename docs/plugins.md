@@ -32,7 +32,12 @@ pinhole plugin check me.favourites
 looks it over as Pinhole would load it, without a window: the manifest,
 every QML file it uses and the JavaScript they import, its translations.
 It takes a folder too (`pinhole plugin check .`), and exits 1 if anything is
-wrong, for an editor or a script to run on save. It warns of anything the
+wrong, for an editor or a script to run on save. A manifest's `sources`
+are checked as pinholed takes them (a provider's kind namespaced by the
+plugin's id, its program in the folder and runnable, `accepts` and
+`rounds_every_secs` as [source-providers.md](source-providers.md) says),
+so what pinholed would refuse is said here, and under the plugin in the
+side panel. It warns of anything the
 plugin uses of an API newer than its manifest asks for, and of a file named
 as one of another plugin's or of Pinhole's own (see Translations).
 
@@ -320,7 +325,8 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out (as assigning `null` to one does: it reads `undefined`, and `settings.keys()` leaves it out) |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting: Series' series made and taken apart by hand, Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
-| `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
+| `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
+| `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
@@ -421,4 +427,10 @@ check` warns of one that is not.
 ### Trust
 
 A plugin runs inside Pinhole with all of Pinhole's rights, as Omarchy's do:
-only turn on one whose code you would run yourself.
+only turn on one whose code you would run yourself. Under the switch of one
+of your own that brings a source, the side panel says so: "It reads your
+photos, and the accounts you sign in to with it. Turn it on only if you
+trust it." A copy of iCloud's plugin in your folder (the same id) replaces
+its QML only, never pinholed's Rust, and its row says: "Your own copy of
+iCloud: it sees the password you type." It is off, iCloud's sources with
+it, until you turn it on.

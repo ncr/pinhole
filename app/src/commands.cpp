@@ -250,6 +250,24 @@ private:
     }
 
     void signIn(QString appleId) {
+        // iCloud is a plugin's (pinhole.icloud): turned off, there is
+        // nothing to sign in to, and no password is asked for.
+        // The switches as plugins.json says them now, edited by hand too
+        // (the service reads it again); then whether iCloud's is on. (A
+        // service from before kinds says neither: it is asked as before.)
+        m_service.call("plugins_changed", {}, [this, appleId](bool, const QJsonObject &, const QString &) {
+            m_service.call("kinds", {}, [this, appleId](bool, const QJsonObject &kinds, const QString &) {
+                for (const QJsonValue &kind : kinds.value("kinds").toArray())
+                    if (kind.toObject().value("kind").toString() == QLatin1String("icloud") && !kind.toObject().value("on").toBool()) {
+                        note("pinhole: iCloud is turned off. Turn it on in Pinhole's side panel (Tab), under Plugins, then sign in.");
+                        return done(1);
+                    }
+                askAppleId(appleId);
+            });
+        });
+    }
+
+    void askAppleId(QString appleId) {
         if (appleId.isEmpty())
             appleId = ask("Apple ID: ");
         if (appleId.isEmpty())
@@ -261,7 +279,7 @@ private:
             stem.remove(notWord);
             if (found.value("icloudpd").toArray().contains(stem)) {
                 note(QStringLiteral("Taking over icloudpd's session for %1").arg(appleId));
-                m_service.call("sign_in", {{"apple_id", appleId}}, [this, appleId](bool ok, const QJsonObject &result, const QString &code) {
+                m_service.call("sign_in", {{"kind", "icloud"}, {"apple_id", appleId}}, [this, appleId](bool ok, const QJsonObject &result, const QString &code) {
                     if (ok)
                         return signedIn(appleId, result);
                     if (code != QLatin1String("needs_sign_in"))
@@ -279,7 +297,7 @@ private:
         const QString password = ask("Password: ", true);
         if (password.isEmpty())
             return fail("bad_request", "no password");
-        call("sign_in", {{"apple_id", appleId}, {"password", password}},
+        call("sign_in", {{"kind", "icloud"}, {"apple_id", appleId}, {"password", password}},
              [this, appleId](const QJsonObject &result) { signedIn(appleId, result); });
     }
 
@@ -289,7 +307,7 @@ private:
             return done();
         }
         const QString code = ask("The six-digit code Apple sent to your devices: ");
-        m_service.call("submit_code", {{"apple_id", appleId}, {"code", code}},
+        m_service.call("submit_code", {{"kind", "icloud"}, {"apple_id", appleId}, {"code", code}},
                        [this, appleId, tries](bool ok, const QJsonObject &result, const QString &error) {
             if (ok)
                 return signedIn(appleId, result);

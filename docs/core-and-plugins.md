@@ -1283,6 +1283,9 @@ API above).
     than the chip at the window's foot; with no heart showing (Ctrl Z in
     the grid), at the foot (`notify`). In select mode the undo notice of
     the step that failed covers it, as it covered the foot's chip on main.
+    (B7: no longer. The step goes as the failure comes, `pinhole.dropStep`,
+    and the notice with it; a complaint over select mode's bar puts the
+    notice away; and one for a photo no longer shown goes to the foot.)
   - F is in the help under the plugin, Favourites, as Live's L moved in
     B3.
   - With the plugin off there is no heart, no F and no mark. The Photo
@@ -1471,6 +1474,48 @@ would mean writing throwaway code.
   - the window opened with `plugins.json` from the baseline copy leaves it
     byte for byte the same;
   - `pinhole plugin check` on the A4 test source's plugin folder.
+
+- As built:
+  - The empty states are the window's `sourcesOff`: the window is given no
+    `--library`, the service lists no source, and either the plugins of
+    the sources added (the settings', `Sources::addedKinds`, their owners
+    from the `kinds` event) are off, or no plugin that brings sources is
+    on. Its buttons are each built-in source plugin that is off, those of
+    the sources added first, on 1 and 2 (the grid's keys, as 1–9 show
+    sources only when there are some), and a line for the side panel.
+    Tab still opens it. Dropping files is off meanwhile.
+  - Under a source plugin's switch: the line when it is off; the trust
+    line, in the theme's yellow, for one of your own; for your own copy of
+    a built-in one, "Your own copy of %1".
+  - pinholed agrees: a built-in kind whose plugin has your own copy (a
+    personal plugin of its id, `plugins::personal_ids`) is on only when
+    switched on, as the window has a plugin of your own
+    (`a_built_in_kind_whose_plugin_is_your_own_copy_is_on_only_when_turned_on`).
+  - `manifestProblem` (so `pinhole plugin check` and the side panel) checks
+    a provider's source as pinholed does: `api` 3, the kind's letters, its
+    namespace, not pinholed's own (a built-in plugin's kind with no
+    provider), the program in the folder and runnable, `needs_sign_in`,
+    `accepts`, `rounds_every_secs`; a kind named twice. Which plugin of
+    several owns a kind (the longest id) stays pinholed's alone.
+  - `pinhole sign-in` sends `plugins_changed` (the file as it is now,
+    edited by hand too), then asks `kinds`: iCloud off, it says "iCloud is
+    turned off" and asks for no password. It sends `kind: "icloud"`.
+  - Every plugin's catalog is read, on or off (`updateCatalogs`), so a
+    plugin turned off (iCloud) is named and described in the language under
+    its switch, and turning one on or off no longer reads every catalog
+    again.
+  - Folded in from the window's queue: a damaged file (`unreadable`) is said
+    so in the viewer and not asked for again every 30 s (B6's commit);
+    Favourites drops a refused step (`pinhole.dropStep`, `did` giving the
+    step's number), and says why under the heart only while what it was
+    pressed on still shows, else at the foot; select mode's undo notice
+    gives way to a complaint over the bar.
+  - Tests as built: `aProvidersSourceIsCheckedAsPinholedTakesIt`,
+    `aStepDroppedIsAsIfNeverDone`, the Favourites test's dropped steps and
+    another photo shown; the Rust test above; `PINHOLE_SELFTEST=sourcesoff:`
+    on a reflink copy of Jacek's library with a scratch pinholed of its own
+    (no Apple session, a stand-in sign-in provider): iCloud off, the card,
+    Turn on iCloud (1), and the 49,079 photos back with no listing.
 
 ### What can run side by side
 

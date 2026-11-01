@@ -5,16 +5,31 @@ namespace {
 constexpr int Most = 200;
 }
 
-void History::did(const QString &owner, const QString &name, Step undo, Step redo) {
+quint64 History::did(const QString &owner, const QString &name, Step undo, Step redo) {
     if (m_replaying)
-        return;
+        return 0;
     m_steps.erase(m_steps.begin() + m_done, m_steps.end());
-    m_steps.push_back({owner, name, std::move(undo), std::move(redo)});
+    m_steps.push_back({owner, name, std::move(undo), std::move(redo), ++m_numbered});
     if (int(m_steps.size()) > Most)
         m_steps.erase(m_steps.begin());
     m_done = int(m_steps.size());
     emit changed();
     emit done(name);
+    return m_numbered;
+}
+
+void History::drop(const QString &owner, quint64 step) {
+    for (int i = 0; i < int(m_steps.size()); ++i) {
+        if (m_steps[i].number != step || m_steps[i].owner != owner || step == 0)
+            continue;
+        const QString name = m_steps[i].name;
+        m_steps.erase(m_steps.begin() + i);
+        if (i < m_done)
+            --m_done;
+        emit changed();
+        emit dropped(name);
+        return;
+    }
 }
 
 void History::undo() {

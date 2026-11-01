@@ -43,6 +43,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <ctime>
 
@@ -1059,10 +1060,15 @@ bool PluginHost::setSetting(const QString &key, const QVariant &value) {
     return m_plugins->setSettingOf(m_id, key, QJsonValue::fromVariant(value));
 }
 
-void PluginHost::did(const QString &name, const QJSValue &undo, const QJSValue &redo) {
+double PluginHost::did(const QString &name, const QJSValue &undo, const QJSValue &redo) {
     if (!undo.isCallable() || !redo.isCallable())
-        return;
-    m_plugins->history()->did(m_id, name, [this, undo] { call(undo); }, [this, redo] { call(redo); });
+        return 0;
+    return double(m_plugins->history()->did(m_id, name, [this, undo] { call(undo); }, [this, redo] { call(redo); }));
+}
+
+void PluginHost::dropStep(double step) {
+    if (step > 0)
+        m_plugins->history()->drop(m_id, quint64(step));
 }
 
 void PluginHost::warn(const QJSValue &error) {
@@ -1683,9 +1689,12 @@ void Plugins::setToured(const QString &id) {
 }
 
 void Plugins::updateCatalogs() {
+    // Those off too: the side panel names one in the language, and says
+    // what it does, whether it is on or not (iCloud turned off, one's own
+    // not yet turned on).
     QList<std::pair<QString, QString>> catalogs;
     for (const auto &p : m_plugins)
-        if (p->error.isEmpty() && enabled(*p))
+        if (p->error.isEmpty())
             catalogs.append({p->id, p->dir});
     if (m_translator)
         m_translator->setPluginCatalogs(catalogs);
@@ -1998,7 +2007,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
         {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
         {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
-        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}};
+        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2024,6 +2033,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"PluginSource", QRegularExpression(QStringLiteral("\\bPluginSource\\s*\\{"))},
         {"pinhole.sources", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*sources\\b"))},
         {"pinhole.chooseFolder", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*chooseFolder\\b"))},
+        {"pinhole.dropStep", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*dropStep\\b"))},
         // pinhole.library's, or by a name of the plugin's for it.
         {"library.revision", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*revision\\b"))},
         {"an action's order, hint, busyDelay, textColour or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
@@ -2193,29 +2203,72 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
         return {};
     if (!declared.isArray())
         return tr("manifest.json's \"sources\" is a list");
-    // Pinhole's own plugins' folder, and the kinds of its plugin of this id.
+    // Pinhole's own plugins' folder; the kinds its plugins bring with no
+    // provider (pinholed's own); and those of its plugin of this id.
     const QString builtIn = QDir(builtInDir()).canonicalPath();
     const bool own = !builtIn.isEmpty() && QDir(dir).canonicalPath().startsWith(builtIn + '/');
-    QStringList ownKinds;
-    if (!own)
-        for (const QFileInfo &each : QDir(builtInDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            QFile file(each.filePath() + "/manifest.json");
-            if (!file.open(QIODevice::ReadOnly))
-                continue;
-            const QJsonObject theirs = QJsonDocument::fromJson(file.readAll()).object();
-            if (theirs.value("id").toString(each.fileName()) == id)
-                ownKinds = sourceKinds(theirs);
-        }
+    QStringList ownKinds, pinholeds;
+    for (const QFileInfo &each : QDir(builtInDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        QFile file(each.filePath() + "/manifest.json");
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject theirs = QJsonDocument::fromJson(file.readAll()).object();
+        for (const QJsonValue &source : theirs.value("sources").toArray())
+            if (!source.toObject().contains("provider"))
+                pinholeds << source.toObject().value("kind").toString();
+        if (theirs.value("id").toString(each.fileName()) == id)
+            ownKinds = sourceKinds(theirs);
+    }
+    static const QRegularExpression named(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"));
+    static const QRegularExpression extension(QStringLiteral("^[a-z0-9]{1,16}$"));
+    QStringList seen;
     for (const QJsonValue &each : declared.toArray()) {
         const QJsonObject source = each.toObject();
         const QString kind = source.value("kind").toString();
         if (!each.isObject() || kind.isEmpty())
             return tr("each of manifest.json's \"sources\" names its \"kind\"");
+        if (seen.contains(kind))
+            return tr("\"sources\": %1 is named twice").arg(kind);
+        seen << kind;
         // A kind with no provider is one of pinholed's own (iCloud's,
         // folders'): only Pinhole's own plugin of it brings it, or one's own
         // copy of that plugin.
-        if (!source.contains("provider") && !own && !ownKinds.contains(kind))
-            return tr("\"sources\": %1 is pinholed's own kind, which only Pinhole's own plugin of it brings").arg(kind);
+        if (!source.contains("provider")) {
+            if (!own && !ownKinds.contains(kind))
+                return tr("\"sources\": %1 is pinholed's own kind, which only Pinhole's own plugin of it brings").arg(kind);
+            continue;
+        }
+        // One of its own, run by its provider: as pinholed takes it
+        // (docs/source-providers.md), so what it would refuse is said here.
+        const auto wrong = [&kind](const QString &why) { return tr("\"sources\": %1: %2").arg(kind, why); };
+        if (manifest.value("api").toInt(1) < 3)
+            return wrong(tr("a source needs \"api\": 3"));
+        if (!named.match(kind).hasMatch())
+            return wrong(tr("a kind is letters, digits, '.', '_' and '-'"));
+        if (kind != id && !kind.startsWith(id + '.'))
+            return wrong(tr("its kind must be the plugin's id, %1, or start with %1 and a dot").arg(id));
+        if (pinholeds.contains(kind))
+            return wrong(tr("that kind is pinholed's own"));
+        const QString provider = source.value("provider").toString();
+        if (!safeEntry(provider))
+            return wrong(tr("\"provider\" is a path in the plugin's folder, without \"..\""));
+        if (const QFileInfo program(dir + '/' + provider); !program.isFile() || !program.isExecutable())
+            return wrong(tr("%1 is not a program in the plugin's folder (a file it can run)").arg(provider));
+        if (source.contains("needs_sign_in") && !source.value("needs_sign_in").isBool())
+            return wrong(tr("\"needs_sign_in\" is true or false"));
+        if (source.contains("accepts")) {
+            const QJsonValue accepts = source.value("accepts");
+            bool fine = accepts.isArray();
+            for (const QJsonValue &e : accepts.toArray())
+                fine = fine && extension.match(e.toString()).hasMatch();
+            if (!fine)
+                return wrong(tr("\"accepts\" is a list of extensions in lower case, without the dot"));
+        }
+        if (source.contains("rounds_every_secs")) {
+            const double every = source.value("rounds_every_secs").toDouble(-1);
+            if (every != std::floor(every) || every < 5 || every > 86400)
+                return wrong(tr("\"rounds_every_secs\" is a whole number from 5 to 86400"));
+        }
     }
     return {};
 }

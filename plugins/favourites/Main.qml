@@ -44,9 +44,12 @@ PinholePlugin {
     readonly property bool tickedAreFavourites: (pinhole.library.revision, pinhole.selectionCount > 0
                                                  && allFavourites(pinhole.selection()))
 
-    // All of them favourites, or none when they all are; a step to undo.
-    // Undone on the library it was done in only (another's photos may have
-    // the same ids; the steps go with it anyway).
+    // All of them favourites, or none when they all are; a step to undo,
+    // at once, so Ctrl Z straight after works however slow the source is.
+    // Refused, the photos are put back and the step goes again: Ctrl Z then
+    // undoes what was done before it. Undone on the library it was done in
+    // only (another's photos may have the same ids; the steps go with it
+    // anyway).
     function toggle(photos) {
         if (photos.length === 0)
             return
@@ -55,16 +58,27 @@ PinholePlugin {
         if (ids.length === 0)
             return
         const key = pinhole.library.key
-        set(ids, on)
-        pinhole.did(on ? qsTr("adding to favourites") : qsTr("removing from favourites"),
-                    () => { if (pinhole.library.key === key) set(ids, !on) },
-                    () => { if (pinhole.library.key === key) set(ids, on) })
+        const step = pinhole.did(on ? qsTr("adding to favourites") : qsTr("removing from favourites"),
+                                 () => { if (pinhole.library.key === key) set(ids, !on, here()) },
+                                 () => { if (pinhole.library.key === key) set(ids, on, here()) })
+        set(ids, on, here(), step)
     }
-    function set(ids, on) {
+    function set(ids, on, where, step) {
         pinhole.setFavorite(ids, on).catch(error => {
-            if (error.code !== "cancelled")
-                complain(whyNot(error.code))
+            if (error.code === "cancelled")
+                return
+            if (step)
+                pinhole.dropStep(step)
+            complain(whyNot(error.code), where)
         })
+    }
+    // What the heart was pressed on: the photo shown, or what is ticked.
+    function here() {
+        if (pinhole.viewer.open && pinhole.viewer.index >= 0)
+            return "shown " + pinhole.library.item(pinhole.viewer.index).id
+        if (pinhole.selectionCount > 0)
+            return "ticked " + pinhole.selectionCount + " " + pinhole.selection()[0]
+        return ""
     }
     // Why not, in Pinhole's words: the source's name from the library's
     // key ("icloud" is iCloud, a folder its name).
@@ -81,13 +95,12 @@ PinholePlugin {
             return qsTr("The Pinhole service is not running")
         return qsTr("Could not change favourites in %1").arg(name)
     }
-    // Under the heart that shows; else (undone in the grid) at the foot of
-    // the window.
-    function complain(text) {
-        if (pinhole.viewer.open)
-            shownHeart.complain(text)
-        else if (pinhole.selectionCount > 0)
-            tickedHeart.complain(text)
+    // Under the heart it was pressed on, while that is still what shows;
+    // else (another photo shown since, or undone in the grid) at the foot
+    // of the window.
+    function complain(text, where) {
+        if (where !== "" && where === here())
+            (where.startsWith("shown ") ? shownHeart : tickedHeart).complain(text)
         else
             pinhole.notify(text)
     }

@@ -102,6 +102,12 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
 // with a sign-in provider of its own only (PINHOLE_AUTH), never Apple.
 void runSourcesSelfTest(QQuickWindow *window, const QString &folder);
 
+// PINHOLE_SELFTEST=sourcesoff:<folder>: with the plugins of the sources
+// added turned off, the middle says so (frame 0-off, the side panel 1-side),
+// and 1 (Turn on iCloud) brings the photos back: how many and how soon.
+// Exits 1 if the middle says nothing or no photo comes within 30 s.
+void runSourcesOffSelfTest(QQuickWindow *window, const QString &folder);
+
 // PINHOLE_SELFTEST=actionbar:<folder>: the newest Live Photo in a series
 // full window; grab its bar, then with each menu open on its key (and the
 // arrow down in one), Esc between; then select mode's bar and its menus.

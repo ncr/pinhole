@@ -1,6 +1,7 @@
 #include "sources.h"
 
 #include "serviceclient.h"
+#include "storage.h"
 
 #include <QJsonArray>
 
@@ -117,6 +118,8 @@ void Sources::remove(const QString &id) {
                             setError(code);
                     });
 }
+
+QStringList Sources::addedKinds() const { return Storage::sourceKinds(); }
 
 void Sources::discover() {
     m_service->call(QStringLiteral("discover"), {}, [this](bool ok, const QJsonObject &result, const QString &) {

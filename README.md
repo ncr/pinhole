@@ -114,7 +114,7 @@ and the grid fills as it does. `?` lists every shortcut.
 The same from a terminal, without the window:
 
 ```bash
-pinhole sign-in              # Apple ID, then the password and code, or icloudpd's session
+pinhole sign-in              # Apple ID, then the password and code, or icloudpd's session (iCloud's plugin on)
 pinhole status               # the source shown, its library, how far it is built
 pinhole help                 # every command: sources, show, remove, sync, add, storage…
 ```

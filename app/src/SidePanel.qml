@@ -978,6 +978,13 @@ Item {
                     readonly property bool hasSettings: on && item !== null && item.settings !== null
                     readonly property bool hasTour: on && item !== null && (item.tour?.length ?? 0) > 0
                     readonly property bool open: (hasSettings || hasTour) && root.unfolded[modelData] === true
+                    // One that brings sources of photos: what turning it
+                    // off keeps, and, one's own, what trusting it means.
+                    readonly property bool bringsSources: (info.sources || []).length > 0 && info.error === ""
+                    readonly property string trust: !bringsSources ? ""
+                        : info.copy ? qsTr("Your own copy of %1: it sees the password you type.").arg(info.name)
+                        : info.personal ? qsTr("It reads your photos, and the accounts you sign in to with it. Turn it on only if you trust it.")
+                        : ""
                     // The gutter its chevron stands in, as a source's glyph does.
                     readonly property int gutter: Math.round(theme.fontSize * 0.714) + Math.round(theme.fontSize * 1.429)
                     width: parent.width
@@ -1080,6 +1087,22 @@ Item {
                                     elide: Text.ElideRight
                                     color: pluginRow.info.error !== "" ? theme.red : theme.darkForeground
                                     opacity: pluginRow.on || pluginRow.info.error !== "" ? 1 : 0.75
+                                    font.pixelSize: Math.round(theme.fontSize * 0.857)
+                                }
+                                UiText {
+                                    width: parent.width
+                                    visible: text !== ""
+                                    text: pluginRow.trust
+                                    wrapMode: Text.WordWrap
+                                    color: theme.yellow
+                                    font.pixelSize: Math.round(theme.fontSize * 0.857)
+                                }
+                                UiText {
+                                    width: parent.width
+                                    visible: pluginRow.bringsSources && !pluginRow.on
+                                    text: qsTr("Its sources and their photos stay on this computer, out of sight, until it is on again.")
+                                    wrapMode: Text.WordWrap
+                                    color: theme.foreground
                                     font.pixelSize: Math.round(theme.fontSize * 0.857)
                                 }
                                 // What went wrong in it as it ran: its QML not

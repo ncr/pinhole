@@ -105,7 +105,35 @@ ApplicationWindow {
     // to ask. Not over a library the window was given (--library): with no
     // source set up (a scratch HOME, pinhole-fake's library on a new
     // computer) the picker would cover it and take every key.
-    readonly property bool firstRun: sources.known && sources.list.length === 0 && !libraryGiven
+    readonly property bool firstRun: sources.known && sources.list.length === 0 && !libraryGiven && !sourcesOff
+    // Where the photos come from is a plugin's (iCloud, Folders, one's
+    // own): with those turned off, the window says which to turn on, with
+    // the button, rather than offer a first run. Nothing of theirs is gone.
+    // The plugins that bring sources, by id; Pinhole's own of them that are
+    // off; and those off that the sources added are of.
+    readonly property var sourcePlugins: (plugins.revision, plugins.ids.filter(id => (plugins.at(id).sources || []).length > 0))
+    // Pinhole's own, in the service's order of kinds: iCloud's, then
+    // folders'.
+    readonly property var ownSourcePlugins: {
+        const order = sources.kinds.map(k => k.plugin)
+        const place = id => order.indexOf(id) < 0 ? order.length : order.indexOf(id)
+        return (plugins.revision, sourcePlugins.filter(id => !plugins.at(id).personal)
+                .map((id, i) => ({ id: id, i: i })).sort((a, b) => place(a.id) - place(b.id) || a.i - b.i).map(x => x.id))
+    }
+    readonly property var ownSourcePluginsOff: (plugins.revision, ownSourcePlugins.filter(id => !plugins.at(id).enabled))
+    readonly property var addedPluginsOff: {
+        const owners = []
+        for (const kind of (sources.list, plugins.revision, sources.addedKinds())) {
+            const told = sources.kinds.find(k => k.kind === kind)
+            const owner = told ? told.plugin : sourcePlugins.find(id => plugins.at(id).sources.indexOf(kind) >= 0)
+            if (owner && owners.indexOf(owner) < 0 && plugins.ids.indexOf(owner) >= 0 && !plugins.at(owner).enabled)
+                owners.push(owner)
+        }
+        return owners
+    }
+    readonly property bool sourcesOff: sources.known && sources.list.length === 0 && !libraryGiven
+                                       && (addedPluginsOff.length > 0 || !sourcePlugins.some(id => plugins.at(id).enabled))
+    function pluginNames(ids) { return ids.map(id => plugins.at(id).name).join(", ") }
     // The source shown, as its plugin is given it (PluginSource.qml): what
     // the service says of it, its row's count, and how it is doing.
     readonly property var shownSource: {
@@ -142,10 +170,67 @@ ApplicationWindow {
         kinds: win.pluginSourceList
     }
 
+    // The plugins sources come from all off: which to turn on, each a
+    // button (1, 2), and the side panel for the rest.
+    Column {
+        id: sourcesOffCard
+        objectName: "sourcesOff"
+        anchors.centerIn: parent
+        visible: win.sourcesOff && win.chromeUp
+        opacity: win.chrome
+        spacing: theme.fontSize
+        width: Math.min(parent.width - 48, 560)
+        UiText {
+            width: parent.width
+            text: win.addedPluginsOff.length > 0 ? qsTr("Your sources' plugins are off: %1").arg(win.pluginNames(win.addedPluginsOff))
+                                                 : qsTr("No source of photos is on")
+            color: theme.brightForeground
+            font.pixelSize: Math.round(theme.fontSize * 1.333)
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+        UiText {
+            width: parent.width
+            text: win.addedPluginsOff.length > 0
+                  ? qsTr("Their sources and photos are still on this computer: turned on, they show again at once.")
+                  : qsTr("Where the photos come from is a plugin's: %1.").arg(win.pluginNames(win.ownSourcePlugins))
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 8
+            topPadding: Math.round(theme.fontSize * 0.5)
+            Repeater {
+                // Those the sources added are of first.
+                model: win.addedPluginsOff.filter(id => !plugins.at(id).personal)
+                       .concat(win.ownSourcePluginsOff.filter(id => win.addedPluginsOff.indexOf(id) < 0)).slice(0, 9)
+                delegate: ShellButton {
+                    required property string modelData
+                    required property int index
+                    objectName: "turnOn:" + modelData
+                    active: index === 0
+                    text: qsTr("Turn on %1").arg(plugins.at(modelData).name)
+                    key: String(index + 1)
+                    keyLayer: "grid"
+                    usable: win.sourcesOff
+                    onTapped: plugins.setEnabled(modelData, true)
+                }
+            }
+        }
+        UiText {
+            width: parent.width
+            text: qsTr("Or in the side panel (Tab), under Plugins.")
+            color: theme.darkForeground
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+    }
+
     // A source with nothing in it yet, and nothing under way to say so.
     Column {
         anchors.centerIn: parent
-        visible: !win.firstRun && sources.known && grid.count === 0 && grid.hiddenCount === 0 && !buildProgress.visible
+        visible: !win.firstRun && !win.sourcesOff && sources.known && grid.count === 0 && grid.hiddenCount === 0 && !buildProgress.visible
                  && !trouble.visible
         spacing: theme.fontSize
         width: Math.min(parent.width - 48, 520)
@@ -168,7 +253,7 @@ ApplicationWindow {
     // of screenshots): it is not empty, and the way back is that plugin's.
     Column {
         anchors.centerIn: parent
-        visible: !win.firstRun && sources.known && grid.count === 0 && grid.hiddenCount > 0 && !trouble.visible
+        visible: !win.firstRun && !win.sourcesOff && sources.known && grid.count === 0 && grid.hiddenCount > 0 && !trouble.visible
         spacing: theme.fontSize
         width: Math.min(parent.width - 48, 520)
         UiText {
@@ -707,6 +792,8 @@ ApplicationWindow {
                 upward: true
                 keyLayer: "grid"
                 hints: selectBar.hints
+                // Said over the bar, where the foot's notice would cover it.
+                onComplained: historyNotice.giveWay()
             }
         }
         // As JPEG and MP4, what opens anywhere; the originals on Shift.
@@ -740,6 +827,8 @@ ApplicationWindow {
                 upward: true
                 keyLayer: "grid"
                 hints: selectBar.hints
+                // Said over the bar, where the foot's notice would cover it.
+                onComplained: historyNotice.giveWay()
             }
         }
     }
@@ -1110,7 +1199,7 @@ ApplicationWindow {
         name: win.placeName
         detail: win.shownKind && win.shownKind.adds ? win.shownKind.adds(win.shownSource)
                                                     : qsTr("Added there. The files here stay as they are.")
-        enabled: sources.known && !win.firstRun
+        enabled: sources.known && !win.firstRun && !win.sourcesOff
     }
 
     // Undo and redo (history.h): favourites, and what plugins change, as
@@ -1174,6 +1263,12 @@ ApplicationWindow {
             opacity = 1
             historyNoticeShown.restart()
         }
+        // A complaint over select mode's bar, where this stands: it goes, so
+        // that can be read.
+        function giveWay() {
+            historyNoticeShown.stop()
+            opacity = 0
+        }
         Row {
             id: noticeRow
             x: 1
@@ -1205,6 +1300,12 @@ ApplicationWindow {
             function onUndone(name) { historyNotice.show(qsTr("Undone: %1").arg(name), "redo") }
             function onRedone(name) { historyNotice.show(qsTr("Redone: %1").arg(name), "undo") }
             function onNothing(undo) { historyNotice.show(undo ? qsTr("Nothing to undo") : qsTr("Nothing to redo"), "") }
+            // A step that did not happen after all (a favourite refused):
+            // no longer offered.
+            function onDropped(name) {
+                if (historyNotice.offer === "undo" && historyNotice.message === name)
+                    historyNotice.giveWay()
+            }
         }
         // A plugin's few words (pinhole.notify), said the same way.
         Connections {

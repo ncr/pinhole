@@ -6,6 +6,7 @@
 #include "selftest.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
@@ -116,4 +117,53 @@ void runSourcesSelfTest(QQuickWindow *window, const QString &dir) {
         });
     };
     (*run)(0);
+}
+
+void runSourcesOffSelfTest(QQuickWindow *window, const QString &dir) {
+    auto grab = [window, dir](const QString &name) {
+        window->grabWindow().save(dir + '/' + name + ".png");
+        std::printf("selftest: %s\n", qPrintable(name));
+        std::fflush(stdout);
+    };
+    auto count = [window] {
+        QObject *grid = window->findChild<QObject *>(QStringLiteral("grid"));
+        return grid ? grid->property("count").toInt() : -1;
+    };
+    QTimer::singleShot(2500, window, [=] {
+        QQuickItem *card = window->findChild<QQuickItem *>(QStringLiteral("sourcesOff"));
+        const bool shown = card && card->isVisible();
+        std::printf("selftest: %s the plugins being off said in the middle (%d photos)\n", shown ? "ok  " : "FAIL", count());
+        grab("0-off");
+        QObject *side = window->findChild<QObject *>(QStringLiteral("sidePanel"));
+        side->setProperty("shown", true);
+        QTimer::singleShot(800, window, [=] {
+            QMetaObject::invokeMethod(side, "showPlugin", Q_ARG(QVariant, QStringLiteral("pinhole.icloud")));
+            QTimer::singleShot(600, window, [=] {
+                grab("1-side");
+                side->setProperty("shown", false);
+                QTimer::singleShot(500, window, [=] {
+                    // Turn on iCloud: its button's key.
+                    key(window, Qt::Key_1, QStringLiteral("1"));
+                    auto clock = std::make_shared<QElapsedTimer>();
+                    clock->start();
+                    auto poll = std::make_shared<std::function<void()>>();
+                    *poll = [=] {
+                        const int n = count();
+                        if (n > 0 || clock->elapsed() > 30000) {
+                            std::printf("selftest: %s %d photos back %lld ms after the key\n", n > 0 ? "ok  " : "FAIL", n,
+                                        static_cast<long long>(clock->elapsed()));
+                            std::fflush(stdout);
+                            QTimer::singleShot(1500, window, [=] {
+                                grab("2-on");
+                                QCoreApplication::exit(n > 0 && shown ? 0 : 1);
+                            });
+                            return;
+                        }
+                        QTimer::singleShot(50, window, *poll);
+                    };
+                    (*poll)();
+                });
+            });
+        });
+    });
 }

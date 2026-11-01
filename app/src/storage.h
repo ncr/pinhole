@@ -74,6 +74,9 @@ public:
     // The ids of the sources added, as each one's library names its own
     // (icloud:<apple id>, folder:<path>), as the settings say now.
     static QStringList sourceIds();
+    // The kinds of the sources added, of every kind, on or off: what the
+    // settings name (or, naming none, the Apple IDs signed in to).
+    static QStringList sourceKinds();
     // The Apple IDs signed in to on this computer, each with a library of
     // its own.
     static QStringList accounts();

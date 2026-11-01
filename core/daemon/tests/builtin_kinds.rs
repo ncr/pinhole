@@ -33,6 +33,27 @@ fn off(plugin: &str) -> HashMap<String, bool> {
     [(plugin.to_owned(), false)].into()
 }
 
+/// One's own copy of iCloud's plugin (the same id, in the personal
+/// folder) is off in the window until turned on: so is iCloud here.
+#[test]
+fn a_built_in_kind_whose_plugin_is_your_own_copy_is_on_only_when_turned_on() {
+    let dir = temp("copy");
+    let places = pinhole_core::plugins::Places { builtin: dir.join("builtin"), personal: dir.join("personal"), state: dir.join("state") };
+    let k = kinds(&[]).with_providers(places.clone(), Default::default());
+    assert!(!k.refresh(&HashMap::new()));
+    assert!(k.on("icloud"));
+    std::fs::create_dir_all(places.personal.join("icloud")).unwrap();
+    std::fs::write(places.personal.join("icloud/manifest.json"), json!({"schemaVersion": 1, "id": "pinhole.icloud"}).to_string()).unwrap();
+    assert!(k.refresh(&HashMap::new()));
+    assert!(!k.on("icloud") && k.on("folder"));
+    assert!(k.refresh(&[("pinhole.icloud".to_owned(), true)].into()));
+    assert!(k.on("icloud"));
+    std::fs::remove_dir_all(places.personal.join("icloud")).unwrap();
+    assert!(!k.refresh(&HashMap::new()));
+    assert!(k.on("icloud"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_kind_is_on_unless_its_plugin_is_turned_off() {
     let k = kinds(&[]);

@@ -2887,6 +2887,84 @@ private slots:
         QCOMPARE(Plugins::sourceKinds(icloud), QStringList{"icloud"});
     }
 
+    // A source of one's own, run by its provider: what pinholed would refuse
+    // (docs/source-providers.md) is said as the plugin is read, and by
+    // `pinhole plugin check`. The test source's manifest is fine.
+    void aProvidersSourceIsCheckedAsPinholedTakesIt() {
+        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
+        const QString testSource = QStringLiteral(PINHOLE_I18N "/../../../core/daemon/tests/provider");
+        QJsonObject manifest;
+        QString main;
+        QCOMPARE(Plugins::manifestProblem(testSource, &manifest, &main), QString());
+        QTemporaryDir dir;
+        write(dir.path() + "/run", "#!/bin/sh\n");
+        write(dir.path() + "/data", "");
+        QFile(dir.path() + "/run").setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        const auto problem = [&dir](const QJsonObject &source, int api = 3, const QString &id = "me.jpegs") {
+            return Plugins::sourcesProblem(dir.path(), id, {{"api", api}, {"sources", QJsonArray{source}}});
+        };
+        const QJsonObject fine{{"kind", "me.jpegs"}, {"provider", "run"}, {"needs_sign_in", true}, {"accepts", QJsonArray{"jpg", "heic"}},
+                               {"rounds_every_secs", 30}};
+        QCOMPARE(problem(fine), QString());
+        QCOMPARE(problem(QJsonObject{{"kind", "me.jpegs.raw"}, {"provider", "./run"}}), QString());
+        const auto with = [&fine](const QString &key, const QJsonValue &value) {
+            QJsonObject changed = fine;
+            changed.insert(key, value);
+            return changed;
+        };
+        const QList<std::pair<QString, QJsonObject>> wrong = {
+            {"api", fine},
+            {"its kind must be", with("kind", "other.jpegs")},
+            {"its kind must be", with("kind", "me.jpegsx")},
+            {"letters, digits", with("kind", "me.jpegs/x")},
+            {"pinholed's own", with("kind", "icloud")},
+            {"a path in the plugin's folder", with("provider", "../run")},
+            {"a path in the plugin's folder", with("provider", "/bin/sh")},
+            {"not a program", with("provider", "data")},
+            {"not a program", with("provider", "gone")},
+            {"true or false", with("needs_sign_in", "yes")},
+            {"lower case", with("accepts", QJsonArray{"JPG"})},
+            {"lower case", with("accepts", QJsonArray{".jpg"})},
+            {"lower case", with("accepts", "jpg")},
+            {"5 to 86400", with("rounds_every_secs", 3)},
+            {"5 to 86400", with("rounds_every_secs", 2.5)},
+        };
+        for (const auto &[said, source] : wrong) {
+            // The kind icloud is pinholed's own however it is declared.
+            const QString id = source.value("kind").toString() == QLatin1String("icloud") ? QStringLiteral("icloud") : QStringLiteral("me.jpegs");
+            const QString why = problem(source, said == QLatin1String("api") ? 2 : 3, id);
+            QVERIFY2(why.contains(said), qPrintable(said + " not in: " + why));
+        }
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.jpegs", {{"api", 3}, {"sources", QJsonArray{fine, fine}}}).contains("twice"));
+    }
+
+    // A step that did not happen after all is dropped: Ctrl Z undoes what was
+    // done before it, and the window no longer offers it.
+    void aStepDroppedIsAsIfNeverDone() {
+        History history;
+        QStringList log;
+        QSignalSpy dropped(&history, &History::dropped);
+        const quint64 first = history.did("me.a", "one", [&] { log << "undo one"; }, [&] { log << "redo one"; });
+        const quint64 second = history.did("me.a", "two", [&] { log << "undo two"; }, [&] { log << "redo two"; });
+        QVERIFY(first > 0 && second > first);
+        history.drop("me.b", second);
+        QCOMPARE(dropped.size(), 0);
+        history.drop("me.a", second);
+        QCOMPARE(dropped.size(), 1);
+        QCOMPARE(dropped[0][0].toString(), QString("two"));
+        history.undo();
+        QCOMPARE(log, QStringList{"undo one"});
+        QVERIFY(!history.canUndo());
+        history.redo();
+        QCOMPARE(log, (QStringList{"undo one", "redo one"}));
+        QVERIFY(!history.canRedo());
+        // One undone already, dropped: not done again either.
+        const quint64 third = history.did("me.a", "three", [&] { log << "undo three"; }, [&] { log << "redo three"; });
+        history.undo();
+        history.drop("me.a", third);
+        QVERIFY(!history.canRedo() && history.canUndo());
+    }
+
     // plugins/icloud against a stand-in service: its rows' words, icloudpd
     // offered when it is here, and signing in with a code, what went wrong
     // said in its panel, over the window until it is done.
@@ -3167,7 +3245,9 @@ private slots:
         QTest::qWait(20);
         QCOMPARE(bench.said(), QStringList());
 
-        // What could not be set: said under the heart, and put back.
+        // What could not be set: said under the heart, and put back; its
+        // step goes again, so Ctrl Z undoes what was done before it.
+        QSignalSpy droppedSteps(&bench.history, &History::dropped);
         bench.viewer->step(1);
         QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString());
         bench.js("plugin.shownAction.triggered()");
@@ -3187,21 +3267,34 @@ private slots:
         answer(5, "unavailable");
         QTRY_COMPARE(bench.said().size(), 3);
         QCOMPARE(bench.said()[2], QString("viewer Could not change favourites in x"));
+        QCOMPARE(droppedSteps.size(), 3);
+        // Another photo shown before the service said no: not under its
+        // heart, which says nothing of it, but at the foot of the window.
+        bench.js("plugin.shownAction.triggered()");
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 7);
+        bench.viewer->step(1);
+        answer(6, "unavailable");
+        QTRY_COMPARE(notified.size(), 1);
+        QCOMPARE(notified[0][0].toString(), QString("Could not change favourites in x"));
+        QCOMPARE(bench.said().size(), 3);
+        QCOMPARE(droppedSteps.size(), 4);
+        notified.clear();
+        bench.viewer->step(-1);
 
         // Several: all made favourites (those not yet), then none.
         bench.viewer->close();
         QTRY_VERIFY(!bench.viewer->isOpen());
         bench.js("said.length = 0; plugin.toggle([0, 1, 2])");
         QVERIFY(bench.library.at(0).favorite && bench.library.at(1).favorite && bench.library.at(2).favorite);
-        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 7);
-        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[6]), (QJsonArray{"b", "c"}));
-        answer(6);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 8);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[7]), (QJsonArray{"b", "c"}));
+        answer(7);
         bench.js("plugin.toggle([0, 1, 2])");
         QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite && !bench.library.at(2).favorite);
-        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 8);
-        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[7]), (QJsonArray{"a", "b", "c"}));
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 9);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[8]), (QJsonArray{"a", "b", "c"}));
         // With no heart showing (undone in the grid, say): at the foot of the window.
-        answer(7, "unavailable");
+        answer(8, "unavailable");
         QTRY_COMPARE(notified.size(), 1);
         QCOMPARE(notified[0][0].toString(), QString("Could not change favourites in x"));
         QCOMPARE(bench.said(), QStringList());
@@ -3218,11 +3311,11 @@ private slots:
         QVERIFY(bench.history.canUndo());
         bench.history.undo();
         QTest::qWait(50);
-        QCOMPARE(favouritesAsked(bench.fake).size(), 8);
+        QCOMPARE(favouritesAsked(bench.fake).size(), 9);
         QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite);
         bench.history.redo();
         QTest::qWait(50);
-        QCOMPARE(favouritesAsked(bench.fake).size(), 8);
+        QCOMPARE(favouritesAsked(bench.fake).size(), 9);
         QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite);
         bench.library.swap(other);
     }

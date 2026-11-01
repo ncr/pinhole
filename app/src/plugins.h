@@ -331,7 +331,12 @@ public:
     Q_INVOKABLE bool setSetting(const QString &key, const QVariant &value);
     // Done just now, to undo with Ctrl+Z: `name` in a word or two, and
     // functions that undo and redo it (history.h).
-    Q_INVOKABLE void did(const QString &name, const QJSValue &undo, const QJSValue &redo);
+    // Its number, for dropStep (API 3).
+    Q_INVOKABLE double did(const QString &name, const QJSValue &undo, const QJSValue &redo);
+    // A step it did that did not happen after all (what it changed was
+    // refused, and put back): out of the history, so Ctrl Z undoes what was
+    // done before it, and no longer offered at the foot of the window.
+    Q_INVOKABLE void dropStep(double step);
     // A few words at the foot of the window, for a while: "Saved to
     // Pictures".
     Q_INVOKABLE void notify(const QString &text);
@@ -690,7 +695,7 @@ private:
     QJsonObject unmoved(QJsonObject config) const;
     bool enabled(const Plugin &plugin) const;
     void watch();
-    // Each plugin turned on may bring its own translations (i18n/).
+    // Each plugin, on or off, may bring its own translations (i18n/).
     void updateCatalogs();
     // The engine's warnings: those from a plugin's files are its problems.
     void warned(const QList<QQmlError> &warnings);

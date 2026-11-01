@@ -109,6 +109,26 @@ impl Places {
     }
 }
 
+/// The ids of the plugins of your own (`personal`), each by its manifest
+/// (its folder's name when that says none). One with a built-in plugin's
+/// id is your own copy of it, which the window keeps off until you turn it
+/// on: so does pinholed the built-in kinds of that id (`Kinds::refresh`).
+pub fn personal_ids(places: &Places) -> std::collections::HashSet<String> {
+    let Ok(entries) = std::fs::read_dir(&places.personal) else { return Default::default() };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|dir| dir.join("manifest.json").is_file())
+        .map(|dir| {
+            let manifest = std::fs::read_to_string(dir.join("manifest.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .unwrap_or(Value::Null);
+            manifest["id"].as_str().map(str::to_owned).unwrap_or_else(|| dir.file_name().unwrap_or_default().to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 /// A source of a plugin's own, run out of process by its provider: one of
 /// its manifest's `sources` with a `provider`.
 #[derive(Clone, Debug, PartialEq)]
