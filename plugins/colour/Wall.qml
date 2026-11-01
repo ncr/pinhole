@@ -51,6 +51,18 @@ Item {
             lay()
         }
     }
+    // A photo on it hidden from the grid: laid again, the rest mostly where
+    // they were (only the tiles that change come in again), now or when it
+    // next shows. Photos shown again leave it as it is.
+    function hiddenMoved() {
+        if (!tiles.some(id => id !== "" && pinhole.isHidden(id)))
+            return
+        laid = null
+        if (visible) {
+            finder.plugin.ensure()
+            lay()
+        }
+    }
     function another() {
         seed = seed + 1 + Math.floor(Math.random() * 1000)
         lay()
@@ -106,7 +118,7 @@ Item {
                 width: wall.tile
                 height: wall.tile
                 z: hover.hovered ? 2 : 0
-                visible: item !== null
+                visible: item !== null && !(wall.finder.plugin.hiddenRevision, wall.pinhole.isHidden(position))
 
                 Rectangle {
                     id: face
@@ -129,7 +141,10 @@ Item {
                     }
                     Connections {
                         target: wall
-                        function onGenerationChanged() { wave.restart() }
+                        function onGenerationChanged() {
+                            if (cell.photo !== (wall.tiles[cell.index] ?? ""))
+                                wave.restart()
+                        }
                     }
                     Component.onCompleted: wave.start()
                     Image {

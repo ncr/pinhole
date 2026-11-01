@@ -18,9 +18,9 @@ PinholePlugin {
     covering: finder.shown
 
     // The library's colours (Colour.index), by the photos' ids: read when
-    // the finder opens, a quarter of a second for 50,000 photos. While a
-    // library is built it changes every few seconds; what the finder shows
-    // stays as it is, and the colours are read again when it next opens.
+    // the finder opens, from the library's columns at once. While a library
+    // is built it changes every few seconds; what the finder shows stays as
+    // it is, and the colours are read again when it next opens.
     property var colours: null
     property bool stale: false
     // Bumped when the library is read again: what is shown finds its
@@ -29,15 +29,10 @@ PinholePlugin {
     function ensure() {
         if (colours && !stale)
             return colours
-        const list = [], dates = [], ids = []
-        for (let i = 0; i < pinhole.library.count; ++i) {
-            const item = pinhole.library.item(i)
-            list.push(item.avgColor)
-            dates.push(item.date)
-            ids.push(item.id)
-        }
+        const library = pinhole.library
+        const data = Colour.index(library.field("avgColor"), library.field("date"), library.field("id"))
         stale = false
-        colours = Colour.index(list, dates, ids)
+        colours = Colour.withHidden(data, hiddenTest())
         return colours
     }
     Connections {
@@ -46,6 +41,26 @@ PinholePlugin {
             plugin.stale = true
             ++plugin.revision
         }
+    }
+
+    // What the grid hides (Screenshots' hide mode, say) is left out of what
+    // is found, the dots and the wall, as the grid leaves it out. Bumped
+    // when that changes, for what is shown to look again.
+    property int hiddenRevision: 0
+    function hiddenTest() {
+        return pinhole.hiddenCount > 0 ? i => pinhole.isHidden(i) : null
+    }
+    // After the library's own change, when it was read again too: the
+    // colours' positions are then old, and they are read again anyway.
+    Connections {
+        target: pinhole
+        function onHiddenChanged() { Qt.callLater(plugin.hiddenMoved) }
+    }
+    function hiddenMoved() {
+        ++hiddenRevision
+        if (colours && !stale)
+            colours = Colour.withHidden(colours, hiddenTest())
+        finder.hiddenMoved()
     }
 
     // A photo's colour as [L, a, b], or null.
@@ -124,7 +139,7 @@ PinholePlugin {
                 : plugin.colours === null ? qsTr("Reading the photos' colours…")
                 : qsTr("%1 of %2 photos have a colour of their own to find by; the rest average to grey. H in the grid, or on a photo.")
                   .arg(Number(plugin.colours.colourful).toLocaleString(Qt.locale(), "f", 0))
-                  .arg(Number(plugin.colours.n).toLocaleString(Qt.locale(), "f", 0))
+                  .arg(Number(plugin.colours.count).toLocaleString(Qt.locale(), "f", 0))
         }
     }
 

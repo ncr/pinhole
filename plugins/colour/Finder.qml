@@ -89,11 +89,27 @@ Item {
     // The photos found that are still in the library; looked for again if
     // none are (another source shown, say).
     function keepFound() {
-        const kept = results.filter(id => pinhole.library.indexOf(id) >= 0)
+        const kept = results.filter(id => pinhole.library.indexOf(id) >= 0 && !pinhole.isHidden(id))
         if (kept.length === 0)
             search()
         else if (kept.length !== results.length)
             results = kept
+    }
+    // Photos hidden from the grid or shown again: found again, the scroll
+    // kept. With the library read again since, its colours are not read
+    // again until it next opens (as for any change): what is hidden now
+    // only leaves.
+    function hiddenMoved() {
+        if ((shown || returning) && mode === "find" && plugin.colours) {
+            const found = plugin.stale ? results.filter(id => !pinhole.isHidden(id))
+                : Colour.nearest(plugin.colours, targetL, targetA, targetB, resultCount, fromId)
+            if (found.length !== results.length || found.some((id, i) => id !== results[i])) {
+                const y = photos.contentY
+                results = found
+                photos.contentY = Math.max(0, Math.min(y, photos.contentHeight - photos.height))
+            }
+        }
+        wall.hiddenMoved()
     }
     // Picked by hand: no longer a photo's.
     function pick(L, a, b) {
@@ -449,6 +465,8 @@ Item {
                         const size = width / cells
                         const count = new Float64Array(cells * cells), sum = new Float64Array(cells * cells * 3)
                         for (let k = 0; k < data.n; ++k) {
+                            if (!Colour.shown(data, k))
+                                continue
                             const r = Math.sqrt(Math.min(1, data.C[k] / finder.rimChroma)) * R
                             const t = data.h[k] * Math.PI / 180
                             const x = Math.min(cells - 1, Math.floor((R + r * Math.cos(t)) / size))
@@ -601,7 +619,7 @@ Item {
                 text: finder.plugin.colours === null ? ""
                     : qsTr("Each photo is found by its average colour, a dot on the wheel at it. %1 of your %2 have a colour of their own; the rest are near the grey middle, found only by grey.")
                       .arg(Number(finder.plugin.colours.colourful).toLocaleString(Qt.locale(), "f", 0))
-                      .arg(Number(finder.plugin.colours.n).toLocaleString(Qt.locale(), "f", 0))
+                      .arg(Number(finder.plugin.colours.count).toLocaleString(Qt.locale(), "f", 0))
             }
         }
 
@@ -625,7 +643,7 @@ Item {
                 required property string modelData
                 readonly property int position: (finder.plugin.revision, finder.pinhole.library.indexOf(modelData))
                 readonly property var item: finder.pinhole.library.item(position)
-                visible: position >= 0
+                visible: position >= 0 && !(finder.plugin.hiddenRevision, finder.pinhole.isHidden(position))
                 width: photos.cellWidth
                 height: photos.cellHeight
                 Rectangle {

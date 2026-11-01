@@ -104,34 +104,70 @@ function hueName(C, h) {
 
 // The library's colours, for finding: each photo's id, its colour and when
 // it was taken, for those that have a colour. `colours` is each position's
-// "#rrggbb" or "", `dates` its date in ms, `ids` its id. Ids, not
-// positions: positions move when the library is read again, and what was
-// found stays what it was.
+// "#rrggbb" or "", `dates` its date in ms, `ids` its id (the library's
+// columns, library.field). Ids, not positions: positions move when the
+// library is read again, and what was found stays what it was. `pos` is
+// where each was as it was read, to ask whether it is hidden from the grid
+// (withHidden); `shown` which are not, null for all.
 function index(colours, dates, ids) {
     let n = 0
     for (let i = 0; i < colours.length; ++i)
         if (colours[i] !== "")
             ++n
-    const data = { n: n, id: new Array(n), L: new Float32Array(n), a: new Float32Array(n), b: new Float32Array(n),
-                   C: new Float32Array(n), h: new Float32Array(n), date: new Float64Array(n), colourful: 0,
-                   wheel: null }
+    const data = { n: n, id: new Array(n), pos: new Int32Array(n), L: new Float32Array(n), a: new Float32Array(n),
+                   b: new Float32Array(n), C: new Float32Array(n), h: new Float32Array(n), date: new Float64Array(n),
+                   shown: null, count: 0, colourful: 0, wheel: null }
     let k = 0
     for (let i = 0; i < colours.length; ++i) {
         if (colours[i] === "")
             continue
         const p = lab(parseInt(colours[i].slice(1), 16))
         data.id[k] = ids[i]
+        data.pos[k] = i
         data.L[k] = p[0]
         data.a[k] = p[1]
         data.b[k] = p[2]
         data.C[k] = chroma(p[1], p[2])
         data.h[k] = hue(p[1], p[2])
         data.date[k] = dates[i]
-        if (data.C[k] >= greyBelow)
-            ++data.colourful
         ++k
     }
+    tally(data)
     return data
+}
+function shown(data, k) { return data.shown === null || data.shown[k] === 1 }
+// How many are shown, and how many of those have a colour of their own.
+function tally(data) {
+    data.count = 0
+    data.colourful = 0
+    for (let k = 0; k < data.n; ++k)
+        if (shown(data, k)) {
+            ++data.count
+            if (data.C[k] >= greyBelow)
+                ++data.colourful
+        }
+}
+
+// The index with the photos hidden from the grid left out of what it finds,
+// `isHidden(position)` saying which (null: none is): a new one, its colours
+// shared, when that changes which are, else the same one.
+function withHidden(data, isHidden) {
+    let mask = null
+    if (isHidden)
+        for (let k = 0; k < data.n; ++k)
+            if (isHidden(data.pos[k])) {
+                if (mask === null)
+                    mask = new Uint8Array(data.n).fill(1)
+                mask[k] = 0
+            }
+    const before = data.shown
+    if (before === mask || (before !== null && mask !== null && before.every((v, k) => v === mask[k])))
+        return data
+    const next = Object.assign({}, data)
+    next.shown = mask
+    next.wheel = null
+    tally(next)
+    return next
 }
 
 // The `count` photos nearest [L, a, b], nearest first, as ids; not the
@@ -139,6 +175,8 @@ function index(colours, dates, ids) {
 function nearest(data, L, a, b, count, skip) {
     const best = [], far = []
     for (let k = 0; k < data.n; ++k) {
+        if (!shown(data, k))
+            continue
         const d = distance2(data.L[k], data.a[k], data.b[k], L, a, b)
         if (best.length === count && d >= far[count - 1])
             continue
@@ -165,7 +203,7 @@ const chromaSteps = 512
 const chromaTop = 0.33
 function chromaStep(C) { return Math.min(chromaSteps - 1, Math.floor(C / chromaTop * chromaSteps)) }
 
-// The colourful photos by whole degree of hue, each degree's most
+// The colourful photos shown by whole degree of hue, each degree's most
 // colourful first: `order` the photos, `from[d]` where degree d's start
 // (360 for the end), and `count[d]` how many; `steps[s]` how many there
 // are at each step of chroma. Made once for an index, by counting (QML's
@@ -178,7 +216,7 @@ function wheel(data) {
     const key = k => (Math.floor(data.h[k]) % 360) * chromaSteps + (chromaSteps - 1 - chromaStep(data.C[k]))
     let n = 0
     for (let k = 0; k < data.n; ++k)
-        if (data.C[k] >= wallChroma) {
+        if (data.C[k] >= wallChroma && shown(data, k)) {
             ++place[key(k) + 1]
             ++steps[chromaStep(data.C[k])]
             ++n
@@ -191,7 +229,7 @@ function wheel(data) {
     for (let d = 0; d < 360; ++d)
         count[d] = from[d + 1] - from[d]
     for (let k = 0; k < data.n; ++k)
-        if (data.C[k] >= wallChroma)
+        if (data.C[k] >= wallChroma && shown(data, k))
             order[place[key(k)]++] = k
     data.wheel = { order: order, from: from, count: count, steps: steps, n: n }
     return data.wheel
@@ -298,6 +336,8 @@ function example(data) {
     const at = (L, a, b) => (Math.round(L * lightnessWeight / size) * 1000 + Math.round(a / size) + 500) * 1000 + Math.round(b / size) + 500
     const cells = new Map()
     for (let k = 0; k < data.n; ++k) {
+        if (!shown(data, k))
+            continue
         const c = at(data.L[k], data.a[k], data.b[k])
         cells.set(c, (cells.get(c) || 0) + 1)
     }
@@ -323,7 +363,7 @@ function example(data) {
     const low = centile(0.9), high = centile(0.95)
     let best = -1, most = 0
     for (let k = 0; k < data.n; ++k) {
-        if (data.C[k] < low || data.C[k] > high || data.L[k] < 0.4 || data.L[k] > 0.85 || data.h[k] < 125 || data.h[k] >= 280)
+        if (!shown(data, k) || data.C[k] < low || data.C[k] > high || data.L[k] < 0.4 || data.L[k] > 0.85 || data.h[k] < 125 || data.h[k] >= 280)
             continue
         const n = near(k)
         if (n > most) {
