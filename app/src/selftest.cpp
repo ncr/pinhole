@@ -1562,6 +1562,8 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
     });
 }
 
+static bool pluginCheckPasses(const QString &plugin, const std::function<void(const QString &)> &say);
+
 void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
     auto say = [](const QString &line) {
         std::printf("selftest: %s\n", qPrintable(line));
@@ -1613,6 +1615,9 @@ void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &view
     auto step = std::make_shared<std::function<void(int)>>();
     *step = [=, &viewer, &library](int n) {
         if (n == photos->size()) {
+            // Then the script's making and pruning, in a home of its own
+            // (plugins/theme/check/check): a theme of the user's stays.
+            *failed = !pluginCheckPasses(QStringLiteral("theme"), say) || *failed;
             say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
             QCoreApplication::exit(*failed ? 1 : 0);
             return;

@@ -1,0 +1,77 @@
+#!/bin/bash
+# pinhole-theme's making and pruning checked: plugins/theme/check/check.
+# Headless, in a home of its own (PINHOLE_OMARCHY_HOME), with a stand-in
+# for Omarchy's scripts (OMARCHY_PATH): never the desktop's theme. Only the
+# themes Pinhole made, under the names it made them as, are pruned; a copy
+# renamed, an older mark, a theme of the user's stay; nothing is built in
+# themes/, and what a killed make left is swept. Exits 1 if anything is off.
+set -euo pipefail
+
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+script="$HERE/../pinhole-theme"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+failed=0
+check() { if eval "$1"; then echo "ok   $2"; else echo "FAIL $2"; failed=1; fi; }
+
+mkdir -p "$work/omarchy/bin"
+cat > "$work/omarchy/bin/omarchy-theme-set" <<'EOF'
+#!/bin/bash
+[[ -d $HOME/.config/omarchy/themes/$1 ]] || { echo "Theme '$1' does not exist"; exit 1; }
+echo "$1" > "$HOME/.local/state/omarchy/current/theme.name"
+EOF
+printf '#!/bin/sh\ncat "$HOME/.local/state/omarchy/current/theme.name"\n' > "$work/omarchy/bin/omarchy-theme-current"
+chmod +x "$work/omarchy/bin/"*
+H="$work/home"
+mkdir -p "$H/.local/state/omarchy/current" "$H/.config/omarchy/themes/mine"
+echo mine > "$H/.local/state/omarchy/current/theme.name"
+export OMARCHY_PATH="$work/omarchy" PINHOLE_OMARCHY_HOME="$H"
+themes="$H/.config/omarchy/themes"
+build="$H/.config/omarchy/.pinhole-build"
+magick -size 64x48 gradient:red-blue "$work/IMG_1.jpg"
+
+make() { # make <name>: made from the photo, the one set before kept
+  local before
+  before=$(cat "$H/.local/state/omarchy/current/theme.name")
+  printf '[colors]\n' | bash "$script" make "$1" "$work/IMG_1.jpg" Yaru "$before" '#112233' '#445566'
+}
+
+# What a killed make left, long ago and just now; and in themes/ itself,
+# as an older Pinhole built there.
+mkdir -p "$build/pinhole-gone.AbC123" "$build/pinhole-going.XyZ789" "$themes/.pinhole-old.QwE456" "$themes/.pinhole-nomark.RtY000"
+touch "$themes/.pinhole-old.QwE456/.pinhole"
+touch -d '-1 hour' "$build/pinhole-gone.AbC123" "$themes/.pinhole-old.QwE456" "$themes/.pinhole-nomark.RtY000"
+# One made by an older Pinhole, its mark the photo's name alone.
+mkdir -p "$themes/pinhole-legacy-0000"
+echo IMG_0.HEIC > "$themes/pinhole-legacy-0000/.pinhole"
+touch -d '-2 hours' "$themes/pinhole-legacy-0000/.pinhole"
+
+make pinhole-t1-0001
+check '[[ $(cat "$H/.local/state/omarchy/current/theme.name") == pinhole-t1-0001 ]]' "made and set"
+check 'grep -qx "name=pinhole-t1-0001" "$themes/pinhole-t1-0001/.pinhole" && grep -qx "photo=IMG_1.jpg" "$themes/pinhole-t1-0001/.pinhole"' "its mark names the photo and the theme"
+check '[[ ! -e $build/pinhole-gone.AbC123 && -d $build/pinhole-going.XyZ789 ]]' "a build left long ago swept, one just now not"
+check '[[ ! -e $themes/.pinhole-old.QwE456 && -d $themes/.pinhole-nomark.RtY000 ]]' "an older Pinhole's leftover in themes/ swept, a folder without its mark not"
+# The user's copy of it under another name, as old as it.
+cp -a "$themes/pinhole-t1-0001" "$themes/pinhole-t1-0001-mine"
+cp -a "$themes/pinhole-t1-0001" "$themes/sunset"
+for n in $(seq 2 15); do
+  make "pinhole-t$n-$(printf '%04d' "$n")"
+done
+check '[[ ! -e $themes/pinhole-t1-0001 && ! -e $themes/pinhole-t3-0003 && -d $themes/pinhole-t4-0004 ]]' "all but the newest 12 made pruned"
+check '[[ $(ls -d "$themes"/pinhole-t*-[0-9][0-9][0-9][0-9] | wc -l) -eq 12 ]]' "12 kept"
+check '[[ -d $themes/pinhole-t1-0001-mine && -d $themes/sunset ]]' "the user's copies under other names stay"
+check '[[ -d $themes/pinhole-legacy-0000 && -d $themes/mine ]]' "an older mark's theme, and the user's own, stay"
+check '[[ -z $(find "$themes" -mindepth 1 -maxdepth 1 -name ".*" ! -name ".pinhole-nomark.RtY000") ]]' "nothing built in themes/"
+check '[[ $(ls "$build") == pinhole-going.XyZ789 ]]' "nothing left in the build folder"
+
+# A theme renamed to the name Pinhole would make: left as it is.
+cp -a "$themes/pinhole-t15-0015" "$themes/pinhole-taken-0001"
+echo changed > "$themes/pinhole-taken-0001/colors.toml"
+if make pinhole-taken-0001 2> "$work/err"; then echo "FAIL a theme renamed to its name refused"; failed=1; else echo "ok   a theme renamed to its name refused: $(cat "$work/err")"; fi
+check '[[ $(cat "$themes/pinhole-taken-0001/colors.toml") == changed ]]' "and left as it was"
+# Its own made again: replaced in place.
+make pinhole-t15-0015
+check '[[ -f $themes/pinhole-t15-0015/preview.png && $(cat "$H/.local/state/omarchy/current/theme.name") == pinhole-t15-0015 ]]' "one of its own made again, replaced"
+
+if ((failed == 0)); then echo "theme check: ok"; else echo "theme check: FAILED"; fi
+exit $failed

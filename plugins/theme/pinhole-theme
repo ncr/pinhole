@@ -21,10 +21,14 @@ export PATH="$OMARCHY_PATH/bin:$PATH"
 OMARCHY_HOME="${PINHOLE_OMARCHY_HOME:-$HOME}"
 [[ -z ${PINHOLE_OMARCHY_HOME:-} ]] || export OMARCHY_THEME_HEADLESS=1
 THEMES="$OMARCHY_HOME/.config/omarchy/themes"
-# The themes Pinhole made, each marked with this file (the photo's name in
-# it), and how many of them are kept.
+# The themes Pinhole made, each marked with this file: the photo's name, and
+# the name the theme was made as (name=), so a copy of one under another
+# name is the user's, never pruned. How many of them are kept.
 MARK=.pinhole
 KEPT=12
+# Where a theme is built before it is swapped in: beside the themes, on the
+# same disk, out of omarchy-theme-list's sight (it lists dot-folders too).
+BUILD="$OMARCHY_HOME/.config/omarchy/.pinhole-build"
 
 current() {
   local name
@@ -40,9 +44,14 @@ used() {
   [[ -n $1 && -f $THEMES/$1/$MARK ]] && touch -- "$THEMES/$1/$MARK" || true
 }
 
+# Whether the theme <name> is Pinhole's own as it made it: its mark names it.
+own() {
+  [[ ! -L $THEMES/$1 && -f $THEMES/$1/$MARK ]] && grep -qxF -- "name=$1" "$THEMES/$1/$MARK"
+}
+
 # All but the newest of Pinhole's own: never the theme set now, nor `keep`
 # (the one set before, what undo would go back to), both used just now, nor
-# a theme Pinhole did not make.
+# a theme Pinhole did not make, nor a copy of one under another name.
 prune() {
   local keep="$1" now count=0 mark name
   now=$(current)
@@ -50,7 +59,9 @@ prune() {
   used "$now"
   while IFS= read -r mark; do
     name=$(basename "$(dirname "$mark")")
-    [[ $name == pinhole-* ]] || continue
+    if [[ $name != pinhole-* ]] || ! own "$name"; then
+      continue
+    fi
     count=$((count + 1))
     if ((count > KEPT)) && [[ $name != "$now" && $name != "$keep" ]]; then
       rm -rf "${THEMES:?}/$name"
@@ -69,14 +80,27 @@ make)
   name="$2" photo="$3" icons="$4" keep="$5"
   shift 5
   [[ $name =~ ^pinhole-[a-z0-9-]+$ ]] || { echo "Not a theme name: $name" >&2; exit 2; }
-  mkdir -p "$THEMES"
-  # Built beside it and swapped in, so a theme is never half written.
-  next=$(mktemp -d "$THEMES/.$name.XXXXXX")
+  # A theme of that name that is not Pinhole's own (one renamed to it) is
+  # left as it is.
+  if [[ -e $THEMES/$name || -L $THEMES/$name ]] && ! own "$name"; then
+    echo "A theme named $name is there already, not one Pinhole made" >&2
+    exit 2
+  fi
+  mkdir -p "$THEMES" "$BUILD"
+  # What a make stopped halfway left (killed, its window closed), untouched
+  # for ten minutes; and so in themes/ itself, as an older Pinhole built
+  # there: .pinhole-<name>.XXXXXX, with its mark.
+  find "$BUILD" -mindepth 1 -maxdepth 1 -mmin +10 -exec rm -rf {} + 2>/dev/null || true
+  while IFS= read -r left; do
+    [[ ! -f $left/$MARK ]] || rm -rf -- "$left"
+  done < <(find "$THEMES" -mindepth 1 -maxdepth 1 -type d -name '.pinhole-*.??????' -mmin +10 2>/dev/null || true)
+  # Built aside and swapped in, so a theme is never half written.
+  next=$(mktemp -d "$BUILD/$name.XXXXXX")
   trap 'rm -rf "$next"' EXIT
   mkdir -p "$next/backgrounds"
   cat >"$next/colors.toml"
   printf '%s\n' "$icons" >"$next/icons.theme"
-  printf '%s\n' "${photo##*/}" >"$next/$MARK"
+  printf 'photo=%s\nname=%s\n' "${photo##*/}" "$name" >"$next/$MARK"
   # The photo as the background: upright, at most a 4K screen's size.
   magick "$photo[0]" -auto-orient -resize '3840x3840>' -quality 92 "$next/backgrounds/$name.jpg"
   # The preview the theme picker shows: the photo, its palette along the
@@ -87,10 +111,10 @@ make)
   done
   magick "$next/backgrounds/$name.jpg" -resize '1280x720^' -gravity center -extent 1280x720 \
     \( "${swatches[@]}" +append -resize '1280x56!' \) -gravity south -composite "$next/preview.png"
-  rm -rf "$THEMES/.$name.old"
-  [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$THEMES/.$name.old"
+  was="$next.was"
+  [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$was"
   mv "$next" "$THEMES/$name"
-  rm -rf "$THEMES/.$name.old"
+  rm -rf "$was"
   trap - EXIT
   # omarchy-theme-set says what went wrong on stdout.
   HOME="$OMARCHY_HOME" omarchy-theme-set "$name" >&2

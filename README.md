@@ -86,7 +86,8 @@ year; a click, or the arrows and Enter, shows that day in the grid.
 Theme makes an Omarchy theme from the photo shown full window: T (or
 Theme) sets it, the photo as the background and its colours on the whole
 desktop, Pinhole too, the text always readable; Ctrl+Z goes back to the
-theme before. The last 12 made or used stay in Omarchy's theme picker.
+theme before. The last 12 made or used stay in Omarchy's theme picker; a
+copy of one under another name is yours, and stays.
 
 Photo frame (Frame, P, in the grid; P on a photo to start from it, or in
 select mode for what is ticked) shows photos one after another, full
