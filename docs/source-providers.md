@@ -322,9 +322,10 @@ A rendition is one file of the asset, for a kind the window asks for:
   only what it needs (through pinholed, so your headers are never on a
   command line). An answer of 401, 403, 404 or 410 to either is a stale
   ticket, as for any `url`: `prepare` is asked again, once. ImageMagick
-  or ffmpeg still going after three minutes is stopped (a mount that no
-  longer answers), and at most two videos are read from URLs at once,
-  beside, not instead of, a folder's thumbnails.
+  or ffmpeg that has done nothing for two minutes (a mount that no longer
+  answers; not one waiting for a processor on a busy computer) is stopped,
+  and at most two videos are read from URLs at once, beside, not instead
+  of, a folder's thumbnails.
 - A photo with no `thumb` shows as its average colour, a blank.
 
 pinholed checks every asset before it writes it. One that is not right

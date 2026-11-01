@@ -13,7 +13,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How many programs at once: the threads of the cores they may use.
 pub fn cores() -> usize {
@@ -50,6 +50,9 @@ pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
     // ImageMagick's own threads, one per core unless told.
     command.env("MAGICK_THREAD_LIMIT", "1");
+    // A process group of its own, so that whatever it starts is stopped
+    // with it (`output`).
+    command.process_group(0);
     let mut mask = [0u64; 16];
     for &cpu in allowed().iter().filter(|cpu| **cpu < 1024) {
         mask[cpu / 64] |= 1 << (cpu % 64);
@@ -116,18 +119,51 @@ impl Drop for Slot {
     }
 }
 
-/// How long a program making a thumbnail or medium (ImageMagick, ffmpeg,
-/// ffprobe) may run before it is stopped: none takes minutes, even at idle
-/// priority on a busy computer, unless what it reads no longer answers.
-pub const DEADLINE: Duration = Duration::from_secs(180);
+/// When a program of background work (ImageMagick, ffmpeg, ffprobe) is
+/// stopped. Never for taking long: at idle priority it gets a processor
+/// only when nothing else wants one, so on a computer busy with a build it
+/// may wait minutes for its first slice, which says nothing about what it
+/// reads. It is stopped when it is
+///
+/// - hung: for `quiet` it used no processor time, read and wrote nothing,
+///   and no thread of it was waiting for a processor (state R, as a
+///   starved one is), nor did any program it started do any of that. It
+///   sleeps (S) or waits in the kernel (D) on something that does not
+///   answer: a file on a mount that has gone, a FIFO with no writer. A
+///   slow mount still reads now and then, which is progress. A read held
+///   two minutes by a busy disk would look the same, but its idle priority
+///   counts only under BFQ, and NVMe disks go without a scheduler;
+/// - or spinning: it has used `cpu` of processor time, which no thumbnail
+///   or medium takes (a frame of a 4K HEVC video takes seconds), and a
+///   file sending a decoder round in circles does.
+///
+/// It is looked at `every` so often: its /proc/<pid>/stat (processor time)
+/// and io (bytes read and written); its threads' states only when those
+/// have not moved, and the programs it started (its process group) only
+/// when no thread of it is waiting for a processor either. One making
+/// progress costs two small reads, a starved one a few more.
+pub struct Limits {
+    pub quiet: Duration,
+    pub cpu: Duration,
+    pub every: Duration,
+}
+
+pub const LIMITS: Limits =
+    Limits { quiet: Duration::from_secs(120), cpu: Duration::from_secs(300), every: Duration::from_secs(2) };
 
 /// What a program of background work wrote, once it has ended; or an
-/// error, the program killed, when it is still going after `deadline` (a
-/// file on a mount that no longer answers). Whoever waits is free then,
-/// and the slot it holds with it, even when the program cannot end yet
-/// (stuck in the kernel on that mount): it is reaped when it does.
-pub fn output(command: &mut Command, deadline: Duration) -> std::io::Result<Output> {
+/// error of the kind `TimedOut`, it and whatever it started killed, when it
+/// is hung or spinning (`LIMITS`). Whoever waits is free then, and the slot
+/// it holds with it, even when the program cannot end yet (stuck in the
+/// kernel on a mount that has gone): it is reaped when it does.
+pub fn output(command: &mut Command) -> std::io::Result<Output> {
+    output_within(command, &LIMITS)
+}
+
+/// The same as `output`, within `limits`.
+pub fn output_within(command: &mut Command, limits: &Limits) -> std::io::Result<Output> {
     let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let pid = child.id();
     let (mut stdout, mut stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
     let child = Arc::new(Mutex::new(child));
     let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
@@ -151,16 +187,149 @@ pub fn output(command: &mut Command, deadline: Duration) -> std::io::Result<Outp
         };
         let _ = tx.send(read.and(status).map(|status| Output { status, stdout: out, stderr: err }));
     });
-    match rx.recv_timeout(deadline) {
-        Ok(output) => output,
-        Err(_) => {
-            // Killed, not yet reaped: its pid stays its own until the
-            // thread above reaps it.
-            let _ = child.lock().unwrap().kill();
-            let program = Path::new(command.get_program()).file_name().unwrap_or_default().to_string_lossy().into_owned();
-            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{program} still going after {} s: stopped", deadline.as_secs())))
+    let mut watching = Watching::new(Instant::now());
+    let stop = loop {
+        match rx.recv_timeout(limits.every) {
+            Ok(output) => return output,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(std::io::Error::other("its reader ended")),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
+        if let Some(stop) = watching.step(Instant::now(), Seen::of(pid), || runnable(pid), || group(pid), limits) {
+            break stop;
+        }
+    };
+    {
+        // Its process group is its own (`command`): whatever it started
+        // goes with it, even after it has ended itself. The group's id is
+        // its pid, which is not another's while it is unreaped (the thread
+        // above reaps it only under this lock) or any of the group is left,
+        // and pids are handed out in turn, so not again for a long while.
+        let mut child = child.lock().unwrap();
+        unsafe { kill(-(pid as i32), SIGKILL) };
+        let _ = child.kill();
     }
+    let program = Path::new(command.get_program()).file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let why = match stop {
+        Stop::Hung => format!("{program} did nothing for {} s: stopped", limits.quiet.as_secs()),
+        Stop::Spinning => format!("{program} used {} s of processor time: stopped", limits.cpu.as_secs()),
+    };
+    Err(std::io::Error::new(std::io::ErrorKind::TimedOut, why))
+}
+
+/// Why a program was stopped (`Limits`).
+#[derive(Debug, PartialEq)]
+enum Stop {
+    Hung,
+    Spinning,
+}
+
+/// What a process has done so far: processor time, in clock ticks, and
+/// bytes read and written (a pipe's too).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Seen {
+    ticks: u64,
+    bytes: u64,
+}
+
+impl Seen {
+    /// Of the process `pid`, all its threads; nothing when it is gone.
+    fn of(pid: u32) -> Seen {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        // utime and stime: fields 14 and 15, the 12th and 13th after the
+        // name, which may hold anything but ends with ") ".
+        let after = stat.rsplit_once(") ").map_or("", |(_, after)| after);
+        let ticks = after.split(' ').skip(11).take(2).filter_map(|t| t.parse::<u64>().ok()).sum();
+        let io = std::fs::read_to_string(format!("/proc/{pid}/io")).unwrap_or_default();
+        let bytes = io
+            .lines()
+            .filter_map(|line| line.strip_prefix("rchar: ").or_else(|| line.strip_prefix("wchar: ")))
+            .filter_map(|n| n.trim().parse::<u64>().ok())
+            .sum();
+        Seen { ticks, bytes }
+    }
+}
+
+/// Whether any thread of the process `pid` is running or waiting for a
+/// processor (R).
+fn runnable(pid: u32) -> bool {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return false };
+    tasks.flatten().any(|task| {
+        let stat = std::fs::read_to_string(task.path().join("stat")).unwrap_or_default();
+        stat.rsplit_once(") ").is_some_and(|(_, after)| after.starts_with('R'))
+    })
+}
+
+/// What the other processes of the process group `pgid` have done, all
+/// together, and whether a thread of any is waiting for a processor.
+fn group(pgid: u32) -> (Seen, bool) {
+    let mut all = (Seen::default(), false);
+    let Ok(procs) = std::fs::read_dir("/proc") else { return all };
+    let pgrp = pgid.to_string();
+    for pid in procs.flatten().filter_map(|p| p.file_name().to_str()?.parse::<u32>().ok()) {
+        if pid == pgid {
+            continue;
+        }
+        // pgrp: field 5, the 3rd after the name.
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        if stat.rsplit_once(") ").and_then(|(_, after)| after.split(' ').nth(2)) != Some(pgrp.as_str()) {
+            continue;
+        }
+        let seen = Seen::of(pid);
+        all.0.ticks += seen.ticks;
+        all.0.bytes += seen.bytes;
+        all.1 |= runnable(pid);
+    }
+    all
+}
+
+/// A program watched (`Limits`): what it and the programs it started had
+/// done when last looked at, and since when none has done anything.
+struct Watching {
+    seen: Seen,
+    others: Option<Seen>,
+    since: Instant,
+}
+
+impl Watching {
+    fn new(now: Instant) -> Watching {
+        Watching { seen: Seen::default(), others: None, since: now }
+    }
+
+    /// Looked at again `now`, having done `seen`: whether to stop it. Its
+    /// threads (`runnable`), and then the programs it started (`group`),
+    /// are looked at only when it has done nothing since.
+    fn step(
+        &mut self,
+        now: Instant,
+        seen: Seen,
+        runnable: impl FnOnce() -> bool,
+        group: impl FnOnce() -> (Seen, bool),
+        limits: &Limits,
+    ) -> Option<Stop> {
+        if seen.ticks >= limits.cpu.as_secs() * clock_ticks() {
+            return Some(Stop::Spinning);
+        }
+        let going = seen != self.seen || runnable() || {
+            let (others, waiting) = group();
+            let moved = self.others.is_some_and(|before| before != others);
+            self.others = Some(others);
+            moved || waiting
+        };
+        self.seen = seen;
+        if going {
+            self.since = now;
+        }
+        (now.duration_since(self.since) >= limits.quiet).then_some(Stop::Hung)
+    }
+}
+
+/// Clock ticks a second, as /proc counts processor time.
+fn clock_ticks() -> u64 {
+    static TICKS: OnceLock<u64> = OnceLock::new();
+    *TICKS.get_or_init(|| match unsafe { sysconf(SC_CLK_TCK) } {
+        n if n > 0 => n as u64,
+        _ => 100,
+    })
 }
 
 // The calls, declared here rather than taking a crate for them.
@@ -172,7 +341,11 @@ extern "C" {
     fn setpriority(which: i32, who: u32, prio: i32) -> i32;
     fn sched_setscheduler(pid: i32, policy: i32, param: *const SchedParam) -> i32;
     fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
+    fn kill(pid: i32, signal: i32) -> i32;
+    fn sysconf(name: i32) -> i64;
 }
+const SIGKILL: i32 = 9;
+const SC_CLK_TCK: i32 = 2;
 const PRIO_PROCESS: i32 = 0;
 const SCHED_IDLE: i32 = 5;
 
@@ -249,26 +422,153 @@ mod tests {
         drop(all);
     }
 
-    #[test]
-    fn a_program_still_going_after_its_deadline_is_stopped_and_reaped() {
-        let dir = std::env::temp_dir().join(format!("pinhole-deadline-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let pid_file = dir.join("pid");
-        let started = std::time::Instant::now();
-        let mut sleeping = command("sh");
-        sleeping.arg("-c").arg(format!("echo $$ > {}; exec sleep 60", pid_file.display()));
-        let e = output(&mut sleeping, Duration::from_millis(500)).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
-        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
-        let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
-        let gone = std::time::Instant::now();
-        while Path::new("/proc").join(&pid).exists() && gone.elapsed() < Duration::from_secs(5) {
+    /// Limits short enough for a test.
+    fn quick(quiet: Duration) -> Limits {
+        Limits { quiet, cpu: Duration::from_secs(60), every: Duration::from_millis(100) }
+    }
+
+    fn gone(pid: &str) -> bool {
+        let since = Instant::now();
+        // Gone, or a zombie its new parent has yet to reap.
+        let alive = || std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
+        while alive() && since.elapsed() < Duration::from_secs(5) {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(!Path::new("/proc").join(&pid).exists(), "{pid} not reaped");
-        // One that ends in time: what it wrote, and how it ended.
-        let out = output(command("sh").args(["-c", "echo out; echo err >&2; exit 3"]), Duration::from_secs(10)).unwrap();
+        !alive()
+    }
+
+    /// One asleep for good, or waiting on a FIFO no one writes to, with a
+    /// program it started: stopped once it has done nothing for `quiet`,
+    /// and both are gone.
+    #[test]
+    fn a_hung_program_is_stopped_with_what_it_started() {
+        let dir = std::env::temp_dir().join(format!("pinhole-hung-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let quiet = Duration::from_secs(1);
+
+        let pid_file = dir.join("pid");
+        let started = Instant::now();
+        let mut sleeping = command("sh");
+        sleeping.arg("-c").arg(format!("echo $$ > {}; exec sleep 60", pid_file.display()));
+        let e = output_within(&mut sleeping, &quick(quiet)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(e.to_string().contains("did nothing for 1 s"), "{e}");
+        assert!(started.elapsed() >= quiet && started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+        assert!(gone(&pid), "{pid} not reaped");
+
+        let fifo = dir.join("fifo");
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        let reader = dir.join("reader");
+        let mut waiting = command("sh");
+        waiting.arg("-c").arg(format!("echo $$ > {}; cat {} & echo $! > {}; wait", pid_file.display(), fifo.display(), reader.display()));
+        let started = Instant::now();
+        let e = output_within(&mut waiting, &quick(quiet)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(started.elapsed() >= quiet && started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        let (sh, cat) = (std::fs::read_to_string(&pid_file).unwrap(), std::fs::read_to_string(&reader).unwrap());
+        assert!(gone(sh.trim()), "sh {sh} still there");
+        assert!(gone(cat.trim()), "cat {cat} still there");
+
+        // One that ends: what it wrote, and how it ended.
+        let out = output(command("sh").args(["-c", "echo out; echo err >&2; exit 3"])).unwrap();
         assert_eq!((&out.stdout[..], &out.stderr[..], out.status.code()), (&b"out\n"[..], &b"err\n"[..], Some(3)));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A busy program at normal priority on the one CPU it may use: it
+    /// waits for a processor (R) many times as long as it may do nothing,
+    /// is not stopped, and ends once that one is done.
+    #[test]
+    fn a_program_starved_of_the_processor_is_not_stopped() {
+        if Command::new("taskset").arg("-V").stdout(Stdio::null()).status().is_err() {
+            return;
+        }
+        let cpu = allowed()[0];
+        let load = Duration::from_secs(12);
+        let (busy_tx, busy_rx) = mpsc::channel();
+        let busy = std::thread::spawn(move || {
+            let mut mask = [0u64; 16];
+            mask[cpu / 64] |= 1 << (cpu % 64);
+            unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) };
+            busy_tx.send(()).unwrap();
+            let since = Instant::now();
+            let mut n = 0u64;
+            while since.elapsed() < load {
+                n = std::hint::black_box(n.wrapping_add(1));
+            }
+        });
+        busy_rx.recv().unwrap();
+        let started = Instant::now();
+        // Half a second's work, at idle priority, on that CPU alone.
+        let mut starved = command("taskset");
+        starved.args(["-c", &cpu.to_string(), "sh", "-c", "i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done; echo done"]);
+        let out = output_within(&mut starved, &quick(Duration::from_secs(2))).unwrap();
+        assert_eq!(&out.stdout[..], b"done\n", "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(started.elapsed() >= load - Duration::from_secs(2), "not starved: {:?}", started.elapsed());
+        busy.join().unwrap();
+    }
+
+    /// One waiting on a program it started (ImageMagick on a delegate),
+    /// which works: not stopped.
+    #[test]
+    fn a_program_waiting_on_one_it_started_that_works_is_not_stopped() {
+        let mut waiting = command("sh");
+        waiting.args(["-c", "(i=0; while [ $i -lt 600000 ]; do i=$((i+1)); done); echo done"]);
+        let started = Instant::now();
+        let out = output_within(&mut waiting, &quick(Duration::from_millis(300))).unwrap();
+        assert_eq!(&out.stdout[..], b"done\n");
+        assert!(started.elapsed() > Duration::from_millis(600), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_program_spinning_is_stopped_once_it_has_used_its_processor_time() {
+        let limits = Limits { quiet: Duration::from_secs(60), cpu: Duration::from_secs(1), every: Duration::from_millis(100) };
+        let e = output_within(command("sh").args(["-c", "while :; do :; done"]), &limits).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(e.to_string().contains("used 1 s of processor time"), "{e}");
+    }
+
+    /// What is done when it is looked at: a starved program (R, nothing
+    /// done) is never hung; one asleep is, after `quiet`, unless a program
+    /// it started does something.
+    #[test]
+    fn hung_is_nothing_done_and_no_processor_waited_for() {
+        let limits = Limits { quiet: Duration::from_secs(120), cpu: Duration::from_secs(300), every: Duration::from_secs(2) };
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+        let seen = Seen { ticks: 3, bytes: 4096 };
+        let others = (Seen::default(), false);
+
+        let mut starved = Watching::new(start);
+        for s in (2..=600).step_by(2) {
+            assert_eq!(starved.step(at(s), seen, || true, || panic!("not looked at"), &limits), None, "{s}");
+        }
+
+        let mut asleep = Watching::new(start);
+        assert_eq!(asleep.step(at(2), seen, || false, || others, &limits), None);
+        assert_eq!(asleep.step(at(120), seen, || false, || others, &limits), None);
+        assert_eq!(asleep.step(at(122), seen, || false, || others, &limits), Some(Stop::Hung));
+
+        let mut waiting = Watching::new(start);
+        for s in (2..=600).step_by(2) {
+            let working = (Seen { ticks: s, bytes: 0 }, false);
+            assert_eq!(waiting.step(at(s), seen, || false, || working, &limits), None, "{s}");
+        }
+        let mut waiting_for_cpu = Watching::new(start);
+        for s in (2..=600).step_by(2) {
+            assert_eq!(waiting_for_cpu.step(at(s), seen, || false, || (Seen::default(), true), &limits), None, "{s}");
+        }
+
+        let mut reading = Watching::new(start);
+        for s in (2..=600).step_by(2) {
+            assert_eq!(reading.step(at(s), Seen { ticks: 3, bytes: s }, || false, || others, &limits), None, "{s}");
+        }
+        assert_eq!(reading.step(at(800), Seen { ticks: 3, bytes: 600 }, || false, || others, &limits), Some(Stop::Hung));
+
+        let mut spinning = Watching::new(start);
+        let spent = Seen { ticks: 300 * clock_ticks(), bytes: 0 };
+        assert_eq!(spinning.step(at(2), spent, || true, || others, &limits), Some(Stop::Spinning));
     }
 }

@@ -72,8 +72,9 @@ pub enum Input<'a> {
     /// A file it opens by its path: a folder's, or one pinholed made.
     Path(&'a Path),
     /// A file already opened, and found to be one (a provider's path
-    /// ticket): its stdin, which it opens again as /dev/stdin, the very
-    /// file whatever is at its path by then, and seeks in.
+    /// ticket): its stdin, which it opens again as /proc/self/fd/0 (not
+    /// /dev/stdin, a link to it a system may lack), the very file whatever
+    /// is at its path by then, and seeks in.
     File(&'a File),
     /// An HTTP URL on the loopback (process.rs serves a provider's there):
     /// by that protocol only, as a playlist it is given could name a file,
@@ -97,7 +98,7 @@ impl Input<'_> {
                 command.args(["-protocol_whitelist", "file", "-i"]).arg(path).stdin(Stdio::null());
             }
             Input::File(file) => {
-                command.args(["-protocol_whitelist", "file", "-i", "/dev/stdin"]).stdin(file.try_clone()?);
+                command.args(["-protocol_whitelist", "file", "-i", "/proc/self/fd/0"]).stdin(file.try_clone()?);
             }
             Input::Url(url) => {
                 // Its reads time out as pinholed's of the provider do.
@@ -135,7 +136,7 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
     for at in times {
         let jpeg = match frame_from(input, at, edge) {
             Ok(jpeg) => jpeg,
-            // One stopped after its deadline: so would the rest be.
+            // One stopped, hung or spinning: so would the rest be.
             Err(e) if timed_out(&e) => return Err(e),
             Err(e) => {
                 failed = Some(e);
@@ -163,7 +164,7 @@ fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
     let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
     let mut ffmpeg = input.command("ffmpeg", &["-threads", "1", "-ss", &format!("{at:.3}")])?;
     ffmpeg.args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
-    let output = crate::background::output(&mut ffmpeg, crate::background::DEADLINE).context("running ffmpeg")?;
+    let output = crate::background::output(&mut ffmpeg).context("running ffmpeg")?;
     if output.stdout.is_empty() {
         return Err(anyhow!("no frame at {at:.1} s: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
@@ -171,11 +172,11 @@ fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
 }
 
 /// The video's length in seconds, from ffprobe, if it can tell; an error
-/// only when it was stopped after its deadline.
+/// only when it was stopped, hung or spinning.
 fn duration(input: Input) -> Result<Option<f64>> {
     let mut ffprobe = input.command("ffprobe", &[])?;
     ffprobe.args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]);
-    let output = match crate::background::output(&mut ffprobe, crate::background::DEADLINE) {
+    let output = match crate::background::output(&mut ffprobe) {
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(anyhow::Error::from(e).context("running ffprobe")),
         Err(_) => return Ok(None),
@@ -183,7 +184,7 @@ fn duration(input: Input) -> Result<Option<f64>> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().parse().ok().filter(|d: &f64| d.is_finite()))
 }
 
-/// Whether a program was stopped after its deadline (background::output).
+/// Whether a program was stopped, hung or spinning (background::output).
 pub fn timed_out(e: &anyhow::Error) -> bool {
     e.chain().any(|e| e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::TimedOut))
 }

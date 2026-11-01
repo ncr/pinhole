@@ -232,8 +232,12 @@ decoder starts itself (libheif does). On an 8-core Ryzen, Pictures/iCloud
 it ran 7% slower instead of twice as slow. As many run at once as those
 cores have threads; a provider's video read from a URL by ffmpeg, which
 mostly waits on the network, takes one of two places of its own instead.
-One still going after three minutes (a mount that no longer answers) is
-stopped, and its place is free.
+One is never stopped for taking long: on a computer busy with a build it
+may wait minutes for a processor, and then goes on. It is stopped, and its
+place is free, when it has done nothing for two minutes (no processor time,
+nothing read or written, not waiting for a processor: a mount that no
+longer answers), or has used five minutes of processor time (a file that
+sends a decoder round in circles).
 
 ## Choosing a source
 

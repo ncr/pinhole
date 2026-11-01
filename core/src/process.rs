@@ -696,15 +696,9 @@ impl Drop for Ending {
     }
 }
 
-/// A file opened and read by a thread of its own, `gap` at most waited for
-/// its opening and for each read: whoever reads it is never held up for
-/// good, however the file behaves. `open` gives the reader and its length.
-fn watched<R: Read + Send + 'static>(
-    what: String,
-    open: impl FnOnce() -> std::result::Result<(R, u64), FetchError> + Send + 'static,
-    gap: Duration,
-    stuck: &Arc<AtomicUsize>,
-) -> std::result::Result<Body, FetchError> {
+/// Whether this source's files may be tried: not while `STUCK_MAX` reads
+/// of them have not come back.
+fn room(what: &str, stuck: &Arc<AtomicUsize>) -> std::result::Result<(), FetchError> {
     // A body put down is counted until its thread is back from the read it
     // was on, which on a file that answers is at once: a moment for those.
     let settling = Instant::now();
@@ -715,6 +709,19 @@ fn watched<R: Read + Send + 'static>(
     if waiting >= STUCK_MAX {
         return Err(FetchError::Failed(anyhow!("{what}: {waiting} reads of this source's files have not come back; none tried until one does")));
     }
+    Ok(())
+}
+
+/// A file opened and read by a thread of its own, `gap` at most waited for
+/// its opening and for each read: whoever reads it is never held up for
+/// good, however the file behaves. `open` gives the reader and its length.
+fn watched<R: Read + Send + 'static>(
+    what: String,
+    open: impl FnOnce() -> std::result::Result<(R, u64), FetchError> + Send + 'static,
+    gap: Duration,
+    stuck: &Arc<AtomicUsize>,
+) -> std::result::Result<Body, FetchError> {
+    room(&what, stuck)?;
     let watch = Arc::new(Watched { phase: Mutex::new(0), stuck: stuck.clone() });
     let (opened_tx, opened_rx) = mpsc::sync_channel::<std::result::Result<u64, FetchError>>(1);
     let (tx, rx) = mpsc::sync_channel::<std::io::Result<Vec<u8>>>(2);
@@ -842,22 +849,39 @@ fn open_path(path: PathBuf, range: Option<(u64, u64)>, gap: Duration, stuck: &Ar
     }, gap, stuck)
 }
 
-/// A path ticket's file to make a thumbnail or medium from, opened as
-/// `watched`, and a photo's size read from its start (render::size) the
-/// same way: before a program is started on it, holding a place among
-/// background work, which is given the file itself, never its path again.
+/// A path ticket's file to make a thumbnail or medium from, opened by a
+/// thread of its own as `watched` opens one, and a photo's size read from
+/// its start (render::size) there too: before a program is started on it,
+/// holding a place among background work, which is given the file itself,
+/// never its path again. The thread ends once it has handed the file over,
+/// so it is counted in `stuck` only when it took longer than `gap`.
 fn open_to_make(path: PathBuf, photo: bool, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<(File, Option<(u32, u32)>), FetchError> {
     let what = path.display().to_string();
-    let opened: Arc<Mutex<Option<(File, Option<(u32, u32)>)>>> = Arc::default();
-    let put = opened.clone();
-    watched(what, move || {
-        let file = open_checked(&path)?;
-        let size = if photo { crate::render::size(&file) } else { None };
-        *put.lock().unwrap() = Some((file, size));
-        Ok((std::io::empty(), 0))
-    }, gap, stuck)?;
-    let opened = opened.lock().unwrap().take();
-    opened.ok_or_else(|| FetchError::Failed(anyhow!("opened, and then not")))
+    room(&what, stuck)?;
+    let watch = Arc::new(Watched { phase: Mutex::new(0), stuck: stuck.clone() });
+    let (opened_tx, opened_rx) = mpsc::sync_channel(1);
+    let opening = watch.clone();
+    std::thread::Builder::new()
+        .name("pinholed-file".into())
+        .spawn(move || {
+            let _ending = Ending(opening.clone());
+            let opened = open_checked(&path).map(|file| {
+                let size = if photo { crate::render::size(&file) } else { None };
+                (file, size)
+            });
+            if !opening.given_up() {
+                let _ = opened_tx.send(opened);
+            }
+        })
+        .map_err(|e| FetchError::Failed(e.into()))?;
+    match opened_rx.recv_timeout(gap) {
+        Ok(opened) => opened,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            watch.give_up();
+            Err(FetchError::Failed(anyhow!("{what} did not answer within {} s", gap.as_secs())))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Failed(anyhow!("{what} could not be opened"))),
+    }
 }
 
 /// Requests a `Loopback` serves at once: ffmpeg makes one at a time.
@@ -1949,6 +1973,45 @@ mod tests {
             racing.into_iter().map(|r| r.join().unwrap()).collect()
         });
         assert!(left.iter().all(|l| *l == 0), "counted though back: {left:?}");
+    }
+
+    /// A file opened to make an image of, by the thousand: none is ever
+    /// counted as a read not back, so many at once never keep the next
+    /// from being tried.
+    #[test]
+    fn a_file_opened_to_make_from_is_never_counted_as_stuck() {
+        let dir = std::env::temp_dir().join(format!("pinhole-to-make-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("a.jpg");
+        image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(&photo).unwrap();
+        let stuck: Arc<AtomicUsize> = Arc::default();
+        let done = AtomicBool::new(false);
+        let most = std::thread::scope(|scope| {
+            let watching = scope.spawn(|| {
+                let mut most = 0;
+                while !done.load(Ordering::SeqCst) {
+                    most = most.max(stuck.load(Ordering::SeqCst));
+                }
+                most
+            });
+            let opening: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        for _ in 0..500 {
+                            let (file, size) = open_to_make(photo.clone(), true, Duration::from_secs(30), &stuck).unwrap();
+                            assert_eq!(size, Some((64, 48)));
+                            assert!(file.metadata().unwrap().is_file());
+                        }
+                    })
+                })
+                .collect();
+            opening.into_iter().for_each(|o| o.join().unwrap());
+            done.store(true, Ordering::SeqCst);
+            watching.join().unwrap()
+        });
+        assert_eq!(most, 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A body put down while its thread still reads: counted until that

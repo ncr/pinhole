@@ -54,7 +54,7 @@ pub fn size(mut file: &File) -> Option<(u32, u32)> {
 /// side, the right way up, from a file already opened and found to be a
 /// file: whatever is at its path by now (a FIFO put there) is never what
 /// is read. `size` is the photo's (`size`), if known. Each program that
-/// makes it is stopped after `background::DEADLINE`.
+/// makes it is stopped if it hangs or spins (`background::LIMITS`).
 pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> Result<Vec<u8>> {
     // A video's from its most telling frame (cover.rs).
     if video {
@@ -76,7 +76,7 @@ pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> 
     }
     magick.args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"]).stdin(stdin);
     let _slot = crate::background::slot();
-    let output = crate::background::output(&mut magick, crate::background::DEADLINE).context("running magick")?;
+    let output = crate::background::output(&mut magick).context("running magick")?;
     if output.stdout.is_empty() {
         return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
     }
@@ -125,19 +125,33 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(30));
 
         if has("ffmpeg") {
-            let video = dir.join("clip.mp4");
-            let made = Command::new("ffmpeg")
-                .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=duration=3:size=320x180:rate=10", "-pix_fmt", "yuv420p"])
-                .arg(&video)
-                .status()
-                .unwrap();
-            assert!(made.success());
-            let file = File::open(&video).unwrap();
-            assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
-            std::fs::rename(&fifo, &video).unwrap();
-            let jpeg = render(&file, None, 160, true).unwrap();
-            let made = image::load_from_memory(&jpeg).unwrap();
-            assert_eq!((made.width(), made.height()), (160, 90));
+            // An MP4 and a MOV as an iPhone writes it (HEVC, if this ffmpeg
+            // can, turned for a phone held upright), each with its index
+            // (moov) at its end, which ffmpeg seeks to: read through the
+            // file it was given on stdin.
+            let ffmpeg = |args: &[&str], to: &Path| {
+                let made = Command::new("ffmpeg").args(["-v", "error", "-y"]).args(args).arg(to).status().unwrap();
+                assert!(made.success(), "{args:?}");
+            };
+            let testsrc = ["-f", "lavfi", "-i", "testsrc2=duration=3:size=320x180:rate=10", "-pix_fmt", "yuv420p"];
+            ffmpeg(&testsrc, &dir.join("clip.mp4"));
+            let hevc = Command::new("ffmpeg").args(["-v", "error", "-h", "encoder=libx265"]).output().is_ok_and(|o| !o.stdout.is_empty());
+            let codec: &[&str] = if hevc { &["-c:v", "libx265", "-tag:v", "hvc1"] } else { &[] };
+            ffmpeg(&[&testsrc[..], codec].concat(), &dir.join("level.mov"));
+            let level = dir.join("level.mov").display().to_string();
+            ffmpeg(&["-display_rotation", "90", "-i", &level, "-c", "copy"], &dir.join("clip.mov"));
+            for (name, size) in [("clip.mp4", (160, 90)), ("clip.mov", (90, 160))] {
+                let video = dir.join(name);
+                let bytes = std::fs::read(&video).unwrap();
+                let at = |atom: &[u8]| bytes.windows(4).position(|w| w == atom).unwrap();
+                assert!(at(b"moov") > at(b"mdat"), "{name}: its index first");
+                let file = File::open(&video).unwrap();
+                assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+                std::fs::rename(&fifo, &video).unwrap();
+                let jpeg = render(&file, None, 160, true).unwrap();
+                let made = image::load_from_memory(&jpeg).unwrap();
+                assert_eq!((made.width(), made.height()), size, "{name}");
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
