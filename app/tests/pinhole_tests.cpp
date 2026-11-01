@@ -631,6 +631,18 @@ Item {
 }
 )");
         QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"pinhole.coveredBy", "hidden", "avgColor", "run's output"}));
+        // A value's ++ or -- then a /: a division, not a regular expression
+        // hiding the rest of the line.
+        QFile::remove(dir.path() + "/Part.qml");
+        for (const QString &step : {QStringLiteral("i++"), QStringLiteral("a[i]--"), QStringLiteral("(i)++")}) {
+            write(dir.path() + "/Main.qml", QStringLiteral(R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    function f(i, a) { return %1 / 2 + pinhole.library.item(i).avgColor }
+}
+)").arg(step).toUtf8());
+            QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"avgColor"}));
+        }
         // Pinhole's own: each that uses any asks for API 2, and what some
         // use is found.
         const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");

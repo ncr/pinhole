@@ -1156,6 +1156,14 @@ QString codeOnly(const QString &source) {
                                                "new",    "delete", "void", "throw", "yield", "await"};
             return before.contains(code.mid(from, k - from + 1));
         }
+        // After a value's ++ or --, it divides.
+        if ((code[k] == '+' || code[k] == '-') && k > 0 && code[k - 1] == code[k]) {
+            qsizetype j = k - 2;
+            while (j >= 0 && code[j].isSpace())
+                --j;
+            if (j >= 0 && (wordy(code[j]) || code[j] == ')' || code[j] == ']'))
+                return false;
+        }
         return QStringLiteral("(,=:[!&|?{};+-*%<>~^").contains(code[k]);
     };
     // A template's words, up to its end or its next ${.
