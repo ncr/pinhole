@@ -64,7 +64,7 @@ private:
 
     // A library in `dir` holding `rows` (id, date) and nothing else of note;
     // all Live Photos, or none.
-    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, int>> &rows, bool live = false,
+    static void makeLibrary(const QString &dir, const QList<std::pair<QByteArray, qint64>> &rows, bool live = false,
                             const QString &source = {}) {
         {
             QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "make");
@@ -113,10 +113,11 @@ private:
         std::unique_ptr<Plugins> plugins;
         PluginHost *host = nullptr;
 
-        explicit PluginBench(const QList<std::pair<QString, QJsonObject>> &manifests) {
+        explicit PluginBench(const QList<std::pair<QString, QJsonObject>> &manifests,
+                             const QList<std::pair<QByteArray, qint64>> &photos = {{"a", 1000}, {"b", 2000}, {"c", 3000}}) {
             QStandardPaths::setTestModeEnabled(true);
             QFile::remove(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
-            makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/x");
+            makeLibrary(dir.path(), photos, false, "folder:/x");
             QString error;
             library.open(dir.path(), &error);
             qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
@@ -525,13 +526,48 @@ QtObject {
         PluginBench bench({{"t", {}}, {"u", {}}});
         QSignalSpy seen(bench.host, &PluginHost::coveredByChanged);
         QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString());
-        bench.plugins->setCoveredBy("u");
+        bench.plugins->setCovering({"u"});
         QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString("u"));
         QCOMPARE(seen.size(), 1);
-        bench.plugins->setCoveredBy("u");
+        bench.plugins->setCovering({"u"});
         QCOMPARE(seen.size(), 1);
-        bench.plugins->setCoveredBy("");
+        // One beneath it: the top is still u's.
+        bench.plugins->setCovering({"t", "u"});
+        QCOMPARE(seen.size(), 1);
+        bench.plugins->setCovering({});
         QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString());
+    }
+
+    // The one over the photos handing a photo over closes those beneath it;
+    // one beneath, or not covering, closes none.
+    void aPhotoHandedOverFromTheTopClosesThoseBeneath() {
+        PluginBench bench({{"t", {}}, {"u", {}}, {"v", {}}});
+        auto hostOf = [&](const QString &id) {
+            return qobject_cast<PluginHost *>(bench.plugins->at(id).value("host").value<QObject *>());
+        };
+        QSignalSpy t(hostOf("t"), &PluginHost::dismissed), u(hostOf("u"), &PluginHost::dismissed),
+            v(hostOf("v"), &PluginHost::dismissed);
+        bench.plugins->setCovering({"t", "u"});
+        bench.plugins->handedOver("t");
+        bench.plugins->handedOver("v");
+        QCOMPARE(t.size() + u.size() + v.size(), 0);
+        bench.plugins->handedOver("u");
+        QCOMPARE(t.size(), 1);
+        QCOMPARE(u.size(), 0);
+        QCOMPARE(v.size(), 0);
+    }
+
+    // Each photo's local day, before 1970 too; a date of 0 is none.
+    void aPhotosDayIsItsLocalDayBefore1970Too() {
+        const auto at = [](int y, int m, int d, int h = 12) {
+            return QDateTime(QDate(y, m, d), QTime(h, 0)).toMSecsSinceEpoch();
+        };
+        // In the library's order, by date. Half a second before a local
+        // midnight before 1970 is the day before, not the day the second
+        // rounded towards 1970 is in.
+        PluginBench bench({{"t", {}}},
+                          {{"none", 0}, {"scan", at(1965, 6, 15)}, {"leap", at(1960, 3, 1, 0) - 500}, {"now", at(2025, 1, 8)}});
+        QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
     }
 
     // What came with API 2, by a plugin's words, comments aside; and each
@@ -1288,7 +1324,7 @@ QtObject {
 
     void hidingPhotosKeepsTheViewAtTheNewestEnd() {
         QTemporaryDir dir;
-        QList<std::pair<QByteArray, int>> rows;
+        QList<std::pair<QByteArray, qint64>> rows;
         for (int i = 0; i < 200; ++i)
             rows.append({QByteArray::number(i), i});
         makeLibrary(dir.path(), rows);
@@ -1357,7 +1393,7 @@ QtObject {
 
     void revealingAHiddenPhotoGoesToWhereItWouldBe() {
         QTemporaryDir dir;
-        QList<std::pair<QByteArray, int>> rows;
+        QList<std::pair<QByteArray, qint64>> rows;
         for (int i = 0; i < 200; ++i)
             rows.append({QByteArray::number(i), i});
         makeLibrary(dir.path(), rows);

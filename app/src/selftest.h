@@ -85,7 +85,9 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // photos at a time. D (On this day), ⏎ on a photo, H (Colours' Same
 // colour), ⏎, Esc: Colours alone comes back, and Esc leaves for the grid;
 // then Colours over On this day: the last covers, the other unseen, and
-// Esc goes back to it. In each, whose the keys are and no key shared.
+// Esc goes back to it; Colours over it again and ⏎: On this day closes for
+// good, Esc comes back to Colours alone; the Year calendar over it and ⏎:
+// the grid. In each, whose the keys are and no key shared.
 // Needs photos taken on this day in other years.
 void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 

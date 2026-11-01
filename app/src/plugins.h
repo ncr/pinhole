@@ -247,6 +247,10 @@ signals:
     void problemChanged();
     void notified(const QString &text);
     void coveredByChanged();
+    // The plugin over this one handed a photo over (pinhole.openPhoto,
+    // reveal): this one, covering beneath it, closes for good, not coming
+    // back once the photo is closed.
+    void dismissed();
 
 private:
     friend class PluginSettings;
@@ -293,10 +297,12 @@ class Plugins : public QObject {
     Q_PROPERTY(int revision READ revision NOTIFY changed)
     // Where one's own plugins go.
     Q_PROPERTY(QString personalDir READ personalDir CONSTANT)
-    // The plugin over the photos, the last of those covering to come
-    // (Main.qml says): its keys are the "plugin" layer's, the others wait
-    // beneath, unseen. Each plugin has it as pinhole.coveredBy.
-    Q_PROPERTY(QString coveredBy READ coveredBy WRITE setCoveredBy NOTIFY coveredByChanged)
+    // The plugins covering the photos, in the order they came (Main.qml
+    // says). The last is over the photos, coveredBy: its keys are the
+    // "plugin" layer's, the others wait beneath, unseen. Each plugin has it
+    // as pinhole.coveredBy.
+    Q_PROPERTY(QStringList covering READ covering WRITE setCovering NOTIFY coveredByChanged)
+    Q_PROPERTY(QString coveredBy READ coveredBy NOTIFY coveredByChanged)
     // The library has been read (or found missing): plugins load from then
     // on (Main.qml), so they find it whole as they start, nothing of it
     // still being read on another thread, and what they keep of it shows
@@ -344,8 +350,13 @@ public:
     Q_INVOKABLE QVariantList hiddenOf(const QString &id, const QVariantList &given, bool fresh);
 
     QStringList ids() const { return m_ids; }
-    QString coveredBy() const { return m_coveredBy; }
-    void setCoveredBy(const QString &id);
+    QStringList covering() const { return m_covering; }
+    void setCovering(const QStringList &ids);
+    QString coveredBy() const { return m_covering.isEmpty() ? QString() : m_covering.last(); }
+    // The plugin `id` showed a photo (openPhoto) or took the grid to one
+    // (reveal). The one over the photos doing so closes those covering
+    // beneath it for good: each is told (PluginHost::dismissed).
+    void handedOver(const QString &id);
     int revision() const { return m_revision; }
     static QString personalDir();
     static QString builtInDir();
@@ -432,7 +443,7 @@ private:
     std::vector<std::unique_ptr<Plugin>> m_plugins;
     QStringList m_ids;
     int m_revision = 0;
-    QString m_coveredBy;
+    QStringList m_covering;
     // plugins.json, read once and kept as written.
     QJsonObject m_config;
     bool m_touching = false;

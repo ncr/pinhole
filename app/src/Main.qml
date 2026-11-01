@@ -771,7 +771,18 @@ ApplicationWindow {
     property var coverOrder: []
     readonly property string coveringPlugin: coverOrder.length > 0 ? coverOrder[coverOrder.length - 1] : ""
     readonly property bool pluginCovering: coveringPlugin !== ""
-    Binding { target: plugins; property: "coveredBy"; value: win.coveringPlugin }
+    Binding { target: plugins; property: "covering"; value: win.coverOrder }
+    // Those covering now, and the order: those still covering in the order
+    // they came, then any new.
+    property var coveringNow: []
+    function orderCovering() {
+        const order = coverOrder.filter(id => coveringNow.indexOf(id) >= 0)
+        for (const id of coveringNow)
+            if (order.indexOf(id) < 0)
+                order.push(id)
+        if (order.join(" ") !== coverOrder.join(" "))
+            coverOrder = order
+    }
     Binding { target: keymap; property: "plugin"; value: win.coveringPlugin }
     property int pluginsLoaded: 0
     function pluginItem(id) {
@@ -812,13 +823,23 @@ ApplicationWindow {
         pluginStacks = stacks
         pluginHidden = hidden
         pluginHiders = hiders
-        // Those still covering in the order they came, then any new.
-        const order = coverOrder.filter(id => covering.indexOf(id) >= 0)
-        for (const id of covering)
-            if (order.indexOf(id) < 0)
-                order.push(id)
-        if (order.join(" ") !== coverOrder.join(" "))
-            coverOrder = order
+        // One that came covers at once; one that stopped leaves the order
+        // a moment later, once what stopped it is done: a photo it hands
+        // over meanwhile (openPhoto, reveal) is then the top one's, and
+        // closes those beneath it for good (plugins.h), before the next
+        // beneath would show.
+        coveringNow = covering
+        if (coverOrder.some(id => covering.indexOf(id) < 0)) {
+            const order = coverOrder.slice()
+            for (const id of covering)
+                if (order.indexOf(id) < 0)
+                    order.push(id)
+            if (order.length !== coverOrder.length)
+                coverOrder = order
+            Qt.callLater(win.orderCovering)
+        } else {
+            orderCovering()
+        }
         ++pluginsLoaded
         // A plugin turned off, or loaded again, takes its tour with it.
         if (tour.shown && pluginItem(tour.pluginId) === null)

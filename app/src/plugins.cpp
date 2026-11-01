@@ -85,13 +85,15 @@ QVariantList PluginLibrary::field(const QString &name) const {
     if (name == QLatin1String("date"))
         return column([](const LibraryItem &item) { return double(item.date); });
     // Not one of item's: the day it was taken, in local time, as yyyymmdd
-    // (20250108); 0 for a photo with no date. The C library's local time,
-    // a fifteenth of QDateTime's.
+    // (20250108); 0 for a photo with no date (its date 0, the library's
+    // NULL), and any other a day, before 1970 too. The C library's local
+    // time, a fifteenth of QDateTime's.
     if (name == QLatin1String("day"))
         return column([](const LibraryItem &item) {
-            if (item.date <= 0)
+            if (item.date == 0)
                 return 0;
-            const time_t seconds = time_t(item.date / 1000);
+            // The second it is in: rounded down, before 1970 too.
+            const time_t seconds = time_t(item.date / 1000 - (item.date % 1000 < 0 ? 1 : 0));
             struct tm local;
             if (!localtime_r(&seconds, &local))
                 return 0;
@@ -390,6 +392,7 @@ void PluginHost::reveal(const QJSValue &photo) const {
     PhotoGrid *grid = m_plugins->grid();
     if (!grid || index < 0)
         return;
+    m_plugins->handedOver(m_id);
     grid->reveal(index);
     grid->putCursorOn(index);
     emit m_plugins->revealed(index);
@@ -399,6 +402,7 @@ void PluginHost::openPhoto(const QJSValue &photo) const {
     const int index = m_plugins->library()->positionOf(photo);
     if (!m_plugins->grid() || index < 0)
         return;
+    m_plugins->handedOver(m_id);
     m_plugins->grid()->reveal(index);
     m_plugins->viewerObject()->openAt(index, m_plugins->grid()->rectOf(index));
 }
@@ -900,13 +904,27 @@ void Plugins::setEnabled(const QString &id, bool on) {
     emit changed();
 }
 
-void Plugins::setCoveredBy(const QString &id) {
-    if (id == m_coveredBy)
+void Plugins::setCovering(const QStringList &ids) {
+    if (ids == m_covering)
         return;
-    m_coveredBy = id;
+    const QString was = coveredBy();
+    m_covering = ids;
+    if (coveredBy() == was)
+        return;
     emit coveredByChanged();
     for (const auto &p : m_plugins)
         emit p->host->coveredByChanged();
+}
+
+void Plugins::handedOver(const QString &id) {
+    if (coveredBy() != id)
+        return;
+    // Each closing changes what covers: told from a copy.
+    const QStringList beneath = m_covering.mid(0, m_covering.size() - 1);
+    for (const QString &other : beneath)
+        for (const auto &p : m_plugins)
+            if (p->id == other && p->host)
+                emit p->host->dismissed();
 }
 
 void Plugins::setToured(const QString &id) {
@@ -1048,6 +1066,7 @@ QStringList Plugins::apiTwoUses(const QString &dir) {
         {"pinhole.warn", QRegularExpression(QStringLiteral("\\bpinhole\\.warn\\b"))},
         {"pinhole.api", QRegularExpression(QStringLiteral("\\bpinhole\\.api\\b"))},
         {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bcoveredBy\\b"))},
+        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bonDismissed\\b"))},
         {"covered", QRegularExpression(QStringLiteral("\\bcovered\\b"))},
         {"hidden", QRegularExpression(QStringLiteral("(^|[\\s;{])hidden\\s*:"), QRegularExpression::MultilineOption)},
         {"avgColor", QRegularExpression(QStringLiteral("\\bavgColor\\b"))},

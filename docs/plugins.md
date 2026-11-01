@@ -56,7 +56,7 @@ out); a Pinhole older than that says it needs a newer one and does not load
 it. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
-`pinhole.coveredBy` and `keepAwake`.
+`pinhole.coveredBy`, `dismissed` and `keepAwake`.
 
 `Main.qml` beside it:
 
@@ -117,7 +117,11 @@ its settings, is there as the window first shows. It sets:
   alone. `pinhole.coveredBy` says which one it is (its id, `""` for none):
   a plugin that comes back by itself, as On this day does when a photo
   opened from it closes, stays away while another's covers, and forgets
-  coming back once another has covered meanwhile.
+  coming back once another has covered meanwhile. When the one over the
+  photos hands one over (`openPhoto`, `reveal`), those covering beneath
+  it are told with `pinhole.dismissed()`, and close for good: Colours
+  opened over On this day, ⏎ opens a photo, and Esc then comes back to
+  Colours alone, then to the grid.
 - `settings`: a `Component` shown under its row in the side panel while it
   is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
 - `help`: its keys for the help (?), as `[["key", "what it does"], ...]`,
@@ -164,7 +168,7 @@ positions move when the library is read again, ids do not, so keep ids.
 
 | | |
 |---|---|
-| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), 0 for one with no date; `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`; for what a plugin keeps for each source apart); and `changed()` when it is read again |
+| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`; for what a plugin keeps for each source apart); and `changed()` when it is read again |
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
@@ -184,6 +188,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown) |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
+| `dismissed()` | the plugin over this one, covering, handed a photo over (`openPhoto`, `reveal`): close, and do not come back when that photo closes |
 | `id`, `api` | its id; the version of all this |
 
 ### Promises
