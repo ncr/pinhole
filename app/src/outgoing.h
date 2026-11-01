@@ -13,9 +13,9 @@ class ServiceClient;
 
 // Files for photos leaving the app: dragged out, copied, exported. Each
 // photo's original comes from pinholed and gets its camera filename; in the
-// "compatible" form a HEIC becomes a JPEG (ImageMagick, which keeps the date,
-// place and camera details), since much that accepts a dropped photo does not
-// read HEIC. Videos always go as they are.
+// "compatible" form a HEIC becomes a JPEG (pinholed's `jpeg`, which keeps the
+// date, place and camera details), since much that accepts a dropped photo
+// does not read HEIC. Videos always go as they are.
 class Outgoing : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -46,11 +46,6 @@ public:
     void setStatus(const QString &status);
 
     static QString stagingFolder();
-    // The name a file's compatible JPEG is kept under in the cache: its
-    // path, size, inode and birth, hashed, so another file of its name (a
-    // folder's) or the file written anew converts anew. Not its time:
-    // pinholed touches what it serves from its cache, each time.
-    static QString compatibleName(const QString &source);
 
     bool dragging() const { return m_dragging; }
 
@@ -99,8 +94,10 @@ signals:
 
 private:
     void flash(const QString &status);
-    void place(const QString &source, const QString &type, const LibraryItem &item, bool compatible, const QString &folder,
-               std::function<void(const QString &)> placed);
+    // A file fetched, under its camera name in `folder`; `of`, the source
+    // whose photo it is, for the JPEG of a HEIC asked for next.
+    void place(const QString &source, const QString &type, const LibraryItem &item, const QString &of, bool compatible,
+               const QString &folder, std::function<void(const QString &)> placed);
     static QString uniqueName(const QString &folder, const QString &name);
 
     const Library *m_library;

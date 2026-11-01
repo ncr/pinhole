@@ -167,9 +167,9 @@ fn a_window_meets_the_service_of_a_folder() {
     let has_heic = heic(&photos.join("c.heic"), [40, 40, 200], "2024:05:06 07:08:09");
     let magicks = root.join("magicks.log");
     count_magicks(&root.join("bin"), &magicks);
-    // JPEGs a window made itself: one unused for two days goes as the
-    // service starts; one made a moment ago, perhaps on its way somewhere
-    // as it starts, stays, and the folder the window writes in with it.
+    // JPEGs a window made itself before it asked the service for them
+    // (`jpeg`): gone as the service starts, however new, and the folder
+    // with them, as nothing writes there any more.
     let compatible = root.join("cache/pinhole/compatible");
     std::fs::create_dir_all(&compatible).unwrap();
     std::fs::write(compatible.join("IMG_0001.jpg"), b"old").unwrap();
@@ -239,8 +239,8 @@ fn a_window_meets_the_service_of_a_folder() {
     let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
     assert_eq!(medium["ok"], true, "{medium:#}");
     assert!(Path::new(medium["result"]["path"].as_str().unwrap()).is_file());
-    assert!(!compatible.join("IMG_0001.jpg").exists());
-    assert_eq!(std::fs::read(compatible.join("IMG_0002.jpg")).unwrap(), b"new");
+    assert!(!compatible.exists());
+    assert!(root.join("cache/pinhole").is_dir());
 
     // A JPEG of a photo that is one is its full: here the file itself.
     let jpeg = window.ask("fetch", json!({"asset": "a.jpg", "kind": "jpeg"}));

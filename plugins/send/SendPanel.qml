@@ -130,7 +130,9 @@ Item {
             filesCompatible = compatible
             done(list)
         }
-        // HEIC as JPEG: a few at once, by pinhole-send.
+        // HEIC as JPEG: the service's (`jpeg`), made once into its cache
+        // from the same full, a few at once there. Each not made is left
+        // out, and said so.
         const convert = () => {
             const heic = []
             got.forEach((path, k) => {
@@ -139,39 +141,24 @@ Item {
             })
             if (heic.length === 0)
                 return finish()
-            // Each not made a JPEG is left out, and said so.
-            const waiting = new Set(heic)
-            const unmade = k => {
-                got[k] = null
-                ++unconverted
-            }
-            const run = pinhole.run(plugin.sender, ["jpeg", pinhole.cacheDir + "/jpeg"], {
-                input: JSON.stringify(heic.map(k => got[k])),
-                output: line => {
-                    if (job !== generation)
-                        return
-                    const at = line.indexOf(" ")
-                    const k = heic[Number(line.slice(0, at))]
-                    if (!waiting.has(k))
-                        return
-                    waiting.delete(k)
-                    const path = line.slice(at + 1)
-                    if (path === "!")
-                        unmade(k)
-                    else
+            let waiting = heic.length
+            jobs = heic.map(k => {
+                const made = pinhole.fetch(wanted[k].item.id, "jpeg")
+                made.then(path => {
+                    if (job === generation)
                         got[k] = path
-                }
+                }, error => {
+                    if (job !== generation || error.code === "cancelled")
+                        return
+                    pinhole.warn(error)
+                    got[k] = null
+                    ++unconverted
+                }).catch(pinhole.warn).then(() => {
+                    if (job === generation && --waiting === 0)
+                        finish()
+                })
+                return made
             })
-            jobs = [run]
-            // Gone wrong as a whole (no ImageMagick, no pinhole-send): those
-            // not made yet are not, and the rest go.
-            run.then(finish, error => {
-                if (job !== generation || error.code === "cancelled")
-                    return
-                pinhole.warn(error)
-                waiting.forEach(unmade)
-                finish()
-            }).catch(pinhole.warn)
         }
         const fetches = wanted.map((w, k) => {
             const fetch = pinhole.fetch(w.item.id, w.kind)

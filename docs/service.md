@@ -536,9 +536,8 @@ which is committed then. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.
-In `~/.cache/pinhole/compatible`, where the window makes its own JPEGs
-until it asks for `jpeg`, what has not been used for a day is removed
-then.
+`~/.cache/pinhole/compatible`, where the window made its own JPEGs
+before it asked for `jpeg`, is removed then.
 
 ## Links
 

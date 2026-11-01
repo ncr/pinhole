@@ -1322,6 +1322,23 @@ API above).
 - `selftest.cpp` (`outgoing`), `docs/plugins.md` (`fetch` kinds).
 - Tests: `PINHOLE_SELFTEST=outgoing` (a HEIC becomes a JPEG with the date
   kept); `PINHOLE_SELFTEST=send:<dir>`; `cargo test` in the sender.
+- As built:
+  - `Outgoing` still asks for `full` first and asks for `jpeg` only when
+    that is a HEIC (`public.heic`), as it made JPEGs only of those: a PNG
+    or a GIF goes as it is, as before, where `jpeg` would make it a JPEG
+    (a GIF its first frame). The JPEG is hard linked out of the cache as
+    the rest are, under the camera's name with `.jpg`. Send likewise asks
+    for `jpeg` of the HEICs among what it fetched (`.heic`, `.heif`).
+  - `forget_compatible()` removes the folder whole, logging how many
+    JPEGs went, and Send's `tidy` its old `jpeg/` folders, however new
+    what is in them: nothing makes or reads either any more.
+  - The sender loses `sha2`, which only named its JPEGs.
+  - Tests: `aHeicGoesOutAsTheServicesJpegUnderItsCameraName` (a stand-in
+    service: `full`, then `jpeg` for the HEIC only, names, the source said,
+    nothing in `compatible`, a JPEG not made failing that photo alone);
+    `outgoing` reports each file's date, camera, place and orientation and
+    that `compatible` is not there; the sender's `tidy` test; core's
+    service test (the folder gone as the service starts).
 
 ### B6: sources from plugins (after A2)
 

@@ -51,25 +51,20 @@ pub fn old_cache() -> PathBuf {
     std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".cache")).join("pinhole")
 }
 
-/// Where the window keeps JPEGs of HEICs it makes itself (`compatible`),
-/// until it asks the service for them (`jpeg`, phase B5 of
-/// docs/core-and-plugins.md): made again when asked for. The window
-/// writes there still, and a JPEG it made a moment ago may be on its way
-/// somewhere, so only what has not been used for a day goes, as the shared
-/// service starts; the folder stays. Nothing else is in it.
+/// Where the window kept JPEGs of HEICs it made itself (`compatible`),
+/// before it asked the service for them (`jpeg`, phase B5 of
+/// docs/core-and-plugins.md): nothing writes or reads there any more, so
+/// the folder goes as the shared service starts. JPEGs are made into the
+/// cache when asked for. Nothing else was in it.
 pub fn forget_compatible() {
     let old = old_cache().join("compatible");
-    let Ok(entries) = std::fs::read_dir(&old) else { return };
-    let day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
-    let mut removed = 0;
-    for entry in entries.flatten() {
-        let stale = entry.metadata().is_ok_and(|m| m.is_file() && m.modified().is_ok_and(|t| t < day_ago));
-        if stale && std::fs::remove_file(entry.path()).is_ok() {
-            removed += 1;
-        }
+    if !old.is_dir() {
+        return;
     }
-    if removed > 0 {
-        eprintln!("pinholed: removed {removed} JPEGs unused for a day from {}: JPEGs are kept in the cache now", old.display());
+    let count = std::fs::read_dir(&old).map(|entries| entries.count()).unwrap_or(0);
+    match std::fs::remove_dir_all(&old) {
+        Ok(()) => eprintln!("pinholed: removed {} ({count} files): JPEGs are made into the cache now", old.display()),
+        Err(err) => eprintln!("pinholed: could not remove {}: {err}", old.display()),
     }
 }
 

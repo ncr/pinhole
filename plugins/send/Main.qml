@@ -6,9 +6,10 @@ import Pinhole.Plugin
 // ticked in select mode (O). The devices with LocalSend open show as they
 // answer; picking one fetches the files and asks its owner (with its PIN,
 // if it has one), and once they say yes the originals go, a Live Photo's
-// video with its photo, or HEIC as JPEG. pinhole-send (sender/) speaks
-// LocalSend's protocol with LocalSend's own code, and makes the JPEGs; for
-// a device that does not show, LocalSend's own window takes the files.
+// video with its photo, or HEIC as JPEG (the service's, `jpeg`, which
+// Export makes too). pinhole-send (sender/) speaks LocalSend's protocol
+// with LocalSend's own code; for a device that does not show, LocalSend's
+// own window takes the files.
 // Nothing is fetched or sent but on a press of a device.
 PinholePlugin {
     id: plugin
@@ -37,9 +38,9 @@ PinholePlugin {
     }
 
     // What it keeps, kept small: folders staged for LocalSend's window go
-    // after a day, JPEGs after thirty, and the oldest past 2 GB; each
-    // source's, as it loads, every hour and when another source is shown.
-    // Not while a send may be taking from it.
+    // after a day (and the JPEGs it made itself before the service made
+    // them, at once); each source's, as it loads, every hour and when
+    // another source is shown. Not while a send may be taking from it.
     function tidy() {
         if (!panel.running)
             pinhole.run(sender, ["tidy", pinhole.cacheDir]).catch(pinhole.warn)

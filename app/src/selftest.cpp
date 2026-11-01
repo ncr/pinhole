@@ -297,7 +297,12 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
     auto describe = [](const QStringList &files) {
         for (const QString &f : files) {
             QProcess identify;
-            identify.start("magick", {"identify", "-format", "%m %wx%h, taken %[EXIF:DateTimeOriginal]", f + "[0]"});
+            // Its date, camera and place kept, and upright (orientation 1,
+            // or none): what a JPEG of a HEIC must keep.
+            identify.start("magick", {"identify", "-format",
+                                      "%m %wx%h, taken %[EXIF:DateTimeOriginal], %[EXIF:Model], at %[EXIF:GPSLatitude], "
+                                      "orientation %[EXIF:Orientation]",
+                                      f + "[0]"});
             identify.waitForFinished(20000);
             const QString what = QString::fromUtf8(identify.readAllStandardOutput()).trimmed();
             std::printf("selftest:   %-28s %8lld KB  %s\n", qPrintable(QFileInfo(f).fileName()), QFileInfo(f).size() / 1024,
@@ -325,6 +330,9 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
                     if (mime && !mime->urls().isEmpty())
                         std::printf("selftest:   first: %s (camera name %s)\n", qPrintable(mime->urls().first().fileName()),
                                     qPrintable(library.at(picks.first()).filename));
+                    // The window makes no JPEGs of its own any more.
+                    const QString compatible = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible";
+                    std::printf("selftest: %s %s\n", qPrintable(compatible), QFileInfo::exists(compatible) ? "is there" : "is not there");
                     std::printf("selftest: done\n");
                     std::fflush(stdout);
                     QCoreApplication::quit();

@@ -59,10 +59,11 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
 `pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
-`hint`, `busyDelay`, `textColour` and `complain`, `fetch`'s options and its
-Live effects, a photo's `effect`, `setFavorite`, `library.revision`, and
-`sources` in the manifest: a source of photos of the plugin's own, whose
-provider pinholed runs ([source-providers.md](source-providers.md)).
+`hint`, `busyDelay`, `textColour` and `complain`, `fetch`'s options, its
+Live effects and `jpeg`, a photo's `effect`, `setFavorite`,
+`library.revision`, and `sources` in the manifest: a source of photos of
+the plugin's own, whose provider pinholed runs
+([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
 
@@ -266,7 +267,7 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
-| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the service makes when the source has none): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize`. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
+| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the service makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize`. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
 | `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did` |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |

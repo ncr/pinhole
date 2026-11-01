@@ -6,7 +6,6 @@
 
 #include <QDateTime>
 #include <QClipboard>
-#include <QCryptographicHash>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QImageReader>
 #include <QFutureWatcher>
@@ -22,12 +21,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
-#include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
 
 #include <memory>
-#include <sys/stat.h>
 #include <unistd.h>
 
 Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *parent)
@@ -313,27 +310,18 @@ void Outgoing::prepare(const Chosen &items, bool compatible, const QString &fold
         // has one); originals are as taken, unedited, as Photos exports
         // "unmodified originals".
         m_service->fetch(item.id, compatible ? QStringLiteral("full") : QStringLiteral("original"),
-                         [this, item, compatible, target, finishOne](bool ok, const QJsonObject &result, const QString &) {
+                         [this, item, source = items.source, compatible, target, finishOne](bool ok, const QJsonObject &result,
+                                                                                             const QString &) {
                              if (!ok)
                                  return finishOne({});
-                             place(result.value("path").toString(), result.value("type").toString(), item, compatible,
-                                   target, finishOne);
+                             place(result.value("path").toString(), result.value("type").toString(), item, source,
+                                   compatible, target, finishOne);
                          }, false, items.source);
     }
 }
 
-QString Outgoing::compatibleName(const QString &source) {
-    const QFileInfo info(source);
-    struct stat st {};
-    ::stat(QFile::encodeName(source).constData(), &st);
-    const QByteArray identity = QFile::encodeName(info.canonicalFilePath().isEmpty() ? info.absoluteFilePath() : info.canonicalFilePath())
-        + '\0' + QByteArray::number(info.size()) + '\0' + QByteArray::number(quint64(st.st_ino)) + '\0'
-        + QByteArray::number(info.birthTime().toMSecsSinceEpoch());
-    return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32)) + ".jpg";
-}
-
-void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, bool compatible,
-                     const QString &folder, std::function<void(const QString &)> placed) {
+void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, const QString &of,
+                     bool compatible, const QString &folder, std::function<void(const QString &)> placed) {
     QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
     // An edit comes as a JPEG whatever the camera wrote: name it so.
     if (type == QLatin1String("public.jpeg") && !name.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive) &&
@@ -350,45 +338,17 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
             placed({});
     };
 
+    // A HEIC, which much that takes a photo does not read, as the service's
+    // JPEG of the same full (`jpeg`): made once into its cache, under its
+    // limit, with the date, place and camera kept and the pixels upright.
     if (compatible && type == QLatin1String("public.heic")) {
-        const QString out = uniqueName(folder, QFileInfo(name).completeBaseName() + ".jpg");
-        // Converted once and kept in the cache beside the originals, by the
-        // file it came from (compatibleName); pinholed's size limit covers it
-        // like the rest.
-        const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible";
-        const QString converted = dir + '/' + compatibleName(source);
-        if (QFileInfo::exists(converted)) {
-            QFile file(converted);
-            if (file.open(QIODevice::ReadWrite))
-                file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime); // recently used
-            hand(converted, out);
-            return;
-        }
-        QDir().mkpath(dir);
-        // Written aside and renamed: two at once never clash, and a reader
-        // never sees half a file. (pinholed's eviction skips .part files.)
-        static int parts = 0;
-        const QString part = converted + '.' + QString::number(QDateTime::currentMSecsSinceEpoch()) + '-' + QString::number(++parts) + ".part";
-        auto *magick = new QProcess(this);
-        connect(magick, &QProcess::finished, this,
-                [magick, part, converted, out, hand, placed](int code, QProcess::ExitStatus status) {
-                    magick->deleteLater();
-                    if (status != QProcess::NormalExit || code != 0 || !QFileInfo::exists(part)) {
-                        QFile::remove(part);
-                        placed({});
-                        return;
-                    }
-                    QFile::remove(converted);
-                    QFile::rename(part, converted);
-                    hand(converted, out);
-                });
-        // The HEIC in on stdin and the JPEG out on stdout: a folder's file
-        // name is never read as ImageMagick's own syntax ("50%off.heic" is
-        // "500ff.heic" to it).
-        magick->setStandardInputFile(source);
-        magick->setStandardOutputFile(part);
-        magick->start(QStringLiteral("magick"),
-                      {QStringLiteral("-[0]"), QStringLiteral("-quality"), QStringLiteral("92"), QStringLiteral("jpg:-")});
+        const QString jpeg = QFileInfo(name).completeBaseName() + QStringLiteral(".jpg");
+        m_service->fetch(item.id, QStringLiteral("jpeg"),
+                         [folder, jpeg, hand, placed](bool ok, const QJsonObject &result, const QString &) {
+                             if (!ok)
+                                 return placed({});
+                             hand(result.value("path").toString(), uniqueName(folder, jpeg));
+                         }, false, of);
         return;
     }
 

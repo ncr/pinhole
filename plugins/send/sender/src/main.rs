@@ -28,16 +28,11 @@
 //!     The files under their names in the folder (linked where they can be,
 //!     else copied), for LocalSend's own window: their paths, a line each.
 //!
-//! `pinhole-send jpeg <folder>`, stdin `["path", ...]`
-//!     Each HEIC as a JPEG in the folder (ImageMagick, which keeps the date,
-//!     place and camera), a few at once: `<k> <path>` for the k-th as it is
-//!     ready, `<k> !` if it could not be. Kept by the original's path, size
-//!     and inode, so another file of its name, or it changed, is made anew.
-//!
 //! `pinhole-send tidy <folder>`
 //!     The plugin's cache kept small, the folder's and each other source's
-//!     beside it: folders staged for LocalSend gone after a day, JPEGs after
-//!     thirty, and the oldest of them past 2 GB.
+//!     beside it: folders staged for LocalSend gone after a day. The JPEGs
+//!     it made of HEICs before the service made them (`jpeg/`) go at once:
+//!     the plugin asks the service for them now (`fetch(photo, "jpeg")`).
 //!
 //! This computer is one LocalSend device to the others, whichever command:
 //! its certificate is kept in ~/.config/pinhole/send, so a phone sees the
@@ -61,13 +56,12 @@ use localsend::model::transfer::{FileContent, FileDto};
 use localsend::multicast::{MulticastDevice, DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
 use localsend::util::interface::{local_interface_addresses, InterfaceFilter};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -84,8 +78,6 @@ const STOPPED_WAIT: Duration = Duration::from_millis(700);
 /// minutes. Past the fourth of Linux's tries again (at 1, 3, 7 and 15 s),
 /// for a phone whose Wi-Fi wakes slowly.
 const CONNECT: Duration = Duration::from_secs(16);
-/// HEICs made JPEGs at once.
-const CONVERSIONS: usize = 3;
 
 fn main() {
     // Ended with the window, however it goes: SIGTERM, as when stopped.
@@ -99,9 +91,8 @@ fn main() {
             Some("devices") => devices(&args[1..]).await,
             Some("send") => send(&args[1..]).await,
             Some("stage") => stage(&args[1..]),
-            Some("jpeg") => jpeg(&args[1..]).await,
             Some("tidy") => tidy(&args[1..]),
-            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> | stage <folder> | jpeg <folder> | tidy <folder>"),
+            _ => bail!("usage: pinhole-send devices [<device> ...] | send <device> | stage <folder> | tidy <folder>"),
         }
     });
     if let Err(err) = result {
@@ -699,99 +690,6 @@ fn stage(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// The name a file's JPEG is kept under: its path, size, inode and birth,
-/// hashed (as Export's, Outgoing::compatibleName). Not its time: pinholed
-/// touches what it serves from its cache, each time. A file replaced, or
-/// written over, is another.
-fn jpeg_name(path: &Path) -> Result<String> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
-    let born = meta.created().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).unwrap_or_default().as_millis();
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut hash = Sha256::new();
-    hash.update(path.to_string_lossy().as_bytes());
-    hash.update(format!("\0{}\0{}\0{born}", meta.len(), meta.ino()).as_bytes());
-    let digest = hash.finalize();
-    Ok(digest[..16].iter().map(|b| format!("{b:02x}")).collect::<String>() + ".jpg")
-}
-
-async fn jpeg(args: &[String]) -> Result<()> {
-    let folder = PathBuf::from(args.first().context("no folder")?);
-    let list = input()?;
-    let paths: Vec<PathBuf> = list
-        .as_array()
-        .context("stdin is not a list")?
-        .iter()
-        .map(|path| path.as_str().map(PathBuf::from).context("a path that is not text"))
-        .collect::<Result<_>>()?;
-    std::fs::create_dir_all(&folder).with_context(|| format!("making {}", folder.display()))?;
-    let stop = stopped();
-    let room = Arc::new(tokio::sync::Semaphore::new(CONVERSIONS));
-    let mut tasks = Vec::new();
-    for (k, path) in paths.into_iter().enumerate() {
-        let folder = folder.clone();
-        let room = room.clone();
-        tasks.push(tokio::spawn(async move {
-            let made = async {
-                let out = folder.join(jpeg_name(&path)?);
-                if out.exists() {
-                    // Recently used, for tidy.
-                    if let Ok(file) = std::fs::File::options().write(true).open(&out) {
-                        let _ = file.set_modified(SystemTime::now());
-                    }
-                    return Ok::<PathBuf, anyhow::Error>(out);
-                }
-                let _turn = room.acquire().await?;
-                // Written aside, under a name of its own, and moved: two at
-                // once never clash, and a half-made one is never taken.
-                let part = out.with_extension(format!("{}.{k}.part", std::process::id()));
-                // The file in on stdin and the JPEG out on stdout: a
-                // folder's file name is never read as ImageMagick's own
-                // syntax ("50%off.jpg" is "500ff.jpg" to it). Its first
-                // image: one JPEG of an animated GIF.
-                let input = std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
-                let output = std::fs::File::create(&part).with_context(|| format!("writing {}", part.display()))?;
-                let mut magick = tokio::process::Command::new("magick");
-                magick.args(["-[0]", "-quality", "92", "jpg:-"]).stdin(input).stdout(output);
-                // Gone with this, should it be stopped.
-                unsafe {
-                    magick.pre_exec(|| {
-                        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                        Ok(())
-                    });
-                }
-                let status = magick.kill_on_drop(true).status().await;
-                if !status.as_ref().is_ok_and(|s| s.success()) {
-                    let _ = std::fs::remove_file(&part);
-                    bail!("magick could not convert {}", path.display());
-                }
-                std::fs::rename(&part, &out)?;
-                Ok(out)
-            };
-            match made.await {
-                Ok(out) => say(&format!("{k} {}", out.display())),
-                Err(err) => {
-                    eprintln!("pinhole-send: {err:#}");
-                    say(&format!("{k} !"));
-                }
-            }
-        }));
-    }
-    tokio::select! {
-        _ = futures_util::future::join_all(tasks) => {}
-        _ = stop.cancelled() => {
-            // The parts being written go with this; tidy takes any left.
-            for entry in std::fs::read_dir(&folder)?.flatten() {
-                if entry.file_name().to_string_lossy().contains(&format!(".{}.", std::process::id())) {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-            end("cancelled");
-        }
-    }
-    Ok(())
-}
-
 fn tidy(args: &[String]) -> Result<()> {
     let folder = PathBuf::from(args.first().context("no folder")?);
     // Each source's library has a folder of its own, beside this one: the
@@ -828,36 +726,15 @@ fn tidy_one(folder: &Path) {
             }
         }
     }
-    // JPEGs: not used for thirty days, then the oldest past 2 GB; parts
-    // left by a stop an hour on.
-    let mut kept = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(folder.join("jpeg")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let old = age(&path);
-            let part = path.extension().is_some_and(|e| e == "part");
-            if (part && old > Duration::from_secs(3600)) || (!part && old > 30 * DAY) {
-                let _ = std::fs::remove_file(&path);
-            } else if !part {
-                kept.push((old, entry.metadata().map(|m| m.len()).unwrap_or(0), path));
-            }
-        }
-    }
-    kept.sort_by(|a, b| b.0.cmp(&a.0));
-    let mut size: u64 = kept.iter().map(|k| k.1).sum();
-    for (_, bytes, path) in kept {
-        if size <= 2 << 30 {
-            break;
-        }
-        if std::fs::remove_file(&path).is_ok() {
-            size -= bytes;
-        }
-    }
+    // JPEGs made here before the service made them (fetch "jpeg"): nothing
+    // makes or reads them any more.
+    let _ = std::fs::remove_dir_all(folder.join("jpeg"));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::SystemTime;
 
     #[test]
     fn a_pin_is_itself_in_the_query() {
@@ -894,19 +771,17 @@ mod tests {
         for source in ["icloud-a", "folder-b"] {
             std::fs::create_dir_all(root.join(source).join("jpeg")).unwrap();
             std::fs::create_dir_all(root.join(source).join("localsend/1")).unwrap();
-            for name in ["old.jpg", "new.jpg"] {
-                std::fs::write(root.join(source).join("jpeg").join(name), b"x").unwrap();
-            }
-            let file = std::fs::File::options().write(true).open(root.join(source).join("jpeg/old.jpg")).unwrap();
-            file.set_modified(old).unwrap();
+            std::fs::create_dir_all(root.join(source).join("localsend/2")).unwrap();
+            std::fs::write(root.join(source).join("jpeg/new.jpg"), b"x").unwrap();
             let staged = std::fs::File::open(root.join(source).join("localsend/1")).unwrap();
             staged.set_modified(old).unwrap();
         }
         tidy(&[root.join("icloud-a").to_string_lossy().into_owned()]).unwrap();
         for source in ["icloud-a", "folder-b"] {
-            assert!(!root.join(source).join("jpeg/old.jpg").exists(), "{source}");
-            assert!(root.join(source).join("jpeg/new.jpg").exists(), "{source}");
+            // The JPEGs of before, however new: the service makes them now.
+            assert!(!root.join(source).join("jpeg").exists(), "{source}");
             assert!(!root.join(source).join("localsend/1").exists(), "{source}");
+            assert!(root.join(source).join("localsend/2").exists(), "{source}");
         }
         std::fs::remove_dir_all(&root).unwrap();
     }

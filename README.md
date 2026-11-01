@@ -221,8 +221,10 @@ reports, for a scratch source only, since they really are added.
 Click selects (Ctrl click adds, ⇧ click a range, Ctrl A all). Drag
 photos out to any app; Ctrl C copies them; Ctrl E exports the originals and
 Ctrl ⇧ E a compatible form (HEIC as JPEG, keeping the date, place and
-camera details) to a folder chosen in the desktop's own picker. Originals
-come from iCloud as they are needed.
+camera details) to a folder chosen in the desktop's own picker. Dragging
+and Ctrl C give the compatible form too. The JPEGs are pinholed's own
+(`jpeg`), made once into the cache, as Send's are. Originals come from
+iCloud as they are needed.
 
 Without a real library the window opens the synthetic one:
 

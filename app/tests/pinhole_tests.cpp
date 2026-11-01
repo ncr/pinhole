@@ -2612,35 +2612,99 @@ PinholePlugin {
         QCOMPARE(chosen.first().filename, QString("b.HEIC"));
     }
 
-    // Export's JPEG of a HEIC is kept by the file it came from: two of one
-    // name in two folders, or one written anew, are not given each other's.
-    void aCompatibleJpegIsKeptByItsFileNotItsName() {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        QDir().mkpath(dir.path() + "/a");
-        QDir().mkpath(dir.path() + "/b");
-        auto write = [](const QString &path, const QByteArray &bytes) {
-            QFile file(path);
-            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
-            file.write(bytes);
-        };
-        const QString a = dir.path() + "/a/IMG_0001.HEIC", b = dir.path() + "/b/IMG_0001.HEIC";
-        write(a, "one");
-        write(b, "one");
-        const QString nameA = Outgoing::compatibleName(a);
-        QVERIFY(nameA.endsWith(".jpg"));
-        QVERIFY(nameA != Outgoing::compatibleName(b));
-        // Touched (as pinholed does what it serves): the same.
-        QFile(a).setFileTime(QDateTime::currentDateTime().addDays(1), QFileDevice::FileModificationTime);
-        QCOMPARE(Outgoing::compatibleName(a), nameA);
-        // Written over, or replaced by another file: another.
-        write(a, "edited");
-        const QString edited = Outgoing::compatibleName(a);
-        QVERIFY(edited != nameA);
-        write(dir.path() + "/c", "edited");
-        QVERIFY(QFile::remove(a));
-        QVERIFY(QFile::rename(dir.path() + "/c", a));
-        QVERIFY(Outgoing::compatibleName(a) != edited);
+    // In the compatible form a HEIC goes as the service's JPEG of it
+    // (`jpeg`), asked for as the source's photo, under its camera name with
+    // .jpg; a JPEG and a video go as they are, and nothing else is asked
+    // for. Nothing is written to ~/.cache/pinhole/compatible any more.
+    void aHeicGoesOutAsTheServicesJpegUnderItsCameraName() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir dir, out;
+        makeLibrary(dir.path(), {{"IMG_0001", 1000}, {"IMG_0002", 2000}, {"IMG_0003", 3000}}, false, "folder:/x");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        // The files the stand-in service answers with: the HEIC's full, the
+        // JPEG made of it, a JPEG's full and a video.
+        const QString heic = dir.path() + "/full.heic", made = dir.path() + "/full-jpeg.jpg";
+        const QString jpeg = dir.path() + "/edit.jpeg", video = dir.path() + "/clip.mov";
+        write(heic, "heic");
+        write(made, "jpeg of the heic");
+        write(jpeg, "jpeg");
+        write(video, "mov");
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        QObject::connect(fake.peer, &QLocalSocket::readyRead, fake.peer, [&] {
+            const qsizetype seen = fake.asked.size();
+            fake.read();
+            for (qsizetype i = seen; i < fake.asked.size(); ++i) {
+                const QJsonObject params = fake.asked[i].value("params").toObject();
+                const QString asset = params.value("asset").toString(), kind = params.value("kind").toString();
+                QJsonObject result;
+                if (asset == "IMG_0001" && kind == "full")
+                    result = {{"path", heic}, {"type", "public.heic"}};
+                else if (asset == "IMG_0001" && kind == "jpeg")
+                    result = {{"path", made}, {"type", "public.jpeg"}, {"rendition", "made"}};
+                else if (asset == "IMG_0002" && kind == "full")
+                    result = {{"path", jpeg}, {"type", "public.jpeg"}};
+                else if (asset == "IMG_0003" && kind == "full")
+                    result = {{"path", video}, {"type", "com.apple.quicktime-movie"}};
+                if (result.isEmpty())
+                    fake.send({{"id", fake.asked[i].value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "not_found"}}}});
+                else
+                    fake.send({{"id", fake.asked[i].value("id")}, {"ok", true}, {"result", result}});
+            }
+        });
+        Outgoing outgoing(&library, &service);
+        QStringList files;
+        int failed = -1;
+        outgoing.prepare(outgoing.snapshot({0, 1, 2}), true, out.path(), [&](const QStringList &f, int n) {
+            files = f;
+            failed = n;
+        });
+        QTRY_COMPARE(failed, 0);
+        files.sort();
+        QCOMPARE(files, (QStringList{out.path() + "/IMG_0001.jpg", out.path() + "/IMG_0002.jpg", out.path() + "/IMG_0003.HEIC"}));
+        QCOMPARE(read(out.path() + "/IMG_0001.jpg"), QString("jpeg of the heic"));
+        QCOMPARE(read(out.path() + "/IMG_0002.jpg"), QString("jpeg"));
+        QStringList asked;
+        for (const QJsonObject &line : std::as_const(fake.asked)) {
+            const QJsonObject params = line.value("params").toObject();
+            asked << params.value("asset").toString() + " " + params.value("kind").toString();
+            QCOMPARE(params.value("source").toString(), QString("folder:/x"));
+        }
+        asked.sort();
+        QCOMPARE(asked, (QStringList{"IMG_0001 full", "IMG_0001 jpeg", "IMG_0002 full", "IMG_0003 full"}));
+        QVERIFY(!QFileInfo::exists(QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/compatible"));
+        // The JPEG not made: that photo failed, the rest went.
+        QTemporaryDir again;
+        QFile::remove(made);
+        QObject::disconnect(fake.peer, nullptr, nullptr, nullptr);
+        QObject::connect(fake.peer, &QLocalSocket::readyRead, fake.peer, [&] {
+            const qsizetype seen = fake.asked.size();
+            fake.read();
+            for (qsizetype i = seen; i < fake.asked.size(); ++i) {
+                const QJsonObject params = fake.asked[i].value("params").toObject();
+                if (params.value("kind").toString() == "jpeg")
+                    fake.send({{"id", fake.asked[i].value("id")}, {"ok", false},
+                               {"error", QJsonObject{{"code", "failing"}, {"message", "magick failed"}}}});
+                else
+                    fake.send({{"id", fake.asked[i].value("id")}, {"ok", true}, {"result", QJsonObject{{"path", heic}, {"type", "public.heic"}}}});
+            }
+        });
+        failed = -1;
+        outgoing.prepare(outgoing.snapshot({0}), true, again.path(), [&](const QStringList &f, int n) {
+            files = f;
+            failed = n;
+        });
+        QTRY_COMPARE(failed, 1);
+        QVERIFY(files.isEmpty());
+        QVERIFY(QDir(again.path()).isEmpty());
+        qunsetenv("PINHOLE_SOCKET");
     }
 
 private slots:
