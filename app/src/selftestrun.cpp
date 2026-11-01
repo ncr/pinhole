@@ -169,7 +169,12 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
     }
     // PINHOLE_SELFTEST=settings:<dir>: the side panel as it opens, as an
-    // image in <dir>. With PINHOLE_SELFTEST_LOWER=1 also with the limit
+    // image in <dir>, a page at a time, then each mark's switch pressed
+    // twice, so left as it was, and the last plugin with marks turned off
+    // and on again (exit 1 if a switch does not turn its mark off and on
+    // in the grid, or the plugin's marks do not go and come back with it;
+    // its switch is kept, so on a scratch config only). With
+    // PINHOLE_SELFTEST_LOWER=1 also with the limit
     // stepped two down, and once that is confirmed: it removes photos, so
     // only for a service on a scratch cache.
     if (name == QLatin1String("settings")) {
@@ -189,7 +194,70 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                         const double most = scroller->property("contentHeight").toDouble() - height;
                         const double y = scroller->property("contentY").toDouble();
                         if (y >= most - 1 || n > 12) {
-                            QCoreApplication::quit();
+                            // Then each mark's switch, pressed and pressed
+                            // again: the grid draws it or not, and the switch
+                            // says so.
+                            PhotoGrid *grid = window->findChild<PhotoGrid *>(QStringLiteral("grid"));
+                            int failures = 0;
+                            // A Repeater's rows are the panel's items, not
+                            // its QObject children.
+                            QList<QQuickItem *> items;
+                            std::function<void(QQuickItem *)> gather = [&](QQuickItem *item) {
+                                items << item;
+                                for (QQuickItem *child : item->childItems())
+                                    gather(child);
+                            };
+                            gather(window->contentItem());
+                            for (QQuickItem *toggle : items) {
+                                const QString id = toggle->objectName().section(':', 1);
+                                if (!toggle->objectName().startsWith(QLatin1String("markSwitch:")))
+                                    continue;
+                                bool ok = true;
+                                for (int press = 0; press < 2; ++press) {
+                                    const bool was = toggle->property("checked").toBool();
+                                    ok &= was == grid->marksShown().contains(id);
+                                    QMetaObject::invokeMethod(toggle, "press");
+                                    ok &= toggle->property("checked").toBool() == !was && grid->marksShown().contains(id) == !was;
+                                }
+                                std::printf("selftest: %s the switch of %s turns it %s and back\n", ok ? "ok  " : "FAIL",
+                                            qPrintable(id), grid->marksShown().contains(id) ? "off" : "on");
+                                failures += !ok;
+                            }
+                            std::fflush(stdout);
+                            // And a plugin's marks go with it turned off, and
+                            // come back with it turned on.
+                            QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
+                            auto marksOf = [grid](const QString &plugin) {
+                                QStringList ids;
+                                for (const QVariant &kind : grid->markKinds())
+                                    if (const QString id = kind.toMap().value("id").toString(); id.startsWith(plugin + '/'))
+                                        ids << id;
+                                return ids;
+                            };
+                            QString marking;
+                            for (const QVariant &kind : plugins->property("markKinds").toList())
+                                if (const QString plugin = kind.toMap().value("plugin").toString(); !plugin.isEmpty())
+                                    marking = plugin;
+                            if (marking.isEmpty()) {
+                                QCoreApplication::exit(failures ? 1 : 0);
+                                return;
+                            }
+                            const QStringList had = marksOf(marking);
+                            QMetaObject::invokeMethod(plugins, "setEnabled", Q_ARG(QString, marking), Q_ARG(bool, false));
+                            QTimer::singleShot(1000, window, [=] {
+                                const QStringList off = marksOf(marking);
+                                std::printf("selftest: %s %s turned off takes its marks (%s) with it: %s left\n",
+                                            off.isEmpty() ? "ok  " : "FAIL", qPrintable(marking), qPrintable(had.join(", ")),
+                                            off.isEmpty() ? "none" : qPrintable(off.join(", ")));
+                                QMetaObject::invokeMethod(plugins, "setEnabled", Q_ARG(QString, marking), Q_ARG(bool, true));
+                                QTimer::singleShot(2000, window, [=] {
+                                    const QStringList on = marksOf(marking);
+                                    std::printf("selftest: %s turned on again, its marks are back: %s\n", on == had ? "ok  " : "FAIL",
+                                                qPrintable(on.join(", ")));
+                                    std::fflush(stdout);
+                                    QCoreApplication::exit(failures || !off.isEmpty() || on != had ? 1 : 0);
+                                });
+                            });
                             return;
                         }
                         scroller->setProperty("contentY", std::min(most, y + height * 0.9));

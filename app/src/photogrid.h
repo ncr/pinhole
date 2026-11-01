@@ -64,12 +64,16 @@ class PhotoGrid : public QQuickItem {
     // How many of the library's photos are hidden now: with `count` 0, a
     // library that is not empty but shows nothing.
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY cellsChanged)
-    // The marks drawn on cells (marks.h: Mark), or-ed.
-    Q_PROPERTY(int marks READ marks WRITE setMarks NOTIFY marksChanged)
-    // The marks' colours, the Omarchy theme's: a video's, a Live Photo's, a
-    // favourite's and a stack's, lit as neon where cells are small and
-    // unlit closer.
-    Q_PROPERTY(QVariantList markColours READ markColours WRITE setMarkColours NOTIFY markColoursChanged)
+    // The kinds of mark there are (Plugins::markKinds), in their order left
+    // to right in a cell's corner, each { id, icon, colour, field }: its
+    // shape (marks.h: markShape), its colour (a theme's, lit as neon where
+    // cells are small and unlit closer), and the library's field that
+    // carries it ("video", "live", "favorite"; "stack" for a stack's card),
+    // or none for one whose photos a plugin lists (setMarkBits). At most
+    // 32, a bit of a word each.
+    Q_PROPERTY(QVariantList markKinds READ markKinds WRITE setMarkKinds NOTIFY markKindsChanged)
+    // The ids of those drawn: the others are turned off (MarkChoices).
+    Q_PROPERTY(QStringList marksShown READ marksShown WRITE setMarksShown NOTIFY marksShownChanged)
     Q_PROPERTY(int columns READ columns NOTIFY columnsChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)
     Q_PROPERTY(bool statsVisible READ statsVisible WRITE setStatsVisible NOTIFY statsVisibleChanged)
@@ -136,10 +140,18 @@ public:
     int hiddenCount() const { return m_hiddenCount; }
     // Whether a photo has no cell, hidden by a plugin.
     Q_INVOKABLE bool isHidden(int index) const;
-    int marks() const { return m_marks; }
-    void setMarks(int marks);
-    QVariantList markColours() const;
-    void setMarkColours(const QVariantList &colours);
+    static constexpr size_t kMaxMarkKinds = 32;
+    QVariantList markKinds() const { return m_markKindsGiven; }
+    void setMarkKinds(const QVariantList &kinds);
+    QStringList marksShown() const { return m_marksShown; }
+    void setMarksShown(const QStringList &ids);
+    // The marks plugins list by photo: a word for each library position,
+    // the bit of each kind (by its place in markKinds) that marks it. Empty
+    // for none; read past its end as none.
+    void setMarkBits(std::vector<quint32> bits);
+    // The ids of the marks a photo's cell carries now, shown ones only, as
+    // the grid draws them (on a cell big enough).
+    Q_INVOKABLE QStringList marksOn(int index) const;
     int columns() const { return m_columns; }
     bool animating() const { return m_animating; }
     bool statsVisible() const { return m_statsVisible; }
@@ -275,8 +287,8 @@ signals:
     void statsTextChanged();
     void stacksChanged();
     void hiddenChanged();
-    void marksChanged();
-    void markColoursChanged();
+    void markKindsChanged();
+    void marksShownChanged();
     // The cells changed: the library's photos, or how they are stacked.
     void cellsChanged();
 
@@ -372,12 +384,24 @@ private:
     QVariantList m_hiddenGiven;
     std::vector<int> m_hiddenList; // as given, through any reload since
     int m_hiddenCount = 0;
-    int m_marks = 13; // all but Live, as the side panel starts
-    // By Mark's bit: video, live, favourite, stack. Counted up on every
-    // change, for the render thread to draw them again.
-    std::array<QColor, kMarkKinds> m_markColours{QColor(0x4f, 0xe3, 0xd0), QColor(0xf5, 0xc9, 0x45),
-                                                 QColor(0xff, 0x54, 0x68), QColor(0xb9, 0x7a, 0xff)};
-    int m_markColoursVersion = 0;
+    // The kinds of mark as given, and as drawn: each one's shape and
+    // colour, in the atlas in this order. Counted up on every change of
+    // shapes or colours, for the render thread to draw them again.
+    struct MarkKind {
+        QString id;
+        MarkShape shape;
+        QColor colour;
+        bool operator==(const MarkKind &) const = default;
+    };
+    QVariantList m_markKindsGiven;
+    QStringList m_marksShown;
+    std::vector<MarkKind> m_markKinds;
+    int m_markKindsVersion = 0;
+    // Which kinds' bits a field of the library or a stack sets, and which
+    // are drawn: worked out when the kinds change, not for each cell.
+    quint32 m_videoMask = 0, m_liveMask = 0, m_favoriteMask = 0, m_stackMask = 0, m_shownMask = 0;
+    void updateMarkMasks();
+    std::vector<quint32> m_markBits;
     FrameStats *m_stats = nullptr;
     TouchpadHold *m_hold = nullptr;
     QPointF m_hover{-1, -1};

@@ -4,27 +4,32 @@
 
 // The small marks in a grid cell's bottom left corner that say what a cell
 // is beyond a photo: a video, a Live Photo, a favourite, several photos as
-// one card (a plugin's stack, such as a series). Each can be turned off in
-// the side panel; PhotoGrid::marks holds the ones shown.
-enum Mark : int {
-    MarkVideo = 1,
-    MarkLive = 2,
-    MarkFavorite = 4,
-    MarkStack = 8,
+// one card (a plugin's stack, such as a series), or whatever a plugin marks
+// (PluginMark). Each can be turned off in the side panel (MarkChoices).
+//
+// A mark's shape: one of Pinhole's own drawn ones (`builtin`: "video",
+// "live", "heart", "stack"), or one character of the theme's font, a Nerd
+// Font glyph (`glyph`). Neither for an icon that is neither: not a mark.
+struct MarkShape {
+    QString builtin;
+    QString glyph;
+    bool valid() const { return !builtin.isEmpty() || !glyph.isEmpty(); }
+    bool operator==(const MarkShape &) const = default;
 };
-constexpr int kMarkKinds = 4;
-constexpr int kAllMarks = MarkVideo | MarkLive | MarkFavorite | MarkStack;
+// "video", "live", "heart" (or "favorite"), "stack", or one character (a
+// single grapheme, an emoji's or a Nerd Font glyph's) as a glyph.
+MarkShape markShape(const QString &icon);
 
 // One mark, white with a soft shadow so it reads on any photo, `px` pixels
 // square (device pixels), as the side panel shows it.
-QImage markImage(Mark mark, int px);
+QImage markImage(const MarkShape &mark, int px);
 
 // The same mark as its neon tube (neonMark()) in `colour` but unlit, for
 // cells seen closer, where a neon sign would be too much and a small white
 // mark is lost on a big photo: the tube's shape in the colour, a little
 // lighter, over a soft dark shadow so it reads on bright photos too, `px`
 // pixels square.
-QImage plainMark(Mark mark, const QColor &colour, int px);
+QImage plainMark(const MarkShape &mark, const QColor &colour, int px);
 
 // The same mark lit like a neon tube, for cells seen from afar, where a
 // white mark is lost among the photos: a white-hot core in a tint of
@@ -38,10 +43,10 @@ constexpr double kNeonSpread = 2;
 struct NeonMark {
     QImage glow, core;
 };
-NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit = 1);
+NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit = 1);
 
-// "image://mark/video" (live, favorite, stack) for QML, as the grid draws
-// them.
+// "image://mark/video" (live, heart, stack, or a glyph, its character
+// percent-encoded) for QML, as the grid draws them.
 class MarkProvider : public QQuickImageProvider {
 public:
     MarkProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}

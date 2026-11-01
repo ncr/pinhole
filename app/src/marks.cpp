@@ -1,7 +1,11 @@
 #include "marks.h"
 
+#include "theme.h"
+
 #include <QPainter>
 #include <QPainterPath>
+#include <QTextBoundaryFinder>
+#include <QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -50,15 +54,40 @@ QImage blurredAlpha(const QImage &source, int radius) {
 // The mark itself, white, in a unit square scaled to `px`, its shapes kept
 // within the middle seven tenths so the shadow has room. As a `tube` (a
 // neon sign's) the filled shapes are drawn as their outlines.
-QImage shape(Mark mark, int px, bool tube = false) {
+QImage shape(const MarkShape &mark, int px, bool tube = false) {
     QImage image(px, px, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
     QPainter p(&image);
     p.setRenderHint(QPainter::Antialiasing);
     p.scale(px, px);
     const QColor white(255, 255, 255);
-    switch (mark) {
-    case MarkVideo: {
+    if (!mark.glyph.isEmpty()) {
+        // A character of the theme's font, as big as Pinhole's own shapes
+        // are (six tenths of the square at its longer side), in the middle;
+        // filled, or as a tube its outline.
+        QFont font(Theme::fontFamily());
+        font.setPixelSize(100);
+        QPainterPath path;
+        path.addText(0, 0, font, mark.glyph);
+        const QRectF bounds = path.boundingRect();
+        if (bounds.isEmpty())
+            return image;
+        const double scale = 0.6 / std::max(bounds.width(), bounds.height());
+        QTransform fit;
+        fit.translate(0.5, 0.5);
+        fit.scale(scale, scale);
+        fit.translate(-bounds.center().x(), -bounds.center().y());
+        if (tube) {
+            p.setPen(QPen(white, 0.06, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+        } else {
+            p.setPen(Qt::NoPen);
+            p.setBrush(white);
+        }
+        p.drawPath(fit.map(path));
+        return image;
+    }
+    if (mark.builtin == QLatin1String("video")) {
         // A play triangle, its corners rounded.
         QPainterPath path;
         path.moveTo(0.35, 0.25);
@@ -68,9 +97,7 @@ QImage shape(Mark mark, int px, bool tube = false) {
         p.setPen(QPen(white, 0.08, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(tube ? QBrush(Qt::NoBrush) : QBrush(white));
         p.drawPath(path);
-        break;
-    }
-    case MarkLive: {
+    } else if (mark.builtin == QLatin1String("live")) {
         // As the iPhone draws Live: a dot, a ring, and a ring of dots.
         p.setPen(Qt::NoPen);
         p.setBrush(white);
@@ -87,9 +114,7 @@ QImage shape(Mark mark, int px, bool tube = false) {
             const double a = 2 * M_PI * i / dots;
             p.drawEllipse(QPointF(0.5 + ring * std::cos(a), 0.5 + ring * std::sin(a)), dot, dot);
         }
-        break;
-    }
-    case MarkFavorite: {
+    } else if (mark.builtin == QLatin1String("heart")) {
         // A heart.
         QPainterPath path;
         path.moveTo(0.5, 0.79);
@@ -107,9 +132,7 @@ QImage shape(Mark mark, int px, bool tube = false) {
             p.setBrush(white);
         }
         p.drawPath(path);
-        break;
-    }
-    case MarkStack: {
+    } else if (mark.builtin == QLatin1String("stack")) {
         // Two cards, one behind the other: the one behind shows only at
         // its top and right.
         const QRectF front(0.19, 0.33, 0.44, 0.44), back = front.translated(0.15, -0.15);
@@ -124,15 +147,28 @@ QImage shape(Mark mark, int px, bool tube = false) {
         p.setPen(QPen(white, 0.065));
         p.setBrush(tube ? QColor(Qt::transparent) : QColor(255, 255, 255, 60));
         p.drawRoundedRect(front, 0.07, 0.07);
-        break;
-    }
     }
     return image;
 }
 
 } // namespace
 
-QImage markImage(Mark mark, int px) {
+MarkShape markShape(const QString &icon) {
+    if (icon == QLatin1String("video") || icon == QLatin1String("live") || icon == QLatin1String("stack"))
+        return {icon, {}};
+    if (icon == QLatin1String("heart") || icon == QLatin1String("favorite"))
+        return {QStringLiteral("heart"), {}};
+    // One character as people see one: a glyph of two code units (past the
+    // first plane), or with a mark joined to it, is still one.
+    if (icon.isEmpty() || icon.size() > 16 || icon.at(0).isSpace())
+        return {};
+    QTextBoundaryFinder graphemes(QTextBoundaryFinder::Grapheme, icon);
+    if (graphemes.toNextBoundary() != icon.size())
+        return {};
+    return {{}, icon};
+}
+
+QImage markImage(const MarkShape &mark, int px) {
     px = std::max(8, px);
     const QImage white = shape(mark, px);
     // The shadow at a little over half, a little below, then the mark over it.
@@ -150,7 +186,7 @@ QImage markImage(Mark mark, int px) {
     return result;
 }
 
-QImage plainMark(Mark mark, const QColor &colour, int px) {
+QImage plainMark(const MarkShape &mark, const QColor &colour, int px) {
     px = std::max(8, px);
     QImage tube = shape(mark, px, true);
     {
@@ -175,7 +211,7 @@ QImage plainMark(Mark mark, const QColor &colour, int px) {
     return result;
 }
 
-NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit) {
+NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit) {
     px = std::max(8, px);
     const int side = int(std::lround(px * kNeonSpread)), at = (side - px) / 2;
     QImage tube(side, side, QImage::Format_ARGB32_Premultiplied);
@@ -214,12 +250,15 @@ NeonMark neonMark(Mark mark, const QColor &colour, int px, double lit) {
 }
 
 QImage MarkProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize) {
-    const Mark mark = id == QLatin1String("video") ? MarkVideo
-                    : id == QLatin1String("live")  ? MarkLive
-                    : id == QLatin1String("favorite") ? MarkFavorite
-                                                       : MarkStack;
+    // A glyph comes percent-encoded (encodeURIComponent), as any character
+    // but a letter or a digit may.
+    const MarkShape mark = markShape(QUrl::fromPercentEncoding(id.toUtf8()));
     const int px = requestedSize.isValid() ? std::max(requestedSize.width(), requestedSize.height()) : 32;
-    const QImage image = markImage(mark, px);
+    QImage image(std::max(8, px), std::max(8, px), QImage::Format_ARGB32_Premultiplied);
+    if (mark.valid())
+        image = markImage(mark, px);
+    else
+        image.fill(Qt::transparent);
     if (size)
         *size = image.size();
     return image;

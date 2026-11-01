@@ -57,7 +57,7 @@ out); a Pinhole older than that says it needs a newer one and does not load
 it. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
-`pinhole.coveredBy`, `dismissed` and `keepAwake`.
+`pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`.
 
 `Main.qml` beside it:
 
@@ -152,6 +152,36 @@ its settings, is there as the window first shows. It sets:
   hidden with `pinhole.isHidden`. When the library is read again, the
   photos it hid stay hidden where they are now until it gives `hidden`
   again (on `library.changed()`, from the ids it keeps).
+- `marks`: marks in the bottom left corner of grid cells, beside
+  Pinhole's own (a video's, a Live Photo's, a favourite's, a stack's),
+  each a `PluginMark`, four at most (32 in all, Pinhole's among them; one
+  past that is left out, and said under the plugin, as is one that is not
+  right). Each has a switch of its own under the side panel's "In the
+  grid", kept for this computer by its id, `<plugin id>/<name>`:
+
+  ```qml
+  marks: [
+      PluginMark {
+          name: "picked"            // unique in the plugin
+          text: qsTr("Picked")      // its switch's words in the side panel
+          icon: ""            // video, live, heart, stack, or one character (a Nerd Font glyph)
+          colour: "green"           // red, green, yellow, blue, magenta, cyan, accent, or "#rrggbb"
+          order: 25                 // left to right: favourite 10, video 20, Live 30, stack 90; 50 if left out
+          photos: plugin.picked     // library positions (or ids)
+          // or field: "live"       // the photos whose library field is true: live, favorite, video
+          defaultShown: true        // its switch until it is first turned
+      }
+  ]
+  ```
+
+  A mark of a `field` costs nothing as the library changes. A mark of
+  `photos` is made into a bit of each photo's once, when they are given;
+  when the library is read again, its photos stay marked where they are
+  now until it gives `photos` again (on `library.changed()`, from the ids
+  it keeps), as with `hidden`. Nothing of a mark is QML's while the grid
+  draws: it reads a word for each cell. Its glyph is drawn in the theme's
+  font, white in the side panel, in its colour on the photos, and as a
+  neon tube in it far out.
 - `tour`: a few steps that show what it does, on the photos and buttons as
   they are: `[{ title, text, photo, open, action, settings }, ...]`.
   `photo` is a library position (or a function giving one) the grid goes to

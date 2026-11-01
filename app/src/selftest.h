@@ -26,7 +26,8 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
 
 class PhotoGrid;
 // PINHOLE_SELFTEST=reload: open a photo and select two, wait for the service
-// to announce a change, and check that all three followed their photos.
+// to announce a change, and check that all three followed their photos, and
+// so did the marks plugins put on photos (all but the stack mark).
 void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer);
 
 class QQuickWindow;

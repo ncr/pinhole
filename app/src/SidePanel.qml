@@ -1,5 +1,4 @@
 import QtQuick
-import QtCore
 
 // Pinhole's side panel, on Tab or ",": over the photos from the left,
 // hidden otherwise. Everything that is set is here, in three parts.
@@ -150,15 +149,18 @@ Item {
         return row
     }
 
-    // The marks the grid draws (marks.h: Mark), kept for this window alone:
-    // the service has no use for them.
-    readonly property int marks: gridSettings.marks
-    Settings {
-        id: gridSettings
-        location: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/pinhole/window.conf"
-        category: "grid"
-        // Not Live: nearly every iPhone photo is one.
-        property int marks: 13
+    // A mark's switch's words: Pinhole's own marks' here, a plugin's its
+    // own, else its plugin's name.
+    function markText(kind) {
+        if (kind.plugin !== "")
+            return kind.text !== "" ? kind.text : plugins.at(kind.plugin).name
+        switch (kind.id) {
+        case "pinhole/video": return qsTr("Videos")
+        case "pinhole.live/live": return qsTr("Live Photos")
+        case "pinhole.favourites/favorite": return qsTr("Favourites")
+        case "pinhole/stack": return qsTr("Series and other groups")
+        }
+        return kind.name
     }
 
     onShownChanged: {
@@ -875,17 +877,14 @@ Item {
             Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
             Heading { text: qsTr("In the grid") }
             Note { text: qsTr("Marks in the corner of a photo that say what it is.") }
+            // Pinhole's own marks and the plugins' (plugins.markKinds), in
+            // their order in a cell's corner, each switch kept by its id.
             Repeater {
-                model: [
-                    { mark: 1, icon: "video", name: qsTr("Videos") },
-                    { mark: 2, icon: "live", name: qsTr("Live Photos") },
-                    { mark: 4, icon: "favorite", name: qsTr("Favourites") },
-                    { mark: 8, icon: "stack", name: qsTr("Series and other groups") }
-                ]
+                model: plugins.markKinds
                 delegate: Item {
                     id: markRow
                     required property var modelData
-                    readonly property bool on: (gridSettings.marks & modelData.mark) !== 0
+                    readonly property bool on: (markChoices.revision, markChoices.shown(modelData.id, modelData.defaultShown))
                     x: Math.round(theme.fontSize * 0.714)
                     width: parent.width - 2 * x
                     height: markSwitch.height
@@ -903,25 +902,26 @@ Item {
                             width: Math.round(parent.width * 0.9)
                             height: width
                             sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
-                            source: "image://mark/" + markRow.modelData.icon
+                            source: "image://mark/" + encodeURIComponent(markRow.modelData.icon)
                         }
                     }
                     UiText {
                         x: swatch.width + Math.round(theme.fontSize * 0.6)
                         width: parent.width - x - markSwitch.width - theme.fontSize
                         y: centredIn(parent.height)
-                        text: markRow.modelData.name
+                        text: root.markText(markRow.modelData)
                         color: theme.brightForeground
                         elide: Text.ElideRight
                     }
                     Toggle {
                         id: markSwitch
+                        objectName: "markSwitch:" + markRow.modelData.id
                         lit: root.focusedStop === markSwitch
                         Component.onCompleted: root.addStop(markSwitch)
                         Component.onDestruction: root.dropStop(markSwitch)
                         anchors.right: parent.right
                         checked: markRow.on
-                        onToggled: gridSettings.marks ^= markRow.modelData.mark
+                        onToggled: markChoices.setShown(markRow.modelData.id, !markRow.on)
                     }
                 }
             }

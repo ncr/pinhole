@@ -29,6 +29,7 @@
 #include "favourites.h"
 #include "commands.h"
 #include "history.h"
+#include "markchoices.h"
 #include "marks.h"
 #include "photoprovider.h"
 #include "plugins.h"
@@ -221,6 +222,8 @@ int main(int argc, char *argv[]) {
     Storage storage(&service);
     Sources sources(&service);
     Plugins plugins(&library, &service, &viewer, &translator, &history);
+    // Which marks the grid draws (the side panel's "In the grid").
+    MarkChoices markChoices;
     // What was done to one source's photos is not undone on another's.
     QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
@@ -244,6 +247,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
     engine.rootContext()->setContextProperty("plugins", &plugins);
+    engine.rootContext()->setContextProperty("markChoices", &markChoices);
     plugins.setEngine(&engine);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // Videos play without sound in test runs (a selftest, the bench, or

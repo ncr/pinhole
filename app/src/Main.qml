@@ -27,12 +27,28 @@ ApplicationWindow {
         background: win.color
         stacks: win.pluginStacks
         hidden: win.pluginHidden
-        marks: side.marks
-        markColours: [theme.cyan, theme.yellow, theme.red, theme.magenta]
+        // Every kind of mark, Pinhole's and the plugins' (plugins.markKinds),
+        // in the theme's colours; those switched on in the side panel drawn.
+        markKinds: plugins.markKinds.map(k => ({ id: k.id, icon: k.icon, field: k.field, colour: win.markColour(k.colour) }))
+        marksShown: (markChoices.revision, plugins.markKinds.filter(k => markChoices.shown(k.id, k.defaultShown)).map(k => k.id))
         // The keyboard's cursor, while the keyboard is what is in use.
         cursorShown: keymap.input === "keyboard"
         cursorColor: theme.brightForeground
         onActivated: (index, rect) => viewer.openAt(index, rect)
+    }
+    // A mark's colour as a plugin names it: a theme colour's name, or
+    // "#rrggbb" as it is.
+    function markColour(name) {
+        switch (name) {
+        case "red": return theme.red
+        case "green": return theme.green
+        case "yellow": return theme.yellow
+        case "blue": return theme.blue
+        case "magenta": return theme.magenta
+        case "cyan": return theme.cyan
+        case "accent": return theme.accent
+        }
+        return name
     }
     // The viewer's row passes over the photos the grid hides.
     Binding { target: viewer; property: "hidden"; value: win.pluginHidden }
@@ -745,14 +761,21 @@ ApplicationWindow {
                 function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
                 onMainChanged: if (completed) load()
                 Component.onCompleted: { completed = true; load() }
-                onLoaded: win.collectPlugins([modelData], [modelData])
+                onLoaded: {
+                    // Its marks straight to the grid (plugins.h), not
+                    // gathered with the rest.
+                    plugins.setMarks(modelData, item.marks || [])
+                    win.collectPlugins([modelData], [modelData])
+                }
                 onStatusChanged: {
                     // What kept it from loading, said under it in the side
                     // panel.
                     if (status === Loader.Error)
                         plugins.loadFailed(modelData)
-                    if (status === Loader.Null || status === Loader.Error)
+                    if (status === Loader.Null || status === Loader.Error) {
+                        plugins.setMarks(modelData, [])
                         win.collectPlugins()
+                    }
                 }
                 Connections {
                     target: pluginLoader.item
@@ -762,6 +785,7 @@ ApplicationWindow {
                     function onHelpChanged() { win.collectPlugins() }
                     function onStacksChanged() { win.collectPlugins([], [modelData]) }
                     function onHiddenChanged() { win.collectPlugins([modelData], []) }
+                    function onMarksChanged() { plugins.setMarks(pluginLoader.modelData, pluginLoader.item.marks) }
                     function onTourReadyChanged() { tourDue.restart() }
                 }
             }

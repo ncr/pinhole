@@ -400,6 +400,7 @@ void Plugins::setGrid(PhotoGrid *grid) {
         else
             emit hiddenChanged();
     });
+    updateMarkBits();
 }
 
 void PluginHost::reveal(const QJSValue &photo) const {
@@ -795,9 +796,16 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
             emit changed();
         });
     scan();
+    // Pinhole's own marks, there from the first frame.
+    updateMarkKinds();
 }
 
 Plugins::~Plugins() {
+    // Marks outliving this (the plugins' QML goes after) tell it nothing.
+    for (const auto &[id, given] : m_marks)
+        for (const GivenMark &g : given)
+            if (g.mark)
+                disconnect(g.mark, nullptr, this, nullptr);
     // Hosts first, while what they stop can still say so to them: every
     // one's programs asked to end at once, and given one second together,
     // not a second each.
@@ -814,6 +822,230 @@ Plugins::~Plugins() {
 void Plugins::registerTypes() {
     for (const char *type : {"PinholePlugin", "PluginAction", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
+    qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
+}
+
+namespace {
+
+template <typename T>
+bool change(T &field, const T &value) {
+    if (field == value)
+        return false;
+    field = value;
+    return true;
+}
+
+} // namespace
+
+void PluginMark::setName(const QString &name) {
+    if (change(m_name, name))
+        emit changed();
+}
+void PluginMark::setText(const QString &text) {
+    if (change(m_text, text))
+        emit changed();
+}
+void PluginMark::setIcon(const QString &icon) {
+    if (change(m_icon, icon))
+        emit changed();
+}
+void PluginMark::setColour(const QString &colour) {
+    if (change(m_colour, colour))
+        emit changed();
+}
+void PluginMark::setOrder(int order) {
+    if (change(m_order, order))
+        emit changed();
+}
+void PluginMark::setField(const QString &field) {
+    if (change(m_field, field))
+        emit changed();
+}
+void PluginMark::setDefaultShown(bool shown) {
+    if (change(m_defaultShown, shown))
+        emit changed();
+}
+void PluginMark::setPhotos(const QVariantList &photos) {
+    // Given again, even the same: a list of the library as it is now, no
+    // longer to be followed from the one before (Plugins::marksOf).
+    m_photos = photos;
+    emit photosChanged();
+}
+
+void Plugins::setMarks(const QString &id, const QList<QObject *> &marks) {
+    std::vector<GivenMark> before = std::move(m_marks[id]);
+    std::vector<GivenMark> now;
+    for (QObject *object : marks) {
+        auto *mark = qobject_cast<PluginMark *>(object);
+        if (!mark)
+            continue;
+        // One kept is still followed where its photos went.
+        const auto kept = std::find_if(before.begin(), before.end(), [mark](const GivenMark &g) { return g.mark == mark; });
+        now.push_back({mark, kept != before.end() ? kept->photos : markPhotos(mark->photos())});
+        if (kept != before.end())
+            continue;
+        connect(mark, &PluginMark::changed, this, &Plugins::updateMarkKinds);
+        connect(mark, &PluginMark::photosChanged, this, [this, id, mark] {
+            for (GivenMark &given : m_marks[id])
+                if (given.mark == mark)
+                    given.photos = markPhotos(mark->photos());
+            updateMarkBits();
+        });
+        // Gone with its plugin's QML (turned off, loaded again): a moment
+        // later, as QPointer has let go of it by then.
+        connect(mark, &QObject::destroyed, this, [this] { QTimer::singleShot(0, this, &Plugins::updateMarkKinds); });
+    }
+    for (const GivenMark &given : before)
+        if (given.mark && std::none_of(now.begin(), now.end(), [&](const GivenMark &g) { return g.mark == given.mark; }))
+            disconnect(given.mark, nullptr, this, nullptr);
+    if (now.empty())
+        m_marks.erase(id);
+    else
+        m_marks[id] = std::move(now);
+    updateMarkKinds();
+    updateMarkBits();
+}
+
+std::vector<int> Plugins::markPhotos(const QVariantList &photos) const {
+    std::vector<int> out;
+    out.reserve(size_t(photos.size()));
+    const int count = m_libraryApi->count();
+    for (const QVariant &photo : photos) {
+        const int index = photo.typeId() == QMetaType::QString ? m_libraryApi->indexOf(photo.toString()) : photo.toInt();
+        if (index >= 0 && index < count)
+            out.push_back(index);
+    }
+    return out;
+}
+
+QVariantMap Plugins::marksOf(const QString &id) const {
+    QVariantMap out;
+    const auto found = m_marks.find(id);
+    if (found == m_marks.end())
+        return out;
+    for (const GivenMark &given : found->second)
+        if (given.mark && given.mark->field().isEmpty())
+            out.insert(given.mark->name(), QVariantList(given.photos.begin(), given.photos.end()));
+    return out;
+}
+
+void Plugins::updateMarkKinds() {
+    // Those gone with their plugin's QML.
+    for (auto it = m_marks.begin(); it != m_marks.end();) {
+        std::erase_if(it->second, [](const GivenMark &given) { return given.mark.isNull(); });
+        it = it->second.empty() ? m_marks.erase(it) : std::next(it);
+    }
+    struct Kind {
+        QVariantMap map;
+        PluginMark *mark;
+    };
+    // Pinhole's own: the video and the stack marks, and until the Live
+    // Photos and Favourites plugins are there, theirs (each gives way to
+    // a plugin's of its id).
+    auto core = [](const QString &id, const QString &icon, const QString &colour, int order, const QString &field,
+                   bool shown) {
+        return Kind{{{"id", id}, {"plugin", QString()}, {"name", id.section('/', 1)}, {"text", QString()},
+                     {"icon", icon}, {"colour", colour}, {"order", order}, {"field", field}, {"defaultShown", shown}},
+                    nullptr};
+    };
+    std::vector<Kind> kinds{core("pinhole.favourites/favorite", "heart", "red", 10, "favorite", true),
+                            core("pinhole/video", "video", "cyan", 20, "video", true),
+                            // Not Live: nearly every iPhone photo is one.
+                            core("pinhole.live/live", "live", "yellow", 30, "live", false),
+                            core("pinhole/stack", "stack", "magenta", 90, "stack", true)};
+    static const QStringList fields{"", "live", "favorite", "video"};
+    static const QStringList colours{"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
+    static const QRegularExpression hex(QStringLiteral("^#[0-9a-fA-F]{6}$"));
+    static const QRegularExpression names(QStringLiteral("^[A-Za-z0-9._-]+$"));
+    for (const auto &plugin : m_plugins) {
+        const auto found = m_marks.find(plugin->id);
+        if (found == m_marks.end())
+            continue;
+        QStringList problems, taken;
+        for (const GivenMark &given : found->second) {
+            PluginMark *mark = given.mark;
+            if (!mark)
+                continue;
+            const QString name = mark->name();
+            const QString what = QStringLiteral("its mark \"%1\"").arg(name);
+            const QString id = plugin->id + '/' + name;
+            // One of Pinhole's stand-ins gives way to its plugin's.
+            const auto standIn = std::find_if(kinds.begin(), kinds.end(),
+                                              [&id](const Kind &k) { return !k.mark && k.map.value("id") == id; });
+            if (!names.match(name).hasMatch())
+                problems << QStringLiteral("a mark's name must be letters, digits, '.', '_' or '-': \"%1\"").arg(name);
+            else if (taken.contains(name))
+                problems << QStringLiteral("two marks are named \"%1\"").arg(name);
+            else if (!fields.contains(mark->field()))
+                problems << QStringLiteral("%1: no field \"%2\" (live, favorite, video, or none for photos)").arg(what, mark->field());
+            else if (!markShape(mark->icon()).valid())
+                problems << QStringLiteral("%1: its icon must be video, live, heart, stack or one character").arg(what);
+            else if (!colours.contains(mark->colour()) && !hex.match(mark->colour()).hasMatch())
+                problems << QStringLiteral("%1: no colour \"%2\" (red, green, yellow, blue, magenta, cyan, accent or #rrggbb)")
+                                .arg(what, mark->colour());
+            else if (taken.size() == kMaxMarksEach)
+                problems << QStringLiteral("%1 is left out: %2 marks at most for a plugin").arg(what).arg(kMaxMarksEach);
+            else if (standIn == kinds.end() && int(kinds.size()) >= kMaxMarks)
+                problems << QStringLiteral("%1 is left out: %2 marks at most in all").arg(what).arg(kMaxMarks);
+            else {
+                taken << name;
+                if (standIn != kinds.end())
+                    kinds.erase(standIn);
+                kinds.push_back({{{"id", id}, {"plugin", plugin->id}, {"name", name}, {"text", mark->text()},
+                                  {"icon", mark->icon()}, {"colour", mark->colour()}, {"order", mark->order()},
+                                  {"field", mark->field()}, {"defaultShown", mark->defaultShown()}},
+                                 mark});
+            }
+        }
+        // Said once, not again each time any plugin's marks change; and
+        // unsaid once its marks are right (or there is room for them),
+        // unless something else went wrong since.
+        const QString problem = problems.join(QStringLiteral("; "));
+        QString &said = m_markProblems[plugin->id];
+        if (plugin->host && !problem.isEmpty() && plugin->host->problem() != problem)
+            plugin->host->report(problem);
+        else if (plugin->host && problem.isEmpty() && !said.isEmpty() && plugin->host->problem() == said)
+            plugin->host->report(QString(), false);
+        said = problem;
+    }
+    // By their order, Pinhole's own first of the same.
+    std::stable_sort(kinds.begin(), kinds.end(),
+                     [](const Kind &a, const Kind &b) { return a.map.value("order").toInt() < b.map.value("order").toInt(); });
+    QVariantList list;
+    std::vector<PluginMark *> of;
+    for (const Kind &kind : kinds) {
+        list.append(kind.map);
+        of.push_back(kind.mark && kind.mark->field().isEmpty() ? kind.mark : nullptr);
+    }
+    const bool bitsMoved = of != m_markOf;
+    m_markOf = std::move(of);
+    if (list != m_markKinds) {
+        m_markKinds = list;
+        emit markKindsChanged();
+    }
+    if (bitsMoved)
+        updateMarkBits();
+}
+
+void Plugins::updateMarkBits() {
+    if (!m_grid)
+        return;
+    std::vector<quint32> bits;
+    for (size_t k = 0; k < m_markOf.size(); ++k) {
+        if (!m_markOf[k])
+            continue;
+        for (const auto &[id, given] : m_marks)
+            for (const GivenMark &g : given) {
+                if (g.mark != m_markOf[k])
+                    continue;
+                if (bits.empty() && !g.photos.empty())
+                    bits.resize(size_t(m_library->count()));
+                for (int i : g.photos)
+                    if (size_t(i) < bits.size())
+                        bits[size_t(i)] |= 1u << k;
+            }
+    }
+    m_grid->setMarkBits(std::move(bits));
 }
 
 void Plugins::setEngine(QQmlEngine *engine) {
@@ -865,6 +1097,12 @@ void Plugins::libraryReloaded(const std::vector<int> &moved) {
         for (auto &stack : followed.stacks)
             follow(stack);
     }
+    // And the photos each mark of photos marks, the grid given them where
+    // they are now at once.
+    for (auto &[id, given] : m_marks)
+        for (GivenMark &g : given)
+            follow(g.photos);
+    updateMarkBits();
     emit positionsMoved();
     m_libraryApi->reloaded();
     // Only another source's library has a cacheDir of its own; the same
@@ -961,6 +1199,8 @@ void Plugins::setEnabled(const QString &id, bool on) {
         for (const auto &p : m_plugins)
             if (p->id == id)
                 p->host->stop();
+        // Its marks go with it at once, before its QML does.
+        setMarks(id, {});
     }
     updateCatalogs();
     ++m_revision;
@@ -1259,15 +1499,18 @@ qsizetype closing(const QString &code, qsizetype open) {
 
 } // namespace
 
-QStringList Plugins::apiTwoUses(const QString &dir) {
-    // Each, and the words that use it: pinhole's own, or what a plugin's
-    // root sets. Anything added to what a plugin is given before API 2 is
-    // released is API 2's, and goes here.
-    static const QStringList order = {"promises",          "pinhole.settings", "pinhole.notify", "pinhole.warn",
-                                      "pinhole.api",       "pinhole.coveredBy", "pinhole.dismissed", "hidden",
-                                      "avgColor",          "library.field",    "pinhole.isHidden", "run's output",
-                                      "pinhole.keepAwake"};
+QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
+    // Each by the API that brought it, and the words that use it: pinhole's
+    // own, or what a plugin's root sets. Anything added to what a plugin is
+    // given goes here, under the API it is released in.
+    static const QList<std::pair<int, QString>> order = {
+        {2, "promises"},      {2, "pinhole.settings"}, {2, "pinhole.notify"},   {2, "pinhole.warn"},
+        {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
+        {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
+        {2, "pinhole.keepAwake"}, {3, "marks"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
+        // Its root's marks, each a PluginMark.
+        {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
         {"promises", QRegularExpression(QStringLiteral("\\.\\s*then\\s*\\("))},
         {"pinhole.settings", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*settings\\b"))},
         {"pinhole.notify", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*notify\\b"))},
@@ -1350,11 +1593,11 @@ QStringList Plugins::apiTwoUses(const QString &dir) {
                 && code.contains(QRegularExpression("\\b" + QRegularExpression::escape(id.captured(2)) + "\\s*\\.\\s*hidden\\s*=(?!=)"))))
             uses << QStringLiteral("hidden");
     }
-    QStringList list;
-    for (const QString &name : order)
+    QMap<int, QStringList> byApi;
+    for (const auto &[version, name] : order)
         if (uses.contains(name))
-            list << name;
-    return list;
+            byApi[version] << name;
+    return byApi;
 }
 
 QStringList Plugins::nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others) {
@@ -1661,10 +1904,15 @@ int checkPlugin(const QString &target) {
     out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(asked));
     // What it uses of a newer API than it asks for works here, and not in a
     // Pinhole of the one it asks for, which would load it all the same.
-    if (const QStringList uses = Plugins::apiTwoUses(dir); asked < 2 && !uses.isEmpty())
-        err(QStringLiteral("%1: warning: it uses %2, of plugin API 2, and its manifest asks for API %3: give it \"api\": 2.")
-                .arg(name, uses.join(QStringLiteral(", ")))
-                .arg(asked));
+    const QMap<int, QStringList> uses = Plugins::apiUses(dir);
+    const int needed = uses.isEmpty() ? 1 : uses.lastKey();
+    for (auto it = uses.begin(); it != uses.end(); ++it)
+        if (asked < it.key())
+            err(QStringLiteral("%1: warning: it uses %2, of plugin API %3, and its manifest asks for API %4: give it \"api\": %5.")
+                    .arg(name, it.value().join(QStringLiteral(", ")))
+                    .arg(it.key())
+                    .arg(asked)
+                    .arg(needed));
     // A file named as another plugin's, or as one of Pinhole's own: Qt
     // tells a qsTr() only by its file's name. One of the same id is the
     // one it replaces, or its copy.

@@ -20,8 +20,8 @@ Everything that is set is in that side panel: the sources, where Pinhole
 keeps its files and how much room they take, and the plugins.
 
 Small marks in a photo's corner say what it is: a video, a Live Photo, a
-favourite, several photos as one card; each can be turned off in the side
-panel.
+favourite, several photos as one card, and whatever a plugin marks; each
+can be turned off in the side panel.
 
 Series, the first plugin, finds photos of one subject taken close together
 and shows each series as one card in the grid; under a photo of one, the

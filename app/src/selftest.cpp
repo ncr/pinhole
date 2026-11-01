@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <memory>
 
 // The library position of the newest asset matching an SQL condition.
@@ -289,10 +290,41 @@ void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer) 
         // Everything selected: after the reload every one of these should
         // still be, and none of the new photos.
         grid->selectAll();
-        std::printf("selftest: %d items; viewer on %s; waiting for the service\n", before, open.constData());
+        // The plugins' marks each photo carries, by its id: the same after
+        // (those of photos followed until given again, of fields read
+        // again). Pinhole's own stack mark aside: a stack may take in the
+        // photo that came.
+        auto plugins = [grid, &library] {
+            std::map<QByteArray, QStringList> marks;
+            int marked = 0;
+            for (int i = 0; i < library.count(); ++i) {
+                QStringList ids = grid->marksOn(i);
+                ids.removeAll(QStringLiteral("pinhole/stack"));
+                marked += !ids.isEmpty();
+                marks[library.at(i).id] = ids;
+            }
+            return std::make_pair(marks, marked);
+        };
+        const auto marksBefore = plugins();
+        std::printf("selftest: %d items; viewer on %s; %d photos with marks; waiting for the service\n", before,
+                    open.constData(), marksBefore.second);
         std::fflush(stdout);
-        QObject::connect(grid, &PhotoGrid::libraryChanged, grid, [&library, grid, &viewer, before, open, b] {
-            QTimer::singleShot(500, grid, [&library, grid, &viewer, before, open, b] {
+        QObject::connect(grid, &PhotoGrid::libraryChanged, grid, [&library, grid, &viewer, before, open, b, plugins, marksBefore] {
+            QTimer::singleShot(500, grid, [&library, grid, &viewer, before, open, b, plugins, marksBefore] {
+                const auto marksAfter = plugins();
+                int same = 0, moved = 0;
+                for (const auto &[id, marks] : marksAfter.first) {
+                    const auto was = marksBefore.first.find(id);
+                    if (was == marksBefore.first.end())
+                        continue;
+                    if (was->second == marks)
+                        ++same;
+                    else if (++moved <= 5)
+                        std::printf("selftest: marks of %s were %s, now %s\n", id.constData(),
+                                    qPrintable(was->second.join(',')), qPrintable(marks.join(',')));
+                }
+                std::printf("selftest: marks followed their photos: %s (%d the same, %d not; %d photos with marks)\n",
+                            moved == 0 ? "yes" : "no", same, moved, marksAfter.second);
                 const bool viewerKept = viewer.isOpen() && library.at(viewer.index()).id == open;
                 std::printf("selftest: reloaded: %d items (was %d)\n", library.count(), before);
                 std::printf("selftest: viewer still on the same photo: %s\n", viewerKept ? "yes" : "no");

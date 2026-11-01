@@ -27,6 +27,7 @@ HEADERS += \
     $$PWD/libraryreloader.h \
     $$PWD/keymap.h \
     $$PWD/marks.h \
+    $$PWD/markchoices.h \
     $$PWD/storage.h \
     $$PWD/sources.h \
     $$PWD/thumbnailloader.h \
@@ -57,6 +58,7 @@ SOURCES += \
     $$PWD/libraryreloader.cpp \
     $$PWD/keymap.cpp \
     $$PWD/marks.cpp \
+    $$PWD/markchoices.cpp \
     $$PWD/storage.cpp \
     $$PWD/sources.cpp \
     $$PWD/thumbnailloader.cpp \

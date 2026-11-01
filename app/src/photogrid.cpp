@@ -80,14 +80,13 @@ constexpr size_t kMaxPages = 64;
 // Marks (marks.h: plainMark()), the neon tubes' shapes unlit in the
 // theme's colours: kMarkShare of a cell's width on screen, from kMarkPx up
 // to kMarkMaxPx, a little in from its bottom left corner, on cells at
-// least kMarksFromPx big; smaller ones would be all marks. In the order
-// drawn, left to right.
+// least kMarksFromPx big; smaller ones would be all marks. In the order of
+// markKinds, left to right.
 constexpr double kMarkPx = 22;
 constexpr double kMarkMaxPx = 40;
 constexpr double kMarkShare = 0.1;
 constexpr double kMarkInset = 4;
 constexpr double kMarksFromPx = 72;
-constexpr std::array<Mark, kMarkKinds> kMarkOrder = {MarkFavorite, MarkVideo, MarkLive, MarkStack};
 // At this many columns and further out, seen from afar, the marks glow
 // like neon in the theme's colours (marks.h: neonMark()), so a video or a
 // favourite is found among hundreds of photos at a glance, and a little
@@ -600,28 +599,75 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
             m_sweepBase.insert(cell);
 }
 
-QVariantList PhotoGrid::markColours() const {
-    return QVariantList(m_markColours.begin(), m_markColours.end());
-}
-
-void PhotoGrid::setMarkColours(const QVariantList &colours) {
-    std::array<QColor, kMarkKinds> given = m_markColours;
-    for (int k = 0; k < std::min(kMarkKinds, int(colours.size())); ++k)
-        if (const QColor c = colours[k].value<QColor>(); c.isValid())
-            given[size_t(k)] = c;
-    if (given == m_markColours)
+void PhotoGrid::setMarkKinds(const QVariantList &kinds) {
+    if (kinds == m_markKindsGiven)
         return;
-    m_markColours = given;
-    ++m_markColoursVersion;
-    emit markColoursChanged();
+    m_markKindsGiven = kinds;
+    std::vector<MarkKind> drawn;
+    for (const QVariant &each : kinds) {
+        if (drawn.size() == kMaxMarkKinds)
+            break;
+        const QVariantMap kind = each.toMap();
+        const QColor colour = kind.value("colour").value<QColor>();
+        drawn.push_back({kind.value("id").toString(), markShape(kind.value("icon").toString()),
+                         colour.isValid() ? colour : QColor(Qt::white)});
+    }
+    // Only a change of what is drawn draws the atlas again.
+    if (drawn != m_markKinds) {
+        m_markKinds = std::move(drawn);
+        ++m_markKindsVersion;
+    }
+    updateMarkMasks();
+    emit markKindsChanged();
     update();
 }
 
-void PhotoGrid::setMarks(int marks) {
-    if (marks == m_marks)
+void PhotoGrid::setMarksShown(const QStringList &ids) {
+    if (ids == m_marksShown)
         return;
-    m_marks = marks;
-    emit marksChanged();
+    m_marksShown = ids;
+    updateMarkMasks();
+    emit marksShownChanged();
+    update();
+}
+
+void PhotoGrid::updateMarkMasks() {
+    m_videoMask = m_liveMask = m_favoriteMask = m_stackMask = m_shownMask = 0;
+    for (size_t k = 0; k < m_markKinds.size(); ++k) {
+        const quint32 bit = 1u << k;
+        const QString field = m_markKindsGiven[qsizetype(k)].toMap().value("field").toString();
+        if (field == QLatin1String("video"))
+            m_videoMask |= bit;
+        else if (field == QLatin1String("live"))
+            m_liveMask |= bit;
+        else if (field == QLatin1String("favorite"))
+            m_favoriteMask |= bit;
+        else if (field == QLatin1String("stack"))
+            m_stackMask |= bit;
+        if (m_marksShown.contains(m_markKinds[k].id))
+            m_shownMask |= bit;
+    }
+}
+
+QStringList PhotoGrid::marksOn(int index) const {
+    QStringList ids;
+    if (!m_library || index < 0 || index >= m_library->count())
+        return ids;
+    // As updatePaintNode's step 3 works them out.
+    const LibraryItem &item = m_library->at(index);
+    quint32 marks = (item.video ? m_videoMask : 0) | (item.live ? m_liveMask : 0) | (item.favorite ? m_favoriteMask : 0)
+                  | (size_t(index) < m_markBits.size() ? m_markBits[size_t(index)] : 0);
+    if (m_stackOf.contains(index))
+        marks |= m_stackMask;
+    for (quint32 left = marks & m_shownMask; left; left &= left - 1)
+        ids << m_markKinds[size_t(std::countr_zero(left))].id;
+    return ids;
+}
+
+void PhotoGrid::setMarkBits(std::vector<quint32> bits) {
+    if (bits == m_markBits)
+        return;
+    m_markBits = std::move(bits);
     update();
 }
 
@@ -1958,7 +2004,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     // The marks on each layer's cells: where, and which.
     struct Marked {
         QRectF rect;
-        int marks;
+        quint32 marks; // a bit for each of m_markKinds
         int photo;
     };
     std::vector<std::vector<Marked>> marked(drawn.size());
@@ -1988,12 +2034,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 // The photo it shows, by which its textures are kept.
                 const int i = libraryAt(cell);
                 const LibraryItem &item = m_library->at(i);
-                if (m_marks && rect.width() >= marksFromPx) {
-                    int marks = (item.video ? MarkVideo : 0) | (item.live ? MarkLive : 0) | (item.favorite ? MarkFavorite : 0);
-                    if (!m_stackOf.empty() && m_stackOf.contains(i))
-                        marks |= MarkStack;
-                    if (marks & m_marks)
-                        marked[k].push_back({rect, marks & m_marks, i});
+                if (m_shownMask && rect.width() >= marksFromPx) {
+                    quint32 marks = (item.video ? m_videoMask : 0) | (item.live ? m_liveMask : 0)
+                                  | (item.favorite ? m_favoriteMask : 0)
+                                  | (size_t(i) < m_markBits.size() ? m_markBits[size_t(i)] : 0);
+                    if ((m_stackMask & m_shownMask) && !m_stackOf.empty() && m_stackOf.contains(i))
+                        marks |= m_stackMask;
+                    if (marks & m_shownMask)
+                        marked[k].push_back({rect, marks & m_shownMask, i});
                 }
                 if (mosaic) {
                     const int page = i / kMosaicCount;
@@ -2257,15 +2305,17 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         node->markDirty(QSGNode::DirtyGeometry);
     };
 
-    // The marks, drawn once for this screen's pixels.
-    if (!rs.marks || rs.marksDpr != dpr || rs.marksVersion != m_markColoursVersion) {
+    // The marks, drawn once for this screen's pixels and these kinds, side
+    // by side in their order (a slot for each, one at least).
+    const int markSlots = std::max(1, int(m_markKinds.size()));
+    if (!rs.marks || rs.marksDpr != dpr || rs.marksVersion != m_markKindsVersion) {
         const int px = int(std::lround(kMarkMaxPx * dpr));
-        QImage strip(px * kMarkKinds, px, QImage::Format_ARGB32_Premultiplied);
+        QImage strip(px * markSlots, px, QImage::Format_ARGB32_Premultiplied);
         strip.fill(Qt::transparent);
         {
             QPainter p(&strip);
-            for (int k = 0; k < kMarkKinds; ++k)
-                p.drawImage(k * px, 0, plainMark(kMarkOrder[size_t(k)], m_markColours[size_t(std::countr_zero(unsigned(kMarkOrder[size_t(k)])))], px));
+            for (size_t k = 0; k < m_markKinds.size(); ++k)
+                p.drawImage(int(k) * px, 0, plainMark(m_markKinds[k].shape, m_markKinds[k].colour, px));
         }
         // The nodes may still point at the old one.
         for (auto &slot : rs.drawSlots)
@@ -2274,19 +2324,18 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         rs.marks = window()->createTextureFromImage(strip);
         rs.marks->setFiltering(QSGTexture::Linear);
         rs.marksDpr = dpr;
-        rs.marksVersion = m_markColoursVersion;
+        rs.marksVersion = m_markKindsVersion;
     }
-    if (!rs.neon || rs.neonDpr != dpr || rs.neonVersion != m_markColoursVersion) {
+    if (!rs.neon || rs.neonDpr != dpr || rs.neonVersion != m_markKindsVersion) {
         const int px = int(std::lround(kNeonMarkPx * dpr));
         const int side = int(std::lround(px * kNeonSpread));
         // Copied in, not painted: the glows' light is premultiplied colour
         // stronger than its alpha, which painting would not keep.
-        QImage strip(side * kMarkKinds, side * 2 * kNeonSteps, QImage::Format_ARGB32_Premultiplied);
+        QImage strip(side * markSlots, side * 2 * kNeonSteps, QImage::Format_ARGB32_Premultiplied);
         strip.fill(Qt::transparent);
-        for (int k = 0; k < kMarkKinds; ++k) {
-            const Mark mark = kMarkOrder[size_t(k)];
+        for (size_t k = 0; k < m_markKinds.size(); ++k) {
             for (int step = 0; step < kNeonSteps; ++step) {
-                const NeonMark neon = neonMark(mark, m_markColours[size_t(std::countr_zero(unsigned(mark)))], px,
+                const NeonMark neon = neonMark(m_markKinds[k].shape, m_markKinds[k].colour, px,
                                                double(step) / (kNeonSteps - 1));
                 const int glowAt = step * side, coreAt = (kNeonSteps + step) * side;
                 for (int y = 0; y < side; ++y) {
@@ -2301,7 +2350,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         rs.neon = window()->createTextureFromImage(strip);
         rs.neon->setFiltering(QSGTexture::Linear);
         rs.neonDpr = dpr;
-        rs.neonVersion = m_markColoursVersion;
+        rs.neonVersion = m_markKindsVersion;
     }
     // A mark's corner snapped to a device pixel, so it is drawn crisp.
     auto snap = [dpr](double v) { return std::round(v * dpr) / dpr; };
@@ -2411,7 +2460,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             const int passes = neon ? 2 : 1;
             int quads = 0;
             for (const Marked &c : cells)
-                quads += std::popcount(unsigned(c.marks)) * passes;
+                quads += std::popcount(c.marks) * passes;
             QSGGeometry *mg = slot.marks->geometry();
             mg->allocate(quads * 6);
             auto *mv = mg->vertexDataAsTexturedPoint2D();
@@ -2433,12 +2482,11 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                     }
                     double x = snap(c.rect.left() + kMarkInset);
                     const double y = snap(c.rect.bottom() - kMarkInset - size);
-                    for (int m = 0; m < kMarkKinds; ++m) {
-                        if (!(c.marks & kMarkOrder[size_t(m)]))
-                            continue;
+                    for (quint32 left = c.marks; left; left &= left - 1) {
+                        const int m = std::countr_zero(left);
                         const float x0 = float(x - grow), y0 = float(y - grow);
                         const float x1 = float(x + size + grow), y1 = float(y + size + grow);
-                        const float u0 = float(m) / kMarkKinds, u1 = float(m + 1) / kMarkKinds;
+                        const float u0 = float(m) / markSlots, u1 = float(m + 1) / markSlots;
                         mv[0].set(x0, y0, u0, v0);
                         mv[1].set(x1, y0, u1, v0);
                         mv[2].set(x0, y1, u0, v1);

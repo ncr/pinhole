@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QJSValue>
 #include <QJsonObject>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
 #include <QQmlError>
@@ -289,6 +290,65 @@ private:
     std::vector<QProcess *> m_ending;
 };
 
+// A mark a plugin puts in the corner of grid cells (PinholePlugin.marks),
+// beside Pinhole's own, with a switch of its own in the side panel's "In
+// the grid": drawn from a field of the library every photo has, or from a
+// list of photos the plugin gives. docs/plugins.md describes it for plugin
+// authors; Plugins gathers them into markKinds for the grid.
+class PluginMark : public QObject {
+    Q_OBJECT
+    // Unique in the plugin: its id is "<plugin id>/<name>", as its switch
+    // is kept (MarkChoices).
+    Q_PROPERTY(QString name READ name WRITE setName NOTIFY changed)
+    // Its switch's words in the side panel.
+    Q_PROPERTY(QString text READ text WRITE setText NOTIFY changed)
+    // A shape of Pinhole's own ("video", "live", "heart", "stack"), or one
+    // character of the theme's font, a Nerd Font glyph (marks.h).
+    Q_PROPERTY(QString icon READ icon WRITE setIcon NOTIFY changed)
+    // A theme colour's name (red, green, yellow, blue, magenta, cyan,
+    // accent), or "#rrggbb".
+    Q_PROPERTY(QString colour READ colour WRITE setColour NOTIFY changed)
+    // Left to right in the corner: Pinhole's favourite 10, video 20, Live
+    // 30, stack 90.
+    Q_PROPERTY(int order READ order WRITE setOrder NOTIFY changed)
+    // The photos whose library field is true ("live", "favorite",
+    // "video"); or "" for `photos`.
+    Q_PROPERTY(QString field READ field WRITE setField NOTIFY changed)
+    // The photos it marks, by position or id (field ""): followed through
+    // the library read again until it gives them again, as `hidden` is.
+    Q_PROPERTY(QVariantList photos READ photos WRITE setPhotos NOTIFY photosChanged)
+    // Its switch until it is first turned.
+    Q_PROPERTY(bool defaultShown READ defaultShown WRITE setDefaultShown NOTIFY changed)
+public:
+    using QObject::QObject;
+    QString name() const { return m_name; }
+    void setName(const QString &name);
+    QString text() const { return m_text; }
+    void setText(const QString &text);
+    QString icon() const { return m_icon; }
+    void setIcon(const QString &icon);
+    QString colour() const { return m_colour; }
+    void setColour(const QString &colour);
+    int order() const { return m_order; }
+    void setOrder(int order);
+    QString field() const { return m_field; }
+    void setField(const QString &field);
+    QVariantList photos() const { return m_photos; }
+    void setPhotos(const QVariantList &photos);
+    bool defaultShown() const { return m_defaultShown; }
+    void setDefaultShown(bool shown);
+
+signals:
+    void changed();
+    void photosChanged();
+
+private:
+    QString m_name, m_text, m_icon, m_colour = QStringLiteral("accent"), m_field;
+    int m_order = 50;
+    QVariantList m_photos;
+    bool m_defaultShown = true;
+};
+
 // Plugins: what is added to Pinhole without changing it. Each is a folder
 // with a manifest.json and a QML entry point, as Omarchy's are: Pinhole's
 // own under its plugins folder, anyone's own in ~/.config/pinhole/plugins
@@ -319,11 +379,21 @@ class Plugins : public QObject {
     // As they do, all those on at once: the window gathers what they add
     // once they all have (allLoaded), not as each does.
     Q_PROPERTY(bool loadingAll READ loadingAll NOTIFY allLoaded)
+    // Every kind of mark the grid can draw, Pinhole's own and the loaded
+    // plugins' (PluginMark), in their order left to right: each { id,
+    // plugin ("" for Pinhole's own), name, text, icon, colour (as given: a
+    // theme colour's name or "#rrggbb"), order, field ("video", "live",
+    // "favorite", "stack", or "" for a plugin's list of photos),
+    // defaultShown }. At most 32, and 4 of any plugin.
+    Q_PROPERTY(QVariantList markKinds READ markKinds NOTIFY markKindsChanged)
 public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
-    // Pinhole. 2: promises, pinhole.settings, notify, photos by id.
-    static constexpr int api = 2;
+    // Pinhole. 2: promises, pinhole.settings, notify, photos by id. 3:
+    // marks.
+    static constexpr int api = 3;
+    static constexpr int kMaxMarks = 32;
+    static constexpr int kMaxMarksEach = 4;
 
     Plugins(const Library *library, ServiceClient *service, Viewer *viewer, Translator *translator, History *history,
             QObject *parent = nullptr);
@@ -334,11 +404,12 @@ public:
     static void registerTypes();
     // What is wrong with the plugin in `dir`, if anything; its manifest.
     static QString manifestProblem(const QString &dir, QJsonObject *manifest, QString *main);
-    // What the plugin in `dir` uses that came with API 2, by its files'
-    // code, strings and comments aside: pinhole's ("pinhole.notify"), a
-    // photo's avgColor, or its root's ("hidden"). `pinhole plugin check`
-    // warns of them when its manifest asks for API 1.
-    static QStringList apiTwoUses(const QString &dir);
+    // What the plugin in `dir` uses that came with an API after the first,
+    // by the API that brought it, by its files' code, strings and comments
+    // aside: pinhole's ("pinhole.notify"), a photo's avgColor, or its
+    // root's ("hidden"), for 2; "marks" for 3. `pinhole plugin check` warns
+    // of those of an API newer than its manifest asks for.
+    static QMap<int, QStringList> apiUses(const QString &dir);
     // The plugin in `dir`'s files named as one of Pinhole's own, or as one
     // of the `others`' (each its id and folder): a qsTr() in it may be
     // given that one's words (Translator). `pinhole plugin check` warns.
@@ -369,6 +440,15 @@ public:
     // photos where they are now until it gives its own again, never one
     // plugin's of the positions before a reload and another's of after.
     Q_INVOKABLE QVariantList stacksOf(const QString &id, const QVariantList &given, bool fresh);
+    // Plugin `id`'s marks (PinholePlugin.marks, PluginMark each), as it
+    // loads and when it gives others; [] as it goes. Followed from then on
+    // by their own signals: no gathering in QML.
+    Q_INVOKABLE void setMarks(const QString &id, const QList<QObject *> &marks);
+    QVariantList markKinds() const { return m_markKinds; }
+    // Each of plugin `id`'s marks drawn from its photos, by name: those
+    // photos where they are now, followed through a reload until it gives
+    // its own again.
+    Q_INVOKABLE QVariantMap marksOf(const QString &id) const;
 
     QStringList ids() const { return m_ids; }
     QStringList covering() const { return m_covering; }
@@ -434,6 +514,7 @@ signals:
     // The library was read again: what plugins hide and stack (hiddenOf,
     // stacksOf) is where its photos are now, to be gathered again.
     void positionsMoved();
+    void markKindsChanged();
 
 private:
     struct Plugin {
@@ -484,6 +565,24 @@ private:
         std::vector<std::vector<int>> stacksGiven, stacks;
     };
     std::map<QString, Followed> m_followed;
+    // Each plugin's marks as given, and for a mark of photos those photos'
+    // positions now.
+    struct GivenMark {
+        QPointer<PluginMark> mark;
+        std::vector<int> photos;
+    };
+    std::map<QString, std::vector<GivenMark>> m_marks;
+    QVariantList m_markKinds;
+    // The mark each kind is, by its place in m_markKinds: null for one of
+    // Pinhole's own, or one drawn from a field.
+    std::vector<PluginMark *> m_markOf;
+    // What was last said of each plugin's marks (PluginHost::problem).
+    std::map<QString, QString> m_markProblems;
+    // The kinds again from the marks given, and the bits of those of
+    // photos for the grid.
+    void updateMarkKinds();
+    void updateMarkBits();
+    std::vector<int> markPhotos(const QVariantList &photos) const;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
 };

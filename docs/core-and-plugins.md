@@ -335,15 +335,23 @@ marks: [
 ]
 ```
 
-- `field` and `photos` are alternatives. A mark with `field` costs nothing
-  when the library changes. With `photos`, `Plugins::marksOf` follows the
+- `field` and `photos` are alternatives (`field: ""` means `photos`). A
+  mark with `field` costs nothing when the library changes. With
+  `photos` (positions, or ids, resolved as given), `Plugins` follows the
   positions through `libraryReloaded` until the plugin gives them again, as
-  `hiddenOf` does.
+  `hiddenOf` does; `Plugins::marksOf(id)` says where they are now, by name.
+  As built (B1), each `PluginMark`'s own `photosChanged` is "given again",
+  so nothing is gathered in QML.
+- Left out: `order` 50, `colour` "accent", `defaultShown` true.
 - At most 32 marks in all (`quint32` per photo), and at most 4 per plugin.
-  Beyond that, `pinhole.warn` says so and the extra marks are left out.
+  Beyond that, `pinhole.warn` says so and the extra marks are left out. So
+  is a mark that is not right (its name, field, icon or colour), and the
+  problem is unsaid once its marks are right.
 - The core's own: `pinhole/video` (shape video, cyan, order 20, field video)
   and `pinhole/stack` (shape stack, magenta, order 90; set from `m_stackOf`
-  as today).
+  as today, field `"stack"`, which only the core's has).
+- The theme gains `green` and `blue` (Tokyo Night's when the theme has
+  none), for the colour names.
 
 Wiring (no QML per frame, no QML gathering per change):
 
@@ -365,12 +373,17 @@ Wiring (no QML per frame, no QML gathering per change):
   (stacked ? m_stackMask : 0) | m_markBits[i]`, then `bits & m_shownMask`.
   The atlas strips are built for `m_markKinds.size()` slots and rebuilt
   only when the kinds or colours change (`m_markKindsVersion`).
+  `PhotoGrid::marksOn(index)` gives the ids a photo's cell carries, as step
+  3 works them out, for tests and self-tests.
 - `marks.h`: `enum Mark` gives way to `struct MarkShape { QString builtin;
   QString glyph; }` and `MarkShape markShape(const QString &icon)`.
   `shape()` keeps the four drawn shapes. It draws a glyph with the theme's
   font as a `QPainterPath::addText`, filled for plain and stroked as the
   tube. `plainMark`, `neonMark` and `markImage` take a `MarkShape`.
-  `MarkProvider` serves `image://mark/<icon>`.
+  `MarkProvider` serves `image://mark/<icon>` (a glyph percent-encoded).
+  "One glyph" is one grapheme: a glyph past the first plane, or a flag of
+  two code points, is one. `"favorite"` names the heart too, as the side
+  panel's images did.
 - The switches move out of QML `Settings` into a C++ `MarkChoices`
   (`app/src/markchoices.{h,cpp}`, a context property `markChoices`). It
   owns `[grid]` in `window.conf`: `Q_INVOKABLE bool shown(QString id, bool
@@ -662,7 +675,7 @@ stdio, as `auth/PROTOCOL.md` does. It is started as `<provider>
 
 | Step | On disk | Migration | Tested on a copy |
 |---|---|---|---|
-| B1 marks | `~/.config/pinhole/window.conf` `[grid]` | `MarkChoices` reads `marks` (int, 13) once, when `markChoices` (JSON) is missing, and writes `{"pinhole/video": bit 1, "pinhole.live/live": bit 2, "pinhole.favourites/favorite": bit 4, "pinhole/stack": bit 8}`. `marks` is left as it is. Ids not in `markChoices` take `defaultShown` | unit test with a temporary `window.conf` holding `marks=13`, `marks=15`, `marks=0` and no `marks`; then the app run with `XDG_CONFIG_HOME` on a copy of `~/.config` |
+| B1 marks | `~/.config/pinhole/window.conf` `[grid]` | `MarkChoices` reads `marks` once, when `markChoices` (JSON) is missing, and writes `{"pinhole/video": bit 1, "pinhole.live/live": bit 2, "pinhole.favourites/favorite": bit 4, "pinhole/stack": bit 8}`. `marks` is left as it is. Ids not in `markChoices` take `defaultShown`. With no `marks` either (a first run), nothing is written until a switch is turned, so every kind follows its `defaultShown` (as built: writing 13's switches then would freeze today's defaults for someone who never chose) | unit test with a temporary `window.conf` holding `marks=13`, `marks=15`, `marks=0` and no `marks`; then the app run with `XDG_CONFIG_HOME` on a copy of `~/.config` |
 | A1 / B5 jpeg | `~/.cache/pinhole/compatible/` | made again on demand, so pinholed removes the folder once, as it starts, and logs it. New JPEGs go to `cache/full/…/<key>-jpeg.jpg` (`cached_path(Want::Jpeg, full_key, "jpg", true)`). They count as `full` in the storage panel, with no new `KINDS` entry | pinholed run with `XDG_CACHE_HOME` and `XDG_DATA_HOME` on reflink copies |
 | A2 kinds | `settings.json` (absent for Jacek), `plugins.json` (read only by pinholed) | none. `resolve` must give the same `Settings` as now for every input. That is a table test over today's cases, plus "no file at all, one Apple ID signed in". Nothing writes settings.json because a plugin was turned off | pinholed with `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` on reflink copies and `PINHOLE_SOCKET` of its own. `sources` lists his Apple ID with `count: 49079`. After a round, `meta.listed_at` and `change_token` are unchanged (no new listing). `enabled["pinhole.icloud"] = false` in the copy's plugins.json lists nothing, leaves the library's mtime as it was, and turning it back on shows it again with no listing |
 | A3 crates | none | `pinhole-auth` keeps its state folder `~/.local/state/pinhole/auth/<apple id>/`. `auth::provider_path` adds the checkout path `plugins/icloud/auth/pinhole-auth` | as A2, and `pinhole sign-in` on a scratch state folder |
@@ -865,10 +878,20 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   `plugins.markKinds`, with `markChoices`), `main.cpp` (`markChoices`),
   `sources.pri`, `resources.qrc`, `app/tests/pinhole_tests.cpp`,
   `selftestrun.cpp` (`neon:`), `docs/plugins.md`, `app/src/i18n/pl.json`.
+  As built: `theme.{h,cpp}` (green, blue), `selftest.cpp` (`reload` also
+  checks that every plugin mark stayed on its photo); `resources.qrc`,
+  `neon:` and `pl.json` needed nothing (the side panel's four words were
+  there already, and the warnings are English, as `warn`'s are).
 - New: `app/src/markchoices.{h,cpp}`.
 - Until B3 and B4, the core itself provides `pinhole.live/live` and
   `pinhole.favourites/favorite` (field marks, as today). That way the
-  migration happens once, with the final ids.
+  migration happens once, with the final ids. A plugin mark of the same id
+  takes the stand-in's place, so B3 and B4 only delete them.
+- Proof as built: a window offscreen (`QT_QPA_PLATFORM=offscreen`) does
+  not draw the grid's photos, so `neon:` ran as a Wayland window on
+  workspace 5, whose grabs do draw it (it steps its own frames). Frames of
+  main and B1 differ only where a medium rendition arrived at another
+  moment, as two runs of main do.
 - Tests:
   - `MarkChoices` migration (above);
   - bits from `photos` followed through a reload;
