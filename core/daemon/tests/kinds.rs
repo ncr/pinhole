@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use pinhole_core::folder::FolderSource;
-use pinhole_core::kinds::Kinds;
+use pinhole_folder::FolderSource;
 use pinhole_core::service::{self, Config};
 use pinhole_core::source::Source;
 use serde_json::{json, Value};
@@ -153,7 +152,7 @@ fn a_kind_turned_off_is_neither_listed_nor_shown_nor_touched() {
         location,
         socket: socket.clone(),
         source,
-        kinds: Kinds::builtin(PathBuf::from("/nonexistent/pinhole-auth")),
+        kinds: pinholed::builtin_kinds(PathBuf::from("/nonexistent/pinhole-auth")),
         limit: None,
         settings: settings.clone(),
         plugins: plugins.clone(),

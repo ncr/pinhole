@@ -1,11 +1,15 @@
-[package]
-name = "pinhole-core"
-version = "1.0.0"
-edition = "2021"
-license = "MIT"
-description = "Pinhole's core: iCloud Photos access, the local library index and the cache"
+# One workspace for pinholed: the core (this package), pinholed itself
+# (daemon), and the Rust of the built-in source plugins, which lives in
+# their folders and is linked into pinholed. Its root is here, not at the
+# top of the checkout, so the lock file and core/target stay where they were
+# and the plugins' own helpers (series' finder, send's sender) stay crates
+# of their own: see docs/core-and-plugins.md, A3.
+[workspace]
+members = ["daemon", "../plugins/icloud/source", "../plugins/folder/source"]
+default-members = [".", "daemon", "../plugins/icloud/source", "../plugins/folder/source"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -21,14 +25,28 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 url = "2"
+pinhole-core = { path = "." }
+pinhole-folder = { path = "../plugins/folder/source" }
+pinhole-icloud = { path = "../plugins/icloud/source" }
 
-[[bin]]
-name = "pinhole-probe"
-path = "src/bin/probe.rs"
+[package]
+name = "pinhole-core"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Pinhole's core: the service, the library index and the cache, whatever the photos come from"
 
-[[bin]]
-name = "pinholed"
-path = "src/bin/daemon.rs"
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+image.workspace = true
+rand.workspace = true
+rayon.workspace = true
+# Nothing in the core fetches with it yet: the URL tickets of sources of
+# your own will (A4).
+reqwest.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
 
 [[bin]]
 name = "pinhole-fake"

@@ -545,7 +545,6 @@ pub struct Failure { pub code: String, pub message: String }
 pub struct Kinds { all: Vec<Arc<dyn Kind>>, on: RwLock<HashSet<String>> }
 impl Kinds {
     pub fn new(all: Vec<Arc<dyn Kind>>) -> Kinds;      // all on until refreshed
-    pub fn builtin(auth: PathBuf) -> Kinds;            // IcloudKind, FolderKind
     pub fn refresh(&self, switches: &HashMap<String, bool>) -> bool; // changed?
     pub fn of(&self, kind: &str) -> Option<Arc<dyn Kind>>; // on or not
     pub fn of_entry(&self, entry: &Value) -> Option<Arc<dyn Kind>>;
@@ -558,13 +557,19 @@ impl Kinds {
 }
 ```
 
-- `IcloudKind` (`icloud/kind.rs`) holds what is now in `service.rs`: the
+- The built-in kinds are put together by pinholed, not the core (since
+  A3): `pinholed::builtin_kinds(auth) -> Kinds` (`core/daemon/src/lib.rs`)
+  is `Kinds::new(vec![IcloudKind, FolderKind])`. Until A3 it was
+  `Kinds::builtin(auth)`.
+- `IcloudKind` (`icloud/kind.rs`, since A3 pinhole-icloud's `kind.rs`)
+  holds what is now in `service.rs`: the
   `signing_in` map of `ProcessProvider`s, sign-in through `import_icloudpd`
   or a password, `submit_code`, `sign_out` (cookies removed), `removed`
   (`state_dir` removed), `implicit` (`auth::accounts()`), the
   `needs_sign_in` check in `entry_for`, `describe` (with `account_name`),
   and `discover` (icloudpd's stems).
-- `FolderKind` (`folder.rs`) has `entry_for` (absolute, a folder,
+- `FolderKind` (`folder.rs`, since A3 pinhole-folder's `lib.rs`) has
+  `entry_for` (absolute, a folder,
   trailing `/` trimmed), `describe` (`display_name`), and `discover`
   (`discover::candidates`).
 - `Source` gains `fn details(&self) -> Value` (`{"account": …}` or
@@ -678,7 +683,7 @@ stdio, as `auth/PROTOCOL.md` does. It is started as `<provider>
 | B1 marks | `~/.config/pinhole/window.conf` `[grid]` | `MarkChoices` reads `marks` once, when `markChoices` (JSON) is missing, and writes `{"pinhole/video": bit 1, "pinhole.live/live": bit 2, "pinhole.favourites/favorite": bit 4, "pinhole/stack": bit 8}`. `marks` is left as it is. Ids not in `markChoices` take `defaultShown`. With no `marks` either (a first run), nothing is written until a switch is turned, so every kind follows its `defaultShown` (as built: writing 13's switches then would freeze today's defaults for someone who never chose) | unit test with a temporary `window.conf` holding `marks=13`, `marks=15`, `marks=0` and no `marks`; then the app run with `XDG_CONFIG_HOME` on a copy of `~/.config` |
 | A1 / B5 jpeg | `~/.cache/pinhole/compatible/` | made again on demand, so pinholed removes the folder once, as it starts, and logs it. New JPEGs go to `cache/full/…/<key>-jpeg.jpg` (`cached_path(Want::Jpeg, full_key, "jpg", true)`). They count as `full` in the storage panel, with no new `KINDS` entry | pinholed run with `XDG_CACHE_HOME` and `XDG_DATA_HOME` on reflink copies |
 | A2 kinds | `settings.json` (absent for Jacek), `plugins.json` (read only by pinholed) | none. `resolve` must give the same `Settings` as now for every input. That is a table test over today's cases, plus "no file at all, one Apple ID signed in". Nothing writes settings.json because a plugin was turned off | pinholed with `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` on reflink copies and `PINHOLE_SOCKET` of its own. `sources` lists his Apple ID with `count: 49079`. After a round, `meta.listed_at` and `change_token` are unchanged (no new listing). `enabled["pinhole.icloud"] = false` in the copy's plugins.json lists nothing, leaves the library's mtime as it was, and turning it back on shows it again with no listing |
-| A3 crates | none | `pinhole-auth` keeps its state folder `~/.local/state/pinhole/auth/<apple id>/`. `auth::provider_path` adds the checkout path `plugins/icloud/auth/pinhole-auth` | as A2, and `pinhole sign-in` on a scratch state folder |
+| A3 crates | none | `pinhole-auth` keeps its state folder `~/.local/state/pinhole/auth/<apple id>/`. `auth::default_provider` looks in the checkout at `plugins/icloud/auth/pyicloud/pinhole-auth`; installed, it is still beside pinholed | as A2, and `pinhole sign-in` on a scratch state folder |
 | A4 providers | new `~/.local/state/pinhole/sources/` | new, nothing to migrate | the test provider |
 | B3, B4, B6, B7 new plugins | `plugins.json` | **none written.** The new built-ins have no `enabled` entry and so are on. They have no `tour`, so no new-plugins card shows. A test loads a copy of Jacek's plugins.json, runs the window, and checks that the file is byte for byte the same afterwards | `XDG_CONFIG_HOME` on a copy |
 | B3 Live effect chosen | memory only (`m_chosen`) | none | |
@@ -816,34 +821,72 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
 
 - `core/Cargo.toml` becomes a workspace root with
   `members = ["daemon", "../plugins/icloud/source", "../plugins/folder/source"]`
-  and the same `default-members`. Each member outside `core/` sets
-  `package.workspace = "../../../core"`. There is one `core/Cargo.lock`,
-  regenerated once offline and committed. The target folder stays
-  `core/target`, so `core/target/release/pinholed` stays where
+  and the same `default-members` (with `.`, the core itself). Each member
+  outside `core/` sets `package.workspace = "../../../core"`. The versions
+  are the workspace's (`[workspace.dependencies]`), each crate taking what
+  it uses. There is one `core/Cargo.lock`, regenerated offline (only the
+  new packages added; no version moved) and committed. The target folder
+  stays `core/target`, so `core/target/release/pinholed` stays where
   `serviceclient.cpp` and `bin/install-files` look for it.
-- `git mv core/src/icloud plugins/icloud/source/src`. This makes crate
-  `pinhole-icloud`, a lib, with `pinhole-probe` as its bin. `git mv
-  core/src/folder.rs plugins/folder/source/src/lib.rs` makes crate
-  `pinhole-folder`, and `add::copy_into` moves into it.
-- `git mv auth plugins/icloud/auth`. `auth::provider_path` looks in the
+- **The layout, decided:** the workspace's root stays `core/`, with
+  members outside it. Cargo took it as it is, lock file and all, so the
+  fallback (a root at the top of the checkout with `target-dir =
+  "core/target"`) was not needed, and would have been worse: a
+  `Cargo.toml` at the top would make the series finder and the send
+  sender (their own crates, built with `--manifest-path`) find a workspace
+  they are not in, so each would need an `exclude`, and `Cargo.lock` would
+  move. `cargo` run inside a plugin's `source/` finds the workspace through
+  `package.workspace` and builds into `core/target`.
+- `git mv core/src/icloud plugins/icloud/source/src` (`mod.rs` becomes
+  `lib.rs`). This makes crate `pinhole-icloud`, a lib, with `pinhole-probe`
+  as its bin (`src/bin/probe.rs`). `git mv core/src/folder.rs
+  plugins/folder/source/src/lib.rs` makes crate `pinhole-folder`, and
+  `add::copy_into` moves into it (`copy.rs`). `core/src/discover.rs` is
+  split between them: icloudpd's stems go to pinhole-icloud's
+  `discover.rs`, the folders to offer to pinhole-folder's. The core has no
+  `discover.rs`, `folder.rs` or `icloud/`.
+- `git mv auth plugins/icloud/auth`. `auth::default_provider` looks in the
   checkout at `plugins/icloud/auth/pyicloud/pinhole-auth`.
-  `bin/install-files` still installs it as `$PREFIX/bin/pinhole-auth`.
-- `pinholed` moves to package `core/daemon` (bin `pinholed`), which
-  depends on `pinhole-core`, `pinhole-icloud` and `pinhole-folder`.
-  `daemon/src/main.rs` builds `Kinds::new(vec![IcloudKind, FolderKind])`.
-  `pinhole-core` no longer depends on `p256`, `tungstenite`, `base64`,
-  `url` or `kamadak-exif`. It keeps `reqwest`, which A4's URL tickets use.
-- Tests that use `FolderSource` (`sync.rs`, `core/tests/service.rs`) move
-  to `plugins/folder/source/tests/` or `core/daemon/tests/`.
-  `core/tests/given.rs` follows `pinholed`.
+  `bin/install-files` still installs it as `$PREFIX/bin/pinhole-auth`,
+  beside pinholed, where the installed pinholed finds it (`--auth`, else
+  `$PINHOLE_AUTH`, else the checkout's, else beside it, else `PATH`).
+- `pinholed` moves to package `core/daemon` (package and bin `pinholed`),
+  which depends on `pinhole-core`, `pinhole-icloud` and `pinhole-folder`.
+  It has a lib too, `pinholed::builtin_kinds(auth)`, which builds
+  `Kinds::new(vec![IcloudKind, FolderKind])`, so its `main.rs` and its
+  tests make the same kinds. `pinhole-core` no longer depends on `p256`,
+  `tungstenite`, `base64`, `url`, `kamadak-exif`, `chrono` or `serde`. It
+  keeps `reqwest`, which A4's URL tickets use. `pinhole-fake` stays the
+  core's.
+- Tests that use `FolderSource` or the built-in kinds move out of the
+  core, unchanged but for their paths: `core/tests/*.rs` to
+  `core/daemon/tests/`; `sync.rs`'s three over a folder to
+  `plugins/folder/source/tests/sync.rs`; `storage.rs`'s folder library
+  names to `plugins/folder/source/tests/libraries.rs`; the `Kinds` and
+  `resolve` table tests over the real kinds to
+  `core/daemon/tests/builtin_kinds.rs` (`storage::resolve` is `pub` for
+  them). In the core, the storage tests' second library is `library/cloud`,
+  a read of only the location uses `Kinds::new(vec![])`, and
+  `rounds_event`'s test has a stub source. 74 tests before, 74 after.
 - `bin/install-local`: `cargo build --release --locked --workspace
   --manifest-path core/Cargo.toml`. `pkgbuild/PKGBUILD`: the same. README:
-  the layout.
+  the layout. `docs/sources.md` and `docs/service.md`: where the crates
+  are and where pinhole-auth is found.
+- Until B6 gives them their QML, `plugins/icloud` and `plugins/folder` hold
+  only Rust and no `manifest.json`: no plugin, as `Plugins::scan` already
+  has it (it skips such a folder), so the window loads nothing new and
+  `bin/install-files` copies nothing of them. The app's tests that walk
+  `plugins/` (the translations, API 2's uses) skip such a folder too.
 - Tests: `cargo test --release --workspace`. `makepkg -f` in a scratch
-  copy of `pkgbuild/` builds, as an ordinary user, with no install.
-  `bin/install-local`, then the real window opens on the real library.
-  `grep -rn "icloud\|Apple" core/src` finds nothing outside comments that
-  name the plugins.
+  copy of the checkout builds, as an ordinary user, with no install, and
+  its package has `usr/bin/pinholed` and `usr/bin/pinhole-auth`. `cargo
+  build --locked --workspace` from a fresh clone of the branch.
+  `bin/install-local`, then the installed pinholed serves the real library
+  as before (49,079, no listing), and `pinhole sign-in` on a scratch state
+  folder reaches pinhole-auth (its "no icloudpd session" answer, no
+  password given). `grep -rn "icloud\|Apple" core/src` finds nothing
+  outside comments that name the plugins (`pinhole.icloud`,
+  `plugins/icloud/source`).
 
 ### A4: sources of your own, out of process
 
@@ -1137,7 +1180,7 @@ and holds the B track's build.
    with `package.workspace`. If it fights the lock file, put the
    workspace root at the repository's top level with `target-dir =
    "core/target"` in `.cargo/config.toml`, so the paths stay the same.
-   Decide that within A3. Do not stop.
+   *Decided in A3:* it did not fight; the root stays `core/` (see A3).
 9. **A provider that hangs or floods.** *Answer:* two minutes of silence
    means it is killed. A `put` line is limited to 4 MB and 1,000 assets.
    Assets are checked before they are written. It restarts at most once

@@ -1051,20 +1051,60 @@ name = "pinhole-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "clap",
+ "image",
+ "rand 0.8.8",
+ "rayon",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "pinhole-folder"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "image",
+ "kamadak-exif",
+ "pinhole-core",
+ "rayon",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "pinhole-icloud"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "chrono",
  "clap",
- "image",
- "kamadak-exif",
  "p256",
+ "pinhole-core",
  "rand 0.8.8",
- "rayon",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "tungstenite",
  "url",
+]
+
+[[package]]
+name = "pinholed"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "image",
+ "pinhole-core",
+ "pinhole-folder",
+ "pinhole-icloud",
+ "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

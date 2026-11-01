@@ -528,6 +528,10 @@ private slots:
         const QFileInfoList plugins = QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
         QVERIFY(plugins.size() > 5);
         for (const QFileInfo &plugin : plugins) {
+            // A folder with no manifest is no plugin, as Plugins::scan has
+            // it: iCloud's and folders' Rust before their plugins' QML.
+            if (!QFileInfo::exists(plugin.filePath() + "/manifest.json"))
+                continue;
             const QJsonObject own = catalog(plugin.filePath(), "pl");
             const QJsonObject manifest = QJsonDocument::fromJson(read(plugin.filePath() + "/manifest.json").toUtf8()).object();
             const QMap<QString, QString> says = saidIn(plugin.filePath(), {"*.qml", "*.js"});
@@ -739,6 +743,8 @@ PinholePlugin {
         const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
         for (const QFileInfo &plugin : QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
             QFile manifest(plugin.filePath() + "/manifest.json");
+            if (!manifest.exists())
+                continue; // no plugin, as Plugins::scan has it
             QVERIFY(manifest.open(QIODevice::ReadOnly));
             const int api = QJsonDocument::fromJson(manifest.readAll()).object().value("api").toInt(1);
             const QMap<int, QStringList> uses = Plugins::apiUses(plugin.filePath());

@@ -7,7 +7,7 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use crate::icloud::cloudkit::PhotosClient;
+use crate::cloudkit::PhotosClient;
 
 /// Assets to one request: CloudKit takes 200 operations at most.
 pub const MODIFY_ASSETS: usize = 100;
@@ -70,8 +70,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::icloud::auth::FixedSession;
-    use crate::icloud::session::Session;
+    use crate::auth::FixedSession;
+    use crate::session::Session;
 
     /// CloudKit as far as favourites go: records with a change tag and
     /// `isFavorite`, which `records/modify` changes only with the tag they

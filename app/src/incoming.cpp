@@ -8,7 +8,7 @@
 
 namespace {
 
-// As core/src/add.rs and icloud/upload.rs have them, for a service from
+// As core/src/add.rs and plugins/icloud/source/src/upload.rs have them, for a service from
 // before it said.
 const QStringList folderTakes{"jpg", "jpeg", "heic", "heif", "png", "gif", "tif", "tiff", "webp", "avif",
                               "mov", "mp4", "m4v", "mkv", "webm", "avi"};

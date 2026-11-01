@@ -14,9 +14,9 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::add::{extension, AddError, Added, Addition};
-use crate::icloud::cloudkit::{session_headers, PRIMARY_ZONE};
-use crate::icloud::session::Session;
+use pinhole_core::add::{extension, AddError, Added, Addition};
+use crate::cloudkit::{session_headers, PRIMARY_ZONE};
+use crate::session::Session;
 
 /// What icloud.com takes (its iCPLUploadV2Requirements): photos and videos
 /// up to 500 MB.
@@ -57,7 +57,7 @@ impl Uploader {
         let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
 
         // A link to send the file to.
-        let key = crate::add::uuid();
+        let key = pinhole_core::add::uuid();
         let r = self.call("createUploadUrl", &json!({"zoneName": PRIMARY_ZONE, "assets": {&key: size}}))?;
         let link = r["uploadUrls"][&key].as_str().ok_or_else(|| anyhow!("iCloud gave no upload link: {r}"))?.to_owned();
 

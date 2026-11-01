@@ -292,8 +292,10 @@ its own library in the one folder: `library/icloud/<apple-id>/`,
 ### Kinds
 
 Each kind of source is a plugin's: `icloud` is `pinhole.icloud`'s and
-`folder` is `pinhole.folder`'s (`core/src/kinds.rs`), tied in the service
-and never claimed by a manifest. A kind is on unless its plugin is turned
+`folder` is `pinhole.folder`'s (`core/src/kinds.rs`), compiled into the
+service from the plugins' crates (`plugins/icloud/source`,
+`plugins/folder/source`; `core/daemon` puts them together), tied there and
+never claimed by a manifest. A kind is on unless its plugin is turned
 off in `~/.config/pinhole/plugins.json` (`"enabled": {"pinhole.icloud":
 false}`), which the window writes and the service only reads: the window
 sends `plugins_changed` after writing it, and each sync round looks at the
@@ -331,6 +333,13 @@ over the session icloudpd has for that Apple ID, as `pinhole sign-in`
 does when icloudpd has one (`discover`). Signed in, the Apple ID is added and shown. Errors
 carry the provider's codes: `wrong_password`, `try_again`, `wrong_code`,
 `rate_limited`, `unavailable`, `needs_sign_in` (no icloudpd session for it).
+
+The provider is `pinhole-auth` (`plugins/icloud/auth`, protocol in its
+`PROTOCOL.md`): pinholed's `--auth`, else `$PINHOLE_AUTH`, else the
+checkout's `plugins/icloud/auth/pyicloud/pinhole-auth` when pinholed runs
+from `core/target/release`, else the one installed beside pinholed
+(`bin/install-files` puts it in `<prefix>/bin`), else `pinhole-auth` on
+`PATH`.
 
 `discover` says what could be added, for the first window and the Add
 button, from each kind that is on: under `kinds` by kind

@@ -1,0 +1,26 @@
+[package]
+name = "pinholed"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "pinholed: Pinhole's service, with the built-in source plugins' Rust linked in"
+workspace = ".."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pinholed"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+pinhole-core.workspace = true
+pinhole-folder.workspace = true
+pinhole-icloud.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true

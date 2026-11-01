@@ -1,0 +1,17 @@
+[package]
+name = "pinhole-folder"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The pinhole.folder plugin's Rust: a folder of photos as a source, linked into pinholed"
+workspace = "../../../core"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+image.workspace = true
+kamadak-exif.workspace = true
+pinhole-core.workspace = true
+rayon.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true

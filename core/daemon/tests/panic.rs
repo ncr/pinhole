@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use pinhole_core::db::Index;
-use pinhole_core::folder::FolderSource;
+use pinhole_folder::FolderSource;
 use pinhole_core::kinds::{Failure, Kind, Kinds};
 use pinhole_core::service::{self, Config};
 use pinhole_core::source::{Body, FetchError, Listing, Source, Stored, Ticket};

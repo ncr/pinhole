@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Parser;
 
-use pinhole_core::kinds::Kinds;
 use pinhole_core::service::{self, Config};
 use pinhole_core::storage;
 
@@ -21,7 +20,7 @@ struct Cli {
     cache: Option<PathBuf>,
     #[arg(long)]
     socket: Option<PathBuf>,
-    /// The sign-in provider (see auth/PROTOCOL.md).
+    /// iCloud's sign-in provider (see plugins/icloud/auth/PROTOCOL.md).
     #[arg(long)]
     auth: Option<PathBuf>,
     /// Downloads at once.
@@ -48,8 +47,8 @@ fn main() -> Result<()> {
     let settings = storage::settings_path();
     // The kinds of source there are, those whose plugins are on (in
     // plugins.json, as the window keeps them) on.
-    let auth = cli.auth.unwrap_or_else(pinhole_core::icloud::auth::default_provider);
-    let kinds = Kinds::builtin(auth);
+    let auth = cli.auth.unwrap_or_else(pinhole_icloud::auth::default_provider);
+    let kinds = pinholed::builtin_kinds(auth);
     let plugins = pinhole_core::plugins::plugins_path();
     kinds.refresh(&pinhole_core::plugins::switches_in(&plugins));
     let saved = storage::read_settings(&settings, &kinds);

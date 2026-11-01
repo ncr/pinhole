@@ -6,9 +6,9 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use crate::db::Index;
-use crate::icloud::records::CloudAsset;
-use crate::source::{Asset, Want};
+use pinhole_core::db::Index;
+use crate::records::CloudAsset;
+use pinhole_core::source::{Asset, Want};
 
 /// Which of iCloud's renditions serves each kind a window asks for: the
 /// first of these the asset has. `full` is the photo as it looks now: the

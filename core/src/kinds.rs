@@ -5,13 +5,13 @@
 //! where that means anything. The service names no kind itself.
 //!
 //! Each kind follows the switch of the plugin that owns it in
-//! `plugins.json` (plugins.rs): `icloud` is `pinhole.icloud`'s, `folder`
-//! `pinhole.folder`'s, tied here and never claimed by a manifest. A kind
-//! that is off keeps its entries in the settings and its libraries on disk;
-//! it is only not listed, not shown and not synced, until it is on again.
+//! `plugins.json` (plugins.rs). The built-in kinds are compiled into
+//! pinholed, each tied to its plugin's id there (core/daemon: pinhole.icloud,
+//! pinhole.folder) and never claimed by a manifest. A kind that is off keeps
+//! its entries in the settings and its libraries on disk; it is only not
+//! listed, not shown and not synced, until it is on again.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -21,30 +21,30 @@ use crate::source::{NoSource, Source};
 use crate::storage::Settings;
 
 pub trait Kind: Send + Sync {
-    /// As settings.json names it: "icloud", "folder".
+    /// As settings.json names it: "folder", or pinhole.icloud's own.
     fn kind(&self) -> &str;
 
-    /// The plugin whose switch it follows: "pinhole.icloud".
+    /// The plugin whose switch it follows: "pinhole.folder".
     fn plugin(&self) -> &str;
 
     /// An entry of this kind in its usual form, or None for one that
     /// names nothing.
     fn normal(&self, entry: &Value) -> Option<Value>;
 
-    /// The entry's source id, as its source's `id()` says it:
-    /// "icloud:<apple id>", "folder:<path>".
+    /// The entry's source id, as its source's `id()` says it: the kind,
+    /// a colon and what tells its sources apart ("folder:<path>").
     fn id_of(&self, entry: &Value) -> String;
 
-    /// Entries known without the settings naming them: the Apple IDs
-    /// signed in to here.
+    /// Entries known without the settings naming them (pinhole.icloud's:
+    /// the accounts signed in to here).
     fn implicit(&self) -> Vec<Value> {
         Vec::new()
     }
 
     /// Whether, with no list in the settings, its sources are only its
-    /// `implicit` ones: one shown that is not among them is not added (an
-    /// Apple ID not signed in to). A kind with none (a folder) has the one
-    /// shown added after them.
+    /// `implicit` ones: one shown that is not among them is not added
+    /// (pinhole.icloud's account not signed in to). A kind with none (a
+    /// folder) has the one shown added after them.
     fn implicit_only(&self) -> bool {
         false
     }
@@ -87,7 +87,7 @@ pub trait Kind: Send + Sync {
         Err(Failure::bad_request(format!("{} is not signed in to", self.id_of(entry))))
     }
 
-    /// Taken out of the sources: what it kept apart goes (an Apple ID's
+    /// Taken out of the sources: what it kept apart goes (pinhole.icloud's
     /// session). Its library is the service's to delete.
     fn removed(&self, _entry: &Value) {}
 }
@@ -139,13 +139,6 @@ impl Kinds {
     pub fn new(all: Vec<Arc<dyn Kind>>) -> Kinds {
         let on = all.iter().map(|k| k.kind().to_owned()).collect();
         Kinds { all, on: RwLock::new(on) }
-    }
-
-    /// The kinds compiled into pinholed: iCloud first, as Apple IDs have
-    /// always been the first sources, then folders. `auth` is the sign-in
-    /// provider.
-    pub fn builtin(auth: PathBuf) -> Kinds {
-        Kinds::new(vec![Arc::new(crate::icloud::kind::IcloudKind::new(auth)), Arc::new(crate::folder::FolderKind)])
     }
 
     /// Which are on, from the plugins' switches: a built-in kind unless
@@ -213,83 +206,5 @@ impl Kinds {
         let Some(entry) = entry else { return Ok(Arc::new(NoSource)) };
         let kind = self.of_entry(entry).ok_or_else(|| anyhow!("unknown source {:?}", entry["kind"].as_str().unwrap_or("")))?;
         kind.source(entry)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::icloud::kind::IcloudKind;
-
-    fn kinds(accounts: &[&str]) -> Kinds {
-        let accounts = accounts.iter().map(|a| a.to_string()).collect();
-        Kinds::new(vec![
-            Arc::new(IcloudKind::with_accounts(PathBuf::from("/nonexistent/pinhole-auth"), accounts)),
-            Arc::new(crate::folder::FolderKind),
-        ])
-    }
-
-    fn off(plugin: &str) -> HashMap<String, bool> {
-        [(plugin.to_owned(), false)].into()
-    }
-
-    #[test]
-    fn a_kind_is_on_unless_its_plugin_is_turned_off() {
-        let k = kinds(&[]);
-        assert!(k.on("icloud") && k.on("folder"));
-        // Nothing said, or said on: on, and nothing changed.
-        assert!(!k.refresh(&HashMap::new()));
-        assert!(!k.refresh(&[("pinhole.icloud".to_owned(), true), ("pinhole.series".to_owned(), false)].into()));
-        assert!(k.refresh(&off("pinhole.icloud")));
-        assert!(!k.on("icloud") && k.on("folder"));
-        assert!(!k.refresh(&off("pinhole.icloud")));
-        let report = k.report();
-        assert_eq!(report["kinds"][0], json!({"kind": "icloud", "plugin": "pinhole.icloud", "on": false,
-                                              "needs_sign_in": true, "accepts": crate::icloud::upload::ACCEPTS}));
-        assert_eq!(report["kinds"][1]["kind"], "folder");
-        assert_eq!(report["kinds"][1]["plugin"], "pinhole.folder");
-        assert_eq!(report["kinds"][1]["on"], true);
-        // Off a kind still is: its entries are known, and its sources made.
-        assert!(k.of("icloud").is_some());
-        assert_eq!(k.id_of(&json!({"kind": "icloud", "account": "a@x.com"})), "icloud:a@x.com");
-        assert_eq!(k.source_for(Some(&json!({"kind": "icloud", "account": "a@x.com"}))).unwrap().id(), "icloud:a@x.com");
-        assert!(k.refresh(&HashMap::new()));
-        assert!(k.on("icloud"));
-        // No kind of that name.
-        assert!(k.of("what").is_none());
-        assert_eq!(k.id_of(&json!({"kind": "what"})), "none");
-        assert!(k.source_for(Some(&json!({"kind": "what"}))).is_err());
-        assert_eq!(k.source_for(None).unwrap().kind(), "none");
-    }
-
-    #[test]
-    fn the_source_shown_is_the_one_named_while_its_kind_is_on() {
-        let k = kinds(&[]);
-        let a = json!({"kind": "icloud", "account": "a@x.com"});
-        let f = json!({"kind": "folder", "path": "/f"});
-        let g = json!({"kind": "folder", "path": "/g"});
-        let settings = |source: Option<&Value>| Settings {
-            sources: vec![a.clone(), f.clone(), g.clone()],
-            source: source.cloned(),
-            ..Settings::default()
-        };
-        assert_eq!(k.shown(&settings(Some(&a))), Some(a.clone()));
-        assert_eq!(k.shown(&settings(Some(&g))), Some(g.clone()));
-        // None named is none, whatever was added.
-        assert_eq!(k.shown(&settings(None)), None);
-        // Its kind off: the first added whose kind is on.
-        k.refresh(&off("pinhole.icloud"));
-        assert_eq!(k.shown(&settings(Some(&a))), Some(f.clone()));
-        assert_eq!(k.shown(&settings(Some(&g))), Some(g.clone()));
-        // Every kind added off: none.
-        k.refresh(&[("pinhole.icloud".to_owned(), false), ("pinhole.folder".to_owned(), false)].into());
-        assert_eq!(k.shown(&settings(Some(&a))), None);
-        // On again: what was named, as the settings never changed.
-        k.refresh(&HashMap::new());
-        assert_eq!(k.shown(&settings(Some(&a))), Some(a));
-        // Only a folder added, iCloud off: the folder.
-        k.refresh(&off("pinhole.icloud"));
-        let only = Settings { sources: vec![f.clone()], source: Some(f.clone()), ..Settings::default() };
-        assert_eq!(k.shown(&only), Some(f));
     }
 }

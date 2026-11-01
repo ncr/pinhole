@@ -5,7 +5,11 @@
 //! ffmpeg: cover.rs). Changes are found by looking at the folder again: a
 //! stat of every file, compared with what the index has. A folder has no
 //! favourites of its own: they are kept in its library (`folder_favorites`).
-//! See docs/sources.md.
+//! See docs/sources.md. This is the Rust of the `pinhole.folder` plugin,
+//! linked into pinholed: `FolderKind` is its kind of source.
+
+pub mod copy;
+pub mod discover;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -18,9 +22,9 @@ use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
 use rusqlite::Connection;
 
-use crate::add::{Added, Addition};
-use crate::db::Index;
-use crate::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
+use pinhole_core::add::{Added, Addition};
+use pinhole_core::db::Index;
+use pinhole_core::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
 
 /// Long edges of the thumbnail (kept in the library, like iCloud's) and of
 /// the medium size (made into the cache when first asked for).
@@ -92,9 +96,9 @@ fn favorites(index: &Connection) -> HashSet<String> {
 
 fn media_of(path: &Path) -> Option<Media> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if crate::add::PHOTOS.contains(&ext.as_str()) {
+    if pinhole_core::add::PHOTOS.contains(&ext.as_str()) {
         Some(Media::Photo)
-    } else if crate::add::VIDEOS.contains(&ext.as_str()) {
+    } else if pinhole_core::add::VIDEOS.contains(&ext.as_str()) {
         Some(Media::Video)
     } else {
         None
@@ -397,7 +401,7 @@ impl FolderSource {
         let favorites = favorites(index.conn);
         for batch in entries.chunks(PUT_BATCH) {
             if index.stopping() {
-                return Err(crate::source::Stopped.into());
+                return Err(pinhole_core::source::Stopped.into());
             }
             let mut assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
             for a in &mut assets {
@@ -414,13 +418,13 @@ impl FolderSource {
     fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
         let path = self.root.join(rel);
         // Never more at once than background work may take (background.rs).
-        let _slot = crate::background::slot();
+        let _slot = pinhole_core::background::slot();
         // A video's from its most telling frame (cover.rs).
         if media_of(&path) == Some(Media::Video) {
-            return crate::cover::pick(&path, edge).with_context(|| format!("could not make an image of {rel}"));
+            return pinhole_core::cover::pick(&path, edge).with_context(|| format!("could not make an image of {rel}"));
         }
         let fit = format!("{edge}x{edge}>");
-        let mut magick = crate::background::command("magick");
+        let mut magick = pinhole_core::background::command("magick");
         // Decoding a big JPEG at a fraction of its size is much quicker.
         // Only a big one: the hint lets the decoder enlarge a small one too.
         let big = image::image_dimensions(&path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
@@ -442,11 +446,11 @@ impl FolderSource {
     }
 }
 
-/// Folders as a kind of source (kinds.rs), `pinhole.folder`'s: an entry is
+/// Folders as a kind of source (pinhole-core's kinds.rs), `pinhole.folder`'s: an entry is
 /// a folder's absolute path (`{"kind": "folder", "path": …}`).
 pub struct FolderKind;
 
-impl crate::kinds::Kind for FolderKind {
+impl pinhole_core::kinds::Kind for FolderKind {
     fn kind(&self) -> &str {
         "folder"
     }
@@ -479,8 +483,8 @@ impl crate::kinds::Kind for FolderKind {
     }
 
     /// `path`: an absolute folder, without a slash at the end.
-    fn entry_for(&self, params: &serde_json::Value) -> Result<serde_json::Value, crate::kinds::Failure> {
-        let bad = |m: &str| crate::kinds::Failure::bad_request(m);
+    fn entry_for(&self, params: &serde_json::Value) -> Result<serde_json::Value, pinhole_core::kinds::Failure> {
+        let bad = |m: &str| pinhole_core::kinds::Failure::bad_request(m);
         let path = params["path"].as_str().ok_or_else(|| bad("a folder needs its path"))?;
         let path = path.trim_end_matches('/');
         if !Path::new(path).is_absolute() || !Path::new(path).is_dir() {
@@ -536,7 +540,7 @@ impl Source for FolderSource {
         if name.is_empty() {
             "-".into()
         } else if path.contains(['-', '~']) {
-            format!("{name}~{:016x}", crate::storage::stable_hash(path.as_bytes()))
+            format!("{name}~{:016x}", pinhole_core::storage::stable_hash(path.as_bytes()))
         } else {
             name
         }
@@ -582,7 +586,7 @@ impl Source for FolderSource {
         self.put(index, &all, progress, all.len() as u64)?;
         let lives = entries.values().filter(|e| e.motion.is_some()).count();
         Ok(Listing {
-            token: Some(crate::sync::now_secs().to_string()),
+            token: Some(pinhole_core::sync::now_secs().to_string()),
             summary: format!("{} photos and videos in {}, {lives} of them Live Photos{}", entries.len(),
                              self.root.display(), look.unread_note()),
         })
@@ -618,7 +622,7 @@ impl Source for FolderSource {
         self.put(index, &changed, &|_, _| {}, changed.len() as u64)?;
         index.remove(&gone)?;
         Ok(Listing {
-            token: Some(crate::sync::now_secs().to_string()),
+            token: Some(pinhole_core::sync::now_secs().to_string()),
             summary: format!("{} files looked at{}", entries.len(), look.unread_note()),
         })
     }
@@ -646,12 +650,12 @@ impl Source for FolderSource {
     }
 
     /// Copied into the folder itself, beside what is there, never over it
-    /// (`add::copy_into`); the next look at the folder finds it.
+    /// (`copy::copy_into`); the next look at the folder finds it.
     fn add(&self, addition: &Addition, sent: &(dyn Fn(u64, u64) + Sync)) -> Result<Added> {
         if !self.root.is_dir() {
             return Err(anyhow!("{} is not there", self.root.display()));
         }
-        let names = crate::add::copy_into(&self.root, addition, sent)?;
+        let names = copy::copy_into(&self.root, addition, sent)?;
         Ok(Added { id: names.into_iter().next(), ..Added::default() })
     }
 
@@ -755,8 +759,8 @@ struct Probe {
 /// creation date (with the place's offset) when there is one, else the
 /// container's.
 fn probe_video(path: &Path) -> Probe {
-    let _slot = crate::background::slot();
-    let Ok(output) = crate::background::command("ffprobe")
+    let _slot = pinhole_core::background::slot();
+    let Ok(output) = pinhole_core::background::command("ffprobe")
         .args(["-v", "quiet", "-print_format", "json", "-show_entries", "format=duration:format_tags"])
         .arg(path)
         .stdin(Stdio::null())
@@ -864,7 +868,7 @@ mod tests {
         touch(&from.join("IMG_1.MOV"));
         touch(&dir.join("IMG_1.HEIC"));
         let source = FolderSource::new(dir.clone());
-        let (additions, _) = crate::add::gather(&[from.join("IMG_1.HEIC"), from.join("IMG_1.MOV")]);
+        let (additions, _) = pinhole_core::add::gather(&[from.join("IMG_1.HEIC"), from.join("IMG_1.MOV")]);
         let added = source.add(&additions[0], &|_, _| {}).unwrap();
         assert_eq!(added.id.as_deref(), Some("IMG_1 (2).HEIC"));
         let entries = source.look().unwrap().entries;
@@ -884,8 +888,8 @@ mod tests {
             touch(&dir.join(f));
         }
         let source = FolderSource::new(dir.clone());
-        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
-        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        let mut conn = pinhole_core::db::open(&dir.join(".library.sqlite")).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
         source.set_favorite(&conn, &["IMG_1.JPG".into()], true).unwrap();
         conn.execute("UPDATE assets SET favorite = 1 WHERE id = 'IMG_1.JPG'", []).unwrap();
         let favourite = |conn: &Connection, id: &str| -> bool {
@@ -893,19 +897,19 @@ mod tests {
         };
         // The file edited: put again, still a favourite.
         std::fs::write(dir.join("IMG_1.JPG"), b"xy").unwrap();
-        let report = crate::sync::follow(&source, &mut conn).unwrap();
+        let report = pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(report.changes.updated, ["IMG_1.JPG"]);
         assert!(favourite(&conn, "IMG_1.JPG"));
         // Listed afresh.
-        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
         assert!(favourite(&conn, "IMG_1.JPG"));
         assert!(!favourite(&conn, "IMG_2.JPG"));
         // Gone, and back: not a favourite any more.
         std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
-        crate::sync::follow(&source, &mut conn).unwrap();
+        pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert!(favorites(&conn).is_empty());
         touch(&dir.join("IMG_1.JPG"));
-        crate::sync::follow(&source, &mut conn).unwrap();
+        pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert!(!favourite(&conn, "IMG_1.JPG"));
         // And not one again once taken back.
         source.set_favorite(&conn, &["IMG_2.JPG".into()], true).unwrap();
@@ -922,8 +926,8 @@ mod tests {
             touch(&dir.join(f));
         }
         let source = FolderSource::new(dir.clone());
-        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
-        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        let mut conn = pinhole_core::db::open(&dir.join(".library.sqlite")).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
         source.set_favorite(&conn, &["2026/deeper/IMG_3.JPG".into()], true).unwrap();
         let ids = |conn: &Connection| -> Vec<String> {
             let mut stmt = conn.prepare("SELECT id FROM assets ORDER BY id").unwrap();
@@ -936,16 +940,16 @@ mod tests {
         // elsewhere still goes.
         std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o000)).unwrap();
         std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
-        let report = crate::sync::follow(&source, &mut conn).unwrap();
+        let report = pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(report.changes.removed, ["IMG_1.JPG"]);
         assert!(report.summary.contains("could not be read"), "{}", report.summary);
-        crate::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
         assert_eq!(ids(&conn), ["2026/IMG_2.JPG", "2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
         assert!(favorites(&conn).contains("2026/deeper/IMG_3.JPG"));
         // Readable again, and the file in it gone: now that is seen.
         std::fs::set_permissions(dir.join("2026"), std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::remove_file(dir.join("2026/IMG_2.JPG")).unwrap();
-        crate::sync::follow(&source, &mut conn).unwrap();
+        pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(ids(&conn), ["2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -979,8 +983,8 @@ mod tests {
         let dir = temp("live");
         image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(dir.join("IMG_1.JPG")).unwrap();
         touch(&dir.join("IMG_1.MOV"));
-        let mut conn = crate::db::open(&dir.join(".library.sqlite")).unwrap();
-        crate::sync::list(&FolderSource::new(dir.clone()), &mut conn, &|_, _| {}, &|| false).unwrap();
+        let mut conn = pinhole_core::db::open(&dir.join(".library.sqlite")).unwrap();
+        pinhole_core::sync::list(&FolderSource::new(dir.clone()), &mut conn, &|_, _| {}, &|| false).unwrap();
         let live = |conn: &Connection| -> (bool, Option<String>) {
             conn.query_row(
                 "SELECT a.is_live, r.key FROM assets a LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'live'
@@ -996,13 +1000,13 @@ mod tests {
         // and it is a Live Photo still, its motion where it was.
         let mut unread = FolderSource::new(dir.clone());
         unread.unread_too = vec!["IMG_1.MOV".into()];
-        crate::sync::follow(&unread, &mut conn).unwrap();
+        pinhole_core::sync::follow(&unread, &mut conn).unwrap();
         assert_eq!(live(&conn), before);
-        crate::sync::list(&unread, &mut conn, &|_, _| {}, &|| false).unwrap();
+        pinhole_core::sync::list(&unread, &mut conn, &|_, _| {}, &|| false).unwrap();
         assert_eq!(live(&conn), before);
         // Gone for good: a photo alone.
         std::fs::remove_file(dir.join("IMG_1.MOV")).unwrap();
-        crate::sync::follow(&FolderSource::new(dir.clone()), &mut conn).unwrap();
+        pinhole_core::sync::follow(&FolderSource::new(dir.clone()), &mut conn).unwrap();
         assert_eq!(live(&conn), (false, None));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1021,7 +1025,7 @@ mod tests {
 
     #[test]
     fn it_accepts_whatever_a_look_finds() {
-        let both: Vec<&str> = crate::add::PHOTOS.iter().chain(crate::add::VIDEOS).copied().collect();
+        let both: Vec<&str> = pinhole_core::add::PHOTOS.iter().chain(pinhole_core::add::VIDEOS).copied().collect();
         assert_eq!(ACCEPTS, both.as_slice());
     }
 

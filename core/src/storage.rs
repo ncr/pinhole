@@ -90,11 +90,11 @@ fn written(path: &Path) -> Value {
 
 /// The settings as written, each entry in its kind's usual form (one of
 /// no kind known left out): without `sources`, every kind's implicit ones
-/// (the Apple IDs signed in to on this computer), then the source shown if
-/// its kind has none of those (a folder); without `source`, the first of
-/// them (`null` is none). Whether a kind is on changes nothing here: its
-/// entries stay (`Kinds::shown` passes over them).
-fn resolve(v: &Value, kinds: &Kinds) -> Settings {
+/// (pinhole.icloud's: the accounts signed in to on this computer), then the
+/// source shown if its kind has none of those (a folder); without `source`,
+/// the first of them (`null` is none). Whether a kind is on changes nothing
+/// here: its entries stay (`Kinds::shown` passes over them).
+pub fn resolve(v: &Value, kinds: &Kinds) -> Settings {
     let normal = |entry: &Value| -> Option<Value> { kinds.of_entry(entry)?.normal(entry) };
     let shown = match v.get("source") {
         None => None,
@@ -167,8 +167,8 @@ pub fn remove_source(path: &Path, kinds: &Kinds, id: &str) -> Result<Option<Valu
 }
 
 /// A source's library in the folder Pinhole keeps everything in, one to a
-/// source, under its kind: `library/icloud/<apple-id>`,
-/// `library/folder/home-me-Pictures`; with no source, an empty one in
+/// source, under its kind: `library/folder/home-me-Pictures` (and
+/// pinhole.icloud's by account); with no source, an empty one in
 /// `library/none`. Never another source's (by what each says it is,
 /// `library_owner`), and always the same one: its own wherever it is (its
 /// name, a former one, or one by its id it was given when its name was
@@ -843,51 +843,9 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn folders_whose_paths_differ_have_libraries_apart() {
-        use crate::folder::FolderSource;
-        let location = temp("names");
-        let for_path = |p: &str| library_for(&location, &FolderSource::new(PathBuf::from(p)));
-        assert_ne!(for_path("/a-b/c"), for_path("/a/b-c"));
-        assert_ne!(for_path("/root"), for_path("/"));
-        // A tilde of its own is told apart from the hash's.
-        assert_ne!(for_path("/home/me/My-Photos"), for_path("/home/me/My/Photos~7f094097f3a39b1b"));
-        assert_eq!(for_path("/home/me/Pictures"), location.join("library/folder/home-me-Pictures"));
-        // The same as the window's (Storage::library) test of this path.
-        assert_eq!(for_path("/home/me/My-Photos"), location.join("library/folder/home-me-My-Photos~7f094097f3a39b1b"));
-
-        // One made under the name a path with a dash had before is kept;
-        // another folder whose name that is now has one by its id, and one
-        // that only had it before has its new one.
-        let own = location.join("library/folder/a-b-c");
-        std::fs::create_dir_all(&own).unwrap();
-        let db = crate::db::open(&own.join("library.sqlite")).unwrap();
-        crate::db::set_meta(&db, "source", "folder:/a/b-c").unwrap();
-        drop(db);
-        assert_eq!(for_path("/a/b-c"), own);
-        assert_eq!(for_path("/a/b/c"), location.join("library/folder/a-b-c~43215282df502c0e"));
-        assert_ne!(for_path("/a-b/c"), own);
-        // One with no owner yet is anyone's to claim.
-        assert_eq!(for_path("/x/y"), location.join("library/folder/x-y"));
-        // That name by its id another's too (as a path with a tilde and no
-        // dash had it before): the next.
-        let claimed = |dir: &Path, owner: &str| {
-            std::fs::create_dir_all(dir).unwrap();
-            crate::db::set_meta(&crate::db::open(&dir.join("library.sqlite")).unwrap(), "source", owner).unwrap();
-        };
-        let by_id = location.join("library/folder/a-b-c~43215282df502c0e");
-        claimed(&by_id, "folder:/a/b/c~43215282df502c0e");
-        let next = location.join("library/folder/a-b-c~43215282df502c0e-1");
-        assert_eq!(for_path("/a/b/c"), next);
-        // Its own there, it is kept to, even once its name, and the one by
-        // its id before it, are no one's.
-        claimed(&next, "folder:/a/b/c");
-        assert_eq!(for_path("/a/b/c"), next);
-        std::fs::remove_dir_all(&own).unwrap();
-        assert_eq!(for_path("/a/b/c"), next);
-        std::fs::remove_dir_all(&by_id).unwrap();
-        assert_eq!(for_path("/a/b/c"), next);
-        let _ = std::fs::remove_dir_all(&location);
+    /// Where only the location and limit are read: no kind needed.
+    fn no_kinds() -> Kinds {
+        Kinds::new(Vec::new())
     }
 
     fn file(path: &Path, bytes: usize, age_secs: u64) {
@@ -900,7 +858,7 @@ mod tests {
     fn storage_in(location: &Path, settings: &Path) -> Arc<Storage> {
         Arc::new(Storage::new(
             location.to_owned(),
-            location.join("library/icloud"),
+            location.join("library/cloud"),
             location.join("cache"),
             None,
             settings.to_owned(),
@@ -942,7 +900,7 @@ mod tests {
         let storage = storage_in(&location, &dir.join("settings.json"));
         storage.set_limit(1).unwrap();
         // Kept at the least there can be, in the settings with the folder.
-        let saved = read_settings(&dir.join("settings.json"), &kinds(&[]));
+        let saved = read_settings(&dir.join("settings.json"), &no_kinds());
         assert_eq!((saved.location, saved.limit), (Some(location), Some(GB)));
         // What the eviction thread does when asked, at a test's size.
         storage.free(1300, 1300);
@@ -955,8 +913,8 @@ mod tests {
     fn a_new_folder_gets_the_library_and_the_photos_moved() {
         let dir = temp("move");
         let (from, to) = (dir.join("old/pinhole"), dir.join("new"));
-        file(&from.join("library/icloud/library.sqlite"), 50, 0);
-        file(&from.join("library/icloud/thumbs/aa/one.jpg"), 20, 0);
+        file(&from.join("library/cloud/library.sqlite"), 50, 0);
+        file(&from.join("library/cloud/thumbs/aa/one.jpg"), 20, 0);
         file(&from.join("cache/full/aa/one.jpg"), 100, 0);
         file(&from.join("cache/video/bb/two.mov"), 300, 0);
         let storage = storage_in(&from, &dir.join("settings.json"));
@@ -969,15 +927,15 @@ mod tests {
         assert!(storage.set_location(PathBuf::from("relative")).is_err());
         storage.set_location(to.clone()).unwrap();
         until_moved(&storage);
-        assert!(to.join("library/icloud/library.sqlite").exists());
-        assert!(to.join("library/icloud/thumbs/aa/one.jpg").exists());
+        assert!(to.join("library/cloud/library.sqlite").exists());
+        assert!(to.join("library/cloud/thumbs/aa/one.jpg").exists());
         assert!(to.join("cache/full/aa/one.jpg").exists());
         assert!(to.join("cache/video/bb/two.mov").exists());
         assert!(!from.exists());
-        assert_eq!(storage.library(), to.join("library/icloud"));
-        assert_eq!(*told.lock().unwrap(), Some(to.join("library/icloud")));
+        assert_eq!(storage.library(), to.join("library/cloud"));
+        assert_eq!(*told.lock().unwrap(), Some(to.join("library/cloud")));
         assert_eq!(storage.library_generation.load(Ordering::Relaxed), 1);
-        assert_eq!(read_settings(&dir.join("settings.json"), &kinds(&[])).location, Some(to));
+        assert_eq!(read_settings(&dir.join("settings.json"), &no_kinds()).location, Some(to));
         // And no plan left.
         let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
@@ -988,45 +946,47 @@ mod tests {
         let dir = temp("move-sources");
         let (from, to) = (dir.join("old"), dir.join("new"));
         file(&from.join("library/folder/library.sqlite"), 50, 0);
-        file(&from.join("library/icloud/library.sqlite"), 70, 0);
-        file(&from.join("library/icloud/thumbs/aa/one.jpg"), 20, 0);
+        file(&from.join("library/cloud/library.sqlite"), 70, 0);
+        file(&from.join("library/cloud/thumbs/aa/one.jpg"), 20, 0);
         let settings = dir.join("settings.json");
         std::fs::write(&settings, r#"{"source": {"kind": "folder", "path": "/photos"}}"#).unwrap();
-        // The folder's library in use, iCloud's beside it.
+        // The folder's library in use, another kind's beside it.
         let storage = Arc::new(Storage::new(from.clone(), from.join("library/folder"), from.join("cache"), None, settings.clone()));
         storage.set_location(to.clone()).unwrap();
         until_moved(&storage);
         assert_eq!(storage.library(), to.join("library/folder"));
         assert!(to.join("library/folder/library.sqlite").exists());
-        assert!(to.join("library/icloud/thumbs/aa/one.jpg").exists());
+        assert!(to.join("library/cloud/thumbs/aa/one.jpg").exists());
         assert!(!from.exists());
-        let saved = read_settings(&settings, &kinds(&[]));
+        let saved = read_settings(&settings, &no_kinds());
         assert_eq!(saved.location, Some(to));
-        assert_eq!(saved.source, Some(json!({"kind": "folder", "path": "/photos"})));
+        // The source shown kept as written (read as it is: no kind here).
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(written["source"], json!({"kind": "folder", "path": "/photos"}));
     }
 
     #[test]
     fn a_move_cut_short_before_the_libraries_were_over_leaves_everything_where_it_was() {
         let dir = temp("cut-library");
         let (from, to) = (dir.join("old"), dir.join("new"));
-        file(&from.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("library/cloud/library.sqlite"), 50, 0);
         file(&from.join("cache/full/aa/one.jpg"), 100, 0);
         // Half a copy beside the new place, and the plan, as a service
         // stopped while copying across disks leaves them.
-        file(&to.join("library.part/icloud/library.sqlite"), 20, 0);
+        file(&to.join("library.part/cloud/library.sqlite"), 20, 0);
         let settings = dir.join("settings.json");
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
             "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
         let storage = storage_in(&from, &settings);
         storage.resume().unwrap();
         assert!(!storage.state.lock().unwrap().moving);
-        assert_eq!(storage.library(), from.join("library/icloud"));
-        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert_eq!(storage.library(), from.join("library/cloud"));
+        assert!(from.join("library/cloud/library.sqlite").exists());
         assert!(from.join("cache/full/aa/one.jpg").exists());
         assert!(!to.exists());
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(from));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(from));
     }
 
     #[test]
@@ -1034,7 +994,7 @@ mod tests {
         let dir = temp("cut-photos");
         let (from, to) = (dir.join("old"), dir.join("new"));
         // The libraries renamed over, the settings not told yet.
-        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        file(&to.join("library/cloud/library.sqlite"), 50, 0);
         file(&from.join("cache/full/aa/one.jpg"), 100, 0);
         let settings = dir.join("settings.json");
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
@@ -1042,14 +1002,14 @@ mod tests {
         let storage = storage_in(&from, &settings);
         storage.resume().unwrap();
         // The library is read from its new place at once.
-        assert_eq!(storage.library(), to.join("library/icloud"));
+        assert_eq!(storage.library(), to.join("library/cloud"));
         until_moved(&storage);
         assert!(to.join("cache/full/aa/one.jpg").exists());
         assert!(!from.exists());
         assert_eq!(storage.cache(), to.join("cache"));
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(to));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(to));
     }
 
     #[test]
@@ -1058,32 +1018,32 @@ mod tests {
         let (from, to) = (dir.join("old"), dir.join("new"));
         // Copied across disks and renamed into place, the service stopped
         // before the commit: both there, the plan's libraries half.
-        file(&from.join("library/icloud/library.sqlite"), 50, 0);
-        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        file(&from.join("library/cloud/library.sqlite"), 50, 0);
+        file(&to.join("library/cloud/library.sqlite"), 50, 0);
         let settings = dir.join("settings.json");
         std::fs::write(&settings, json!({"location": from, "moving": {"from": from, "to": to,
             "cache": from.join("cache"), "phase": "library"}}).to_string()).unwrap();
         let storage = storage_in(&from, &settings);
         storage.resume().unwrap();
-        assert_eq!(storage.library(), from.join("library/icloud"));
-        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert_eq!(storage.library(), from.join("library/cloud"));
+        assert!(from.join("library/cloud/library.sqlite").exists());
         assert!(!to.join("library").exists());
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(from));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(from));
     }
 
     #[test]
     fn a_commit_that_cannot_be_written_undoes_the_move() {
         let dir = temp("no-commit");
         let (from, to) = (dir.join("old/library"), dir.join("new/library"));
-        file(&from.join("icloud/library.sqlite"), 50, 0);
+        file(&from.join("cloud/library.sqlite"), 50, 0);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         let storage = storage_in(&dir.join("old"), &dir.join("settings.json"));
         let result = storage.move_library(&from, &to, || Err(anyhow!("the settings cannot be written")));
         assert!(result.is_err());
         // Back where it was, and in use there.
-        assert!(from.join("icloud/library.sqlite").exists());
+        assert!(from.join("cloud/library.sqlite").exists());
         assert!(!to.exists());
-        assert_eq!(storage.library(), dir.join("old/library/icloud"));
+        assert_eq!(storage.library(), dir.join("old/library/cloud"));
         assert_eq!(storage.library_generation.load(Ordering::Relaxed), 0);
     }
 
@@ -1091,11 +1051,11 @@ mod tests {
     fn a_move_takes_the_library_in_use_when_it_moves_not_when_it_was_asked_for() {
         let dir = temp("move-switched");
         let (from, to) = (dir.join("old/library"), dir.join("new/library"));
-        file(&from.join("icloud/library.sqlite"), 50, 0);
+        file(&from.join("cloud/library.sqlite"), 50, 0);
         file(&from.join("folder/library.sqlite"), 50, 0);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         let storage = storage_in(&dir.join("old"), &dir.join("settings.json"));
-        // Asked for with iCloud's in use; the folder's shown before it goes.
+        // Asked for with another kind's in use; the folder's shown before it goes.
         storage.switch_library(from.join("folder"));
         storage.move_library(&from, &to, || Ok(())).unwrap();
         assert_eq!(storage.library(), to.join("folder"));
@@ -1131,8 +1091,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(storage.location(), to);
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(to));
-        assert_eq!(read_settings(&settings, &kinds(&[])).limit, Some(30 * GB));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(to));
+        assert_eq!(read_settings(&settings, &no_kinds()).limit, Some(30 * GB));
     }
 
     #[test]
@@ -1149,7 +1109,7 @@ mod tests {
         let storage = Arc::new(Storage::new(from.clone(), from.join("library/folder"), from.join("cache"), None, settings.clone()));
         storage.set_location(to.clone()).unwrap();
         until_moved(&storage);
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(to.clone()));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(to.clone()));
         let db = crate::db::open(&storage.library().join("library.sqlite")).unwrap();
         let kept: String = db.query_row("SELECT asset_id FROM folder_favorites", [], |r| r.get(0)).unwrap();
         assert_eq!(kept, "IMG_1.JPG");
@@ -1164,7 +1124,7 @@ mod tests {
         let locked = dir.join("locked");
         std::fs::create_dir_all(&locked).unwrap();
         let (from, to) = (locked.join("old"), dir.join("new"));
-        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        file(&to.join("library/cloud/library.sqlite"), 50, 0);
         let conf = dir.join("conf");
         std::fs::create_dir_all(&conf).unwrap();
         let settings = conf.join("settings.json");
@@ -1179,15 +1139,15 @@ mod tests {
             std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         // Nothing touched: the libraries where they are, none made old.
-        assert!(to.join("library/icloud/library.sqlite").exists());
+        assert!(to.join("library/cloud/library.sqlite").exists());
         assert!(!from.exists());
         // Started again, writable: committed, and in use there.
         let storage = storage_in(&from, &settings);
         storage.resume().unwrap();
-        assert_eq!(storage.library(), to.join("library/icloud"));
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(to.clone()));
+        assert_eq!(storage.library(), to.join("library/cloud"));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(to.clone()));
         until_moved(&storage);
-        assert!(to.join("library/icloud/library.sqlite").exists());
+        assert!(to.join("library/cloud/library.sqlite").exists());
     }
 
     #[test]
@@ -1195,7 +1155,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp("resume-unwritable");
         let (from, to) = (dir.join("old"), dir.join("new"));
-        file(&to.join("library/icloud/library.sqlite"), 50, 0);
+        file(&to.join("library/cloud/library.sqlite"), 50, 0);
         let conf = dir.join("conf");
         std::fs::create_dir_all(&conf).unwrap();
         let settings = conf.join("settings.json");
@@ -1207,16 +1167,16 @@ mod tests {
         storage.resume().unwrap();
         std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Back where the settings say, and nothing new made in its place.
-        assert_eq!(storage.library(), from.join("library/icloud"));
-        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert_eq!(storage.library(), from.join("library/cloud"));
+        assert!(from.join("library/cloud/library.sqlite").exists());
         assert!(!to.join("library").exists());
         // Started again, with the settings writable: undone for good.
         let storage = storage_in(&from, &settings);
         storage.resume().unwrap();
-        assert!(from.join("library/icloud/library.sqlite").exists());
+        assert!(from.join("library/cloud/library.sqlite").exists());
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none(), "{written:#}");
-        assert_eq!(read_settings(&settings, &kinds(&[])).location, Some(from));
+        assert_eq!(read_settings(&settings, &no_kinds()).location, Some(from));
     }
 
     #[test]
@@ -1230,180 +1190,5 @@ mod tests {
         until_moved(&storage);
         assert!(location.join("cache/medium/aa/one.jpg").exists());
         assert!(!old.exists());
-    }
-
-    /// The built-in kinds, with these Apple IDs taken as signed in to.
-    fn kinds(accounts: &[&str]) -> Kinds {
-        let accounts = accounts.iter().map(|a| a.to_string()).collect();
-        Kinds::new(vec![
-            Arc::new(crate::icloud::kind::IcloudKind::with_accounts(PathBuf::from("/nonexistent/pinhole-auth"), accounts)),
-            Arc::new(crate::folder::FolderKind),
-        ])
-    }
-
-    #[test]
-    fn without_a_list_the_sources_are_the_apple_ids_then_the_folder_shown() {
-        let two = kinds(&["a@x.com", "b@x.com"]);
-        let folder = json!({"kind": "folder", "path": "/photos"});
-        let s = resolve(&json!({"source": folder}), &two);
-        assert_eq!(s.sources, vec![
-            json!({"kind": "icloud", "account": "a@x.com"}),
-            json!({"kind": "icloud", "account": "b@x.com"}),
-            folder.clone(),
-        ]);
-        assert_eq!(s.source, Some(folder));
-        // Nothing said: the first of them; nothing at all: none.
-        assert_eq!(resolve(&json!({}), &two).source, Some(json!({"kind": "icloud", "account": "a@x.com"})));
-        assert_eq!(resolve(&json!({}), &kinds(&[])), Settings::default());
-        // `null` is none, though there are sources.
-        assert_eq!(resolve(&json!({"source": null}), &two).source, None);
-        // An iCloud entry without an Apple ID is the only one signed in to.
-        let one = resolve(&json!({"source": {"kind": "icloud"}}), &kinds(&["a@x.com"]));
-        assert_eq!(one.source, Some(json!({"kind": "icloud", "account": "a@x.com"})));
-    }
-
-    #[test]
-    fn a_list_is_kept_in_order_without_repeats() {
-        let k = kinds(&["z@x.com"]);
-        let s = resolve(
-            &json!({"sources": [
-                {"kind": "folder", "path": "/b"}, {"kind": "icloud", "account": "a@x.com"},
-                {"kind": "folder", "path": "/b"}, {"kind": "what"},
-            ]}),
-            &k,
-        );
-        assert_eq!(s.sources, vec![json!({"kind": "folder", "path": "/b"}), json!({"kind": "icloud", "account": "a@x.com"})]);
-        assert_eq!(s.source, Some(json!({"kind": "folder", "path": "/b"})));
-        assert_eq!(k.id_of(&s.sources[1]), "icloud:a@x.com");
-        assert_eq!(source_entry(&s, &k, "folder:/b"), Some(json!({"kind": "folder", "path": "/b"})));
-    }
-
-    /// `resolve` as it was before source kinds (7d06da2), word for word
-    /// but for its name: what every input must still resolve to.
-    fn resolve_before_kinds(v: &Value, accounts: &[String]) -> Settings {
-        let source_id = |entry: &Value| -> String {
-            match entry["kind"].as_str() {
-                Some("icloud") => format!("icloud:{}", entry["account"].as_str().unwrap_or("")),
-                Some("folder") => format!("folder:{}", entry["path"].as_str().unwrap_or("")),
-                _ => "none".into(),
-            }
-        };
-        let normal = |entry: &Value| -> Option<Value> {
-            match entry["kind"].as_str()? {
-                "icloud" => {
-                    let account = entry["account"].as_str().map(str::to_owned).or_else(|| (accounts.len() == 1).then(|| accounts[0].clone()))?;
-                    Some(json!({"kind": "icloud", "account": account}))
-                }
-                "folder" => Some(json!({"kind": "folder", "path": entry["path"].as_str()?})),
-                _ => None,
-            }
-        };
-        let shown = match v.get("source") {
-            None => None,
-            Some(Value::Null) => Some(None),
-            Some(entry) => Some(normal(entry)),
-        };
-        let mut sources: Vec<Value> = match v["sources"].as_array() {
-            Some(list) => list.iter().filter_map(normal).collect(),
-            None => {
-                let mut list: Vec<Value> = accounts.iter().map(|a| json!({"kind": "icloud", "account": a})).collect();
-                if let Some(Some(entry)) = &shown {
-                    if entry["kind"] == "folder" {
-                        list.push(entry.clone());
-                    }
-                }
-                list
-            }
-        };
-        let mut seen = std::collections::HashSet::new();
-        sources.retain(|e| seen.insert(source_id(e)));
-        let source = match shown {
-            Some(entry) => entry,
-            None => sources.first().cloned(),
-        };
-        Settings {
-            location: v["location"].as_str().map(PathBuf::from),
-            limit: v["limit_bytes"].as_u64(),
-            sources,
-            source,
-        }
-    }
-
-    #[test]
-    fn every_setting_resolves_as_it_did_before_source_kinds_whichever_kinds_are_on() {
-        let jacek = json!({"kind": "icloud", "account": "jacek@example.com"});
-        let a = json!({"kind": "icloud", "account": "a@x.com"});
-        let b = json!({"kind": "icloud", "account": "b@x.com"});
-        let f = json!({"kind": "folder", "path": "/photos"});
-        let g = json!({"kind": "folder", "path": "/home/me/Pictures/iCloud"});
-        let inputs = [
-            // Jacek's: no settings.json at all.
-            json!({}),
-            json!({"location": "/mnt/photos", "limit_bytes": 21474836480u64}),
-            json!({"location": 5, "limit_bytes": "big"}),
-            json!({"source": null}),
-            json!({"source": f}),
-            json!({"source": a}),
-            json!({"source": b}),
-            json!({"source": jacek}),
-            json!({"source": {"kind": "icloud"}}),
-            json!({"source": {"kind": "icloud", "account": null}}),
-            json!({"source": {"kind": "folder"}}),
-            json!({"source": {"kind": "what", "path": "/x"}}),
-            json!({"source": {"path": "/x"}}),
-            json!({"source": "folder"}),
-            json!({"sources": []}),
-            json!({"sources": [], "source": f}),
-            json!({"sources": [], "source": null}),
-            json!({"sources": [f, a, f, {"kind": "what"}, {"kind": "folder"}, {"kind": "icloud"}, g]}),
-            json!({"sources": [g, f], "source": f}),
-            json!({"sources": [g, f], "source": a}),
-            json!({"sources": [a, b, jacek], "source": {"kind": "icloud"}}),
-            json!({"sources": [{"kind": "icloud"}]}),
-            json!({"sources": "not a list", "source": g}),
-            json!({"sources": {"0": f}}),
-            json!({"sources": [f], "source": null, "location": "/elsewhere", "moving": {"from": "/a", "to": "/b"}}),
-        ];
-        let account_sets: [&[&str]; 4] = [&[], &["jacek@example.com"], &["a@x.com", "b@x.com"], &["b@x.com"]];
-        let switch_sets: [&[(&str, bool)]; 4] =
-            [&[], &[("pinhole.icloud", false)], &[("pinhole.folder", false)], &[("pinhole.icloud", false), ("pinhole.folder", false)]];
-        for accounts in account_sets {
-            let owned: Vec<String> = accounts.iter().map(|a| a.to_string()).collect();
-            let k = kinds(accounts);
-            for switches in switch_sets {
-                k.refresh(&switches.iter().map(|(id, on)| (id.to_string(), *on)).collect());
-                for input in &inputs {
-                    assert_eq!(resolve(input, &k), resolve_before_kinds(input, &owned), "{input} with {accounts:?}, {switches:?}");
-                }
-            }
-        }
-        // Jacek's own: no settings, one Apple ID signed in to by its session.
-        let s = resolve(&json!({}), &kinds(&["jacek@example.com"]));
-        assert_eq!(s.sources, vec![jacek.clone()]);
-        assert_eq!(s.source, Some(jacek));
-        assert_eq!((s.location, s.limit), (None, None));
-    }
-
-    #[test]
-    fn sources_are_added_shown_and_removed() {
-        let dir = temp("sources");
-        let path = dir.join("settings.json");
-        let k = kinds(&[]);
-        std::fs::write(&path, r#"{"location": "/keep", "sources": [{"kind": "folder", "path": "/a"}]}"#).unwrap();
-        let b = json!({"kind": "folder", "path": "/b"});
-        show_source(&path, &k, Some(&b)).unwrap();
-        let s = read_settings(&path, &k);
-        assert_eq!(s.sources, vec![json!({"kind": "folder", "path": "/a"}), b.clone()]);
-        assert_eq!(s.source, Some(b.clone()));
-        assert_eq!(s.location, Some(PathBuf::from("/keep")));
-        // Shown again: not added twice.
-        show_source(&path, &k, Some(&b)).unwrap();
-        assert_eq!(read_settings(&path, &k).sources.len(), 2);
-        // The one shown goes: the first left is shown; then none.
-        assert_eq!(remove_source(&path, &k, "folder:/b").unwrap(), Some(json!({"kind": "folder", "path": "/a"})));
-        assert_eq!(remove_source(&path, &k, "folder:/a").unwrap(), None);
-        let s = read_settings(&path, &k);
-        assert!(s.sources.is_empty());
-        assert_eq!(s.source, None);
     }
 }

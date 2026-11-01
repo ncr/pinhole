@@ -269,8 +269,8 @@ fn health_event(health: Health) -> Value {
 }
 
 /// What a window says about the source: its kind and the plugin it is
-/// of, its name, which of its kind it is (`details`: an Apple ID's
-/// `account`, a folder's `path`), and whether it is one that needs signing
+/// of, its name, which of its kind it is (`details`: a folder's `path`,
+/// pinhole.icloud's `account`), and whether it is one that needs signing
 /// in. With none, `kind` is null.
 fn source_info(kinds: &Kinds, source: &dyn Source) -> Value {
     if source.kind() == "none" {
@@ -367,8 +367,8 @@ fn added(shared: &Shared, id: &str) -> std::result::Result<(Value, Arc<dyn crate
 }
 
 /// Show another source: one added before, by its `id`, or a new one by
-/// `kind` and what that kind needs (an Apple ID signed in to, a folder's
-/// path), added first. Kept in the settings, the library switched to that
+/// `kind` and what that kind needs (a folder's path, pinhole.icloud's
+/// account signed in to), added first. Kept in the settings, the library switched to that
 /// source's own (made from scratch if it has none yet), and every window
 /// told to read it.
 fn set_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, Refused> {
@@ -391,7 +391,7 @@ fn set_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value
 }
 
 /// Take a source out: its library deleted (never the photos themselves),
-/// and whatever its kind kept for it apart (an Apple ID's session); if it
+/// and whatever its kind kept for it apart (pinhole.icloud's session); if it
 /// was the one shown, the first left whose kind is on is shown instead, or
 /// none.
 fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, Refused> {
@@ -427,7 +427,7 @@ fn remove_source(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Va
     Ok(sources_report(shared))
 }
 
-/// Sign out of a source (an Apple ID): its session deleted, nothing else.
+/// Sign out of a source (pinhole.icloud's): its session deleted, nothing else.
 /// It stays among the sources with its library (and its owner's name),
 /// which shows what is on this computer until it is signed in to again, at
 /// once.
@@ -1016,7 +1016,7 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
             Some(method @ ("set_source" | "remove_source" | "sign_out" | "plugins_changed")) => {
                 let _ = shared.changes.lock().unwrap().send((method.to_owned(), request["params"].clone(), reply));
             }
-            // These take a while (the sign-in provider starts, Apple
+            // These take a while (the sign-in provider starts, a server
             // answers, a disk is looked through): on a thread of their
             // own, so this window's photos keep coming meanwhile.
             // Minutes for a long video to iCloud: on a thread of its own.
@@ -1718,8 +1718,8 @@ fn sync_round(shared: &Shared) -> Result<()> {
     if source.kind() == "none" {
         return Ok(());
     }
-    // Nothing is made for a source not ready, such as an iCloud with no
-    // Apple ID signed in to yet.
+    // Nothing is made for a source not ready, such as pinhole.icloud's
+    // with no account signed in to yet.
     source.start()?;
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
@@ -1797,9 +1797,46 @@ fn sync_round(shared: &Shared) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// A folder as the rounds see it: its id, and nothing in it.
+    struct Pictures;
+
+    impl Source for Pictures {
+        fn name(&self) -> String {
+            "Pictures".into()
+        }
+
+        fn kind(&self) -> &'static str {
+            "folder"
+        }
+
+        fn id(&self) -> String {
+            "folder:/home/me/Pictures".into()
+        }
+
+        fn library_name(&self) -> String {
+            "home-me-Pictures".into()
+        }
+
+        fn list(&self, _index: &mut crate::db::Index, _progress: &(dyn Fn(u64, u64) + Sync)) -> Result<crate::source::Listing> {
+            Ok(Default::default())
+        }
+
+        fn changes(&self, _index: &mut crate::db::Index, _token: &str) -> Result<crate::source::Listing> {
+            Ok(Default::default())
+        }
+
+        fn prepare(&self, _index: &Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
+            Ok(wanted.iter().map(|_| Err(FetchError::NotFound("nothing here".into()))).collect())
+        }
+
+        fn open(&self, _ticket: &Ticket, _range: Option<(u64, u64)>) -> Result<crate::source::Body, FetchError> {
+            Err(FetchError::NotFound("nothing here".into()))
+        }
+    }
+
     #[test]
     fn rounds_say_when_the_source_shown_was_looked_at_and_is_next() {
-        let folder = crate::folder::FolderSource::new(PathBuf::from("/home/me/Pictures"));
+        let folder = Pictures;
         let checked = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         let mut rounds = Rounds::default();
         rounds.last.insert("folder:/home/elsewhere".into(), checked);

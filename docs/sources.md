@@ -65,16 +65,16 @@ downloaded and a folder's are made from the photo.
 - `add(addition, sent)`: one asset, a photo or a video with a Live
   Photo's motion beside it (`add::gather` makes them of the files and
   folders given), with how many bytes have gone. A folder copies it in
-  (`add::copy_into`: never over a file, the two halves of a Live Photo
-  under one name), iCloud uploads it (`icloud/upload.rs`). An `AddError`
-  says why one cannot be added; the library hears of what was added at
-  the next round, as of any other change.
+  (`copy_into` in pinhole-folder: never over a file, the two halves of a
+  Live Photo under one name), iCloud uploads it (pinhole-icloud's
+  `upload.rs`). An `AddError` says why one cannot be added; the library
+  hears of what was added at the next round, as of any other change.
 
 **Favourites** are the one thing besides adding that a window changes:
 
 - `set_favorite(index, ids, favorite)`: make these assets favourites, or
   not, where the source keeps that. iCloud sets `isFavorite` on each
-  CPLAsset (`icloud/favorite.rs`, with the change tags in
+  CPLAsset (pinhole-icloud's `favorite.rs`, with the change tags in
   `icloud_assets`, which it updates); a folder keeps them in its library
   (`folder_favorites`) and puts them back on its assets each time it
   describes them. The core sets `assets.favorite` once it has worked. A
@@ -129,9 +129,9 @@ it knows of each apart from the trait is the kind's (`core/src/kinds.rs`,
 the `Kind` trait): what its settings entries look like and their source
 id, making its source, its sources implied without settings (the Apple IDs
 signed in to), describing one for `sources`, the entry `set_source` adds,
-`discover`, and signing in and out. `IcloudKind` (`icloud/kind.rs`) and
-`FolderKind` (`folder.rs`) are compiled in; each follows the switch of its
-plugin, `pinhole.icloud` or `pinhole.folder`, in `plugins.json`
+`discover`, and signing in and out. `IcloudKind` and `FolderKind` are
+compiled in, from their plugins' crates (below; `core/daemon` puts them
+together as pinholed); each follows the switch of its plugin, `pinhole.icloud` or `pinhole.folder`, in `plugins.json`
 (`core/src/plugins.rs`), and a kind that is off is not listed or shown,
 with nothing of it deleted (docs/service.md, Kinds). `fetch` finds the rendition in
 `renditions`, serves `local` files as they are, else the cached file by
@@ -148,10 +148,22 @@ writer of a library: `pinhole <command>` from a terminal asks it, as the
 window does (`pinhole sync` for a round now, `pinhole sign-in` to add an
 Apple ID and show it).
 
+## Where the built-in sources' Rust is
+
+Each built-in source is the Rust of its plugin, a crate in the plugin's
+folder, in the workspace whose root is `core/` (one `core/Cargo.lock`, and
+`core/target`, where pinholed is built): `plugins/icloud/source` is
+`pinhole-icloud` (with `pinhole-probe`), `plugins/folder/source` is
+`pinhole-folder`. Each depends on `pinhole-core` for the `Source` and
+`Kind` traits, the index and the sync; `core/daemon` (`pinholed`) depends
+on all three and builds the `Kinds` of the two. The core names neither.
+
 ## The iCloud source
 
-`core/src/icloud/` holds what is Apple's: the sign-in provider (`auth.rs`,
-and `auth/PROTOCOL.md`), the session, the CloudKit client, the pairing of
+`plugins/icloud/source` holds what is Apple's: the sign-in provider
+(`auth.rs`, and `plugins/icloud/auth/PROTOCOL.md`, whose provider
+`pinhole-auth` is in `plugins/icloud/auth/pyicloud` and installed beside
+pinholed), the session, the CloudKit client, the pairing of
 asset and master records, the parallel walk and the change feed (moved out
 of `sync.rs`), and the link lookups and their refreshing (moved out of
 `service.rs`). Its walk and change feed are as they were; they now put
@@ -160,7 +172,7 @@ them.
 
 ## The folder source
 
-`core/src/folder.rs` makes a library of a folder (and the folders in it).
+`plugins/folder/source` makes a library of a folder (and the folders in it).
 An asset's id is its path inside the folder. Photos (JPEG, HEIC, PNG, and
 anything else ImageMagick reads) and videos (MOV, MP4, M4V) are assets; a
 video with the same name as a photo beside it (`IMG_1234.HEIC` and

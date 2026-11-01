@@ -62,10 +62,10 @@ mod tests {
             assert!(switches_in(&path).is_empty(), "{text}");
         }
         // Off and on as written; anything but a boolean is no switch.
-        std::fs::write(&path, r#"{"enabled": {"pinhole.icloud": false, "pinhole.folder": true, "odd": "yes"}, "toured": []}"#)
+        std::fs::write(&path, r#"{"enabled": {"pinhole.series": false, "pinhole.folder": true, "odd": "yes"}, "toured": []}"#)
             .unwrap();
         let s = switches_in(&path);
-        assert_eq!(s.get("pinhole.icloud"), Some(&false));
+        assert_eq!(s.get("pinhole.series"), Some(&false));
         assert_eq!(s.get("pinhole.folder"), Some(&true));
         assert_eq!(s.len(), 2);
         assert!(stamp(&path).is_some());

@@ -1,18 +1,17 @@
-//! Pinhole's core.
+//! Pinhole's core: what pinholed is, whatever the photos come from.
 //!
 //! `source` is what the rest of Pinhole asks for photos, whoever keeps them
-//! (docs/sources.md). The service and the index talk only to it. iCloud is one source, everything Apple's is in `icloud`: in it,
-//! `auth` talks to a sign-in provider process and gets back a finished
-//! `Session`, and nothing else knows how Apple's sign-in works.
+//! (docs/sources.md), and `kinds` the kinds of source there are, each
+//! owned by a plugin. The service and the index talk only to them. The
+//! built-in kinds are crates of their plugins, linked into pinholed
+//! (core/daemon): pinhole.icloud's in plugins/icloud/source, pinhole.folder's
+//! in plugins/folder/source.
 
 pub mod add;
 pub mod background;
 pub mod cover;
 pub mod db;
-pub mod discover;
 pub mod effects;
-pub mod folder;
-pub mod icloud;
 pub mod jpeg;
 pub mod kinds;
 pub mod plugins;

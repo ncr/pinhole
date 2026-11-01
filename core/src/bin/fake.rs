@@ -1,5 +1,5 @@
-//! pinhole-fake: a synthetic library for working on the grid without an
-//! Apple account. It writes the same index the real sync writes, and
+//! pinhole-fake: a synthetic library for working on the grid without a
+//! source's account. It writes the same index the real sync writes, and
 //! thumbnails shaped like iCloud's: JPEG, 480 px on the long edge.
 
 use std::path::{Path, PathBuf};

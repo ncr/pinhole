@@ -23,9 +23,9 @@ use tungstenite::client::IntoClientRequest;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
-use crate::icloud::auth::{self, ProcessProvider, SessionProvider};
-use crate::icloud::session::Session;
-use crate::source::Heard;
+use crate::auth::{self, ProcessProvider, SessionProvider};
+use crate::session::Session;
+use pinhole_core::source::Heard;
 
 const CONTAINER: &str = "com.apple.photos.cloud";
 const TOPIC: &str = "com.apple.icloud-container.com.apple.photos.cloud";

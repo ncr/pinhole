@@ -316,24 +316,24 @@ pub trait Source: Send + Sync {
     /// "iCloud", or the folder's name: what the window calls it.
     fn name(&self) -> String;
 
-    /// "icloud" or "folder", as the settings name it.
+    /// Its kind, as the settings name it: "folder", or pinhole.icloud's.
     fn kind(&self) -> &'static str;
 
     /// Which library this is, written into the index it fills, so it never
-    /// writes into another's: "icloud", or the folder's path.
+    /// writes into another's: by default its kind; a folder's says its path.
     fn id(&self) -> String {
         self.kind().to_owned()
     }
 
-    /// What says which of its kind it is, for the window: `{"account":
-    /// <apple id>}`, `{"path": <folder>}`; nothing when it is not yet
-    /// known.
+    /// What says which of its kind it is, for the window: `{"path":
+    /// <folder>}`, or pinhole.icloud's `{"account": …}`; nothing when it is
+    /// not yet known.
     fn details(&self) -> serde_json::Value {
         serde_json::json!({})
     }
 
     /// The folder its library is in, under `library/<kind>/`: unique among
-    /// sources of its kind (an Apple ID, a folder's path).
+    /// sources of its kind (a folder's path, pinhole.icloud's account).
     fn library_name(&self) -> String;
 
     /// Names its library went by in earlier versions, kept to while a

@@ -10,8 +10,8 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::icloud::auth::SessionProvider;
-use crate::icloud::session::Session;
+use crate::auth::SessionProvider;
+use crate::session::Session;
 
 pub const PRIMARY_ZONE: &str = "PrimarySync";
 

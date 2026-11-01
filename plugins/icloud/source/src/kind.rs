@@ -13,8 +13,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::auth::{self, ProcessProvider, ProviderError};
-use crate::kinds::{Failure, Kind, SignedIn};
-use crate::source::Source;
+use pinhole_core::kinds::{Failure, Kind, SignedIn};
+use pinhole_core::source::Source;
 
 pub struct IcloudKind {
     /// The sign-in provider to run.

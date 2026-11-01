@@ -17,7 +17,7 @@ sha256sums=()
 
 build() {
   cd "$startdir/.."
-  cargo build --release --locked --manifest-path core/Cargo.toml
+  cargo build --release --locked --workspace --manifest-path core/Cargo.toml
   cargo build --release --locked --manifest-path plugins/series/finder/Cargo.toml
   cargo build --release --locked --manifest-path plugins/send/sender/Cargo.toml
   app/bin/build

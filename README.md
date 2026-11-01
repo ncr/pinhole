@@ -132,12 +132,15 @@ synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
 ## Layout
 
 ```text
-auth/PROTOCOL.md          the sign-in provider protocol: JSON lines over stdio
-auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
-core/                     the Rust core: session, CloudKit client, index
-core/src/bin/probe.rs     pinhole-probe, which measures the API
-core/src/bin/daemon.rs    pinholed, the background service: larger renditions on demand
+core/                     the Rust core: the service, the index, the cache, source kinds;
+                          the workspace root (Cargo.lock, target/) for all the Rust below
+core/daemon/              pinholed, the background service, with the built-in sources linked in
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
+plugins/icloud/source/    iCloud as a source (crate pinhole-icloud): session, CloudKit, walk, push, upload
+plugins/icloud/source/src/bin/probe.rs  pinhole-probe, which measures the API
+plugins/icloud/auth/PROTOCOL.md  the sign-in provider protocol: JSON lines over stdio
+plugins/icloud/auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
+plugins/folder/source/    a folder as a source (crate pinhole-folder)
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background
@@ -222,11 +225,14 @@ still shows your photos.
 
 The two boundaries that are meant to be swapped:
 
-- **Sign-in.** The core starts a provider process and asks it for a session
-  (cookies, service URLs, query params). How the provider signs in is its own
-  business. A native provider only has to speak `auth/PROTOCOL.md`.
-- **Photo source.** `core/src/source.rs` defines `PhotoSource`. iCloud is one
-  implementation; a synthetic library for tests and grid stress runs is next.
+- **Sign-in.** iCloud's source starts a provider process and asks it for a
+  session (cookies, service URLs, query params). How the provider signs in is
+  its own business. A native provider only has to speak
+  `plugins/icloud/auth/PROTOCOL.md`.
+- **Photo source.** `core/src/source.rs` defines `Source`, and
+  `core/src/kinds.rs` the kinds of source. iCloud and folders are the
+  built-in ones, each the Rust of its plugin (`plugins/icloud/source`,
+  `plugins/folder/source`), linked into pinholed (`core/daemon`).
 
 ## Trying the probe
 
@@ -235,13 +241,13 @@ icloudpd into its cache on first use. To adopt a session icloudpd already
 signed in (it is copied, not shared):
 
 ```bash
-echo '{"id":1,"method":"import_icloudpd","params":{"apple_id":"you@example.com"}}' | auth/pyicloud/pinhole-auth
+echo '{"id":1,"method":"import_icloudpd","params":{"apple_id":"you@example.com"}}' | plugins/icloud/auth/pyicloud/pinhole-auth
 ```
 
 Then, from the repository root:
 
 ```bash
-cargo build --release --manifest-path core/Cargo.toml
+cargo build --release --workspace --manifest-path core/Cargo.toml
 core/target/release/pinhole-probe count
 core/target/release/pinhole-probe walk --parallel 4
 core/target/release/pinhole-probe stats

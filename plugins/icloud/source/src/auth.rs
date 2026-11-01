@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 
-use crate::icloud::session::Session;
+use crate::session::Session;
 
 /// Where sessions come from. The core asks again whenever iCloud rejects the
 /// one it has.
@@ -189,14 +189,14 @@ pub fn accounts() -> Vec<String> {
 }
 
 /// The sign-in provider to run: $PINHOLE_AUTH, else the one in this
-/// checkout when running from core/target/release/, else the one installed
-/// beside pinholed, else `pinhole-auth` on PATH.
+/// checkout (plugins/icloud/auth) when running from core/target/release/,
+/// else the one installed beside pinholed, else `pinhole-auth` on PATH.
 pub fn default_provider() -> PathBuf {
     if let Some(p) = std::env::var_os("PINHOLE_AUTH") {
         return PathBuf::from(p);
     }
     if let Ok(exe) = std::env::current_exe() {
-        let checkout = exe.ancestors().nth(4).map(|root| root.join("auth/pyicloud/pinhole-auth"));
+        let checkout = exe.ancestors().nth(4).map(|root| root.join("plugins/icloud/auth/pyicloud/pinhole-auth"));
         if let Some(p) = checkout.filter(|p| p.exists()) {
             return p;
         }

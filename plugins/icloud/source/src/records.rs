@@ -8,9 +8,9 @@ use anyhow::Result;
 use base64::Engine;
 use serde_json::Value;
 
-use crate::icloud::cloudkit::PhotosClient;
-use crate::icloud::index::CANDIDATES;
-use crate::source::{Asset, Effect, Kind, Rendition, Want};
+use crate::cloudkit::PhotosClient;
+use crate::index::CANDIDATES;
+use pinhole_core::source::{Asset, Effect, Kind, Rendition, Want};
 
 /// One rendition of an asset iCloud keeps: the original, the JPEG sizes
 /// and the video sizes. Download URLs are signed and short-lived, so they

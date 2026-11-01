@@ -11,10 +11,10 @@ use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rusqlite::Connection;
 
-use pinhole_core::icloud::auth::ProcessProvider;
-use pinhole_core::icloud::cloudkit::{PhotosClient, LIBRARY_COUNT};
+use pinhole_icloud::auth::ProcessProvider;
+use pinhole_icloud::cloudkit::{PhotosClient, LIBRARY_COUNT};
 use pinhole_core::db;
-use pinhole_core::icloud::records::{pair_records, CloudAsset as Asset};
+use pinhole_icloud::records::{pair_records, CloudAsset as Asset};
 
 #[derive(Parser)]
 struct Cli {
@@ -104,8 +104,8 @@ fn main() -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let provider = Box::new(ProcessProvider::spawn(
-        cli.auth.clone().unwrap_or_else(pinhole_core::icloud::auth::default_provider),
-        cli.account.as_deref().map(pinhole_core::icloud::auth::state_dir),
+        cli.auth.clone().unwrap_or_else(pinhole_icloud::auth::default_provider),
+        cli.account.as_deref().map(pinhole_icloud::auth::state_dir),
     )?);
     let mut client = PhotosClient::new(provider)?;
 
@@ -196,7 +196,7 @@ fn page_size(client: &mut PhotosClient) -> Result<()> {
 fn walk(mut client: PhotosClient, db_path: &PathBuf, per_page: u32, raw: bool, parallel: usize) -> Result<()> {
     let mut conn = db::open(db_path)?;
     let mut index = db::Index::new(&mut conn);
-    let report = pinhole_core::icloud::walk::walk(&mut client, &mut index, per_page, parallel, raw, &|done, total| {
+    let report = pinhole_icloud::walk::walk(&mut client, &mut index, per_page, parallel, raw, &|done, total| {
         if done % 4000 < per_page as u64 {
             eprintln!("{done:>7}/{total}");
         }

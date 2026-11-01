@@ -1,12 +1,15 @@
-//! Everything that is Apple's: iCloud Photos as a source. Signing in goes
-//! through a provider process (`auth`, auth/PROTOCOL.md); the library is
-//! read with CloudKit's web API (`cloudkit`), whose records `records` pairs
-//! into assets; `walk` reads them into the index, beside which iCloud keeps
-//! tables of its own (`index`). Files are downloaded from signed links that
-//! expire within the hour, looked up a hundred assets at a time.
+//! Everything that is Apple's: iCloud Photos as a source, the Rust of the
+//! `pinhole.icloud` plugin, linked into pinholed (`kind::IcloudKind` is its
+//! kind of source). Signing in goes through a provider process (`auth`,
+//! plugins/icloud/auth/PROTOCOL.md); the library is read with CloudKit's web
+//! API (`cloudkit`), whose records `records` pairs into assets; `walk` reads
+//! them into the index, beside which iCloud keeps tables of its own
+//! (`index`). Files are downloaded from signed links that expire within the
+//! hour, looked up a hundred assets at a time.
 
 pub mod auth;
 pub mod cloudkit;
+pub mod discover;
 pub mod favorite;
 pub mod index;
 pub mod kind;
@@ -23,10 +26,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::add::{Added, Addition};
-use crate::db::Index;
-use crate::source::{Body, FetchError, Health, Heard, Listing, Source, Stored, Ticket, Watch};
-use crate::sync::now_secs;
+use pinhole_core::add::{Added, Addition};
+use pinhole_core::db::Index;
+use pinhole_core::source::{Body, FetchError, Health, Heard, Listing, Source, Stored, Ticket, Watch};
+use pinhole_core::sync::now_secs;
 use auth::{FixedSession, ProcessProvider, ProviderError};
 use cloudkit::{Downloader, PhotosClient};
 use records::{pair_records_with_leftovers, CloudAsset};
