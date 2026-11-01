@@ -149,10 +149,13 @@ Item {
         onClicked: root.shown = false
     }
 
-    // Columns all alike, as wide as the widest part needs, its keys and
-    // words, but no wider than 21 times the type size: longer words wrap. Each
-    // part has its own keys' width. As many columns as fit, the parts down
-    // each in order, as even as they go (layout()).
+    // Columns all alike. As many as fit at a width each part reads well
+    // in, its keys up to 12 times the type size and its words up to 15 (the
+    // mouse's and the touchpad's keys are words too, so they take fewer,
+    // wider columns than the keyboard's); then all as wide as the window
+    // leaves them, but no wider than the widest part needs. Each part has
+    // its own keys' width. The parts down each column in order, as even as
+    // they go (layout()).
     FontMetrics { id: metrics; font.family: theme.font; font.pixelSize: theme.fontSize }
     readonly property int gap: theme.fontSize
     readonly property int columnGap: 2 * gap
@@ -162,17 +165,25 @@ Item {
             most = Math.max(most, metrics.advanceWidth(text))
         return Math.ceil(most)
     }
-    readonly property int columnWidth: {
-        let most = 0
-        for (const section of sections) {
-            const keys = widest(section.keys.map(k => k[0]))
-            most = Math.max(most, keys + gap + widest([section.title].concat(section.keys.map(k => k[1]))))
-        }
-        return Math.min(most, Math.round(theme.fontSize * 21))
-    }
+    // Each part's widest keys and widest words (its title's among them).
+    readonly property var measures: sections.map(s => ({
+        keys: widest(s.keys.map(k => k[0])),
+        words: widest([s.title].concat(s.keys.map(k => k[1])))
+    }))
     readonly property int padding: 2 * theme.fontSize
-    readonly property int columns: Math.max(1, Math.min(sections.length,
-        Math.floor((width - 32 - 2 * padding + columnGap) / (columnWidth + columnGap))))
+    readonly property int room: width - 32 - 2 * padding
+    readonly property int columns: {
+        let least = 1
+        for (const m of measures)
+            least = Math.max(least, Math.min(m.keys, 12 * theme.fontSize) + gap + Math.min(m.words, 15 * theme.fontSize))
+        return Math.max(1, Math.min(sections.length, Math.floor((room + columnGap) / (least + columnGap))))
+    }
+    readonly property int columnWidth: {
+        let most = 1
+        for (const m of measures)
+            most = Math.max(most, m.keys + gap + m.words)
+        return Math.max(1, Math.min(most, Math.floor((room - (columns - 1) * columnGap) / columns)))
+    }
 
     Rectangle {
         id: card
@@ -300,12 +311,17 @@ Item {
                         id: part
                         required property var modelData
                         required property int index
-                        // Its keys' width, its own, but no more than six
-                        // tenths of the column: longer ones (the mouse's
-                        // and the touchpad's, in words) wrap, and what
-                        // they do keeps the rest.
-                        readonly property int keyWidth: Math.min(root.widest(modelData.keys.map(k => k[0])),
-                                                                 Math.floor((root.columnWidth - root.gap) * 0.6))
+                        // Its keys' width, its own while its words fit
+                        // beside them; if not, keys and words share the
+                        // column as their widest would, the keys never
+                        // less than four tenths (so a key's few symbols
+                        // do not wrap for a long word), and both wrap.
+                        readonly property int keyWidth: {
+                            const m = root.measures[index] ?? { keys: 0, words: 0 }
+                            const room = root.columnWidth - root.gap
+                            return Math.min(m.keys, Math.max(room - m.words, Math.floor(room * 0.4),
+                                                             Math.floor(room * m.keys / Math.max(1, m.keys + m.words))))
+                        }
                         x: board.places[index]?.x ?? 0
                         y: board.places[index]?.y ?? 0
                         width: root.columnWidth
