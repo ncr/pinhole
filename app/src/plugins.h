@@ -12,12 +12,14 @@
 #include <QTimer>
 #include <QVariantList>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
 #include <vector>
 
 #include "keepawake.h"
+#include "pluginstore.h"
 
 class History;
 class QProcess;
@@ -131,6 +133,12 @@ class PluginHost : public QObject {
     Q_PROPERTY(QObject *library READ library CONSTANT)
     Q_PROPERTY(QObject *viewer READ viewer CONSTANT)
     Q_PROPERTY(QObject *settings READ settings CONSTANT)
+    // What it keeps that is not a setting (pluginstore.h): what the user
+    // made, in ~/.local/state/pinhole/plugins/<id>/state.json, and what it
+    // can work out again, in ~/.cache/pinhole/plugins/<id>/cache.json.
+    // Each read the first time it is asked for.
+    Q_PROPERTY(QObject *state READ state CONSTANT)
+    Q_PROPERTY(QObject *cache READ cache CONSTANT)
     // Photos ticked in the grid's select mode (a card's all of them).
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // How many photos the grid hides now, all plugins' `hidden` together.
@@ -154,6 +162,8 @@ public:
     QObject *library() const;
     QObject *viewer() const;
     QObject *settings() const { return m_settings.get(); }
+    QObject *state() const;
+    QObject *cache() const;
     QString problem() const { return m_problem; }
     QString coveredBy() const;
 
@@ -277,6 +287,7 @@ private:
     QString m_dir;
     Plugins *m_plugins;
     std::unique_ptr<PluginSettings> m_settings;
+    mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
     QString m_problem;
     // Bumped by stop(): what was started before it does not answer.
     int m_generation = 0;
@@ -390,7 +401,7 @@ public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
     // Pinhole. 2: promises, pinhole.settings, notify, photos by id. 3:
-    // marks.
+    // marks, pinhole.state and pinhole.cache.
     static constexpr int api = 3;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
@@ -407,8 +418,9 @@ public:
     // What the plugin in `dir` uses that came with an API after the first,
     // by the API that brought it, by its files' code, strings and comments
     // aside: pinhole's ("pinhole.notify"), a photo's avgColor, or its
-    // root's ("hidden"), for 2; "marks" for 3. `pinhole plugin check` warns
-    // of those of an API newer than its manifest asks for.
+    // root's ("hidden"), for 2; "marks" or "pinhole.state" for 3.
+    // `pinhole plugin check` warns of those of an API newer than its
+    // manifest asks for.
     static QMap<int, QStringList> apiUses(const QString &dir);
     // The plugin in `dir`'s files named as one of Pinhole's own, or as one
     // of the `others`' (each its id and folder): a qsTr() in it may be
@@ -494,6 +506,16 @@ public:
     KeepAwake *keepAwake() { return &m_keepAwake; }
     QJsonObject settingsOf(const QString &id) const;
     bool setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
+    // What plugins keep that is not a setting (PluginHost::state, cache).
+    PluginStore *stateStore() { return &m_stateStore; }
+    PluginStore *cacheStore() { return &m_cacheStore; }
+    // Where: ~/.local/state/pinhole/plugins, ~/.cache/pinhole/plugins;
+    // and the tours seen, ~/.local/state/pinhole/toured.json.
+    static QString stateRoot();
+    static QString cacheRoot();
+    static QString touredPath();
+    // Every file of theirs written that is still to be.
+    void flush();
     // A plugin's problem changed: the side panel says, once things settle.
     void touched();
 
@@ -526,7 +548,14 @@ private:
         std::unique_ptr<PluginHost> host;
     };
     void scan();
-    bool writeConfig(const QJsonObject &config);
+    bool writeConfig(QJsonObject config);
+    // What plugins kept in their settings that is not one (a list found,
+    // the user's edits, a panel left open), and the tours seen: moved out
+    // of plugins.json to where it belongs, once, as Pinhole starts.
+    void moveOutOfSettings();
+    // That move's keys back in `config`, if writing them where they now
+    // belong failed.
+    QJsonObject unmoved(QJsonObject config) const;
     bool enabled(const Plugin &plugin) const;
     void watch();
     // Each plugin turned on may bring its own translations (i18n/).
@@ -550,6 +579,16 @@ private:
     QStringList m_covering;
     // plugins.json, read once and kept as written.
     QJsonObject m_config;
+    // Written away from the window's thread; before the stores, which
+    // write through it.
+    KeptFiles m_files;
+    PluginStore m_stateStore, m_cacheStore;
+    // The plugins whose tours were seen (toured.json).
+    QJsonObject m_toured;
+    // What moveOutOfSettings took out of plugins.json, until it is written
+    // where it now belongs: 0 while it is being, 1 written, 2 failed.
+    QJsonObject m_moved;
+    std::shared_ptr<std::atomic<int>> m_moving;
     bool m_touching = false;
     bool m_ready = false;
     bool m_loadingAll = false;

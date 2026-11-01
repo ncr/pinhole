@@ -16,12 +16,12 @@ PinholePlugin {
 
     // Open, kept from one time to the next; and open for the tour, which
     // closes with the viewer it opened.
-    property bool shown: pinhole.setting("shown", false) === true
+    property bool shown: pinhole.state.shown === true
     property bool touring: false
     readonly property bool showing: (shown || touring) && pinhole.viewer.open
     function toggle() {
         shown = !shown
-        pinhole.setSetting("shown", shown)
+        pinhole.state.shown = shown
     }
 
     // The photo the panel is about, what the library says of it, and what

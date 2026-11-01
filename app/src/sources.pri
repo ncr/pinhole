@@ -45,6 +45,7 @@ HEADERS += \
     $$PWD/commands.h \
     $$PWD/encoder.h \
     $$PWD/plugins.h \
+    $$PWD/pluginstore.h \
     $$PWD/incoming.h \
     $$PWD/portal.h \
     $$PWD/selftest.h \
@@ -76,6 +77,7 @@ SOURCES += \
     $$PWD/commands.cpp \
     $$PWD/encoder.cpp \
     $$PWD/plugins.cpp \
+    $$PWD/pluginstore.cpp \
     $$PWD/incoming.cpp \
     $$PWD/portal.cpp \
     $$PWD/selftest.cpp \

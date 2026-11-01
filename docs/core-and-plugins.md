@@ -105,7 +105,8 @@ checkout), then `personalDir()`. A personal plugin with a built-in's id
 takes its place. `enabled()` reads `plugins.json`'s `enabled[id]`, and a
 plugin with no entry there is on when built-in and off when personal.
 Jacek's `plugins.json` has `settings` and `toured` and no `enabled`, so
-every built-in is on. `Main.qml` loads each plugin that is on in a `Loader`
+every built-in is on. (Since B1b, `toured` and what was not a setting move
+out of it: see B1b.) `Main.qml` loads each plugin that is on in a `Loader`
 once `plugins.ready`. It gathers them once, on `allLoaded`
 (`collectPlugins`), and follows `hidden` and `stacks` through a reload
 with `plugins.hiddenOf` and `plugins.stacksOf`.
@@ -426,6 +427,39 @@ the effects (`loop`, `bounce`, `long_exposure`).
 `library.item()` gains `effect` (`"loop"`, `"bounce"`, `"long_exposure"`,
 `""`), and `library.field("effect")` works.
 
+### State and cache: `pinhole.state`, `pinhole.cache` (B1b)
+
+Not in the design as first written; added once it showed that plugins kept
+in `plugins.json` what is not a setting. That file is the user's choices,
+and pinholed reads it again whenever it changes (A2), yet Screenshots
+wrote its 30 KB `found:` list there on a launch on a real library, Series
+its edits, Info its panel left open, Send its devices, and the window
+every tour seen.
+
+- `pinhole.state` and `pinhole.cache` are `QQmlPropertyMap`s, as
+  `pinhole.settings` is: read, bind, assign, `null` takes a key out. The
+  smallest shape that fits: no new idiom for plugin authors, bindable,
+  and `keys()` for pruning. No promise: nothing is waited for, as the
+  value is the plugin's at once; a failed write is said under the plugin
+  (`PluginHost::report`), as a setting's is.
+- `PluginStore` (`app/src/pluginstore.{h,cpp}`): one JSON object per
+  plugin, `~/.local/state/pinhole/plugins/<id>/state.json` and
+  `~/.cache/pinhole/plugins/<id>/cache.json` (beside the `cacheDir`s,
+  which stay for files). Read when the plugin first asks, so before the
+  first frame for one that reads it as it loads, as Screenshots must.
+  Writes: an unchanged value is no write; changes in one turn of the event
+  loop are one write, of the whole file, through `KeptFiles`: a
+  one-thread `QThreadPool`, in order, each a `QSaveFile` (beside it, then
+  renamed over it). Nothing is written on the window's thread, so no
+  write holds up a frame. `Plugins::flush()` waits for all of it, and
+  `~Plugins` calls it.
+- A file per plugin, not per key: one read for all a plugin keeps, and a
+  key may hold any characters (`found:folder:/home/me/Pictures`).
+- The tours seen are the window's state, not a choice:
+  `~/.local/state/pinhole/toured.json`, written the same way.
+- `apiUses`: `pinhole.state` and `pinhole.cache` are API 3's.
+  Screenshots, Series, Info and Send ask for `api: 3`.
+
 ### Favourites: `pinhole.setFavorite`
 
 `pinhole.setFavorite(photos, favorite)` returns a promise of
@@ -726,6 +760,7 @@ what changed as it was built:
 | A4 providers | new `~/.local/state/pinhole/sources/` | new, nothing to migrate | the test provider |
 | B3, B4, B6, B7 new plugins | `plugins.json` | **none written.** The new built-ins have no `enabled` entry and so are on. They have no `tour`, so no new-plugins card shows. A test loads a copy of Jacek's plugins.json, runs the window, and checks that the file is byte for byte the same afterwards | `XDG_CONFIG_HOME` on a copy |
 | B3 Live effect chosen | memory only (`m_chosen`) | none | |
+| B1b state and cache | `plugins.json`; new `~/.local/state/pinhole/plugins/<id>/state.json`, `~/.cache/pinhole/plugins/<id>/cache.json`, `~/.local/state/pinhole/toured.json` | `Plugins::moveOutOfSettings`, as the window starts, before any plugin loads: `pinhole.screenshots` `found:*` to its cache; `pinhole.series` `edits:*` and `edits`, `pinhole.info` `shown`, `pinhole.send` `devices` to their state; `toured` to toured.json (merged with what is there). Only those plugins' keys (another plugin's `edits` is its own). The settings are read without them at once. One job on `KeptFiles`: the new files first, then `plugins.json` without them, only if those were written. If they could not be, the keys stay in `plugins.json`, and a setting changed meanwhile writes them back with it (`unmoved`). An emptied plugin's entry goes. With nothing to move, nothing is written | unit tests (the move and the next start writing nothing; a state folder that cannot be made); a window on a copy of Jacek's live `plugins.json` and real library |
 
 Rules for every test on a copy:
 
@@ -1012,6 +1047,34 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   - a test plugin in a scratch `PINHOLE_BUILTIN_PLUGINS` with a glyph mark
     on every tenth photo, drawn plain and neon;
   - first frame within 5 %.
+
+### B1b: a plugin's state and cache, out of plugins.json
+
+Added after the design, on the window track (see "State and cache" in the
+API above).
+
+- Changed: `plugins.{h,cpp}` (`PluginHost::state`, `cache`,
+  `Plugins::moveOutOfSettings`, `unmoved`, `flush`, `stateRoot`,
+  `cacheRoot`, `touredPath`, toured out of `m_config`, `writeConfig`
+  waiting for the move), `sources.pri`, `selftest.cpp` (`otherseries`
+  reads Series' state), `app/tests/pinhole_tests.cpp`,
+  `app/src/i18n/pl.json` (two warnings), `docs/plugins.md`; the plugins
+  Screenshots (`found:` in its cache; its old `cacheDir`s are no longer
+  removed, as the cache file now lives in that folder and they were gone
+  on this computer already), Series (`edits` in its state), Info (`shown`),
+  Send (`devices`), each `api: 3`.
+- New: `app/src/pluginstore.{h,cpp}`.
+- Stay settings: Screenshots' `hide`, Series' and Sheet's `recipe` (the
+  user's choice of look), Send's `compatible`, On this day's, Frame's and
+  Theme's.
+- Tests: the store (at once, written after the turn, one write for many
+  changes, none for the same value, read by the next start, a failed write
+  said); the move (every key where it belongs, `plugins.json` exactly the
+  switches and settings, a second start writing nothing, a tour seen not
+  touching `plugins.json`); a move that cannot be written; Screenshots
+  with its cache; `apiUses`. Then a window on a copy of Jacek's live
+  `plugins.json` with his library: the file afterwards, and a second
+  launch leaving its mtime as it was.
 
 ### B2: hooks in the viewer and on actions
 

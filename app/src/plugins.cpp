@@ -306,6 +306,40 @@ QJsonObject readConfig() {
     return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
 }
 
+QJsonObject readToured() {
+    QFile file(Plugins::touredPath());
+    return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+}
+
+// What Pinhole's own plugins kept in their settings before they had a
+// state and a cache of their own (API 3), by plugin: a key, or each key
+// beginning with one that ends in ':'.
+struct Moved {
+    const char *plugin, *key;
+    bool cache;
+};
+const Moved movedKeys[] = {
+    // What it found in each library: worked out again.
+    {"pinhole.screenshots", "found:", true},
+    // The user's series made and taken apart, each library's, and from
+    // before they were.
+    {"pinhole.series", "edits:", false},
+    {"pinhole.series", "edits", false},
+    // Its panel left open.
+    {"pinhole.info", "shown", false},
+    // The devices sent to.
+    {"pinhole.send", "devices", false},
+};
+
+const Moved *movedKey(const QString &plugin, const QString &key) {
+    for (const Moved &moved : movedKeys) {
+        const QLatin1String wanted(moved.key);
+        if (plugin == QLatin1String(moved.plugin) && (wanted.endsWith(':') ? key.startsWith(wanted) : key == wanted))
+            return &moved;
+    }
+    return nullptr;
+}
+
 // A path a manifest names, kept inside the plugin's folder.
 bool safeEntry(const QString &path) {
     return !path.isEmpty() && !path.startsWith('/') && !path.contains(QLatin1String(".."));
@@ -358,6 +392,18 @@ void PluginHost::endPrograms(const std::vector<QProcess *> &programs) {
 int PluginHost::api() const { return Plugins::api; }
 
 QString PluginHost::coveredBy() const { return m_plugins->coveredBy(); }
+
+QObject *PluginHost::state() const {
+    if (!m_state)
+        m_state = std::make_unique<PluginStoreMap>(m_plugins->stateStore(), m_id);
+    return m_state.get();
+}
+
+QObject *PluginHost::cache() const {
+    if (!m_cache)
+        m_cache = std::make_unique<PluginStoreMap>(m_plugins->cacheStore(), m_id);
+    return m_cache.get();
+}
 
 QString PluginHost::cacheDir() const {
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/" + m_id + '/'
@@ -781,7 +827,20 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                  History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
       m_history(history),
-      m_libraryApi(std::make_unique<PluginLibrary>(library)), m_config(readConfig()) {
+      m_libraryApi(std::make_unique<PluginLibrary>(library)), m_config(readConfig()),
+      m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
+      m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files), m_toured(readToured()) {
+    // What a plugin keeps that could not be written, said under it.
+    const auto failed = [this](const QString &what) {
+        return [this, what](const QString &id) {
+            for (const auto &p : m_plugins)
+                if (p->id == id)
+                    p->host->report(what);
+        };
+    };
+    connect(&m_stateStore, &PluginStore::failed, this, failed(tr("Its state could not be kept.")));
+    connect(&m_cacheStore, &PluginStore::failed, this, failed(tr("Its cache could not be kept.")));
+    moveOutOfSettings();
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
     m_settle.setSingleShot(true);
@@ -817,6 +876,133 @@ Plugins::~Plugins() {
     PluginHost::endPrograms(ending);
     for (auto &plugin : m_plugins)
         plugin->host.reset();
+    // What they kept still to be written, written.
+    flush();
+}
+
+QString Plugins::stateRoot() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/plugins";
+}
+
+QString Plugins::cacheRoot() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins";
+}
+
+QString Plugins::touredPath() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/toured.json";
+}
+
+void Plugins::flush() {
+    m_stateStore.flush();
+    m_cacheStore.flush();
+    m_files.wait();
+}
+
+void Plugins::moveOutOfSettings() {
+    // plugins.json is the user's choices, which pinholed reads again
+    // whenever it changes: what plugins kept there that is not one goes to
+    // their state or their cache, and the tours seen to toured.json; all
+    // of it written there first, then plugins.json without it, once, away
+    // from the window's thread. Their settings are read without it from
+    // now on, and their state and cache with it.
+    QJsonObject config = m_config;
+    QJsonObject settings = config.value("settings").toObject();
+    QJsonObject moved, movedSettings;
+    QList<std::pair<QString, QByteArray>> files;
+    QStringList said;
+    const QStringList ids = settings.keys();
+    for (const QString &id : ids) {
+        QJsonObject mine = settings.value(id).toObject();
+        QJsonObject state, cache;
+        for (const QString &key : mine.keys())
+            if (const Moved *to = movedKey(id, key)) {
+                (to->cache ? cache : state).insert(key, mine.value(key));
+                mine.remove(key);
+                said << id + ' ' + key + (to->cache ? " (cache)" : " (state)");
+            }
+        if (state.isEmpty() && cache.isEmpty())
+            continue;
+        QJsonObject taken = state;
+        for (auto it = cache.begin(); it != cache.end(); ++it)
+            taken.insert(it.key(), it.value());
+        movedSettings.insert(id, taken);
+        if (mine.isEmpty())
+            settings.remove(id);
+        else
+            settings.insert(id, mine);
+        if (!state.isEmpty())
+            files.append({m_stateStore.path(id), m_stateStore.merged(id, state)});
+        if (!cache.isEmpty())
+            files.append({m_cacheStore.path(id), m_cacheStore.merged(id, cache)});
+    }
+    if (!movedSettings.isEmpty()) {
+        moved.insert("settings", movedSettings);
+        config.insert("settings", settings);
+    }
+    if (config.contains("toured")) {
+        const QJsonObject toured = config.value("toured").toObject();
+        for (auto it = toured.begin(); it != toured.end(); ++it)
+            if (it.value().toBool())
+                m_toured.insert(it.key(), true);
+        moved.insert("toured", config.value("toured"));
+        config.remove("toured");
+        files.append({touredPath(), QJsonDocument(m_toured).toJson()});
+        said << "toured";
+    }
+    if (files.isEmpty())
+        return;
+    std::fprintf(stderr, "pinhole: moving out of plugins.json: %s\n", qPrintable(said.join(", ")));
+    m_config = config;
+    m_moved = moved;
+    m_moving = std::make_shared<std::atomic<int>>(0);
+    const auto moving = m_moving;
+    const QString path = configPath();
+    const QByteArray bytes = QJsonDocument(config).toJson();
+    m_files.run(
+        [files, path, bytes, moving] {
+            // Where they belong first: only then out of plugins.json.
+            for (const auto &[file, contents] : files)
+                if (!KeptFiles::write(file, contents)) {
+                    moving->store(2);
+                    return false;
+                }
+            moving->store(1);
+            // If this fails, plugins.json is written without them the next
+            // time it is.
+            return KeptFiles::write(path, bytes);
+        },
+        [this](bool) {
+            if (!m_moving)
+                return;
+            if (m_moving->load() == 2) {
+                std::fprintf(stderr, "pinhole: left in plugins.json, as they could not be kept apart\n");
+                m_config = unmoved(m_config);
+            }
+            m_moving.reset();
+            m_moved = {};
+        });
+}
+
+QJsonObject Plugins::unmoved(QJsonObject config) const {
+    QJsonObject settings = config.value("settings").toObject();
+    const QJsonObject moved = m_moved.value("settings").toObject();
+    for (auto it = moved.begin(); it != moved.end(); ++it) {
+        QJsonObject mine = settings.value(it.key()).toObject();
+        const QJsonObject taken = it.value().toObject();
+        for (auto key = taken.begin(); key != taken.end(); ++key)
+            if (!mine.contains(key.key()))
+                mine.insert(key.key(), key.value());
+        settings.insert(it.key(), mine);
+    }
+    if (!moved.isEmpty())
+        config.insert("settings", settings);
+    if (m_moved.contains("toured")) {
+        QJsonObject toured = m_moved.value("toured").toObject();
+        for (auto it = m_toured.begin(); it != m_toured.end(); ++it)
+            toured.insert(it.key(), it.value());
+        config.insert("toured", toured);
+    }
+    return config;
 }
 
 void Plugins::registerTypes() {
@@ -1174,7 +1360,7 @@ QVariantMap Plugins::at(const QString &id) const {
             {"enabled", p->error.isEmpty() && enabled(*p)},
             {"error", p->error},
             {"problem", p->host->problem()},
-            {"toured", m_config.value("toured").toObject().value(p->id).toBool()},
+            {"toured", m_toured.value(p->id).toBool()},
             {"dir", p->dir},
             // Another URL for each load, so the engine reads the files again;
             // and naming the plugin, which its strings' context keeps
@@ -1231,13 +1417,13 @@ void Plugins::handedOver(const QString &id) {
 }
 
 void Plugins::setToured(const QString &id) {
-    QJsonObject config = m_config;
-    QJsonObject toured = config.value("toured").toObject();
-    if (toured.value(id).toBool())
+    // Not a choice of the user's, so not in plugins.json.
+    if (m_toured.value(id).toBool())
         return;
-    toured.insert(id, true);
-    config.insert("toured", toured);
-    writeConfig(config);
+    m_toured.insert(id, true);
+    const QString path = touredPath();
+    const QByteArray bytes = QJsonDocument(m_toured).toJson();
+    m_files.run([path, bytes] { return KeptFiles::write(path, bytes); });
     ++m_revision;
     emit changed();
 }
@@ -1269,7 +1455,13 @@ bool Plugins::enabled(const Plugin &plugin) const {
     return state.isBool() ? state.toBool() : !plugin.personal;
 }
 
-bool Plugins::writeConfig(const QJsonObject &config) {
+bool Plugins::writeConfig(QJsonObject config) {
+    // After what is being written away from this thread (the move out of
+    // it, as Pinhole started): the keys it moved back in, if they could
+    // not be kept where they now belong.
+    m_files.wait();
+    if (m_moving && m_moving->load() == 2)
+        config = unmoved(config);
     // In place of the one there in one step (written beside it, then
     // renamed over it), so a failure leaves that one as it was, and what
     // is kept here with it.
@@ -1507,7 +1699,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "promises"},      {2, "pinhole.settings"}, {2, "pinhole.notify"},   {2, "pinhole.warn"},
         {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
         {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
-        {2, "pinhole.keepAwake"}, {3, "marks"}};
+        {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1525,6 +1717,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.isHidden",
          QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(isHidden|hiddenCount|hiddenChanged)\\b"))},
         {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
+        {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
+        {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));

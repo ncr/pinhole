@@ -58,8 +58,9 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
-and `sources` in the manifest: a source of photos of the plugin's own,
-whose provider pinholed runs ([source-providers.md](source-providers.md)).
+`pinhole.state`, `pinhole.cache`, and `sources` in the manifest: a source
+of photos of the plugin's own, whose provider pinholed runs
+([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
 
@@ -230,16 +231,51 @@ positions move when the library is read again, ids do not, so keep ids.
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |
 | `keepAwake(on)` | the screen kept on, no screensaver and no lock, while `on`, as the Photo frame does while it shows; `false` lets it go, and so does the plugin turned off or loaded again, and Pinhole quitting or crashing. Whether the screen is kept on now: not where it cannot be (not on Wayland, the window hidden, or on a workspace not shown), which it then is once it can |
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
-| `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
-| `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own, and Screenshots what it found as `found:` and the `key`, read as it loads (none for a library whose `key` is `""`, nor past 5,000, and those of sources no longer added gone) |
+| `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
+| `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out |
+| `state` | what the user made with it, which must outlive Pinhole but is no setting: Series' series made and taken apart by hand, Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out, which then reads `undefined`; `keys()`), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
+| `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
-| `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown) |
+| `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
 | `dismissed()` | the plugin over this one, covering, handed a photo over (`openPhoto`, `reveal`): close, and do not come back when that photo closes |
 | `id`, `api` | its id; the version of all this |
+
+### Settings, state and cache
+
+Keep each thing in the one it is:
+
+- `settings`: what the user chose, the switches and choices in its part of
+  the side panel. `plugins.json` is theirs, and pinholed reads it again
+  each time it changes, so a plugin writes there only when the user
+  changes a setting.
+- `state`: what the user made and would miss: their edits, a panel left
+  open, the devices they sent to.
+- `cache`: what can be worked out again, and is kept only to be quick; it
+  may be gone (`rm -r ~/.cache/pinhole`), and the plugin works it out again.
+
+What is assigned is the plugin's at once. The file follows soon after,
+away from the window, in one step (written beside it, then renamed over
+it), and only if something changed, so assigning the same again costs
+nothing; several changes in a moment are one write. What could not be
+written is said under the plugin in the side panel. Each is read whole the
+first time the plugin uses it, before the window's first frame if it does
+so as it loads, so keep them small: ids, not pictures (files go in
+`cacheDir`). What is kept for each source's library goes under a key with
+its `library.key`, as Series' `edits:icloud:me@example.com` and
+Screenshots' `found:…`; Screenshots keeps none for a library whose `key`
+is `""`, nor a list past 5,000, and lets go of those of sources no longer
+added.
+
+Before API 3, Pinhole's own plugins kept all of these in their settings.
+The first start of a Pinhole with API 3 moves them out of `plugins.json`,
+once: Screenshots' `found:` lists to its cache, Series' `edits`, Info's
+`shown` and Send's `devices` to their state, and the tours seen to
+`~/.local/state/pinhole/toured.json`, each written there before
+`plugins.json` is written without them.
 
 ### Promises
 

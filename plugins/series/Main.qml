@@ -23,9 +23,10 @@ PinholePlugin {
     // What the finder found, each series its photos' ids.
     property var foundIds: []
     // The edits: series made or changed by hand (ids), and photos kept out
-    // of any series. Kept for each source's library apart (by its key): a
-    // folder's photos are named by their paths, and one folder's edits
-    // must not group another's photos of the same names.
+    // of any series. The user's own work, so kept in the plugin's state
+    // (not its settings, nor its cache), for each source's library apart
+    // (by its key): a folder's photos are named by their paths, and one
+    // folder's edits must not group another's photos of the same names.
     property var edits: ({ manual: [], apart: [] })
     property string editsKey: ""
     // Bumped when the series or the edits change, for bindings to follow.
@@ -115,8 +116,7 @@ PinholePlugin {
         pinhole.did(name, () => setEdits(key, before), () => setEdits(key, after))
     }
     function setEdits(key, state) {
-        if (!pinhole.setSetting(key, state))
-            pinhole.warn(qsTr("The edits could not be kept."))
+        pinhole.state[key] = state
         if (key !== editsKey)
             return
         edits = state
@@ -131,13 +131,13 @@ PinholePlugin {
         if (editsKey !== "")
             foundIds = []
         editsKey = key
-        let kept = pinhole.settings[key]
+        let kept = pinhole.state[key]
         // From before they were kept for each library: the one shown then.
-        const old = pinhole.settings.edits
+        const old = pinhole.state.edits
         if (!kept && old) {
             kept = old
-            if (pinhole.setSetting(key, old))
-                pinhole.settings.edits = null
+            pinhole.state[key] = old
+            pinhole.state.edits = null
         }
         edits = kept || { manual: [], apart: [] }
         if (found)

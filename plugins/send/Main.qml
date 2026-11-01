@@ -28,12 +28,12 @@ PinholePlugin {
     // next time (a phone whose LocalSend has been open a while does not
     // announce itself) and listed in this order.
     function known() {
-        const list = pinhole.settings.devices
+        const list = pinhole.state.devices
         return Array.isArray(list) ? list : []
     }
     function remember(device) {
         const list = [device].concat(known().filter(d => d.fingerprint !== device.fingerprint)).slice(0, 6)
-        pinhole.settings.devices = list
+        pinhole.state.devices = list
     }
 
     // What it keeps, kept small: folders staged for LocalSend's window go

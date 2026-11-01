@@ -8,6 +8,7 @@
 #include "outgoing.h"
 #include "photogrid.h"
 #include "photoprovider.h"
+#include "plugins.h"
 #include "viewer.h"
 
 #include <QClipboard>
@@ -2420,12 +2421,15 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
             series.append(ids.toStringList());
         return series;
     };
+    // As written in its state, once all of it is.
     auto keptFor = [=](const QString &key) {
-        QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+        if (auto *plugins = qobject_cast<Plugins *>(qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>()))
+            plugins->flush();
+        QFile file(Plugins::stateRoot() + "/pinhole.series/state.json");
         if (!file.open(QIODevice::ReadOnly))
             return QList<QStringList>();
         QList<QStringList> series;
-        const QJsonObject edits = QJsonDocument::fromJson(file.readAll()).object()["settings"].toObject()["pinhole.series"].toObject()[key].toObject();
+        const QJsonObject edits = QJsonDocument::fromJson(file.readAll()).object()[key].toObject();
         for (const QVariant &ids : edits.toVariantMap().value("manual").toList())
             series.append(ids.toStringList());
         return series;

@@ -11,8 +11,8 @@ import "Find.js" as Find
 // marks an iPhone's or an iPad's as one; one named so is one (Omarchy's
 // screenshot-…, a Mac's Screenshot … or Zrzut ekranu …); and so is a PNG
 // with no place shaped like a phone's screen. What it found last is kept
-// for each source's library, and used at once when Pinhole starts, so the
-// screenshots do not show for a moment and then go.
+// for each source's library in its cache, and used at once when Pinhole
+// starts, so the screenshots do not show for a moment and then go.
 PinholePlugin {
     id: plugin
 
@@ -49,13 +49,13 @@ PinholePlugin {
             pinhole.notify(qsTr("%n screenshots hidden: ⇧\u00a0S shows them again", "", shots.length))
     }
 
-    // What it found, kept for each source's library in its settings, as
-    // Series keeps its edits: read at once as it loads, which is before the
-    // grid's first frame, so the screenshots never show for a moment and go.
-    // Not for a library that does not say whose it is (its key ""), which
-    // another such would share; nor more than `keepAtMost`, which would
-    // make the settings long to read and write for every plugin: those
-    // show for a moment as the window opens.
+    // What it found, kept for each source's library in its cache (it can
+    // be found again; it is not a setting): read at once as it loads, which
+    // is before the grid's first frame, so the screenshots never show for a
+    // moment and go. Not for a library that does not say whose it is (its
+    // key ""), which another such would share; nor more than `keepAtMost`,
+    // which would be long to read before that frame: those show for a
+    // moment as the window opens.
     readonly property int keepAtMost: 5000
     // The library shown: its key, or its folder; and where what was found
     // in it is kept, "" for nowhere.
@@ -70,26 +70,18 @@ PinholePlugin {
         shown = library
         keptKey = key !== "" ? "found:" + key : ""
         found = false
-        take(keptKey !== "" ? pinhole.setting(keptKey, []) : [])
+        take(keptKey !== "" ? pinhole.cache[keptKey] || [] : [])
         return true
     }
-    // Kept, and what was found of sources no longer added gone: true if
-    // all of it went well.
+    // Kept (written only if it changed), and what was found of sources no
+    // longer added gone.
     function keep(key, list) {
-        let kept = pinhole.setSetting(key, list.length <= keepAtMost ? list : null)
+        pinhole.cache[key] = list.length <= keepAtMost ? list : null
         const sources = pinhole.library.keys()
-        for (const other of pinhole.settings.keys())
+        for (const other of pinhole.cache.keys())
             if (other.startsWith("found:") && other !== key && sources.indexOf(other.slice(6)) < 0
-                    && pinhole.setting(other) !== undefined)
-                kept = pinhole.setSetting(other, null) && kept
-        return kept
-    }
-    // Where it kept them before its settings, the cacheDirs of its own:
-    // gone, once.
-    function forgetCacheDirs() {
-        const old = pinhole.cacheDir.replace(/\/[^/]*$/, "")
-        if (old.endsWith("/pinhole/plugins/pinhole.screenshots") && pinhole.exists(old))
-            pinhole.run("rm", ["-r", "--", old]).catch(pinhole.warn)
+                    && pinhole.cache[other] !== undefined)
+                pinhole.cache[other] = null
     }
 
     function find() {
@@ -116,8 +108,8 @@ PinholePlugin {
                     return
                 }
                 const list = result.stdout.split("\n").filter(id => id !== "")
-                if (key !== "" && !keep(key, list))
-                    pinhole.warn(qsTr("The setting could not be kept"))
+                if (key !== "")
+                    keep(key, list)
                 take(list)
                 found = true
             })
@@ -163,7 +155,6 @@ PinholePlugin {
     Component.onCompleted: {
         loadKept()
         find()
-        forgetCacheDirs()
     }
 
     actions: [
