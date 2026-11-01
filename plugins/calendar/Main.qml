@@ -8,8 +8,10 @@ import "Days.js" as Days
 // the photo the grid is on; a day, clicked or picked with the arrows and
 // Enter, is shown in the grid.
 //
-// The library is counted into days (Days.js) once, a little a frame so the
-// grid never waits, and again whenever it is read again.
+// The library is counted into days (Days.js) from its columns of days and
+// dates, at once, and again whenever it is read again; what the grid hides
+// (Screenshots' hide mode, say) is not counted, as the grid does not show
+// it.
 PinholePlugin {
     id: plugin
     covering: calendar.shown
@@ -28,30 +30,10 @@ PinholePlugin {
     // The week's rows start on the locale's first day.
     readonly property int firstWeekday: Qt.locale().firstDayOfWeek
 
-    // Counting, a few milliseconds a frame so the grid never waits; what it
-    // has so far.
-    property var counting: null
     function count() {
-        counting = Days.start(pinhole.library.count, firstWeekday)
-        stepping.restart()
-    }
-    Timer {
-        id: stepping
-        interval: 1
-        repeat: true
-        onTriggered: plugin.step()
-    }
-    function step() {
-        const c = counting
-        if (!c) {
-            stepping.stop()
-            return
-        }
-        if (!Days.count(c, i => pinhole.library.item(i), 3))
-            return
-        stepping.stop()
-        counting = null
-        const done = Days.finish(c)
+        const library = pinhole.library
+        const done = Days.finish(Days.count(library.field("day"), library.field("date"), library.field("id"), firstWeekday,
+                                            pinhole.hiddenCount > 0 ? i => pinhole.isHidden(i) : null))
         full = done.full
         glowing = done.glowing
         total = done.total
@@ -61,13 +43,17 @@ PinholePlugin {
         counted = true
     }
 
-    // Read again: counted again, once it has settled.
-    Timer { id: later; interval: 1200; onTriggered: plugin.count() }
+    // Read again, or photos hidden from the grid or shown again: counted
+    // again, once for both when the library's reading moves what is hidden.
     Connections {
         target: pinhole.library
-        function onChanged() { later.restart() }
+        function onChanged() { Qt.callLater(plugin.count) }
     }
-    Component.onCompleted: later.start()
+    Connections {
+        target: pinhole
+        function onHiddenChanged() { Qt.callLater(plugin.count) }
+    }
+    Component.onCompleted: count()
 
     actions: [
         PluginAction {

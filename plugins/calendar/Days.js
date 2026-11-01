@@ -28,40 +28,49 @@ function weekdayRow(date, firstWeekday) {
     return (date.getDay() - firstWeekday + 7) % 7
 }
 
-// Counting `n` photos: given to count() a few at a time.
-function start(n, firstWeekday) {
-    return { at: 0, n: n, firstWeekday: firstWeekday, byYear: {} }
-}
-// Counts photos from where `state` is, `item(i)` giving each one's date (ms)
-// and id, for up to `budget` ms; true once every photo is counted. A date
-// of 0 is none (the library's NULL) and not counted; any other, before 1970
-// too, is.
-function count(state, item, budget) {
-    const began = Date.now()
-    let i = state.at
-    for (; i < state.n; ++i) {
-        if ((i & 63) === 0 && i > state.at && Date.now() - began >= budget)
-            break
-        const photo = item(i)
-        const ms = photo.date
-        if (ms === 0 || !isFinite(ms))
-            continue
-        const date = new Date(ms)
-        const y = date.getFullYear()
-        let year = state.byYear[y]
-        if (!year) {
-            year = state.byYear[y] = { year: y, days: daysIn(y), offset: weekdayRow(dateOf(y, 0, 1), state.firstWeekday),
-                                       counts: new Array(366).fill(0), first: new Array(366).fill(""), total: 0 }
+// The days before each month, in a year that is not a leap year.
+const monthStarts = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+
+// Counts the library into days, at once: `days` is each photo's local day
+// as yyyymmdd (library.field("day"), 0 for none), `dates` its date in ms
+// (library.field("date"): a photo before 1970 has no day there, and is
+// counted by its date), `ids` its id. `hidden(i)`, if given, is true for a
+// photo hidden from the grid, which is not counted, as the grid does not
+// show it. A date of 0 is none (the library's NULL) and not counted; any
+// other, before 1970 too, is.
+function count(days, dates, ids, firstWeekday, hidden) {
+    const byYear = {}
+    let year = null
+    for (let i = 0; i < days.length; ++i) {
+        const key = days[i]
+        let y, day
+        if (key === 0) {
+            const ms = dates[i]
+            if (ms === 0 || !isFinite(ms))
+                continue
+            const date = new Date(ms)
+            y = date.getFullYear()
+            day = dayOf(date)
+        } else {
+            y = Math.floor(key / 10000)
+            const m = Math.floor(key / 100) % 100
+            day = monthStarts[m - 1] + key % 100 - 1 + (m > 2 && daysIn(y) === 366 ? 1 : 0)
         }
-        const day = dayOf(date)
+        if (hidden && hidden(i))
+            continue
+        if (!year || year.year !== y) {
+            year = byYear[y]
+            if (!year)
+                year = byYear[y] = { year: y, days: daysIn(y), offset: weekdayRow(dateOf(y, 0, 1), firstWeekday),
+                                     counts: new Array(366).fill(0), first: new Array(366).fill(""), total: 0 }
+        }
         // The library is in time order: a day's first is its earliest. By
         // its id, as positions move when the library is read again.
         if (year.counts[day]++ === 0)
-            year.first[day] = photo.id
+            year.first[day] = ids[i]
         ++year.total
     }
-    state.at = i
-    return i >= state.n
+    return { byYear: byYear }
 }
 // What was counted: every year with a photo, oldest first ({year, days,
 // offset (the weekday row of 1 January), counts and first (each day's

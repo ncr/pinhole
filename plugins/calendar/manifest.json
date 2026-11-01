@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "api": 2,
   "id": "pinhole.calendar",
   "name": "Year calendar",
   "version": "1.0.0",
