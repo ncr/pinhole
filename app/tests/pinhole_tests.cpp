@@ -1,9 +1,13 @@
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
+#include <QImage>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QMimeData>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -1824,6 +1828,45 @@ private slots:
         QVERIFY(bench.js("pinhole.library.item(3).id").isUndefined());
         bench.js(R"(pinhole.fetch("zz", "medium").then(null, e => said.push(e.code)))");
         QTRY_COMPARE(bench.said(), QStringList({"not_found"}));
+    }
+
+    void aCopiedImagePastesIntoAChatAsOne() {
+        QTemporaryDir dir;
+        // A JPEG bigger than 2560 px: as it is, and a PNG of 2560 at most.
+        const QString jpeg = dir.path() + "/sheet.jpg";
+        QImage big(3000, 1500, QImage::Format_RGB32);
+        big.fill(Qt::red);
+        QVERIFY(big.save(jpeg, "JPEG"));
+        QFile file(jpeg);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray bytes = file.readAll();
+        const Outgoing::ClipboardImage image = Outgoing::clipboardImage(jpeg);
+        QCOMPARE(image.jpeg, bytes);
+        QImage png;
+        QVERIFY(png.loadFromData(image.png, "PNG"));
+        QCOMPARE(png.size(), QSize(2560, 1280));
+        // A GIF goes as itself, to move; what is not an image, as a file only.
+        const QString gif = dir.path() + "/clip.gif";
+        write(gif, QByteArray("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+                              "\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;", 43));
+        const Outgoing::ClipboardImage moving = Outgoing::clipboardImage(gif);
+        QCOMPARE(moving.gif.size(), 43);
+        QVERIFY(moving.png.isEmpty() && moving.jpeg.isEmpty());
+        write(dir.path() + "/notes.txt", "not a picture");
+        const Outgoing::ClipboardImage none = Outgoing::clipboardImage(dir.path() + "/notes.txt");
+        QVERIFY(none.jpeg.isEmpty() && none.png.isEmpty() && none.gif.isEmpty());
+
+        // A plugin's copyFile, as Pinhole's own copy: the file, and the image.
+        PluginBench bench({{"t", {}}});
+        QVERIFY(bench.host);
+        QGuiApplication::clipboard()->clear();
+        auto mimeData = [] { return QGuiApplication::clipboard()->mimeData(); };
+        bench.host->copyFile(jpeg);
+        QTRY_VERIFY(mimeData() && mimeData()->hasFormat("image/png"));
+        const QMimeData *mime = mimeData();
+        QCOMPARE(mime->data("image/jpeg"), bytes);
+        QCOMPARE(mime->urls(), QList<QUrl>({QUrl::fromLocalFile(jpeg)}));
+        QVERIFY(mime->data("x-special/gnome-copied-files").startsWith("copy\nfile://"));
     }
 
     void aPluginsNoticeIsSaidAsItsOwn() {

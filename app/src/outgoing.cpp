@@ -157,63 +157,76 @@ void Outgoing::copy(const QList<int> &indexes, bool quiet) {
             emit copyFailed(0, failed);
             return;
         }
-        // One photo is an image too, for pasting into chats: its JPEG as it
-        // is, and a PNG of at most 2560 px for what takes only that. Made
-        // here, away from the window's thread, as finished bytes: left to Qt,
-        // a request for PNG (Omarchy's clipboard history asks at once)
-        // encoded the full-size photo then and there, and the window stood
-        // still for seconds.
-        const QString single = files.size() == 1 ? files.first() : QString();
-        auto *watcher = new QFutureWatcher<std::pair<QByteArray, QByteArray>>(this);
-        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, files, failed, quiet] {
-            const auto [jpeg, png] = watcher->result();
-            watcher->deleteLater();
-            auto *mime = new QMimeData;
-            QList<QUrl> urls;
-            QByteArray gnome = "copy";
-            for (const QString &f : files) {
-                urls.append(QUrl::fromLocalFile(f));
-                gnome += '\n' + QUrl::fromLocalFile(f).toEncoded();
-            }
-            mime->setUrls(urls);
-            // File managers paste from this one.
-            mime->setData(QStringLiteral("x-special/gnome-copied-files"), gnome);
-            if (!jpeg.isEmpty())
-                mime->setData(QStringLiteral("image/jpeg"), jpeg);
-            if (!png.isEmpty())
-                mime->setData(QStringLiteral("image/png"), png);
-            QGuiApplication::clipboard()->setMimeData(mime);
+        toClipboard(files, this, [this, files, failed, quiet] {
             if (failed)
                 emit copyFailed(int(files.size()), failed);
             else if (!quiet)
                 flash(tr("Copied %n photo(s)", "", int(files.size())));
         });
-        watcher->setFuture(QtConcurrent::run([single]() -> std::pair<QByteArray, QByteArray> {
-            if (single.isEmpty())
-                return {};
-            QImageReader reader(single);
-            reader.setAutoTransform(true);
-            if (!reader.canRead())
-                return {}; // a video
-            QByteArray jpeg;
-            if (reader.format() == "jpeg") {
-                QFile file(single);
-                if (file.open(QIODevice::ReadOnly))
-                    jpeg = file.readAll();
-            }
-            const QSize size = reader.size();
-            if (size.isValid() && (size.width() > 2560 || size.height() > 2560))
-                reader.setScaledSize(size.scaled(2560, 2560, Qt::KeepAspectRatio));
-            const QImage image = reader.read();
-            QByteArray png;
-            if (!image.isNull()) {
-                QBuffer buffer(&png);
-                buffer.open(QIODevice::WriteOnly);
-                image.save(&buffer, "PNG");
-            }
-            return {jpeg, png};
-        }));
     }, quiet);
+}
+
+Outgoing::ClipboardImage Outgoing::clipboardImage(const QString &file) {
+    QImageReader reader(file);
+    reader.setAutoTransform(true);
+    if (!reader.canRead())
+        return {}; // a video
+    ClipboardImage image;
+    auto bytes = [&file] {
+        QFile f(file);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    if (reader.format() == "jpeg")
+        image.jpeg = bytes();
+    // A GIF moves only as itself.
+    if (reader.format() == "gif") {
+        image.gif = bytes();
+        return image;
+    }
+    const QSize size = reader.size();
+    if (size.isValid() && (size.width() > 2560 || size.height() > 2560))
+        reader.setScaledSize(size.scaled(2560, 2560, Qt::KeepAspectRatio));
+    const QImage picture = reader.read();
+    if (!picture.isNull()) {
+        QBuffer buffer(&image.png);
+        buffer.open(QIODevice::WriteOnly);
+        picture.save(&buffer, "PNG");
+    }
+    return image;
+}
+
+QMimeData *Outgoing::clipboardData(const QStringList &files, const ClipboardImage &image) {
+    auto *mime = new QMimeData;
+    QList<QUrl> urls;
+    QByteArray gnome = "copy";
+    for (const QString &f : files) {
+        urls.append(QUrl::fromLocalFile(f));
+        gnome += '\n' + QUrl::fromLocalFile(f).toEncoded();
+    }
+    mime->setUrls(urls);
+    mime->setData(QStringLiteral("x-special/gnome-copied-files"), gnome);
+    if (!image.jpeg.isEmpty())
+        mime->setData(QStringLiteral("image/jpeg"), image.jpeg);
+    if (!image.png.isEmpty())
+        mime->setData(QStringLiteral("image/png"), image.png);
+    if (!image.gif.isEmpty())
+        mime->setData(QStringLiteral("image/gif"), image.gif);
+    return mime;
+}
+
+void Outgoing::toClipboard(const QStringList &files, QObject *context, std::function<void()> then) {
+    // Made here as finished bytes: left to Qt, a request for PNG (Omarchy's
+    // clipboard history asks at once) encoded the full-size photo then and
+    // there, and the window stood still for seconds.
+    const QString single = files.size() == 1 ? files.first() : QString();
+    auto *watcher = new QFutureWatcher<ClipboardImage>(context);
+    QObject::connect(watcher, &QFutureWatcherBase::finished, context, [watcher, files, then] {
+        QGuiApplication::clipboard()->setMimeData(clipboardData(files, watcher->result()));
+        watcher->deleteLater();
+        if (then)
+            then();
+    });
+    watcher->setFuture(QtConcurrent::run([single] { return single.isEmpty() ? ClipboardImage() : clipboardImage(single); }));
 }
 
 void Outgoing::exportTo(const QList<int> &indexes, bool compatible) {

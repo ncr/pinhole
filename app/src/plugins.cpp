@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "history.h"
 #include "library.h"
+#include "outgoing.h"
 #include "photogrid.h"
 #include "serviceclient.h"
 #include "translator.h"
@@ -649,18 +650,8 @@ QJSValue PluginHost::record(QQuickItem *item, const QJSValue &options, const QJS
 void PluginHost::copyFile(const QString &path) const {
     if (!QFileInfo::exists(path))
         return;
-    auto *mime = new QMimeData;
-    const QUrl url = QUrl::fromLocalFile(path);
-    mime->setUrls({url});
-    // File managers paste from this one.
-    mime->setData(QStringLiteral("x-special/gnome-copied-files"), "copy\n" + url.toEncoded());
-    // A chat takes a GIF pasted as one.
-    if (path.endsWith(QLatin1String(".gif"), Qt::CaseInsensitive)) {
-        QFile file(path);
-        if (file.open(QIODevice::ReadOnly))
-            mime->setData(QStringLiteral("image/gif"), file.readAll());
-    }
-    QGuiApplication::clipboard()->setMimeData(mime);
+    // As Pinhole's own copy: an image pastes into a chat as one.
+    Outgoing::toClipboard({path}, const_cast<PluginHost *>(this));
 }
 
 void PluginHost::showFile(const QString &path) const {

@@ -155,7 +155,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
-| `copyFile(path)`, `showFile(path)` | a file on the clipboard; its folder in the file manager |
+| `copyFile(path)`, `showFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is and a PNG of at most 2560 px, a GIF as it is), as Pinhole's own copy has it; its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
 | `id`, `api` | its id; the version of all this |

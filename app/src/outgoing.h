@@ -70,6 +70,21 @@ public:
     // Ask for a folder (the desktop's own picker) and export into it.
     Q_INVOKABLE void exportTo(const QList<int> &indexes, bool compatible);
 
+    // One image file as a chat takes it pasted: its JPEG as it is (a GIF as
+    // it is), and a PNG of at most 2560 px for what takes only that. Empty
+    // for what is not an image. Slow for a big photo: not on the window's
+    // thread.
+    struct ClipboardImage {
+        QByteArray jpeg, png, gif;
+    };
+    static ClipboardImage clipboardImage(const QString &file);
+    // What the clipboard is given for these files: their URLs (file managers
+    // paste from x-special/gnome-copied-files), and `image` as image data.
+    static QMimeData *clipboardData(const QStringList &files, const ClipboardImage &image);
+    // These files on the clipboard as those two say, a single one's image
+    // read away from the window's thread first; `then` once it is set.
+    static void toClipboard(const QStringList &files, QObject *context, std::function<void()> then = {});
+
 signals:
     void statusChanged();
     void draggingChanged();

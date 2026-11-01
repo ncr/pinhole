@@ -174,7 +174,8 @@ public:
     // The item must be in the window and showing while it records.
     Q_INVOKABLE QJSValue record(QQuickItem *item, const QJSValue &options, const QJSValue &progress = {},
                                 const QJSValue &done = {});
-    // A file on the clipboard, for pasting into a chat or a file manager.
+    // A file on the clipboard, for pasting into a chat or a file manager:
+    // an image as image data too, as Pinhole's own copy has it (Outgoing).
     Q_INVOKABLE void copyFile(const QString &path) const;
     // The folder a file is in, in the file manager.
     Q_INVOKABLE void showFile(const QString &path) const;
