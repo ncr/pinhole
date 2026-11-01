@@ -94,6 +94,7 @@ SOURCES += \
     $$PWD/selftesthidden.cpp \
     $$PWD/selfteststacks.cpp \
     $$PWD/selftestthrough.cpp \
+    $$PWD/selftestcolour.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

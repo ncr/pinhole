@@ -250,6 +250,14 @@ void runHiddenSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
 // PINHOLE_SOCKET of its own). Exits 1 if any check fails.
 void runStacksSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, LibraryReloader &reloader);
 
+// PINHOLE_SELFTEST=colour:<dir> (selftestcolour.cpp): each photo of
+// PINHOLE_SELFTEST_PHOTOS (ids, by commas; else the newest) in the grid at
+// 3 columns, then full window as it opens and once its sharpest has come;
+// the first at 13 and 29 columns (mosaics); then Colours' finder (H) and
+// its rainbow wall (W). Frames in <dir>, named by the photo's file name
+// and what they show, to compare their colours with a reference.
+void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer, const QString &dir);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

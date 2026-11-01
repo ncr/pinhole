@@ -225,6 +225,16 @@ void Bench::endPhase() {
         beginPhase();
         return;
     }
+    // What the loader's threads spent on each decode, the whole run.
+    std::printf("decoded:");
+    const char *kinds[] = {"thumbnails", "mediums", "mosaic pages"};
+    for (int kind = 0; kind < 3; ++kind) {
+        const quint64 n = m_loader->decodedCount(kind);
+        std::printf("%s %llu %s at %.3f ms each", kind ? "," : "", static_cast<unsigned long long>(n), kinds[kind],
+                    n ? m_loader->decodeNanos(kind) / 1e6 / double(n) : 0.0);
+    }
+    std::printf("\n");
+    std::fflush(stdout);
     m_grid->setDriveVelocity(0);
     m_running = false;
     emit runningChanged();

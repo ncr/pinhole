@@ -76,6 +76,10 @@ public:
     int threads() const { return int(m_threads.size()); }
     quint64 decodedCount() const { return m_decoded.load(); }
     quint64 decodeNanos() const { return m_decodeNanos.load(); }
+    // Of one kind (0 thumbnails, 1 medium renditions, 2 mosaic pages): how
+    // many were decoded, and in how long all told (each on its thread).
+    quint64 decodedCount(int kind) const { return m_kindCount[kind].load(); }
+    quint64 decodeNanos(int kind) const { return m_kindNanos[kind].load(); }
     size_t queued();
 
 signals:
@@ -110,4 +114,6 @@ private:
     std::atomic<bool> m_signalPending{false};
     std::atomic<quint64> m_decoded{0};
     std::atomic<quint64> m_decodeNanos{0};
+    std::atomic<quint64> m_kindCount[3] = {0, 0, 0};
+    std::atomic<quint64> m_kindNanos[3] = {0, 0, 0};
 };

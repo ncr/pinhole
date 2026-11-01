@@ -29,7 +29,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -331,9 +331,11 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // PINHOLE_SELFTEST=plugins:<dir>: the side panel's plugins, the one
     // PINHOLE_SELFTEST_PLUGIN names (Series, else) in view, as an image in
     // <dir>: what each says of itself and what went wrong in it
-    // (PINHOLE_BUILTIN_PLUGINS for some that go wrong).
+    // (PINHOLE_BUILTIN_PLUGINS for some that go wrong). After
+    // PINHOLE_SELFTEST_DELAY ms (2500): later, for what goes wrong later.
     if (name == QLatin1String("plugins")) {
-        QTimer::singleShot(2500, window, [window, arg] {
+        const int delay = qEnvironmentVariableIsSet("PINHOLE_SELFTEST_DELAY") ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_DELAY") : 2500;
+        QTimer::singleShot(delay, window, [window, arg] {
             QObject *panel = window->findChild<QObject *>(QStringLiteral("sidePanel"));
             panel->setProperty("shown", true);
             QTimer::singleShot(800, window, [=] {
@@ -548,6 +550,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runFrameSelfTest(window, library);
     if (name == QLatin1String("hidden"))
         runHiddenSelfTest(window, grid, library, viewer, arg);
+    if (name == QLatin1String("colour"))
+        runColourSelfTest(window, grid, library, viewer, arg);
     if (name == QLatin1String("stacks"))
         runStacksSelfTest(window, grid, library, context.reloader);
     if (name == QLatin1String("undo"))

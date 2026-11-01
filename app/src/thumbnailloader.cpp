@@ -216,8 +216,12 @@ void ThumbnailLoader::run() {
         } else if (const int index = keyIndex(key); index >= 0 && index < m_library->count()) {
             image = decodeJpeg(tj, m_library->at(index).thumbPath, keyLevel(key), buffer);
         }
-        m_decodeNanos += quint64(timer.nsecsElapsed());
+        const quint64 took = quint64(timer.nsecsElapsed());
+        m_decodeNanos += took;
         m_decoded += 1;
+        const int kind = isPageKey(key) ? 2 : isMediumKey(key) ? 1 : 0;
+        m_kindNanos[kind] += took;
+        m_kindCount[kind] += 1;
 
         bool notify = false;
         {
