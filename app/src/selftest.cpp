@@ -1121,22 +1121,34 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
             .arg(t->property("steps").toList().size())
             .arg(t->property("lit").toBool() ? "yes" : "no", viewer.isOpen() ? "open" : "closed");
     };
-    auto wait = std::make_shared<QTimer>();
-    wait->setInterval(250);
-    QObject::connect(wait.get(), &QTimer::timeout, window, [=, &viewer] {
-        // A source signed out (as a test profile's is) says so first, and
-        // no tour shows over that: looked past, as Esc does.
-        window->setProperty("troubleSeen", true);
+    auto card = [window] { return window->findChild<QObject *>(QStringLiteral("newPlugins")); };
+    QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
+    auto toured = [plugins](const QString &id) {
+        QVariantMap info;
+        QMetaObject::invokeMethod(plugins, "at", Q_RETURN_ARG(QVariantMap, info), Q_ARG(QString, id));
+        return info.value("toured").toBool();
+    };
+    auto ready = [window](const QString &id) {
+        QVariant item;
+        QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, item), Q_ARG(QVariant, id));
+        QObject *plugin = item.value<QObject *>();
+        return plugin && plugin->property("tourReady").toBool();
+    };
+    auto failures = std::make_shared<int>(0);
+    auto check = [say, failures](bool ok, const QString &what) {
+        say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
+        *failures += ok ? 0 : 1;
+    };
+    auto finish = [say, failures] {
+        say(QStringLiteral("done, %1 failed").arg(*failures));
+        QCoreApplication::exit(*failures ? 1 : 0);
+    };
+    // The plugins the card listed, all to be marked seen once it closed.
+    auto listed = std::make_shared<QStringList>();
+    // Through the tour shown, then: none follows; Series' again, Esc, and
+    // none follows.
+    auto walk = [=, &viewer] {
         QObject *t = tour();
-        if (!t || !t->property("shown").toBool()) {
-            if (clock->elapsed() > 60000) {
-                say(QStringLiteral("no tour showed by itself in 60 s"));
-                QCoreApplication::quit();
-            }
-            return;
-        }
-        wait->stop();
-        say(QStringLiteral("a tour showed by itself after %1 s").arg(clock->elapsed() / 1000.0, 0, 'f', 1));
         const int count = t->property("steps").toList().size();
         auto step = std::make_shared<std::function<void(int)>>();
         *step = [=, &viewer](int k) {
@@ -1148,25 +1160,95 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
                     (*step)(k + 1);
                     return;
                 }
-                QTimer::singleShot(1200, window, [=, &viewer] {
+                // Long enough for another to come by itself, if one would.
+                QTimer::singleShot(3000, window, [=, &viewer] {
                     say(describe(QStringLiteral("after the last")));
+                    check(!tour()->property("shown").toBool() && !card()->property("shown").toBool(),
+                          QStringLiteral("no tour, nor the card, follows the last step"));
+                    check(!viewer.isOpen(), QStringLiteral("the viewer the tour opened is closed"));
+                    QStringList unseen;
+                    for (const QString &id : *listed)
+                        if (!toured(id))
+                            unseen << id;
+                    check(unseen.isEmpty(), QStringLiteral("the card's plugins are marked seen%1")
+                                                .arg(unseen.isEmpty() ? QString() : ": not " + unseen.join(", ")));
                     // As the side panel's button asks for it.
                     QMetaObject::invokeMethod(window->findChild<QObject *>(QStringLiteral("sidePanel")), "tourRequested",
                                               Q_ARG(QString, QStringLiteral("pinhole.series")));
                     QTimer::singleShot(1600, window, [=, &viewer] {
                         say(describe(QStringLiteral("again")));
+                        check(tour()->property("shown").toBool() && tour()->property("pluginId").toString() == "pinhole.series",
+                              QStringLiteral("Series' tour again from the side panel"));
                         grab(QStringLiteral("again"));
                         key(window, Qt::Key_Escape);
-                        // Long enough for it to come back by itself, if it would.
                         QTimer::singleShot(3000, window, [=, &viewer] {
                             say(describe(QStringLiteral("after Esc")));
-                            QCoreApplication::quit();
+                            check(!tour()->property("shown").toBool() && !card()->property("shown").toBool(),
+                                  QStringLiteral("no tour follows Esc"));
+                            finish();
                         });
                     });
                 });
             });
         };
         (*step)(0);
+    };
+    auto wait = std::make_shared<QTimer>();
+    wait->setInterval(250);
+    QObject::connect(wait.get(), &QTimer::timeout, window, [=, &viewer] {
+        // A source signed out (as a test profile's is) says so first, and
+        // no tour shows over that: looked past, as Esc does.
+        window->setProperty("troubleSeen", true);
+        QObject *t = tour(), *c = card();
+        const bool tourShown = t && t->property("shown").toBool(), cardShown = c && c->property("shown").toBool();
+        if (!tourShown && !cardShown) {
+            if (clock->elapsed() > 60000) {
+                check(false, QStringLiteral("no tour nor the card showed by itself in 60 s"));
+                finish();
+            }
+            return;
+        }
+        if (tourShown) {
+            wait->stop();
+            say(QStringLiteral("a tour showed by itself after %1 s: %2")
+                    .arg(clock->elapsed() / 1000.0, 0, 'f', 1)
+                    .arg(t->property("pluginId").toString()));
+            walk();
+            return;
+        }
+        // The card: once Series' tour is ready (or another's, after 30 s),
+        // ⏎ on its row.
+        const QStringList ids = c->property("ids").toStringList();
+        if (listed->isEmpty()) {
+            *listed = ids;
+            say(QStringLiteral("the New plugins card showed by itself after %1 s: %2")
+                    .arg(clock->elapsed() / 1000.0, 0, 'f', 1)
+                    .arg(ids.join(", ")));
+            check(ids.size() > 1, QStringLiteral("it lists more than one"));
+            QTimer::singleShot(400, window, [=] { grab(QStringLiteral("card")); });
+            return;
+        }
+        QString pick = ready(QStringLiteral("pinhole.series")) && ids.contains(QStringLiteral("pinhole.series"))
+                           ? QStringLiteral("pinhole.series") : QString();
+        if (pick.isEmpty() && clock->elapsed() > 30000)
+            for (const QString &id : ids)
+                if (ready(id)) {
+                    pick = id;
+                    break;
+                }
+        if (pick.isEmpty())
+            return;
+        wait->stop();
+        c->setProperty("current", ids.indexOf(pick));
+        key(window, Qt::Key_Return);
+        QTimer::singleShot(300, window, [=] {
+            check(tour()->property("shown").toBool() && tour()->property("pluginId").toString() == pick
+                      && !card()->property("shown").toBool(),
+                  QStringLiteral("⏎ on %1 shows its tour in the card's place").arg(pick));
+            if (!tour()->property("shown").toBool())
+                return finish();
+            walk();
+        });
     });
     wait->start();
 }

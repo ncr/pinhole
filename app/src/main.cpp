@@ -220,6 +220,8 @@ int main(int argc, char *argv[]) {
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
     engine.addImageProvider(QStringLiteral("mark"), new MarkProvider);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
+    // Which file a qsTr() in JavaScript is in: Pinhole's, or which plugin's.
+    translator.setEngine(&engine);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     // Every action and its keys, the layer that has them, and how the

@@ -289,7 +289,7 @@ Item {
     }
     Command {
         name: "calendar.first"
-        text: qsTr("The first, the last day with photos")
+        text: qsTr("First, last day with photos")
         section: "Year calendar"
         keys: ["Home"]
         keysText: "Home End"

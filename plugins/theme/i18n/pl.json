@@ -1,4 +1,5 @@
 {
+  "A desktop theme from the photo": "Motyw pulpitu ze zdjęcia",
   "As the photo": "Jak zdjęcie",
   "Back again": "Z powrotem",
   "Could not go back to %1: %2": "Nie udało się wrócić do %1: %2",
@@ -8,7 +9,7 @@
   "Dark": "Ciemny",
   "Here, in the side panel (Tab): the photo's colours strong or muted, and the theme dark, light or as the photo is.": "Tu, w panelu bocznym (Tab): kolory zdjęcia mocne albo stonowane, a motyw ciemny, jasny albo taki jak zdjęcie.",
   "Light": "Jasny",
-  "Make the desktop's theme from the photo": "Zrób motyw pulpitu ze zdjęcia",
+  "Makes an Omarchy theme from the photo shown full window, and the whole desktop takes its colours.": "Robi motyw Omarchy ze zdjęcia otwartego na całe okno, a cały pulpit przejmuje jego kolory.",
   "On a photo shown full window, T makes an Omarchy theme from it: the photo as the background, its colours everywhere, the text kept readable.": "Na zdjęciu otwartym na całe okno T robi z niego motyw Omarchy: zdjęcie jako tło, jego kolory wszędzie, a tekst wciąż czytelny.",
   "Strong or muted": "Mocne czy stonowane",
   "The last 12 themes made are kept in Omarchy's theme picker; older ones are removed, never the one set.": "Ostatnie 12 zrobionych motywów zostaje w wyborze motywów Omarchy; starsze są usuwane, nigdy ten ustawiony.",

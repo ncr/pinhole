@@ -63,10 +63,10 @@ PinholePlugin {
     ]
 
     help: [
-        ["O", qsTr("Send to a phone or computer nearby (LocalSend)")],
+        ["O", qsTr("Send to a phone nearby")],
         ["1–9", qsTr("Send to that device")],
         ["J", qsTr("HEIC as JPEG, or originals")],
-        ["L", qsTr("Send with LocalSend's own window")],
+        ["L", qsTr("In LocalSend's own window")],
         ["X", qsTr("Stop sending")]
     ]
 

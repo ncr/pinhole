@@ -94,7 +94,7 @@ PinholePlugin {
         }
     ]
 
-    help: [["Y", qsTr("Year calendar: every day's photos")]]
+    help: [["Y", qsTr("Every day's photos")]]
 
     settings: Component {
         UiText {

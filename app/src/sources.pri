@@ -71,6 +71,7 @@ SOURCES += \
     $$PWD/portal.cpp \
     $$PWD/selftest.cpp \
     $$PWD/selftestrun.cpp \
+    $$PWD/selftestcovering.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

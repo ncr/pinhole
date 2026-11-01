@@ -12,7 +12,9 @@ Item {
     // Under the plugin's switch in the side panel, while it is on.
     property Component settings
     // Over the photos and taking the keys: the grid's controls fade and its
-    // keys rest, as for Pinhole's own panels.
+    // keys rest, as for Pinhole's own panels. One plugin at a time, the last
+    // to start covering: the others wait beneath, unseen and without keys
+    // (pinhole.coveredBy says whose it is).
     property bool covering: false
     // Its keys, as the help (?) lists them: [["G", "Series"], ...].
     property var help: []

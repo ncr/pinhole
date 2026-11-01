@@ -13,7 +13,7 @@ Item {
     Behavior on opacity { NumberAnimation { duration: 120 } }
 
     property bool shown: false
-    // Keys plugins list without commands of their own: [{title, keys}].
+    // Keys plugins list without commands of their own: [{plugin, keys}].
     property var pluginSections: []
 
     // "keyboard", "mouse" or "touchpad".
@@ -41,14 +41,21 @@ Item {
         "pinhole": "Pinhole"
     })
     // Each part's rows, [how, what]: the keys, or how with the mouse or
-    // the touchpad, as each command says.
+    // the touchpad, as each command says. A plugin's own are under its
+    // name, in the language, whatever section they give (but Pinhole's
+    // parts), with what its `help` lists.
     readonly property var sections: {
         keymap.revision
+        plugins.revision
         const rows = {}
         const add = (section, how, what) => {
             const list = rows[section] ?? (rows[section] = [])
             if (!list.some(r => r[0] === how && r[1] === what))
                 list.push([how, what])
+        }
+        const sectionOf = c => {
+            const plugin = order.indexOf(c.section) < 0 ? c.plugin() : ""
+            return plugin !== "" ? "plugin:" + plugin : c.section
         }
         const commands = keymap.actions().slice().sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line)
         for (const c of commands) {
@@ -56,20 +63,22 @@ Item {
                 continue
             if (tab === "keyboard") {
                 if (c.keyHelp && c.keyName !== "")
-                    add(c.section, c.keyName, c.text)
+                    add(sectionOf(c), c.keyName, c.text)
             } else if (c.pointerHelp) {
                 const how = tab === "mouse" ? c.mouse : c.touchpad
                 if (how)
-                    add(c.section, how, c.text)
+                    add(sectionOf(c), how, c.text)
             }
         }
         if (tab === "keyboard")
             for (const s of pluginSections)
                 for (const k of s.keys)
-                    add(s.title, k[0], k[1])
+                    add("plugin:" + s.plugin, k[0], k[1])
+        const titleOf = s => titles[s] ?? (s.startsWith("plugin:") ? plugins.at(s.slice(7)).name ?? s.slice(7) : s)
         const known = order.filter(s => rows[s] !== undefined)
-        const others = Object.keys(rows).filter(s => order.indexOf(s) < 0).sort()
-        return known.concat(others).map(s => ({ title: titles[s] ?? s, keys: rows[s] }))
+        const others = Object.keys(rows).filter(s => order.indexOf(s) < 0)
+            .sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+        return known.concat(others).map(s => ({ title: titleOf(s), keys: rows[s] }))
     }
 
     // Its keys, while it is on top (Command.qml).
@@ -135,41 +144,36 @@ Item {
         onClicked: root.shown = false
     }
 
-    // A column as wide as its widest key and words, all columns alike.
+    // Columns all alike, as wide as the widest part needs, its keys and
+    // words, but no wider than 21 times the type size: longer words wrap. Each
+    // part has its own keys' width. As many columns as fit, the parts down
+    // each in order, as even as they go (layout()).
     FontMetrics { id: metrics; font.family: theme.font; font.pixelSize: theme.fontSize }
     readonly property int gap: theme.fontSize
+    readonly property int columnGap: 2 * gap
     function widest(texts) {
         let most = 0
         for (const text of texts)
             most = Math.max(most, metrics.advanceWidth(text))
         return Math.ceil(most)
     }
-    readonly property int keyWidth: {
-        const keys = []
-        for (const section of sections)
-            for (const key of section.keys)
-                keys.push(key[0])
-        return widest(keys)
-    }
-    readonly property int wordsWidth: {
-        const words = []
+    readonly property int columnWidth: {
+        let most = 0
         for (const section of sections) {
-            words.push(section.title)
-            for (const key of section.keys)
-                words.push(key[1])
+            const keys = widest(section.keys.map(k => k[0]))
+            most = Math.max(most, keys + gap + widest([section.title].concat(section.keys.map(k => k[1]))))
         }
-        return widest(words)
+        return Math.min(most, Math.round(theme.fontSize * 21))
     }
-    readonly property int columnWidth: keyWidth + gap + wordsWidth
     readonly property int padding: 2 * theme.fontSize
     readonly property int columns: Math.max(1, Math.min(sections.length,
-        Math.floor((width - 32 - 2 * padding + 2 * gap) / (columnWidth + 2 * gap))))
+        Math.floor((width - 32 - 2 * padding + columnGap) / (columnWidth + columnGap))))
 
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: Math.min(parent.width - 32, Math.max(flow.width, head.implicitWidth) + 2 * root.padding)
-        height: Math.min(parent.height - 32, head.height + theme.fontSize + flow.height + 2 * root.padding)
+        width: Math.min(parent.width - 32, Math.max(board.width, head.implicitWidth) + 2 * root.padding)
+        height: Math.min(parent.height - 32, head.height + theme.fontSize + board.height + 2 * root.padding)
         radius: Math.min(4, theme.radius)
         color: theme.background
         border.color: theme.foreground
@@ -223,38 +227,102 @@ Item {
             anchors.fill: parent
             anchors.margins: root.padding
             anchors.topMargin: head.y + head.height + theme.fontSize
-            contentWidth: flow.width
-            contentHeight: flow.height
+            contentWidth: board.width
+            contentHeight: board.height
             boundsBehavior: Flickable.StopAtBounds
             clip: true
-            Flow {
-                id: flow
-                width: root.columns * root.columnWidth + (root.columns - 1) * 2 * root.gap
-                spacing: 2 * root.gap
+            Item {
+                id: board
+                objectName: "helpBoard"
+                width: used * root.columnWidth + (used - 1) * root.columnGap
+                height: 0
+                // Where each part stands, [{x, y}], and the columns they
+                // take: by layout().
+                property var places: []
+                property int used: 1
+                // The parts in order down the columns, each column no
+                // longer than it must be for them all to fit in as many
+                // columns as there are.
+                function layout() {
+                    const heights = []
+                    for (let i = 0; i < parts.count; ++i) {
+                        const part = parts.itemAt(i)
+                        if (!part)
+                            return
+                        heights.push(Math.ceil(part.implicitHeight))
+                    }
+                    const space = root.columnGap
+                    // Down the columns, a new one when a part would pass
+                    // `most`: each part's place, and how many columns.
+                    const fill = most => {
+                        const places = []
+                        let column = 0, y = 0
+                        for (const h of heights) {
+                            if (y > 0 && y + space + h > most) {
+                                ++column
+                                y = 0
+                            }
+                            const top = y > 0 ? y + space : 0
+                            places.push({ x: column * (root.columnWidth + root.columnGap), y: top, bottom: top + h })
+                            y = top + h
+                        }
+                        return { places: places, columns: column + 1 }
+                    }
+                    const total = heights.reduce((sum, h) => sum + h + space, 0)
+                    let most = Math.max(0, ...heights)
+                    let laid = fill(most)
+                    while (laid.columns > root.columns && most < total) {
+                        most += 4
+                        laid = fill(most)
+                    }
+                    places = laid.places
+                    used = laid.columns
+                    height = Math.max(0, ...laid.places.map(p => p.bottom))
+                }
+                function relayout() { Qt.callLater(layout) }
+                Connections {
+                    target: root
+                    function onColumnsChanged() { board.relayout() }
+                    function onColumnWidthChanged() { board.relayout() }
+                }
                 Repeater {
+                    id: parts
                     model: root.sections
+                    onItemAdded: board.relayout()
+                    onItemRemoved: board.relayout()
                     delegate: Column {
+                        id: part
                         required property var modelData
+                        required property int index
+                        // Its keys' width, its own.
+                        readonly property int keyWidth: root.widest(modelData.keys.map(k => k[0]))
+                        x: board.places[index]?.x ?? 0
+                        y: board.places[index]?.y ?? 0
                         width: root.columnWidth
                         spacing: Math.round(theme.fontSize * 0.4)
+                        onImplicitHeightChanged: board.relayout()
                         UiText {
-                            x: root.keyWidth + root.gap
-                            text: parent.modelData.title
+                            x: part.keyWidth + root.gap
+                            width: part.width - x
+                            wrapMode: Text.WordWrap
+                            text: part.modelData.title
                             color: theme.accent
                             bottomPadding: Math.round(theme.fontSize * 0.25)
                         }
                         Repeater {
-                            model: parent.modelData.keys
+                            model: part.modelData.keys
                             delegate: Row {
                                 required property var modelData
                                 spacing: root.gap
                                 UiText {
-                                    width: root.keyWidth
+                                    width: part.keyWidth
                                     text: parent.modelData[0]
                                     color: theme.brightForeground
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 UiText {
+                                    width: part.width - part.keyWidth - root.gap
+                                    wrapMode: Text.WordWrap
                                     text: parent.modelData[1]
                                     color: theme.darkForeground
                                 }

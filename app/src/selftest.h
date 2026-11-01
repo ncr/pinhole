@@ -73,11 +73,21 @@ class Incoming;
 void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &incoming, const QString &dir,
                      const QStringList &files);
 
-// PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen it, wait for
-// a plugin's tour to show by itself, step through it with → and grab each
-// step into <dir>; check it ended, closed the viewer it opened and is
-// marked seen; then ask for Series' again, as the side panel does, and Esc.
+// PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen them, wait
+// for the New plugins card (more than one tour not seen) or a tour to show
+// by itself; from the card, ⏎ on Series' (or the first ready); step through
+// the tour with → and grab each step into <dir>; check no tour or card
+// follows and that they are marked seen; then ask for Series' again, as
+// the side panel does, Esc, and check none follows. Fails on any.
 void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
+
+// PINHOLE_SELFTEST=covering (selftestcovering.cpp): one plugin over the
+// photos at a time. D (On this day), ⏎ on a photo, H (Colours' Same
+// colour), ⏎, Esc: Colours alone comes back, and Esc leaves for the grid;
+// then Colours over On this day: the last covers, the other unseen, and
+// Esc goes back to it. In each, whose the keys are and no key shared.
+// Needs photos taken on this day in other years.
+void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 
 // PINHOLE_SELFTEST=series:<dir>: once Series has found its series, open the
 // longest on its screen to put it right, over the viewer, as G does; go

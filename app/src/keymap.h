@@ -21,6 +21,9 @@
 class Keymap : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString layer READ layer WRITE setLayer NOTIFY layerChanged)
+    // The plugin over the photos (its id), one at a time: the "plugin"
+    // layer's keys are its alone.
+    Q_PROPERTY(QString plugin READ plugin WRITE setPlugin NOTIFY pluginChanged)
     Q_PROPERTY(QString input READ input NOTIFY inputChanged)
     // Counts up as actions come and go, for bindings over the list.
     Q_PROPERTY(int revision READ revision NOTIFY actionsChanged)
@@ -30,6 +33,8 @@ public:
 
     QString layer() const { return m_layer; }
     void setLayer(const QString &layer);
+    QString plugin() const { return m_plugin; }
+    void setPlugin(const QString &plugin);
     QString input() const { return m_input; }
     int revision() const { return m_revision; }
 
@@ -47,6 +52,7 @@ public:
 
 signals:
     void layerChanged();
+    void pluginChanged();
     void inputChanged();
     void actionsChanged();
 
@@ -57,6 +63,7 @@ private:
     void setInput(const QString &input);
 
     QString m_layer = QStringLiteral("grid");
+    QString m_plugin;
     QString m_input = QStringLiteral("keyboard");
     // The pointer last used: a click says nothing of which, as Wayland
     // gives a touchpad's tap and a mouse's click alike; a scroll or a

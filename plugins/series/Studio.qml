@@ -454,7 +454,7 @@ Item {
     Command {
         id: backgroundCommand
         name: "studio.background"
-        text: qsTr("The video made as the desktop background")
+        text: qsTr("The video as the background")
         section: "Series"
         keys: ["B"]
         keyLayer: "plugin"

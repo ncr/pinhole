@@ -14,6 +14,7 @@
   "HEIC as JPEG": "HEIC jako JPEG",
   "HEIC as JPEG, or originals": "HEIC jako JPEG albo oryginały",
   "Here, in the side panel (Tab), this tour can be shown again.": "Tutaj, w panelu bocznym (Tab), można znów obejrzeć ten przewodnik.",
+  "In LocalSend's own window": "W oknie LocalSend",
   "LocalSend has to be open on the phone, on the same network. Sends %1.": "LocalSend musi być otwarty na telefonie, w tej samej sieci. Wysyła %1.",
   "Looking for devices with LocalSend open, on this network…": "Szukanie urządzeń z otwartym LocalSend w tej sieci…",
   "No device answered. Open LocalSend on the phone, or send with LocalSend (L).": "Żadne urządzenie nie odpowiedziało. Otwórz LocalSend na telefonie albo wyślij przez LocalSend (L).",
@@ -36,12 +37,13 @@
     "other": "Wyślij %n filmu"
   },
   "Send to a device": "Wyślij na urządzenie",
-  "Send to a phone or computer nearby (LocalSend)": "Wyślij na pobliski telefon lub komputer (LocalSend)",
+  "Send to a phone nearby": "Wyślij na telefon obok",
+  "Send to phone": "Wyślij na telefon",
   "Send to that device": "Wyślij na to urządzenie",
   "Send with LocalSend": "Wyślij przez LocalSend",
-  "Send with LocalSend's own window": "Wyślij przez okno LocalSend",
   "Sending": "Wysyłanie",
   "Sending to %1: %2 of %3": "Wysyłanie do %1: %2 z %3",
+  "Sends photos to a phone or computer nearby with LocalSend: originals, a Live Photo with its video, or HEIC as JPEG.": "Wysyła zdjęcia na pobliski telefon albo komputer z LocalSend: oryginały, zdjęcie Live z jego wideo albo HEIC jako JPEG.",
   "Sent %n file(s) to %1": {
     "one": "Wysłano %n plik do %1",
     "few": "Wysłano %n pliki do %1",

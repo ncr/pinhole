@@ -1,15 +1,16 @@
 {
   "%1 (RAW)": "%1 (RAW)",
   "%1 · %2 mm in 35 mm": "%1 · %2 mm (ekw. 35 mm)",
+  "A big video's details": "Szczegóły dużego wideo",
   "A photo that knows where it was taken shows the place, and W opens it on OpenStreetMap.": "Zdjęcie, które wie, gdzie zostało zrobione, pokazuje to miejsce, a W otwiera je w OpenStreetMap.",
-  "A big video's details, from its original": "Szczegóły dużego wideo, z jego oryginału",
   "A photo's details": "Szczegóły zdjęcia",
+  "A photo's details over it, on I: when, the camera, lens and exposure, its size and format, and where it was taken, with the map.": "Szczegóły zdjęcia na nim samym, pod I: kiedy, aparat, obiektyw i ekspozycja, rozmiar i format, i gdzie zostało zrobione, z mapą.",
   "Camera": "Aparat",
   "Details": "Szczegóły",
   "Exposure": "Ekspozycja",
   "Focal length": "Ogniskowa",
   "Format": "Format",
-  "Info": "Info",
+  "Info": "Informacje",
   "Lens": "Obiektyw",
   "Live Photo": "Live Photo",
   "Location": "Miejsce",
@@ -24,7 +25,7 @@
   "The original could not be fetched: %1": "Nie udało się pobrać oryginału: %1",
   "The original could not be read: %1": "Nie udało się odczytać oryginału: %1",
   "Where": "Gdzie",
-  "Where it was taken, on the map": "Gdzie zostało zrobione, na mapie",
+  "Where, on the map": "Gdzie, na mapie",
   "Yes": "Tak",
   "Yes; where, once the original is here": "Tak; gdzie, gdy dotrze oryginał"
 }

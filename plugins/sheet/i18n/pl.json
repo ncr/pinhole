@@ -19,7 +19,6 @@
     "many": "%n zdjęć nie ma już w bibliotece, pominięte",
     "other": "%n zdjęcia nie ma już w bibliotece, pominięte"
   },
-  "A contact sheet or collage of what is ticked": "Stykówka albo kolaż z zaznaczonych",
   "An even grid, like a contact sheet, or a collage that keeps each photo whole; with a gap, a background, a size and the dates if you like. Enter copies it and keeps it in Pictures/Pinhole.": "Równa siatka, jak stykówka, albo kolaż, w którym każde zdjęcie jest całe; z odstępem, tłem, rozmiarem i datami, jeśli chcesz. Enter kopiuje go i zapisuje w Pictures/Pinhole.",
   "Another library is shown, so the contact sheet was closed": "Pokazano inną bibliotekę, więc stykówkę zamknięto",
   "Background": "Tło",
@@ -45,7 +44,9 @@
   "magick took too long": "magick trwał za długo",
   "Make": "Zrób",
   "Make it, copied": "Zrób i skopiuj",
+  "Makes the photos ticked in select mode one picture to send: an even grid, or a collage that keeps each photo whole.": "Robi z zaznaczonych zdjęć jeden obraz do wysłania: równą siatkę, jak stykówka, albo kolaż, w którym każde zdjęcie jest całe.",
   "No gap": "Bez odstępu",
+  "One picture of what is ticked": "Jeden obraz z zaznaczonych",
   "Putting it together…": "Składam…",
   "Settings": "Ustawienia",
   "Several photos as one": "Kilka zdjęć w jednym",

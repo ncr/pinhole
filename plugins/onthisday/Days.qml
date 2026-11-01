@@ -90,9 +90,19 @@ Item {
         function onOpenChanged() {
             if (!days.pinhole.viewer.open && days.away) {
                 days.away = false
-                days.shown = true
+                // Not while another plugin is over the photos.
+                days.shown = days.pinhole.coveredBy === ""
                 days.keepInView()
             }
+        }
+    }
+    // Another plugin over the photos meanwhile (Colours' Same colour on
+    // the photo opened from here): it is where the way back leads now.
+    Connections {
+        target: days.pinhole
+        function onCoveredByChanged() {
+            if (days.pinhole.coveredBy !== "" && days.pinhole.coveredBy !== days.pinhole.id)
+                days.away = false
         }
     }
     // The years changed under it (the library read again, a setting, or

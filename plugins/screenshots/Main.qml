@@ -156,7 +156,7 @@ PinholePlugin {
         onTriggered: plugin.setHiding(true)
     }
 
-    help: [["Shift+S", qsTr("Screenshots: hide them, or show them again, each day's one card")]]
+    help: [["Shift+S", qsTr("Hide or show them")]]
 
     tourReady: shots.length > 0
     // As it is now: each day's one card, or hidden.

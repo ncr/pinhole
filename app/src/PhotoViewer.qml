@@ -361,6 +361,7 @@ Item {
 
     // What is shown, and what is still on its way.
     Column {
+        id: titleColumn
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 16
@@ -369,6 +370,7 @@ Item {
         Row {
             spacing: 6
             Chip {
+                id: dateChip
                 // The date bright, the time after it muted.
                 readonly property var parts: viewer.title.split(" · ")
                 text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
@@ -390,17 +392,66 @@ Item {
 
     // What can be done with it, as one card: its favourite, Live and its
     // effects, the plugins' groups, Copy and Export, and back to the
-    // library.
+    // library. Right of the date, as much as fits there (`fit`); under it
+    // when not even the least does.
     Row {
         id: actions
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 16
+        anchors.rightMargin: 16
+        anchors.topMargin: actionBar.below ? titleColumn.y + titleColumn.height + 6 : 16
         spacing: 8
         opacity: root.progress * root.chrome
         ActionBar {
             id: actionBar
             objectName: "viewerActions"
+
+            // How much it says, from 0, everything, to 2: the keys go, then
+            // the plugins' buttons fold into More ▾. The first that fits,
+            // from the words (as select mode's bar does, Main.qml), right
+            // of the date and the arc beside it; where not even the least
+            // does, it goes under the date, the window's width its room.
+            function levelIn(room) {
+                for (let level = 0; level < 3; ++level)
+                    if (widthAt(level) <= room)
+                        return level
+                return 3
+            }
+            readonly property int besideDate: {
+                // The date's width a step at a time, so that a photo's
+                // longer or shorter date does not refold the bar.
+                const step = 3 * theme.fontSize
+                const date = Math.ceil((dateChip.width + 6 + dateChip.height) / step) * step
+                return levelIn(root.width - 16 - (16 + date + 8))
+            }
+            readonly property bool below: besideDate > 2
+            readonly property int fit: below ? Math.min(2, levelIn(root.width - 32)) : besideDate
+            readonly property bool hints: fit < 1
+            readonly property bool folded: fit >= 2
+            readonly property var pluginGroups: groupsOf(root.pluginActions)
+            function widthAt(level) {
+                const pad = 2 * Math.round(theme.fontSize * 0.833)
+                const arrow = viewerMetrics.advanceWidth("▾") + 2 * Math.round(theme.fontSize * 0.5)
+                const key = name => level < 1 && name !== "" ? viewerMetrics.advanceWidth(" " + name) : 0
+                const words = text => viewerMetrics.advanceWidth(text)
+                // Each group's button, ▾ and the hairline before it.
+                const groups = [words("") + key("F") + pad]
+                if (viewer.live)
+                    groups.push(words(root.effectName(viewer.effect)) + key("L") + pad + arrow)
+                const shown = pluginGroups.map(group => group.filter(a => a.shown)).filter(group => group.length > 0)
+                if (level < 2) {
+                    for (const group of shown)
+                        groups.push(words(group[0].text) + key(KeyNames.nameOf(group[0].key)) + pad + (group.length > 1 ? arrow : 0))
+                } else if (shown.length > 0) {
+                    groups.push(words(qsTr("More") + " ▾") + pad)
+                }
+                groups.push(Math.max(words(qsTr("Copy")) + (level < 1 ? words("  C") : 0), words("✓ " + qsTr("Copied"))) + pad + arrow)
+                groups.push(words("?") + pad)
+                groups.push(words("✕") + key("Esc") + pad)
+                return 2 + groups.reduce((sum, w) => sum + w, 0) + 5 * (groups.length - 1)
+            }
+            FontMetrics { id: viewerMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+
             // A favourite or not: a filled heart in the accent, or an empty
             // one (Nerd Font's: the typeface's own ♥ is an outline too).
             MenuGroup {
@@ -414,6 +465,7 @@ Item {
                     keyLayer: "viewer"
                     section: "photo"
                     helpText: qsTr("Favourite")
+                    hint: actionBar.hints ? "F" : ""
                     onTapped: favourites.toggle([viewer.index])
                     transform: Translate { id: favoriteNudge }
                 }
@@ -445,6 +497,7 @@ Item {
                     keyLayer: "viewer"
                     section: "photo"
                     helpText: qsTr("Play the Live Photo")
+                    hint: actionBar.hints ? "L" : ""
                     active: viewer.liveLoading || liveOutput.visible
                     busy: viewer.liveLoading || root.liveBuffering
                     busyDelay: 300
@@ -453,12 +506,20 @@ Item {
                 }
             }
             Repeater {
-                model: actionBar.groupsOf(root.pluginActions)
+                model: actionBar.pluginGroups
                 delegate: PluginGroup {
                     required property var modelData
                     items: modelData
                     keyLayer: "viewer"
+                    hints: actionBar.hints
+                    visible: primary >= 0 && !actionBar.folded
                 }
+            }
+            // Or all of them in one, where they do not fit.
+            MoreGroup {
+                visible: actionBar.folded && menuItems.length > 0
+                groups: actionBar.pluginGroups
+                keyLayer: "viewer"
             }
             // Out of the app: Copy answers with a tick on itself; Export as
             // JPEG or MP4, what opens anywhere, or the original.
@@ -477,6 +538,7 @@ Item {
                     key: "C"
                     keyLayer: "viewer"
                     section: "share"
+                    hint: actionBar.hints ? "C" : ""
                 }
             }
             // The keys and gestures, as the grid's ? button shows them.
@@ -497,6 +559,7 @@ Item {
                     keyLayer: "viewer"
                     section: "photo"
                     helpText: qsTr("Back to the library")
+                    hint: actionBar.hints ? "Esc" : ""
                     onTapped: root.closeViewer()
                 }
             }

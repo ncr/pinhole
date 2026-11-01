@@ -22,6 +22,13 @@ void Keymap::setLayer(const QString &layer) {
     emit layerChanged();
 }
 
+void Keymap::setPlugin(const QString &plugin) {
+    if (plugin == m_plugin)
+        return;
+    m_plugin = plugin;
+    emit pluginChanged();
+}
+
 void Keymap::setInput(const QString &input) {
     if (input == m_input)
         return;

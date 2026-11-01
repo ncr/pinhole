@@ -602,7 +602,7 @@ Item {
     Command {
         id: localSendCommand
         name: "send.localsend"
-        text: qsTr("Send with LocalSend's own window")
+        text: qsTr("In LocalSend's own window")
         section: "Send to phone"
         keys: ["L"]
         keyLayer: "plugin"

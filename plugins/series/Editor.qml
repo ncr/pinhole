@@ -259,7 +259,7 @@ Item {
     }
     Command {
         name: "editor.takeOut"
-        text: qsTr("Take a photo out of its series")
+        text: qsTr("Out of its series")
         section: "Series"
         keys: ["X"]
         keyLayer: "plugin"
@@ -271,7 +271,7 @@ Item {
     }
     Command {
         name: "editor.add"
-        text: qsTr("Add a photo to the series beside it")
+        text: qsTr("Into the series beside it")
         section: "Series"
         keys: ["A"]
         keyLayer: "plugin"

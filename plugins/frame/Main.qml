@@ -138,8 +138,8 @@ PinholePlugin {
     ]
 
     help: [
-        ["P", qsTr("Photo frame: photos one after another, from this one")],
-        ["P", qsTr("In select mode: a photo frame of what is ticked")]
+        ["P", qsTr("From this photo on")],
+        ["P", qsTr("Of what is ticked")]
     ]
 
     tourReady: pinhole.library.count > 0

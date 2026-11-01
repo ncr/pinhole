@@ -124,6 +124,10 @@ class PluginHost : public QObject {
     // an error thrown, a warning from one of its files. Empty when loaded
     // again.
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
+    // The plugin over the photos now, one at a time (its id; "" for none,
+    // this one's own when it is): one that would come back by itself
+    // stays away while another's is.
+    Q_PROPERTY(QString coveredBy READ coveredBy NOTIFY coveredByChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -136,6 +140,7 @@ public:
     QObject *viewer() const;
     QObject *settings() const { return m_settings.get(); }
     QString problem() const { return m_problem; }
+    QString coveredBy() const;
 
     // The photo under the pointer in the grid, else the one in the middle.
     Q_INVOKABLE int currentIndex() const;
@@ -221,6 +226,7 @@ signals:
     void hiddenChanged();
     void problemChanged();
     void notified(const QString &text);
+    void coveredByChanged();
 
 private:
     friend class PluginSettings;
@@ -263,6 +269,10 @@ class Plugins : public QObject {
     Q_PROPERTY(int revision READ revision NOTIFY changed)
     // Where one's own plugins go.
     Q_PROPERTY(QString personalDir READ personalDir CONSTANT)
+    // The plugin over the photos, the last of those covering to come
+    // (Main.qml says): its keys are the "plugin" layer's, the others wait
+    // beneath, unseen. Each plugin has it as pinhole.coveredBy.
+    Q_PROPERTY(QString coveredBy READ coveredBy WRITE setCoveredBy NOTIFY coveredByChanged)
 public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
@@ -278,6 +288,10 @@ public:
     static void registerTypes();
     // What is wrong with the plugin in `dir`, if anything; its manifest.
     static QString manifestProblem(const QString &dir, QJsonObject *manifest, QString *main);
+    // What the plugin in `dir` uses that came with API 2, by its files'
+    // words ("hidden", "avgColor"): `pinhole plugin check` warns of them
+    // when its manifest asks for API 1.
+    static QStringList apiTwoUses(const QString &dir);
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);
@@ -289,6 +303,8 @@ public:
     void libraryReloaded();
 
     QStringList ids() const { return m_ids; }
+    QString coveredBy() const { return m_coveredBy; }
+    void setCoveredBy(const QString &id);
     int revision() const { return m_revision; }
     static QString personalDir();
     static QString builtInDir();
@@ -306,6 +322,9 @@ public:
     Q_INVOKABLE void showPersonalDir() const;
     // Look for plugins again.
     Q_INVOKABLE void rescan();
+    // Whose file a URL is: a plugin's id, "" for none (Pinhole's own). The
+    // help lists a plugin's commands under its name by it.
+    Q_INVOKABLE QString idOf(const QString &url) const;
     // Its QML did not load: what the engine says of it is its problem.
     Q_INVOKABLE void loadFailed(const QString &id);
     // A QML error as a plugin's author reads it: the file in its folder,
@@ -333,6 +352,7 @@ signals:
     void revealed(int index);
     // A plugin's few words for the foot of the window (notify).
     void notice(const QString &id, const QString &text);
+    void coveredByChanged();
 
 private:
     struct Plugin {
@@ -363,6 +383,7 @@ private:
     std::vector<std::unique_ptr<Plugin>> m_plugins;
     QStringList m_ids;
     int m_revision = 0;
+    QString m_coveredBy;
     // plugins.json, read once and kept as written.
     QJsonObject m_config;
     bool m_touching = false;

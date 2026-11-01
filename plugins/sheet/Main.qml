@@ -43,7 +43,7 @@ PinholePlugin {
     ]
 
     help: [
-        ["K", qsTr("A contact sheet or collage of what is ticked")]
+        ["K", qsTr("One picture of what is ticked")]
     ]
 
     settings: Component {

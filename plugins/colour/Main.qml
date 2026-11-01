@@ -106,10 +106,11 @@ PinholePlugin {
     ]
 
     help: [
-        ["H", qsTr("Find photos by colour; on a photo, the photos closest to its colour")],
-        ["W", qsTr("In the colour finder: the rainbow wall")],
-        ["Space", qsTr("On the rainbow wall: another")],
-        ["+ −", qsTr("On the rainbow wall: bigger, smaller photos")]
+        ["H", qsTr("Find by colour")],
+        ["H", qsTr("On a photo: those of its colour")],
+        ["W", qsTr("The rainbow wall")],
+        ["Space", qsTr("Another rainbow wall")],
+        ["+ −", qsTr("Wall: bigger, smaller photos")]
     ]
 
     settings: Component {

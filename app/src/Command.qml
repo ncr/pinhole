@@ -16,7 +16,9 @@ Item {
     property string text
     // Its part of the help: "library", "select", "photo", "video", "share",
     // "pinhole", a panel's ("sources", "storage", "signin", "tour"), or a
-    // plugin's name. None: not in the help (a button's own key, shown on it).
+    // plugin's name: a plugin's own are under its name in the language,
+    // whatever other than Pinhole's parts they say. None: not in the help
+    // (a button's own key, shown on it).
     property string section
     // The keys that do it, as sequences ("Space", "Shift+Up"); the first is
     // the one named, unless `keysText` says it better ("1–9", "↑ ↓").
@@ -53,8 +55,23 @@ Item {
 
     // The key as a button or the help shows it: "⇧ E", "Esc".
     readonly property string keyName: keysText !== "" ? keysText : keys.length > 0 ? KeyNames.nameOf(keys[0]) : ""
-    readonly property bool live: bound && when && (keyLayer === "any" || keymap.layer === keyLayer
+    readonly property bool live: bound && when && (keyLayer === "any"
+        || (keymap.layer === keyLayer && (keyLayer !== "plugin" || ours()))
         || (keyLayer === "chrome" && (keymap.layer === "grid" || keymap.layer === "viewer")))
+
+    // The plugin it is in, by the Loader Main.qml loads each in, else by
+    // its file; "" for Pinhole's own, or not known yet.
+    function plugin() {
+        for (let item = action.parent; item; item = item.parent)
+            if (item.pluginId !== undefined)
+                return item.pluginId
+        return file !== "" && typeof plugins !== "undefined" ? plugins.idOf(file) : ""
+    }
+    // The "plugin" layer's keys are the covering plugin's alone (keymap.h).
+    function ours() {
+        const mine = plugin()
+        return keymap.plugin === "" || mine === "" || mine === keymap.plugin
+    }
 
     signal triggered()
     function trigger() {

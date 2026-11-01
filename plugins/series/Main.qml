@@ -322,11 +322,11 @@ PinholePlugin {
     ]
 
     help: [
-        ["X", qsTr("Take a photo out of its series")],
-        ["A", qsTr("Add a photo to the series beside it")],
+        ["X", qsTr("Out of its series")],
+        ["A", qsTr("Into the series beside it")],
         ["U", qsTr("Ungroup")],
         ["G", qsTr("Group what is ticked")],
-        ["G", qsTr("On a photo: its series, whole, to put right")]
+        ["G", qsTr("Its series, to put right")]
     ]
 
     settings: Component {

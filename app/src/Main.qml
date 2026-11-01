@@ -505,8 +505,10 @@ ApplicationWindow {
     }
 
     // Plugins' buttons for the grid, before Select (not in select mode,
-    // which has its own).
+    // which has its own), right of the date: their keys go when they do
+    // not fit there, then they fold into More ▾ (`fit`).
     Row {
+        id: gridActions
         objectName: "gridActions"
         visible: win.chromeUp && !win.firstRun && !grid.selecting
         opacity: win.chrome
@@ -515,21 +517,51 @@ ApplicationWindow {
         anchors.topMargin: 16
         anchors.rightMargin: selectButton.visible ? 6 : 16
         spacing: 6
+        readonly property var actions: win.pluginActions.filter(a => a.place === "grid")
+        // 0: as they are; 1: without their keys; 2: in More ▾. The first
+        // that fits from the words (ShellButton.qml's measures), as select
+        // mode's bar does.
+        readonly property int fit: {
+            // The date's width a step at a time, so that scrolling through
+            // months of longer and shorter names does not refold them.
+            const step = 3 * theme.fontSize
+            const date = dateLabel.visible ? Math.ceil(dateLabel.width / step) * step : 0
+            const right = selectButton.visible ? win.width - selectButton.x + 6 : 16
+            const room = win.width - right - (dateLabel.visible ? dateLabel.x + date + 8 : 16)
+            for (let level = 0; level < 2; ++level)
+                if (widthAt(level) <= room)
+                    return level
+            return 2
+        }
+        function widthAt(level) {
+            const pad = 2 * Math.round(theme.fontSize * 0.833)
+            const shown = actions.filter(a => a.shown)
+            let width = 0
+            for (const a of shown)
+                width += gridMetrics.advanceWidth(a.text) + pad + spacing
+                    + (level < 1 && a.key !== "" ? gridMetrics.advanceWidth(" " + KeyNames.nameOf(a.key)) : 0)
+            return Math.max(0, width - spacing)
+        }
+        FontMetrics { id: gridMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
         Repeater {
-            model: win.pluginActions.filter(a => a.place === "grid")
+            model: gridActions.actions
             delegate: ShellButton {
                 id: gridAction
                 required property var modelData
                 floating: true
-                visible: modelData.shown
+                visible: modelData.shown && gridActions.fit < 2
                 usable: modelData.usable
                 active: modelData.active
                 busy: modelData.busy
                 text: modelData.text
                 key: modelData.key
+                hint: gridActions.fit < 1 ? KeyNames.nameOf(modelData.key) : ""
                 keyLayer: "grid"
                 onTapped: modelData.triggered()
                 onHoveredChanged: modelData.hovered = hovered
+                // It stands for its action, for a tour to light; back from
+                // More, again.
+                onVisibleChanged: if (visible) modelData.button = gridAction
                 Component.onCompleted: modelData.button = gridAction
                 Component.onDestruction: {
                     if (hovered)
@@ -538,6 +570,12 @@ ApplicationWindow {
                         modelData.button = null
                 }
             }
+        }
+        MoreGroup {
+            visible: gridActions.fit >= 2 && menuItems.length > 0
+            floating: true
+            groups: gridActions.actions.map(a => [a])
+            keyLayer: "grid"
         }
     }
 
@@ -678,9 +716,16 @@ ApplicationWindow {
         delegate: Loader {
             id: pluginLoader
             required property string modelData
+            // Whose its Commands are (Command.qml).
+            readonly property string pluginId: modelData
             readonly property var info: (plugins.revision, plugins.at(modelData))
             readonly property string main: info.enabled ? info.main : ""
             anchors.fill: parent
+            // One plugin over the photos at a time: the one covering above
+            // the rest, and while it does, the others (an overlay as Info's,
+            // one that covered before it) unseen beneath.
+            z: win.coveringPlugin === modelData ? 1 : 0
+            visible: win.coveringPlugin === "" || win.coveringPlugin === modelData
             property bool completed: false
             function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
             onMainChanged: if (completed) load()
@@ -714,7 +759,13 @@ ApplicationWindow {
     // The names of the plugins hiding any.
     property var pluginHiders: []
     property var pluginHelp: []
-    property bool pluginCovering: false
+    // The plugins covering, in the order they came; the last is over the
+    // photos (plugins.coveredBy), its keys the "plugin" layer's.
+    property var coverOrder: []
+    readonly property string coveringPlugin: coverOrder.length > 0 ? coverOrder[coverOrder.length - 1] : ""
+    readonly property bool pluginCovering: coveringPlugin !== ""
+    Binding { target: plugins; property: "coveredBy"; value: win.coveringPlugin }
+    Binding { target: keymap; property: "plugin"; value: win.coveringPlugin }
     property int pluginsLoaded: 0
     function pluginItem(id) {
         for (let i = 0; i < pluginLayer.count; ++i) {
@@ -725,9 +776,8 @@ ApplicationWindow {
         return null
     }
     function collectPlugins() {
-        const actions = [], help = []
+        const actions = [], help = [], covering = []
         let stacks = [], hidden = [], hiders = []
-        let covering = false
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
             const item = loader ? loader.item : null
@@ -736,21 +786,28 @@ ApplicationWindow {
             for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k)
                 actions.push(item.actions[k])
             if (item.help && item.help.length > 0)
-                help.push({ title: loader.info.name, keys: item.help })
+                help.push({ plugin: loader.modelData, keys: item.help })
             if (item.stacks && item.stacks.length > 0)
                 stacks = stacks.concat(item.stacks)
             if (item.hidden && item.hidden.length > 0) {
                 hidden = hidden.concat(item.hidden)
                 hiders.push(loader.info.name)
             }
-            covering = covering || item.covering === true
+            if (item.covering === true)
+                covering.push(loader.modelData)
         }
         pluginActions = actions
         pluginHelp = help
         pluginStacks = stacks
         pluginHidden = hidden
         pluginHiders = hiders
-        pluginCovering = covering
+        // Those still covering in the order they came, then any new.
+        const order = coverOrder.filter(id => covering.indexOf(id) >= 0)
+        for (const id of covering)
+            if (order.indexOf(id) < 0)
+                order.push(id)
+        if (order.join(" ") !== coverOrder.join(" "))
+            coverOrder = order
         ++pluginsLoaded
         // A plugin turned off, or loaded again, takes its tour with it.
         if (tour.shown && pluginItem(tour.pluginId) === null)
@@ -761,6 +818,8 @@ ApplicationWindow {
     // A plugin's tour (Tour.qml), from the side panel; and by itself the
     // first time the plugin is on, once it has something to show and the
     // grid is free (a plugin turned on in the side panel: once it closes).
+    // At most one by itself to a launch: with more than one not seen yet,
+    // a card lists them instead (NewPlugins.qml).
     function startTour(id) {
         const item = pluginItem(id)
         if (!item || !item.tour || item.tour.length === 0)
@@ -768,19 +827,26 @@ ApplicationWindow {
         side.shown = false
         tour.start(id, plugins.at(id).name, item.tour)
     }
+    property bool touredThisLaunch: false
     Timer {
         id: tourDue
         interval: 1200
         onTriggered: {
-            if (!autoTours || tour.shown || !win.tourFree)
+            if (!autoTours || win.touredThisLaunch || tour.shown || newPlugins.shown || !win.tourFree)
                 return
+            const unseen = []
             for (let i = 0; i < pluginLayer.count; ++i) {
                 const loader = pluginLayer.itemAt(i)
                 const item = loader ? loader.item : null
-                if (item && item.tour && item.tour.length > 0 && item.tourReady && !loader.info.toured) {
-                    win.startTour(loader.modelData)
-                    return
-                }
+                if (item && item.tour && item.tour.length > 0 && !loader.info.toured)
+                    unseen.push(loader.modelData)
+            }
+            if (unseen.length > 1) {
+                win.touredThisLaunch = true
+                newPlugins.open(unseen.sort((a, b) => plugins.at(a).name.localeCompare(plugins.at(b).name)))
+            } else if (unseen.length === 1 && win.pluginItem(unseen[0]).tourReady) {
+                win.touredThisLaunch = true
+                win.startTour(unseen[0])
             }
         }
     }
@@ -827,6 +893,12 @@ ApplicationWindow {
         }
     }
     HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
+    NewPlugins {
+        id: newPlugins
+        objectName: "newPlugins"
+        ready: id => win.pluginItem(id)?.tourReady ?? false
+        onTourRequested: id => win.startTour(id)
+    }
     Tour { id: tour; objectName: "tour"; grid: grid; photoViewer: win.photoViewer; side: side }
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
@@ -836,7 +908,7 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || pluginCovering
+    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || newPlugins.shown || pluginCovering
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
@@ -844,6 +916,7 @@ ApplicationWindow {
     readonly property string keyLayer: signIn.shown ? "signIn"
         : tour.shown ? "tour"
         : help.shown ? "help"
+        : newPlugins.shown ? "newPlugins"
         : addPicker.shown ? "addSource"
         : firstRun ? "firstRun"
         : side.shown ? "side"

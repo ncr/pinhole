@@ -284,8 +284,8 @@ PinholePlugin {
     ]
     help: [
         ["I", qsTr("A photo's details")],
-        ["W", qsTr("Where it was taken, on the map")],
-        ["⇧ I", qsTr("A big video's details, from its original")]
+        ["W", qsTr("Where, on the map")],
+        ["⇧ I", qsTr("A big video's details")]
     ]
 
     // The photo under the pointer in the grid, shown full window with the

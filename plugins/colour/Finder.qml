@@ -127,8 +127,18 @@ Item {
                 finder.plugin.ensure()
                 finder.keepFound()
                 wall.keepFound()
-                finder.shown = true
+                // Not while another plugin is over the photos.
+                finder.shown = finder.pinhole.coveredBy === ""
             }
+        }
+    }
+    // Another plugin over the photos meanwhile: it is where the way back
+    // leads now.
+    Connections {
+        target: finder.pinhole
+        function onCoveredByChanged() {
+            if (finder.pinhole.coveredBy !== "" && finder.pinhole.coveredBy !== finder.pinhole.id)
+                finder.returning = false
         }
     }
 

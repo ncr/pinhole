@@ -27,12 +27,17 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "theme", "mouse", "keys", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "favourite", "tour", "series", "undo", "theme", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
     }
     QQuickWindow *window = context.window;
+    // PINHOLE_SELFTEST_SIZE: the window's, as 1400x900, for any of them
+    // (offscreen, or a window the compositor lets float): how it looks and
+    // works that wide, the bars folding and the help in its columns.
+    if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
+        window->resize(size[0].toInt(), size[1].toInt());
     PhotoGrid *grid = context.grid;
     Library &library = context.library;
     Viewer &viewer = context.viewer;
@@ -76,9 +81,6 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
     }
     if (name == QLatin1String("help")) {
-        // PINHOLE_SELFTEST_SIZE: the window's, as 1400x900.
-        if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
-            window->resize(size[0].toInt(), size[1].toInt());
         QTimer::singleShot(800, window, [window, arg] {
             if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
                 help->setProperty("shown", true);
@@ -390,6 +392,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runMouseSelfTest(window, grid, viewer, library);
     if (name == QLatin1String("keys"))
         runKeysSelfTest(window, grid, viewer, keymap);
+    if (name == QLatin1String("covering"))
+        runCoveringSelfTest(window, viewer, keymap);
     if (name == QLatin1String("inputs"))
         runInputsSelfTest(window, grid, arg);
     if (name == QLatin1String("reload"))

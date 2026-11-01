@@ -166,9 +166,9 @@ PinholePlugin {
     ]
 
     help: [
-        ["B", qsTr("Make the photo or video the desktop background")],
-        ["V", qsTr("A Live Photo's motion as a moving background")],
-        ["⇧V", qsTr("A Live Photo's Bounce as the background")]
+        ["B", qsTr("Make it the desktop background")],
+        ["V", qsTr("A Live Photo's motion")],
+        ["⇧V", qsTr("A Live Photo's Bounce")]
     ]
 
     tour: [

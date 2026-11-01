@@ -443,6 +443,112 @@ private slots:
         QCOMPARE(translator.translate("Incoming", "Added %n file(s) to %1", nullptr, 2), QString("Added %n files to %1"));
     }
 
+    // Two plugins and Pinhole giving the same English other words: each
+    // string in the catalog of the files it is in, Pinhole's in its own
+    // alone; in a binding or in JavaScript, in a main file (each plugin
+    // has its Main.qml) or another of its own.
+    void eachCatalogKeepsItsOwnWordsForTheSameEnglish() {
+        QTemporaryDir dir;
+        write(dir.path() + "/language", "pl\n");
+        for (const auto &[name, click] : {std::pair<QString, QString>{"a", "Kliknięcie"}, {"b", "Klik"}}) {
+            const QString other = name == "a" ? "Finder" : "Days";
+            QDir(dir.path()).mkpath(name + "/i18n");
+            write(dir.path() + "/" + name + "/i18n/pl.json",
+                  QJsonDocument(QJsonObject{{"Click", click}, {"Frame", name.toUpper()}}).toJson());
+            write(dir.path() + "/" + name + "/Main.qml", QStringLiteral(R"(import QtQuick
+QtObject {
+    property string bound: qsTr("Click")
+    property string called: word()
+    function word() { return qsTr("Click") }
+    property string common: qsTr("Quit")
+    property QtObject other: %1 {}
+}
+)").arg(other).toUtf8());
+            write(dir.path() + "/" + name + "/" + other + ".qml",
+                  "import QtQuick\nQtObject { property string bound: qsTr(\"Click\"); property string called: [qsTr(\"Click\")][0] }\n");
+        }
+        Translator translator(dir.path() + "/language", PINHOLE_I18N);
+        translator.setPluginCatalogs({{"me.a", dir.path() + "/a"}, {"me.b", dir.path() + "/b"}});
+        QQmlEngine engine;
+        translator.setEngine(&engine);
+        QCoreApplication::installTranslator(&translator);
+        // Pinhole's own: its Polish whatever the plugins say.
+        QCOMPARE(translator.translate("HelpOverlay", "Click"), QString("Kliknij"));
+        QCOMPARE(translator.translate("Main", "Click"), QString("Kliknij"));
+        QCOMPARE(translator.translate("Outgoing", "Click"), QString("Kliknij"));
+        for (const auto &[name, click] : {std::pair<QString, QString>{"a", "Kliknięcie"}, {"b", "Klik"}}) {
+            // Loaded as Plugins loads a plugin: its id in the URL.
+            const QUrl url(QUrl::fromLocalFile(dir.path() + "/" + name + "/Main.qml").toString() + "?plugin=me." + name + "&load=0");
+            QQmlComponent component(&engine, url);
+            std::unique_ptr<QObject> plugin(component.create());
+            QVERIFY2(plugin, qPrintable(component.errorString()));
+            QCOMPARE(plugin->property("bound").toString(), click);
+            QCOMPARE(plugin->property("called").toString(), click);
+            QObject *other = plugin->property("other").value<QObject *>();
+            QCOMPARE(other->property("bound").toString(), click);
+            QCOMPARE(other->property("called").toString(), click);
+            // What it does not say itself, Pinhole's.
+            QCOMPARE(plugin->property("common").toString(), QString("Zakończ"));
+            // Its name, from its own catalog.
+            QCOMPARE(translator.pluginText("me." + name, "Frame"), name.toUpper());
+            QCOMPARE(translator.pluginText("me." + name, "Not said"), QString("Not said"));
+        }
+        QCoreApplication::removeTranslator(&translator);
+    }
+
+    // A plugin's name and description in the language, from its catalog.
+    void aPluginsNameAndDescriptionAreItsCatalogs() {
+        PluginBench bench({{"t", {{"name", "Colours"}, {"description", "Finds photos by colour."}}}});
+        QCOMPARE(bench.plugins->at("t").value("name").toString(), QString("Colours"));
+        QDir(bench.dir.path() + "/plugins/t").mkdir("i18n");
+        write(bench.dir.path() + "/plugins/t/i18n/pl.json",
+              QJsonDocument(QJsonObject{{"Colours", "Kolory"}, {"Finds photos by colour.", "Szuka zdjęć po kolorze."}}).toJson());
+        QSignalSpy changed(bench.plugins.get(), &Plugins::changed);
+        write(bench.dir.path() + "/language", "pl\n");
+        QTRY_COMPARE(bench.plugins->at("t").value("name").toString(), QString("Kolory"));
+        QCOMPARE(bench.plugins->at("t").value("description").toString(), QString("Szuka zdjęć po kolorze."));
+        QVERIFY(changed.size() > 0);
+    }
+
+    // Who covers the photos, as every plugin sees it.
+    void everyPluginSeesWhichOneCovers() {
+        PluginBench bench({{"t", {}}, {"u", {}}});
+        QSignalSpy seen(bench.host, &PluginHost::coveredByChanged);
+        QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString());
+        bench.plugins->setCoveredBy("u");
+        QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString("u"));
+        QCOMPARE(seen.size(), 1);
+        bench.plugins->setCoveredBy("u");
+        QCOMPARE(seen.size(), 1);
+        bench.plugins->setCoveredBy("");
+        QCOMPARE(bench.js("pinhole.coveredBy").toString(), QString());
+    }
+
+    // What came with API 2, by a plugin's words, comments aside; and each
+    // of Pinhole's own that uses any asks for API 2.
+    void whatAPluginUsesOfApi2IsFoundAndPinholesOwnAskForIt() {
+        QTemporaryDir dir;
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+// avgColor, pinhole.settings: only in a comment
+QtObject {
+    property var hidden: []
+    property string colour: pinhole.library.item(0).avgColor /* .then( */
+}
+)");
+        QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"hidden", "avgColor"}));
+        write(dir.path() + "/Main.qml", "import QtQuick\nQtObject {}\n");
+        write(dir.path() + "/Helper.js", "function go() { pinhole.run('x', []).then(r => r) }\n");
+        QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"promises"}));
+        const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
+        for (const QFileInfo &plugin : QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            QFile manifest(plugin.filePath() + "/manifest.json");
+            QVERIFY(manifest.open(QIODevice::ReadOnly));
+            const int api = QJsonDocument::fromJson(manifest.readAll()).object().value("api").toInt(1);
+            const QStringList uses = Plugins::apiTwoUses(plugin.filePath());
+            QVERIFY2(api >= 2 || uses.isEmpty(), qPrintable(plugin.fileName() + " uses " + uses.join(", ") + " and asks for API 1"));
+        }
+    }
+
     void theLibraryIsOldestFirstAndAMissingOneIsReported() {
         QTemporaryDir dir;
         Library missing;

@@ -22,6 +22,12 @@ Item {
     // Opens the menu; and what the help calls that.
     property string menuKey
     property string menuText
+    // Its menu is opened by keys, the menuKey's or others' (More's, by
+    // each folded group's): items without a key of their own are done
+    // through it.
+    property bool keyedMenu: menuKey !== ""
+    // ▾ beside the button; none for a button that opens the menu itself.
+    property bool arrowShown: true
     // The menu over the bar rather than under it, for a bar at the bottom.
     property bool upward: false
     // Whose keys its items' are, "grid" or "viewer" (Command.qml); and its
@@ -69,6 +75,11 @@ Item {
         current = byKey ? Math.max(0, lit) : -1
         open = true
     }
+    // Open, by the keys, on `item`'s row (or the first).
+    function openAt(item) {
+        current = Math.max(0, menuItems.indexOf(item))
+        open = true
+    }
 
     Row {
         id: row
@@ -90,7 +101,7 @@ Item {
         }
         ShellButton {
             id: arrow
-            visible: group.menuItems.length > 0
+            visible: group.arrowShown && group.menuItems.length > 0
             flat: true
             inset: Math.round(theme.fontSize * 0.5)
             text: "▾"
@@ -184,7 +195,7 @@ Item {
             section: modelData.section ?? group.section
             keys: (modelData.key ?? "") !== "" ? [modelData.key] : []
             // Without a key of its own, by keys through the menu.
-            noKeyboard: keys.length === 0 && group.menuKey !== "" ? qsTr("Through its menu") : ""
+            noKeyboard: keys.length === 0 && group.keyedMenu ? qsTr("Through its menu") : ""
             keyLayer: group.itemLayer
             when: group.visible && modelData.shown !== false && modelData.usable !== false
             // In the menu, or the button: a pointer's way either way.

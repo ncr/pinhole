@@ -32,7 +32,8 @@ pinhole plugin check me.favourites
 looks it over as Pinhole would load it, without a window: the manifest,
 every QML file it uses and the JavaScript they import, its translations.
 It takes a folder too (`pinhole plugin check .`), and exits 1 if anything is
-wrong, for an editor or a script to run on save.
+wrong, for an editor or a script to run on save. It warns of anything the
+plugin uses of an API newer than its manifest asks for.
 
 ## A whole plugin
 
@@ -52,7 +53,9 @@ wrong, for an editor or a script to run on save.
 
 `api` is the oldest version of what follows the plugin needs (1 if left
 out); a Pinhole older than that says it needs a newer one and does not load
-it. `pinhole.api` says which one it is running in.
+it. `pinhole.api` says which one it is running in. API 2 brought promises,
+`pinhole.settings`, `notify`, `warn`, photos by id, `hidden`, `avgColor`,
+`library.field`, `isHidden`, `run`'s `output` and `pinhole.coveredBy`.
 
 `Main.qml` beside it:
 
@@ -99,13 +102,25 @@ own. It sets:
   the first of them shown, with the rest in a menu under ▾ beside it, opened
   with ⇧ and that button's key. Pinhole sets its `hovered` while the pointer
   is on it, for the plugin to show what pressing it would do, as Series
-  shows the series a photo would join.
+  shows the series a photo would join. Where the window is too narrow for
+  them all, their keys go from the buttons, then the plugins' buttons fold
+  into one, More ▾, whose menu lists them with their keys; the keys work
+  either way, and a group's ⇧ key opens that menu on its row.
 - `covering`: true while it is over the photos: the grid's controls fade
   and its keys rest, as for Pinhole's panels. Its own `Shortcut`s and
-  `Command`s should be enabled only then.
+  `Command`s should be enabled only then. One plugin covers at a time, the
+  last to start: it is drawn over the other plugins, which are hidden
+  meanwhile (an overlay as Info's too), and the `"plugin"` key layer is its
+  alone. `pinhole.coveredBy` says which one it is (its id, `""` for none):
+  a plugin that comes back by itself, as On this day does when a photo
+  opened from it closes, stays away while another's covers, and forgets
+  coming back once another has covered meanwhile.
 - `settings`: a `Component` shown under its row in the side panel while it
   is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
-- `help`: its keys for the help (?), as `[["key", "what it does"], ...]`.
+- `help`: its keys for the help (?), as `[["key", "what it does"], ...]`,
+  listed under its name with its `Command`s that give a `section` (any
+  but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
+  Pinhole's are: the heading says whose they are.
 - `stacks`: photos shown in the grid as one card, each a list of library
   positions, as Series does with each series. The card stands where the
   first one is, shows it and carries the mark for several photos; opening
@@ -126,7 +141,10 @@ own. It sets:
   `PluginAction`s whose button is lit, and `settings: true` lights its part
   of the side panel. Pinhole shows it by itself the first time the plugin is
   on, once `tourReady` is true and the grid is free, and again from the
-  side panel. Series' shows a series of your own.
+  side panel. Series' shows a series of your own. One tour at most shows
+  by itself in a launch: with more than one not seen yet, a card lists
+  those plugins instead, each with Show for its tour, and once it closes
+  they count as seen.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle` and `Command` (a key, with what it does in the help),
@@ -158,6 +176,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `copyFile(path)`, `showFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is and a PNG of at most 2560 px, a GIF as it is), as Pinhole's own copy has it; its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
+| `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
 | `id`, `api` | its id; the version of all this |
 
 ### Promises
@@ -199,7 +218,14 @@ they still do.
 ### Translations
 
 Strings in `qsTr()` are translated from `i18n/<language>.json` in the
-plugin's folder, as Pinhole's own are (`app/src/i18n`).
+plugin's folder, as Pinhole's own are (`app/src/i18n`): the English as
+the key, the translation its value, or an object of plural forms for a
+counted one. Its catalog is its own: a string in its files is looked up
+there first, then in Pinhole's, and never changes what Pinhole or another
+plugin says. The manifest's `name` and `description` are looked up there
+too, so the side panel and the help name it in the language. (Qt names a
+string's file only by its name: a file named as one of another plugin's,
+other than `Main.qml`, may get that one's words for the same English.)
 
 ### Trust
 

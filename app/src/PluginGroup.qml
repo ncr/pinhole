@@ -10,7 +10,11 @@ MenuGroup {
     readonly property var action: primary >= 0 ? items[primary] : null
     primary: items.findIndex(a => a.shown)
     visible: primary >= 0
-    menuKey: action && action.key !== "" && !action.key.startsWith("Shift+") ? "Shift+" + action.key : ""
+    // ⇧ and the button's key; with none shown, the group's first key, so
+    // the menu's way by the keys is there whatever shows (its items
+    // without a key of their own are done through it).
+    readonly property var keyed: action && action.key !== "" ? action : items.find(a => a.key !== "") ?? null
+    menuKey: keyed && !keyed.key.startsWith("Shift+") ? "Shift+" + keyed.key : ""
 
     // The button stands for each of them, for a tour to light.
     function claim() {
@@ -18,6 +22,8 @@ MenuGroup {
             a.button = groupButton
     }
     onItemsChanged: claim()
+    // Back from More (MoreGroup.qml), it stands for them again.
+    onVisibleChanged: if (visible) claim()
     Component.onCompleted: claim()
     Component.onDestruction: {
         for (const a of items)

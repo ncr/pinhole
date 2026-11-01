@@ -2,13 +2,39 @@
 #include "translator.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QQmlEngine>
 #include <QRegularExpression>
+#include <QThread>
+#include <QUrl>
+#include <private/qqmlcontextdata_p.h>
+#include <private/qv4engine_p.h>
+
+#include <algorithm>
+
+namespace {
+
+// The names of the QML and JavaScript files in a folder, as Qt makes a
+// qsTr()'s context of them: "Finder" for Finder.qml.
+QSet<QString> filesIn(const QString &directory, QDirIterator::IteratorFlags flags) {
+    QSet<QString> files;
+    QDirIterator it(directory, {"*.qml", "*.js"}, QDir::Files, flags);
+    while (it.hasNext()) {
+        const QFileInfo info(it.next());
+        // A helper's build folder is not the plugin.
+        if (!info.filePath().contains(QLatin1String("/target/")))
+            files.insert(info.completeBaseName());
+    }
+    return files;
+}
+
+} // namespace
 
 Translator::Translator(const QString &languageFile, const QString &catalogDirectory, QObject *parent)
     : QTranslator(parent),
@@ -80,9 +106,9 @@ QLocale Translator::formatLocale(const QString &language) {
     return QLocale(language);
 }
 
-QString Translator::translate(const char *, const char *sourceText, const char *, int n) const {
+QString Translator::lookup(const Strings &strings, const QString &source, int n) const {
     // A null string tells Qt there is no translation, so it shows the English.
-    const QJsonValue value = m_strings.value(QString::fromUtf8(sourceText));
+    const QJsonValue value = strings.value(source);
     if (value.isString())
         return value.toString();
     if (value.isObject()) {
@@ -93,13 +119,103 @@ QString Translator::translate(const char *, const char *sourceText, const char *
     return {};
 }
 
-void Translator::setExtraCatalogs(const QStringList &directories) {
-    if (directories == m_extraCatalogs)
+QStringList Translator::ownersOf(const QString &context, const QString &calling) const {
+    // A plugin's main file is loaded from a URL that names the plugin
+    // (Plugins::at: Main.qml?plugin=<id>&load=<n>), and Qt makes its
+    // bindings' context of that whole name, less its last four letters:
+    // "Main.qml?plugin=pinhole.colour&lo".
+    static const QRegularExpression named(QStringLiteral("\\?plugin=([^&]+)&"));
+    if (const auto match = named.match(context); match.hasMatch())
+        return {QUrl::fromPercentEncoding(match.captured(1).toUtf8()), QString()};
+    // A qsTr() in JavaScript: the file it is in, when that is the one the
+    // context was made of (and not code further out that made this one's
+    // object). A main file's context is cut at the last dot, the id's.
+    if (!calling.isEmpty()) {
+        const QUrl url(calling);
+        const QString file = url.fileName();
+        if (context == QFileInfo(file).completeBaseName() || context.section('?', 0, 0) == file) {
+            const QString path = url.isLocalFile() ? url.toLocalFile() : QString();
+            for (const PluginCatalog &plugin : m_plugins)
+                if (!path.isEmpty() && path.startsWith(plugin.dir + '/'))
+                    return {plugin.id, QString()};
+            if (url.scheme() == QLatin1String("qrc"))
+                return {QString()};
+        }
+    }
+    // Else by the file's name: the plugins with a file of that name, and
+    // Pinhole, first if it has one too (and for a C++ class's tr()).
+    QStringList owners;
+    for (const PluginCatalog &plugin : m_plugins)
+        if (plugin.files.contains(context))
+            owners << plugin.id;
+    if (owners.isEmpty() || m_files.contains(context))
+        owners.prepend(QString());
+    else
+        owners.append(QString());
+    return owners;
+}
+
+QString Translator::translate(const char *context, const char *sourceText, const char *, int n) const {
+    const QString source = QString::fromUtf8(sourceText);
+    if (m_plugins.isEmpty())
+        return lookup(m_strings, source, n);
+    // Called in JavaScript: in which file, from the engine, on its thread.
+    QString calling;
+    if (m_engine && QThread::currentThread() == m_engine->thread())
+        if (const QQmlRefPointer<QQmlContextData> data = m_engine->handle()->callingQmlContext())
+            calling = data->urlString();
+    for (const QString &owner : ownersOf(QString::fromUtf8(context), calling)) {
+        const Strings *strings = &m_strings;
+        if (!owner.isEmpty()) {
+            const auto plugin = std::find_if(m_plugins.cbegin(), m_plugins.cend(),
+                                             [&](const PluginCatalog &p) { return p.id == owner; });
+            if (plugin == m_plugins.cend())
+                continue;
+            strings = &plugin->strings;
+        }
+        if (const QString text = lookup(*strings, source, n); !text.isNull())
+            return text;
+    }
+    return {};
+}
+
+void Translator::setEngine(QQmlEngine *engine) { m_engine = engine; }
+
+QString Translator::pluginText(const QString &id, const QString &source) const {
+    for (const PluginCatalog &plugin : m_plugins)
+        if (plugin.id == id)
+            if (const QString text = lookup(plugin.strings, source, -1); !text.isNull())
+                return text;
+    return source;
+}
+
+void Translator::setPluginCatalogs(const QList<std::pair<QString, QString>> &plugins) {
+    if (plugins == m_pluginDirs)
         return;
-    m_extraCatalogs = directories;
+    m_pluginDirs = plugins;
     // Read again, whatever the language.
     m_language.clear();
     reload();
+}
+
+// A catalog's strings in the language: English first (it carries the
+// plural forms of counted strings), then the base language and the regional
+// file over it (pt, then pt-BR), so a missing string falls back toward
+// English one step at a time.
+Translator::Strings Translator::read(const QString &directory) const {
+    Strings strings;
+    QStringList codes{"en", m_language.section('-', 0, 0), m_language};
+    codes.removeDuplicates();
+    for (const auto &code : codes) {
+        QFile catalog(directory + "/" + code + ".json");
+        if (!catalog.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject object = QJsonDocument::fromJson(catalog.readAll()).object();
+        for (auto it = object.begin(); it != object.end(); ++it)
+            if ((it.value().isString() && !it.value().toString().isEmpty()) || it.value().isObject())
+                strings.insert(it.key(), it.value());
+    }
+    return strings;
 }
 
 void Translator::reload() {
@@ -116,31 +232,17 @@ void Translator::reload() {
         m_watcher.addPath(m_languageFile);
 
     // Catalogs are compiled in, so only a different language (or plugins'
-    // catalogs, setExtraCatalogs) needs a reload.
+    // catalogs, setPluginCatalogs) needs a reload.
     const QString language = readLanguage(m_languageFile);
     if (language == m_language)
         return;
 
-    // English first (it carries the plural forms of counted strings), then
-    // the base language and the regional file over it (pt, then pt-BR), so a
-    // missing string falls back toward English one step at a time.
-    QHash<QString, QJsonValue> strings;
-    QStringList codes{"en", language.section('-', 0, 0), language};
-    codes.removeDuplicates();
-    for (const QString &directory : QStringList{m_catalogDirectory} + m_extraCatalogs) {
-        for (const auto &code : codes) {
-            QFile catalog(directory + "/" + code + ".json");
-            if (!catalog.open(QIODevice::ReadOnly))
-                continue;
-            const QJsonObject object = QJsonDocument::fromJson(catalog.readAll()).object();
-            for (auto it = object.begin(); it != object.end(); ++it)
-                if ((it.value().isString() && !it.value().toString().isEmpty()) || it.value().isObject())
-                    strings.insert(it.key(), it.value());
-        }
-    }
-
     m_language = language;
-    m_strings = strings;
+    m_strings = read(m_catalogDirectory);
+    m_files = filesIn(QStringLiteral(":/"), QDirIterator::NoIteratorFlags);
+    m_plugins.clear();
+    for (const auto &[id, dir] : m_pluginDirs)
+        m_plugins.append({id, dir, filesIn(dir, QDirIterator::Subdirectories), read(dir + "/i18n")});
     // Dates, numbers, and Qt's own day and month names follow the language
     // too, and right-to-left languages mirror the window.
     const QLocale locale = formatLocale(language);

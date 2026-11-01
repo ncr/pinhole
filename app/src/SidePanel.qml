@@ -120,9 +120,27 @@ Item {
         unfolded = now
     }
     readonly property int pluginsOn: (plugins.revision, plugins.ids.filter(id => plugins.at(id).enabled).length)
+    // The plugins in the order listed: Pinhole's own, then one's own, each
+    // by its name in the language. Set only when it changes, so the rows
+    // stay as they are otherwise.
+    property var pluginOrder: []
+    function orderPlugins() {
+        const order = plugins.ids.slice().sort((a, b) => {
+            const x = plugins.at(a), y = plugins.at(b)
+            return x.personal !== y.personal ? (x.personal ? 1 : -1) : x.name.localeCompare(y.name)
+        })
+        if (order.join("\n") !== pluginOrder.join("\n"))
+            pluginOrder = order
+    }
+    Connections {
+        target: plugins
+        function onChanged() { root.orderPlugins() }
+        function onIdsChanged() { root.orderPlugins() }
+    }
+    Component.onCompleted: orderPlugins()
     function showPlugin(id) {
         unfold(id, true)
-        const k = plugins.ids.indexOf(id)
+        const k = pluginOrder.indexOf(id)
         const row = k >= 0 ? pluginRows.itemAt(k) : null
         if (row) {
             const y = row.mapToItem(scroller.contentItem, 0, 0).y
@@ -919,7 +937,7 @@ Item {
             // them, a line down from its chevron tying them to it.
             Repeater {
                 id: pluginRows
-                model: plugins.ids
+                model: root.pluginOrder
                 delegate: Item {
                     id: pluginRow
                     required property string modelData

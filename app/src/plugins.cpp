@@ -314,6 +314,8 @@ PluginHost::~PluginHost() { stop(); }
 
 int PluginHost::api() const { return Plugins::api; }
 
+QString PluginHost::coveredBy() const { return m_plugins->coveredBy(); }
+
 QString PluginHost::cacheDir() const {
     // library/icloud/<apple id> → icloud-<apple id>.
     const QDir library(m_plugins->libraryData()->dir());
@@ -704,6 +706,12 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     connect(&m_settle, &QTimer::timeout, this, &Plugins::rescan);
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_settle, qOverload<>(&QTimer::start));
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_settle, qOverload<>(&QTimer::start));
+    // Their names and descriptions are in the language too.
+    if (m_translator)
+        connect(m_translator, &Translator::changed, this, [this] {
+            ++m_revision;
+            emit changed();
+        });
     scan();
 }
 
@@ -750,10 +758,15 @@ QVariantMap Plugins::at(const QString &id) const {
     for (const auto &p : m_plugins) {
         if (p->id != id)
             continue;
+        // Its name and description from its own catalog, the English the
+        // key, as its other words are.
+        const auto said = [&](const QString &english) {
+            return m_translator && !english.isEmpty() ? m_translator->pluginText(p->id, english) : english;
+        };
         return {
             {"id", p->id},
-            {"name", p->name},
-            {"description", p->description},
+            {"name", said(p->name)},
+            {"description", said(p->description)},
             {"version", p->version},
             {"author", p->author},
             {"personal", p->personal},
@@ -762,9 +775,12 @@ QVariantMap Plugins::at(const QString &id) const {
             {"problem", p->host->problem()},
             {"toured", m_config.value("toured").toObject().value(p->id).toBool()},
             {"dir", p->dir},
-            // Another URL for each load, so the engine reads the files again.
+            // Another URL for each load, so the engine reads the files again;
+            // and naming the plugin, which its strings' context keeps
+            // (Translator::ownersOf).
             {"main", p->main.isEmpty() ? QString()
-                                       : QUrl::fromLocalFile(p->dir + '/' + p->main).toString() + "?load=" + QString::number(p->loads)},
+                                       : QUrl::fromLocalFile(p->dir + '/' + p->main).toString() + "?plugin="
+                                             + QString::fromUtf8(QUrl::toPercentEncoding(p->id)) + "&load=" + QString::number(p->loads)},
             {"host", QVariant::fromValue<QObject *>(p->host.get())},
         };
     }
@@ -788,6 +804,15 @@ void Plugins::setEnabled(const QString &id, bool on) {
     emit changed();
 }
 
+void Plugins::setCoveredBy(const QString &id) {
+    if (id == m_coveredBy)
+        return;
+    m_coveredBy = id;
+    emit coveredByChanged();
+    for (const auto &p : m_plugins)
+        emit p->host->coveredByChanged();
+}
+
 void Plugins::setToured(const QString &id) {
     QJsonObject config = m_config;
     QJsonObject toured = config.value("toured").toObject();
@@ -801,11 +826,20 @@ void Plugins::setToured(const QString &id) {
 }
 
 void Plugins::updateCatalogs() {
-    QStringList catalogs;
+    QList<std::pair<QString, QString>> catalogs;
     for (const auto &p : m_plugins)
         if (p->error.isEmpty() && enabled(*p))
-            catalogs << p->dir + "/i18n";
-    m_translator->setExtraCatalogs(catalogs);
+            catalogs.append({p->id, p->dir});
+    if (m_translator)
+        m_translator->setPluginCatalogs(catalogs);
+}
+
+QString Plugins::idOf(const QString &url) const {
+    const QString path = QUrl(url).toLocalFile();
+    for (const auto &p : m_plugins)
+        if (!path.isEmpty() && path.startsWith(p->dir + '/'))
+            return p->id;
+    return {};
 }
 
 void Plugins::showPersonalDir() const {
@@ -906,6 +940,40 @@ void Plugins::loadFailed(const QString &id) {
 
 void Plugins::rescan() {
     scan();
+}
+
+QStringList Plugins::apiTwoUses(const QString &dir) {
+    // Each, and the words that use it. Anything added to what a plugin is
+    // given before API 2 is released is API 2's, and goes here.
+    static const QList<std::pair<QString, QRegularExpression>> features = {
+        {"promises", QRegularExpression(QStringLiteral("\\.then\\s*\\("))},
+        {"pinhole.settings", QRegularExpression(QStringLiteral("\\bpinhole\\.settings\\b"))},
+        {"pinhole.notify", QRegularExpression(QStringLiteral("\\bpinhole\\.notify\\b"))},
+        {"pinhole.warn", QRegularExpression(QStringLiteral("\\bpinhole\\.warn\\b"))},
+        {"pinhole.api", QRegularExpression(QStringLiteral("\\bpinhole\\.api\\b"))},
+        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bcoveredBy\\b"))},
+        {"covered", QRegularExpression(QStringLiteral("\\bcovered\\b"))},
+        {"hidden", QRegularExpression(QStringLiteral("(^|[\\s;{])hidden\\s*:"), QRegularExpression::MultilineOption)},
+        {"avgColor", QRegularExpression(QStringLiteral("\\bavgColor\\b"))},
+        {"library.field", QRegularExpression(QStringLiteral("\\blibrary\\.field\\s*\\("))},
+        {"pinhole.isHidden", QRegularExpression(QStringLiteral("\\b(isHidden|hiddenCount|hiddenChanged|onHiddenChanged)\\b"))},
+        {"run's output", QRegularExpression(QStringLiteral("\\boutput\\s*:"))},
+    };
+    // Its words, not its comments.
+    static const QRegularExpression comments(QStringLiteral("/\\*.*?\\*/|//[^\\n]*"),
+                                             QRegularExpression::DotMatchesEverythingOption);
+    QString code;
+    QDirIterator it(dir, {"*.qml", "*.js"}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        QFile file(it.next());
+        if (!file.fileName().contains(QLatin1String("/target/")) && file.open(QIODevice::ReadOnly))
+            code += QString::fromUtf8(file.readAll()).remove(comments) + '\n';
+    }
+    QStringList uses;
+    for (const auto &[name, words] : features)
+        if (code.contains(words))
+            uses << name;
+    return uses;
 }
 
 QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QString *main) {
@@ -1173,7 +1241,14 @@ int checkPlugin(const QString &target) {
             err(QStringLiteral("%1: %2").arg(name, problem));
         return 1;
     }
-    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(manifest.value("api").toInt(1)));
+    const int asked = manifest.value("api").toInt(1);
+    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(asked));
+    // What it uses of a newer API than it asks for works here, and not in a
+    // Pinhole of the one it asks for, which would load it all the same.
+    if (const QStringList uses = Plugins::apiTwoUses(dir); asked < 2 && !uses.isEmpty())
+        err(QStringLiteral("%1: warning: it uses %2, of plugin API 2, and its manifest asks for API %3: give it \"api\": 2.")
+                .arg(name, uses.join(QStringLiteral(", ")))
+                .arg(asked));
     if (QDir(dir).absolutePath().startsWith(Plugins::personalDir() + '/')
         && QFileInfo::exists(Plugins::builtInDir() + '/' + id + "/manifest.json"))
         out(QStringLiteral("It takes the place of Pinhole's own %1 while it is there.").arg(id));

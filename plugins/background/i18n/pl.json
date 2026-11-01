@@ -1,6 +1,6 @@
 {
-  "A Live Photo's Bounce as the background": "Odbicie zdjęcia Live jako tło",
-  "A Live Photo's motion as a moving background": "Ruch zdjęcia Live jako ruchome tło",
+  "A Live Photo's Bounce": "Odbicie zdjęcia Live",
+  "A Live Photo's motion": "Ruch zdjęcia Live",
   "B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds.": "B na zdjęciu otwartym na całe okno. Każde tło zostaje w Pictures/Pinhole/.backgrounds.",
   "Background": "Tło",
   "Behind everything": "Pod wszystkim",
@@ -9,7 +9,8 @@
   "Each one is kept in Pictures/Pinhole/.backgrounds, hidden from the grid, so it stays when the cache is cleaned and comes back with its theme.": "Każde zostaje w Pictures/Pinhole/.backgrounds, ukryte przed siatką, więc nie znika przy czyszczeniu pamięci podręcznej i wraca razem ze swoim motywem.",
   "Kept": "Zachowane",
   "Live Photos move": "Zdjęcia Live się ruszają",
-  "Make the photo or video the desktop background": "Zdjęcie albo wideo jako tło pulpitu",
+  "Make it the desktop background": "Zrób z niego tło pulpitu",
+  "Makes the photo shown the desktop background; a video, or a Live Photo's motion, a moving one.": "Robi z pokazanego zdjęcia tło pulpitu; z wideo albo z ruchu zdjęcia Live — tło ruchome.",
   "Moving background": "Ruchome tło",
   "On a Live Photo, V (or the ▾ beside Background, ⇧B) makes its motion the background: as taken, or as its Loop if the iPhone set one; ⇧V as a Bounce.": "Na zdjęciu Live V (albo ▾ obok Tła, ⇧B) robi tło z jego ruchu: takiego, jak nagrany, albo z Pętli, jeśli iPhone ją ustawił; ⇧V z Odbicia.",
   "On a photo shown full window, B makes it the desktop background; a video becomes a moving one. Ctrl+Z puts the one before back.": "Na zdjęciu otwartym na całe okno B robi z niego tło pulpitu; wideo staje się tłem ruchomym. Ctrl+Z przywraca poprzednie.",
