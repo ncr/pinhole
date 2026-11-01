@@ -154,7 +154,8 @@ PinholePlugin {
         const leapDay = month === 1 && date === 28 && new Date(thisYear, 1, 29).getMonth() === 2
         // What the grid hides (Screenshots' hide mode, say) is left out,
         // as the grid leaves it out.
-        const hiding = pinhole.hiddenCount > 0
+        hiddenSeen = pinhole.hiddenCount
+        const hiding = hiddenSeen > 0
         shotsHidden = hiding && shotIds.some(id => pinhole.isHidden(id))
         const list = []
         for (let year = thisYear - 1; firstYear > 0 && year >= firstYear; --year) {
@@ -219,10 +220,24 @@ PinholePlugin {
     // Photos hidden from the grid, or shown again: counted again. After the
     // library's own change, when it is read again too (the grid's comes
     // first), so the days are this reading's and the overlay stays as it is
-    // when none of its photos moved.
+    // when none of its photos moved. With the days still to be read again
+    // (the library read again in the last ten seconds), photos hidden or
+    // shown again have them read at once, for the button's count; not those
+    // only moved by the library's reading, as they are by every photo come
+    // before them, or a library being built would be read each time.
+    property int hiddenSeen: 0
     Connections {
         target: pinhole
-        function onHiddenChanged() { Qt.callLater(plugin.recount) }
+        function onHiddenChanged() { Qt.callLater(plugin.hiddenMoved) }
+        // Another source's library: its days at once, not the last one's
+        // count for ten seconds.
+        function onCacheDirChanged() { plugin.fresh() }
+    }
+    function hiddenMoved() {
+        if (stale && pinhole.hiddenCount !== hiddenSeen)
+            index()
+        else
+            recount()
     }
     Component.onCompleted: index()
     // Midnight: another day's photos. Looked at every minute rather than

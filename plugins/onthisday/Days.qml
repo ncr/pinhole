@@ -31,50 +31,93 @@ Item {
     }
     readonly property int total: starts[starts.length - 1]
     property int cursor: 0
-    function placeOf(at) {
+    // Where one of them all is, among `among` (the years shown if not
+    // given): which year, and which of its photos. Counted from the years
+    // themselves: as they change, `starts` may not have caught up yet.
+    function placeOf(at, among) {
+        const of = among || years
         let s = 0
-        while (s + 1 < years.length && starts[s + 1] <= at)
+        while (s + 1 < of.length && at >= of[s].photos.length) {
+            at -= of[s].photos.length
             ++s
-        return { s: s, k: at - starts[s] }
+        }
+        return { s: s, k: at }
     }
+    // Its photo (a library position), -1 for none.
     function photoAt(at) {
         const place = placeOf(at)
-        return years[place.s].photos[place.k]
+        const year = years[place.s]
+        return year && place.k >= 0 && place.k < year.photos.length ? year.photos[place.k] : -1
+    }
+    // The line a photo is on, for these years laid out so many across.
+    function rowOf(at, among, across) {
+        const of = among || years, n = across || columns
+        const place = placeOf(at, of)
+        let row = 0
+        for (let s = 0; s < place.s; ++s)
+            row += 1 + Math.ceil(of[s].photos.length / n)
+        return row + 1 + Math.floor(place.k / n)
     }
 
     // The lines of the list, only while it shows (or comes back): each
     // year's heading, then its photos a row at a time. Only those in
-    // sight are made.
-    readonly property var rows: {
-        if (!shown && !away)
-            return []
-        const list = []
-        years.forEach((year, s) => {
-            list.push({ s: s, k: -1 })
-            for (let k = 0; k < year.photos.length; k += columns)
-                list.push({ s: s, k: k })
-        })
-        return list
-    }
-    // The list's model is how many lines there are, each line taking its
-    // own from `rows`: new years of as many lines leave the list where it
-    // is, and more or fewer keep where it was scrolled to.
+    // sight are made. The list's model is how many lines there are, each
+    // line taking its own from `rows`: new years of as many lines leave
+    // the list as it is.
+    property var rows: []
     property int lineCount: 0
-    onRowsChanged: {
-        if (rows.length === lineCount)
-            return
-        const y = list.contentY
-        lineCount = rows.length
-        list.forceLayout()
+    // The years and the columns the lines are laid out for.
+    property var laidYears: []
+    property int laidColumns: 1
+    // The cursor's line as laid out, and how far down the list's view it
+    // is; null when it is not in sight.
+    function cursorLine() {
+        if (lineCount === 0 || laidYears.length === 0)
+            return null
+        const line = rowOf(cursor, laidYears, laidColumns)
+        const item = list.itemAtIndex(line)
+        return item ? { line: line, offset: item.y - list.contentY } : null
+    }
+    function scrollTo(y) {
         list.contentY = Math.max(list.originY, Math.min(y, list.originY + list.contentHeight - list.height))
     }
-    function rowOf(at) {
-        const place = placeOf(at)
-        let row = 0
-        for (let s = 0; s < place.s; ++s)
-            row += 1 + Math.ceil(years[s].photos.length / columns)
-        return row + 1 + Math.floor(place.k / columns)
+    // Laid out again for the years and columns as they are now. More or
+    // fewer lines keep where the list was scrolled to; with `keep` (from
+    // cursorLine() before the change), the cursor's line stays where it
+    // was in the view, however many lines came or went above it.
+    function relayout(keep) {
+        const lines = []
+        if (shown || away)
+            years.forEach((year, s) => {
+                lines.push({ s: s, k: -1 })
+                for (let k = 0; k < year.photos.length; k += columns)
+                    lines.push({ s: s, k: k })
+            })
+        laidYears = years
+        laidColumns = columns
+        const same = lines.length === rows.length && lines.every((line, i) => line.s === rows[i].s && line.k === rows[i].k)
+        if (!same)
+            rows = lines
+        if (lines.length !== lineCount) {
+            const y = list.contentY
+            lineCount = lines.length
+            list.forceLayout()
+            scrollTo(y)
+        }
+        if (keep && years.length > 0) {
+            const line = rowOf(cursor)
+            if (!same || line !== keep.line) {
+                list.forceLayout()
+                list.positionViewAtIndex(line, ListView.Beginning)
+                const item = list.itemAtIndex(line)
+                if (item)
+                    scrollTo(item.y - keep.offset)
+            }
+        }
     }
+    onShownChanged: relayout(null)
+    onAwayChanged: relayout(null)
+    onColumnsChanged: relayout(cursorLine())
 
     function open() {
         plugin.fresh()
@@ -124,11 +167,16 @@ Item {
     }
     // The years changed under it (the library read again, a setting,
     // photos hidden, or midnight): the cursor stays on its photo, by its
-    // id, if it is still among them.
+    // id, if it is still among them, and its line where it was on the
+    // screen.
     property string cursorId: ""
-    onCursorChanged: cursorId = total > 0 ? pinhole.library.item(photoAt(cursor)).id ?? "" : ""
+    function idAt(at) {
+        const photo = photoAt(at)
+        return photo >= 0 ? pinhole.library.item(photo).id ?? "" : ""
+    }
+    onCursorChanged: cursorId = idAt(cursor)
     onYearsChanged: {
-        // Counted here: `starts` and `total` may not have caught up yet.
+        const keep = cursorLine()
         const at = cursorId !== "" ? pinhole.library.indexOf(cursorId) : -1
         let k = -1, n = 0
         for (const year of years) {
@@ -137,10 +185,9 @@ Item {
                 k = n + i
             n += year.photos.length
         }
-        const id = cursorId
         cursor = k >= 0 ? k : Math.min(cursor, Math.max(0, n - 1))
-        if (k >= 0)
-            cursorId = id
+        cursorId = idAt(cursor)
+        relayout(keep)
     }
 
     // The keys: along a year's rows, and from one year to the next.
