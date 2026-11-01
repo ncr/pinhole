@@ -37,8 +37,24 @@ PinholePlugin {
     }
 
     // What it keeps, kept small: folders staged for LocalSend's window go
-    // after a day, JPEGs after thirty, and the oldest past 2 GB.
-    Component.onCompleted: pinhole.run(sender, ["tidy", pinhole.cacheDir]).catch(pinhole.warn)
+    // after a day, JPEGs after thirty, and the oldest past 2 GB; each
+    // source's, as it loads, every hour and when another source is shown.
+    // Not while a send may be taking from it.
+    function tidy() {
+        if (!panel.running)
+            pinhole.run(sender, ["tidy", pinhole.cacheDir]).catch(pinhole.warn)
+    }
+    Component.onCompleted: tidy()
+    Connections {
+        target: pinhole
+        function onCacheDirChanged() { plugin.tidy() }
+    }
+    Timer {
+        interval: 60 * 60 * 1000
+        running: true
+        repeat: true
+        onTriggered: plugin.tidy()
+    }
 
     readonly property string label: panel.running ? qsTr("Sending") : qsTr("Send")
 

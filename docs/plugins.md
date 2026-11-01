@@ -211,8 +211,9 @@ said nowhere. There is no `finally` in Qt's JavaScript; a `.then()` after
 the `.catch()` does the same. Nor is there `async`/`await` in QML.
 
 Everything a plugin started ends with it: turned off or loaded again, its
-programs are stopped (asked to end with SIGTERM, killed a second later), its recordings dropped, and no promise or callback of
-its old self is answered.
+programs are stopped (asked to end with SIGTERM, killed a second later; so
+too when the window closes), its recordings dropped, and no promise or
+callback of its old self is answered.
 
 Before API 2 these took a callback last in place of a promise
 (`fetch(i, kind, done(path, error))`, `run(program, args, done(code,

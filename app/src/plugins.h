@@ -18,6 +18,7 @@
 #include "keepawake.h"
 
 class History;
+class QProcess;
 class Library;
 class PhotoGrid;
 class QJSEngine;
@@ -262,6 +263,10 @@ private:
     // with the plugin.
     std::vector<std::pair<QPointer<QObject>, std::function<void()>>> m_running;
     void track(QObject *job, std::function<void()> stop);
+    // Going with the window: the programs asked to end are waited for here,
+    // as no event loop is left to kill them a second later.
+    bool m_closing = false;
+    std::vector<QProcess *> m_ending;
 };
 
 // Plugins: what is added to Pinhole without changing it. Each is a folder

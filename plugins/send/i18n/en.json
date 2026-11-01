@@ -15,8 +15,12 @@
     "one": "With the video of %n Live Photo",
     "other": "With the videos of %n Live Photos"
   },
-  "Sent %n file(s) to %1; %2 could not be fetched.": {
-    "one": "Sent %n file to %1; %2 could not be fetched.",
-    "other": "Sent %n files to %1; %2 could not be fetched."
+  "%n could not be fetched": {
+    "one": "%n could not be fetched",
+    "other": "%n could not be fetched"
+  },
+  "%n could not be made JPEG": {
+    "one": "%n could not be made JPEG",
+    "other": "%n could not be made JPEG"
   }
 }

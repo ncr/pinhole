@@ -17,6 +17,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <csignal>
+
 #include "encoder.h"
 #include "favourites.h"
 #include "history.h"
@@ -1902,6 +1904,28 @@ private slots:
         QVERIFY(QDir(bench.dir.path() + "/plugins/t").removeRecursively());
         bench.plugins->rescan();
         QVERIFY(!awake->wanted());
+    }
+
+    // The window closing: no event loop is left to kill a program a second
+    // after asking it to end, so the host waits that second itself.
+    void aProgramThatWillNotEndGoesWithTheWindow() {
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}});
+        const QString pidFile = bench->dir.path() + "/pid";
+        // Deaf to SIGTERM, as is what it runs in its place.
+        bench->js(QStringLiteral(R"(pinhole.run("sh", ["-c", "trap '' TERM; echo $$ > %1; exec sleep 30"]))").arg(pidFile));
+        QTRY_VERIFY(QFileInfo(pidFile).size() > 0);
+        QFile file(pidFile);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const pid_t pid = file.readAll().trimmed().toInt();
+        QVERIFY(pid > 0);
+        QVERIFY(::kill(pid, 0) == 0);
+        QElapsedTimer clock;
+        clock.start();
+        bench->plugins.reset();
+        // Gone, and reaped, before anything else runs.
+        QVERIFY(::kill(pid, 0) != 0);
+        QVERIFY(clock.elapsed() >= 900);
+        QVERIFY(clock.elapsed() < 3000);
     }
 
     void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {

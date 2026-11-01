@@ -16,9 +16,10 @@
 //!     owner decides, `accepted <files> <bytes>`, `progress <sent> <total>`
 //!     as it goes, and `sent <files>`. Else, exiting 1, one of: `declined`,
 //!     `busy`, `pin` (it wants one), `wrongpin`, `nothing` (it took none),
-//!     `stalled` (nothing went for 30 s), `unreachable`, `mismatch` (not the
-//!     certificate it answered with before), `rejected <status>`, `failed`,
-//!     or `cancelled` once stopped (SIGTERM), the device told.
+//!     `stalled` (nothing went for 30 s), `unreachable` (nothing answered
+//!     at its address in 10 s), `mismatch` (not the certificate it answered
+//!     with before), `rejected <status>`, `failed`, or `cancelled` at once
+//!     when stopped (SIGTERM), the device then told within 0.7 s.
 //!
 //! `pinhole-send stage <folder>`, stdin `[{"path", "name"}, ...]`
 //!     The files under their names in the folder (linked where they can be,
@@ -31,8 +32,9 @@
 //!     and inode, so another file of its name, or it changed, is made anew.
 //!
 //! `pinhole-send tidy <folder>`
-//!     The plugin's cache kept small: folders staged for LocalSend gone after
-//!     a day, JPEGs after thirty, and the oldest of them past 2 GB.
+//!     The plugin's cache kept small, the folder's and each other source's
+//!     beside it: folders staged for LocalSend gone after a day, JPEGs after
+//!     thirty, and the oldest of them past 2 GB.
 //!
 //! This computer is one LocalSend device to the others, whichever command:
 //! its certificate is kept in ~/.config/pinhole/send, so a phone sees the
@@ -69,8 +71,15 @@ use tokio_util::sync::CancellationToken;
 
 /// With nothing sent for this long, a receiver is taken to have stopped.
 const STALL: Duration = Duration::from_secs(30);
-/// How long the device is given to hear it was stopped.
+/// How long the device is given to hear the send was given up on.
 const CANCEL_WAIT: Duration = Duration::from_secs(2);
+/// Stopped, less: the plugin's host kills a second after asking (SIGTERM),
+/// and `cancelled` is said before.
+const STOPPED_WAIT: Duration = Duration::from_millis(700);
+/// How long a device's address is given to answer at all: one gone from
+/// the network would otherwise be waited for as long as the system tries,
+/// minutes.
+const CONNECT: Duration = Duration::from_secs(10);
 /// HEICs made JPEGs at once.
 const CONVERSIONS: usize = 3;
 
@@ -446,6 +455,29 @@ fn file_type(name: &str) -> &'static str {
     }
 }
 
+/// A value for a URL's query, percent-encoded but for what never needs it
+/// (RFC 3986's unreserved): LocalSend puts it in as it is given.
+fn query_value(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            b => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Whether anything takes a connection at the device's address within
+/// CONNECT. An address that is not one (a name) is left to the request.
+async fn reachable(http: &HttpChannel) -> bool {
+    let address = if http.host.contains(':') {
+        format!("[{}]:{}", http.host, http.port)
+    } else {
+        format!("{}:{}", http.host, http.port)
+    };
+    let Ok(address) = address.parse::<std::net::SocketAddr>() else { return true };
+    matches!(tokio::time::timeout(CONNECT, tokio::net::TcpStream::connect(address)).await, Ok(Ok(_)))
+}
+
 /// What went wrong talking to a device, as a word for the plugin; never
 /// the error itself, whose URL carries the session's token.
 fn trouble(err: &ClientError) -> String {
@@ -465,7 +497,8 @@ fn trouble(err: &ClientError) -> String {
 
 async fn send(args: &[String]) -> Result<()> {
     let device: Value = serde_json::from_str(args.first().context("no device")?).context("the device")?;
-    let pin = args.get(1).filter(|pin| !pin.is_empty()).cloned();
+    // As a URL's query has it: a PIN of `&`, `#`, `+` or `%` is itself.
+    let pin = args.get(1).filter(|pin| !pin.is_empty()).map(|pin| query_value(pin));
     let http = channel_of(&device)?;
     let identity = Identity::load()?;
     let chosen = files_in()?;
@@ -507,6 +540,13 @@ async fn send(args: &[String]) -> Result<()> {
     )?;
 
     say("asking");
+    tokio::select! {
+        answers = reachable(&http) => if !answers {
+            eprintln!("pinhole-send: asking: unreachable");
+            end("unreachable");
+        },
+        _ = stop.cancelled() => end("cancelled"),
+    }
     let payload = PrepareUploadRequestDtoV2 { info: identity.register_dto(DEFAULT_PORT), files: files.clone() };
     let prepared = match client
         .prepare_upload(http.protocol, &http.host, http.port, None, payload, pin.as_deref(), stop.clone())
@@ -547,7 +587,7 @@ async fn send(args: &[String]) -> Result<()> {
         async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let since = started.elapsed().as_millis() as u64 - last.load(Ordering::Relaxed);
+                let since = (started.elapsed().as_millis() as u64).saturating_sub(last.load(Ordering::Relaxed));
                 if Duration::from_millis(since) >= STALL {
                     abort.cancel();
                     return;
@@ -588,18 +628,27 @@ async fn send(args: &[String]) -> Result<()> {
             .upload(http.protocol, &http.host, http.port, None, &response.session_id, id, token, body, abort.clone())
             .await;
         if let Err(err) = result {
-            // Told, if it will hear it in a moment; not waited for longer.
-            let _ = tokio::time::timeout(
-                CANCEL_WAIT,
-                client.cancel(http.protocol, &http.host, http.port, &response.session_id),
-            )
-            .await;
+            let stopped = stop.is_cancelled();
             let word = match err {
-                ClientError::Cancelled if stop.is_cancelled() => "cancelled".to_string(),
+                ClientError::Cancelled if stopped => "cancelled".to_string(),
                 ClientError::Cancelled => "stalled".to_string(),
                 err => trouble(&err),
             };
             eprintln!("pinhole-send: sending: {word}");
+            // Stopped: said at once, before the host's kill; the device is
+            // told in what is left. Else told, if it will hear it in a
+            // moment, and not waited for longer.
+            if stopped {
+                say(&word);
+            }
+            let _ = tokio::time::timeout(
+                if stopped { STOPPED_WAIT } else { CANCEL_WAIT },
+                client.cancel(http.protocol, &http.host, http.port, &response.session_id),
+            )
+            .await;
+            if stopped {
+                std::process::exit(1);
+            }
             end(&word);
         }
         sent += files[*id].size;
@@ -721,8 +770,25 @@ async fn jpeg(args: &[String]) -> Result<()> {
 }
 
 fn tidy(args: &[String]) -> Result<()> {
-    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
     let folder = PathBuf::from(args.first().context("no folder")?);
+    // Each source's library has a folder of its own, beside this one: the
+    // others' are kept small too, though not shown now.
+    let mut folders = vec![folder.clone()];
+    if let Some(entries) = folder.parent().and_then(|parent| std::fs::read_dir(parent).ok()) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) && entry.path() != folder {
+                folders.push(entry.path());
+            }
+        }
+    }
+    for folder in folders {
+        tidy_one(&folder);
+    }
+    Ok(())
+}
+
+fn tidy_one(folder: &Path) {
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
     let age = |path: &Path| -> Duration {
         std::fs::symlink_metadata(path)
             .and_then(|m| m.modified())
@@ -764,5 +830,44 @@ fn tidy(args: &[String]) -> Result<()> {
             size -= bytes;
         }
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pin_is_itself_in_the_query() {
+        assert_eq!(query_value("1234"), "1234");
+        assert_eq!(query_value("a&b"), "a%26b");
+        assert_eq!(query_value("x#y"), "x%23y");
+        assert_eq!(query_value("1+2"), "1%2B2");
+        assert_eq!(query_value("50%"), "50%25");
+        assert_eq!(query_value("a b"), "a%20b");
+        assert_eq!(query_value("ż"), "%C5%BC");
+    }
+
+    #[test]
+    fn tidy_keeps_each_sources_cache_small() {
+        let root = std::env::temp_dir().join(format!("pinhole-send-tidy-{}", std::process::id()));
+        let old = SystemTime::now() - Duration::from_secs(40 * 24 * 60 * 60);
+        for source in ["icloud-a", "folder-b"] {
+            std::fs::create_dir_all(root.join(source).join("jpeg")).unwrap();
+            std::fs::create_dir_all(root.join(source).join("localsend/1")).unwrap();
+            for name in ["old.jpg", "new.jpg"] {
+                std::fs::write(root.join(source).join("jpeg").join(name), b"x").unwrap();
+            }
+            let file = std::fs::File::options().write(true).open(root.join(source).join("jpeg/old.jpg")).unwrap();
+            file.set_modified(old).unwrap();
+            let staged = std::fs::File::open(root.join(source).join("localsend/1")).unwrap();
+            staged.set_modified(old).unwrap();
+        }
+        tidy(&[root.join("icloud-a").to_string_lossy().into_owned()]).unwrap();
+        for source in ["icloud-a", "folder-b"] {
+            assert!(!root.join(source).join("jpeg/old.jpg").exists(), "{source}");
+            assert!(root.join(source).join("jpeg/new.jpg").exists(), "{source}");
+            assert!(!root.join(source).join("localsend/1").exists(), "{source}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

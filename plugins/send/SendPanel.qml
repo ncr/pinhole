@@ -20,13 +20,15 @@ Item {
     property var chosen: []
     // Their files once fetched, in order: {path, name}; a Live Photo's video
     // after its photo. Fetched for a send, kept for the next (a PIN asked
-    // for, another device), as JPEGs or not.
+    // for, another device), as JPEGs or not, if none was missing.
     property var files: []
     property bool filesCompatible: false
-    // Fetching: how many of how many, and what is under way, to stop.
+    // Fetching: how many of how many, and what is under way, to stop; how
+    // many could not be fetched, and how many HEICs not made JPEGs.
     property int fetched: 0
     property int fetching: 0
     property int missing: 0
+    property int unconverted: 0
     property var jobs: []
     property int generation: 0
 
@@ -75,11 +77,14 @@ Item {
 
     // The files, then done(files): originals as taken; HEIC as JPEG, the
     // photo as it looks now (an edit, if it has one), as Export does.
-    // Videos as they are.
+    // Videos as they are. Those fetched before, if all of them were and
+    // are still there; else all of them again.
     function prepare(done) {
         const compatible = plugin.compatible
-        if (files.length > 0 && filesCompatible === compatible)
+        if (files.length > 0 && filesCompatible === compatible && missing === 0 && unconverted === 0
+                && files.every(file => pinhole.exists(file.path)))
             return done(files)
+        files = []
         const job = ++generation
         const wanted = []
         for (const item of chosen) {
@@ -92,6 +97,7 @@ Item {
         fetched = 0
         fetching = wanted.length
         missing = 0
+        unconverted = 0
         const fetches = wanted.map((w, k) => {
             const fetch = pinhole.fetch(w.item.id, w.kind)
             fetch.then(path => {
@@ -120,24 +126,38 @@ Item {
             })
             if (heic.length === 0)
                 return finish()
+            // Each not made a JPEG is left out, and said so.
+            const waiting = new Set(heic)
+            const unmade = k => {
+                got[k] = null
+                ++unconverted
+            }
             const run = pinhole.run(plugin.sender, ["jpeg", pinhole.cacheDir + "/jpeg"], {
                 input: JSON.stringify(heic.map(k => got[k])),
                 output: line => {
+                    if (job !== generation)
+                        return
                     const at = line.indexOf(" ")
                     const k = heic[Number(line.slice(0, at))]
+                    if (!waiting.has(k))
+                        return
+                    waiting.delete(k)
                     const path = line.slice(at + 1)
-                    if (path === "!") {
-                        got[k] = null
-                        ++missing
-                    } else {
+                    if (path === "!")
+                        unmade(k)
+                    else
                         got[k] = path
-                    }
                 }
             })
             jobs = [run]
+            // Gone wrong as a whole (no ImageMagick, no pinhole-send): those
+            // not made yet are not, and the rest go.
             run.then(finish, error => {
-                if (error.code !== "cancelled")
-                    pinhole.warn(error)
+                if (job !== generation || error.code === "cancelled")
+                    return
+                pinhole.warn(error)
+                waiting.forEach(unmade)
+                finish()
             }).catch(pinhole.warn)
         }
         const finish = () => {
@@ -212,11 +232,10 @@ Item {
                 return
             list[at] = device
         } else {
-            // Where it was in the list sent to last, else after the rest.
-            const order = plugin.known().map(d => d.fingerprint)
-            const rank = d => { const r = order.indexOf(d.fingerprint); return r < 0 ? order.length : r }
+            // After the rest: a device's number never changes under the
+            // finger. Those sent to before are asked first, and so tend to
+            // be first.
             list.push(device)
-            list.sort((a, b) => rank(a) - rank(b))
         }
         devices = list
     }
@@ -237,7 +256,7 @@ Item {
         if (phase !== "fetching")
             return
         if (list.length === 0)
-            return outcome("unfetched")
+            return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
         phase = "asking"
         // What it says is heard as it goes; ended any way but by saying so,
         // it failed.
@@ -245,8 +264,10 @@ Item {
                                 { input: JSON.stringify(list), output: line => heard(line) })
         sending = run
         run.then(() => {}, error => {
+            // Stopped before it could say so (the host kills a second
+            // after asking), or ended any other way.
             if (running)
-                outcome("failed")
+                outcome(error.code === "cancelled" ? "cancelled" : "failed")
         }).catch(pinhole.warn).then(() => {
             if (sending === run)
                 sending = null
@@ -300,27 +321,40 @@ Item {
 
     // LocalSend's own window, with the files: for a device that does not
     // show here. Started apart from Pinhole (uwsm-app, as Omarchy starts
-    // apps), so it outlives it; one already running takes them over.
+    // apps), so it outlives it; one already running takes them over. Not
+    // installed, it says so first: started apart, nothing would.
     function openLocalSend() {
         if (running)
             return
         phase = "fetching"
         target = null
-        prepare(list => {
-            if (phase !== "fetching")
+        const at = generation
+        pinhole.run("sh", ["-c", "command -v localsend"]).then(() => {
+            if (phase !== "fetching" || generation !== at)
                 return
-            phase = ""
-            if (list.length === 0)
-                return outcome("unfetched")
-            const folder = pinhole.cacheDir + "/localsend/" + Date.now()
-            pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
-                const paths = result.stdout.split("\n").filter(l => l !== "")
-                // The folder for very many, which LocalSend takes as a folder.
-                const given = paths.length > 500 ? [folder] : paths
-                return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
-                                          "sh"].concat(given))
-            }).then(() => panel.close()).catch(pinhole.warn)
-        })
+            prepare(list => {
+                if (phase !== "fetching")
+                    return
+                phase = ""
+                if (list.length === 0)
+                    return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
+                const folder = pinhole.cacheDir + "/localsend/" + Date.now()
+                pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
+                    const paths = result.stdout.split("\n").filter(l => l !== "")
+                    // The folder for very many, which LocalSend takes as a folder.
+                    const given = paths.length > 500 ? [folder] : paths
+                    return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
+                                              "sh"].concat(given))
+                }).then(() => panel.close(), error => {
+                    pinhole.warn(error)
+                    outcome("failed")
+                }).catch(pinhole.warn)
+            })
+        }, error => {
+            if (phase !== "fetching" || generation !== at || error.code === "cancelled")
+                return
+            outcome("nolocalsend")
+        }).catch(pinhole.warn)
     }
 
     readonly property string what: chosen.every(item => item.video) ? qsTr("Send %n video(s)", "", chosen.length)
@@ -333,9 +367,14 @@ Item {
             return fetching <= 1 ? qsTr("Fetching…") : qsTr("Fetching %1 of %2…").arg(fetched).arg(fetching)
         case "asking": return qsTr("Waiting for %1 to accept…").arg(name)
         case "sending": return qsTr("Sending to %1: %2 of %3").arg(name).arg(pinhole.sizeText(sentBytes)).arg(pinhole.sizeText(totalBytes))
-        case "sent":
-            return missing > 0 ? qsTr("Sent %n file(s) to %1; %2 could not be fetched.", "", sentFiles).arg(name).arg(missing)
-                               : qsTr("Sent %n file(s) to %1", "", sentFiles).arg(name)
+        case "sent": {
+            const parts = [qsTr("Sent %n file(s) to %1", "", sentFiles).arg(name)]
+            if (missing > 0)
+                parts.push(qsTr("%n could not be fetched", "", missing))
+            if (unconverted > 0)
+                parts.push(qsTr("%n could not be made JPEG", "", unconverted))
+            return parts.length > 1 ? parts.join("; ") + "." : parts[0]
+        }
         case "declined": return qsTr("%1 declined.").arg(name)
         case "busy": return qsTr("%1 is busy with another transfer.").arg(name)
         case "pin": return qsTr("%1 asks for a PIN.").arg(name)
@@ -346,6 +385,8 @@ Item {
         case "mismatch": return qsTr("Something else answered where %1 was: nothing sent.").arg(name)
         case "rejected": return qsTr("%1 refused them (%2).").arg(name).arg(detail)
         case "unfetched": return qsTr("The photos could not be fetched.")
+        case "unconverted": return qsTr("The photos could not be made JPEG.")
+        case "nolocalsend": return qsTr("LocalSend is not installed.")
         case "cancelled": return qsTr("Stopped.")
         case "failed": return target ? qsTr("Could not send to %1.").arg(name) : qsTr("Could not send.")
         }

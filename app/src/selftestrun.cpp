@@ -411,7 +411,9 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // LocalSend open, or the plugin's test receiver) is the run's. With
     // PINHOLE_SELFTEST_SEND=stop, Stop is pressed while the device decides;
     // =pin, the PIN it asks for is 1234; =closed, the panel is closed as it
-    // goes, and how it ended shows at the foot of the window.
+    // goes, and how it ended shows at the foot of the window; =stopsending,
+    // Stop is pressed 2.5 s into the send (the run's device having stopped
+    // answering); =localsend, L in place of a device; =jpeg, HEIC as JPEG.
     if (name == QLatin1String("send")) {
         QTimer::singleShot(3000, window, [window, &library, &viewer, arg] {
             auto say = [](const QString &line) {
@@ -451,6 +453,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QTimer::singleShot(400, window, [=] { grab(QStringLiteral("1-open")); });
             });
             const QString mode = qEnvironmentVariable("PINHOLE_SELFTEST_SEND");
+            if (mode == QLatin1String("jpeg"))
+                QMetaObject::invokeMethod(panel->property("plugin").value<QObject *>(), "setCompatible", Q_ARG(QVariant, true));
             auto describe = [panel] {
                 return QStringLiteral("%1 devices, %2 files (%5 fetched), phase \"%3\", %4")
                     .arg(panel->property("devices").toList().size())
@@ -462,9 +466,12 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 grab(QStringLiteral("2-devices"));
                 say(describe());
                 const QVariantList devices = panel->property("devices").toList();
-                if (devices.isEmpty())
+                if (mode == QLatin1String("localsend"))
+                    QMetaObject::invokeMethod(panel, "openLocalSend");
+                else if (devices.isEmpty())
                     return QCoreApplication::quit();
-                QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, devices.first()), Q_ARG(QVariant, QString()));
+                else
+                    QMetaObject::invokeMethod(panel, "sendTo", Q_ARG(QVariant, devices.first()), Q_ARG(QVariant, QString()));
                 QTimer::singleShot(300, window, [=] { grab(QStringLiteral("3-asking")); });
                 if (mode == QLatin1String("stop"))
                     QTimer::singleShot(500, window, [=] { QMetaObject::invokeMethod(panel, "stopSending"); });
@@ -472,12 +479,20 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     QTimer::singleShot(100, window, [=] { QMetaObject::invokeMethod(panel, "close"); });
                 auto clock = std::make_shared<QElapsedTimer>();
                 clock->start();
+                auto stopping = std::make_shared<bool>(false);
                 auto poll = new QTimer(window);
                 poll->setInterval(200);
                 QObject::connect(poll, &QTimer::timeout, window, [=] {
                     const QString phase = panel->property("phase").toString();
                     if (phase == QLatin1String("sending"))
                         grab(QStringLiteral("4-sending"));
+                    if (phase == QLatin1String("sending") && mode == QLatin1String("stopsending") && !*stopping) {
+                        *stopping = true;
+                        QTimer::singleShot(2500, window, [=] {
+                            say(QStringLiteral("Stop pressed: ") + describe());
+                            QMetaObject::invokeMethod(panel, "stopSending");
+                        });
+                    }
                     if (phase == QLatin1String("pin") && mode == QLatin1String("pin")) {
                         grab(QStringLiteral("4-pin"));
                         say(describe());

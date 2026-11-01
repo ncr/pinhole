@@ -12,6 +12,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
+#include <QDeadlineTimer>
 #include <QDesktopServices>
 #include <QDir>
 #include <QSaveFile>
@@ -311,7 +312,22 @@ PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
     connect(this, &PluginHost::notified, plugins, [this](const QString &text) { emit m_plugins->notice(m_id, text); });
 }
 
-PluginHost::~PluginHost() { stop(); }
+PluginHost::~PluginHost() {
+    // Its programs asked to end (SIGTERM), as when turned off, and given a
+    // second all told; then killed, here, as nothing would do it later.
+    m_closing = true;
+    stop();
+    QDeadlineTimer second(1000);
+    for (QProcess *process : m_ending)
+        process->waitForFinished(int(std::max<qint64>(0, second.remainingTime())));
+    for (QProcess *process : m_ending) {
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+            process->waitForFinished(1000);
+        }
+        delete process;
+    }
+}
 
 int PluginHost::api() const { return Plugins::api; }
 
@@ -513,6 +529,10 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
         }
         process->setParent(nullptr);
         process->terminate();
+        if (m_closing) {
+            disconnect(process, &QProcess::finished, process, &QObject::deleteLater);
+            return m_ending.push_back(process);
+        }
         QTimer::singleShot(1000, process, [process] {
             if (process->state() != QProcess::NotRunning)
                 process->kill();
