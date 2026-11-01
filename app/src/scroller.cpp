@@ -1,9 +1,11 @@
 #include "scroller.h"
 
 #include "touchpadhold.h"
+#include "zoomer.h"
 
 #include <QCoreApplication>
 #include <QMouseEvent>
+#include <QNativeGestureEvent>
 #include <QQmlEngine>
 #include <QQuickWindow>
 #include <QTouchEvent>
@@ -16,8 +18,11 @@
 
 namespace {
 QPointer<TouchpadHold> theHold;
-// `import Pinhole` has it wherever Pinhole's QML loads (Shield's alike).
-void registerScroller() { qmlRegisterType<Scroller>("Pinhole", 1, 0, "Scroller"); }
+// `import Pinhole` has them wherever Pinhole's QML loads (Shield's alike).
+void registerScroller() {
+    qmlRegisterType<Scroller>("Pinhole", 1, 0, "Scroller");
+    qmlRegisterType<PanelScroller>("Pinhole", 1, 0, "PanelScroller");
+}
 } // namespace
 Q_COREAPP_STARTUP_FUNCTION(registerScroller)
 
@@ -26,16 +31,23 @@ void Scroller::setTouchpadHold(TouchpadHold *hold) { theHold = hold; }
 Scroller::Scroller(QQuickItem *parent) : QQuickItem(parent) {
     // The wheel only: presses and touches go on to what is beneath.
     setAcceptedMouseButtons(Qt::NoButton);
-    // Coasting into an end it bounces some 45 px, not a screen.
-    m_physics.params().bounceVelocity = 1500;
     if (theHold) {
         connect(theHold, &TouchpadHold::began, this, [this](quint32 time) {
-            if (isVisible() && m_physics.animating()) {
-                m_physics.touch(double(time));
+            if (isVisible() && moving()) {
+                m_y.physics.touch(double(time));
+                m_x.physics.touch(double(time));
                 apply();
             }
         });
     }
+}
+
+PanelScroller::PanelScroller(QQuickItem *parent) : Scroller(parent) { tune(8, 0.25, 1500); }
+
+void Scroller::tune(double wheel, double stretch, double bounce) {
+    m_wheel = wheel;
+    m_stretch = stretch;
+    m_y.physics.params().bounceVelocity = m_x.physics.params().bounceVelocity = bounce;
 }
 
 Scroller::~Scroller() {
@@ -47,39 +59,103 @@ void Scroller::setFlickable(QQuickItem *flickable) {
     if (flickable == m_flickable)
         return;
     m_flickable = flickable;
-    m_physics.stop();
+    m_y.physics.stop();
+    m_x.physics.stop();
+    if (isComponentComplete())
+        adopt();
     emit flickableChanged();
 }
 
-double Scroller::contentY() const { return m_flickable ? m_flickable->property("contentY").toDouble() : 0; }
-
-void Scroller::syncBounds() {
+void Scroller::componentComplete() {
+    QQuickItem::componentComplete();
+    // Declared inside a Flickable: that one, and over it rather than in
+    // what it scrolls.
     if (!m_flickable)
-        return;
-    const double origin = m_flickable->property("originY").toDouble();
-    const double top = origin - m_flickable->property("topMargin").toDouble();
-    const double bottom = origin + m_flickable->property("contentHeight").toDouble()
-                          + m_flickable->property("bottomMargin").toDouble() - m_flickable->height();
-    m_top = top;
-    m_bottom = std::max(top, bottom);
-    // Pulled past an end, it gives a quarter of its height at most (the
-    // grid, a whole screen): a list of settings is not a library to fling.
-    m_physics.setBounds(m_top, m_bottom, m_flickable->height() / 4);
+        for (QQuickItem *up = parentItem(); up; up = up->parentItem())
+            if (up->inherits("QQuickFlickable")) {
+                m_flickable = up;
+                emit flickableChanged();
+                break;
+            }
+    adopt();
 }
 
-void Scroller::pickUp() {
-    const double y = contentY();
-    if ((!m_physics.animating() && !m_physics.tracking()) || std::abs(y - m_written) > 0.5)
-        m_physics.jumpTo(y);
-    m_written = y;
+void Scroller::adopt() {
+    for (const auto &c : std::as_const(m_fitting))
+        disconnect(c);
+    m_fitting.clear();
+    if (!m_flickable)
+        return;
+    QQuickItem *content = m_flickable->property("contentItem").value<QQuickItem *>();
+    // Declared in it (in what it scrolls, or its own child): over it.
+    if (parentItem() == m_flickable || (content && parentItem() == content)) {
+        setParentItem(m_flickable);
+        // Above what it shows, its delegates and their handlers too.
+        setZ(1e6);
+        m_fitting << connect(m_flickable, &QQuickItem::widthChanged, this, &Scroller::fit)
+                  << connect(m_flickable, &QQuickItem::heightChanged, this, &Scroller::fit);
+        fit();
+    }
+}
+
+void Scroller::fit() {
+    if (m_flickable && parentItem() == m_flickable) {
+        setPosition({0, 0});
+        setSize(m_flickable->size());
+    }
+}
+
+double Scroller::at(const Axis &axis) const { return m_flickable ? m_flickable->property(axis.position).toDouble() : 0; }
+
+double Scroller::view(const Axis &axis) const {
+    return m_flickable ? (axis.across ? m_flickable->width() : m_flickable->height()) : 0;
+}
+
+void Scroller::syncBounds(Axis &axis) {
+    if (!m_flickable)
+        return;
+    const double origin = m_flickable->property(axis.origin).toDouble();
+    const double low = origin - m_flickable->property(axis.before).toDouble();
+    const double high = origin + m_flickable->property(axis.content).toDouble()
+                        + m_flickable->property(axis.after).toDouble() - view(axis);
+    axis.low = low;
+    axis.high = std::max(low, high);
+    // Pulled past an end it gives as the grid does, for the view's length
+    // (a panel's, for a quarter of it).
+    axis.physics.setBounds(axis.low, axis.high, view(axis) * m_stretch);
+}
+
+bool Scroller::scrolls(const Axis &axis) const {
+    if (!m_flickable)
+        return false;
+    // Content no larger than the view goes nowhere that way.
+    return m_flickable->property(axis.content).toDouble() + m_flickable->property(axis.before).toDouble()
+               + m_flickable->property(axis.after).toDouble()
+           > view(axis) + 0.5;
+}
+
+void Scroller::pickUp(Axis &axis) {
+    const double p = at(axis);
+    if ((!axis.physics.animating() && !axis.physics.tracking()) || std::abs(p - axis.written) > 0.5)
+        axis.physics.jumpTo(p);
+    axis.written = p;
+}
+
+bool Scroller::moving() const {
+    return m_y.physics.animating() || m_x.physics.animating() || m_y.physics.tracking() || m_x.physics.tracking();
 }
 
 void Scroller::apply() {
     if (!m_flickable)
         return;
-    m_written = m_physics.position();
-    m_flickable->setProperty("contentY", m_written);
-    if (m_physics.animating() && !m_ticking && m_window) {
+    for (Axis *axis : {&m_y, &m_x}) {
+        // Only a way it goes: a list's contentX is the ListView's own.
+        if (!scrolls(*axis) && !axis->physics.animating())
+            continue;
+        axis->written = axis->physics.position();
+        m_flickable->setProperty(axis->position, axis->written);
+    }
+    if ((m_y.physics.animating() || m_x.physics.animating()) && !m_ticking && m_window) {
         m_ticking = true;
         m_frameClock.restart();
         m_window->update();
@@ -91,39 +167,49 @@ void Scroller::tick() {
         return;
     if (theHold)
         theHold->poll();
-    // Moved by something else meanwhile (keys, a drag, the list growing
-    // under it): that is where it is now.
-    if (!m_flickable || std::abs(contentY() - m_written) > 0.5) {
-        m_ticking = false;
-        m_physics.jumpTo(contentY());
-        m_written = contentY();
-        return;
-    }
     const double dt = std::clamp(m_frameClock.restart() / 1000.0, 0.0, 0.05);
-    syncBounds();
-    const bool moving = m_physics.step(dt);
-    m_written = m_physics.position();
-    m_flickable->setProperty("contentY", m_written);
-    m_ticking = moving;
-    if (moving && m_window)
+    m_ticking = advance(dt);
+    if (m_ticking && m_window)
         m_window->update();
 }
 
-bool Scroller::canMove(double dy) const {
-    if (!m_flickable || dy == 0)
-        return false;
-    const double y = contentY();
-    const double origin = m_flickable->property("originY").toDouble();
-    const double top = origin - m_flickable->property("topMargin").toDouble();
-    const double bottom = std::max(top, origin + m_flickable->property("contentHeight").toDouble()
-                                            + m_flickable->property("bottomMargin").toDouble() - m_flickable->height());
-    // Up the wheel or the fingers, up the content: towards its top.
-    return dy > 0 ? y > top + 0.5 : y < bottom - 0.5;
+bool Scroller::advance(double dt) {
+    bool still = false;
+    for (Axis *axis : {&m_y, &m_x}) {
+        if (!axis->physics.animating())
+            continue;
+        // Moved by something else meanwhile (keys, a drag, the list growing
+        // under it): that is where it is now.
+        if (!m_flickable || std::abs(at(*axis) - axis->written) > 0.5) {
+            axis->physics.jumpTo(at(*axis));
+            axis->written = at(*axis);
+            continue;
+        }
+        syncBounds(*axis);
+        still = axis->physics.step(dt) || still;
+        axis->written = axis->physics.position();
+        m_flickable->setProperty(axis->position, axis->written);
+    }
+    return still;
 }
 
-Scroller *Scroller::innerAt(QPointF scenePosition, double dy) const {
+bool Scroller::canMove(bool across, double d) const {
+    const Axis &axis = across ? m_x : m_y;
+    if (!m_flickable || d == 0 || !scrolls(axis))
+        return false;
+    const double p = at(axis);
+    const double origin = m_flickable->property(axis.origin).toDouble();
+    const double low = origin - m_flickable->property(axis.before).toDouble();
+    const double high = std::max(low, origin + m_flickable->property(axis.content).toDouble()
+                                          + m_flickable->property(axis.after).toDouble() - view(axis));
+    // Up the wheel or the fingers, up the content: towards its top (its
+    // left).
+    return d > 0 ? p > low + 0.5 : p < high - 0.5;
+}
+
+Scroller *Scroller::innerAt(QPointF scenePosition, bool across, double d) const {
     QQuickItem *content = m_flickable ? m_flickable->property("contentItem").value<QQuickItem *>() : nullptr;
-    if (!content || dy == 0)
+    if (!content || d == 0)
         return nullptr;
     // Front to back, as the pointer meets them: the first Scroller there
     // that, or one within it, can still go this way.
@@ -137,8 +223,8 @@ Scroller *Scroller::innerAt(QPointF scenePosition, double dy) const {
             if (child->clip() && !child->contains(child->mapFromScene(scenePosition)))
                 continue;
             if (auto *inner = qobject_cast<Scroller *>(child)) {
-                if (inner->contains(inner->mapFromScene(scenePosition))
-                    && (inner->canMove(dy) || inner->innerAt(scenePosition, dy)))
+                if (inner != this && inner->contains(inner->mapFromScene(scenePosition))
+                    && (inner->canMove(across, d) || inner->innerAt(scenePosition, across, d)))
                     return inner;
                 continue;
             }
@@ -150,6 +236,13 @@ Scroller *Scroller::innerAt(QPointF scenePosition, double dy) const {
     return look(content);
 }
 
+Zoomer *Scroller::zoomer() const {
+    for (QQuickItem *up = parentItem(); up; up = up->parentItem())
+        if (auto *zoom = qobject_cast<Zoomer *>(up))
+            return zoom->isEnabled() ? zoom : nullptr;
+    return nullptr;
+}
+
 void Scroller::wheelEvent(QWheelEvent *event) {
     // Every one is its own, whatever it does here: none goes on beneath.
     event->accept();
@@ -157,11 +250,25 @@ void Scroller::wheelEvent(QWheelEvent *event) {
 }
 
 void Scroller::take(const QWheelEvent *event) {
-    if (!m_flickable || (event->modifiers() & Qt::ControlModifier))
+    if (!m_flickable)
         return;
     const QPoint pixels = event->pixelDelta(), angle = event->angleDelta();
+    // Ctrl and the wheel zoom, as on the grid: the PinchZoom it is in, if
+    // any. So does the sideways wheel where nothing here goes across.
+    const bool sidewaysNotch = event->phase() == Qt::NoScrollPhase && std::abs(angle.x()) > std::abs(angle.y());
+    if ((event->modifiers() & Qt::ControlModifier) || (sidewaysNotch && !scrolls(m_x))) {
+        if (Zoomer *zoom = zoomer())
+            zoom->takeWheel(event);
+        return;
+    }
     const double t = double(event->timestamp());
     const double dy = !pixels.isNull() ? pixels.y() : angle.y() / 8.0;
+    const double dx = !pixels.isNull() ? pixels.x() : angle.x() / 8.0;
+    // Which way it mostly goes, for who has it: a notch over what only
+    // goes across, across.
+    const bool notchAcross = event->phase() == Qt::NoScrollPhase && !angle.isNull() && !scrolls(m_y) && scrolls(m_x);
+    const bool across = std::abs(dx) > std::abs(dy) || notchAcross;
+    const double d = std::abs(dx) > std::abs(dy) ? dx : dy;
     // A Scroller within that can still go this way has it first: a swipe,
     // decided at its first movement, its to its end (and the momentum
     // after); a notch, each.
@@ -173,12 +280,13 @@ void Scroller::take(const QWheelEvent *event) {
         break;
     case Qt::ScrollUpdate:
     case Qt::ScrollMomentum:
-        if (!m_swipeDecided && dy != 0) {
+        if (!m_swipeDecided && (dx != 0 || dy != 0)) {
             m_swipeDecided = true;
-            if ((m_inner = innerAt(event->scenePosition(), dy))) {
+            if ((m_inner = innerAt(event->scenePosition(), across, d))) {
                 // Its, from the fingers landing; this one's still where
                 // they landed.
-                m_physics.end(t);
+                m_y.physics.end(t);
+                m_x.physics.end(t);
                 apply();
                 QWheelEvent began(event->position(), event->globalPosition(), QPoint(), QPoint(), event->buttons(),
                                   event->modifiers(), Qt::ScrollBegin, event->inverted(), event->source(),
@@ -199,38 +307,52 @@ void Scroller::take(const QWheelEvent *event) {
         }
         break;
     case Qt::NoScrollPhase:
-        if (std::abs(angle.y()) >= std::abs(angle.x()) && !(angle.isNull() && std::abs(pixels.x()) > std::abs(pixels.y())))
-            if (Scroller *inner = innerAt(event->scenePosition(), dy)) {
-                inner->take(event);
-                return;
-            }
+        if (Scroller *inner = innerAt(event->scenePosition(), across, d)) {
+            inner->take(event);
+            return;
+        }
         break;
     }
-    pickUp();
-    syncBounds();
+    for (Axis *axis : {&m_y, &m_x}) {
+        pickUp(*axis);
+        syncBounds(*axis);
+    }
     // As the grid takes them (PhotoGrid::wheelEvent): a touchpad's begin,
     // updates and end, and the momentum a Mac's adds; a wheel's notches
-    // glide; pixels without phases are followed as they come.
+    // glide; pixels without phases are followed as they come. Each way the
+    // content goes, its own.
     switch (event->phase()) {
     case Qt::ScrollBegin:
-        if (!m_physics.tracking())
-            m_physics.begin(t);
+        for (Axis *axis : {&m_y, &m_x})
+            if (scrolls(*axis) && !axis->physics.tracking())
+                axis->physics.begin(t);
         break;
     case Qt::ScrollUpdate:
     case Qt::ScrollMomentum:
-        m_physics.move(t, !pixels.isNull() ? -pixels.y() : -angle.y() / 8.0);
+        if (scrolls(m_y))
+            m_y.physics.move(t, -dy);
+        if (scrolls(m_x))
+            m_x.physics.move(t, -dx);
         break;
     case Qt::ScrollEnd:
-        m_physics.end(t);
+        m_y.physics.end(t);
+        m_x.physics.end(t);
         break;
     case Qt::NoScrollPhase:
-        // A sideways wheel: nothing here goes sideways.
-        if (std::abs(angle.x()) > std::abs(angle.y()) || (angle.isNull() && std::abs(pixels.x()) > std::abs(pixels.y())))
-            return;
-        if (angle.y() == 0 && !pixels.isNull()) {
-            m_physics.jumpTo(std::clamp(m_physics.position() - pixels.y(), m_top, m_bottom));
+        if (angle.isNull() && !pixels.isNull()) {
+            // Smooth scrolling without phases or notches: followed directly.
+            for (Axis *axis : {&m_y, &m_x}) {
+                const double by = axis->across ? pixels.x() : pixels.y();
+                if (scrolls(*axis) && by != 0)
+                    axis->physics.jumpTo(std::clamp(axis->physics.position() - by, axis->low, axis->high));
+            }
         } else {
-            m_physics.wheel(t, (!pixels.isNull() ? -pixels.y() / 15.0 : -angle.y() / 120.0) * kNotch);
+            // A notch: glided, and sped up the longer it spins
+            // (ScrollPhysics::wheel()); over what only goes across, the
+            // wheel goes across.
+            Axis &axis = across ? m_x : m_y;
+            if (scrolls(axis))
+                axis.physics.wheel(t, -(notchAcross ? dy : d) * m_wheel);
         }
         break;
     }
@@ -238,8 +360,11 @@ void Scroller::take(const QWheelEvent *event) {
 }
 
 bool Scroller::event(QEvent *event) {
-    // A pinch over a panel zooms nothing, the photos beneath included.
+    // A pinch zooms the PinchZoom it is in, if any; nothing else, the
+    // photos beneath included.
     if (event->type() == QEvent::NativeGesture) {
+        if (Zoomer *zoom = zoomer())
+            zoom->takeGesture(static_cast<QNativeGestureEvent *>(event));
         event->accept();
         return true;
     }
@@ -247,17 +372,21 @@ bool Scroller::event(QEvent *event) {
 }
 
 bool Scroller::stopAt(QPointF scenePosition) {
-    if (!isVisible() || !isEnabled() || !(m_physics.animating() || m_physics.tracking()))
+    if (!isVisible() || !isEnabled() || !moving())
         return false;
     if (!contains(mapFromScene(scenePosition)))
         return false;
     // Moved by something else meanwhile (a drag, its keys): not this one's
     // to stop.
-    if (!m_flickable || std::abs(contentY() - m_written) > 0.5)
+    if (!m_flickable)
         return false;
+    for (const Axis *axis : {&m_y, &m_x})
+        if ((axis->physics.animating() || axis->physics.tracking()) && std::abs(at(*axis) - axis->written) > 0.5)
+            return false;
     // A click or a touch on it while it moves: it stops there, as the grid
     // does (and a two-finger tap is a click of the right button).
-    m_physics.stop();
+    m_y.physics.stop();
+    m_x.physics.stop();
     apply();
     return true;
 }

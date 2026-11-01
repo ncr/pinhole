@@ -21,6 +21,12 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDeadlineTimer>
+#include <QFutureWatcher>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QSqlRecord>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QDesktopServices>
 #include <QDir>
 #include <QSaveFile>
@@ -47,6 +53,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -1060,6 +1067,93 @@ void PluginHost::showFile(const QString &path) const {
 
 QString PluginHost::picturesDir() const { return picturesLocation(); }
 
+QString PluginHost::picturePath(const QString &name, const QString &extension) const {
+    const QString dir = picturesLocation() + QStringLiteral("/Pinhole");
+    QDir().mkpath(dir);
+    // A name, not a path: no folders, nor a hidden file.
+    QString base = name.trimmed();
+    base.replace(QLatin1Char('/'), QLatin1Char('-'));
+    while (base.startsWith(QLatin1Char('.')))
+        base.remove(0, 1);
+    if (base.isEmpty())
+        base = QStringLiteral("Pinhole");
+    QString ext = extension.trimmed();
+    while (ext.startsWith(QLatin1Char('.')))
+        ext.remove(0, 1);
+    const QString dot = ext.isEmpty() ? QString() : QLatin1Char('.') + ext;
+    QString path = dir + QLatin1Char('/') + base + dot;
+    for (int n = 2; QFileInfo::exists(path); ++n)
+        path = dir + QLatin1Char('/') + base + QLatin1Char(' ') + QString::number(n) + dot;
+    return path;
+}
+
+QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
+    const int generation = m_generation;
+    auto cancelled = std::make_shared<std::atomic_bool>(false);
+    const Deferred deferred = defer([cancelled] { *cancelled = true; });
+    const QString dir = m_plugins->library() ? m_plugins->library()->dir() : QString();
+    const QString path = dir + QStringLiteral("/library.sqlite");
+    if (dir.isEmpty() || !QFileInfo::exists(path)) {
+        settle(generation, deferred.reject, error(QStringLiteral("no_library"), tr("no library is shown")));
+        return deferred.promise;
+    }
+    struct Answer {
+        QVariantList rows;
+        QString error;
+    };
+    // Away from the window: a connection of its own, read only, that waits
+    // up to five seconds while the service writes.
+    auto *watcher = new QFutureWatcher<Answer>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, deferred, generation, cancelled] {
+        watcher->deleteLater();
+        if (*cancelled)
+            return;
+        const Answer answer = watcher->result();
+        if (!answer.error.isEmpty()) {
+            settle(generation, deferred.reject, error(QStringLiteral("sql"), answer.error));
+            return;
+        }
+        if (QJSEngine *js = engine())
+            settle(generation, deferred.resolve, js->toScriptValue(answer.rows));
+    });
+    watcher->setFuture(QtConcurrent::run([path, sql, values, cancelled] {
+        Answer answer;
+        static std::atomic_int serial = 0;
+        const QString name = QStringLiteral("plugin-query-%1").arg(++serial);
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), name);
+            db.setDatabaseName(path);
+            db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
+            if (!db.open()) {
+                answer.error = db.lastError().text();
+            } else {
+                QSqlQuery q(db);
+                q.setForwardOnly(true);
+                if (!q.prepare(sql)) {
+                    answer.error = q.lastError().text();
+                } else {
+                    for (const QVariant &value : values)
+                        q.addBindValue(value);
+                    if (!q.exec()) {
+                        answer.error = q.lastError().text();
+                    } else {
+                        const QSqlRecord record = q.record();
+                        while (!*cancelled && q.next()) {
+                            QVariantMap row;
+                            for (int i = 0; i < record.count(); ++i)
+                                row.insert(record.fieldName(i), q.value(i));
+                            answer.rows.append(row);
+                        }
+                    }
+                }
+            }
+        }
+        QSqlDatabase::removeDatabase(name);
+        return answer;
+    }));
+    return deferred.promise;
+}
+
 bool PluginHost::exists(const QString &path) const { return QFileInfo::exists(path); }
 
 double PluginHost::fileSize(const QString &path) const { return double(QFileInfo(path).size()); }
@@ -1285,12 +1379,15 @@ QJsonObject Plugins::unmoved(QJsonObject config) const {
 }
 
 void Plugins::registerTypes() {
-    for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle", "FieldInput"})
+    for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner",
+                             "Toggle", "FieldInput", "ScrollList", "ScrollGrid", "ScrollArea", "PinchZoom", "Panel", "Card",
+                             "Choices"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
     // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
     qmlRegisterType<SdrVideo>("Pinhole.Plugin", 1, 0, "SdrVideo");
-    // The side panel's scrolling, for a plugin's own list (scroller.h).
+    // The grid's scrolling over a Flickable of one's own (scroller.h, API
+    // 4): ScrollList, ScrollGrid and ScrollArea are each one with it.
     qmlRegisterType<Scroller>("Pinhole.Plugin", 1, 0, "Scroller");
 }
 
@@ -2029,7 +2126,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
         {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
         {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"},
-        {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}};
+        {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
+        {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
+        {5, "pinhole.query"}, {5, "pinhole.picturePath"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2072,6 +2171,13 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"viewer.hdr", QRegularExpression(QStringLiteral("\\bviewer\\s*\\.\\s*hdr\\b"))},
         {"SdrVideo", QRegularExpression(QStringLiteral("\\bSdrVideo\\s*\\{"))},
         {"pinhole.srgbProfile", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*srgbProfile\\b"))},
+        {"Scroller", QRegularExpression(QStringLiteral("\\bScroller\\s*\\{"))},
+        {"ScrollList, ScrollGrid or ScrollArea", QRegularExpression(QStringLiteral("\\bScroll(List|Grid|Area)\\s*\\{"))},
+        {"PinchZoom", QRegularExpression(QStringLiteral("\\bPinchZoom\\s*\\{"))},
+        {"Panel or Card", QRegularExpression(QStringLiteral("\\b(Panel|Card)\\s*\\{"))},
+        {"Choices", QRegularExpression(QStringLiteral("\\bChoices\\s*\\{"))},
+        {"pinhole.query", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*query\\s*\\("))},
+        {"pinhole.picturePath", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*picturePath\\b"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));

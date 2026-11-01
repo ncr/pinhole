@@ -180,7 +180,7 @@ QQuickItem *deepest(QQuickItem *within, QPointF scene) {
             QQuickItem *child = *it;
             const QString type = QString::fromLatin1(child->metaObject()->className());
             if (type.contains(QLatin1String("MouseArea")) || type.startsWith(QLatin1String("Shield"))
-                || type.startsWith(QLatin1String("Scroller")))
+                || type.contains(QLatin1String("Scroller")))
                 continue;
             if (child->isVisible() && child->opacity() > 0 && child->contains(child->mapFromScene(scene)))
                 deeper = child;

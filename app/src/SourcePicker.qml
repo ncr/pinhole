@@ -265,7 +265,7 @@ Item {
                 }
             }
         }
-        Scroller {
+        PanelScroller {
             anchors.fill: parent
             flickable: scroller
         }

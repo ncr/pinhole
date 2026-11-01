@@ -324,6 +324,17 @@ public:
     Q_INVOKABLE void showFile(const QString &path) const;
     // ~/Pictures, or the desktop's own Pictures folder.
     Q_INVOKABLE QString picturesDir() const;
+    // A file to make in Pictures/Pinhole, as Pinhole names what it makes:
+    // `name.extension` there, or `name 2.extension`… if that is taken; the
+    // folder made. In a self-test, the scratch Pictures (API 5).
+    Q_INVOKABLE QString picturePath(const QString &name, const QString &extension) const;
+    // The library's index (library.sqlite, docs/sources.md) asked, read
+    // only, away from the window, waiting while the service writes it:
+    // a promise of its rows, each an object by column name; rejected
+    // "sql" (and its message) or "no_library". `values` bind its ?s
+    // (API 5). Never sqlite3 on the file: that one opens it while the
+    // service writes, and fails "database is locked".
+    Q_INVOKABLE QJSValue query(const QString &sql, const QVariantList &values = {});
     Q_INVOKABLE bool exists(const QString &path) const;
     // A file's size in bytes, and as people read it: "1.8 MB".
     Q_INVOKABLE double fileSize(const QString &path) const;
@@ -523,8 +534,10 @@ public:
     // at least this; a plugin asking for more says it needs a newer
     // Pinhole. 2: promises, pinhole.settings, notify, photos by id. 3:
     // marks, pinhole.state and pinhole.cache. 4: photos in sRGB
-    // (image://file, a photo's thumbPath; docs/hdr.md).
-    static constexpr int api = 4;
+    // (image://file, a photo's thumbPath; docs/hdr.md). 5: the kit
+    // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
+    // Choices), pinhole.query and pinhole.picturePath.
+    static constexpr int api = 5;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

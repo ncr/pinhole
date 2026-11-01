@@ -4636,6 +4636,78 @@ private slots:
     // A click on a switch while the panel coasts stops it there, and does
     // nothing else: the switch is not pressed (with iCloud's, a slip would
     // turn a source off). At rest, the next click presses it.
+    // A plugin's strip (a ScrollList across) goes across by a sideways
+    // swipe, and by the wheel itself, which has nowhere else to go; the
+    // sideways wheel too. Nothing reaches what is beneath. A Panel with
+    // steps steps a notch at a time, and once a swipe.
+    void aStripScrollsAcrossAndAPanelSteps() {
+        Plugins::registerTypes();
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"(import QtQuick
+            import Pinhole.Plugin
+            Window {
+                width: 400; height: 300
+                property int beneath: 0
+                property int stepCount: 0
+                property alias strip: strip
+                MouseArea { anchors.fill: parent; onWheel: wheel => beneath++ }
+                Panel {
+                    anchors.fill: undefined
+                    y: 200; width: 400; height: 100
+                    color: "black"
+                    steps: Qt.Horizontal | Qt.Vertical
+                    onStepped: step => stepCount += step
+                }
+                ScrollList {
+                    id: strip
+                    width: 400; height: 100
+                    orientation: ListView.Horizontal
+                    model: 40
+                    delegate: Rectangle { width: 50; height: 100 }
+                }
+            })", QUrl());
+        std::unique_ptr<QObject> made(component.create());
+        QVERIFY2(made, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(made.get());
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *strip = window->property("strip").value<QQuickItem *>();
+        quint64 time = 2000000;
+        auto wheel = [&](QPointF at, QPoint pixels, QPoint angle, Qt::ScrollPhase phase) {
+            QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, Qt::NoModifier, phase, false,
+                              Qt::MouseEventNotSynthesized,
+                              phase != Qt::NoScrollPhase ? ScrollerBench::touchpad() : QPointingDevice::primaryPointingDevice());
+            event.setTimestamp(time += 8);
+            QGuiApplication::sendEvent(window, &event);
+        };
+        const QPointF over(200, 50), panel(200, 250);
+        // A notch of the wheel: across, 180 px as the grid's.
+        wheel(over, {0, -15}, {0, -120}, Qt::NoScrollPhase);
+        QTRY_VERIFY(strip->property("contentX").toDouble() > 170);
+        QTest::qWait(400);
+        QCOMPARE(strip->property("contentY").toDouble(), 0.0);
+        // A sideways swipe, back.
+        const double was = strip->property("contentX").toDouble();
+        time += 1000;
+        wheel(over, {}, {}, Qt::ScrollBegin);
+        for (int i = 0; i < 6; ++i)
+            wheel(over, {10, 0}, {80, 0}, Qt::ScrollUpdate);
+        wheel(over, {}, {}, Qt::ScrollEnd);
+        QTRY_VERIFY(strip->property("contentX").toDouble() < was - 40);
+        // The Panel: two notches, two steps; a long swipe, one.
+        wheel(panel, {0, -15}, {0, -120}, Qt::NoScrollPhase);
+        wheel(panel, {0, -15}, {0, -120}, Qt::NoScrollPhase);
+        QCOMPARE(window->property("stepCount").toInt(), 2);
+        time += 1000;
+        wheel(panel, {}, {}, Qt::ScrollBegin);
+        for (int i = 0; i < 20; ++i)
+            wheel(panel, {-20, 0}, {-160, 0}, Qt::ScrollUpdate);
+        wheel(panel, {}, {}, Qt::ScrollEnd);
+        QCOMPARE(window->property("stepCount").toInt(), 3);
+        QCOMPARE(window->property("beneath").toInt(), 0);
+    }
+
     void aClickThatStopsAPanelPressesNothing() {
         ScrollerBench bench;
         QVERIFY(bench.window);

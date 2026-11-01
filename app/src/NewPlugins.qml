@@ -169,7 +169,7 @@ Item {
             }
         }
         // The wheel and the touchpad anywhere on the card scroll the list.
-        Scroller {
+        PanelScroller {
             anchors.fill: parent
             flickable: scroller
         }

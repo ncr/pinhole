@@ -40,6 +40,7 @@ HEADERS += \
     $$PWD/scrollphysics.h \
     $$PWD/scroller.h \
     $$PWD/shield.h \
+    $$PWD/zoomer.h \
     $$PWD/touchpadhold.h \
     $$PWD/keepawake.h \
     $$PWD/serviceclient.h \
@@ -78,6 +79,7 @@ SOURCES += \
     $$PWD/scrollphysics.cpp \
     $$PWD/scroller.cpp \
     $$PWD/shield.cpp \
+    $$PWD/zoomer.cpp \
     $$PWD/touchpadhold.cpp \
     $$PWD/keepawake.cpp \
     $$PWD/serviceclient.cpp \
@@ -107,6 +109,7 @@ SOURCES += \
     $$PWD/selftesthidden.cpp \
     $$PWD/selfteststacks.cpp \
     $$PWD/selftestthrough.cpp \
+    $$PWD/selftestphysics.cpp \
     $$PWD/selftestcolour.cpp \
     $$PWD/selftestguard.cpp \
     $$PWD/selftesthdr.cpp \

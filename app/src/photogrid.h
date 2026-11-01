@@ -242,6 +242,11 @@ public:
     static int levelCount();
     static int columnsAt(int level);
     double stride() const;
+    // The cell size drawn now, a pinch's or a settle's on its way (the
+    // physics self-test).
+    double zoomStride() const { return m_zoom.active ? m_zoom.stride : stride(); }
+    // Where the view is, in pixels down the library.
+    double scrollPosition() const { return m_scroll; }
     double scrollRange() const { return maxScroll(m_columns); }
     int unresolvedVisible() const { return m_unresolved.load(); }
     // Cells on screen that want a sharper rendition than the thumbnail, and

@@ -211,6 +211,29 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // window grabbed. Needs photos taken on this day in other years.
 void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 
+// PINHOLE_SELFTEST=physics (selftestphysics.cpp): a plugin's screens scroll
+// and zoom as the grid does. The same wheel notches, a spin, touchpad
+// swipes with their coast, a drag set down, a Mac's momentum and a flick
+// on a flick, given on one clock frame by frame to the grid and to the
+// Year calendar, On this day and Colours' photos of a colour (each a
+// ScrollList or ScrollGrid), from the middle of each: their curves match
+// within a pixel and a half until one reaches an end. A pinch out, held
+// and let go, on the grid and on Colours' wall (a PinchZoom): the same size
+// under the fingers, and the same easing to where each lands. Offscreen
+// or anywhere: no frame of the window's drives them. Needs photos taken on
+// this day in other years.
+void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid);
+
+// PINHOLE_SELFTEST=examples[:<dir>] (selftestphysics.cpp): the examples in
+// docs/plugins.md, each a plugin in app/tests/examples, among the plugins
+// (PINHOLE_BUILTIN_PLUGINS a folder with Pinhole's own and them), run: F5
+// lists the years in a ScrollList, F6's tiles pinched out land a size up,
+// F7's card makes a copy of the photo in Pictures/Pinhole and puts it on
+// the (private) clipboard, F8 asks the index with pinhole.query. Each over
+// the photos, as frames in <dir>. Pictures a scratch folder.
+class Library;
+void runExamplesSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, const QString &dir);
+
 // PINHOLE_SELFTEST=through[:<dir>] (selftestthrough.cpp): nothing over the photos
 // lets the pointer through to them, at 850 and 1700 wide. Over the date at
 // the top left, over every part of the side panel (at its top, at its end

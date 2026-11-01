@@ -172,4 +172,19 @@ Rectangle {
             control.tapped()
         }
     }
+
+    // What pressing it could not do, in a few words under it for four
+    // seconds, the button shaking, as a PluginAction's complain() says it
+    // under its button (Complaint.qml).
+    function complain(text) {
+        complaint.active = true
+        complaint.item.say(text)
+    }
+    transform: Translate { id: complaintNudge }
+    Loader {
+        id: complaint
+        active: false
+        z: 10
+        sourceComponent: Complaint { button: control; nudged: complaintNudge }
+    }
 }
