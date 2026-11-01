@@ -1374,12 +1374,23 @@ void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &view
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
+    // Never the desktop's own theme: Omarchy in a home of its own, and the
+    // window watching that one.
+    const QString home = QDir(QDir::homePath()).canonicalPath();
+    const QString omarchyHome = qEnvironmentVariable("PINHOLE_OMARCHY_HOME");
+    const QString themeDir = qEnvironmentVariable("PINHOLE_THEME_DIR");
+    if (omarchyHome.isEmpty() || themeDir.isEmpty() || QDir(omarchyHome).canonicalPath() == home
+        || QDir(themeDir).canonicalPath() == QDir(home + "/.local/state/omarchy/current").canonicalPath()) {
+        say(QStringLiteral("refused: it would set the desktop's own theme; give PINHOLE_OMARCHY_HOME and "
+                           "PINHOLE_THEME_DIR (its .local/state/omarchy/current), apart from $HOME"));
+        QTimer::singleShot(0, window, [] { QCoreApplication::exit(1); });
+        return;
+    }
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     // Omarchy's theme as omarchy-theme-set leaves it, where the window
     // watches it.
     auto current = [] {
-        const QString dir = qEnvironmentVariable("PINHOLE_THEME_DIR", QDir::homePath() + "/.local/state/omarchy/current");
-        QFile file(dir + "/theme.name");
+        QFile file(qEnvironmentVariable("PINHOLE_THEME_DIR") + "/theme.name");
         return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed() : QString();
     };
     auto failed = std::make_shared<bool>(false);

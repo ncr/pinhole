@@ -6,7 +6,7 @@
 #
 #   pinhole-theme available
 #   pinhole-theme current
-#   pinhole-theme make <name> <photo> <colors.toml text> <icon theme> <swatch>...
+#   pinhole-theme make <name> <photo> <icon theme> <keep> <swatch>... < colors.toml
 #   pinhole-theme set <name>
 set -euo pipefail
 
@@ -16,31 +16,57 @@ export OMARCHY_PATH="${OMARCHY_PATH:-$HOME/.local/share/omarchy}"
 export PATH="$OMARCHY_PATH/bin:$PATH"
 
 # Omarchy's home: the desktop's, or for a test one of its own
-# (PINHOLE_OMARCHY_HOME, with OMARCHY_THEME_HEADLESS=1), so the desktop
-# keeps its theme while Pinhole watches that one (PINHOLE_THEME_DIR).
+# (PINHOLE_OMARCHY_HOME), set headless there so the desktop keeps its theme
+# while Pinhole watches that one (PINHOLE_THEME_DIR).
 OMARCHY_HOME="${PINHOLE_OMARCHY_HOME:-$HOME}"
+[[ -z ${PINHOLE_OMARCHY_HOME:-} ]] || export OMARCHY_THEME_HEADLESS=1
 THEMES="$OMARCHY_HOME/.config/omarchy/themes"
+# The themes Pinhole made, each marked with this file (the photo's name in
+# it), and how many of them are kept.
+MARK=.pinhole
+KEPT=12
+
+current() {
+  local name
+  name=$(cat "$OMARCHY_HOME/.local/state/omarchy/current/theme.name" 2>/dev/null || true)
+  [[ -n $name ]] || name=$(HOME="$OMARCHY_HOME" omarchy-theme-current)
+  echo "$name"
+}
+
+# All but the newest of Pinhole's own: never the theme set now, nor `keep`
+# (what undo would go back to), nor a theme Pinhole did not make.
+prune() {
+  local keep="$1" now count=0 mark name
+  now=$(current)
+  while IFS= read -r mark; do
+    name=$(basename "$(dirname "$mark")")
+    [[ $name == pinhole-* ]] || continue
+    count=$((count + 1))
+    if ((count > KEPT)) && [[ $name != "$now" && $name != "$keep" ]]; then
+      rm -rf "${THEMES:?}/$name"
+    fi
+  done < <(ls -t "$THEMES"/pinhole-*/"$MARK" 2>/dev/null || true)
+}
 
 case "${1:-}" in
 available)
   command -v omarchy-theme-set >/dev/null
   ;;
 current)
-  # The folder's name, as omarchy-theme-set takes it.
-  name=$(cat "$OMARCHY_HOME/.local/state/omarchy/current/theme.name" 2>/dev/null || true)
-  [[ -n $name ]] || name=$(HOME="$OMARCHY_HOME" omarchy-theme-current)
-  echo "$name"
+  current
   ;;
 make)
-  name="$2" photo="$3" colors="$4" icons="$5"
+  name="$2" photo="$3" icons="$4" keep="$5"
   shift 5
   [[ $name =~ ^pinhole-[a-z0-9-]+$ ]] || { echo "Not a theme name: $name" >&2; exit 2; }
+  mkdir -p "$THEMES"
   # Built beside it and swapped in, so a theme is never half written.
   next=$(mktemp -d "$THEMES/.$name.XXXXXX")
   trap 'rm -rf "$next"' EXIT
   mkdir -p "$next/backgrounds"
-  printf '%s' "$colors" >"$next/colors.toml"
+  cat >"$next/colors.toml"
   printf '%s\n' "$icons" >"$next/icons.theme"
+  printf '%s\n' "${photo##*/}" >"$next/$MARK"
   # The photo as the background: upright, at most a 4K screen's size.
   magick "$photo[0]" -auto-orient -resize '3840x3840>' -quality 92 "$next/backgrounds/$name.jpg"
   # The preview the theme picker shows: the photo, its palette along the
@@ -51,18 +77,20 @@ make)
   done
   magick "$next/backgrounds/$name.jpg" -resize '1280x720^' -gravity center -extent 1280x720 \
     \( "${swatches[@]}" +append -resize '1280x56!' \) -gravity south -composite "$next/preview.png"
-  rm -rf "$THEMES/$name.old"
-  [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$THEMES/$name.old"
+  rm -rf "$THEMES/.$name.old"
+  [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$THEMES/.$name.old"
   mv "$next" "$THEMES/$name"
-  rm -rf "$THEMES/$name.old"
+  rm -rf "$THEMES/.$name.old"
   trap - EXIT
-  HOME="$OMARCHY_HOME" omarchy-theme-set "$name"
+  # omarchy-theme-set says what went wrong on stdout.
+  HOME="$OMARCHY_HOME" omarchy-theme-set "$name" >&2
+  prune "$keep"
   ;;
 set)
-  HOME="$OMARCHY_HOME" omarchy-theme-set "$2"
+  HOME="$OMARCHY_HOME" omarchy-theme-set "$2" >&2
   ;;
 *)
-  echo "Usage: pinhole-theme available | current | make <name> <photo> <colors> <icons> <swatch>... | set <name>" >&2
+  echo "Usage: pinhole-theme available | current | make <name> <photo> <icons> <keep> <swatch>... < colors.toml | set <name>" >&2
   exit 2
   ;;
 esac

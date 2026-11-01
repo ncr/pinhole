@@ -183,9 +183,15 @@ function make(colours, strong, mode) {
     const candidates = colours.filter(c => c.weight >= 0.015 && c.lch.c > 0.035)
     const score = c => c.lch.c * Math.pow(c.weight, 0.25)
     const accentSource = candidates.length > 0 ? candidates.reduce((a, b) => score(b) > score(a) ? b : a) : null
-    const accentHue = accentSource ? accentSource.lch.h : (dominant.c > 0.01 ? groundHue : 250)
-    const accentChroma = Math.max(accentSource ? accentSource.lch.c : 0, 0.13) * vivid + (strong ? 0.02 : 0)
-    const accentLch = readable(lch(dark ? 0.74 : 0.52, Math.min(accentChroma, 0.2), accentHue), [background], 4.5, dark)
+    // A photo with little colour gives an accent with as little, and a
+    // grey or black-and-white one a grey accent: a theme without colour.
+    const accentHue = accentSource ? accentSource.lch.h : groundHue
+    const sourceChroma = accentSource ? accentSource.lch.c : 0
+    const accentChroma = !accentSource ? Math.min(dominant.c, 0.02)
+                       : sourceChroma < 0.06 ? sourceChroma * 2 * vivid
+                       : Math.max(sourceChroma, 0.13) * vivid + (strong ? 0.02 : 0)
+    const accentLch = readable(lch(dark ? (accentSource ? 0.74 : 0.82) : (accentSource ? 0.52 : 0.42), Math.min(accentChroma, 0.2), accentHue),
+                               [background], 4.5, dark)
     const accent = hex(accentLch)
 
     // Text: from the ground's hue, a little of it, read at 7:1 on the ground
@@ -234,7 +240,8 @@ function make(colours, strong, mode) {
     const second = candidates.filter(c => hueDistance(c.lch.h, accentHue) > 40)
                              .reduce((a, b) => !a || score(b) > score(a) ? b : a, null)
     const borderEnd = second ? hex(readable(lch(accentLch.l, Math.max(second.lch.c, 0.1) * vivid, second.lch.h), [background], 3, dark))
-                             : hex(named.magenta)
+                    : accentSource ? hex(named.magenta)
+                    : hex(lch(dark ? accentLch.l - 0.25 : accentLch.l + 0.25, accentLch.c, accentLch.h))
     const strip = h => h.substr(1)
 
     const p = {
@@ -268,16 +275,6 @@ function toml(p, title) {
         + group("Window borders", ["hyprland_active_border", "hyprland_inactive_border"])
         + group("Named colours, pulled toward the photo's", ["red", "orange", "yellow", "green", "cyan", "blue", "magenta", "brown"])
         + group("Bright variants", ["bright_red", "bright_yellow", "bright_green", "bright_cyan", "bright_blue", "bright_magenta"])
-}
-
-// A word for the accent's colour, for the theme's name.
-function hueName(p) {
-    const c = rgbToOklch(hexToRgb(p.accent))
-    if (c.c < 0.04)
-        return p.mode === "dark" ? "night" : "snow"
-    const names = [[20, "rose"], [45, "coral"], [70, "amber"], [105, "gold"], [130, "olive"], [165, "leaf"],
-                   [195, "teal"], [225, "sky"], [270, "blue"], [300, "violet"], [345, "plum"], [360, "rose"]]
-    return names.find(n => c.h < n[0])[1]
 }
 
 // Yaru's icons in the accent's colour, as Omarchy's themes name them.

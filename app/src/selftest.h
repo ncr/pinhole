@@ -102,7 +102,7 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // it, then Ctrl+Z; check Omarchy's theme was set and set back each time,
 // and grab the window, retinted and not, into <dir>. Run it with Omarchy in
 // a home of its own (PINHOLE_OMARCHY_HOME, OMARCHY_THEME_HEADLESS=1) and the
-// window watching that (PINHOLE_THEME_DIR), or the desktop's theme changes.
+// window watching that (PINHOLE_THEME_DIR); without them it refuses.
 void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
 
 // PINHOLE_SELFTEST=otherseries:<dir>: Series' edits and another source's
