@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QImageReader>
 #include <QMimeData>
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
@@ -1582,6 +1583,148 @@ void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &view
         *before = current();
         say(QStringLiteral("%1 photos; the theme is %2").arg(photos->size()).arg(*before));
         QTimer::singleShot(3000, window, [loaded, step] { (*step)(0); });
+    });
+    loaded->start();
+}
+
+void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    // Never the desktop's own background: Omarchy's shell answers whatever
+    // HOME asks, so a home of its own, stand-ins for what reaches the shell,
+    // and the backgrounds kept in that home.
+    const QString home = QDir(QDir::homePath()).canonicalPath();
+    const QString omarchyHome = QDir(qEnvironmentVariable("PINHOLE_OMARCHY_HOME")).canonicalPath();
+    const QString stubs = qEnvironmentVariable("PINHOLE_OMARCHY_STUBS");
+    const QString kept = QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) + "/Pinhole/.backgrounds").absolutePath();
+    if (qEnvironmentVariable("PINHOLE_OMARCHY_HOME").isEmpty() || omarchyHome.isEmpty() || omarchyHome == home
+        || !QFileInfo(stubs + "/omarchy-theme-bg-set").isExecutable() || !QFileInfo(stubs + "/omarchy-shell").isExecutable()
+        || !kept.startsWith(omarchyHome + '/')) {
+        say(QStringLiteral("refused: it would set the desktop's own background; give PINHOLE_OMARCHY_HOME (apart from "
+                           "$HOME, with XDG_PICTURES_DIR in it), and stand-ins for omarchy-theme-bg-set and "
+                           "omarchy-shell in PINHOLE_OMARCHY_STUBS"));
+        QTimer::singleShot(0, window, [] { QCoreApplication::exit(1); });
+        return;
+    }
+    const QString state = omarchyHome + "/.local/state/omarchy";
+    auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
+    // What Omarchy's link points at now.
+    auto current = [state] { return QFileInfo(state + "/current/background").canonicalFilePath(); };
+    auto failed = std::make_shared<bool>(false);
+    // Calls `then` once `done`, a moment later; fails after 60 s.
+    auto waitFor = [=](const QString &what, const std::function<bool(const QString &)> &done, const std::function<void()> &then) {
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto poll = std::make_shared<QTimer>();
+        poll->setInterval(200);
+        QObject::connect(poll.get(), &QTimer::timeout, window, [=] {
+            const QString now = current();
+            if (!done(now) && clock->elapsed() < 60000)
+                return;
+            poll->stop();
+            say(QStringLiteral("%1: %2 (%3)").arg(what, now, done(now) ? "as it should" : "WRONG"));
+            *failed = *failed || !done(now);
+            grab(what);
+            QTimer::singleShot(800, window, [poll, then] { then(); });
+        });
+        poll->start();
+    };
+    auto finish = [=] {
+        say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
+        QCoreApplication::exit(*failed ? 1 : 0);
+    };
+    auto before = std::make_shared<QString>();
+    auto set = std::make_shared<QString>();
+    auto keptHere = [kept](const QString &path) { return path.startsWith(QDir(kept).canonicalPath() + '/'); };
+    // Series' studio: its B on a video as if just made; the theme switched
+    // to one with a background of the same name; Ctrl+Z.
+    auto studio = [=] {
+        const QString video = qEnvironmentVariable("PINHOLE_SELFTEST_VIDEO");
+        std::function<QQuickItem *(QQuickItem *)> find = [&find](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == QLatin1String("seriesStudio"))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child))
+                    return found;
+            return nullptr;
+        };
+        QQuickItem *studioItem = find(window->contentItem());
+        if (video.isEmpty() || !studioItem) {
+            say(video.isEmpty() ? QStringLiteral("no PINHOLE_SELFTEST_VIDEO: the studio left out") : QStringLiteral("no studio"));
+            *failed = *failed || !video.isEmpty();
+            finish();
+            return;
+        }
+        studioItem->setProperty("made", QVariantMap{{"path", video}, {"name", QFileInfo(video).fileName()}, {"size", ""}});
+        QMetaObject::invokeMethod(studioItem, "makeBackground");
+        waitFor(QStringLiteral("studio-set"), [=](const QString &now) { return keptHere(now) && now.endsWith(".mp4"); }, [=] {
+            *set = current();
+            // Another theme now, its own file of that name where the one
+            // before was.
+            QFile name(state + "/current/theme.name");
+            name.open(QIODevice::ReadOnly);
+            const QString was = QString::fromUtf8(name.readAll()).trimmed();
+            name.close();
+            name.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            name.write("test-other\n");
+            name.close();
+            QFile::remove(*before);
+            QFile::copy(qEnvironmentVariable("PINHOLE_SELFTEST_OTHER"), *before);
+            const QString own = omarchyHome + "/.config/omarchy/themes/" + was + "/backgrounds/" + QFileInfo(*before).fileName();
+            say(QStringLiteral("the theme switched from %1; the one before is now %2").arg(was, own));
+            key(window, Qt::Key_Z, Qt::ControlModifier);
+            waitFor(QStringLiteral("studio-undone"), [own](const QString &now) { return now == QFileInfo(own).canonicalFilePath(); }, [=] {
+                key(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+                waitFor(QStringLiteral("studio-redone"), [set](const QString &now) { return now == *set; }, finish);
+            });
+        });
+    };
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto loaded = std::make_shared<QTimer>();
+    loaded->setInterval(250);
+    Viewer *shown = &viewer;
+    QObject::connect(loaded.get(), &QTimer::timeout, window, [=, &library] {
+        if (library.count() == 0 && clock->elapsed() < 60000)
+            return;
+        loaded->stop();
+        int index = -1;
+        const QString id = qEnvironmentVariable("PINHOLE_SELFTEST_PHOTOS").section(',', 0, 0);
+        for (int i = 0; i < library.count(); ++i)
+            if (library.at(i).id == id.toUtf8())
+                index = i;
+        if (index < 0) {
+            say(QStringLiteral("the first of PINHOLE_SELFTEST_PHOTOS is not in the library"));
+            QCoreApplication::exit(1);
+            return;
+        }
+        *before = current();
+        say(QStringLiteral("%1, the background %2").arg(library.at(index).filename, *before));
+        QTimer::singleShot(3000, window, [=] {
+            shown->openAt(index, QRectF(0, 0, 100, 100));
+            QTimer::singleShot(2500, window, [=] {
+                grab(QStringLiteral("photo"));
+                key(window, Qt::Key_B, Qt::NoModifier, QStringLiteral("b"));
+                waitFor(QStringLiteral("set"), [=](const QString &now) { return keptHere(now); }, [=] {
+                    *set = current();
+                    const QSize size = QImageReader(*set).size();
+                    const bool small = size.isValid() && std::max(size.width(), size.height()) <= 3840;
+                    say(QStringLiteral("kept %1x%2, %3 bytes (%4)").arg(size.width()).arg(size.height())
+                        .arg(QFileInfo(*set).size()).arg(small ? "as it should" : "WRONG"));
+                    *failed = *failed || !small;
+                    key(window, Qt::Key_Z, Qt::ControlModifier);
+                    waitFor(QStringLiteral("undone"), [before](const QString &now) { return now == *before; }, [=] {
+                        key(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+                        waitFor(QStringLiteral("redone"), [set](const QString &now) { return now == *set; }, [=] {
+                            key(window, Qt::Key_Z, Qt::ControlModifier);
+                            waitFor(QStringLiteral("undone-again"), [before](const QString &now) { return now == *before; }, studio);
+                        });
+                    });
+                });
+            });
+        });
     });
     loaded->start();
 }

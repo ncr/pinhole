@@ -97,9 +97,12 @@ PinholePlugin {
             .catch(error => failed(error, qsTr("Could not make a theme: %1").arg(why(error))))
             .then(() => making = null)
     }
-    // Undone or done again: that theme set, if it is still there.
+    // Undone or done again: that theme set, if it is still there; one of
+    // Pinhole's own gone (exit 3) was pruned, as only the last 12 are kept.
     function set(name, saying) {
-        pinhole.run("pinhole-theme", ["set", name]).catch(error => failed(error, saying.arg(titleOf(name)).arg(why(error))))
+        pinhole.run("pinhole-theme", ["set", name]).catch(error => failed(error, error.exitCode === 3
+            ? qsTr("%1 is gone: only the last 12 themes made from photos are kept").arg(titleOf(name))
+            : saying.arg(titleOf(name)).arg(why(error))))
     }
     function failed(error, text) {
         if (error.code === "cancelled")
@@ -190,7 +193,7 @@ PinholePlugin {
                 wrapMode: Text.WordWrap
                 color: theme.darkForeground
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: qsTr("The last 12 themes made are kept in Omarchy's theme picker; older ones are removed, never the one set.")
+                text: qsTr("The last 12 themes made or used are kept in Omarchy's theme picker; older ones are removed, never the one set.")
             }
         }
     }

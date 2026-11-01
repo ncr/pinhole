@@ -33,11 +33,21 @@ current() {
   echo "$name"
 }
 
+# A theme of Pinhole's own in use, made fresh by its mark's time, so the
+# newest are the ones last used: one picked in Omarchy's picker as much as
+# one just made.
+used() {
+  [[ -n $1 && -f $THEMES/$1/$MARK ]] && touch -- "$THEMES/$1/$MARK" || true
+}
+
 # All but the newest of Pinhole's own: never the theme set now, nor `keep`
-# (what undo would go back to), nor a theme Pinhole did not make.
+# (the one set before, what undo would go back to), both used just now, nor
+# a theme Pinhole did not make.
 prune() {
   local keep="$1" now count=0 mark name
   now=$(current)
+  used "$keep"
+  used "$now"
   while IFS= read -r mark; do
     name=$(basename "$(dirname "$mark")")
     [[ $name == pinhole-* ]] || continue
@@ -87,7 +97,13 @@ make)
   prune "$keep"
   ;;
 set)
+  # One of Pinhole's own pruned: exit 3 (only the last KEPT are kept).
+  if [[ $2 == pinhole-* && ! -d $THEMES/$2 ]]; then
+    echo "Only the last $KEPT themes made are kept" >&2
+    exit 3
+  fi
   HOME="$OMARCHY_HOME" omarchy-theme-set "$2" >&2
+  used "$2"
   ;;
 *)
   echo "Usage: pinhole-theme available | current | make <name> <photo> <icons> <keep> <swatch>... < colors.toml | set <name>" >&2

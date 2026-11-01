@@ -8,6 +8,7 @@ import "Engine.js" as Engine
 // clipboard and kept in Pictures/Pinhole.
 Item {
     id: studio
+    objectName: "seriesStudio"
     required property var plugin
     readonly property var pinhole: plugin.pinhole
 
@@ -195,36 +196,56 @@ Item {
         }
     }
 
-    // The video made as the desktop background, kept as the Background
-    // plugin keeps one: in Pictures/Pinhole/.backgrounds, where no folder
-    // source shows it and no cache clean takes it. Ctrl+Z puts back the one
-    // before.
+    // The video made as the desktop background, by the Background plugin's
+    // own script, beside this plugin's folder: kept as it keeps one, in
+    // Pictures/Pinhole/.backgrounds, where no folder source shows it and no
+    // cache clean takes it, and the one before remembered with its theme.
+    // Ctrl+Z puts that one back, as the Background plugin's does.
     property bool settingBackground: false
+    readonly property string backgroundScript: pinhole.dir + "/../background/background"
     function makeBackground() {
         if (!made || settingBackground)
             return
-        const kept = pinhole.picturesDir() + "/Pinhole/.backgrounds/" + made.name
-        let before = ""
+        let kept = "", before = null
         settingBackground = true
-        // Kept (linked, as it is on the same disk), then the one set now.
-        pinhole.run("sh", ["-c", 'mkdir -p "${2%/*}" && { ln -f -- "$1" "$2" 2>/dev/null || cp -f -- "$1" "$2"; } && '
-                                 + '{ omarchy-shell shell selectedBackground 2>/dev/null '
-                                 + '|| readlink -f "$HOME/.local/state/omarchy/current/background"; }', "sh", made.path, kept])
+        pinhole.run(backgroundScript, ["keep", made.path, pinhole.picturesDir() + "/Pinhole/.backgrounds",
+                                       made.name.replace(/\.[^.]*$/, ""), "mp4", "own"])
             .then(result => {
-                before = result.stdout.trim()
-                return pinhole.run("omarchy-theme-bg-set", [kept])
+                kept = result.stdout.trim()
+                return pinhole.run(backgroundScript, ["current"]).then(result => {
+                    const lines = result.stdout.split("\n")
+                    return { theme: lines[0].trim(), path: (lines[1] || "").trim() }
+                }, () => ({ theme: "", path: "" }))
+            })
+            .then(now => {
+                before = now
+                return pinhole.run(backgroundScript, ["set", kept, ""])
             })
             .then(() => {
                 pinhole.notify(qsTr("Your moving desktop background now"))
-                if (before !== "" && before !== kept)
-                    pinhole.did(qsTr("setting the background"), () => setBackground(before), () => setBackground(kept))
+                if (before.path !== "" && before.path !== kept)
+                    pinhole.did(qsTr("setting the background"), () => setBackground(before),
+                                () => setBackground({ path: kept, theme: before.theme }))
             })
-            .catch(error => pinhole.notify(qsTr("Could not set the background: %1").arg(String(error.message).trim())))
+            .catch(backgroundFailed)
             .then(() => settingBackground = false)
     }
-    function setBackground(path) {
-        pinhole.run("omarchy-theme-bg-set", [path])
-            .catch(error => pinhole.notify(qsTr("Could not set the background: %1").arg(String(error.message).trim())))
+    // Undone or done again: that one, if it is still there.
+    function setBackground(background) {
+        pinhole.run(backgroundScript, ["set", background.path, background.theme]).catch(error => {
+            if (error.exitCode === 3)
+                pinhole.notify(qsTr("The background before went with the theme %1").arg(background.theme))
+            else if (error.exitCode === 4)
+                pinhole.notify(qsTr("The background before is gone: %1").arg(background.path.split("/").pop()))
+            else
+                backgroundFailed(error)
+        })
+    }
+    function backgroundFailed(error) {
+        if (error.code === "cancelled")
+            return
+        const why = String(error.message || error.code || error).trim().split("\n").pop()
+        pinhole.notify(qsTr("Could not set the background: %1").arg(why))
     }
 
     FrameAnimation {

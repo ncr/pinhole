@@ -1,17 +1,19 @@
 #!/bin/sh
-# The Background plugin's work outside QML.
+# The Background plugin's work outside QML; Series' studio sets its videos
+# with it too.
 #
 # background keep <file> <folder> <name> <extension> own|cached
 #   A photo or video from the service kept where it lasts, as a background
 #   Omarchy can show, and its path said. A .jpg is the photo as it looks
-#   (HEIC and the rest made a JPEG, turned upright: the shell draws with Qt's
-#   image readers, which know neither); a .mkv a video's picture, without its
-#   sound (a background is silent), in a container mpv reads whatever it came
-#   in; anything else the file as it is, linked where it can be. The name
-#   ends in a few characters of the rendition: its cache name, which an edit
-#   changes, or for a folder's own file its time and size; so an edited
-#   photo set again is kept anew, and the same one is the same file. Written
-#   aside and renamed, so the shell never reads half a file.
+#   (HEIC and the rest made a JPEG, turned upright, at most a 4K screen's
+#   size: the shell draws with Qt's image readers, which know neither); a
+#   .mkv a video's picture, without its sound (a background is silent), in a
+#   container mpv reads whatever it came in; anything else the file as it
+#   is, linked where it can be. The name ends in a few characters of the
+#   rendition: its cache name, which an edit changes, or for a folder's own
+#   file its time and size; so an edited photo set again is kept anew, and
+#   the same one is the same file. Written aside and renamed, so the shell
+#   never reads half a file. Then the folder pruned (see prune).
 #
 # background current
 #   The theme's name, then the background set now ("" if none): the shell's
@@ -19,18 +21,78 @@
 #   flash, else the link.
 #
 # background set <path> <theme>
-#   Sets one set before, under <theme>. A theme's own background is named in
-#   the current theme's folder, which a theme switch replaces: under another
-#   theme now, it is looked for in that theme's own folder. Exits 3 if it
-#   went with its theme, 4 if it is gone.
+#   Sets one, under <theme> ("" for one kept here). A theme's own background
+#   is named in the current theme's folder, which a theme switch replaces:
+#   under another theme now, it is looked for in that theme's own folder.
+#   Exits 3 if it went with its theme, 4 if it is gone.
+#
+# background size <folder>
+#   How many are kept there, and their bytes.
 set -eu
 
-state="$HOME/.local/state/omarchy"
-current_theme() { cat "$state/current/theme.name" 2>/dev/null || true; }
+# Omarchy's home: the desktop's, or for a test one of its own
+# (PINHOLE_OMARCHY_HOME). Omarchy's shell answers whoever asks, whatever
+# their HOME, so a test never calls it, nor omarchy-theme-bg-set, which asks
+# it: it gives stand-ins for both in PINHOLE_OMARCHY_STUBS, and keeps its
+# backgrounds in its own home, or is refused.
+home=${PINHOLE_OMARCHY_HOME:-$HOME}
+state="$home/.local/state/omarchy"
+bg_set=omarchy-theme-bg-set
+shell=omarchy-shell
+if [ -n "${PINHOLE_OMARCHY_HOME:-}" ]; then
+  stubs=${PINHOLE_OMARCHY_STUBS:-}
+  if [ -z "$stubs" ] || [ ! -x "$stubs/omarchy-theme-bg-set" ] || [ ! -x "$stubs/omarchy-shell" ] \
+    || [ "$(cd "$home" 2>/dev/null && pwd -P)" = "$(cd "$HOME" && pwd -P)" ]; then
+    echo "Refused: a test's Omarchy (PINHOLE_OMARCHY_HOME, apart from \$HOME) needs stand-ins for omarchy-theme-bg-set and omarchy-shell in PINHOLE_OMARCHY_STUBS, or it would change the desktop's background" >&2
+    exit 2
+  fi
+  bg_set="$stubs/omarchy-theme-bg-set"
+  shell="$stubs/omarchy-shell"
+fi
 
-case "$1" in
+current_theme() { cat "$state/current/theme.name" 2>/dev/null || true; }
+# The shell's latest choice, if it answers in time, as Omarchy's own scripts
+# ask it: a hung shell must not keep B turning.
+selected() { timeout 2 "$shell" shell selectedBackground 2>/dev/null || true; }
+
+# How many stay in the folder whatever uses them, the newest.
+KEPT=12
+# All but the newest KEPT in <folder> (by when each was kept, its ctime: a
+# linked one's mtime is its photo's), never <keep> nor one in use: the
+# background set now, one a theme remembers to bring back (omarchy-theme-set
+# keeps its path in theme-backgrounds/<theme>), one a link points at.
+prune() {
+  folder=$1 keep=$2
+  [ -d "$folder" ] || return 0
+  used=$(
+    {
+      echo "$keep"
+      readlink -f "$state/current/background" 2>/dev/null || true
+      selected
+      cat "$state"/theme-backgrounds/* 2>/dev/null || true
+      find "$home/.config/omarchy/backgrounds" "$home/.config/omarchy/themes" "$state/current" \
+        -maxdepth 3 -type l -exec readlink -f {} \; 2>/dev/null || true
+    } | while IFS= read -r path; do
+      [ -z "$path" ] || readlink -f -- "$path" 2>/dev/null || true
+    done
+  )
+  ls -tc -- "$folder" | grep -v '\.part$' | tail -n +$((KEPT + 1)) | while IFS= read -r name; do
+    file="$folder/$name"
+    if [ -f "$file" ] && [ ! -L "$file" ] && ! printf '%s\n' "$used" | grep -qxF -- "$(readlink -f -- "$file")"; then
+      rm -f -- "$file"
+    fi
+  done
+}
+
+case "${1:-}" in
 keep)
   from=$2 dir=$3 name=$4 extension=$5 own=$6
+  if [ -n "${PINHOLE_OMARCHY_HOME:-}" ]; then
+    case "$dir" in
+      "$home"/*) ;;
+      *) echo "Refused: a test keeps its backgrounds in its own home (PINHOLE_OMARCHY_HOME), not $dir" >&2; exit 2 ;;
+    esac
+  fi
   # Kept in Pictures/Pinhole/Backgrounds at first, where a folder source of
   # Pictures showed them as photos: moved, with Omarchy's link and what its
   # themes remember.
@@ -45,7 +107,7 @@ keep)
     done
     shown=$(readlink -f "$state/current/background" 2>/dev/null || true)
     case "$shown" in
-      "$old"/*) omarchy-theme-bg-set "$dir/${shown##*/}" || true ;;
+      "$old"/*) "$bg_set" "$dir/${shown##*/}" || true ;;
     esac
     rmdir "$old" 2>/dev/null || true
   fi
@@ -66,7 +128,7 @@ keep)
     part="$kept.part"
     trap 'rm -f -- "$part"' EXIT
     case "$extension" in
-      jpg) magick "$from" -auto-orient -quality 92 "jpg:$part" ;;
+      jpg) magick "$from[0]" -auto-orient -resize '3840x3840>' -quality 92 "jpg:$part" ;;
       mkv) ffmpeg -v error -y -i "$from" -map 0:v:0 -c copy -f matroska "$part" ;;
       # A hard link where the cache and Pictures share a disk: instant, no
       # room taken twice, and it stays when the cache lets its name go.
@@ -74,12 +136,17 @@ keep)
     esac
     mv -f -- "$part" "$kept"
   fi
+  prune "$dir" "$kept"
   echo "$kept"
   ;;
 current)
   current_theme
-  chosen=$(omarchy-shell shell selectedBackground 2>/dev/null) && [ -f "$chosen" ] && echo "$chosen" \
-    || readlink -f "$state/current/background" 2>/dev/null || echo
+  chosen=$(selected)
+  if [ -n "$chosen" ] && [ -f "$chosen" ]; then
+    echo "$chosen"
+  else
+    readlink -f "$state/current/background" 2>/dev/null || echo
+  fi
   ;;
 set)
   path=$2 theme=$3
@@ -88,7 +155,7 @@ set)
       if [ -n "$theme" ] && [ "$theme" != "$(current_theme)" ]; then
         file=${path#"$state/current/theme/"}
         path=
-        for themes in "$HOME/.config/omarchy/themes" /usr/share/omarchy/themes; do
+        for themes in "$home/.config/omarchy/themes" /usr/share/omarchy/themes; do
           if [ -f "$themes/$theme/$file" ]; then
             path="$themes/$theme/$file"
             break
@@ -99,6 +166,16 @@ set)
       ;;
   esac
   [ -f "$path" ] || exit 4
-  exec omarchy-theme-bg-set "$path"
+  exec "$bg_set" "$path"
+  ;;
+size)
+  dir=$2
+  count=$(find "$dir" -maxdepth 1 -type f ! -name '*.part' 2>/dev/null | wc -l)
+  bytes=$(du -sb -- "$dir" 2>/dev/null | cut -f1)
+  echo "$count ${bytes:-0}"
+  ;;
+*)
+  echo "Usage: background keep <file> <folder> <name> <extension> own|cached | current | set <path> <theme> | size <folder>" >&2
+  exit 2
   ;;
 esac

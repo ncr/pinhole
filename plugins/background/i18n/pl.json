@@ -1,7 +1,13 @@
 {
+  "%n kept there now, %1.": {
+    "one": "Jest tam teraz jedno, %1.",
+    "few": "Są tam teraz %n, razem %1.",
+    "many": "Jest tam teraz %n, razem %1.",
+    "other": "Jest tam teraz %n, razem %1."
+  },
   "A Live Photo's Bounce": "Odbicie zdjęcia Live",
   "A Live Photo's motion": "Ruch zdjęcia Live",
-  "B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds.": "B na zdjęciu otwartym na całe okno. Każde tło zostaje w Pictures/Pinhole/.backgrounds.",
+  "B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds: the newest 12, and any in use or a theme will bring back.": "B na zdjęciu otwartym na całe okno. Każde tło zostaje w Pictures/Pinhole/.backgrounds: 12 najnowszych i każde, które jest ustawione albo do którego wróci motyw.",
   "Background": "Tło",
   "Behind everything": "Pod wszystkim",
   "Bounce as background": "Odbicie jako tło",

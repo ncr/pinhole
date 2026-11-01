@@ -116,6 +116,18 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // window watching that (PINHOLE_THEME_DIR); without them it refuses.
 void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
 
+// PINHOLE_SELFTEST=background:<dir>: the first photo of
+// PINHOLE_SELFTEST_PHOTOS full window, B to make it the Background plugin's
+// desktop background, Ctrl+Z, Ctrl+⇧Z, Ctrl+Z; then, with
+// PINHOLE_SELFTEST_VIDEO (an MP4), Series' studio's B on it as if just
+// made, the theme switched, and Ctrl+Z, which finds the background before
+// in its own theme's folder. Each checked on Omarchy's link, the still at
+// most 3840 px, and grabbed into <dir>. Never the desktop's: Omarchy in a
+// home of its own (PINHOLE_OMARCHY_HOME, with Pictures in it, as
+// XDG_PICTURES_DIR), stand-ins for omarchy-theme-bg-set and omarchy-shell
+// in PINHOLE_OMARCHY_STUBS; without them it refuses.
+void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder);
+
 // PINHOLE_SELFTEST=otherseries:<dir>: Series' edits and another source's
 // library of the same ids, shown from elsewhere (as another window or a
 // terminal would): photos 0-2 grouped in the library shown; the service

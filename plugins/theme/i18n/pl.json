@@ -1,4 +1,5 @@
 {
+  "%1 is gone: only the last 12 themes made from photos are kept": "Motywu %1 już nie ma: zostaje tylko 12 ostatnich motywów ze zdjęć",
   "A desktop theme from the photo": "Motyw pulpitu ze zdjęcia",
   "As the photo": "Jak zdjęcie",
   "Back again": "Z powrotem",
@@ -12,7 +13,7 @@
   "Makes an Omarchy theme from the photo shown full window, and the whole desktop takes its colours.": "Robi motyw Omarchy ze zdjęcia otwartego na całe okno, a cały pulpit przejmuje jego kolory.",
   "On a photo shown full window, T makes an Omarchy theme from it: the photo as the background, its colours everywhere, the text kept readable.": "Na zdjęciu otwartym na całe okno T robi z niego motyw Omarchy: zdjęcie jako tło, jego kolory wszędzie, a tekst wciąż czytelny.",
   "Strong or muted": "Mocne czy stonowane",
-  "The last 12 themes made are kept in Omarchy's theme picker; older ones are removed, never the one set.": "Ostatnie 12 zrobionych motywów zostaje w wyborze motywów Omarchy; starsze są usuwane, nigdy ten ustawiony.",
+  "The last 12 themes made or used are kept in Omarchy's theme picker; older ones are removed, never the one set.": "Ostatnie 12 zrobionych albo używanych motywów zostaje w wyborze motywów Omarchy; starsze są usuwane, nigdy ten ustawiony.",
   "The photo's colours strong": "Mocne kolory zdjęcia",
   "Theme": "Motyw",
   "Your desktop's theme now: %1": "Motyw pulpitu to teraz %1",

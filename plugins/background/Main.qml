@@ -12,7 +12,9 @@ import Pinhole.Plugin
 // to bring back after a switch to another theme and back, so it has to
 // outlast a cache clean. Hidden, as a folder source of Pictures would show
 // each one beside its photo. Each is a step of Pinhole's history: Ctrl+Z
-// puts back the background before it.
+// puts back the background before it. The folder is pruned as one is kept:
+// the newest 12 stay, and any in use or a theme will bring back (see
+// `background keep`).
 PinholePlugin {
     id: plugin
 
@@ -73,7 +75,7 @@ PinholePlugin {
             })
             .then(now => {
                 before = now
-                return pinhole.run("omarchy-theme-bg-set", [kept])
+                return pinhole.run("background", ["set", kept, ""])
             })
             .then(() => {
                 pinhole.notify(way === "still" ? qsTr("Your desktop background now")
@@ -113,16 +115,25 @@ PinholePlugin {
     function aLivePhoto() {
         if (touringId === "") {
             touringId = "-"
-            for (let i = pinhole.library.count - 1; i >= 0; --i) {
-                const item = pinhole.library.item(i)
-                if (item.live) {
-                    touringId = item.id
+            const live = pinhole.library.field("live")
+            for (let i = live.length - 1; i >= 0; --i)
+                if (live[i]) {
+                    touringId = pinhole.library.item(i).id
                     break
                 }
-            }
         }
         const index = pinhole.library.indexOf(touringId)
-        return index >= 0 ? index : pinhole.currentIndex()
+        return index >= 0 ? index : nearestPhoto(pinhole.currentIndex())
+    }
+    // The photo nearest `index` that is not a video: the still's
+    // Background, which the tour lights, shows on one.
+    function nearestPhoto(index) {
+        const videos = pinhole.library.field("video")
+        for (let d = 0; d < videos.length; ++d)
+            for (const i of [index - d, index + d])
+                if (i >= 0 && i < videos.length && !videos[i])
+                    return i
+        return index
     }
 
     actions: [
@@ -175,7 +186,7 @@ PinholePlugin {
         {
             title: qsTr("Behind everything"),
             text: qsTr("On a photo shown full window, B makes it the desktop background; a video becomes a moving one. Ctrl+Z puts the one before back."),
-            open: () => pinhole.currentIndex(),
+            open: () => plugin.nearestPhoto(pinhole.currentIndex()),
             action: stillAction
         },
         {
@@ -193,14 +204,22 @@ PinholePlugin {
 
     settings: Component {
         Column {
+            id: settingsColumn
             width: parent ? parent.width : 0
             spacing: 8
+            // What the folder holds, read as the settings show.
+            property string held: ""
+            Component.onCompleted: pinhole.run("background", ["size", plugin.folder]).then(result => {
+                const counted = result.stdout.trim().split(" ").map(Number)
+                held = counted[0] > 0 ? qsTr("%n kept there now, %1.", "", counted[0]).arg(pinhole.sizeText(counted[1])) : ""
+            }, () => {})
             UiText {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 color: theme.foreground
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: qsTr("B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds.")
+                text: qsTr("B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds: the newest 12, and any in use or a theme will bring back.")
+                      + (settingsColumn.held !== "" ? " " + settingsColumn.held : "")
             }
             ShellButton {
                 text: qsTr("Show the folder")
