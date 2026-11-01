@@ -406,11 +406,14 @@ Item {
                 order = order.slice(0, at + 1).concat(round(current.photoId, true))
             }
         }
+        // A step under way keeps its way: on to the next, or back where
+        // it was going (what is behind stays as it was).
         const waited = waiting.running || waiting.held
-        if (waited)
+        if (waited && waiting.forward)
             target = at + 1
-        if (next.photoId !== idAt(at + 1) || next.gone)
-            next.load(distinct > 1 || current.gone ? idAt(at + 1) : "")
+        const coming = waited ? target : at + 1
+        if (next.photoId !== idAt(coming) || next.gone)
+            next.load(distinct > 1 || current.gone ? idAt(coming) : "")
         prefetch(2)
         if (current.gone && !waited)
             go(1, false)

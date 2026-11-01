@@ -82,6 +82,17 @@ Item {
         function onOpenChanged() {
             if (viewer.open)
                 root.opened()
+            // Closed by something else (the photo frame starting from it,
+            // its photo gone): it shrinks away as Esc has it, rather than
+            // stay over the grid. With no photo to shrink into, at once.
+            else if (!shrinking.running && (root.progress > 0 || growing.running)) {
+                if (viewer.index >= 0) {
+                    root.closeViewer()
+                } else {
+                    growing.stop()
+                    root.progress = 0
+                }
+            }
         }
         // A photo opened as it shrinks away: it grows back.
         function onOpenAsked() {

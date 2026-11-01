@@ -386,8 +386,11 @@ Item {
         Image {
             id: sharpImage
             anchors.fill: parent
-            // Let go under the full size, once that is up.
-            source: fullImage.status === Image.Ready ? "" : slide.sharp
+            // Let go under the full size once that has faded in all the
+            // way: the photo sharpens from the medium, not from the
+            // thumbnail.
+            objectName: "sharpImage"
+            source: fullImage.status === Image.Ready && fullImage.opacity >= 1 ? "" : slide.sharp
             asynchronous: true
             smooth: true
             cache: false
@@ -398,6 +401,7 @@ Item {
         }
         Image {
             id: fullImage
+            objectName: "fullImage"
             anchors.fill: parent
             source: slide.full
             sourceSize: slide.fullSize
