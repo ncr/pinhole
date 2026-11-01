@@ -1140,7 +1140,7 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
         *failures += ok ? 0 : 1;
     };
-    auto finish = [say, failures] {
+    auto exitTest = [say, failures] {
         say(QStringLiteral("done, %1 failed").arg(*failures));
         QCoreApplication::exit(*failures ? 1 : 0);
     };
@@ -1207,7 +1207,7 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
             key(window, Qt::Key_Escape);
             QTimer::singleShot(1000, window, [=] {
                 say(describe(QStringLiteral("after the last")));
-                finish();
+                exitTest();
             });
         });
         poll->start();
@@ -1232,6 +1232,149 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         poll->start();
     };
     auto shown = [](QObject *o) { return o && o->property("shown").toBool(); };
+    // However soon a tour that opens a photo ends, the viewer it opened
+    // closes and one open before stays: Esc as it starts (Background's first
+    // step opens a photo) and mid-open, between steps, as a step without a
+    // photo closes it, and back on a photo mid-close. Then the test ends.
+    auto photoViewer = [window] { return window->findChild<QObject *>(QStringLiteral("photoViewer")); };
+    auto viewerShown = [photoViewer] {
+        QObject *p = photoViewer();
+        return p && p->property("shown").toBool();
+    };
+    auto state = [=, &viewer] {
+        QObject *p = photoViewer();
+        return QStringLiteral("tour %1, step %2, viewer %3 on %4, shown %5 (progress %6)")
+            .arg(shown(tour()) ? "shown" : "gone")
+            .arg(tour()->property("index").toInt() + 1)
+            .arg(viewer.isOpen() ? "open" : "closed")
+            .arg(viewer.property("index").toInt())
+            .arg(viewerShown() ? "yes" : "no")
+            .arg(p ? p->property("progress").toReal() : -1, 0, 'f', 2);
+    };
+    const QString background = QStringLiteral("pinhole.background");
+    auto startTour = [=, &viewer](const QString &what) {
+        QMetaObject::invokeMethod(window, "startTour", Q_ARG(QVariant, background));
+        const bool ok = shown(tour()) && viewer.isOpen();
+        if (!ok)
+            check(false, QStringLiteral("%1: Background's tour opens a photo as it starts (%2)").arg(what, state()));
+        return ok;
+    };
+    // Keys at so many ms from now; 0 at once.
+    auto keysAt = [window](const QList<QPair<int, int>> &keys) {
+        for (const auto &[ms, code] : keys) {
+            if (ms == 0)
+                key(window, code);
+            else
+                QTimer::singleShot(ms, window, [window, code] { key(window, code); });
+        }
+    };
+    auto closedAt = [=, &viewer](int ms, const QString &what, std::function<void()> next) {
+        QTimer::singleShot(ms, window, [=, &viewer] {
+            check(!shown(tour()) && !viewer.isOpen() && !viewerShown()
+                      && !shown(window->findChild<QObject *>(QStringLiteral("sidePanel"))),
+                  QStringLiteral("%1: the tour, the viewer and the side panel closed (%2)").arg(what, state()));
+            next();
+        });
+    };
+    using Case = std::function<void(std::function<void()>)>;
+    auto cases = std::make_shared<QList<Case>>();
+    for (const int ms : {0, 50, 150, 250, 500})
+        cases->append([=](std::function<void()> next) {
+            const QString what = QStringLiteral("Esc %1 ms after the tour opens a photo").arg(ms);
+            if (!startTour(what))
+                return next();
+            keysAt({{ms, Qt::Key_Escape}});
+            closedAt(ms + 1200, what, next);
+        });
+    cases->append([=](std::function<void()> next) {
+        const QString what = QStringLiteral("→ at 100 ms, Esc 30 ms after (another photo opening)");
+        if (!startTour(what))
+            return next();
+        keysAt({{100, Qt::Key_Right}, {130, Qt::Key_Escape}});
+        closedAt(1400, what, next);
+    });
+    cases->append([=](std::function<void()> next) {
+        const QString what = QStringLiteral("→ → at 100 and 200 ms to the step without a photo, Esc at 250 ms");
+        if (!startTour(what))
+            return next();
+        keysAt({{100, Qt::Key_Right}, {200, Qt::Key_Right}, {250, Qt::Key_Escape}});
+        closedAt(1500, what, next);
+    });
+    cases->append([=, &viewer](std::function<void()> next) {
+        const QString what = QStringLiteral("→ → at 300 and 600 ms, ← at 650 ms, back on a photo as the viewer closes");
+        if (!startTour(what))
+            return next();
+        keysAt({{300, Qt::Key_Right}, {600, Qt::Key_Right}, {650, Qt::Key_Left}});
+        QTimer::singleShot(1700, window, [=, &viewer] {
+            QObject *p = photoViewer();
+            check(shown(tour()) && tour()->property("index").toInt() == 1 && viewer.isOpen() && p
+                      && p->property("progress").toReal() == 1,
+                  QStringLiteral("%1: the viewer open again (%2)").arg(what, state()));
+            keysAt({{0, Qt::Key_Escape}});
+            closedAt(1200, what + ", then Esc", next);
+        });
+    });
+    // A photo open before the tour, as one had it.
+    auto ownPhoto = std::make_shared<int>(-1);
+    auto openOwn = [=, &viewer](std::function<void()> then) {
+        *ownPhoto = viewer.count() / 2;
+        viewer.openAt(*ownPhoto, QRectF(0, 0, 100, 100));
+        QTimer::singleShot(1000, window, then);
+    };
+    cases->append([=, &viewer](std::function<void()> next) {
+        openOwn([=, &viewer] {
+            const QString what = QStringLiteral("a photo open before the tour, Esc at 50 ms");
+            if (!startTour(what))
+                return next();
+            keysAt({{50, Qt::Key_Escape}});
+            QTimer::singleShot(1250, window, [=, &viewer] {
+                QObject *p = photoViewer();
+                check(!shown(tour()) && viewer.isOpen() && viewer.property("index").toInt() == *ownPhoto && p
+                          && p->property("progress").toReal() == 1,
+                      QStringLiteral("%1: it stays open on photo %2 (%3)").arg(what).arg(*ownPhoto).arg(state()));
+                QMetaObject::invokeMethod(p, "closeViewer");
+                next();
+            });
+        });
+    });
+    cases->append([=, &viewer](std::function<void()> next) {
+        openOwn([=, &viewer] {
+            QMetaObject::invokeMethod(photoViewer(), "closeViewer");
+            QTimer::singleShot(60, window, [=, &viewer] {
+                const QString what = QStringLiteral("a tour started as the viewer closes");
+                if (!startTour(what))
+                    return next();
+                QTimer::singleShot(1000, window, [=, &viewer] {
+                    QObject *p = photoViewer();
+                    check(shown(tour()) && viewer.isOpen() && p && p->property("progress").toReal() == 1,
+                          QStringLiteral("%1: the viewer open again for its step (%2)").arg(what, state()));
+                    keysAt({{0, Qt::Key_Escape}});
+                    closedAt(1200, what + ", then Esc", next);
+                });
+            });
+        });
+    });
+    auto finish = [=, &viewer] {
+        say(QStringLiteral("a tour that opens a photo, ended at once"));
+        if (!ready(background)) {
+            check(false, QStringLiteral("Background's tour, to end at once, ready"));
+            return exitTest();
+        }
+        auto run = std::make_shared<std::function<void(int)>>();
+        *run = [=, &viewer](int k) {
+            if (k >= cases->size())
+                return exitTest();
+            // Nothing left open by the one before; what was, closed, to go on.
+            when([=, &viewer] { return !shown(tour()) && !viewer.isOpen() && !viewerShown(); }, 3,
+                 [=] { (*cases)[k]([=] { (*run)(k + 1); }); },
+                 [=] {
+                     say(QStringLiteral("left open, closed to go on (%1)").arg(state()));
+                     QMetaObject::invokeMethod(photoViewer(), "closeViewer");
+                     QTimer::singleShot(1000, window, [=] { (*cases)[k]([=] { (*run)(k + 1); }); });
+                 });
+        };
+        (*run)(0);
+    };
     // As the next launch would: the one by itself not yet had.
     auto relaunch = [window] {
         window->setProperty("touredThisLaunch", false);

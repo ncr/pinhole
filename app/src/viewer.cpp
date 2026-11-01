@@ -152,6 +152,7 @@ void Viewer::openAt(int index, QRectF from) {
         m_open = true;
         emit openChanged();
     }
+    emit openAsked();
 }
 
 bool Viewer::eventFilter(QObject *, QEvent *event) {

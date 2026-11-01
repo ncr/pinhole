@@ -30,8 +30,20 @@ Item {
     property var action: null
     property var panelPart: null
     // The tour opened the viewer, or the side panel, so it closes it again.
+    // A viewer open before it (not one shrinking away) stays, back on the
+    // photo it showed (ownPhoto) if a step showed another.
     property bool opened: false
     property bool openedSide: false
+    property int ownPhoto: -1
+    // Open as it will stay: not shrinking away, which takes a moment.
+    readonly property bool viewerUp: viewer.open && !(photoViewer?.closing ?? false)
+    function closeViewer() {
+        // Before the viewer is made (Main.qml), nothing shows to shrink.
+        if (photoViewer)
+            photoViewer.closeViewer()
+        else
+            viewer.close()
+    }
 
     function start(id, name, list) {
         pluginId = id
@@ -44,9 +56,12 @@ Item {
     function close() {
         if (!shown)
             return
-        if (opened && viewer.open)
-            photoViewer.closeViewer()
+        if (opened && viewerUp)
+            closeViewer()
+        else if (!opened && ownPhoto >= 0 && viewerUp && viewer.index !== ownPhoto)
+            viewer.openAt(ownPhoto, grid.rectOf(ownPhoto))
         opened = false
+        ownPhoto = -1
         if (openedSide)
             side.shown = false
         openedSide = false
@@ -69,13 +84,17 @@ Item {
         photo = s.photo !== undefined ? value(s.photo) : -1
         action = s.action ?? null
         if (open >= 0) {
-            if (!viewer.open || viewer.index !== open) {
+            if (!viewerUp || viewer.index !== open) {
+                // Closed, or on its way: the tour's to close again.
+                if (!viewerUp)
+                    opened = true
+                else if (!opened && ownPhoto < 0)
+                    ownPhoto = viewer.index
                 grid.reveal(open)
                 viewer.openAt(open, grid.rectOf(open))
             }
-            opened = true
-        } else if (opened && viewer.open) {
-            photoViewer.closeViewer()
+        } else if (opened && viewerUp) {
+            closeViewer()
             opened = false
         }
         if (photo >= 0 && open < 0)

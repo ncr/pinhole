@@ -175,6 +175,8 @@ signals:
     void takesInputChanged();
     void hiddenChanged();
     void openChanged();
+    // openAt() called, open already or not: one shrinking away grows back.
+    void openAsked();
     void indexChanged();
     // Another photo shown, or this one's favourite changed (favourites.h)
     // or read again.

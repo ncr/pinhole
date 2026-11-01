@@ -59,9 +59,12 @@ Item {
     function opened() {
         root.openedAt = Date.now()
         root.cell = viewer.origin
-        closing.stop()
-        opening.start()
+        shrinking.stop()
+        growing.start()
     }
+
+    // Shrinking back into the grid: viewer.open still, until it is there.
+    readonly property bool closing: shrinking.running
 
     function closeViewer() {
         actionBar.closeMenus()
@@ -69,13 +72,20 @@ Item {
         root.cell = root.grid.rectOf(viewer.index)
         videoPlayer.stop()
         livePlayer.stop()
-        closing.start()
+        // Still opening, it would grow again after it closed, and stay.
+        growing.stop()
+        shrinking.start()
     }
 
     Connections {
         target: viewer
         function onOpenChanged() {
             if (viewer.open)
+                root.opened()
+        }
+        // A photo opened as it shrinks away: it grows back.
+        function onOpenAsked() {
+            if (shrinking.running)
                 root.opened()
         }
         function onIndexChanged() {
@@ -113,11 +123,11 @@ Item {
     }
 
     NumberAnimation {
-        id: opening
+        id: growing
         target: root; property: "progress"; to: 1; duration: 260; easing.type: Easing.OutCubic
     }
     NumberAnimation {
-        id: closing
+        id: shrinking
         target: root; property: "progress"; to: 0; duration: 220; easing.type: Easing.OutCubic
         onFinished: viewer.close()
     }
