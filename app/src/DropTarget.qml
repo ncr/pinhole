@@ -6,8 +6,10 @@ import QtQuick
 // source takes; never photos being dragged out of this window.
 DropArea {
     id: target
-    // What to call the source.
+    // What to call the source, and what adding does there, as its plugin
+    // says ("Copied into the folder…").
     property string name
+    property string detail
     // Files and folders the drag would add; neither when it is not for here.
     property int files: 0
     property int folders: 0
@@ -68,9 +70,7 @@ DropArea {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                text: storage.sourceKind === "icloud"
-                      ? qsTr("Uploaded to your iCloud Photos. The files here stay as they are.")
-                      : qsTr("Copied into the folder. The files here stay as they are.")
+                text: target.detail
             }
         }
     }

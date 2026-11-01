@@ -93,6 +93,15 @@ void runLiveSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &libra
 // action of order -5 before Copy in select mode's bar. Frames in <folder>.
 void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
 
+// PINHOLE_SELFTEST=sources:<folder>: the sources as they look, a frame of
+// each in <folder>: the first run (PINHOLE_SELFTEST_PICK, a key pressed on
+// it: "Return", "2"), the side panel's rows, O and Delete asked on the one
+// shown, Add a source, and iCloud's sign-in: an Apple ID and the password
+// "two-factor" typed, the code boxes, a wrong code, the code 123456, and
+// the card saying the source shown needs signing in. Against a service
+// with a sign-in provider of its own only (PINHOLE_AUTH), never Apple.
+void runSourcesSelfTest(QQuickWindow *window, const QString &folder);
+
 // PINHOLE_SELFTEST=actionbar:<folder>: the newest Live Photo in a series
 // full window; grab its bar, then with each menu open on its key (and the
 // arrow down in one), Esc between; then select mode's bar and its menus.

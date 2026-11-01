@@ -6,8 +6,6 @@
   "Exported %n photo(s) to %1": { "one": "Exported %n photo to %1", "other": "Exported %n photos to %1" },
   "Export %n photo(s) to": { "one": "Export %n photo to", "other": "Export %n photos to" },
   "About %n minute(s) left.": { "one": "About %n minute left.", "other": "About %n minutes left." },
-  "%Ln photo(s) and video(s)": { "one": "%Ln photo or video", "other": "%Ln photos and videos" },
-  "%Ln Live Photo(s)": { "one": "%Ln Live Photo", "other": "%Ln Live Photos" },
   "Adding %n file(s) to %1…": { "one": "Adding %n file to %1…", "other": "Adding %n files to %1…" },
   "Added %n file(s) to %1": { "one": "Added %n file to %1", "other": "Added %n files to %1" },
   "Add %n file(s) to %1": { "one": "Add %n file to %1", "other": "Add %n files to %1" },

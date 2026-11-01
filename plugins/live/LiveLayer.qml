@@ -180,9 +180,9 @@ Item {
         const key = pinhole.library.key
         const kind = key.split(":")[0]
         const name = kind === "icloud" ? "iCloud" : key.substring(key.indexOf(":") + 1).split("/").pop()
-        // The window's line to the service, for whether it is offline (the
+        // How the source shown is doing, for whether it is offline (the
         // service says so before it answers).
-        const health = typeof service !== "undefined" && service ? service.health : ""
+        const health = pinhole.sources.health
         if (code === "needs_sign_in")
             return qsTr("Not signed in to %1").arg(name)
         if (code === "not_found")

@@ -31,6 +31,13 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/live/i18n" plugins/live/i18n/*.js
 install -d "$PREFIX/lib/pinhole/plugins/favourites/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/favourites" plugins/favourites/manifest.json plugins/favourites/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/favourites/i18n" plugins/favourites/i18n/*.json
+# The sources' plugins: their QML, here; their Rust is linked into pinholed.
+install -d "$PREFIX/lib/pinhole/plugins/icloud/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/icloud" plugins/icloud/manifest.json plugins/icloud/*.qml
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/icloud/i18n" plugins/icloud/i18n/*.json
+install -d "$PREFIX/lib/pinhole/plugins/folder/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/folder" plugins/folder/manifest.json plugins/folder/*.qml
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/folder/i18n" plugins/folder/i18n/*.json
 install -d "$PREFIX/lib/pinhole/plugins/background/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/manifest.json plugins/background/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background/i18n" plugins/background/i18n/*.json

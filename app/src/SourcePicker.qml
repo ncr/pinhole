@@ -3,8 +3,9 @@ import QtQuick
 // Where the photos come from, chosen: on the first run the whole window
 // (nothing else to show yet), later a card from the sources bar's Add. What
 // is already on this computer comes first, ready on one key (icloudpd's
-// sign-in, folders of photos), then signing in to iCloud and choosing any
-// folder.
+// sign-in, folders of photos), then the ways in that are always there
+// (signing in to iCloud, choosing any folder): each of them a source
+// plugin's (PluginSource.offers and .ways).
 Item {
     id: root
     anchors.fill: parent
@@ -15,41 +16,31 @@ Item {
     property bool shown: false
     // The first run: the window's only content, with no way to close it.
     property bool firstRun: false
-    // Signing in asked for: with icloudpd's session when `icloudpd`.
-    signal signInRequested(bool icloudpd)
+    // The kinds of source the plugins on bring (PluginSource), in the
+    // service's order: iCloud's first.
+    property var kinds: []
 
     onShownChanged: if (shown) sources.discover()
 
-    function count(n) { return Number(n).toLocaleString(Qt.locale(), "f", 0) }
-
-    // What is here already, best first, at most five.
+    // What is here already, best first, at most five: each plugin's offers
+    // in turn ({ title, detail, icon, triggered }).
     readonly property var suggestions: {
-        const list = []
-        if (sources.icloudpd.length > 0)
-            list.push({ icloudpd: true, title: qsTr("iCloud Photos"),
-                        detail: qsTr("icloudpd is signed in on this computer, so no password is needed") })
-        // The biggest folders, past a few stray pictures when there is
-        // more: three at most, a parent and its own subfolders alike.
-        let folders = sources.folders.slice().sort((a, b) => b.assets - a.assets)
-        if (folders.some(f => f.assets >= 20))
-            folders = folders.filter(f => f.assets >= 20)
-        for (const folder of folders.slice(0, 3)) {
-            const parts = [qsTr("%Ln photo(s) and video(s)", "", folder.assets)]
-            if (folder.live > 0)
-                parts.push(qsTr("%Ln Live Photo(s)", "", folder.live))
-            parts.push(storage.size(folder.bytes))
-            list.push({ icloudpd: false, path: folder.path, title: folder.name, detail: parts.join(" · ") })
-        }
+        let list = []
+        for (const kind of kinds)
+            for (const offer of kind.offers || [])
+                list.push(Object.assign({ icon: kind.icon }, offer))
         return list.slice(0, 5)
     }
+    // The ways in that are always there: { title, key, triggered }.
+    readonly property var ways: {
+        let list = []
+        for (const kind of kinds)
+            list = list.concat(kind.ways || [])
+        return list
+    }
     function use(i) {
-        if (i >= suggestions.length)
-            return
-        const s = suggestions[i]
-        if (s.icloudpd)
-            root.signInRequested(true)
-        else
-            sources.addFolder(s.path)
+        if (i < suggestions.length)
+            suggestions[i].triggered()
     }
 
     // Its keys, while it is on top (Command.qml): the first run's, or adding
@@ -67,22 +58,6 @@ Item {
             touchpad: qsTr("Its Use button")
             onTriggered: root.use(index)
         }
-    }
-    Command {
-        id: signInAction
-        name: "pick.signIn"
-        keys: ["I"]
-        keyLayer: root.keyLayer
-        when: root.shown
-        onTriggered: root.signInRequested(false)
-    }
-    Command {
-        id: folderAction
-        name: "pick.folder"
-        keys: ["F"]
-        keyLayer: root.keyLayer
-        when: root.shown
-        onTriggered: sources.chooseFolder()
     }
     Command {
         id: closeAction
@@ -214,8 +189,8 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: Math.round(theme.fontSize * 2)
                                     horizontalAlignment: Text.AlignHCenter
-                                    // A cloud and a folder, from the Nerd Font Omarchy's type is.
-                                    text: row.modelData.icloudpd ? "" : ""
+                                    // A cloud, a folder: the Nerd Font Omarchy's type is.
+                                    text: row.modelData.icon
                                     font.pixelSize: Math.round(theme.fontSize * 1.571)
                                     color: row.first ? theme.accent : theme.foreground
                                 }
@@ -263,13 +238,16 @@ Item {
                             text: qsTr("Or")
                             color: theme.darkForeground
                         }
-                        ShellButton {
-                            text: qsTr("Sign in to iCloud")
-                            action: signInAction
-                        }
-                        ShellButton {
-                            text: qsTr("Choose a folder…")
-                            action: folderAction
+                        Repeater {
+                            model: root.ways
+                            delegate: ShellButton {
+                                required property var modelData
+                                text: modelData.title
+                                key: modelData.key ?? ""
+                                keyLayer: root.keyLayer
+                                usable: root.shown
+                                onTapped: modelData.triggered()
+                            }
                         }
                     }
                 }

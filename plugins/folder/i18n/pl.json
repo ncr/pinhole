@@ -1,0 +1,22 @@
+{
+  "Folder": "Folder",
+  "%Ln photo(s) and video(s)": {
+    "one": "%Ln zdjęcie lub film",
+    "few": "%Ln zdjęcia i filmy",
+    "many": "%Ln zdjęć i filmów",
+    "other": "%Ln zdjęcia i filmu"
+  },
+  "%Ln Live Photo(s)": {
+    "one": "%Ln zdjęcie Live",
+    "few": "%Ln zdjęcia Live",
+    "many": "%Ln zdjęć Live",
+    "other": "%Ln zdjęcia Live"
+  },
+  "Choose a folder…": "Wybierz folder…",
+  "Show photos from": "Pokazuj zdjęcia z",
+  "Not there: is its disk connected?": "Nie ma go: czy dysk jest podłączony?",
+  "Forget its index? The photos stay in the folder.": "Zapomnieć jego indeks? Zdjęcia zostają w folderze.",
+  "Copied into the folder. The files here stay as they are.": "Zostaną skopiowane do folderu. Pliki tutaj zostają bez zmian.",
+  "Folders": "Foldery",
+  "A folder of photos on this computer or a disk as a source: its photos and videos, Live Photos paired, followed as it changes, and what you drop on the window copied in.": "Folder ze zdjęciami na tym komputerze lub dysku jako źródło: jego zdjęcia i filmy, zdjęcia Live złożone w pary, śledzone, gdy się zmienia, a to, co upuścisz na okno, kopiowane do niego."
+}

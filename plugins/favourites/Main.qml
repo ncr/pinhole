@@ -71,8 +71,8 @@ PinholePlugin {
     function whyNot(code) {
         const key = pinhole.library.key
         const name = key.split(":")[0] === "icloud" ? "iCloud" : key.substring(key.indexOf(":") + 1).split("/").pop()
-        // The window's line to the service, for whether it is running.
-        const health = typeof service !== "undefined" && service ? service.health : ""
+        // How the source shown is doing: no_service when no service runs.
+        const health = pinhole.sources.health
         if (code === "read_only")
             return qsTr("This library is only being looked at here: its favourites cannot be changed")
         if (code === "needs_sign_in")

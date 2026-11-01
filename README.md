@@ -141,10 +141,12 @@ core/daemon/              pinholed, the background service, with the built-in so
 core/src/process.rs       sources of plugins' own, run out of process by their providers
 core/daemon/tests/provider/  the test source, a provider in Python (docs/source-providers.md)
 core/src/bin/fake.rs      pinhole-fake, a synthetic library for the grid
+plugins/icloud/           the iCloud plugin: its sources' rows, what Add a source offers, the sign-in (ICloudSignIn.qml)
 plugins/icloud/source/    iCloud as a source (crate pinhole-icloud): session, CloudKit, walk, push, upload
 plugins/icloud/source/src/bin/probe.rs  pinhole-probe, which measures the API
 plugins/icloud/auth/PROTOCOL.md  the sign-in provider protocol: JSON lines over stdio
 plugins/icloud/auth/pyicloud/pinhole-auth  the first provider, on the pyicloud module from icloudpd
+plugins/folder/           the Folders plugin: its sources' rows, the folders offered, Choose a folder…
 plugins/folder/source/    a folder as a source (crate pinhole-folder)
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/live/             the Live Photos plugin: the mark, L and ⇧ L, the motion and effects over the photo

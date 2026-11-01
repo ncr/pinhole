@@ -295,7 +295,15 @@ its library listed if it has none yet.
 
 It never sends anyone to a terminal. With no source it offers what
 `discover` finds (icloudpd's sign-in, folders of photos) and signs in to
-iCloud itself; with sources it shows one at a time and switches between
+iCloud itself. What it shows of each kind is that kind's plugin's
+(`plugins/icloud`, `plugins/folder`: a `PluginSource` each, docs/plugins.md):
+a source's row in the side panel and its buttons, what the first run and
+Add a source offer, the sign-in, and the source's place in a sentence. The
+window keeps what is the same for every kind: the list, 1–9, Remove,
+progress, rounds, dropping files, and the card saying a source needs
+signing in, whose button is its plugin's. Turning a plugin on or off in the
+side panel writes `plugins.json` and sends `plugins_changed`, so pinholed
+lists and shows what is on at once; with sources it shows one at a time and switches between
 them (`sources`, `set_source`, `remove_source`), and a library being built
 fills the grid as `progress` says how far it is. It says the source's name
 where it means the source (the health line, the viewer's messages), and

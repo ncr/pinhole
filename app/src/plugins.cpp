@@ -6,7 +6,9 @@
 #include "library.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "portal.h"
 #include "serviceclient.h"
+#include "sources.h"
 #include "storage.h"
 #include "translator.h"
 #include "viewer.h"
@@ -432,6 +434,153 @@ QObject *PluginHost::cache() const {
     return m_cache.get();
 }
 
+QObject *PluginHost::sources() const {
+    if (!m_sources)
+        m_sources = std::make_unique<PluginSources>(const_cast<PluginHost *>(this));
+    return m_sources.get();
+}
+
+PluginSources::PluginSources(PluginHost *host) : QObject(nullptr), m_host(host) {
+    connect(host->m_plugins, &Plugins::changed, this, &PluginSources::kindsChanged);
+    if (Sources *window = sources()) {
+        connect(window, &Sources::listChanged, this, &PluginSources::listChanged);
+        connect(window, &Sources::progressChanged, this, &PluginSources::progressChanged);
+        connect(window, &Sources::roundsChanged, this, &PluginSources::roundsChanged);
+        connect(window, &Sources::discoveredChanged, this, &PluginSources::discoveredChanged);
+    }
+    connect(host->m_plugins->service(), &ServiceClient::healthChanged, this, &PluginSources::healthChanged);
+}
+
+Sources *PluginSources::sources() const { return m_host->m_plugins->sourcesObject(); }
+
+QStringList PluginSources::kinds() const { return m_host->m_plugins->sourceKindsOf(m_host->id()); }
+
+QVariantList PluginSources::list() const { return sources() ? sources()->list() : QVariantList(); }
+
+QString PluginSources::current() const { return sources() ? sources()->current() : QString(); }
+
+QString PluginSources::health() const { return m_host->m_plugins->service()->health(); }
+
+QVariantMap PluginSources::progress() const { return sources() ? sources()->progress() : QVariantMap(); }
+
+QVariantMap PluginSources::rounds() const { return sources() ? sources()->rounds() : QVariantMap(); }
+
+QVariantMap PluginSources::discovered() const {
+    QVariantMap own;
+    if (!sources())
+        return own;
+    const QVariantMap found = sources()->discovered();
+    for (const QString &kind : kinds())
+        if (found.contains(kind))
+            own.insert(kind, found.value(kind));
+    return own;
+}
+
+void PluginSources::discover() {
+    if (sources())
+        sources()->discover();
+}
+
+void PluginSources::show(const QString &id) {
+    if (sources())
+        sources()->show(id);
+}
+
+QJSValue PluginSources::refused(const QString &code, const QString &message) {
+    const PluginHost::Deferred deferred = m_host->defer([] {});
+    m_host->settle(m_host->m_generation, deferred.reject, m_host->error(code, message));
+    return deferred.promise;
+}
+
+QJSValue PluginSources::ask(const std::function<void(std::function<void(bool, const QJsonObject &, const QString &, const QString &)>)> &how,
+                            const std::function<QVariant(const QJsonObject &)> &shape) {
+    // The service's answer cannot be stopped, only no longer waited for.
+    PluginHost *host = m_host;
+    auto deferred = std::make_shared<PluginHost::Deferred>();
+    const std::weak_ptr<PluginHost::Deferred> weak = deferred;
+    const int generation = host->m_generation;
+    *deferred = host->defer([host, weak, generation] {
+        if (const auto d = weak.lock())
+            host->settle(generation, d->reject, host->error(QStringLiteral("cancelled"), PluginHost::tr("cancelled")));
+    });
+    const QJSValue promise = deferred->promise;
+    const QPointer<PluginHost> alive(host);
+    how([alive, deferred, generation, shape](bool ok, const QJsonObject &result, const QString &code, const QString &message) {
+        if (!alive)
+            return;
+        if (!ok) {
+            alive->settle(generation, deferred->reject, alive->error(code, message));
+            return;
+        }
+        if (QJSEngine *js = alive->engine())
+            alive->settle(generation, deferred->resolve, js->toScriptValue(shape(result)));
+    });
+    return promise;
+}
+
+QJSValue PluginSources::add(const QString &kind, const QJSValue &entry) {
+    if (!kinds().contains(kind))
+        return refused(QStringLiteral("not_yours"), tr("%1 is not a kind of source of this plugin's").arg(kind));
+    if (!sources())
+        return refused(QStringLiteral("no_service"), tr("no sources here"));
+    const QJsonObject params = QJsonObject::fromVariantMap(entry.toVariant().toMap());
+    return ask([this, kind, params](auto answer) { sources()->add(kind, params, answer); },
+               [](const QJsonObject &result) { return QVariant(result.toVariantMap()); });
+}
+
+QJSValue PluginSources::signIn(const QString &kind, const QJSValue &params) {
+    if (!kinds().contains(kind))
+        return refused(QStringLiteral("not_yours"), tr("%1 is not a kind of source of this plugin's").arg(kind));
+    if (!sources())
+        return refused(QStringLiteral("no_service"), tr("no sources here"));
+    const QJsonObject asked = QJsonObject::fromVariantMap(params.toVariant().toMap());
+    return ask([this, kind, asked](auto answer) { sources()->signIn(kind, asked, answer); },
+               [](const QJsonObject &result) { return QVariant(QVariantMap{{"state", result.value("state").toString()}}); });
+}
+
+QJSValue PluginSources::submitCode(const QString &kind, const QJSValue &params) {
+    if (!kinds().contains(kind))
+        return refused(QStringLiteral("not_yours"), tr("%1 is not a kind of source of this plugin's").arg(kind));
+    if (!sources())
+        return refused(QStringLiteral("no_service"), tr("no sources here"));
+    const QJsonObject asked = QJsonObject::fromVariantMap(params.toVariant().toMap());
+    return ask([this, kind, asked](auto answer) { sources()->submitCode(kind, asked, answer); },
+               [](const QJsonObject &result) { return QVariant(QVariantMap{{"state", result.value("state").toString()}}); });
+}
+
+QJSValue PluginSources::signOut(const QString &id) {
+    if (!sources())
+        return refused(QStringLiteral("no_service"), tr("no sources here"));
+    const QVariantMap entry = sources()->entry(id);
+    if (entry.isEmpty())
+        return refused(QStringLiteral("not_found"), tr("no source %1").arg(id));
+    const QString kind = entry.value("kind").toString();
+    if (!kinds().contains(kind))
+        return refused(QStringLiteral("not_yours"), tr("%1 is not a kind of source of this plugin's").arg(kind));
+    return ask([this, id](auto answer) { sources()->signOut(id, answer); },
+               [](const QJsonObject &result) { return QVariant(result.value("sources").toArray().toVariantList()); });
+}
+
+QJSValue PluginHost::chooseFolder(const QString &title) {
+    auto deferred = std::make_shared<Deferred>();
+    const std::weak_ptr<Deferred> weak = deferred;
+    const int generation = m_generation;
+    *deferred = defer([this, weak, generation] {
+        if (const auto d = weak.lock())
+            settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
+    });
+    auto *picker = new PortalFolderPicker(this);
+    connect(picker, &PortalFolderPicker::picked, this, [this, picker, deferred, generation](const QString &folder) {
+        picker->deleteLater();
+        if (folder.isEmpty())
+            settle(generation, deferred->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
+        else
+            settle(generation, deferred->resolve, folder);
+    });
+    picker->pick(title);
+    return deferred->promise;
+}
+
 QString PluginHost::cacheDir() const {
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/" + m_id + '/'
          + m_plugins->cacheName();
@@ -474,6 +623,15 @@ void Plugins::setGrid(PhotoGrid *grid) {
             emit hiddenChanged();
     });
     updateMarkBits();
+}
+
+void Plugins::setSources(Sources *sources) { m_sources = sources; }
+
+QStringList Plugins::sourceKindsOf(const QString &id) const {
+    for (const auto &p : m_plugins)
+        if (p->id == id)
+            return p->sources;
+    return {};
 }
 
 void Plugins::setFavourites(Favourites *favourites) {
@@ -888,8 +1046,8 @@ bool PluginHost::exists(const QString &path) const { return QFileInfo::exists(pa
 
 double PluginHost::fileSize(const QString &path) const { return double(QFileInfo(path).size()); }
 
-QString PluginHost::sizeText(double bytes) const {
-    return QLocale().formattedDataSize(qint64(bytes), 1, QLocale::DataSizeTraditionalFormat);
+QString PluginHost::sizeText(double bytes, int decimals) const {
+    return QLocale().formattedDataSize(qint64(bytes), std::clamp(decimals, 0, 3), QLocale::DataSizeTraditionalFormat);
 }
 
 QVariant PluginHost::setting(const QString &key, const QVariant &fallback) const {
@@ -1104,7 +1262,7 @@ QJsonObject Plugins::unmoved(QJsonObject config) const {
 }
 
 void Plugins::registerTypes() {
-    for (const char *type : {"PinholePlugin", "PluginAction", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle"})
+    for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle", "FieldInput"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
 }
@@ -1452,6 +1610,8 @@ QVariantMap Plugins::at(const QString &id) const {
             {"error", p->error},
             {"problem", p->host->problem()},
             {"toured", m_toured.value(p->id).toBool()},
+            {"sources", p->sources},
+            {"copy", p->copy},
             {"dir", p->dir},
             // Another URL for each load, so the engine reads the files again;
             // and naming the plugin, which its strings' context keeps
@@ -1470,7 +1630,10 @@ void Plugins::setEnabled(const QString &id, bool on) {
     QJsonObject states = config.value("enabled").toObject();
     states.insert(id, on);
     config.insert("enabled", states);
-    writeConfig(config);
+    // pinholed reads the switches too (a source kind follows its plugin's):
+    // told once the file says so, it lists and shows what is on at once.
+    if (writeConfig(config) && m_service)
+        m_service->call(QStringLiteral("plugins_changed"), {}, [](bool, const QJsonObject &, const QString &) {});
     if (!on) {
         m_history->forget(id);
         for (const auto &p : m_plugins)
@@ -1641,6 +1804,12 @@ void Plugins::loadFailed(const QString &id) {
     for (const auto &p : m_plugins)
         if (p->id == id && !component.errors().isEmpty())
             p->host->report(describe(component.errors().first(), p->dir), false);
+}
+
+void Plugins::sourceRefused(const QString &id, const QString &kind) {
+    for (const auto &p : m_plugins)
+        if (p->id == id && p->host)
+            p->host->report(tr("sources: %1 is not among the kinds its manifest's \"sources\" names").arg(kind));
 }
 
 void Plugins::layerFailed(const QString &id, const QString &message) {
@@ -1828,7 +1997,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
         {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
         {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
-        {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}};
+        {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
+        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1850,6 +2020,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
         {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
         {"pinhole.setFavorite", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*setFavorite\\b"))},
+        // Its root's sources, each a PluginSource.
+        {"PluginSource", QRegularExpression(QStringLiteral("\\bPluginSource\\s*\\{"))},
+        {"pinhole.sources", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*sources\\b"))},
+        {"pinhole.chooseFolder", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*chooseFolder\\b"))},
         // pinhole.library's, or by a name of the plugin's for it.
         {"library.revision", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*revision\\b"))},
         {"an action's order, hint, busyDelay, textColour or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
@@ -2002,6 +2176,47 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
         return tr("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder");
     if (const int wanted = manifest->value("api").toInt(1); wanted > api)
         return tr("It needs a newer Pinhole: plugin API %1, and this one has %2.").arg(wanted).arg(api);
+    return sourcesProblem(dir, id, *manifest);
+}
+
+QStringList Plugins::sourceKinds(const QJsonObject &manifest) {
+    QStringList kinds;
+    for (const QJsonValue &source : manifest.value("sources").toArray())
+        if (const QString kind = source.toObject().value("kind").toString(); !kind.isEmpty())
+            kinds << kind;
+    return kinds;
+}
+
+QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJsonObject &manifest) {
+    const QJsonValue declared = manifest.value("sources");
+    if (declared.isUndefined())
+        return {};
+    if (!declared.isArray())
+        return tr("manifest.json's \"sources\" is a list");
+    // Pinhole's own plugins' folder, and the kinds of its plugin of this id.
+    const QString builtIn = QDir(builtInDir()).canonicalPath();
+    const bool own = !builtIn.isEmpty() && QDir(dir).canonicalPath().startsWith(builtIn + '/');
+    QStringList ownKinds;
+    if (!own)
+        for (const QFileInfo &each : QDir(builtInDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            QFile file(each.filePath() + "/manifest.json");
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            const QJsonObject theirs = QJsonDocument::fromJson(file.readAll()).object();
+            if (theirs.value("id").toString(each.fileName()) == id)
+                ownKinds = sourceKinds(theirs);
+        }
+    for (const QJsonValue &each : declared.toArray()) {
+        const QJsonObject source = each.toObject();
+        const QString kind = source.value("kind").toString();
+        if (!each.isObject() || kind.isEmpty())
+            return tr("each of manifest.json's \"sources\" names its \"kind\"");
+        // A kind with no provider is one of pinholed's own (iCloud's,
+        // folders'): only Pinhole's own plugin of it brings it, or one's own
+        // copy of that plugin.
+        if (!source.contains("provider") && !own && !ownKinds.contains(kind))
+            return tr("\"sources\": %1 is pinholed's own kind, which only Pinhole's own plugin of it brings").arg(kind);
+    }
     return {};
 }
 
@@ -2046,11 +2261,14 @@ void Plugins::scan() {
             plugin->author = manifest.value("author").toString();
             if (plugin->error.isEmpty())
                 plugin->main = main;
+            plugin->sources = sourceKinds(manifest);
             plugin->stamp = stampOf(plugin->dir);
             // One's own with a built-in's id takes its place.
             const auto same = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == plugin->id; });
-            if (same != found.end())
+            if (same != found.end()) {
+                plugin->copy = personal && !(*same)->personal;
                 found.erase(same);
+            }
             found.push_back(std::move(plugin));
         }
     };

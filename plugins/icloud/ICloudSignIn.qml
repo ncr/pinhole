@@ -1,10 +1,11 @@
 import QtQuick
+import Pinhole.Plugin
 
-// Signing in to an Apple ID, in the window: the Apple ID and password (or
+// Signing in to an Apple ID, over the window: the Apple ID and password (or
 // none, when icloudpd is signed in to that Apple ID here), then the code
 // Apple sends to the person's devices, in six boxes that go on by
 // themselves after the sixth digit. Signed in, the Apple ID is added and
-// its photos shown.
+// its photos shown (pinhole.sources.signIn, submitCode).
 Item {
     id: root
     anchors.fill: parent
@@ -15,13 +16,92 @@ Item {
     property bool shown: false
     // Filled in already: signing in again to an Apple ID added before.
     property string appleId
+    function open(id) {
+        appleId = id
+        shown = true
+    }
 
-    readonly property bool busy: sources.signInState === "busy"
-    readonly property bool needsCode: sources.signInState === "needs_code"
+    // "" (nothing under way), "busy" (Apple is asked), "needs_code"; and
+    // what went wrong, said for people.
+    property string stage: ""
+    property string error: ""
+    // Each request made; an answer to one before the last is not waited
+    // for (closed meanwhile, or asked again).
+    property int asked: 0
+    readonly property bool busy: stage === "busy"
+    readonly property bool needsCode: stage === "needs_code"
     // Past the password: the code is what is asked for.
     property bool codeStage: false
-    readonly property bool fromIcloudpd: !codeStage && sources.icloudpdHas(account.text)
+    readonly property bool fromIcloudpd: !codeStage && icloudpdHas(account.text)
     readonly property bool ready: account.text.indexOf("@") > 0 && (fromIcloudpd || password.text !== "")
+
+    // Whether icloudpd is signed in to this Apple ID here, so no password is
+    // needed: its session files are named after the Apple ID with only
+    // letters, digits and _ kept (discover's icloudpd).
+    function icloudpdHas(id) {
+        const stem = id.trim().replace(/[^A-Za-z0-9_]/g, "")
+        const known = pinhole.sources.discovered.icloud?.icloudpd ?? []
+        return stem !== "" && id.indexOf("@") >= 0 && known.indexOf(stem) >= 0
+    }
+    // What each of the sign-in provider's codes means for the person
+    // signing in.
+    function said(code) {
+        switch (code) {
+        case "": return ""
+        case "wrong_password": return qsTr("Apple did not accept that Apple ID or password.")
+        case "wrong_code": return qsTr("That code did not work. The newest one Apple sent is the one to type.")
+        case "try_again": return qsTr("Apple's sign-in did not go through this time. Try again in a moment.")
+        case "rate_limited": return qsTr("Apple is not taking sign-ins for this Apple ID right now. Try once more in half an hour.")
+        case "needs_sign_in": return qsTr("icloudpd's sign-in for this Apple ID has run out. Sign in with the password instead.")
+        case "unavailable": return qsTr("iCloud cannot be reached. Is this computer online?")
+        case "read_only": return qsTr("This library is only being looked at here: sign in from a window of your own library.")
+        case "turned_off": return qsTr("iCloud is turned off: turn it on in the side panel (Tab), under Plugins.")
+        }
+        return qsTr("Signing in did not work (%1).").arg(code)
+    }
+    function settle(stage, code) {
+        root.stage = stage
+        root.error = said(code || "")
+    }
+    function cancel() {
+        ++asked
+        settle("")
+    }
+    function signIn(id, secret) {
+        // A code asked for again keeps the code boxes up.
+        const back = stage === "needs_code" ? stage : ""
+        settle("busy")
+        const mine = ++asked
+        const params = { apple_id: id.trim() }
+        if (secret !== "")
+            params.password = secret
+        pinhole.sources.signIn("icloud", params).then(result => {
+            if (mine !== asked)
+                return
+            if (result.state === "needs_code") {
+                settle("needs_code")
+            } else {
+                settle("")
+                root.shown = false
+            }
+        }, error => {
+            if (mine === asked && error.code !== "cancelled")
+                settle(back, error.code)
+        })
+    }
+    function submitCode(id, digits) {
+        settle("busy")
+        const mine = ++asked
+        pinhole.sources.submitCode("icloud", { apple_id: id.trim(), code: digits }).then(() => {
+            if (mine !== asked)
+                return
+            settle("")
+            root.shown = false
+        }, error => {
+            if (mine === asked && error.code !== "cancelled")
+                settle("needs_code", error.code)
+        })
+    }
 
     onNeedsCodeChanged: if (needsCode) {
         codeStage = true
@@ -31,7 +111,9 @@ Item {
     }
     onShownChanged: {
         if (shown) {
-            sources.cancelSignIn()
+            cancel()
+            // Whether icloudpd is signed in here, afresh.
+            pinhole.sources.discover()
             codeStage = false
             account.text = appleId
             password.text = ""
@@ -41,7 +123,7 @@ Item {
                     (appleId === "" ? account.input : password.input).forceActiveFocus()
             })
         } else {
-            sources.cancelSignIn()
+            cancel()
             appleId = ""
             // Its fields let go of the keys: one hidden with them would
             // take Pinhole's (each a shortcut a field takes first).
@@ -49,19 +131,15 @@ Item {
                 field.focus = false
         }
     }
-    Connections {
-        target: sources
-        function onSignedIn() { root.shown = false }
-    }
 
     function submit() {
         if (busy)
             return
         if (codeStage) {
             if (code.text.length === 6)
-                sources.submitCode(account.text, code.text)
+                submitCode(account.text, code.text)
         } else if (ready) {
-            sources.signIn(account.text, fromIcloudpd ? "" : password.text)
+            signIn(account.text, fromIcloudpd ? "" : password.text)
         } else if (account.input.activeFocus && account.text !== "") {
             // Enter after the Apple ID: on to the password.
             password.input.forceActiveFocus()
@@ -74,14 +152,16 @@ Item {
         name: "signIn.submit"
         keys: ["Return", "Enter"]
         keysText: "⏎"
-        keyLayer: "signIn"
+        keyLayer: "plugin"
+        when: root.shown
         onTriggered: root.submit()
     }
     Command {
         id: closeAction
         name: "signIn.close"
         keys: ["Escape"]
-        keyLayer: "signIn"
+        keyLayer: "plugin"
+        when: root.shown
         onTriggered: root.shown = false
     }
     // Tab and ⇧ Tab between the Apple ID and the password, as anywhere.
@@ -95,8 +175,8 @@ Item {
     Command {
         name: "signIn.next"
         keys: ["Tab"]
-        keyLayer: "signIn"
-        when: !root.codeStage
+        keyLayer: "plugin"
+        when: root.shown && !root.codeStage
         mouse: qsTr("Click the field")
         touchpad: qsTr("Tap the field")
         onTriggered: root.nextField(1)
@@ -104,8 +184,8 @@ Item {
     Command {
         name: "signIn.previous"
         keys: ["Shift+Tab", "Backtab"]
-        keyLayer: "signIn"
-        when: !root.codeStage
+        keyLayer: "plugin"
+        when: root.shown && !root.codeStage
         mouse: qsTr("Click the field")
         touchpad: qsTr("Tap the field")
         onTriggered: root.nextField(-1)
@@ -115,18 +195,18 @@ Item {
         noMouse: qsTr("Typing an Apple ID, a password or a code needs a keyboard")
         noTouchpad: qsTr("Typing an Apple ID, a password or a code needs a keyboard")
         noKeyboard: qsTr("Typed")
-        keyLayer: "signIn"
+        keyLayer: "plugin"
         bound: false
     }
     Command {
         id: newCodeAction
         name: "signIn.newCode"
         keys: ["Ctrl+R"]
-        keyLayer: "signIn"
-        when: root.codeStage && password.text !== "" && !root.busy
+        keyLayer: "plugin"
+        when: root.shown && root.codeStage && password.text !== "" && !root.busy
         onTriggered: {
             code.text = ""
-            sources.signIn(account.text, password.text)
+            root.signIn(account.text, password.text)
             code.forceActiveFocus()
         }
     }
@@ -287,11 +367,11 @@ Item {
             }
 
             UiText {
-                visible: sources.signInError !== "" && !root.busy
+                visible: root.error !== "" && !root.busy
                 width: parent.width
                 wrapMode: Text.WordWrap
                 color: theme.red
-                text: sources.signInError
+                text: root.error
             }
 
             Rectangle {

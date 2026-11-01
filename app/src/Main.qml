@@ -106,16 +106,40 @@ ApplicationWindow {
     // source set up (a scratch HOME, pinhole-fake's library on a new
     // computer) the picker would cover it and take every key.
     readonly property bool firstRun: sources.known && sources.list.length === 0 && !libraryGiven
-    // Where the photos are, in a sentence: iCloud, or the folder's name
-    // (an Apple ID's source is named after its owner, which reads wrong
-    // there).
-    readonly property string placeName: storage.sourceKind === "icloud" ? "iCloud" : storage.sourceName
+    // The source shown, as its plugin is given it (PluginSource.qml): what
+    // the service says of it, its row's count, and how it is doing.
+    readonly property var shownSource: {
+        const entry = sources.list[sources.currentIndex]
+        return Object.assign({}, storage.source, entry && entry.id === storage.source.id ? entry : {},
+                             { shown: true, health: service.health })
+    }
+    // Its kind as its plugin shows it, null when no plugin on shows it.
+    readonly property var shownKind: shownSource.kind ? win.pluginSources[shownSource.kind] ?? null : null
+    // Where the photos are, in a sentence, as its plugin says: iCloud, or
+    // the folder's name (an Apple ID's source is named after its owner,
+    // which reads wrong there).
+    readonly property string placeName: shownKind && shownKind.place ? shownKind.place(shownSource) : storage.sourceName
+    // Signing in to a source, as its plugin does it: over the window, with
+    // what was open for it put away.
+    function canSignIn(source) {
+        const kind = source && source.kind ? win.pluginSources[source.kind] : null
+        return !!(kind && kind.signIn)
+    }
+    function signInTo(source) {
+        if (!canSignIn(source))
+            return
+        side.shown = false
+        addPicker.shown = false
+        win.pluginSources[source.kind].signIn(source)
+    }
     SourcePicker {
         id: firstRunPicker
         objectName: "firstRun"
         firstRun: true
+        // Under a plugin's own screen (iCloud's sign-in) as it covers the
+        // window, which then has the keys.
         shown: win.firstRun
-        onSignInRequested: icloudpd => signIn.open("")
+        kinds: win.pluginSourceList
     }
 
     // A source with nothing in it yet, and nothing under way to say so.
@@ -310,8 +334,8 @@ ApplicationWindow {
         label.width: width - 2 * theme.fontSize
         label.elide: Text.ElideRight
         // Signing in again, from here too, or with I.
-        HoverHandler { enabled: service.health === "needs_sign_in"; cursorShape: Qt.PointingHandCursor }
-        TapHandler { enabled: service.health === "needs_sign_in"; onTapped: signInAgain.trigger() }
+        HoverHandler { enabled: signInAgain.when; cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: signInAgain.when; onTapped: signInAgain.trigger() }
     }
     Command {
         id: signInAgain
@@ -319,15 +343,16 @@ ApplicationWindow {
         text: qsTr("Sign in again")
         keys: ["I"]
         keyLayer: "grid"
-        when: service.health === "needs_sign_in" && healthNotice.visible
+        when: service.health === "needs_sign_in" && healthNotice.visible && win.canSignIn(win.shownSource)
         mouse: qsTr("Click the notice at the foot")
         touchpad: qsTr("Tap the notice at the foot")
-        onTriggered: signIn.open(storage.sourceAccount)
+        onTriggered: win.signInTo(win.shownSource)
     }
 
-    // The Apple ID shown is not signed in to (Apple wants it again, or it was
-    // signed out of): said once, in the middle, with the way to do it.
-    // Looking around first leaves it to the corner.
+    // The source shown is not signed in to (Apple wants it again, or it was
+    // signed out of): said once, in the middle, with the way to do it, its
+    // plugin's (PluginSource.signIn). Looking around first leaves it to the
+    // corner.
     property bool troubleSeen: false
     // An Apple ID signed out of here, on purpose: the corner says so, the
     // middle need not.
@@ -347,7 +372,7 @@ ApplicationWindow {
         id: trouble
         objectName: "trouble"
         visible: win.chromeUp && !win.firstRun && !win.troubleSeen && sources.current !== win.signedOutOf
-                 && service.health === "needs_sign_in" && storage.sourceKind === "icloud"
+                 && service.health === "needs_sign_in" && win.canSignIn(win.shownSource)
         opacity: win.chrome
         anchors.centerIn: parent
         width: Math.min(parent.width - 32, theme.fontSize * 37)
@@ -364,7 +389,7 @@ ApplicationWindow {
             UiText {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: qsTr("Not signed in to %1").arg(storage.sourceAccount)
+                text: qsTr("Not signed in to %1").arg(storage.sourceAccount || storage.sourceName)
                 color: theme.brightForeground
                 font.pixelSize: Math.round(theme.fontSize * 1.143)
             }
@@ -394,7 +419,7 @@ ApplicationWindow {
         keysText: "⏎"
         keyLayer: "grid"
         when: trouble.visible
-        onTriggered: signIn.open(storage.sourceAccount)
+        onTriggered: win.signInTo(win.shownSource)
     }
     Command {
         id: troubleLater
@@ -777,6 +802,7 @@ ApplicationWindow {
                     function onActionsChanged() { win.collectPlugins() }
                     function onHelpChanged() { win.collectPlugins() }
                     function onViewerLayerChanged() { win.collectPlugins() }
+                    function onSourcesChanged() { win.collectPlugins() }
                     function onStacksChanged() { win.collectPlugins([], [modelData]) }
                     function onHiddenChanged() { win.collectPlugins([modelData], []) }
                     function onMarksChanged() { plugins.setMarks(pluginLoader.modelData, pluginLoader.item.marks) }
@@ -807,6 +833,17 @@ ApplicationWindow {
     property var pluginActions: []
     // Their layers over a photo shown full window: { plugin, component }.
     property var pluginLayers: []
+    // Each kind of source as the plugin that brings it shows it
+    // (PluginSource), by kind; and the same in the service's order of kinds
+    // (iCloud's, folders', then those of one's own).
+    property var pluginSources: ({})
+    readonly property var pluginSourceList: {
+        const order = sources.kinds.map(k => k.kind)
+        const place = kind => order.indexOf(kind) < 0 ? order.length : order.indexOf(kind)
+        return Object.keys(pluginSources).map((kind, i) => ({ kind: kind, i: i }))
+            .sort((a, b) => place(a.kind) - place(b.kind) || a.i - b.i)
+            .map(k => pluginSources[k.kind])
+    }
     property var pluginStacks: []
     property var pluginHidden: []
     // The names of the plugins hiding any.
@@ -852,7 +889,7 @@ ApplicationWindow {
                     loadedMeanwhile.push(id)
             return
         }
-        const actions = [], help = [], covering = [], layers = []
+        const actions = [], help = [], covering = [], layers = [], kinds = {}
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -865,6 +902,14 @@ ApplicationWindow {
                 help.push({ plugin: loader.modelData, keys: item.help })
             if (item.viewerLayer)
                 layers.push({ plugin: loader.modelData, component: item.viewerLayer })
+            // Only the kinds its manifest names (Plugins::at's sources).
+            for (let k = 0; k < (item.sources ? item.sources.length : 0); ++k) {
+                const source = item.sources[k]
+                if ((loader.info.sources || []).indexOf(source.kind) < 0)
+                    plugins.sourceRefused(loader.modelData, source.kind)
+                else if (!kinds[source.kind])
+                    kinds[source.kind] = source
+            }
             const stacked = plugins.stacksOf(loader.modelData, item.stacks || [], freshStacks.indexOf(loader.modelData) >= 0)
             if (stacked.length > 0)
                 stacks = stacks.concat(stacked)
@@ -885,6 +930,10 @@ ApplicationWindow {
         if (layers.length !== pluginLayers.length
                 || layers.some((l, i) => l.plugin !== pluginLayers[i].plugin || l.component !== pluginLayers[i].component))
             pluginLayers = layers
+        // Set only when one comes or goes: the side panel's rows follow it.
+        const kindNames = Object.keys(kinds)
+        if (kindNames.length !== Object.keys(pluginSources).length || kindNames.some(k => pluginSources[k] !== kinds[k]))
+            pluginSources = kinds
         pluginHelp = help
         pluginStacks = stacks
         pluginHidden = hidden
@@ -980,28 +1029,21 @@ ApplicationWindow {
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
         onTourRequested: id => win.startTour(id)
+        pluginSources: win.pluginSources
         onAddRequested: {
             side.shown = false
             addPicker.shown = true
         }
-        onSignInRequested: appleId => signIn.open(appleId)
+        onSignInRequested: source => win.signInTo(source)
     }
     SourcePicker {
         id: addPicker
         objectName: "addSource"
-        onSignInRequested: icloudpd => {
-            addPicker.shown = false
-            signIn.open("")
-        }
+        kinds: win.pluginSourceList
     }
-    SignInPanel {
-        id: signIn
-        objectName: "signIn"
-        function open(appleId) {
-            signIn.appleId = appleId
-            signIn.shown = true
-        }
-    }
+    // A plugin's own screen over the photos (iCloud's sign-in, chosen in
+    // the picker): the picker gives way to it.
+    onPluginCoveringChanged: if (pluginCovering) addPicker.shown = false
     // A folder added, or an Apple ID signed in to: what was open for it goes.
     Connections {
         target: sources
@@ -1027,17 +1069,16 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || signIn.shown || newPlugins.shown || pluginCovering
+    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || newPlugins.shown || pluginCovering
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
     // Whose the keys are (keymap.h): the one on top, so two never share one.
-    readonly property string keyLayer: signIn.shown ? "signIn"
-        : tour.shown ? "tour"
+    readonly property string keyLayer: tour.shown ? "tour"
         : help.shown ? "help"
         : newPlugins.shown ? "newPlugins"
         : addPicker.shown ? "addSource"
-        : firstRun ? "firstRun"
+        : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"
         : pluginCovering ? "plugin"
         : selectBar.menuOpen || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
@@ -1067,6 +1108,8 @@ ApplicationWindow {
         objectName: "dropTarget"
         anchors.fill: parent
         name: win.placeName
+        detail: win.shownKind && win.shownKind.adds ? win.shownKind.adds(win.shownSource)
+                                                    : qsTr("Added there. The files here stay as they are.")
         enabled: sources.known && !win.firstRun
     }
 
@@ -1094,8 +1137,9 @@ ApplicationWindow {
         when: win.historyKeys
         onTriggered: history.redo()
     }
-    // Not while typing (an Apple ID, a code), nor while a tour shows.
-    readonly property bool historyKeys: !signIn.shown && !addPicker.shown && !tour.shown
+    // Not while choosing a source, nor while a tour shows. (A field typed
+    // into, an Apple ID, takes Ctrl Z first.)
+    readonly property bool historyKeys: !addPicker.shown && !tour.shown
     // What was done, undone or done again, said at the foot for a while,
     // with the button that takes it back (or does it again): undo and redo
     // for a pointer, as Ctrl+Z and Ctrl+⇧Z are for the keys.
@@ -1187,7 +1231,7 @@ ApplicationWindow {
         section: "pinhole"
         keys: ["?"]
         keyLayer: "any"
-        when: keymap.layer !== "signIn" && keymap.layer !== "tour"
+        when: keymap.layer !== "tour"
         onTriggered: help.shown = !help.shown
     }
     Command {

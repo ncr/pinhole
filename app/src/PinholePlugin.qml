@@ -35,6 +35,10 @@ Item {
     // that photo is shown, false the moment it changes or the viewer
     // starts closing), which its root declares.
     property Component viewerLayer
+    // The kinds of source it brings, each a PluginSource: how Pinhole's
+    // side panel, its first run and Add a source show them, and what
+    // signing in to one does. Only kinds its manifest's "sources" names.
+    property list<QtObject> sources
     // A few steps that show what it does, on the photos and its buttons as
     // they are (Tour.qml): shown by itself the first time it is on, once
     // `tourReady`, and again from the side panel.

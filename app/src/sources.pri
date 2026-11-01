@@ -84,6 +84,7 @@ SOURCES += \
     $$PWD/selftestrun.cpp \
     $$PWD/selftestcovering.cpp \
     $$PWD/selftestlayers.cpp \
+    $$PWD/selftestsources.cpp \
     $$PWD/selftestlive.cpp \
     $$PWD/selftestframe.cpp \
     $$PWD/selftesthidden.cpp \

@@ -535,7 +535,7 @@ rejects `not_yours` for a kind not in this plugin's manifest.
 | | |
 |---|---|
 | `list`, `current`, `health`, `progress`, `rounds` | as `Sources` has them |
-| `discovered(kind)` | what `discover` found for that kind (`{icloudpd: […]}`, `{folders: […]}`); `discoveredChanged()` |
+| `discovered` | what `discover` found, by kind, of its own kinds (`{icloud: {icloudpd: […]}}`); `discoveredChanged()` (as built, B6: a property, not `discovered(kind)`) |
 | `discover()` | look again |
 | `add(kind, entry)` | a promise of the source as shown: `set_source` with `kind` |
 | `show(id)` | show it |
@@ -1393,6 +1393,55 @@ would mean writing throwaway code.
   - the real window on the real library: unchanged, the source row as
     before, Sign out present;
   - first frame within 5 % with 14 plugins.
+- As built:
+  - `pinhole.sources.discovered` is a property, a map by kind of the
+    plugin's own kinds only (`discovered.icloud.icloudpd`), not a method:
+    an offer binds to it.
+  - `PluginSource` says more than the design's sketch, each something the
+    core said by kind before: `icon` (the row's and the offer's glyph),
+    `noun` ("iCloud · 49,079", "Folder · 654"), `forgets` (what Remove
+    asks), `adds` (under "Add 3 files to %1" as files are dragged in),
+    `pushed` ("Apple notifies of changes"). An action may `ask` (the row
+    asks first, Yes or No, as Sign out did), a way has its `key` (I, F), an
+    offer its `icon`. The keys under the list are the actions' (O only
+    where an iCloud source is). No "Sign in" action: tapping a row that
+    needs it signs in, as before.
+  - `pinhole.chooseFolder`, `sizeText(bytes, decimals)` (the folders' sizes
+    as the storage panel says them) and `FieldInput` in `Pinhole.Plugin`
+    (the sign-in's fields) are API 3's too; `apiUses` counts `PluginSource`,
+    `pinhole.sources` and `chooseFolder`.
+  - A kind with no `provider` is allowed in `builtInDir()` and in one's own
+    copy of the built-in plugin that declares it (same id): the copy
+    replaces the QML only, and must still load (`Plugins::sourcesProblem`;
+    `Plugins::at` says `sources` and `copy`). B7 adds the provider rules.
+  - The first-run picker stays shown beneath a plugin covering the window
+    (only its keys give way: `keyLayer`), so iCloud's sign-in over the first
+    run looks as it did. The sign-in from a source's row closes the side
+    panel first: a plugin's cover is beneath Pinhole's own panels.
+  - `Sources` keeps `list`, `current`, `known`, `progress`, `rounds`,
+    `show`, `showAt`, `remove`, `discover`, `error`, `switched`, and gains
+    `kinds`, `discovered`, `entry(id)`, and `add`, `signIn`, `submitCode`,
+    `signOut` for `PluginSources`, each answering the service's result.
+    Signed in or added, the source is announced (`switched`) once the
+    service shows it: its `sources` comes before its answer.
+  - Live and Favourites read `pinhole.sources.health` for "offline" and
+    "no_service", not the window's `service`.
+  - `Storage.source` is the whole `source` event, for `shownSource`.
+  - Tests as built: `pluginSourcesActOnlyOnTheirOwnKinds`,
+    `aKindOfPinholedsOwnIsOnlyItsOwnPlugins`,
+    `theICloudPluginSignsInWithACodeAndSaysWhyNot` and
+    `theFoldersPluginOffersTheBiggestFoldersAndAddsOne` (the plugins' QML
+    against a stand-in service). `PINHOLE_SELFTEST=sources:<dir>`
+    (`selftestsources.cpp`, built into main's window too to compare): the
+    first run on a scratch HOME with a folder of photos in Pictures and an
+    icloudpd session file (iCloud on ⏎, the folder on 2, which adds it),
+    the side panel, O and Delete asked, Add a source, the sign-in typed,
+    the code boxes, a wrong code, the code, and the card saying it needs
+    signing in, against a scratch pinholed with a stand-in sign-in provider
+    (`PINHOLE_AUTH`), never Apple; then on a copy of Jacek's library. Every
+    frame is main's pixel for pixel but the side panel's, which lists the
+    two new plugins and the time of the last round. `keys` covers the
+    sign-in as the plugin's layer.
 
 ### B7: switched off, and the trust lines (after B6)
 

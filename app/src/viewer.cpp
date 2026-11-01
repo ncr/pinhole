@@ -580,6 +580,10 @@ void Viewer::request(int index, const QString &kind) {
             }
             if (code == QLatin1String("needs_sign_in"))
                 setMessage(tr("Not signed in to %1").arg(m_service->sourceName()));
+            // The file is there, but nothing can be made of it: asking again
+            // gives the same.
+            else if (code == QLatin1String("unreadable"))
+                setMessage(tr("This file is damaged, so it cannot be shown"));
             else
                 setMessage(tr("Could not load from %1").arg(m_service->sourceName()));
             return;

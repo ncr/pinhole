@@ -1,4 +1,5 @@
 import QtQuick
+import "keys.js" as KeyNames
 
 // Pinhole's side panel, on Tab or ",": over the photos from the left,
 // hidden otherwise. Everything that is set is here, in three parts.
@@ -97,10 +98,16 @@ Item {
         else if (y + item.height > scroller.contentY + scroller.height - margin)
             scroller.contentY = Math.min(scroller.contentHeight - scroller.height, y + item.height - scroller.height + margin)
     }
+    // The row asking before it acts, -1 for none; and what it asks before:
+    // Remove (null), or one of its kind's actions.
     property int confirming: -1
-    property bool signingOut: false
+    property var askingFor: null
     signal addRequested()
-    signal signInRequested(string appleId)
+    // Its row tapped while the source shown needs signing in.
+    signal signInRequested(var source)
+    // Each kind of source as its plugin shows it, by kind (PluginSource,
+    // Main.qml's pluginSources).
+    property var pluginSources: ({})
     // The loaded plugin of an id (Main.qml), for its settings; `pluginsLoaded`
     // changes as plugins load.
     property var pluginItem: id => null
@@ -221,34 +228,65 @@ Item {
     })
 
     function count(n) { return Number(n).toLocaleString(Qt.locale(), "f", 0) }
-    function at(i) { return sources.list[i] }
+    // A source as its plugin is given it: the one shown with how it is
+    // doing (only the one shown is being looked after).
+    function at(i) {
+        const s = sources.list[i]
+        if (!s)
+            return s
+        const shown = s.id === sources.current
+        return Object.assign({}, s, { shown: shown, health: shown ? root.health : "" })
+    }
+    function kindOf(s) { return s ? root.pluginSources[s.kind] ?? null : null }
     function open(i) {
         const s = at(i)
         if (!s)
             return
-        if (s.id === sources.current && trouble(s) === "needs_sign_in")
-            root.signInRequested(s.account)
+        const kind = kindOf(s)
+        if (s.shown && s.health === "needs_sign_in" && kind && kind.signIn)
+            root.signInRequested(s)
         else
             sources.show(s.id)
     }
-    // What is wrong with a source, as far as is known: only the one shown
-    // is being looked after.
+    // What its plugin says it needs (signing in again, its disk), in place
+    // of its count; "" when all is well.
     function trouble(s) {
-        if (s.id !== sources.current)
-            return ""
-        if (root.health === "needs_sign_in" && s.kind === "icloud")
-            return "needs_sign_in"
-        if (root.health === "offline" && s.kind === "folder")
-            return "offline"
-        return ""
+        const kind = kindOf(s)
+        return kind && kind.note ? kind.note(s) || "" : ""
     }
     function detail(s) {
-        switch (trouble(s)) {
-        case "needs_sign_in": return qsTr("Sign in again")
-        case "offline": return qsTr("Not there: is its disk connected?")
+        const said = trouble(s)
+        if (said !== "")
+            return said
+        const kind = kindOf(s)
+        const noun = kind && kind.noun !== "" ? kind.noun : plugins.at(s.plugin).name ?? s.kind
+        return noun + " · " + count(s.count)
+    }
+    // Its buttons beside Remove, as its plugin gives them.
+    function actionsOf(s) {
+        const kind = kindOf(s)
+        return kind && kind.actions ? kind.actions(s) || [] : []
+    }
+    function act(i, action) {
+        if (action.ask) {
+            root.askingFor = action
+            root.confirming = i
+        } else {
+            action.triggered()
         }
-        const kind = s.kind === "icloud" ? "iCloud" : qsTr("Folder")
-        return kind + " · " + count(s.count)
+    }
+    // Every source's buttons, once each, for the keys under the list: those
+    // it has when all is well (Sign out too while signed out), so the list
+    // stays as it is as the one shown comes and goes.
+    readonly property var actionKeys: {
+        const seen = {}, keys = []
+        for (let i = 0; i < sources.list.length; ++i)
+            for (const action of actionsOf(Object.assign({}, sources.list[i], { shown: false, health: "" })))
+                if (action.key && !seen[action.key]) {
+                    seen[action.key] = true
+                    keys.push([KeyNames.nameOf(action.key), action.text])
+                }
+        return keys
     }
     // When the one shown was last looked at for new photos, and when it is
     // next (the service's rounds), counted on as the bar is open; or
@@ -279,8 +317,9 @@ Item {
         const last = r.last === undefined ? qsTr("Not checked yet")
                    : ago < 5000 ? qsTr("Checked just now")
                    : qsTr("Checked %1 ago").arg(span(ago))
+        const kind = kindOf(s)
         const next = r.next === undefined || r.next <= root.now ? qsTr("Checking now…")
-                   : r.push ? qsTr("Apple notifies of changes")
+                   : r.push ? (kind && kind.pushed !== "" ? kind.pushed : qsTr("It says when something changes"))
                    : qsTr("Next check in %1").arg(span(r.next - root.now))
         return last + "\n" + next
     }
@@ -336,13 +375,14 @@ Item {
         onTriggered: root.focusedStop.press()
     }
     function answer(yes) {
-        if (yes && root.signingOut) {
-            sources.signOut(root.at(root.confirming).id)
+        if (yes && root.askingFor) {
+            root.askingFor.triggered()
         } else if (yes) {
             sources.remove(root.at(root.confirming).id)
             root.focusIndex = Math.max(0, Math.min(root.focusIndex, sources.list.length - 2))
         }
         root.confirming = -1
+        root.askingFor = null
     }
     Command {
         id: removeSource
@@ -351,24 +391,7 @@ Item {
         keyLayer: "side"
         when: root.confirming < 0 && root.focusIndex < root.sourceCount
         onTriggered: {
-            root.signingOut = false
-            root.confirming = root.focusIndex
-        }
-    }
-    // Signing out of an Apple ID keeps its photos here; signed out, the row
-    // offers signing in again instead.
-    function canSignOut(i) {
-        const s = root.at(i)
-        return s !== undefined && s.kind === "icloud" && root.trouble(s) !== "needs_sign_in"
-    }
-    Command {
-        id: signOutSource
-        name: "side.signOut"
-        keys: ["O"]
-        keyLayer: "side"
-        when: root.confirming < 0 && root.canSignOut(root.focusIndex)
-        onTriggered: {
-            root.signingOut = true
+            root.askingFor = null
             root.confirming = root.focusIndex
         }
     }
@@ -485,7 +508,11 @@ Item {
                     required property int index
                     readonly property bool current: modelData.id === sources.current
                     readonly property bool asking: root.confirming === index
-                    readonly property string trouble: root.trouble(modelData)
+                    // As its plugin is given it, and what it says of it.
+                    readonly property var source: (root.health, root.at(index))
+                    readonly property var kind: root.kindOf(source)
+                    readonly property string trouble: root.trouble(source)
+                    readonly property var actions: root.actionsOf(source)
                     width: parent.width
                     height: rowContent.implicitHeight + Math.round(theme.fontSize * 1.143)
                     radius: Math.min(4, theme.radius)
@@ -518,7 +545,7 @@ Item {
                             id: glyph
                             width: Math.round(theme.fontSize * 1.429)
                             horizontalAlignment: Text.AlignHCenter
-                            text: row.modelData.kind === "icloud" ? "" : ""
+                            text: row.kind ? row.kind.icon : "\uf03e"
                             color: row.trouble !== "" ? theme.red : row.current ? theme.accent : theme.foreground
                         }
                         Column {
@@ -533,14 +560,14 @@ Item {
                             UiText {
                                 visible: !row.asking
                                 width: parent.width
-                                text: root.detail(row.modelData)
+                                text: root.detail(row.source)
                                 color: row.trouble !== "" ? theme.red : theme.darkForeground
                                 font.pixelSize: Math.round(theme.fontSize * 0.857)
                             }
                             UiText {
                                 visible: !row.asking && row.trouble === "" && text !== ""
                                 width: parent.width
-                                text: root.rounds(row.modelData)
+                                text: root.rounds(row.source)
                                 wrapMode: Text.WordWrap
                                 color: theme.darkForeground
                                 font.pixelSize: Math.round(theme.fontSize * 0.857)
@@ -564,15 +591,13 @@ Item {
                                 wrapMode: Text.WordWrap
                                 color: theme.red
                                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                                text: (root.signingOut
-                                       ? qsTr("Sign out? Its index stays here, so signing in again is quick.")
-                                       : row.modelData.kind === "icloud"
-                                       ? qsTr("Sign out and forget its index? The photos stay in iCloud.")
-                                       : qsTr("Forget its index? The photos stay in the folder."))
-
+                                text: root.askingFor ? root.askingFor.ask
+                                      : row.kind && row.kind.forgets ? row.kind.forgets(row.source)
+                                      : qsTr("Forget its index? The photos stay where they are.")
                             }
                             // Its buttons: Yes and No while asking; else, under
-                            // the pointer or the keys, Sign out and Remove.
+                            // the pointer or the keys, its plugin's (Sign out)
+                            // and Remove.
                             Row {
                                 id: rowButtons
                                 spacing: 6
@@ -591,11 +616,18 @@ Item {
                                     hint: "Esc"
                                     onTapped: root.confirming = -1
                                 }
-                                ShellButton {
-                                    visible: !row.asking && root.canSignOut(row.index)
-                                    flat: true
-                                    text: qsTr("Sign out")
-                                    action: signOutSource
+                                Repeater {
+                                    model: row.actions
+                                    delegate: ShellButton {
+                                        required property var modelData
+                                        visible: !row.asking
+                                        flat: true
+                                        text: modelData.text
+                                        key: modelData.key ?? ""
+                                        keyLayer: "side"
+                                        usable: root.confirming < 0
+                                        onTapped: root.act(row.index, modelData)
+                                    }
                                 }
                                 ShellButton {
                                     visible: !row.asking
@@ -630,8 +662,8 @@ Item {
                 topPadding: 4
                 spacing: Math.round(theme.fontSize * 0.3)
                 Repeater {
-                    model: [["↑ ↓", qsTr("Choose")], ["⏎", qsTr("Show it")], ["1–9", qsTr("Show one, from anywhere")],
-                            ["O", qsTr("Sign out")], ["Del", qsTr("Remove")]]
+                    model: [["↑ ↓", qsTr("Choose")], ["⏎", qsTr("Show it")], ["1–9", qsTr("Show one, from anywhere")]]
+                           .concat(root.actionKeys).concat([["Del", qsTr("Remove")]])
                     delegate: Row {
                         required property var modelData
                         spacing: Math.round(theme.fontSize * 0.4)

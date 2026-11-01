@@ -220,6 +220,12 @@ Storage::Storage(ServiceClient *service, QObject *parent) : QObject(parent), m_s
 QString Storage::sourceKind() const { return m_service->source().value("kind").toString(); }
 QString Storage::sourceName() const { return m_service->sourceName(); }
 QString Storage::sourcePath() const { return withTilde(m_service->source().value("path").toString()); }
+QVariantMap Storage::source() const {
+    QVariantMap source = m_service->source().toVariantMap();
+    source.remove(QStringLiteral("event"));
+    return source;
+}
+
 QString Storage::sourceAccount() const { return m_service->source().value("account").toString(); }
 bool Storage::sourceNeedsSignIn() const { return m_service->source().value("needs_sign_in").toBool(); }
 

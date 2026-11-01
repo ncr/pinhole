@@ -28,6 +28,7 @@
 #include "favourites.h"
 #include "history.h"
 #include "keymap.h"
+#include "sources.h"
 #include "library.h"
 #include "libraryreloader.h"
 #include "markchoices.h"
@@ -2784,6 +2785,258 @@ private slots:
     // already, whose they are said; the promise has them once it answers,
     // and what it could not set goes back, rejected with its code; put
     // back only on the library it was set on, another shown meanwhile.
+    // The lines asked of the stand-in service by method.
+    static QList<QJsonObject> askedFor(FakeService &fake, const QString &method) {
+        fake.read();
+        QList<QJsonObject> found;
+        for (const QJsonObject &line : std::as_const(fake.asked))
+            if (line.value("method").toString() == method)
+                found.append(line);
+        return found;
+    }
+    static QJsonObject sourcesEvent(const QJsonArray &list, const QString &current) {
+        return {{"event", "sources"}, {"sources", list}, {"current", current}};
+    }
+
+    // The window's sources (Sources): the list, the one shown and the
+    // kinds as the service says them; and a plugin's pinhole.sources, which
+    // mirrors them and acts only on the kinds its manifest names.
+    void pluginSourcesActOnlyOnTheirOwnKinds() {
+        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}},
+                          {{"a", 1000}}, true);
+        Sources sources(bench.service.get());
+        bench.plugins->setSources(&sources);
+        QCOMPARE(bench.plugins->at("pinhole.icloud").value("sources").toStringList(), QStringList{"icloud"});
+        QCOMPARE(bench.js("pinhole.sources.kinds.join()").toString(), QString("icloud"));
+        const QJsonArray list{QJsonObject{{"id", "icloud:me@example.com"}, {"kind", "icloud"}, {"plugin", "pinhole.icloud"},
+                                          {"name", "Me"}, {"account", "me@example.com"}, {"count", 3}, {"thumbs", 3}},
+                              QJsonObject{{"id", "folder:/x"}, {"kind", "folder"}, {"plugin", "pinhole.folder"}, {"name", "x"},
+                                          {"path", "/x"}, {"count", 1}, {"thumbs", 1}}};
+        bench.fake.send(sourcesEvent(list, "folder:/x"));
+        bench.fake.send({{"event", "kinds"},
+                         {"kinds", QJsonArray{QJsonObject{{"kind", "icloud"}, {"plugin", "pinhole.icloud"}, {"on", true}},
+                                              QJsonObject{{"kind", "folder"}, {"plugin", "pinhole.folder"}, {"on", false}}}}});
+        QTRY_COMPARE(sources.kinds().size(), 2);
+        QCOMPARE(sources.kinds()[1].toMap().value("on").toBool(), false);
+        QCOMPARE(bench.js("pinhole.sources.list.length").toInt(), 2);
+        QCOMPARE(bench.js("pinhole.sources.current").toString(), QString("folder:/x"));
+        bench.fake.send({{"event", "health"}, {"state", "offline"}});
+        QTRY_COMPARE(bench.js("pinhole.sources.health").toString(), QString("offline"));
+
+        // Another plugin's kind, or a source of it: not_yours, and nothing
+        // asked of the service.
+        const QString told = ".then(r => said.push('ok ' + JSON.stringify(r)), e => said.push('not ' + e.code))";
+        bench.js("pinhole.sources.add('folder', { path: '/y' })" + told);
+        bench.js("pinhole.sources.signIn('folder', {})" + told);
+        bench.js("pinhole.sources.signOut('folder:/x')" + told);
+        bench.js("pinhole.sources.signOut('icloud:nobody')" + told);
+        QTRY_COMPARE(bench.said(), QStringList({"not not_yours", "not not_yours", "not not_yours", "not not_found"}));
+        QVERIFY(askedFor(bench.fake, "set_source").isEmpty() && askedFor(bench.fake, "sign_out").isEmpty());
+
+        // What could be added: only its own kinds'.
+        bench.js("pinhole.sources.discover()");
+        QTRY_COMPARE(askedFor(bench.fake, "discover").size(), 1);
+        bench.fake.send({{"id", askedFor(bench.fake, "discover")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"kinds", QJsonObject{{"icloud", QJsonObject{{"icloudpd", QJsonArray{"meexamplecom"}}}},
+                                                                     {"folder", QJsonObject{{"folders", QJsonArray{}}}}}}}}});
+        QTRY_COMPARE(bench.js("Object.keys(pinhole.sources.discovered).join()").toString(), QString("icloud"));
+        QCOMPARE(bench.js("pinhole.sources.discovered.icloud.icloudpd[0]").toString(), QString("meexamplecom"));
+
+        // Its own: asked with its kind, answered as the service says.
+        QSignalSpy switched(&sources, &Sources::switched);
+        bench.js("said.length = 0; pinhole.sources.signIn('icloud', { apple_id: 'me@example.com', password: 'p' })" + told);
+        QTRY_COMPARE(askedFor(bench.fake, "sign_in").size(), 1);
+        QJsonObject params = askedFor(bench.fake, "sign_in")[0].value("params").toObject();
+        QCOMPARE(params.value("kind").toString(), QString("icloud"));
+        QCOMPARE(params.value("apple_id").toString(), QString("me@example.com"));
+        bench.fake.send({{"id", askedFor(bench.fake, "sign_in")[0].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "wrong_password"}, {"message", "no"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"not wrong_password"}));
+        // Signed in: shown already when it answers, and said so.
+        bench.js("said.length = 0; pinhole.sources.submitCode('icloud', { apple_id: 'me@example.com', code: '123456' })" + told);
+        QTRY_COMPARE(askedFor(bench.fake, "submit_code").size(), 1);
+        QCOMPARE(askedFor(bench.fake, "submit_code")[0].value("params").toObject().value("kind").toString(), QString("icloud"));
+        bench.fake.send(sourcesEvent(list, "icloud:me@example.com"));
+        bench.fake.send({{"id", askedFor(bench.fake, "submit_code")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"state", "signed_in"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"ok {\"state\":\"signed_in\"}"}));
+        QCOMPARE(switched.size(), 1);
+        QCOMPARE(switched[0][0].toString(), QString("Me"));
+        // Signing out of its own: the sources left.
+        bench.js("said.length = 0; pinhole.sources.signOut('icloud:me@example.com').then(r => said.push(r.length))");
+        QTRY_COMPARE(askedFor(bench.fake, "sign_out").size(), 1);
+        bench.fake.send({{"id", askedFor(bench.fake, "sign_out")[0].value("id")}, {"ok", true}, {"result", sourcesEvent(list, "icloud:me@example.com")}});
+        QTRY_COMPARE(bench.said(), QStringList({"2"}));
+
+        // A switch turned: pinholed told, which reads plugins.json again.
+        bench.plugins->setEnabled("pinhole.icloud", false);
+        QTRY_COMPARE(askedFor(bench.fake, "plugins_changed").size(), 1);
+    }
+
+    // A kind of pinholed's own (no provider) only in Pinhole's own plugin of
+    // it, or in one's own copy of that plugin; a manifest's sources said.
+    void aKindOfPinholedsOwnIsOnlyItsOwnPlugins() {
+        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
+        QTemporaryDir personal;
+        const QJsonObject icloud{{"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}};
+        QVERIFY(Plugins::sourcesProblem(bench.dir.path() + "/plugins/pinhole.icloud", "pinhole.icloud", icloud).isEmpty());
+        QVERIFY(Plugins::sourcesProblem(personal.path(), "pinhole.icloud", icloud).isEmpty());
+        QVERIFY(Plugins::sourcesProblem(personal.path(), "me.thief", icloud).contains("icloud"));
+        QVERIFY(!Plugins::sourcesProblem(personal.path(), "pinhole.icloud", {{"sources", QJsonObject{}}}).isEmpty());
+        QVERIFY(!Plugins::sourcesProblem(personal.path(), "pinhole.icloud", {{"sources", QJsonArray{QJsonObject{}}}}).isEmpty());
+        QCOMPARE(Plugins::sourceKinds(icloud), QStringList{"icloud"});
+    }
+
+    // plugins/icloud against a stand-in service: its rows' words, icloudpd
+    // offered when it is here, and signing in with a code, what went wrong
+    // said in its panel, over the window until it is done.
+    void theICloudPluginSignsInWithACodeAndSaysWhyNot() {
+        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}}, {{"a", 1000}},
+                          true);
+        Sources sources(bench.service.get());
+        bench.plugins->setSources(&sources);
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/icloud/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.icloud&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.js("kind = plugin.sources[0]");
+        QCOMPARE(bench.js("kind.kind").toString(), QString("icloud"));
+        QCOMPARE(bench.js("kind.place({ name: 'Me' })").toString(), QString("iCloud"));
+        QCOMPARE(bench.js("kind.noun").toString(), QString("iCloud"));
+        // Its row: Sign out on O, asked first; signed out, a line saying so.
+        QCOMPARE(bench.js("kind.actions({ id: 'icloud:me@example.com', shown: true, health: 'fine' })[0].key").toString(), QString("O"));
+        QCOMPARE(bench.js("kind.note({ shown: true, health: 'fine' })").toString(), QString());
+        QCOMPARE(bench.js("kind.note({ shown: true, health: 'needs_sign_in' })").toString(), QString("Sign in again"));
+        QCOMPARE(bench.js("kind.actions({ shown: true, health: 'needs_sign_in' }).length").toInt(), 0);
+        QCOMPARE(bench.js("kind.ways[0].key").toString(), QString("I"));
+        // icloudpd here: offered.
+        QCOMPARE(bench.js("kind.offers.length").toInt(), 0);
+        bench.js("pinhole.sources.discover()");
+        QTRY_COMPARE(askedFor(bench.fake, "discover").size(), 1);
+        bench.fake.send({{"id", askedFor(bench.fake, "discover")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"kinds", QJsonObject{{"icloud", QJsonObject{{"icloudpd", QJsonArray{"meexamplecom"}}}}}}}}});
+        QTRY_COMPARE(bench.js("kind.offers.length").toInt(), 1);
+        QCOMPARE(bench.js("kind.offers[0].title").toString(), QString("iCloud Photos"));
+
+        // Signing in, over the window.
+        QVERIFY(!plugin->property("covering").toBool());
+        bench.js("kind.signIn({ account: 'me@example.com' })");
+        QVERIFY(plugin->property("covering").toBool());
+        bench.js("panel = plugin.signInPanel");
+        QCOMPARE(bench.js("panel.appleId").toString(), QString("me@example.com"));
+        // icloudpd's session for this one: no password needed.
+        QVERIFY(bench.js("panel.icloudpdHas('me@example.com') && !panel.icloudpdHas('you@example.com')").toBool());
+        bench.js("panel.signIn('me@example.com ', 'secret')");
+        QVERIFY(bench.js("panel.busy").toBool());
+        QTRY_COMPARE(askedFor(bench.fake, "sign_in").size(), 1);
+        QJsonObject params = askedFor(bench.fake, "sign_in")[0].value("params").toObject();
+        QCOMPARE(params, (QJsonObject{{"kind", "icloud"}, {"apple_id", "me@example.com"}, {"password", "secret"}}));
+        bench.fake.send({{"id", askedFor(bench.fake, "sign_in")[0].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "wrong_password"}, {"message", "no"}}}});
+        QTRY_COMPARE(bench.js("panel.error").toString(), QString("Apple did not accept that Apple ID or password."));
+        QVERIFY(!bench.js("panel.busy").toBool());
+        // A code asked for, a wrong one, then the right one.
+        bench.js("panel.signIn('me@example.com', 'secret')");
+        QTRY_COMPARE(askedFor(bench.fake, "sign_in").size(), 2);
+        bench.fake.send({{"id", askedFor(bench.fake, "sign_in")[1].value("id")}, {"ok", true}, {"result", QJsonObject{{"state", "needs_code"}}}});
+        QTRY_VERIFY(bench.js("panel.codeStage && panel.error === ''").toBool());
+        bench.js("panel.submitCode('me@example.com', '000000')");
+        QTRY_COMPARE(askedFor(bench.fake, "submit_code").size(), 1);
+        QCOMPARE(askedFor(bench.fake, "submit_code")[0].value("params").toObject(),
+                 (QJsonObject{{"kind", "icloud"}, {"apple_id", "me@example.com"}, {"code", "000000"}}));
+        bench.fake.send({{"id", askedFor(bench.fake, "submit_code")[0].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "wrong_code"}, {"message", "no"}}}});
+        QTRY_COMPARE(bench.js("panel.error").toString(), QString("That code did not work. The newest one Apple sent is the one to type."));
+        QVERIFY(bench.js("panel.needsCode").toBool());
+        QSignalSpy switched(&sources, &Sources::switched);
+        bench.js("panel.submitCode('me@example.com', '123456')");
+        QTRY_COMPARE(askedFor(bench.fake, "submit_code").size(), 2);
+        bench.fake.send(sourcesEvent({QJsonObject{{"id", "icloud:me@example.com"}, {"kind", "icloud"}, {"name", "Me"}}},
+                                     "icloud:me@example.com"));
+        bench.fake.send({{"id", askedFor(bench.fake, "submit_code")[1].value("id")}, {"ok", true}, {"result", QJsonObject{{"state", "signed_in"}}}});
+        QTRY_VERIFY(!plugin->property("covering").toBool());
+        QCOMPARE(switched.size(), 1);
+        // Closed while Apple is asked: its answer is not waited for.
+        bench.js("kind.signIn({}); panel.signIn('me@example.com', 'secret'); panel.shown = false");
+        QTRY_COMPARE(askedFor(bench.fake, "sign_in").size(), 3);
+        bench.fake.send({{"id", askedFor(bench.fake, "sign_in")[2].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "try_again"}, {"message", "no"}}}});
+        QTest::qWait(50);
+        QCOMPARE(bench.js("panel.error").toString(), QString());
+        // Signing out, from its row's button.
+        bench.js("kind.actions({ id: 'icloud:me@example.com', shown: true, health: 'fine' })[0].triggered()");
+        QTRY_COMPARE(askedFor(bench.fake, "sign_out").size(), 1);
+        QCOMPARE(askedFor(bench.fake, "sign_out")[0].value("params").toObject().value("id").toString(), QString("icloud:me@example.com"));
+    }
+
+    // plugins/folder against a stand-in service: the biggest folders found
+    // offered, with what is in them, and one added and shown as it is
+    // chosen.
+    void theFoldersPluginOffersTheBiggestFoldersAndAddsOne() {
+        PluginBench bench({{"pinhole.folder", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "folder"}}}}}}}, {{"a", 1000}},
+                          true);
+        Sources sources(bench.service.get());
+        bench.plugins->setSources(&sources);
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        // In English, its counted words its own (i18n/en.json).
+        Translator english(bench.dir.path() + "/language", PINHOLE_I18N);
+        english.setPluginCatalogs({{"pinhole.folder", QStringLiteral(PINHOLE_I18N "/../../../plugins/folder")}});
+        english.setEngine(&bench.engine);
+        QCoreApplication::installTranslator(&english);
+        const auto removed = qScopeGuard([&english] { QCoreApplication::removeTranslator(&english); });
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/folder/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.folder&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.js("kind = plugin.sources[0]");
+        QCOMPARE(bench.js("kind.place({ name: 'Pictures/Trips' })").toString(), QString("Pictures/Trips"));
+        QCOMPARE(bench.js("kind.note({ shown: true, health: 'offline' })").toString(), QString("Not there: is its disk connected?"));
+        QCOMPARE(bench.js("kind.note({ shown: false, health: '' })").toString(), QString());
+        QCOMPARE(bench.js("kind.ways[0].key").toString(), QString("F"));
+        bench.js("pinhole.sources.discover()");
+        QTRY_COMPARE(askedFor(bench.fake, "discover").size(), 1);
+        const auto folder = [](const QString &name, int assets, int live, double bytes) {
+            return QJsonObject{{"path", "/p/" + name}, {"name", name}, {"assets", assets}, {"live", live}, {"bytes", bytes}};
+        };
+        bench.fake.send({{"id", askedFor(bench.fake, "discover")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"kinds", QJsonObject{{"folder", QJsonObject{{"folders", QJsonArray{
+                             folder("few", 3, 0, 1e6), folder("big", 400, 12, 3.5 * (1 << 30)), folder("mid", 25, 0, 50e6),
+                             folder("more", 30, 0, 2.0 * (1 << 30)), folder("most", 900, 0, 12.0 * (1 << 30))}}}}}}}}});
+        // Three at most, the biggest first, past the strays.
+        QTRY_COMPARE(bench.js("kind.offers.map(o => o.title).join()").toString(), QString("most,big,more"));
+        QCOMPARE(bench.js("kind.offers[1].detail").toString(), QString("400 photos and videos · 12 Live Photos · 3.5 GB"));
+        QCOMPARE(bench.js("kind.offers[2].detail").toString(), QString("30 photos and videos · 2 GB"));
+        QSignalSpy switched(&sources, &Sources::switched);
+        bench.js("kind.offers[0].triggered()");
+        QTRY_COMPARE(askedFor(bench.fake, "set_source").size(), 1);
+        QCOMPARE(askedFor(bench.fake, "set_source")[0].value("params").toObject(), (QJsonObject{{"kind", "folder"}, {"path", "/p/most"}}));
+        bench.fake.send(sourcesEvent({QJsonObject{{"id", "folder:/p/most"}, {"kind", "folder"}, {"name", "most"}}}, "folder:/p/most"));
+        bench.fake.send({{"id", askedFor(bench.fake, "set_source")[0].value("id")}, {"ok", true},
+                         {"result", QJsonObject{{"id", "folder:/p/most"}, {"kind", "folder"}, {"name", "most"}}}});
+        QTRY_COMPARE(switched.size(), 1);
+        QCOMPARE(switched[0][0].toString(), QString("most"));
+        QCOMPARE(sources.error(), QString());
+        // One the service will not show: said where it was chosen.
+        bench.js("kind.offers[1].triggered()");
+        QTRY_COMPARE(askedFor(bench.fake, "set_source").size(), 2);
+        bench.fake.send({{"id", askedFor(bench.fake, "set_source")[1].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "bad_request"}, {"message", "no"}}}});
+        QTRY_COMPARE(sources.error(), QString("Photos cannot be shown from there."));
+    }
+
     void setFavoriteSetsAtOnceAndPutsBackWhatTheServiceCouldNot() {
         PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         Favourites favourites(&bench.library, bench.service.get());

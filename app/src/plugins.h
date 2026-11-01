@@ -30,6 +30,7 @@ class QJSEngine;
 class QQmlEngine;
 class QQuickItem;
 class ServiceClient;
+class Sources;
 class Translator;
 class Viewer;
 
@@ -123,6 +124,76 @@ private:
     std::function<void()> m_cancel;
 };
 
+// A plugin's side of the sources (pinhole.sources): the sources added and
+// the one shown, as the window has them (Sources), and what it may change,
+// only of the kinds its manifest's "sources" names: any other is rejected
+// with "not_yours", so no plugin signs in or adds for another.
+// docs/plugins.md describes it for plugin authors.
+class PluginSources : public QObject {
+    Q_OBJECT
+    // The kinds its manifest names ("icloud").
+    Q_PROPERTY(QStringList kinds READ kinds NOTIFY kindsChanged)
+    // Every source added whose kind is on, as Sources lists them, and the
+    // id of the one shown ("" for none).
+    Q_PROPERTY(QVariantList list READ list NOTIFY listChanged)
+    Q_PROPERTY(QString current READ current NOTIFY listChanged)
+    // How the source shown is doing: fine, needs_sign_in, offline, failing;
+    // no_service when no service answers, incompatible for another version.
+    Q_PROPERTY(QString health READ health NOTIFY healthChanged)
+    // A library being built, and when the one shown was last and is next
+    // looked at (Sources).
+    Q_PROPERTY(QVariantMap progress READ progress NOTIFY progressChanged)
+    Q_PROPERTY(QVariantMap rounds READ rounds NOTIFY roundsChanged)
+    // What could be added of its kinds, by kind, as the service last found
+    // (discover): { "icloud": { "icloudpd": [...] } }.
+    Q_PROPERTY(QVariantMap discovered READ discovered NOTIFY discoveredChanged)
+public:
+    explicit PluginSources(class PluginHost *host);
+
+    QStringList kinds() const;
+    QVariantList list() const;
+    QString current() const;
+    QString health() const;
+    QVariantMap progress() const;
+    QVariantMap rounds() const;
+    QVariantMap discovered() const;
+
+    // Look again for what could be added.
+    Q_INVOKABLE void discover();
+    // Show a source added, by its id.
+    Q_INVOKABLE void show(const QString &id);
+    // A source of `kind` added from `entry` (what its kind takes: a folder's
+    // path, a provider's own fields) and shown: a promise of the source as
+    // shown (id, kind, name…).
+    Q_INVOKABLE QJSValue add(const QString &kind, const QJSValue &entry);
+    // Signing in to a source of `kind`: a promise of { state: "signed_in" }
+    // (added and shown) or { state: "needs_code" }, then submitCode with
+    // the code; rejected with the service's or the provider's code.
+    Q_INVOKABLE QJSValue signIn(const QString &kind, const QJSValue &params);
+    Q_INVOKABLE QJSValue submitCode(const QString &kind, const QJSValue &params);
+    // Signing out of a source of its kinds: its session goes, it stays with
+    // its photos here. A promise of the sources left.
+    Q_INVOKABLE QJSValue signOut(const QString &id);
+
+signals:
+    void kindsChanged();
+    void listChanged();
+    void healthChanged();
+    void progressChanged();
+    void roundsChanged();
+    void discoveredChanged();
+
+private:
+    // What the window asked the service, answered to the plugin as a
+    // promise of its result (`shape` takes the part to give), unless the
+    // plugin has stopped since.
+    QJSValue ask(const std::function<void(std::function<void(bool, const QJsonObject &, const QString &, const QString &)>)> &how,
+                 const std::function<QVariant(const QJsonObject &)> &shape);
+    QJSValue refused(const QString &code, const QString &message);
+    Sources *sources() const;
+    PluginHost *m_host;
+};
+
 // The `pinhole` a plugin is given: the library, the photo the grid or the
 // viewer is on, the larger renditions, programs to run (its own helpers,
 // ffmpeg), a picture made into a GIF or a video, the clipboard, its
@@ -152,6 +223,9 @@ class PluginHost : public QObject {
     // Each read the first time it is asked for.
     Q_PROPERTY(QObject *state READ state CONSTANT)
     Q_PROPERTY(QObject *cache READ cache CONSTANT)
+    // The sources (PluginSources): those of its own kinds to add, sign in
+    // to and out of.
+    Q_PROPERTY(QObject *sources READ sources CONSTANT)
     // Photos ticked in the grid's select mode (a card's all of them).
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     // How many photos the grid hides now, all plugins' `hidden` together.
@@ -177,6 +251,7 @@ public:
     QObject *settings() const { return m_settings.get(); }
     QObject *state() const;
     QObject *cache() const;
+    QObject *sources() const;
     QString problem() const { return m_problem; }
     QString coveredBy() const;
 
@@ -244,7 +319,11 @@ public:
     Q_INVOKABLE bool exists(const QString &path) const;
     // A file's size in bytes, and as people read it: "1.8 MB".
     Q_INVOKABLE double fileSize(const QString &path) const;
-    Q_INVOKABLE QString sizeText(double bytes) const;
+    // With `decimals` (API 3; 1 when left out).
+    Q_INVOKABLE QString sizeText(double bytes, int decimals = 1) const;
+    // A folder chosen in the desktop's own picker, titled `title`: a
+    // promise of its path, rejected "cancelled" when none is.
+    Q_INVOKABLE QJSValue chooseFolder(const QString &title);
     // The plugin's settings, kept in ~/.config/pinhole/plugins.json; the
     // same as pinhole.settings[key].
     Q_INVOKABLE QVariant setting(const QString &key, const QVariant &fallback = {}) const;
@@ -300,6 +379,7 @@ signals:
 
 private:
     friend class PluginSettings;
+    friend class PluginSources;
     QJSEngine *engine() const;
     // A promise to give the plugin: its resolve and reject, and `job`'s
     // cancel() as the promise's.
@@ -315,6 +395,7 @@ private:
     Plugins *m_plugins;
     std::unique_ptr<PluginSettings> m_settings;
     mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
+    mutable std::unique_ptr<PluginSources> m_sources;
     QString m_problem;
     // Bumped by stop(): what was started before it does not answer.
     int m_generation = 0;
@@ -442,6 +523,11 @@ public:
     static void registerTypes();
     // What is wrong with the plugin in `dir`, if anything; its manifest.
     static QString manifestProblem(const QString &dir, QJsonObject *manifest, QString *main);
+    // The source kinds a manifest names ("sources"), and what is wrong with
+    // them: a kind of pinholed's own (no "provider") only in Pinhole's own
+    // plugin of it, or one's own copy of that plugin.
+    static QStringList sourceKinds(const QJsonObject &manifest);
+    static QString sourcesProblem(const QString &dir, const QString &id, const QJsonObject &manifest);
     // What the plugin in `dir` uses that came with an API after the first,
     // by the API that brought it, by its files' code, strings and comments
     // aside: pinhole's ("pinhole.notify"), a photo's avgColor, or its
@@ -456,6 +542,11 @@ public:
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);
+    // The window's sources, which pinhole.sources mirrors and asks.
+    void setSources(Sources *sources);
+    Sources *sourcesObject() const { return m_sources; }
+    // The source kinds plugin `id`'s manifest names, on or not.
+    QStringList sourceKindsOf(const QString &id) const;
     // What setFavorite sets through (the window's one).
     void setFavourites(Favourites *favourites);
     Favourites *favourites() const { return m_favourites; }
@@ -506,6 +597,8 @@ public:
 
     // id, name, description, version, author, personal, enabled, error
     // (it cannot load: its manifest), problem (it went wrong running),
+    // sources (the source kinds its manifest names), copy (one's own in
+    // place of Pinhole's own of the same id),
     // toured (its tour seen through or closed), main (the entry point's URL,
     // changing when its files change, so it loads again), host (its
     // PluginHost).
@@ -522,6 +615,9 @@ public:
     Q_INVOKABLE QString idOf(const QString &url) const;
     // Its QML did not load: what the engine says of it is its problem.
     Q_INVOKABLE void loadFailed(const QString &id);
+    // A PluginSource of a kind its manifest does not name: left out, and
+    // said under it.
+    Q_INVOKABLE void sourceRefused(const QString &id, const QString &kind);
     // Its viewerLayer could not be made: why, under it.
     Q_INVOKABLE void layerFailed(const QString &id, const QString &message);
     // A QML error as a plugin's author reads it: the file in its folder,
@@ -573,6 +669,10 @@ signals:
 private:
     struct Plugin {
         QString id, name, description, version, author, dir, main, error;
+        // The source kinds its manifest names.
+        QStringList sources;
+        // One's own with the id of one of Pinhole's own, which it replaces.
+        bool copy = false;
         // Its files' names, times and sizes: a change loads it again.
         QString stamp;
         bool personal = false;
@@ -602,6 +702,7 @@ private:
     History *m_history;
     PhotoGrid *m_grid = nullptr;
     Favourites *m_favourites = nullptr;
+    Sources *m_sources = nullptr;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
     // Before the plugins, so it outlives their hosts, which let it go.

@@ -2337,8 +2337,23 @@ void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keym
          }, "grid"},
         {"the side panel", [=] { show("sidePanel", true); }, "side"},
         {"the help over the side panel", [=] { show("help", true); }, "help"},
-        {"sign-in over the side panel", [=] { show("help", false); show("signIn", true); }, "signIn"},
-        {"adding a source", [=] { show("signIn", false); show("sidePanel", false); show("addSource", true); }, "addSource"},
+        // iCloud's, its plugin's (plugins/icloud), as its row or Add a source
+        // opens it: the side panel gives way to it.
+        {"signing in to iCloud", [=] {
+             show("help", false);
+             QVariant icloud;
+             QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, icloud), Q_ARG(QVariant, QStringLiteral("pinhole.icloud")));
+             show("sidePanel", false);
+             if (QObject *plugin = icloud.value<QObject *>())
+                 QMetaObject::invokeMethod(plugin, "openSignIn", Q_ARG(QVariant, QString()));
+         }, "plugin"},
+        {"adding a source", [=] {
+             QVariant icloud;
+             QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, icloud), Q_ARG(QVariant, QStringLiteral("pinhole.icloud")));
+             if (QObject *plugin = icloud.value<QObject *>())
+                 QMetaObject::invokeMethod(plugin, "closeSignIn");
+             show("addSource", true);
+         }, "addSource"},
         {"the grid at the end", [=] { show("addSource", false); }, "grid"},
     });
     auto failures = std::make_shared<int>(0);

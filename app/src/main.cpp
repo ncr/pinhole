@@ -224,6 +224,7 @@ int main(int argc, char *argv[]) {
     Sources sources(&service);
     Plugins plugins(&library, &service, &viewer, &translator, &history);
     plugins.setFavourites(&favourites);
+    plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
     // What was done to one source's photos is not undone on another's.
@@ -308,8 +309,10 @@ int main(int argc, char *argv[]) {
                                   return;
                               }
                               loader.setMediumUnavailable(index, generation);
-                              // Missing for good, or only for now: try again later.
-                              if (code != QLatin1String("not_found"))
+                              // Missing for good (none, or a file too damaged
+                              // to make one of), or only for now: try again
+                              // later.
+                              if (code != QLatin1String("not_found") && code != QLatin1String("unreadable"))
                                   QTimer::singleShot(30000, &loader, [&loader, index, generation] { loader.clearMedium(index, generation); });
                           });
         }

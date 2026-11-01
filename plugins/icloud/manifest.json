@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "api": 3,
+  "id": "pinhole.icloud",
+  "name": "iCloud",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Your iCloud Photos as a source: signing in with your Apple ID or icloudpd's sign-in, the whole library at once, each photo fetched as you open it, and what you drop on the window uploaded.",
+  "entryPoints": {
+    "main": "Main.qml"
+  },
+  "sources": [
+    { "kind": "icloud" }
+  ]
+}

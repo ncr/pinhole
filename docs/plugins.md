@@ -61,9 +61,11 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 `pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
 `hint`, `busyDelay`, `textColour` and `complain`, `fetch`'s options, its
 Live effects and `jpeg`, a photo's `effect`, `setFavorite`,
-`library.revision`, and `sources` in the manifest: a source of photos of
+`library.revision`, `sources` in the manifest: a source of photos of
 the plugin's own, whose provider pinholed runs
-([source-providers.md](source-providers.md)).
+([source-providers.md](source-providers.md)), and what the window shows of
+one: the root's `sources` (`PluginSource`), `pinhole.sources`,
+`chooseFolder` and `sizeText`'s decimals.
 
 `Main.qml` beside it:
 
@@ -225,6 +227,44 @@ its settings, is there as the window first shows. It sets:
   draws: it reads a word for each cell. Its glyph is drawn in the theme's
   font, white in the side panel, in its colour on the photos, and as a
   neon tube in it far out.
+- `sources`: how the window shows the kinds of source the plugin brings,
+  each a `PluginSource` of a kind its manifest's `sources` names (one of
+  another kind is left out, and said under the plugin). iCloud and Folders
+  are plugins made this way (`plugins/icloud`, `plugins/folder`); a source
+  of your own is the same over its provider. Each function is given a
+  `source`, one of `pinhole.sources.list` (`id`, `kind`, `plugin`, `name`,
+  `count`, `thumbs`, and its kind's own fields: `account`, `path`, `key`…),
+  with `shown` and `health` for the one shown:
+
+  ```qml
+  sources: [
+      PluginSource {
+          kind: "me.immich"
+          icon: ""                       // a Nerd Font glyph, for its rows and offers
+          noun: qsTr("Immich")           // before a source's count in its row: "Immich · 2,301"
+          place: source => source.name   // the photos' place in a sentence: "Nothing in %1 yet"
+          // What was found here that could be added, best first: the first
+          // five of all the plugins' are offered on ⏎ and 2–5, on the first
+          // run and in Add a source.
+          offers: []                     // [{ title, detail, icon, triggered }]
+          // The ways in that are always there, each a button there.
+          ways: [{ title: qsTr("Add an Immich server…"), key: "M", triggered: () => plugin.ask() }]
+          // A line in place of its count, in red, when it needs something.
+          note: source => source.health === "needs_sign_in" ? qsTr("Sign in again") : ""
+          // Its buttons beside Remove, each asked first on its row when `ask` is said.
+          actions: source => [{ text: qsTr("Sign out"), key: "O", ask: qsTr("Sign out?"),
+                                triggered: () => pinhole.sources.signOut(source.id) }]
+          forgets: source => qsTr("Forget its index? The photos stay on the server.")  // what Remove asks
+          adds: source => qsTr("Uploaded to Immich.")    // under "Add 3 files to %1" as files are dragged in
+          pushed: qsTr("Immich says when something changes")  // for one that tells of its changes
+          signIn: source => plugin.signIn(source)        // the card's Sign in, I, its row; null: never
+      }
+  ]
+  ```
+
+  Choosing an offer or a way leaves the rest to the plugin: add the source
+  (`pinhole.sources.add`), or cover the window with a panel of its own to
+  sign in (`covering`), as iCloud's does; the picker gives way to it.
 - `tour`: a few steps that show what it does, on the photos and buttons as
   they are: `[{ title, text, photo, open, action, settings }, ...]`.
   `photo` is a library position (or a function giving one) the grid goes to
@@ -241,7 +281,9 @@ its settings, is there as the window first shows. It sets:
   closes.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
-`Spinner`, `Toggle` and `Command` (a key, with what it does in the help),
+`Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
+`placeholder`, `password`, `done`, `accepted()`) and `Command` (a key,
+with what it does in the help),
 and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
@@ -281,7 +323,9 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
-| `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
+| `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
+| `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
+| `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
 | `dismissed()` | the plugin over this one, covering, handed a photo over (`openPhoto`, `reveal`): close, and do not come back when that photo closes |

@@ -74,6 +74,19 @@ provider's own folder stay as they are, and come back at once, with no
 listing, when it is on again. A plugin taken away altogether (its folder
 moved) is the same: its sources stay in the settings for when it is back.
 
+Turning it on or off in the side panel tells pinholed at once
+(`plugins_changed`): its sources are listed and shown, or put away, as the
+switch turns.
+
+What the window shows of your sources is your plugin's QML, as iCloud's
+and Folders' is theirs: a `PluginSource` in its root's `sources`
+(docs/plugins.md) gives a source's row its words and buttons, offers what
+your `discover` found and the ways in (a button and key of Add a source),
+and signs in. Its `pinhole.sources` adds a source (`add(kind, entry)`,
+which reaches your `add_entry`), signs in (`signIn`, `submitCode`) and out,
+each only of the kinds your manifest names. With none, your sources are
+still listed, by their names, with Remove.
+
 Turning a plugin on is trusting it. It runs as you, as every plugin does;
 these rules keep plugins from stepping on each other, not from you.
 

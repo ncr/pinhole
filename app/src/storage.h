@@ -26,6 +26,9 @@ class Storage : public QObject {
     // An iCloud source's Apple ID.
     Q_PROPERTY(QString sourceAccount READ sourceAccount NOTIFY sourceChanged)
     Q_PROPERTY(bool sourceNeedsSignIn READ sourceNeedsSignIn NOTIFY sourceChanged)
+    // All the service says of it (its "source" event: id, kind, plugin,
+    // name, account or path…), else what the settings say.
+    Q_PROPERTY(QVariantMap source READ source NOTIFY sourceChanged)
     // The folder, with ~ for the home folder.
     Q_PROPERTY(QString location READ location NOTIFY changed)
     // The limit for all of it; the least it can be (the library always
@@ -80,6 +83,7 @@ public:
     QString sourceName() const;
     QString sourcePath() const;
     QString sourceAccount() const;
+    QVariantMap source() const;
     bool sourceNeedsSignIn() const;
     QString location() const;
     double limit() const { return m_limit; }

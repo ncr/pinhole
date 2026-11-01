@@ -15,7 +15,7 @@ Item {
     // What it does, for the help: "Open", "Newest".
     property string text
     // Its part of the help: "library", "select", "photo", "video", "share",
-    // "pinhole", a panel's ("sources", "storage", "signin", "tour"), or a
+    // "pinhole", a panel's ("sources", "storage", "tour"), or a
     // plugin's name: a plugin's own are under its name in the language,
     // whatever other than Pinhole's parts they say. None: not in the help
     // (a button's own key, shown on it).
@@ -34,7 +34,7 @@ Item {
     property string noMouse
     property string noTouchpad
     // Whose keys these are: "grid", "viewer", "menu", "side", "addSource",
-    // "firstRun", "signIn", "tour", "help", "plugin"; "chrome" for a
+    // "firstRun", "tour", "help", "plugin"; "chrome" for a
     // button's, on the grid or the viewer, whichever has them; "any" for
     // the window's own.
     property string keyLayer: "chrome"
