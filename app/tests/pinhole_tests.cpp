@@ -865,6 +865,66 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("pinhole.dismissed"));
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("avgColor"));
         QVERIFY(Plugins::apiUses(builtIn + "/frame").value(2).contains("pinhole.keepAwake"));
+        QVERIFY(Plugins::apiUses(builtIn + "/background").value(3).contains("fetch's loop, bounce, long_exposure or jpeg"));
+        QVERIFY(Plugins::apiUses(builtIn + "/send").value(3).contains("fetch's loop, bounce, long_exposure or jpeg"));
+        QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
+    }
+
+    // Every one of API 3's, as docs/plugins.md lists them, in a plugin
+    // that asks for API 2: each found, and said by `pinhole plugin check`.
+    void everythingOfApi3IsFoundInAPluginOfApi2() {
+        QTemporaryDir dir;
+        write(dir.path() + "/manifest.json", R"({ "id": "me.all", "api": 2, "entryPoints": { "main": "Main.qml" },
+            "sources": [{ "kind": "me.all", "provider": "provider" }] })");
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    id: plugin
+    readonly property var ways: ({ bounce: { kind: "bounce" } })
+    readonly property string shownAs: pinhole.library.item(0).effect
+    readonly property bool now: (pinhole.library.revision, true)
+    marks: [ PluginMark { name: "x"; field: "live" } ]
+    viewerLayer: Item { property int photo; property bool shown }
+    actions: [ PluginAction { id: a; text: "a"; order: -1; hint: "h"; busyDelay: 300; textColour: "red"
+                              onTriggered: a.complain("no") } ]
+    function f() {
+        pinhole.state.x = pinhole.cache.y
+        pinhole.setFavorite([0], true)
+        pinhole.fetch(0, "long_exposure", { stream: true })
+        return pinhole.library.field("effect")
+    }
+}
+)");
+        const QStringList all = {"marks", "pinhole.state", "pinhole.cache", "viewerLayer",
+                                 "an action's order, hint, busyDelay, textColour or complain", "fetch's options",
+                                 "fetch's loop, bounce, long_exposure or jpeg", "a photo's effect", "pinhole.setFavorite",
+                                 "library.revision", "sources in the manifest"};
+        QCOMPARE(Plugins::apiUses(dir.path()).value(3), all);
+        // Each kind alone, in the call or named as a kind; a photo's effect
+        // alone, by item or by field.
+        for (const QString &kind : {"loop", "bounce", "long_exposure", "jpeg"}) {
+            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { function f() { return pinhole.fetch(0, '%1') } }\n").arg(kind).toUtf8());
+            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"fetch's loop, bounce, long_exposure or jpeg", "sources in the manifest"}));
+            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { property string kind: \"%1\" }\n").arg(kind).toUtf8());
+            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"fetch's loop, bounce, long_exposure or jpeg", "sources in the manifest"}));
+        }
+        write(dir.path() + "/manifest.json", R"({ "id": "me.all", "api": 2 })");
+        for (const char *use : {"pinhole.library.item(i).effect", "it.effect", "pinhole.library.field('effect')"}) {
+            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { function f(i, it) { return %1 } }\n").arg(QString::fromLatin1(use)).toUtf8());
+            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"a photo's effect"}));
+        }
+        // Not: what API 2 fetched, a layer's effect, a kind's words in a
+        // sentence or a comment, another field.
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+// pinhole.fetch(0, "jpeg"), kind: "loop", item.effect
+Item {
+    property string said: 'kind: "loop" and a jpeg'
+    layer.enabled: true
+    layer.effect: Item {}
+    function f(i) { pinhole.fetch(i, "medium"); pinhole.fetch(i, "live"); return pinhole.library.field("live") + item.layer.effect }
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList());
     }
 
     // A plugin's file named as another's, or as one of Pinhole's own, is

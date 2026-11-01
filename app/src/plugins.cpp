@@ -1652,7 +1652,8 @@ namespace {
 
 // QML or JavaScript as code alone, by its tokens: its comments gone, and
 // the words of its strings and regular expressions (a URL's "//", a
-// "hidden:" said), their quotes left; a template's ${…} is code again.
+// "hidden:" said), their quotes left, but a string of one word (a name:
+// "jpeg", "effect"); a template's ${…} is code again.
 // Line breaks stay, so what follows is where it was.
 QString codeOnly(const QString &source) {
     QString code;
@@ -1725,10 +1726,18 @@ QString codeOnly(const QString &source) {
                     code += '\n';
             i += 2;
         } else if (c == '"' || c == '\'') {
-            code += c;
-            for (++i; i < n && source[i] != c && source[i] != '\n'; ++i)
+            // A string's words are not code; one word alone stays, as a
+            // name (fetch's "jpeg", field's "effect").
+            const qsizetype from = i + 1;
+            bool word = true;
+            for (++i; i < n && source[i] != c && source[i] != '\n'; ++i) {
+                word &= source[i].isLetterOrNumber() || source[i] == '_';
                 if (source[i] == '\\')
                     ++i;
+            }
+            code += c;
+            if (word)
+                code += source.mid(from, i - from);
             code += c;
             ++i;
         } else if (c == '`') {
@@ -1813,7 +1822,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
         {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
         {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
-        {3, "pinhole.setFavorite"}, {3, "library.revision"}};
+        {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
+        {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1838,6 +1848,11 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         // pinhole.library's, or by a name of the plugin's for it.
         {"library.revision", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*revision\\b"))},
         {"an action's order, hint, busyDelay, textColour or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
+        // The kinds fetch has had since API 3, named where they are not in
+        // the call itself (Background's `kind: "loop"`).
+        {"fetch's loop, bounce, long_exposure or jpeg",
+         QRegularExpression(QStringLiteral("\\bkind\\s*[:=]\\s*[\"'](loop|bounce|long_exposure|jpeg)[\"']"))},
+        {"a photo's effect", QRegularExpression(QStringLiteral("\\bfield\\s*\\(\\s*[\"']effect[\"']\\s*\\)"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
@@ -1854,6 +1869,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     // fetch's, in its call.
     static const QRegularExpression fetch(QStringLiteral("\\bpinhole\\s*\\.\\s*fetch\\s*\\("));
     static const QRegularExpression fetchOptions(QStringLiteral("\\bstream\\s*:"));
+    static const QRegularExpression fetchKinds(QStringLiteral("[\"'](loop|bounce|long_exposure|jpeg)[\"']"));
+    // A photo's effect, as library.item gives it: whatever is before the
+    // dot but a layer (Qt Quick's own `layer.effect`).
+    static const QRegularExpression effect(QStringLiteral("(?:\\b([\\w$]+)|[\\])])\\s*\\.\\s*effect\\b"));
     // A PluginAction's own lines that say its order, hint, busyDelay or
     // textColour.
     static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
@@ -1888,9 +1907,15 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         }
         for (auto match = fetch.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;
-            if (code.mid(open, closing(code, open) - open + 1).contains(fetchOptions))
+            const QString call = code.mid(open, closing(code, open) - open + 1);
+            if (call.contains(fetchOptions))
                 uses << QStringLiteral("fetch's options");
+            if (call.contains(fetchKinds))
+                uses << QStringLiteral("fetch's loop, bounce, long_exposure or jpeg");
         }
+        for (auto match = effect.globalMatch(code); match.hasNext();)
+            if (match.next().captured(1) != QLatin1String("layer"))
+                uses << QStringLiteral("a photo's effect");
         for (auto match = action.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;
             if (ownLines(code, open).contains(orderOrHint))
@@ -1908,6 +1933,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
                 && code.contains(QRegularExpression("\\b" + QRegularExpression::escape(id.captured(2)) + "\\s*\\.\\s*hidden\\s*=(?!=)"))))
             uses << QStringLiteral("hidden");
     }
+    // Sources of its own, in its manifest.
+    if (QFile manifest(dir + "/manifest.json");
+        manifest.open(QIODevice::ReadOnly) && QJsonDocument::fromJson(manifest.readAll()).object().contains(QLatin1String("sources")))
+        uses << QStringLiteral("sources in the manifest");
     QMap<int, QStringList> byApi;
     for (const auto &[version, name] : order)
         if (uses.contains(name))
