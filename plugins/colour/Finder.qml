@@ -145,7 +145,7 @@ Item {
     readonly property bool canGrow: wall.density < wall.densities.length - 1
     function grow() {
         if (canGrow)
-            wall.density += 1
+            wall.zoomBy(1)
     }
     // While a finger drags on the wheel or a key is held, the photos follow
     // some fifteen times a second (a search is some 10 ms), each time for
@@ -180,16 +180,8 @@ Item {
         function onDismissed() { finder.close() }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
-    // Clicks stay here, off the photos beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
-    }
+    // Nothing over it reaches the photos beneath.
+    Panel {}
 
     Row {
         id: top
@@ -240,7 +232,7 @@ Item {
             keyLayer: "plugin"
             hint: ""
             usable: wall.density > 0
-            onTapped: wall.density -= 1
+            onTapped: wall.zoomBy(-1)
         }
         ShellButton {
             text: "+"
@@ -248,7 +240,7 @@ Item {
             keyLayer: "plugin"
             hint: ""
             usable: wall.density < wall.densities.length - 1
-            onTapped: wall.density += 1
+            onTapped: wall.zoomBy(1)
         }
     }
     // What is shown, where there is room for it.
@@ -530,19 +522,17 @@ Item {
         }
 
         // The photos, closest first.
-        GridView {
+        ScrollGrid {
             id: photos
             anchors.left: picker.right
             anchors.leftMargin: 24
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            clip: true
             readonly property int across: Math.max(2, Math.round(width / 180))
             cellWidth: Math.floor(width / across)
             cellHeight: cellWidth
             model: finder.results
-            boundsBehavior: Flickable.StopAtBounds
             delegate: Item {
                 id: cell
                 // A photo's id; where it is now, as the library changes.

@@ -1,7 +1,7 @@
 .pragma library
 
-// What sqlite3 is asked, of the source's library.sqlite (docs/sources.md),
-// to find the screenshots: their ids, one to a line.
+// What the source's library.sqlite (docs/sources.md) is asked, by
+// pinhole.query, to find the screenshots: their ids.
 
 // The library's tables: whether it is iCloud's (icloud_assets).
 var tablesQuery = "SELECT name FROM sqlite_master WHERE type = 'table';"

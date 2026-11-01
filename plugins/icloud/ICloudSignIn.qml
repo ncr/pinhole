@@ -211,20 +211,14 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
-    }
     // A click beside it puts it away; nothing there reaches what is under
     // it (the photos, the side panel): no button, no wheel.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onClicked: mouse => { if (mouse.button === Qt.LeftButton && !root.busy) root.shown = false }
-        onWheel: wheel => wheel.accepted = true
+    Panel {
+        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
+        onClicked: if (!root.busy) root.shown = false
     }
 
-    Rectangle {
+    Card {
         id: card
         objectName: "signInCard"
         readonly property int padding: 2 * theme.fontSize
@@ -232,11 +226,8 @@ Item {
         width: Math.min(parent.width - 32, theme.fontSize * 36)
         height: Math.min(parent.height - 32, content.implicitHeight + 2 * padding)
         radius: Math.min(4, theme.radius)
-        color: theme.background
         border.color: theme.foreground
-        border.width: 1
         clip: true
-        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: wheel => wheel.accepted = true }
 
         Column {
             id: content

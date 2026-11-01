@@ -102,21 +102,20 @@ PinholePlugin {
             recount()
             return
         }
-        // Read only; while the service writes the index (as a round
-        // starts), waited for rather than failed.
-        const library = pinhole.library.dir + "/library.sqlite"
-        const tables = pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.tablesQuery])
+        // Read only, away from the window; while the service writes the
+        // index (as a round starts), waited for rather than failed.
+        const tables = pinhole.query(Find.tablesQuery)
         finding = tables
-        tables.then(result => {
+        tables.then(rows => {
             if (finding !== tables)
                 return
-            const found = pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.query(result.stdout.split("\n"))])
+            const found = pinhole.query(Find.query(rows.map(row => row.name)))
             finding = found
-            return found.then(result => {
+            return found.then(rows => {
                 if (finding !== found)
                     return
                 finding = null
-                shotIds = result.stdout.split("\n").filter(id => id !== "")
+                shotIds = rows.map(row => row.id)
                 placeShots()
                 recount()
             })

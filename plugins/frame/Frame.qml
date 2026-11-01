@@ -428,6 +428,13 @@ Item {
         function onHiddenChanged() { frame.libraryChanged() }
     }
 
+    // Nothing reaches the photos beneath; a swipe sideways, or the sideways
+    // wheel, steps.
+    Panel {
+        color: "black"
+        steps: Qt.Horizontal
+        onStepped: step => frame.go(step, true)
+    }
     Slide {
         id: slideA
         anchors.fill: parent
@@ -446,8 +453,9 @@ Item {
     }
 
     // A click stops it; a two-finger tap (the right button) holds it still,
-    // or lets it go on; a swipe sideways steps. The pointer, once moved,
-    // shows the buttons for a while, and hides with them.
+    // or lets it go on (a swipe sideways steps: the Panel beneath). The
+    // pointer, once moved, shows the buttons for a while, and hides with
+    // them.
     MouseArea {
         id: pointer
         anchors.fill: parent
@@ -468,26 +476,6 @@ Item {
                 frame.stop()
             else if (mouse.button === Qt.RightButton)
                 frame.setPaused(!frame.paused)
-        }
-        // Sideways, one step a swipe; up and down do nothing.
-        property real swiped: 0
-        property bool stepped: false
-        onWheel: wheel => {
-            wheel.accepted = true
-            swipeRest.restart()
-            if (stepped)
-                return
-            const dx = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.angleDelta.x / 2
-            swiped += dx
-            if (Math.abs(swiped) > 80) {
-                frame.go(swiped > 0 ? -1 : 1, true)
-                stepped = true
-            }
-        }
-        Timer {
-            id: swipeRest
-            interval: 250
-            onTriggered: { pointer.swiped = 0; pointer.stepped = false }
         }
         Timer { id: awake; interval: 2500 }
     }

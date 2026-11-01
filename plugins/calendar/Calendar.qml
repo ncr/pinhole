@@ -250,11 +250,8 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-        opacity: 0.97
-    }
+    // Nothing over it reaches the photos beneath.
+    Panel { color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.97) }
     // A glow of the accent behind the year opened on, faint.
     Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -268,13 +265,6 @@ Item {
             GradientStop { position: 0.6; color: "transparent" }
         }
     }
-    // Clicks stay here, off the grid beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => {}
-    }
-
     // The library at a glance: how many photos, on how many days, since when.
     Item {
         id: header
@@ -351,14 +341,13 @@ Item {
         }
     }
 
-    ListView {
+    ScrollList {
         id: years
         anchors.fill: parent
         anchors.topMargin: calendar.headerHeight
         anchors.bottomMargin: calendar.footerHeight
         clip: true
         model: calendar.yearCount
-        boundsBehavior: Flickable.StopAtBounds
         cacheBuffer: calendar.rowHeight * 2
         topMargin: Math.round(calendar.cell * 0.5)
         bottomMargin: Math.round(calendar.cell * 0.5)

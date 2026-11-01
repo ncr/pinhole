@@ -284,16 +284,8 @@ Item {
         onTriggered: days.close()
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
-    // Clicks stay here, off the photos beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
-    }
+    // Nothing over it reaches the photos beneath.
+    Panel {}
 
     Row {
         id: top
@@ -329,7 +321,7 @@ Item {
     readonly property int columns: Math.max(3, Math.floor((list.width + gap) / (theme.fontSize * 13 + gap)))
     readonly property real cell: Math.floor((list.width - (columns - 1) * gap) / columns)
 
-    ListView {
+    ScrollList {
         id: list
         anchors.left: parent.left
         anchors.right: parent.right
@@ -338,8 +330,6 @@ Item {
         anchors.leftMargin: 16
         anchors.rightMargin: 16
         anchors.topMargin: 10
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
         model: days.lineCount
         cacheBuffer: Math.max(0, height)
         footer: Item { height: 16 }

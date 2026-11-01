@@ -97,19 +97,18 @@ PinholePlugin {
         finding = true
         // Which tables there are, then what it can ask of them.
         const key = keptKey, showing = shown, dir = pinhole.library.dir
-        // Read only; while the service writes the index (as a round
-        // starts), waited for rather than failed.
-        const library = dir + "/library.sqlite"
-        pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.tablesQuery])
-            .then(result => pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.query(result.stdout.split("\n"))]))
-            .then(result => {
+        // Read only, away from the window; while the service writes the
+        // index (as a round starts), waited for rather than failed.
+        pinhole.query(Find.tablesQuery)
+            .then(tables => pinhole.query(Find.query(tables.map(row => row.name))))
+            .then(rows => {
                 // Another library shown meanwhile: these are the last one's,
                 // neither kept as this one's nor shown; it is looked at next.
                 if (showing !== shown || dir !== pinhole.library.dir) {
                     findAgain = true
                     return
                 }
-                const list = result.stdout.split("\n").filter(id => id !== "")
+                const list = rows.map(row => row.id)
                 if (key !== "")
                     keep(key, list)
                 take(list)

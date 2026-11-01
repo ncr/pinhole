@@ -147,11 +147,8 @@ Item {
             return
         const plan = Engine.plan(recipe, shots, format)
         const date = new Date(pinhole.library.item(positions[0]).date)
-        const base = pinhole.picturesDir() + "/Pinhole/" + Qt.formatDateTime(date, "yyyy-MM-dd HH.mm") + " " + names[recipe.motion]
-        const extension = format === "gif" ? ".gif" : ".mp4"
-        let path = base + extension
-        for (let n = 2; pinhole.exists(path); ++n)
-            path = base + " " + n + extension
+        const path = pinhole.picturePath(Qt.formatDateTime(date, "yyyy-MM-dd HH.mm") + " " + names[recipe.motion],
+                                         format === "gif" ? "gif" : "mp4")
         recorder.width = plan.w
         recorder.height = plan.h
         recorder.time = 0
@@ -386,24 +383,6 @@ Item {
         pointerHelp: false
         onTriggered: studio.make("mp4")
     }
-    Repeater {
-        model: Engine.MOTIONS
-        delegate: Command {
-            required property string modelData
-            required property int index
-            name: "studio.motion" + (index + 1)
-            text: qsTr("Motion")
-            section: index === 0 ? "Series" : ""
-            keys: [String(index + 1)]
-            keysText: "1–" + Engine.MOTIONS.length
-            keyLayer: "plugin"
-            when: studio.shown && studio.making === ""
-            mouse: qsTr("Its button")
-            touchpad: qsTr("Its button")
-            pointerHelp: false
-            onTriggered: { studio.change({ motion: modelData }); studio.time = 0 }
-        }
-    }
 
     // The crop moved with ⇧ and the arrows, a quarter of its room a press,
     // and 0 puts it back in the middle.
@@ -510,16 +489,8 @@ Item {
         recipe: studio.recipe
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
-    // Clicks stay here, off the photos beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
-    }
+    // Nothing over it reaches the photos beneath.
+    Panel {}
 
     // The series: when, how many, which of how many.
     Row {
@@ -713,20 +684,15 @@ Item {
             x: 1
             y: 1
             visible: studio.making === ""
-            Row {
+            // The motions, on 1 to 6.
+            Choices {
                 anchors.horizontalCenter: parent.horizontalCenter
-                Repeater {
-                    model: Engine.MOTIONS
-                    delegate: ShellButton {
-                        required property string modelData
-                        required property int index
-                        flat: true
-                        text: studio.names[modelData]
-                        hint: String(index + 1)
-                        active: studio.recipe.motion === modelData
-                        onTapped: { studio.change({ motion: modelData }); studio.time = 0 }
-                    }
-                }
+                options: Engine.MOTIONS.map(motion => ({ value: motion, text: studio.names[motion] }))
+                value: studio.recipe.motion
+                when: studio.shown && studio.making === ""
+                section: "Series"
+                helpText: qsTr("Motion")
+                onChosen: motion => { studio.change({ motion: motion }); studio.time = 0 }
             }
             Rectangle {
                 width: parent.width

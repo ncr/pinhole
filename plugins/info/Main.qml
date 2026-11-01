@@ -431,8 +431,8 @@ PinholePlugin {
 
     // At the bottom left, over the photo's corner, not its middle: above the
     // strip and a video's bar, clear of the date at the top left and the
-    // arrows halfway down.
-    Rectangle {
+    // arrows halfway down. Nothing over it reaches the photo beneath.
+    Card {
         id: panel
         objectName: "infoPanel"
         readonly property int padding: Math.round(theme.fontSize * 0.833)
@@ -450,8 +450,6 @@ PinholePlugin {
         visible: opacity > 0
         opacity: plugin.showing ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
-        // The photos under it take no clicks meant for it.
-        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: wheel => wheel.accepted = true }
 
         Column {
             id: content

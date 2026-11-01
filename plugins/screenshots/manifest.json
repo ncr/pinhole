@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 3,
+  "api": 5,
   "id": "pinhole.screenshots",
   "name": "Screenshots",
   "version": "1.0.0",

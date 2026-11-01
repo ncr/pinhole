@@ -404,17 +404,14 @@ Item {
     readonly property bool typing: askingPin && pinField.activeFocus
     readonly property bool bad: phase !== "" && !running && phase !== "sent" && phase !== "cancelled" && !askingPin
 
-    // Behind the card: the window dimmed, a tap there closes.
-    Rectangle {
-        anchors.fill: parent
+    // Behind the card: the window dimmed, a tap there closes; nothing
+    // reaches the photos beneath.
+    Panel {
         color: Qt.rgba(0, 0, 0, 0.45)
-        MouseArea {
-            anchors.fill: parent
-            onClicked: panel.close()
-        }
+        onClicked: panel.close()
     }
 
-    Rectangle {
+    Card {
         id: card
         readonly property int pad: Math.round(theme.fontSize * 1.4)
         // In the middle, or from the top when the window is short.
@@ -422,12 +419,6 @@ Item {
         y: Math.max(pad, Math.round((parent.height - height) / 2))
         width: Math.min(parent.width - 2 * pad, Math.round(theme.fontSize * 30))
         height: column.implicitHeight + 2 * pad
-        radius: Math.min(8, theme.radius)
-        color: theme.background
-        border.width: 1
-        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.25)
-        // Taps on the card stay on it.
-        MouseArea { anchors.fill: parent }
 
         Column {
             id: column

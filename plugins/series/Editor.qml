@@ -306,24 +306,11 @@ Item {
         onTriggered: editor.toStudio()
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
-    // Clicks stay here, off the photo beneath; the wheel, either way, goes
-    // through the photos, one a notch.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        property real turned: 0
-        onWheel: wheel => {
-            const a = wheel.angleDelta
-            turned -= Math.abs(a.x) > Math.abs(a.y) ? a.x : a.y
-            for (; turned >= 120; turned -= 120)
-                editor.move(1)
-            for (; turned <= -120; turned += 120)
-                editor.move(-1)
-        }
+    // Nothing reaches the photos beneath; the wheel, either way, goes
+    // through the series, a photo a notch, and a swipe a photo.
+    Panel {
+        steps: Qt.Horizontal | Qt.Vertical
+        onStepped: step => editor.move(step)
     }
 
     // The series: when, and how many.

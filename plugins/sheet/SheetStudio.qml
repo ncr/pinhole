@@ -307,16 +307,13 @@ Item {
         }
         making = "making"
         const gen = makeGeneration
-        const dir = pinhole.picturesDir() + "/Pinhole"
-        const base = dir + "/" + day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage"))
-        let path = base + ".jpg"
-        for (let n = 2; pinhole.exists(path); ++n)
-            path = base + " " + n + ".jpg"
+        const path = pinhole.picturePath(day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage")),
+                                         "jpg")
         // Made beside, then moved in whole.
         const temp = pinhole.cacheDir + "/sheet.jpg"
         const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], points, plugin.fontFile,
                                             pinhole.dir + "/sRGB.icc", temp)
-        keep(pinhole.run("mkdir", ["-p", dir, pinhole.cacheDir]), true).then(() => {
+        keep(pinhole.run("mkdir", ["-p", pinhole.cacheDir]), true).then(() => {
             if (gen !== makeGeneration)
                 return null
             // A minute, and more for many.
@@ -457,16 +454,8 @@ Item {
         onTriggered: studio.pinhole.showFile(studio.made.path)
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
-    // Clicks stay here, off the photos beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
-    }
+    // Nothing over it reaches the photos beneath.
+    Panel {}
 
     // When, and how many.
     Chip {

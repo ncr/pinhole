@@ -14,10 +14,12 @@ Item {
     required property var finder
     readonly property var pinhole: finder.pinhole
 
-    // The tile's size, by step.
+    // The tile's size, by step: a pinch, + and -, as the grid zooms.
     readonly property var densities: [36, 48, 64, 88, 120]
-    property int density: 2
-    readonly property int tile: densities[density]
+    property alias density: zoom.level
+    readonly property int tile: zoom.size
+    // A size bigger or smaller, eased, as + and - zoom the grid.
+    function zoomBy(steps) { zoom.zoomBy(steps) }
     readonly property int columns: Math.max(1, Math.floor(width / tile))
     readonly property int rows: Math.max(1, Math.floor(height / tile))
     // Red to pink, starting at the pinks.
@@ -78,23 +80,13 @@ Item {
         function onColoursChanged() { if (wall.tiles.length === 0) settle.restart() }
     }
 
-    // A pinch makes the tiles bigger or smaller, a step at a time.
-    PinchHandler {
-        target: null
-        property real from: 1
-        onActiveChanged: if (active) from = activeScale
-        onActiveScaleChanged: {
-            if (activeScale / from > 1.3 && wall.density < wall.densities.length - 1) {
-                wall.density += 1
-                from = activeScale
-            } else if (activeScale / from < 0.77 && wall.density > 0) {
-                wall.density -= 1
-                from = activeScale
-            }
-        }
-    }
-
-    // The wall in the middle of its room.
+    // The wall in the middle of its room, grown and shrunk under the
+    // fingers as the grid's photos are, landing on a tile size.
+    PinchZoom {
+        id: zoom
+        anchors.fill: parent
+        levels: wall.densities
+        level: 2
     Item {
         id: board
         width: wall.columns * wall.tile
@@ -164,5 +156,6 @@ Item {
                 TapHandler { onTapped: wall.finder.open(cell.photo) }
             }
         }
+    }
     }
 }
