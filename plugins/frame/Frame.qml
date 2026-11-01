@@ -58,6 +58,8 @@ Item {
         paused = false
         fade.stop()
         waiting.stop()
+        waiting.held = false
+        target = -1
         changedLater = false
         current.z = 1
         current.opacity = 1
@@ -131,7 +133,10 @@ Item {
         shown = false
         changedLater = false
         advance.stop()
+        // A wait held still is over with it: shown again, it begins anew.
         waiting.stop()
+        waiting.held = false
+        target = -1
         if (fade.running)
             fade.pause()
         const last = current.photoId
@@ -317,9 +322,9 @@ Item {
             libraryChanged()
     }
 
-    // On to the next once its time is up; a video plays to its end first,
-    // for a minute and a half at most. Held still, what is left of its
-    // time is kept.
+    // On to the next once its time is up; a video comes and plays to its
+    // end first, for a minute and a half at most. Held still, what is left
+    // of its time is kept.
     Timer {
         id: advance
         property double startedAt: 0

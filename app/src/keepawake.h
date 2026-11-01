@@ -14,7 +14,10 @@ struct zwp_idle_inhibitor_v1;
 // The screen kept on while something asks for it (a plugin's
 // pinhole.keepAwake: a photo frame left running): an idle inhibitor on the
 // window's surface, as a video player holds, so neither the screensaver nor
-// the lock comes while the window shows. Wayland's idle-inhibit protocol,
+// the lock comes while the window shows: visible, and exposed. Hyprland
+// would keep the screen on for a window on a workspace it does not show,
+// which Qt still has visible; it is not exposed there once its frames stop
+// coming (Qt Wayland's frame callback timeout). Wayland's idle-inhibit protocol,
 // bound on Qt's connection on an event queue of its own, as TouchpadHold
 // does. The compositor drops an inhibitor with its connection, so a Pinhole
 // that crashes or is killed leaves nothing holding the screen on.
@@ -33,9 +36,17 @@ public:
     bool wanted() const { return !m_owners.isEmpty(); }
     // An inhibitor is there: asked for, on Wayland, with the window shown.
     bool inhibiting() const { return m_inhibitor != nullptr; }
+    // The window shows: visible and exposed, as last looked at.
+    bool shows() const { return m_shows; }
 
 signals:
     void inhibitingChanged();
+    void showsChanged();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    // Whether the window is exposed (a test has it say otherwise).
+    virtual bool exposed() const { return m_window->isExposed(); }
 
 private:
     void update();
@@ -45,6 +56,7 @@ private:
 
     QSet<const void *> m_owners;
     QPointer<QWindow> m_window;
+    bool m_shows = false;
     QList<QMetaObject::Connection> m_watching;
     wl_display *m_display = nullptr;
     wl_event_queue *m_queue = nullptr;

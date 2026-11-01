@@ -46,8 +46,6 @@
 #include <cstdio>
 #include <memory>
 
-namespace {
-
 // The library position of the newest asset matching an SQL condition.
 int findIndex(const Library &library, const QString &where) {
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "selftest");
@@ -67,6 +65,8 @@ int findIndex(const Library &library, const QString &where) {
             return i;
     return -1;
 }
+
+namespace {
 
 struct Case {
     const char *name;

@@ -1,5 +1,6 @@
 #include "keepawake.h"
 
+#include <QEvent>
 #include <QGuiApplication>
 #include <QtGui/qpa/qplatformwindow_p.h>
 
@@ -28,14 +29,26 @@ KeepAwake::~KeepAwake() {
 void KeepAwake::setWindow(QWindow *window) {
     for (const auto &connection : std::exchange(m_watching, {}))
         disconnect(connection);
+    if (m_window)
+        m_window->removeEventFilter(this);
     drop();
     m_window = window;
     if (window) {
         // Shown again after it was hidden, its surface is a new one.
         m_watching << connect(window, &QWindow::visibleChanged, this, &KeepAwake::update);
         m_watching << connect(window, &QObject::destroyed, this, &KeepAwake::drop);
+        // Seen or not: on a workspace Hyprland is not showing it stays
+        // visible, but is no longer exposed.
+        window->installEventFilter(this);
     }
     update();
+}
+
+bool KeepAwake::eventFilter(QObject *watched, QEvent *event) {
+    // Qt has it exposed or not by now; looked at once the event is over.
+    if (watched == m_window && event->type() == QEvent::Expose)
+        QMetaObject::invokeMethod(this, &KeepAwake::update, Qt::QueuedConnection);
+    return false;
 }
 
 void KeepAwake::hold(const void *owner, bool on) {
@@ -57,7 +70,12 @@ void KeepAwake::drop() {
 }
 
 void KeepAwake::update() {
-    if (!wanted() || !m_window) {
+    const bool shows = m_window && m_window->isVisible() && exposed();
+    if (shows != m_shows) {
+        m_shows = shows;
+        emit showsChanged();
+    }
+    if (!wanted() || !shows) {
         drop();
         return;
     }
@@ -76,7 +94,7 @@ void KeepAwake::update() {
         wl_display_roundtrip_queue(m_display, m_queue);
     }
     auto *platform = m_window->nativeInterface<QNativeInterface::Private::QWaylandWindow>();
-    wl_surface *surface = platform && m_window->isVisible() ? platform->surface() : nullptr;
+    wl_surface *surface = platform ? platform->surface() : nullptr;
     if (!m_manager || !surface) {
         drop();
         return;

@@ -12,6 +12,10 @@ class Viewer;
 class Outgoing;
 class QString;
 
+// The library position of the newest asset matching an SQL condition on
+// the index's `assets a`; -1 if none.
+int findIndex(const Library &library, const QString &where);
+
 // PINHOLE_SELFTEST=viewer: open a HEIC photo, a JPEG, a video and a Live
 // Photo in the viewer, report each stage's arrival, and quit.
 void runViewerSelfTest(const Library &library, Viewer &viewer);
@@ -150,8 +154,10 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
 // photos: the screen kept on (an idle inhibitor on the window, on
 // Wayland), a fade held still halfway with both photos, going on, then
 // stopped: the screen let go at once, the photo fading out with the frame
-// and only then let go. Exits 1 if any step fails.
-void runFrameSelfTest(QQuickWindow *window);
+// and only then let go; shown again after a wait held still and stopped,
+// starting afresh; a photo with no medium rendition shown sharp, as its
+// full size. Exits 1 if any step fails.
+void runFrameSelfTest(QQuickWindow *window, const Library &library);
 
 // PINHOLE_SELFTEST=hidden:<dir> (selftesthidden.cpp): with a plugin hiding
 // photos (Screenshots, in hide mode, what it found kept): some hidden

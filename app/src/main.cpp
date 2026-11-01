@@ -44,6 +44,7 @@
 
 #include <cstdio>
 #include <dlfcn.h>
+#include <malloc.h>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -111,6 +112,12 @@ int main(int argc, char *argv[]) {
         qputenv("QSG_ATLAS_WIDTH", "4096");
     if (qEnvironmentVariableIsEmpty("QSG_ATLAS_HEIGHT"))
         qputenv("QSG_ATLAS_HEIGHT", "4096");
+    // A megabyte or more (a photo decoded, a video's frames, libheif's
+    // planes) straight from the system and straight back once freed:
+    // glibc's own threshold grows to 32 MB as such blocks are freed, and
+    // they then go into its per-thread arenas, which a photo frame left
+    // running grew by hundreds of megabytes that stayed once it stopped.
+    mallopt(M_MMAP_THRESHOLD, 1 << 20);
 
     // Not GTK's platform theme, which Omarchy's environment asks for: it
     // costs about 30 ms at start, and Pinhole draws everything itself (its

@@ -2,6 +2,7 @@
 
 #include "selftest.h"
 
+#include "library.h"
 #include "plugins.h"
 
 #include <QCoreApplication>
@@ -18,7 +19,7 @@
 #include <functional>
 #include <memory>
 
-void runFrameSelfTest(QQuickWindow *window) {
+void runFrameSelfTest(QQuickWindow *window, const Library &library) {
     auto failures = std::make_shared<int>(0);
     auto check = [failures](bool ok, const QString &what) {
         std::printf("selftest: %s %s\n", ok ? "ok  " : "FAIL", qPrintable(what));
@@ -71,8 +72,12 @@ void runFrameSelfTest(QQuickWindow *window) {
         QMetaObject::invokeMethod(frame->property("plugin").value<QObject *>(), "begin", Q_ARG(QVariant, QStringLiteral("all")));
         check(frame->property("shown").toBool(), "the frame shows");
         check(awake->wanted(), "it asks for the screen to stay on");
+        // Not on a workspace Hyprland is not showing (where a self-test
+        // runs), once the window's frames stop coming there.
         if (wayland)
-            check(awake->inhibiting(), "an idle inhibitor is on the window's surface");
+            check(awake->inhibiting() == awake->shows(),
+                  QStringLiteral("an idle inhibitor is on the window's surface while it shows (%1)")
+                      .arg(awake->shows() ? "it shows" : "not shown, none"));
 
         // On to the next, and held still halfway through the fade: both
         // slides, and the fade, stay where they are.
@@ -106,7 +111,48 @@ void runFrameSelfTest(QQuickWindow *window) {
                                 check(incoming->property("photoId").toString().isEmpty()
                                           && outgoing->property("photoId").toString().isEmpty(),
                                       "then the slides let their photos go");
-                                finish();
+                                // Stopped while waiting for a photo, held
+                                // still: shown again, it starts afresh, not
+                                // where that wait was going.
+                                QObject *plugin = frame->property("plugin").value<QObject *>();
+                                QMetaObject::invokeMethod(plugin, "begin", Q_ARG(QVariant, QStringLiteral("all")));
+                                QMetaObject::invokeMethod(frame, "go", Q_ARG(QVariant, 3), Q_ARG(QVariant, false));
+                                QMetaObject::invokeMethod(frame, "setPaused", Q_ARG(QVariant, true));
+                                QMetaObject::invokeMethod(frame, "stop");
+                                QMetaObject::invokeMethod(plugin, "begin", Q_ARG(QVariant, QStringLiteral("all")));
+                                check(frame->property("target").toInt() == -1 && !frame->property("paused").toBool(),
+                                      "shown again, no wait is left over");
+                                QMetaObject::invokeMethod(frame, "go", Q_ARG(QVariant, 1), Q_ARG(QVariant, false));
+                                check(frame->property("target").toInt() == 1,
+                                      QStringLiteral("the next is the one after the first (%1)")
+                                          .arg(frame->property("target").toInt()));
+                                QMetaObject::invokeMethod(frame, "stop");
+                                // A photo with no medium rendition (one in
+                                // eight of a library) shows sharp: its full
+                                // size in the medium's place.
+                                const int bare = findIndex(library, QStringLiteral(
+                                    "NOT a.is_video AND NOT EXISTS (SELECT 1 FROM renditions r "
+                                    "WHERE r.asset_id = a.id AND r.kind = 'medium')"));
+                                if (bare < 0) {
+                                    std::printf("selftest: no photo without a medium in the library\n");
+                                    QTimer::singleShot(500, window, finish);
+                                    return;
+                                }
+                                const QString id = QString::fromUtf8(library.at(bare).id);
+                                QTimer::singleShot(500, window, [=] {
+                                    QMetaObject::invokeMethod(frame, "start", Q_ARG(QVariant, id),
+                                                              Q_ARG(QVariant, QVariantList{id}), Q_ARG(QVariant, false),
+                                                              Q_ARG(QVariant, QVariant()));
+                                    QObject *shown = slide("current");
+                                    (*waitFor)([=] { return shown->property("ready").toBool()
+                                                            && shown->property("sharpest").toString() == "full"; },
+                                               30000, "a photo without a medium shows sharp, as its full size", [=] {
+                                        check(!shown->property("missing").toBool(),
+                                              QStringLiteral("a photo without a medium shows sharp, as its full size (%1)").arg(id));
+                                        QMetaObject::invokeMethod(frame, "stop");
+                                        QTimer::singleShot(500, window, finish);
+                                    });
+                                });
                             });
                         });
                     });

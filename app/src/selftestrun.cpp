@@ -386,7 +386,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     if (name == QLatin1String("sheet"))
         runSheetSelfTest(window, grid, arg);
     if (name == QLatin1String("frame"))
-        runFrameSelfTest(window);
+        runFrameSelfTest(window, library);
     if (name == QLatin1String("hidden"))
         runHiddenSelfTest(window, grid, library, viewer, arg);
     if (name == QLatin1String("stacks"))

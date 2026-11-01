@@ -5,8 +5,10 @@ import QtMultimedia
 import Pinhole.Plugin
 
 // One photo of the frame, full window: its thumbnail at once, the medium
-// rendition over it once here, then the full size, decoded at the size it
-// is shown, and for a video or a Live Photo its motion, once it is shown.
+// rendition over it once here, then the full size where the screen has the
+// pixels for it (in the medium's place for a photo without one), decoded at
+// the size it is shown; and for a video or a Live Photo its motion, fetched
+// once it is shown.
 // Loaded while under the one showing, so it is sharp by the time it comes;
 // `begin()` starts its slow pan and zoom.
 Item {
@@ -23,7 +25,13 @@ Item {
     property var item: null
     property string sharp: ""
     property string full: ""
+    // The size the full one is decoded at, set as it comes: the slide
+    // going on to another photo does not decode it again at that one's.
+    property size fullSize
+    property bool fullAsked: false
     // The medium came, or will not: showing it now is as sharp as it gets.
+    // A photo with no medium (one in eight of a library, some of them
+    // favourites) has its full size in its place.
     property bool settled: false
     // Not in the library (not_found): shown, it would be its thumbnail
     // for good.
@@ -32,15 +40,19 @@ Item {
     // shown as its thumbnail, and asked for again.
     property string failure: ""
     readonly property bool ready: settled && (sharp === "" || sharpImage.status !== Image.Loading)
-    // A video's or Live Photo's file, once fetched.
+                                  && (sharp !== "" || full === "" || fullImage.status !== Image.Loading)
+    // A video's or Live Photo's file, once fetched; fetched once shown.
     property string motionFile: ""
+    property bool motionAsked: false
+    property bool motionComing: false
     // Shown, its motion going.
     property bool running: false
     property bool paused: false
     property bool played: false
-    // A video playing to its end, which the frame waits for.
-    readonly property bool playingVideo: item !== null && item.video && motion && motionFile !== ""
-                                         && player.playbackState === MediaPlayer.PlayingState
+    // A video coming or playing to its end, which the frame waits for.
+    readonly property bool playingVideo: item !== null && item.video && motion
+                                         && (motionComing || motionFile !== ""
+                                             && player.playbackState === MediaPlayer.PlayingState)
 
     readonly property real aspect: item && item.width > 0 && item.height > 0 ? item.width / item.height : 4 / 3
     // Filling the window when its shape is near the window's; a tall photo
@@ -60,12 +72,17 @@ Item {
         fetching.forEach(f => f.cancel())
         fetching = []
         const loading = ++serial
+        // Its images let go first: the photo changing changes the size
+        // they are shown at, and they would be decoded again at it.
+        sharp = ""
+        full = ""
+        fullAsked = false
         photoId = id
         index = id !== "" ? pinhole.library.indexOf(id) : -1
         item = index >= 0 ? pinhole.library.item(index) : null
-        sharp = ""
-        full = ""
         motionFile = ""
+        motionAsked = false
+        motionComing = false
         played = false
         failure = ""
         gone = false
@@ -75,19 +92,6 @@ Item {
         if (index < 0)
             return
         fetchMedium(loading)
-        // The motion, fetched now so it can play as the slide comes; a
-        // still if it does not.
-        if (motion && (item.video || item.live)) {
-            const clip = pinhole.fetch(id, item.video ? "video" : "live")
-            clip.then(path => {
-                if (slide.serial !== loading)
-                    return
-                slide.motionFile = "file://" + path
-                if (slide.running)
-                    slide.play()
-            }, () => {}).catch(pinhole.warn)
-            fetching.push(clip)
-        }
     }
     function fetchMedium(loading) {
         const medium = pinhole.fetch(photoId, "medium")
@@ -100,43 +104,93 @@ Item {
         }, error => {
             if (slide.serial !== loading || error.code === "cancelled")
                 return
-            // Not in the library: passed over. Anything else (no service,
-            // offline, the service starting again) is for now: its
-            // thumbnail, and the medium asked for again in a while.
-            if (error.code === "not_found")
-                slide.missing = true
-            else {
-                slide.failure = error.code || "failed"
-                retry.restart()
+            // No medium, the photo still in the library: its full size
+            // instead (a video stays its thumbnail, and plays).
+            if (error.code === "not_found" && slide.pinhole.library.indexOf(slide.photoId) >= 0) {
+                if (slide.item && slide.item.video)
+                    slide.settled = true
+                else
+                    slide.fetchFull(loading, true)
+                return
             }
-            slide.settled = true
+            slide.failed(error)
         }).catch(pinhole.warn)
         fetching.push(medium)
+    }
+    // Not in the library: passed over. Anything else (no service, offline,
+    // the service starting again) is for now: its thumbnail, and asked for
+    // again in a while.
+    function failed(error) {
+        if (error.code === "not_found")
+            missing = true
+        else {
+            failure = error.code || "failed"
+            retry.restart()
+        }
+        settled = true
     }
     Timer {
         id: retry
         interval: 8000
         onTriggered: if (slide.failure !== "" && slide.photoId !== "") slide.fetchMedium(slide.serial)
     }
-    // The full size, once the medium is up and smaller than the slide
-    // shows it (a 2048 px medium on a 2× screen): decoded at that size, by
-    // Pinhole's own decoder, as it is mostly HEIC. Not for a video, whose
-    // frames are the medium's size.
+    // The full size, where the medium would show clearly soft: smaller
+    // than three quarters of the size the slide shows it at (a 2048 px
+    // medium on a 2× screen, not on a 1× one). Decoded at the size it is
+    // shown at its closest, by Pinhole's own decoder, as it is mostly HEIC.
+    // Not for a video, whose frames are the medium's size.
     readonly property size shownSize: Qt.size(Math.ceil(photo.width * zoomMax * Screen.devicePixelRatio),
                                               Math.ceil(photo.height * zoomMax * Screen.devicePixelRatio))
     readonly property bool wantsFull: sharpImage.status === Image.Ready && item !== null && !item.video
                                       && Math.max(sharpImage.implicitWidth, sharpImage.implicitHeight)
-                                         < 0.9 * Math.max(shownSize.width, shownSize.height)
-    onWantsFullChanged: {
-        if (!wantsFull || full !== "")
+                                         < 0.75 * Math.max(photo.width, photo.height) * Screen.devicePixelRatio
+    onWantsFullChanged: if (wantsFull) fetchFull(serial, false)
+    // `instead`: of the medium, which it does not have; it is ready once
+    // this is decoded, or failed as the medium would have.
+    function fetchFull(loading, instead) {
+        if (fullAsked)
             return
-        const loading = serial
+        fullAsked = true
         const big = pinhole.fetch(photoId, "full")
         big.then(path => {
-            if (slide.serial === loading)
-                slide.full = "image://photo/" + encodeURIComponent(path)
-        }, () => {}).catch(pinhole.warn)
+            if (slide.serial !== loading)
+                return
+            slide.fullSize = slide.shownSize
+            slide.full = "image://photo/" + encodeURIComponent(path)
+            if (instead) {
+                slide.failure = ""
+                slide.settled = true
+            }
+        }, error => {
+            if (slide.serial !== loading || error.code === "cancelled")
+                return
+            slide.fullAsked = false
+            if (instead)
+                slide.failed(error)
+        }).catch(pinhole.warn)
         fetching.push(big)
+    }
+    // The motion, once its slide shows: never fetched for one passed on
+    // before it came. A still until it is here, if it does not come.
+    function fetchMotion() {
+        if (!motion || !item || !(item.video || item.live) || motionAsked)
+            return
+        motionAsked = true
+        motionComing = true
+        const loading = serial
+        const clip = pinhole.fetch(photoId, item.video ? "video" : "live")
+        clip.then(path => {
+            if (slide.serial !== loading)
+                return
+            slide.motionComing = false
+            slide.motionFile = "file://" + path
+            if (slide.running)
+                slide.play()
+        }, () => {
+            if (slide.serial === loading)
+                slide.motionComing = false
+        }).catch(pinhole.warn)
+        fetching.push(clip)
     }
 
     // A pan and zoom, from one framing to another: first through its time
@@ -159,6 +213,8 @@ Item {
         leg(to.zoom, to.x, to.y, Math.round(seconds * 1000), Easing.Linear)
         if (motionFile !== "")
             play()
+        else
+            fetchMotion()
     }
     // How far it may go each way at a scale, the window always covered
     // (or, shown whole, a little way sideways only).
@@ -344,7 +400,7 @@ Item {
             id: fullImage
             anchors.fill: parent
             source: slide.full
-            sourceSize: slide.shownSize
+            sourceSize: slide.fullSize
             asynchronous: true
             smooth: true
             cache: false

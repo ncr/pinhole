@@ -1208,6 +1208,16 @@ Item {
         QCOMPARE(read.size(), QSize(64, 48));
     }
 
+    void aPhotoIsDecodedAtTheSizeAskedAndNotAtAllOnceDropped() {
+        QTemporaryDir dir;
+        QImage picture(400, 300, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        QVERIFY(picture.save(dir.path() + "/a.jpg", "JPEG"));
+        QCOMPARE(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200)).size(), QSize(200, 150));
+        std::atomic<bool> dropped{true};
+        QVERIFY(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200), &dropped).isNull());
+    }
+
     void aReadOfALibraryShownNoLongerIsDroppedAndAnotherSourcesPhotosAreOthers() {
         QTemporaryDir first, other;
         makeLibrary(first.path(), {{"a.jpg", 1}, {"b.jpg", 2}});
@@ -2397,6 +2407,41 @@ private slots:
         QVERIFY(QDir(bench.dir.path() + "/plugins/t").removeRecursively());
         bench.plugins->rescan();
         QVERIFY(!awake->wanted());
+    }
+
+    // Kept on only while the window is seen: on a workspace Hyprland is not
+    // showing it stays visible, but Qt has it unexposed once its frames stop
+    // coming, and it lets go; seen again, it holds again.
+    void theScreenIsKeptOnOnlyWhileTheWindowIsSeen() {
+        // Exposed as the test says (the offscreen platform has a shown
+        // window exposed for good).
+        struct Faked : KeepAwake {
+            bool seen = true;
+            bool exposed() const override { return seen; }
+        } awake;
+        QWindow window;
+        window.resize(100, 100);
+        awake.setWindow(&window);
+        awake.hold(this, true);
+        QVERIFY(!awake.shows());
+        window.show();
+        QTRY_VERIFY(awake.shows());
+        QSignalSpy changed(&awake, &KeepAwake::showsChanged);
+        // Its frames stop coming: still visible, no longer exposed.
+        awake.seen = false;
+        QExposeEvent unexposed{QRegion()};
+        QCoreApplication::sendEvent(&window, &unexposed);
+        QVERIFY(window.isVisible());
+        QTRY_VERIFY(!awake.shows());
+        QCOMPARE(changed.count(), 1);
+        QVERIFY(awake.wanted() && !awake.inhibiting());
+        awake.seen = true;
+        QExposeEvent exposed{QRegion(0, 0, 100, 100)};
+        QCoreApplication::sendEvent(&window, &exposed);
+        QTRY_VERIFY(awake.shows());
+        QCOMPARE(changed.count(), 2);
+        window.hide();
+        QTRY_VERIFY(!awake.shows());
     }
 
     // The window closing: no event loop is left to kill a program a second
