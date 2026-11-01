@@ -327,7 +327,8 @@ impl FolderSource {
     }
 
     /// The asset for an entry: its dates and details read from the file.
-    fn describe(&self, entry: &Entry) -> Asset {
+    /// An error only when the folder does not answer (`probe_video`).
+    fn describe(&self, entry: &Entry) -> Result<Asset> {
         let f = &entry.file;
         let path = self.root.join(&f.rel);
         let modified_ms = (f.modified_ns / 1_000_000) as i64;
@@ -337,7 +338,7 @@ impl FolderSource {
                 (exif.taken, None, exif.orientation, exif.has_location)
             }
             Media::Video => {
-                let probe = probe_video(&path);
+                let probe = probe_video(&path)?;
                 (probe.taken, probe.duration, None, false)
             }
         };
@@ -376,7 +377,7 @@ impl FolderSource {
                 file_type: Some(self::file_type(&m.rel).into()),
             });
         }
-        Asset {
+        Ok(Asset {
             id: f.rel.clone(),
             filename: Path::new(&f.rel).file_name().map(|n| n.to_string_lossy().into_owned()),
             item_type: Some(file_type.into()),
@@ -394,7 +395,7 @@ impl FolderSource {
             size: Some(f.size as i64),
             effect: None,
             renditions,
-        }
+        })
     }
 
     /// Describe entries (reading files takes a while: in parallel) and put
@@ -405,7 +406,7 @@ impl FolderSource {
             if index.stopping() {
                 return Err(pinhole_core::source::Stopped.into());
             }
-            let mut assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect();
+            let mut assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect::<Result<_>>()?;
             for a in &mut assets {
                 a.favorite = favorites.contains(&a.id);
             }
@@ -745,18 +746,24 @@ struct Probe {
 
 /// A video's length and when it was recorded, from ffprobe: Apple's own
 /// creation date (with the place's offset) when there is one, else the
-/// container's.
-fn probe_video(path: &Path) -> Probe {
+/// container's. Nothing of a video it cannot read, or spins on (a damaged
+/// one); an error when it hangs, on a folder that does not answer (a mount
+/// gone), so that the listing fails rather than keep the video without.
+fn probe_video(path: &Path) -> Result<Probe> {
     let _slot = pinhole_core::background::slot();
-    let Ok(output) = pinhole_core::background::command("ffprobe")
+    let mut ffprobe = pinhole_core::background::command("ffprobe");
+    ffprobe
         .args(["-v", "quiet", "-print_format", "json", "-show_entries", "format=duration:format_tags"])
         .arg(path)
-        .stdin(Stdio::null())
-        .output()
-    else {
-        return Probe::default();
+        .stdin(Stdio::null());
+    let output = match pinhole_core::background::output(&mut ffprobe) {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut && !pinhole_core::background::spun(&e) => {
+            return Err(anyhow!("reading {}: {e}", path.display()));
+        }
+        Err(_) => return Ok(Probe::default()),
     };
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return Probe::default() };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return Ok(Probe::default()) };
     let format = &v["format"];
     let duration = format["duration"].as_str().and_then(|d| d.parse().ok());
     let tags = &format["tags"];
@@ -767,7 +774,7 @@ fn probe_video(path: &Path) -> Probe {
             chrono::DateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%z").ok()
         }))
         .map(|t| t.timestamp_millis());
-    Probe { taken, duration }
+    Ok(Probe { taken, duration })
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 //! These are made while someone waits for them, so they run at normal
 //! priority, not as background work (background.rs).
 
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -67,12 +68,13 @@ pub fn long_exposure(motion: &Path, out: &Path) -> Result<()> {
 /// How many frames the motion has: tmix averages that many (it takes at
 /// most 1024; a Live Photo has about 90).
 fn frame_count(motion: &Path) -> Result<u32> {
-    let output = Command::new("ffprobe")
+    let mut ffprobe = Command::new("ffprobe");
+    ffprobe
         .args(["-v", "error", "-count_packets", "-select_streams", "v:0", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0"])
         .arg(motion)
         .stdin(Stdio::null())
-        .output()
-        .context("running ffprobe")?;
+        .process_group(0);
+    let output = crate::background::output(&mut ffprobe).context("running ffprobe")?;
     let text = String::from_utf8_lossy(&output.stdout);
     let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
     match digits.parse::<u32>() {
@@ -89,12 +91,15 @@ fn filter_path(path: &Path) -> String {
 
 fn ffmpeg() -> Command {
     let mut command = Command::new("ffmpeg");
-    command.args(["-v", "error", "-nostdin", "-y"]).stdin(Stdio::null());
+    command.args(["-v", "error", "-nostdin", "-y"]).stdin(Stdio::null()).process_group(0);
     command
 }
 
+/// Stopped if it hangs (a folder's motion on a mount that has gone) or
+/// spins, as background work is (background::output); a group of its own,
+/// so with whatever it starts.
 fn run(mut command: Command) -> Result<()> {
-    let output = command.output().context("running ffmpeg")?;
+    let output = crate::background::output(&mut command).context("running ffmpeg")?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!("ffmpeg failed: {}", message.lines().last().unwrap_or("")));

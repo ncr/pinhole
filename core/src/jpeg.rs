@@ -8,8 +8,9 @@
 //! as one ImageMagick of a 48-megapixel HEIC takes every core and a few
 //! hundred megabytes, and a window may ask for fifty at once.
 
+use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::{Condvar, Mutex};
 
 use anyhow::{anyhow, Context, Result};
@@ -29,13 +30,17 @@ static FREED: Condvar = Condvar::new();
 pub fn make(full: &Path, out: &Path) -> Result<()> {
     let input = std::fs::File::open(full).with_context(|| format!("opening {}", full.display()))?;
     let _turn = Turn::wait();
-    let output = Command::new("magick")
+    let mut magick = Command::new("magick");
+    magick
         .args(["-[0]", "-auto-orient", "-background", "white", "-alpha", "remove", "-alpha", "off", "-quality", "92"])
         .arg(format!("jpg:{}", out.display()))
         .stdin(input)
-        .stdout(Stdio::null())
-        .output()
-        .context("running magick")?;
+        // A group of its own, as background work's: stopped with whatever
+        // it starts.
+        .process_group(0);
+    // Stopped if it hangs (a folder's file on a mount that has gone) or
+    // spins, as background work is, so it never holds a turn for good.
+    let output = crate::background::output(&mut magick).context("running magick")?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!("magick failed: {}", message.lines().next().unwrap_or("")));
@@ -67,6 +72,7 @@ impl Drop for Turn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Stdio;
 
     fn has_magick() -> bool {
         Command::new("magick").arg("-version").stdout(Stdio::null()).status().is_ok_and(|s| s.success())
