@@ -2426,6 +2426,25 @@ private slots:
         QVERIFY(!awake.shows());
         window.show();
         QTRY_VERIFY(awake.shows());
+        // A frame asked of it now and then, still as it is (a frame held
+        // still), so Qt finds it unexposed where none comes; not once let go.
+        struct Frames : QObject {
+            int asked = 0;
+            bool eventFilter(QObject *, QEvent *event) override {
+                if (event->type() == QEvent::UpdateRequest)
+                    ++asked;
+                return false;
+            }
+        } frames;
+        window.installEventFilter(&frames);
+        awake.setAskEvery(50);
+        QTRY_VERIFY(frames.asked >= 3);
+        awake.hold(this, false);
+        QTest::qWait(100);
+        const int asked = frames.asked;
+        QTest::qWait(300);
+        QCOMPARE(frames.asked, asked);
+        awake.hold(this, true);
         QSignalSpy changed(&awake, &KeepAwake::showsChanged);
         // Its frames stop coming: still visible, no longer exposed.
         awake.seen = false;

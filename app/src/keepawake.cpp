@@ -2,6 +2,7 @@
 
 #include <QEvent>
 #include <QGuiApplication>
+#include <QQuickWindow>
 #include <QtGui/qpa/qplatformwindow_p.h>
 
 #include <cstring>
@@ -9,7 +10,20 @@
 
 #include "idle-inhibit-unstable-v1-client-protocol.h"
 
-KeepAwake::KeepAwake(QObject *parent) : QObject(parent) {}
+KeepAwake::KeepAwake(QObject *parent) : QObject(parent) {
+    // A frame asked for: on a workspace not shown, none comes, and Qt has
+    // the window unexposed (an Expose, looked at below).
+    m_ask.setInterval(2000);
+    connect(&m_ask, &QTimer::timeout, this, [this] {
+        if (!m_window || !m_window->isVisible())
+            return;
+        // Qt Quick draws one even with nothing changed only so.
+        if (auto *quick = qobject_cast<QQuickWindow *>(m_window.data()))
+            quick->update();
+        else
+            m_window->requestUpdate();
+    });
+}
 
 KeepAwake::~KeepAwake() {
     if (m_inhibitor)
@@ -70,6 +84,12 @@ void KeepAwake::drop() {
 }
 
 void KeepAwake::update() {
+    if (wanted() && m_window) {
+        if (!m_ask.isActive())
+            m_ask.start();
+    } else {
+        m_ask.stop();
+    }
     const bool shows = m_window && m_window->isVisible() && exposed();
     if (shows != m_shows) {
         m_shows = shows;
