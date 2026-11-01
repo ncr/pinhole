@@ -754,7 +754,7 @@ what changed as it was built:
 | Step | On disk | Migration | Tested on a copy |
 |---|---|---|---|
 | B1 marks | `~/.config/pinhole/window.conf` `[grid]` | `MarkChoices` reads `marks` once, when `markChoices` (JSON) is missing, and writes `{"pinhole/video": bit 1, "pinhole.live/live": bit 2, "pinhole.favourites/favorite": bit 4, "pinhole/stack": bit 8}`. `marks` is left as it is. Ids not in `markChoices` take `defaultShown`. With no `marks` either (a first run), nothing is written until a switch is turned, so every kind follows its `defaultShown` (as built: writing 13's switches then would freeze today's defaults for someone who never chose) | unit test with a temporary `window.conf` holding `marks=13`, `marks=15`, `marks=0` and no `marks`; then the app run with `XDG_CONFIG_HOME` on a copy of `~/.config` |
-| A1 / B5 jpeg | `~/.cache/pinhole/compatible/` | made again on demand, so pinholed removes the folder once, as it starts, and logs it. New JPEGs go to `cache/full/…/<key>-jpeg.jpg` (`cached_path(Want::Jpeg, full_key, "jpg", true)`). They count as `full` in the storage panel, with no new `KINDS` entry | pinholed run with `XDG_CACHE_HOME` and `XDG_DATA_HOME` on reflink copies |
+| A1 / B5 jpeg | `~/.cache/pinhole/compatible/` | made again on demand. Until B5 the window still writes it, so pinholed removes only what is unused for a day, as it starts, and logs it; B5 removes the folder with its writer. New JPEGs go to `cache/full/…/<key>-jpeg.jpg` (`cached_path(Want::Jpeg, full_key, "jpg", true)`). They count as `full` in the storage panel, with no new `KINDS` entry | pinholed run with `XDG_CACHE_HOME` and `XDG_DATA_HOME` on reflink copies |
 | A2 kinds | `settings.json` (absent for Jacek), `plugins.json` (read only by pinholed) | none. `resolve` must give the same `Settings` as now for every input. That is a table test over today's cases, plus "no file at all, one Apple ID signed in". Nothing writes settings.json because a plugin was turned off | pinholed with `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` on reflink copies and `PINHOLE_SOCKET` of its own. `sources` lists his Apple ID with `count: 49079`. After a round, `meta.listed_at` and `change_token` are unchanged (no new listing). `enabled["pinhole.icloud"] = false` in the copy's plugins.json lists nothing, leaves the library's mtime as it was, and turning it back on shows it again with no listing |
 | A3 crates | none | `pinhole-auth` keeps its state folder `~/.local/state/pinhole/auth/<apple id>/`. `auth::default_provider` looks in the checkout at `plugins/icloud/auth/pyicloud/pinhole-auth`; installed, it is still beside pinholed | as A2, and `pinhole sign-in` on a scratch state folder |
 | A4 providers | new `~/.local/state/pinhole/sources/` | new, nothing to migrate | the test provider |
@@ -825,18 +825,21 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   `part-0`, `part-1`…; white so a see-through PNG is not black. Two at
   most at once: one ImageMagick of a 24-megapixel HEIC takes every core
   for 0.6–0.9 s, and a window may ask for fifty.
-- `core/src/storage.rs`: `forget_compatible()` removes
-  `old_cache()/compatible` as the shared service starts. Until B5 the
-  window still makes its JPEGs there, so it may come back and go again at
-  the next start; after B5 nothing writes it.
+- `core/src/storage.rs`: `forget_compatible()`, as the shared service
+  starts, removes what in `old_cache()/compatible` has not been used for a
+  day, never the folder: until B5 the window still makes its JPEGs there
+  (`outgoing.cpp`), and one made a moment ago may be on its way somewhere.
+  B5 removes the writer, and with it the folder.
 - `core/tests/service.rs`: a folder with a HEIC (made with `magick` in the
   test, skipped without it) and a JPEG. `jpeg` of the HEIC is a JPEG with
   the EXIF date kept (`magick identify -format %[EXIF:DateTimeOriginal]`).
   `jpeg` of the JPEG is the file itself. Three asks at once run one
   `magick` (a logging `magick` first on `PATH`) and all say `cached:
-  false`; a fourth is `cached: true`; `storage` counts it in `full`; the
-  old `compatible` folder is gone. `jpeg.rs` has a unit test: a name with
-  `[1]*`, an animated GIF, a see-through PNG, a file that is no photo.
+  false`; a fourth is `cached: true`; `storage` counts it in `full`; of
+  the old `compatible` folder, a JPEG unused for two days is gone and one
+  just made stays. `jpeg.rs` has a unit test: a name with `[1]*`, an
+  animated GIF, a see-through PNG, a TIFF of orientation 6, a HEIC turned
+  by its own transform, a file that is no photo.
 - `docs/service.md`: the kind.
 - Works alone: nothing asks for it yet.
 
@@ -1161,6 +1164,8 @@ API above).
 
 - `app/src/outgoing.{h,cpp}`: `place()` asks for `fetch(id, "jpeg")` in
   place of `magick`. `compatibleName` goes, along with its test.
+- `core/src/storage.rs`: `forget_compatible()` removes the whole
+  `compatible` folder, as nothing writes it any more.
 - `plugins/send/SendPanel.qml`: HEIC as JPEG through `pinhole.fetch(id,
   "jpeg")`.
 - `plugins/send/sender/src/main.rs`: `jpeg` and its tidying of `jpeg/` go.

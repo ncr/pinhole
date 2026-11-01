@@ -182,5 +182,7 @@ mod tests {
         assert_eq!(names(&to), vec!["IMG_1 (3).HEIC", "IMG_1 (3)_HEVC.MOV", "IMG_1.heic", "clip (2).mp4", "clip.mp4", "img_1 (2).mov"]);
         let modified = |p: &Path| p.metadata().unwrap().modified().unwrap();
         assert_eq!(modified(&to.join("clip.mp4")), modified(&from.join("clip.mp4")));
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
     }
 }

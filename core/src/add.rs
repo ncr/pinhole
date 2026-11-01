@@ -193,6 +193,7 @@ mod tests {
         ]);
         assert_eq!(other, vec![from.join("notes.txt")]);
         assert!(additions.iter().all(|a| a.group == additions[0].group));
+        let _ = std::fs::remove_dir_all(&from);
     }
 
     #[test]

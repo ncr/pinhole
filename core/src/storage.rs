@@ -51,16 +51,25 @@ pub fn old_cache() -> PathBuf {
     std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".cache")).join("pinhole")
 }
 
-/// Where the window kept JPEGs of HEICs before the service made them
-/// (`jpeg`, kept in the cache under the limit): made again when asked for,
-/// so removed as the shared service starts. Nothing else is in it.
+/// Where the window keeps JPEGs of HEICs it makes itself (`compatible`),
+/// until it asks the service for them (`jpeg`, phase B5 of
+/// docs/core-and-plugins.md): made again when asked for. The window
+/// writes there still, and a JPEG it made a moment ago may be on its way
+/// somewhere, so only what has not been used for a day goes, as the shared
+/// service starts; the folder stays. Nothing else is in it.
 pub fn forget_compatible() {
     let old = old_cache().join("compatible");
-    if old.is_dir() {
-        match std::fs::remove_dir_all(&old) {
-            Ok(()) => eprintln!("pinholed: removed {}: JPEGs are kept in the cache now", old.display()),
-            Err(e) => eprintln!("pinholed: could not remove {}: {e}", old.display()),
+    let Ok(entries) = std::fs::read_dir(&old) else { return };
+    let day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let stale = entry.metadata().is_ok_and(|m| m.is_file() && m.modified().is_ok_and(|t| t < day_ago));
+        if stale && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
         }
+    }
+    if removed > 0 {
+        eprintln!("pinholed: removed {removed} JPEGs unused for a day from {}: JPEGs are kept in the cache now", old.display());
     }
 }
 
@@ -79,6 +88,15 @@ fn follow_cache(cache: &Path) {
 pub fn making() -> PathBuf {
     let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     cache.unwrap_or_else(|| std::env::temp_dir().join("pinhole-cache")).join("making")
+}
+
+/// Whether a file is one being written: a download (`<name>.part`), or a
+/// file being made, which keeps its extension for the program making it
+/// (`<name>.part.jpg`, `<name>.part.mp4`, and what such a program writes
+/// beside it, `<name>.part.trf`). Never evicted, moved or counted.
+pub fn is_part(path: &Path) -> bool {
+    let part = |p: &Path| p.extension().is_some_and(|e| e == "part");
+    part(path) || path.file_stem().is_some_and(|stem| part(Path::new(stem)))
 }
 
 /// What the settings say, any part missing.
@@ -820,7 +838,7 @@ pub fn files_in(dir: &Path, out: &mut Vec<(SystemTime, u64, PathBuf)>) {
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
             files_in(&path, out);
-        } else if path.extension().is_none_or(|e| e != "part") {
+        } else if !is_part(&path) {
             out.push((meta.modified().unwrap_or(SystemTime::UNIX_EPOCH), meta.len(), path));
         }
     }
@@ -863,11 +881,34 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn temp(name: &str) -> PathBuf {
+    /// A scratch folder, gone when the test is done with it.
+    struct Temp(PathBuf);
+
+    impl std::ops::Deref for Temp {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            // A test may have left a folder unwritable.
+            let mut stack = vec![self.0.clone()];
+            while let Some(dir) = stack.pop() {
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+                stack.extend(std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir() && !p.is_symlink()));
+            }
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp(name: &str) -> Temp {
         let dir = std::env::temp_dir().join(format!("pinhole-storage-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        Temp(dir)
     }
 
     /// Where only the location and limit are read: no kind needed.
@@ -924,6 +965,12 @@ mod tests {
         file(&cache.join("full/aa/old.jpg"), 600, 300);
         file(&cache.join("full/bb/newer.jpg"), 600, 200);
         file(&cache.join("medium/cc/newest.jpg"), 600, 100);
+        // Files being written, used longer ago than any: a download, a JPEG
+        // and an effect being made, and what ffmpeg writes beside one.
+        let parts = ["full/aa/k1.part", "full/aa/k1-jpeg.part.jpg", "live/dd/k2-bounce.part.mp4", "live/dd/k2-bounce.part.trf"];
+        for part in parts {
+            file(&cache.join(part), 10, 400);
+        }
         let storage = storage_in(&location, &dir.join("settings.json"));
         storage.set_limit(1).unwrap();
         // Kept at the least there can be, in the settings with the folder.
@@ -934,6 +981,10 @@ mod tests {
         assert!(!cache.join("full/aa/old.jpg").exists());
         assert!(cache.join("full/bb/newer.jpg").exists());
         assert!(cache.join("medium/cc/newest.jpg").exists());
+        for part in parts {
+            assert!(cache.join(part).exists(), "{part} evicted while it was written");
+        }
+        assert!(is_part(Path::new("x.part")) && is_part(Path::new("a/k-jpeg.part.jpg")) && !is_part(Path::new("a/k-jpeg.jpg")));
     }
 
     #[test]

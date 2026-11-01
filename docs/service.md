@@ -486,7 +486,12 @@ One limit covers the whole folder. The library always stays, so the limit
 is never under the library and 1 GB for photos; unless set it is the
 library and 10 GB, and at least 20 GB. A hit refreshes a photo's
 modification time; past what the limit leaves for photos, the least
-recently used go, every two minutes, down to nine tenths of it.
+recently used go, every two minutes, down to nine tenths of it. A file
+still being written (`<name>.part`, or `<name>.part.<ext>` for one being
+made: a JPEG, an effect) is never counted, moved or evicted. A
+provider's original fetched only to make a thumbnail of
+(docs/source-providers.md) waits in `cache/making/` meanwhile, outside
+the photos counted; the folder is emptied as the service starts.
 
 The window's settings panel changes the folder and the limit with
 `set_storage`; the service keeps them in `~/.config/pinhole/settings.json`
@@ -520,8 +525,9 @@ which is committed then. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.
-`~/.cache/pinhole/compatible`, where the window made its own JPEGs before
-`jpeg`, is removed then.
+In `~/.cache/pinhole/compatible`, where the window makes its own JPEGs
+until it asks for `jpeg`, what has not been used for a day is removed
+then.
 
 ## Links
 

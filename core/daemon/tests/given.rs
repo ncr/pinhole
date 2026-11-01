@@ -81,7 +81,9 @@ fn count(library: &Path) -> i64 {
 /// The service of `library`, on a thread: a receiver told when `run`
 /// returns.
 fn start(root: &Path, name: &str, library: &Path, source: &Path, linger: Duration) -> (PathBuf, mpsc::Receiver<String>) {
-    let socket = root.join(format!("{name}.sock"));
+    // Not under TMPDIR, which may be too long a path for a socket.
+    let socket = PathBuf::from("/tmp").join(format!("pinhole-given-{name}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
     let config = Config {
         library: library.to_path_buf(),
         cache: root.join("location/cache"),

@@ -58,5 +58,6 @@ mod tests {
         assert_eq!(icloudpd_stems(&dir, &[]), vec!["meexamplecom", "youexamplecom"]);
         assert_eq!(icloudpd_stems(&dir, &["you@example.com".into()]), vec!["meexamplecom"]);
         assert!(icloudpd_stems(&dir.join("absent"), &[]).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

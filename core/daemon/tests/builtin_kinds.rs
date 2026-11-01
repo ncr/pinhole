@@ -256,4 +256,5 @@ fn sources_are_added_shown_and_removed() {
     let s = read_settings(&path, &k);
     assert!(s.sources.is_empty());
     assert_eq!(s.source, None);
+    let _ = std::fs::remove_dir_all(&dir);
 }

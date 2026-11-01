@@ -145,7 +145,9 @@ fn a_kind_turned_off_is_neither_listed_nor_shown_nor_touched() {
     let source: Arc<dyn Source> = Arc::new(FolderSource::new(photos.clone()));
     let location = root.join("data/pinhole");
     let library = pinhole_core::storage::library_for(&location, source.as_ref());
-    let socket = root.join("pinhole.sock");
+    // Not under TMPDIR, which may be too long a path for a socket.
+    let socket = PathBuf::from("/tmp").join(format!("pinhole-kinds-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
     let config = Config {
         library: library.clone(),
         cache: location.join("cache"),
@@ -285,5 +287,6 @@ fn a_kind_turned_off_is_neither_listed_nor_shown_nor_touched() {
     window.drain();
     assert!(window.heard.iter().all(|e| e["event"] != "kinds" && e["event"] != "sources"), "{:#?}", window.heard);
 
+    let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_dir_all(&root);
 }

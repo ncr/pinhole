@@ -156,7 +156,9 @@ fn a_round_that_panics_is_one_that_failed_and_the_next_goes_on() {
     let kinds = Kinds::new(vec![Arc::new(PanickyKind)]);
     let source = kinds.source_for(Some(&entry)).unwrap();
     let location = root.join("data");
-    let socket = root.join("pinhole.sock");
+    // Not under TMPDIR, which may be too long a path for a socket.
+    let socket = PathBuf::from("/tmp").join(format!("pinhole-panic-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
     let config = Config {
         library: pinhole_core::storage::library_for(&location, source.as_ref()),
         cache: location.join("cache"),
@@ -192,5 +194,6 @@ fn a_round_that_panics_is_one_that_failed_and_the_next_goes_on() {
     assert_eq!(sources["result"]["sources"][0]["count"], 1, "{sources:#}");
     assert_eq!(sources["result"]["sources"][0]["thumbs"], 1, "{sources:#}");
 
+    let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_dir_all(&root);
 }

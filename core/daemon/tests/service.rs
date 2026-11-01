@@ -167,9 +167,15 @@ fn a_window_meets_the_service_of_a_folder() {
     let has_heic = heic(&photos.join("c.heic"), [40, 40, 200], "2024:05:06 07:08:09");
     let magicks = root.join("magicks.log");
     count_magicks(&root.join("bin"), &magicks);
-    // JPEGs a window made before the service did: gone as it starts.
-    std::fs::create_dir_all(root.join("cache/pinhole/compatible")).unwrap();
-    std::fs::write(root.join("cache/pinhole/compatible/IMG_0001.jpg"), b"old").unwrap();
+    // JPEGs a window made itself: one unused for two days goes as the
+    // service starts; one made a moment ago, perhaps on its way somewhere
+    // as it starts, stays, and the folder the window writes in with it.
+    let compatible = root.join("cache/pinhole/compatible");
+    std::fs::create_dir_all(&compatible).unwrap();
+    std::fs::write(compatible.join("IMG_0001.jpg"), b"old").unwrap();
+    let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
+    std::fs::File::options().write(true).open(compatible.join("IMG_0001.jpg")).unwrap().set_modified(two_days_ago).unwrap();
+    std::fs::write(compatible.join("IMG_0002.jpg"), b"new").unwrap();
     let entry = json!({"kind": "folder", "path": photos});
     let settings = root.join("config/pinhole/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -178,7 +184,9 @@ fn a_window_meets_the_service_of_a_folder() {
     let source: Arc<dyn Source> = Arc::new(FolderSource::new(photos.clone()));
     let location = root.join("data/pinhole");
     let library = pinhole_core::storage::library_for(&location, source.as_ref());
-    let socket = root.join("pinhole.sock");
+    // Not under TMPDIR, which may be too long a path for a socket.
+    let socket = PathBuf::from("/tmp").join(format!("pinhole-service-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
     let config = Config {
         library: library.clone(),
         cache: location.join("cache"),
@@ -231,7 +239,8 @@ fn a_window_meets_the_service_of_a_folder() {
     let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
     assert_eq!(medium["ok"], true, "{medium:#}");
     assert!(Path::new(medium["result"]["path"].as_str().unwrap()).is_file());
-    assert!(!root.join("cache/pinhole/compatible").exists());
+    assert!(!compatible.join("IMG_0001.jpg").exists());
+    assert_eq!(std::fs::read(compatible.join("IMG_0002.jpg")).unwrap(), b"new");
 
     // A JPEG of a photo that is one is its full: here the file itself.
     let jpeg = window.ask("fetch", json!({"asset": "a.jpg", "kind": "jpeg"}));
@@ -443,7 +452,9 @@ fn a_window_meets_the_service_of_a_folder() {
     pinhole_core::sync::list(&their_source, &mut conn, &|_, _| {}, &|| false).unwrap();
     drop(conn);
     assert_eq!(pinhole_core::storage::library_owner(&given), Some(format!("folder:{}", theirs.display())));
-    let socket = root.join("given.sock");
+    let first_socket = socket.clone();
+    let given_socket = PathBuf::from("/tmp").join(format!("pinhole-service-given-{}.sock", std::process::id()));
+    let socket = given_socket.clone();
     let config = Config {
         library: given.clone(),
         cache: root.join("given-cache"),
@@ -467,5 +478,7 @@ fn a_window_meets_the_service_of_a_folder() {
         assert_eq!(fetched["error"]["code"], "other_source", "{fetched:#}");
     }
 
+    let _ = std::fs::remove_file(&first_socket);
+    let _ = std::fs::remove_file(&given_socket);
     let _ = std::fs::remove_dir_all(&root);
 }

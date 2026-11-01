@@ -97,6 +97,7 @@ mod tests {
         file(&config.join("user-dirs.dirs"), 0);
         std::fs::write(config.join("user-dirs.dirs"), "# x\nXDG_PICTURES_DIR=\"$HOME/Obrazy\"\n").unwrap();
         assert_eq!(pictures_dir(&home, &config), home.join("Obrazy"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -124,6 +125,7 @@ mod tests {
             {"path": media.join("T7/DCIM"), "name": "T7/DCIM", "assets": 1, "live": 0, "bytes": 7, "partial": false},
             {"path": pictures.join("iCloud"), "name": "Pictures/iCloud", "assets": 2, "live": 1, "bytes": 180, "partial": false},
         ]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
