@@ -1,5 +1,6 @@
 #include "viewer.h"
 
+#include "gainmap.h"
 #include "library.h"
 #include "photogrid.h"
 #include "photoprovider.h"
@@ -7,10 +8,13 @@
 
 #include <QDateTime>
 #include <QFile>
+#include <QFutureWatcher>
 #include <QKeyEvent>
 #include <QLocale>
 #include <QNativeGestureEvent>
+#include <QThreadPool>
 #include <QWheelEvent>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
@@ -523,6 +527,7 @@ void Viewer::show(int index) {
     m_stage = QStringLiteral("thumbnail");
     m_video = QUrl();
     setMessage({});
+    setHdr({});
     fitPhoto();
     emit indexChanged();
     emit imageChanged();
@@ -604,11 +609,40 @@ void Viewer::request(int index, const QString &kind) {
             if (kind == QLatin1String("medium"))
                 remember(index, path);
             emit imageChanged();
+            readHdrOf(path);
             // The medium is on screen; the full size follows.
             if (kind == QLatin1String("medium"))
                 request(index, QStringLiteral("full"));
         }
     }, kind == QLatin1String("video"));
+}
+
+void Viewer::readHdrOf(const QString &path) {
+    const int generation = m_generation;
+    auto *watcher = new QFutureWatcher<QVariantMap>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, generation] {
+        watcher->deleteLater();
+        // Still the photo it was read for; a full size read after its
+        // medium has the last word.
+        if (generation == m_generation)
+            setHdr(watcher->result());
+    });
+    // On a thread of its own, at low priority: never one of the pool's,
+    // which decode the very photo at the same moment.
+    static QThreadPool *reading = [] {
+        auto *pool = new QThreadPool;
+        pool->setMaxThreadCount(1);
+        pool->setThreadPriority(QThread::LowPriority);
+        return pool;
+    }();
+    watcher->setFuture(QtConcurrent::run(reading, [path] { return readHdr(path).toMap(); }));
+}
+
+void Viewer::setHdr(const QVariantMap &hdr) {
+    if (hdr == m_hdr)
+        return;
+    m_hdr = hdr;
+    emit hdrChanged();
 }
 
 void Viewer::libraryReloaded(const std::vector<int> &moved) {

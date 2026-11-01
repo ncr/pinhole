@@ -11,9 +11,12 @@
 // twelve clusters, as "count: (r,g,b) #RRGGBB …" lines. Its first image,
 // every % doubled: ImageMagick reads "%d" or "%o" in a name as a frame's
 // number ("50%off.jpg" is "500ff.jpg" to it).
-function magickArgs(path) {
-    return [path.replace(/%/g, "%%") + "[0]", "-auto-orient", "-resize", "200x200>", "-colorspace", "sRGB", "-kmeans", "12",
-            "-depth", "8", "-format", "%c", "histogram:info:-"]
+// The photo made sRGB first with `srgbProfile` (pinhole.srgbProfile), from
+// an iPhone's Display P3 or whatever it carries: the palette is of the
+// colours the screen shows.
+function magickArgs(path, srgbProfile) {
+    return [path.replace(/%/g, "%%") + "[0]", "-auto-orient"].concat(srgbProfile ? ["-profile", srgbProfile] : [])
+        .concat(["-resize", "200x200>", "-colorspace", "sRGB", "-kmeans", "12", "-depth", "8", "-format", "%c", "histogram:info:-"])
 }
 
 // The histogram's colours, the most of the photo first: [{ weight, rgb }].

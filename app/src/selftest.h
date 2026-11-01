@@ -283,6 +283,16 @@ void runStacksSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
 // and what they show, to compare their colours with a reference.
 void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer, const QString &dir);
 
+// PINHOLE_SELFTEST=hdrvideo:<dir> (selftesthdr.cpp): each video of
+// PINHOLE_SELFTEST_VIDEOS (paths, by ':') as Qt Multimedia shows it, a
+// MediaPlayer and VideoOutput as the viewer has them, paused on its first
+// frame over the window; the frame grabbed into <dir> as <name>-qt.png,
+// and beside it ffmpeg's tone mappings of the same frame (zscale and
+// tonemap: hable at SDR white 203 nits, as cover.rs; hable, mobius and
+// clip at 100; and the codes as they are), each compared by the means of
+// 16x9 blocks: the mean and the largest difference, out of 255.
+void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QStringList &videos);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

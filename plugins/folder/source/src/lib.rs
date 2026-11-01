@@ -61,10 +61,13 @@ struct Found {
 }
 
 impl Found {
-    /// Names its thumbnail and cached files; changes when the file does.
+    /// Names its thumbnail and cached files; changes when the file does,
+    /// and a video's when how its cover is made does (cover::VERSION), so
+    /// that it is made again.
     fn key(&self) -> String {
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in self.rel.bytes().chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()) {
+        let cover = if self.media == Media::Video { pinhole_core::cover::VERSION } else { "" };
+        for b in self.rel.bytes().chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()).chain(cover.bytes()) {
             hash = (hash ^ b as u64).wrapping_mul(0x0100_0000_01b3);
         }
         format!("f{hash:016x}")

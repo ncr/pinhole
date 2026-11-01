@@ -14,13 +14,18 @@ GENERATED = $$OUT_PWD/generated
 system(mkdir -p $$GENERATED && \
     wayland-scanner client-header $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-client-protocol.h && \
     wayland-scanner private-code $$GESTURES_XML $$GENERATED/pointer-gestures-unstable-v1-protocol.c)
+# Colour management, to read what each display can show (display.h).
+CM_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/staging/color-management/color-management-v1.xml
+system(wayland-scanner client-header $$CM_XML $$GENERATED/color-management-v1-client-protocol.h && \
+    wayland-scanner private-code $$CM_XML $$GENERATED/color-management-v1-protocol.c)
 # And idle-inhibit, for the screen kept on while a plugin asks (keepawake.h).
 IDLE_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
 system(wayland-scanner client-header $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-client-protocol.h && \
     wayland-scanner private-code $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-protocol.c)
 INCLUDEPATH += $$GENERATED
 SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
-    $$GENERATED/idle-inhibit-unstable-v1-protocol.c
+    $$GENERATED/idle-inhibit-unstable-v1-protocol.c \
+    $$GENERATED/color-management-v1-protocol.c
 
 HEADERS += \
     $$PWD/library.h \
@@ -40,6 +45,9 @@ HEADERS += \
     $$PWD/serviceclient.h \
     $$PWD/photoprovider.h \
     $$PWD/colour.h \
+    $$PWD/gainmap.h \
+    $$PWD/display.h \
+    $$PWD/sdrvideo.h \
     $$PWD/viewer.h \
     $$PWD/viewermotion.h \
     $$PWD/outgoing.h \
@@ -75,6 +83,9 @@ SOURCES += \
     $$PWD/serviceclient.cpp \
     $$PWD/photoprovider.cpp \
     $$PWD/colour.cpp \
+    $$PWD/gainmap.cpp \
+    $$PWD/display.cpp \
+    $$PWD/sdrvideo.cpp \
     $$PWD/viewer.cpp \
     $$PWD/viewermotion.cpp \
     $$PWD/outgoing.cpp \
@@ -98,6 +109,7 @@ SOURCES += \
     $$PWD/selftestthrough.cpp \
     $$PWD/selftestcolour.cpp \
     $$PWD/selftestguard.cpp \
+    $$PWD/selftesthdr.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

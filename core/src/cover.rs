@@ -7,6 +7,10 @@
 //! one-colour frame has none) and how much detail it has (a blurred one
 //! has little). A frame with almost no spread is dull, whatever its colour;
 //! a dark night scene or a blue one under water still has some.
+//!
+//! An HDR video's frame (HLG, as an iPhone records, or PQ) is tone mapped
+//! to SDR as it is taken (docs/hdr.md, H2): its codes read as SDR's are
+//! flat and grey.
 
 use std::fs::File;
 use std::path::Path;
@@ -23,6 +27,17 @@ const DULL: f64 = 6.0;
 
 /// Frames looked at, spread evenly across the video.
 const CANDIDATES: u32 = 7;
+
+/// How covers are made: part of a folder's video's key, so that its cover
+/// is made again once when this changes. 2: HDR tone mapped.
+pub const VERSION: &str = "2";
+
+/// An HDR frame made SDR: linear light with SDR white at 203 nits
+/// (BT.2408), BT.2020 to BT.709, Hable's curve on the highlights, then
+/// BT.709 again. ffmpeg's tonemap has no BT.2390; Hable's is the nearest
+/// of its curves.
+const TONE_MAP: &str =
+    "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 
 /// Whether a cover shows next to nothing.
 pub fn dull(image: &RgbImage) -> bool {
@@ -142,15 +157,17 @@ pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
 fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
     // A video whose length ffprobe cannot tell, or a very short one, from
     // its start.
-    let times: Vec<f64> = match duration(input)? {
+    let probe = probe(input)?;
+    let times: Vec<f64> = match probe.duration {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
+    let hdr = probe.hdr;
     let from_start = times == [0.0];
     let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
     for at in times {
-        let jpeg = match frame_from(input, at, edge) {
+        let jpeg = match frame_from(input, at, edge, hdr) {
             Ok(jpeg) => jpeg,
             // One stopped, hung or spinning: so would the rest be.
             Err(e) if timed_out(&e) => return Err(e),
@@ -170,18 +187,20 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
         // Not the start again, when that is what failed.
         None => match failed {
             Some(e) if from_start => Err(e),
-            failed => frame_from(input, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
+            failed => frame_from(input, 0.0, edge, hdr).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
         },
     }
 }
 
 /// A JPEG of the frame `at` seconds in, at most `edge` on the long side.
 pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
-    frame_from(Input::Path(video), at, edge)
+    let input = Input::Path(video);
+    frame_from(input, at, edge, probe(input)?.hdr)
 }
 
-fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
-    let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
+fn frame_from(input: Input, at: f64, edge: u32, hdr: bool) -> Result<Vec<u8>> {
+    let fit = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
+    let scale = if hdr { format!("{TONE_MAP},{fit}") } else { fit };
     let mut ffmpeg = input.command("ffmpeg", &["-threads", "1", "-ss", &format!("{at:.3}")])?;
     ffmpeg.args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
     let output = crate::background::output(&mut ffmpeg).map_err(|e| crate::render::failed(e, "ffmpeg", input.of_file()))?;
@@ -191,17 +210,34 @@ fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-/// The video's length in seconds, from ffprobe, if it can tell; an error
-/// only when it was stopped, hung or spinning.
-fn duration(input: Input) -> Result<Option<f64>> {
-    let mut ffprobe = input.command("ffprobe", &[])?;
-    ffprobe.args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]);
+/// What ffprobe tells of a video.
+#[derive(Default)]
+struct Probe {
+    /// Its length in seconds, if it can tell.
+    duration: Option<f64>,
+    /// Its picture's curve is HLG or PQ.
+    hdr: bool,
+}
+
+/// The video's length and whether it is HDR, from ffprobe; an error only
+/// when it was stopped, hung or spinning.
+fn probe(input: Input) -> Result<Probe> {
+    let mut ffprobe = input.command("ffprobe", &["-select_streams", "v:0"])?;
+    ffprobe.args(["-show_entries", "format=duration:stream=color_transfer", "-of", "default=noprint_wrappers=1"]);
     let output = match crate::background::output(&mut ffprobe) {
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(crate::render::failed(e, "ffprobe", input.of_file())),
-        Err(_) => return Ok(None),
+        Err(_) => return Ok(Probe::default()),
     };
-    Ok(String::from_utf8_lossy(&output.stdout).trim().parse().ok().filter(|d: &f64| d.is_finite()))
+    let mut probe = Probe::default();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        match line.trim().split_once('=') {
+            Some(("duration", d)) => probe.duration = d.parse().ok().filter(|d: &f64| d.is_finite()),
+            Some(("color_transfer", t)) => probe.hdr = matches!(t, "arib-std-b67" | "smpte2084"),
+            _ => {}
+        }
+    }
+    Ok(probe)
 }
 
 /// Whether a program was stopped, hung or spinning (background::output).
@@ -251,6 +287,62 @@ mod tests {
         let image = image::load_from_memory(&jpeg).unwrap().to_rgb8();
         assert_eq!(image.dimensions(), (80, 45));
         assert!(!dull(&image));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Mean saturation (HSV's, 0 to 1) of an image.
+    fn saturation(image: &RgbImage) -> f64 {
+        let s: f64 = image
+            .pixels()
+            .map(|p| {
+                let (max, min) = (p.0.iter().max().copied().unwrap_or(0) as f64, p.0.iter().min().copied().unwrap_or(0) as f64);
+                if max == 0.0 { 0.0 } else { (max - min) / max }
+            })
+            .sum();
+        s / (image.width() * image.height()) as f64
+    }
+
+    #[test]
+    fn an_hlg_video_gets_a_cover_as_colourful_as_its_sdr_self() {
+        if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("pinhole-cover-hlg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // testsrc2's bars as an SDR video, and the same made HLG as a
+        // camera would record them: its SDR picture's light, put through
+        // HLG's curve in BT.2020.
+        let sdr = dir.join("sdr.mp4");
+        let hlg = dir.join("hlg.mp4");
+        let made = |args: &[&str], out: &Path| {
+            let status = Command::new("ffmpeg")
+                .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:d=2:r=10"])
+                .args(args)
+                .arg(out)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        made(&["-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"], &sdr);
+        made(
+            &[
+                "-vf",
+                "format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt2020:t=arib-std-b67:m=bt2020nc:r=tv,format=yuv420p10le",
+                "-c:v",
+                "libx264",
+                "-x264-params",
+                "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+            ],
+            &hlg,
+        );
+        let cover = |video: &Path| image::load_from_memory(&pick(Input::Path(video), 160).unwrap()).unwrap().to_rgb8();
+        let (s_sdr, s_hlg) = (saturation(&cover(&sdr)), saturation(&cover(&hlg)));
+        // Its codes read as SDR's, as before: far greyer.
+        let flat = image::load_from_memory(&frame_from(Input::Path(&hlg), 1.0, 160, false).unwrap()).unwrap().to_rgb8();
+        let s_flat = saturation(&flat);
+        eprintln!("saturation: SDR {s_sdr:.3}, HLG tone mapped {s_hlg:.3}, HLG as SDR {s_flat:.3}");
+        assert!((s_hlg - s_sdr).abs() <= 0.1 * s_sdr, "HLG {s_hlg:.3} against SDR {s_sdr:.3}");
+        assert!(s_flat < 0.85 * s_sdr, "untouched HLG {s_flat:.3} against SDR {s_sdr:.3}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

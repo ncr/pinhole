@@ -285,6 +285,10 @@ PinholePlugin {
             parts.push(Details.isRaw(facts.format) ? qsTr("%1 (RAW)").arg(facts.format) : facts.format)
         if (item.live)
             parts.push(qsTr("Live Photo"))
+        // An HDR photo (a gain map, or PQ or HLG): by how many stops its
+        // highlights go above SDR white, as the viewer read it.
+        if (!item.video && hdr.kind && item.index === pinhole.viewer.index)
+            parts.push(qsTr("HDR, %1 EV").arg(Details.decimal(hdr.headroom, 1, Qt.locale())))
         if (item.video) {
             if (facts.codec)
                 parts.push(facts.hdr ? facts.codec + ", " + facts.hdr : facts.codec)
@@ -297,6 +301,8 @@ PinholePlugin {
         }
         return parts.join(" · ")
     }
+    // The photo shown's HDR (API 4): {kind, headroom}, {} for SDR.
+    readonly property var hdr: pinhole.viewer.hdr || ({})
     readonly property bool hasPlace: facts.latitude !== undefined
     function placeText() {
         if (hasPlace)
@@ -305,7 +311,7 @@ PinholePlugin {
             return coming ? qsTr("Yes; where, once the original is here") : qsTr("Yes")
         return coming ? "" : qsTr("None")
     }
-    readonly property var rows: (facts, item, coming, [
+    readonly property var rows: (facts, item, coming, hdr, [
         [qsTr("Taken"), takenText()],
         [qsTr("Camera"), facts.camera || ""],
         [qsTr("Lens"), facts.lens || ""],

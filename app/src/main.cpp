@@ -29,6 +29,8 @@
 #include "outgoing.h"
 #include "favourites.h"
 #include "commands.h"
+#include "display.h"
+#include "sdrvideo.h"
 #include "history.h"
 #include "markchoices.h"
 #include "marks.h"
@@ -95,6 +97,9 @@ bool vulkanUsable() {
 int main(int argc, char *argv[]) {
     // pinhole plugin new …: a plugin begun or looked over, no window.
     if (const int code = runPluginCommand(argc, argv); code >= 0)
+        return code;
+    // pinhole display: what the compositor says of each display, no window.
+    if (const int code = runDisplayCommand(argc, argv); code >= 0)
         return code;
     // pinhole status, pinhole add …: a command for the service, no window.
     if (const int code = runCommand(argc, argv); code >= 0)
@@ -201,6 +206,7 @@ int main(int argc, char *argv[]) {
     std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
+    qmlRegisterType<SdrVideo>("Pinhole", 1, 0, "SdrVideo");
     // What a plugin's QML imports (docs/plugins.md).
     Plugins::registerTypes();
     FrameStats stats;
@@ -255,6 +261,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
     engine.rootContext()->setContextProperty("plugins", &plugins);
+    engine.rootContext()->setContextProperty("display", plugins.display());
     engine.rootContext()->setContextProperty("markChoices", &markChoices);
     plugins.setEngine(&engine);
     engine.rootContext()->setContextProperty("bench", nullptr);
@@ -290,6 +297,9 @@ int main(int argc, char *argv[]) {
     window->installEventFilter(&viewer);
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
+    // What the display the window is on can show.
+    plugins.display()->setScreen(window->screen());
+    QObject::connect(window, &QWindow::screenChanged, plugins.display(), &ColourDisplay::setScreen);
     grid->setTouchpadHold(&hold);
     // Plugins load now, with the library whole, before the first frame.
     plugins.libraryOpened();

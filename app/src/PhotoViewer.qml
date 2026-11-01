@@ -220,10 +220,16 @@ Item {
             readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
             onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
+        // HDR video (an iPhone's HLG, Dolby Vision) made SDR on its way
+        // (sdrvideo.h); any other as it is.
+        SdrVideo {
+            id: sdrVideo
+            output: videoOutput
+        }
         MediaPlayer {
             id: videoPlayer
             source: viewer.video ? viewer.videoSource : ""
-            videoOutput: videoOutput
+            videoOutput: sdrVideo
             audioOutput: AudioOutput { muted: root.muted || silent }
             onSourceChanged: if (source.toString() !== "" && viewer.open) play()
         }

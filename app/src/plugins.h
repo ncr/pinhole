@@ -18,6 +18,7 @@
 #include <memory>
 #include <vector>
 
+#include "display.h"
 #include "keepawake.h"
 #include "pluginstore.h"
 
@@ -216,6 +217,11 @@ class PluginHost : public QObject {
     Q_PROPERTY(QString cacheDir READ cacheDir NOTIFY cacheDirChanged)
     Q_PROPERTY(QObject *library READ library CONSTANT)
     Q_PROPERTY(QObject *viewer READ viewer CONSTANT)
+    // The display the window is on (display.h): hdr, headroom, wide.
+    Q_PROPERTY(QObject *display READ display CONSTANT)
+    // An sRGB ICC profile installed with Pinhole, for a program to make a
+    // picture sRGB with (magick -profile).
+    Q_PROPERTY(QString srgbProfile READ srgbProfile CONSTANT)
     Q_PROPERTY(QObject *settings READ settings CONSTANT)
     // What it keeps that is not a setting (pluginstore.h): what the user
     // made, in ~/.local/state/pinhole/plugins/<id>/state.json, and what it
@@ -248,6 +254,8 @@ public:
     QString cacheDir() const;
     QObject *library() const;
     QObject *viewer() const;
+    QObject *display() const;
+    QString srgbProfile() const;
     QObject *settings() const { return m_settings.get(); }
     QObject *state() const;
     QObject *cache() const;
@@ -634,6 +642,8 @@ public:
     PluginLibrary *library() const { return m_libraryApi.get(); }
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
+    // What the display can show (pinhole.display).
+    ColourDisplay *display() { return &m_display; }
     PhotoGrid *grid() const { return m_grid; }
     History *history() const { return m_history; }
     // The screen kept on for plugins that ask (PluginHost::keepAwake).
@@ -713,6 +723,7 @@ private:
     std::unique_ptr<PluginLibrary> m_libraryApi;
     // Before the plugins, so it outlives their hosts, which let it go.
     KeepAwake m_keepAwake;
+    ColourDisplay m_display;
     std::vector<std::unique_ptr<Plugin>> m_plugins;
     QStringList m_ids;
     int m_revision = 0;

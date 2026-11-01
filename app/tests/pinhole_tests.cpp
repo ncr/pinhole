@@ -26,14 +26,21 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QVideoFrame>
+#include <QVideoFrameFormat>
 
+#include <array>
 #include <csignal>
 #include <pwd.h>
 #include <unistd.h>
 #include <lcms2.h>
+#include <libheif/heif.h>
 #include <turbojpeg.h>
 
 #include "colour.h"
+#include "display.h"
+#include "gainmap.h"
+#include "sdrvideo.h"
 #include "encoder.h"
 #include "favourites.h"
 #include "history.h"
@@ -1731,6 +1738,379 @@ Item {
         const QImage small = decodePhoto(dir.path() + "/nclx.heic", QSize(24, 8));
         QCOMPARE(small.size(), QSize(24, 8));
         QVERIFY(near(small.pixel(4, 4), qRgb(0, 255, 0), 2));
+    }
+
+    // ---- HDR in SDR (docs/hdr.md, H2) ----
+
+    // Linear BT.2020 light (PQ's in nits, HLG's display light after its
+    // OOTF) made SDR by the formulas themselves, in double precision:
+    // BT.2390's EETF to SDR white on the largest channel, BT.2020 to sRGB,
+    // clipped, encoded.
+    static QRgb sdrOfLight(double r, double g, double b, double peak) {
+        static const double toSrgb[9] = {1.6605, -0.5876, -0.0728, -0.1246, 1.1329, -0.0083, -0.0182, -0.1006, 1.1187};
+        const double most = std::max({r, g, b});
+        const double f = most > 1e-6 ? eetfToSdr(most, peak) / most : 1 / kSdrWhiteNits;
+        int out[3];
+        for (int k = 0; k < 3; ++k) {
+            double v = std::clamp((toSrgb[k * 3] * r + toSrgb[k * 3 + 1] * g + toSrgb[k * 3 + 2] * b) * f, 0.0, 1.0);
+            v = v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
+            out[k] = int(std::lround(v * 255));
+        }
+        return qRgb(out[0], out[1], out[2]);
+    }
+    // R'G'B' from 0 to 1 in PQ or HLG, as the formulas make it SDR.
+    static QRgb sdrOfCodes(double r, double g, double b, bool hlg, double peak) {
+        double c[3] = {r, g, b};
+        for (double &v : c)
+            v = hlg ? hlgSceneLight(v) : pqToNits(v);
+        if (hlg) {
+            const double ys = 0.2627 * c[0] + 0.6780 * c[1] + 0.0593 * c[2];
+            const double gain = ys > 0 ? kHlgPeakNits * std::pow(ys, 0.2) : 0;
+            for (double &v : c)
+                v *= gain;
+        }
+        return sdrOfLight(c[0], c[1], c[2], hlg ? kHlgPeakNits : peak);
+    }
+
+    void theEetfKeepsWhatIsBelowItsKneeAndPutsThePeakAtSdrWhite() {
+        // Below the knee, light as it is (1 is SDR white, 203 nits).
+        QVERIFY(std::abs(eetfToSdr(20, 1000) - 20 / kSdrWhiteNits) < 1e-6);
+        QVERIFY(std::abs(eetfToSdr(1000, 1000) - 1) < 1e-6);
+        QVERIFY(std::abs(eetfToSdr(4000, 1000) - 1) < 1e-6);
+        // Rising all the way, and SDR white itself made room for highlights.
+        double last = 0;
+        for (double nits = 1; nits <= 1000; nits *= 1.1) {
+            const double v = eetfToSdr(nits, 1000);
+            QVERIFY2(v > last, qPrintable(QString::number(nits)));
+            last = v;
+        }
+        QVERIFY(eetfToSdr(kSdrWhiteNits, 1000) < 1 && eetfToSdr(kSdrWhiteNits, 1000) > 0.7);
+        // A picture no brighter than SDR: as it is.
+        QVERIFY(std::abs(eetfToSdr(100, 150) - 100 / kSdrWhiteNits) < 1e-9);
+        // PQ there and back.
+        for (double nits : {0.01, 1.0, 100.0, 203.0, 1000.0, 10000.0})
+            QVERIFY(std::abs(pqToNits(nitsToPq(nits)) - nits) < nits * 1e-6);
+    }
+
+    void aPqOrHlgStillIsToneMappedAsTheFormulasSay() {
+        if (QStandardPaths::findExecutable("heif-enc").isEmpty())
+            QSKIP("no heif-enc");
+        QTemporaryDir dir;
+        // A 16-bit PNG: a ramp over every code, and four patches.
+        QImage png(256, 64, QImage::Format_RGBX64);
+        const double patchesRgb[4][3] = {{0.8, 0.1, 0.1}, {0.1, 0.7, 0.2}, {0.15, 0.2, 0.85}, {0.6, 0.6, 0.6}};
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 256; ++x) {
+                if (y < 32) {
+                    const quint16 v = quint16(x * 257);
+                    png.setPixelColor(x, y, QColor::fromRgba64(v, v, v));
+                } else {
+                    const double *p = patchesRgb[x / 64];
+                    png.setPixelColor(x, y, QColor::fromRgbF(float(p[0]), float(p[1]), float(p[2])));
+                }
+            }
+        QVERIFY(png.save(dir.path() + "/still.png"));
+        for (const bool hlg : {false, true}) {
+            // 10 bits, losslessly as RGB, so the codes are the PNG's; AVIF,
+            // as this x265 makes no 10-bit HEIC. Primaries BT.2020.
+            const QString file = dir.path() + (hlg ? "/hlg.avif" : "/pq.avif");
+            QProcess process;
+            process.start("heif-enc", {"-A", "-L", "-b", "10", "--colour_primaries", "9", "--transfer_characteristic",
+                                       hlg ? "18" : "16", "-o", file, dir.path() + "/still.png"});
+            QVERIFY(process.waitForFinished(60000) && process.exitCode() == 0);
+            const QImage image = decodePhoto(file, QSize());
+            QCOMPARE(image.size(), png.size());
+            // The reference from libheif's own 16-bit decode.
+            heif_context *context = heif_context_alloc();
+            heif_image_handle *handle = nullptr;
+            heif_image *decoded = nullptr;
+            QVERIFY(heif_context_read_from_file(context, QFile::encodeName(file).constData(), nullptr).code == heif_error_Ok);
+            QVERIFY(heif_context_get_primary_image_handle(context, &handle).code == heif_error_Ok);
+            QVERIFY(heif_decode_image(handle, &decoded, heif_colorspace_RGB, heif_chroma_interleaved_RRGGBB_LE, nullptr).code
+                    == heif_error_Ok);
+            size_t stride = 0;
+            const uint8_t *plane = heif_image_get_plane_readonly2(decoded, heif_channel_interleaved, &stride);
+            const double top = (1 << heif_image_get_bits_per_pixel_range(decoded, heif_channel_interleaved)) - 1;
+            int worst = 0;
+            for (int y = 0; y < png.height(); ++y)
+                for (int x = 0; x < png.width(); ++x) {
+                    const auto *px = reinterpret_cast<const uint16_t *>(plane + stride * size_t(y)) + 3 * x;
+                    const QRgb want = sdrOfCodes(px[0] / top, px[1] / top, px[2] / top, hlg, 1000);
+                    const QRgb got = image.pixel(x, y);
+                    worst = std::max({worst, std::abs(qRed(got) - qRed(want)), std::abs(qGreen(got) - qGreen(want)),
+                                      std::abs(qBlue(got) - qBlue(want))});
+                }
+            heif_image_release(decoded);
+            heif_image_handle_release(handle);
+            heif_context_free(context);
+            QVERIFY2(worst <= 2, qPrintable(QStringLiteral("%1: %2 off").arg(hlg ? "HLG" : "PQ").arg(worst)));
+            // Its peak and above (PQ's ramp goes to 10,000 nits) is SDR white.
+            QCOMPARE(image.pixel(255, 0), qRgb(255, 255, 255));
+            // And Info's: what kind, how many stops.
+            const HdrInfo info = readHdr(file);
+            QCOMPARE(info.kind(), QString(hlg ? "hlg" : "pq"));
+            QVERIFY(std::abs(info.headroom() - std::log2(1000 / kSdrWhiteNits)) < 0.01);
+            // Scaled to fit: the same colours.
+            const QImage small = decodePhoto(file, QSize(128, 32));
+            QCOMPARE(small.size(), QSize(128, 32));
+            QVERIFY(near(small.pixel(16, 24), image.pixel(32, 48), 2));
+        }
+    }
+
+    // A JPEG as an iPhone's medium has its gain map: Apple's MakerNote in
+    // its Exif, an MPF index, and a second image with Apple's XMP and ISO's
+    // APP2. Made here, with only those: no picture, no place.
+    static QByteArray gainMapJpeg(double maker33, double maker48, double xmpHeadroom, double isoStops, bool adobe = false) {
+        auto u16 = [](QByteArray &b, quint16 v) { b.append(char(v >> 8)).append(char(v & 255)); };
+        auto u32 = [&](QByteArray &b, quint32 v) { u16(b, quint16(v >> 16)); u16(b, quint16(v & 0xffff)); };
+        auto segment = [&](quint8 marker, const QByteArray &payload) {
+            QByteArray s;
+            s.append(char(0xff)).append(char(marker));
+            u16(s, quint16(payload.size() + 2));
+            return s + payload;
+        };
+        // Exif: IFD0 → Exif IFD → MakerNote, "Apple iOS" with tags 33 and 48.
+        QByteArray note("Apple iOS\0\0\x01MM", 14);
+        u16(note, 2);
+        const auto entry = [&](QByteArray &b, quint16 tag, quint16 type, quint32 count, quint32 value) {
+            u16(b, tag), u16(b, type), u32(b, count), u32(b, value);
+        };
+        entry(note, 33, 10, 1, 14 + 2 + 24 + 4);
+        entry(note, 48, 10, 1, 14 + 2 + 24 + 4 + 8);
+        u32(note, 0);
+        u32(note, quint32(qint32(std::lround(maker33 * 1e6)))), u32(note, 1000000);
+        u32(note, quint32(qint32(std::lround(maker48 * 1e6)))), u32(note, 1000000);
+        QByteArray tiff("MM\0*", 4);
+        u32(tiff, 8);
+        u16(tiff, 1);
+        entry(tiff, 0x8769, 4, 1, 26);
+        u32(tiff, 0);
+        u16(tiff, 1);
+        entry(tiff, 0x927c, 7, quint32(note.size()), 44);
+        u32(tiff, 0);
+        tiff += note;
+        // The second image: XMP and ISO's metadata.
+        QByteArray second("\xff\xd8", 2);
+        QByteArray xmp = QByteArray("http://ns.adobe.com/xap/1.0/", 29);
+        if (adobe)
+            xmp += QStringLiteral("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF><rdf:Description hdrgm:Version=\"1.0\" "
+                                  "hdrgm:HDRCapacityMax=\"%1\"/></rdf:RDF></x:xmpmeta>").arg(isoStops).toUtf8();
+        else
+            xmp += QStringLiteral("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF><rdf:Description "
+                                  "xmlns:HDRGainMap=\"http://ns.apple.com/HDRGainMap/1.0/\">"
+                                  "<HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion>"
+                                  "<HDRGainMap:HDRGainMapHeadroom>%1</HDRGainMap:HDRGainMapHeadroom>"
+                                  "</rdf:Description></rdf:RDF></x:xmpmeta>").arg(xmpHeadroom, 0, 'f', 6).toUtf8();
+        second += segment(0xe1, xmp);
+        if (!adobe) {
+            QByteArray iso("urn:iso:std:iso:ts:21496:-1", 28);
+            u16(iso, 0), u16(iso, 0);
+            iso.append(char(0));
+            u32(iso, 0), u32(iso, 1);
+            u32(iso, quint32(std::lround(isoStops * 1000))), u32(iso, 1000);
+            u32(iso, 0), u32(iso, 1);
+            u32(iso, quint32(std::lround(isoStops * 1000))), u32(iso, 1000);
+            u32(iso, 1), u32(iso, 1);
+            u32(iso, 1), u32(iso, 64);
+            u32(iso, 1), u32(iso, 64);
+            second += segment(0xe2, iso);
+        }
+        second += QByteArray("\xff\xd9", 2);
+        // The primary: its Exif, then the MPF index pointing at the second.
+        QByteArray primary("\xff\xd8", 2);
+        primary += segment(0xe1, QByteArray("Exif\0\0", 6) + tiff);
+        QByteArray mpf("MPF\0", 4);
+        mpf += QByteArray("MM\0*", 4);
+        u32(mpf, 8);
+        u16(mpf, 1);
+        entry(mpf, 0xb002, 7, 32, 26);
+        u32(mpf, 0);
+        const qsizetype mpfAt = primary.size() + 4;
+        const qsizetype total = primary.size() + 4 + mpf.size() + 32 + 2;
+        u32(mpf, 0x30000), u32(mpf, quint32(total)), u32(mpf, 0), u32(mpf, 0);
+        u32(mpf, 0), u32(mpf, quint32(second.size())), u32(mpf, quint32(total - (mpfAt + 4))), u32(mpf, 0);
+        primary += segment(0xe2, mpf);
+        primary += QByteArray("\xff\xd9", 2);
+        return primary + second;
+    }
+
+    void aGainMapIsReadFromAJpegsMetadata() {
+        QTemporaryDir dir;
+        auto write = [&](const QString &name, const QByteArray &bytes) {
+            QFile f(dir.path() + '/' + name);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(bytes);
+        };
+        // An iPhone's medium (2.79 stops: MakerNote 33 above 1, 48 0.003;
+        // XMP 6.917, linear), ISO's and Apple's both.
+        write("medium.jpg", gainMapJpeg(1.0, 0.003, std::exp2(2.79), 2.79));
+        HdrInfo info = readHdr(dir.path() + "/medium.jpg");
+        QVERIFY(info.apple && info.iso);
+        QCOMPARE(info.kind(), QString("iso"));
+        QVERIFY(std::abs(info.headroom() - 2.79) < 0.01);
+        // HDRGainMapHeadroom is linear: its log2 is the MakerNote's stops.
+        QVERIFY(std::abs(info.xmpStops - info.makerStops) < 0.1);
+        QCOMPARE(info.toMap().value("kind").toString(), QString("iso"));
+        QCOMPARE(info.toMap().value("headroom").toDouble(), 2.79);
+        // The MakerNote's other branches.
+        QVERIFY(std::abs(appleMakerStops(0.5, 0.005) - 1.7) < 1e-9);
+        QVERIFY(std::abs(appleMakerStops(0.5, 0.5) - 1.5505) < 1e-9);
+        QVERIFY(std::abs(appleMakerStops(1.5, 0.5) - 2.1515) < 1e-9);
+        QCOMPARE(appleMakerStops(1.5, 20), 0.0);
+        // Adobe's (Ultra HDR) by its XMP.
+        write("adobe.jpg", gainMapJpeg(0, 0, 0, 2.3, true));
+        info = readHdr(dir.path() + "/adobe.jpg");
+        QCOMPARE(info.kind(), QString("iso"));
+        QVERIFY(std::abs(info.headroom() - 2.3) < 1e-9);
+        // A JPEG with none: SDR, {} for QML.
+        QImage plain(8, 8, QImage::Format_RGB32);
+        plain.fill(Qt::gray);
+        QVERIFY(plain.save(dir.path() + "/plain.jpg"));
+        QVERIFY(readHdr(dir.path() + "/plain.jpg").toMap().isEmpty());
+        QVERIFY(readHdr(dir.path() + "/none.jpg").kind().isEmpty());
+        // Cut short anywhere, it reads what is there and never crashes.
+        const QByteArray whole = gainMapJpeg(1.0, 0.003, std::exp2(2.79), 2.79);
+        for (qsizetype cut = 0; cut < whole.size(); cut += 7) {
+            write("cut.jpg", whole.left(cut));
+            readHdr(dir.path() + "/cut.jpg");
+        }
+    }
+
+    void realGainMapsAgreeInEveryKind() {
+        // PINHOLE_HDR_SAMPLE: a folder of real HEICs and JPEGs (a cache's
+        // originals and mediums), read only. Skipped without.
+        const QString sample = qEnvironmentVariable("PINHOLE_HDR_SAMPLE");
+        if (sample.isEmpty())
+            QSKIP("no PINHOLE_HDR_SAMPLE");
+        int heics = 0, heicBoth = 0, jpegs = 0, jpegHdr = 0;
+        double worst = 0;
+        QDirIterator it(sample, {"*.heic", "*.HEIC", "*.jpg", "*.JPG"}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            const HdrInfo info = readHdr(path);
+            const bool heic = path.endsWith(".heic", Qt::CaseInsensitive);
+            heics += heic, jpegs += !heic;
+            if (heic && info.apple && info.iso)
+                ++heicBoth;
+            if (!heic && !info.kind().isEmpty())
+                ++jpegHdr;
+            if (info.xmpStops >= 0 && info.makerStops >= 0)
+                worst = std::max(worst, std::abs(info.xmpStops - info.makerStops));
+            if (info.iso && info.apple)
+                worst = std::max(worst, std::abs(info.isoStops - info.appleStops));
+        }
+        qInfo("%d HEICs, %d with Apple's map and ISO's; %d JPEGs, %d HDR; kinds and MakerNote within %.3f EV", heics, heicBoth,
+              jpegs, jpegHdr, worst);
+        QVERIFY(worst < 0.1);
+    }
+
+    void aDisplaysHeadroomIsItsTargetOverSdrWhite() {
+        OutputColour hdr;
+        hdr.described = true;
+        hdr.referenceLum = 203, hdr.maxLum = 400, hdr.targetMax = 1000;
+        QVERIFY(std::abs(hdr.headroom() - 2.30) < 0.01);
+        // No target: the maximum.
+        hdr.targetMax = 0;
+        QVERIFY(std::abs(hdr.headroom() - std::log2(400.0 / 203)) < 1e-9);
+        // This MacBook's panel as Hyprland says it: 80 of 80, sRGB.
+        OutputColour sdr;
+        sdr.described = true;
+        sdr.referenceLum = 80, sdr.maxLum = 80, sdr.targetMax = 80;
+        const double srgb[8] = {0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.329};
+        std::copy(srgb, srgb + 8, sdr.xy);
+        QCOMPARE(sdr.headroom(), 0.0);
+        QVERIFY(!sdr.wide());
+        QVERIFY(sdr.describe().contains("srgb primaries") && sdr.describe().contains("no HDR headroom"));
+        sdr.primaries = "display_p3";
+        QVERIFY(sdr.wide());
+        sdr.primaries = "bt2020";
+        QVERIFY(sdr.wide());
+        // pinhole.display with nothing to ask (offscreen): SDR; or as told.
+        ColourDisplay display;
+        QVERIFY(!display.hdr());
+        qputenv("PINHOLE_HEADROOM", "2");
+        QVERIFY(display.hdr() && display.headroom() == 2);
+        qunsetenv("PINHOLE_HEADROOM");
+    }
+
+    // A 10-bit frame of patches, each a BT.2020 R'G'B' made Y'CbCr (video
+    // range), planar or as P010.
+    static QVideoFrame hdrFrame(QSize size, bool p010, bool hlg, const std::vector<std::array<double, 3>> &patches) {
+        QVideoFrameFormat format(size, p010 ? QVideoFrameFormat::Format_P010 : QVideoFrameFormat::Format_YUV420P10);
+        format.setColorSpace(QVideoFrameFormat::ColorSpace_BT2020);
+        format.setColorTransfer(hlg ? QVideoFrameFormat::ColorTransfer_STD_B67 : QVideoFrameFormat::ColorTransfer_ST2084);
+        format.setColorRange(QVideoFrameFormat::ColorRange_Video);
+        QVideoFrame frame(format);
+        if (!frame.map(QVideoFrame::WriteOnly))
+            return {};
+        const int across = int(patches.size());
+        auto codes = [&](int x) {
+            const auto &p = patches[size_t(std::min(x * across / size.width(), across - 1))];
+            const double y = 0.2627 * p[0] + 0.6780 * p[1] + 0.0593 * p[2];
+            const double cb = (p[2] - y) / 1.8814, cr = (p[0] - y) / 1.4746;
+            return std::array<int, 3>{int(std::lround(64 + 876 * y)), int(std::lround(512 + 896 * cb)), int(std::lround(512 + 896 * cr))};
+        };
+        const int shift = p010 ? 6 : 0;
+        for (int y = 0; y < size.height(); ++y) {
+            auto *row = reinterpret_cast<uint16_t *>(frame.bits(0) + frame.bytesPerLine(0) * y);
+            for (int x = 0; x < size.width(); ++x)
+                row[x] = uint16_t(codes(x)[0] << shift);
+        }
+        for (int y = 0; y < size.height() / 2; ++y) {
+            auto *u = reinterpret_cast<uint16_t *>(frame.bits(1) + frame.bytesPerLine(1) * y);
+            auto *v = p010 ? nullptr : reinterpret_cast<uint16_t *>(frame.bits(2) + frame.bytesPerLine(2) * y);
+            for (int x = 0; x < size.width() / 2; ++x) {
+                const auto c = codes(2 * x);
+                if (p010) {
+                    u[2 * x] = uint16_t(c[1] << shift);
+                    u[2 * x + 1] = uint16_t(c[2] << shift);
+                } else {
+                    u[x] = uint16_t(c[1]);
+                    v[x] = uint16_t(c[2]);
+                }
+            }
+        }
+        frame.unmap();
+        return frame;
+    }
+
+    void hdrVideoFramesAreMadeSdrAsTheFormulasSay() {
+        const std::vector<std::array<double, 3>> patches = {
+            {0.75, 0.75, 0.75}, {0.5, 0.5, 0.5}, {0.9, 0.3, 0.2}, {0.3, 0.8, 0.3}, {0.2, 0.3, 0.9}, {0.95, 0.95, 0.95}, {0.6, 0.4, 0.7}, {0.1, 0.1, 0.1}};
+        const QSize size(256, 32);
+        for (const bool hlg : {true, false})
+            for (const bool p010 : {false, true}) {
+                const QVideoFrame made = toneMapFrame(hdrFrame(size, p010, hlg, patches));
+                QVERIFY(made.isValid());
+                QCOMPARE(made.size(), size);
+                const QImage image = made.toImage();
+                for (int k = 0; k < int(patches.size()); ++k) {
+                    // Inside each patch, away from its edges' chroma.
+                    const int x = k * size.width() / int(patches.size()) + 16;
+                    const auto &p = patches[size_t(k)];
+                    const QRgb want = sdrOfCodes(p[0], p[1], p[2], hlg, 1000);
+                    QVERIFY2(near(image.pixel(x, 16), want, 3),
+                             qPrintable(QStringLiteral("%1 %2 patch %3: %4 for %5").arg(hlg ? "HLG" : "PQ", p010 ? "P010" : "planar")
+                                            .arg(k).arg(QColor(image.pixel(x, 16)).name(), QColor(want).name())));
+                }
+            }
+        // SDR: none made, the frame goes on as it is.
+        QVideoFrameFormat sdr(size, QVideoFrameFormat::Format_YUV420P10);
+        sdr.setColorTransfer(QVideoFrameFormat::ColorTransfer_BT709);
+        QVERIFY(!toneMapFrame(QVideoFrame(sdr)).isValid());
+        // What one costs, on the pool: a phone's 1080p and 4K.
+        for (const QSize big : {QSize(1920, 1080), QSize(3840, 2160)}) {
+            const QVideoFrame frame = hdrFrame(big, true, true, patches);
+            QList<QImage> buffers;
+            QElapsedTimer clock;
+            clock.start();
+            const int rounds = 10;
+            for (int i = 0; i < rounds; ++i)
+                QVERIFY(toneMapFrame(frame, &buffers).isValid());
+            // Each drawn into the one before, which none holds any more.
+            QCOMPARE(buffers.size(), 1);
+            qInfo("an HLG frame of %dx%d made SDR in %.1f ms", big.width(), big.height(), clock.nsecsElapsed() / 1e6 / rounds);
+        }
     }
 
     void whatDecodingAndColourCostOnRealPhotos() {

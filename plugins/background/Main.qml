@@ -68,7 +68,9 @@ PinholePlugin {
                 const name = (item.filename || item.id).replace(/\.[^.]*$/, "").replace(/\//g, "-")
                     + " " + Qt.formatDateTime(new Date(item.date), "yyyy-MM-dd HH.mm.ss") + ways[way].tag
                 const own = stemOf(from) === stemOf(item.filename || "")
-                return pinhole.run("background", ["keep", from, folder, name, extension, own ? "own" : "cached"])
+                // A still made sRGB, as the desktop shows it (API 4).
+                return pinhole.run("background", ["keep", from, folder, name, extension, own ? "own" : "cached",
+                                                  pinhole.srgbProfile])
             })
             .then(result => {
                 kept = result.stdout.trim()

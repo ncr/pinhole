@@ -72,7 +72,7 @@ PinholePlugin {
         step(pinhole.fetch(index, "full"))
             .then(fetched => {
                 path = fetched
-                return step(pinhole.run("magick", Palette.magickArgs(path)))
+                return step(pinhole.run("magick", Palette.magickArgs(path, pinhole.srgbProfile)))
             })
             .then(result => {
                 palette = Palette.make(Palette.parseHistogram(result.stdout), strong, mode)

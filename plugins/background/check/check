@@ -150,6 +150,21 @@ magick -size 64x48 xc:'#28c828' jpg:- > "$odd/500ff [1]*.jpg"
 kept=$(sh "$script" keep "$odd/50%off [1]*.jpg" "$D" "50%off [1]*" jpg own) || kept=
 check '[ -f "$kept" ] && [ "$(magick - -format "%[fx:round(p{32,24}.r*9)]%[fx:round(p{32,24}.g*9)]" info: < "$kept")" = 71 ]' "a photo named 50%off [1]*.jpg kept as a JPEG of its own pixels"
 
+# A Display P3 photo kept with an sRGB profile given: in sRGB, as the
+# desktop shows a background (untagged): P3's (220, 80, 60) is sRGB's
+# (239, 65, 47). Untagged, its codes stay.
+fresh colours
+srgb="$HERE/../../../app/assets/sRGB.icc"
+p3="$HERE/../../../app/tests/data/display-p3.icc"
+if [ -f "$srgb" ] && [ -f "$p3" ]; then
+  magick -size 64x48 xc:'rgb(220,80,60)' -profile "$p3" jpg:- > "$H/cache/p3.jpg"
+  magick -size 64x48 xc:'rgb(40,200,80)' jpg:- > "$H/cache/plain.jpg"
+  kept=$(sh "$script" keep "$H/cache/p3.jpg" "$D" "p3" jpg own "$srgb") || kept=
+  check '[ -f "$kept" ] && [ "$(magick "$kept" -format "%[fx:abs(round(p{32,24}.r*255)-239)<=3 && abs(round(p{32,24}.g*255)-65)<=3]" info:)" = 1 ] && [ "$(magick "$kept" -format "%[profile:icc]" info:)" != "Display P3" ]' "a Display P3 photo kept in sRGB"
+  kept=$(sh "$script" keep "$H/cache/plain.jpg" "$D" "plain" jpg own "$srgb") || kept=
+  check '[ -f "$kept" ] && [ "$(magick "$kept" -format "%[fx:abs(round(p{32,24}.g*255)-200)<=2]" info:)" = 1 ]' "an untagged photo kept with its codes"
+fi
+
 check '[ ! -s "$work/decoys.log" ]' "Omarchy's own shell and scripts never called"
 [ ! -s "$work/decoys.log" ] || cat "$work/decoys.log"
 if [ $failed -eq 0 ]; then echo "background check: ok"; else echo "background check: FAILED"; fi

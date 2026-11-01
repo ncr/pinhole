@@ -71,8 +71,10 @@ the plugin's own, whose provider pinholed runs
 ([source-providers.md](source-providers.md)), and what the window shows of
 one: the root's `sources` (`PluginSource`), `pinhole.sources`,
 `chooseFolder` and `sizeText`'s decimals. API 4 brought photos in their
-right colours ([hdr.md](hdr.md)): `image://file`, and a photo's `thumbPath`
-now that its `thumbnail` is a URL of that, not of its file.
+right colours and HDR shown right in SDR ([hdr.md](hdr.md)): `image://file`,
+a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
+file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
+`SdrVideo`.
 
 `Main.qml` beside it:
 
@@ -294,6 +296,19 @@ with what it does in the help),
 and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
+A plugin that plays video puts `SdrVideo` (API 4) between its
+`MediaPlayer` and its `VideoOutput`, as the viewer does, so that an HDR
+video (an iPhone's HLG or Dolby Vision, PQ) shows right in SDR: Qt
+Multimedia shows one either flat and grey or, decoded by the hardware,
+with its brightest colours broken ([hdr.md](hdr.md), H2). Any other video
+goes through as it is. `hdr` says whether the frames are being made SDR.
+
+```qml
+SdrVideo { id: sdr; output: video }
+MediaPlayer { source: url; videoOutput: sdr }
+VideoOutput { id: video }
+```
+
 Pinhole's keys are application shortcuts, and a field with the keys takes
 letters, Space and the arrows first: a plugin's `TextInput` takes focus only
 while it shows, and lets go (`focus = false`, or `enabled: false`) as its
@@ -311,7 +326,9 @@ positions move when the library is read again, ids do not, so keep ids.
 | `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a
 Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
-| `viewer` | the photo shown full window: `open`, `index` |
+| `viewer` | the photo shown full window: `open`, `index`; `hdr` (API 4), what makes it HDR, read from its file once it shows: `{ kind, headroom }`, `kind` `"apple"` or `"iso"` (a gain map: Apple's own, or ISO 21496-1's, which Android's and Adobe's Ultra HDR are too, ISO's when it has both), `"pq"` or `"hlg"` (its picture's own curve), and `headroom` how many stops its highlights go above SDR white; `{}` for SDR, a video, or until it is read |
+| `display` | the display the window is on, as the compositor says (API 4): `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
+| `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole (API 4): for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |

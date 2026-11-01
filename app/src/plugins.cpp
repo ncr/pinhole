@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "sdrvideo.h"
 #include "selftest.h"
 
 #include "encoder.h"
@@ -603,6 +604,16 @@ QString Plugins::cacheName() const {
 QObject *PluginHost::library() const { return m_plugins->library(); }
 
 QObject *PluginHost::viewer() const { return m_plugins->viewerObject(); }
+
+QObject *PluginHost::display() const { return m_plugins->display(); }
+
+QString PluginHost::srgbProfile() const {
+    // Installed (/usr/bin/pinhole: /usr/share/pinhole), else this
+    // checkout's (app/build/pinhole: app/assets).
+    const QString app = QCoreApplication::applicationDirPath();
+    const QString installed = QDir::cleanPath(app + "/../share/pinhole/sRGB.icc");
+    return QFileInfo::exists(installed) ? installed : QDir::cleanPath(app + "/../assets/sRGB.icc");
+}
 
 int PluginHost::currentIndex() const { return m_plugins->grid() ? m_plugins->grid()->currentIndex() : -1; }
 
@@ -1276,6 +1287,8 @@ void Plugins::registerTypes() {
     for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner", "Toggle", "FieldInput"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
+    // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
+    qmlRegisterType<SdrVideo>("Pinhole.Plugin", 1, 0, "SdrVideo");
 }
 
 namespace {
@@ -2012,7 +2025,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
         {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
         {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
-        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"}};
+        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"},
+        {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2050,6 +2064,11 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         // The thumbnail's file beside its URL. (image://file, API 4's too,
         // is in a string, whose words are not looked at.)
         {"a photo's thumbPath", QRegularExpression(QStringLiteral("\\.\\s*thumbPath\\b"))},
+        {"pinhole.display", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*display\\b"))},
+        // pinhole.viewer's, or by a name of the plugin's for it.
+        {"viewer.hdr", QRegularExpression(QStringLiteral("\\bviewer\\s*\\.\\s*hdr\\b"))},
+        {"SdrVideo", QRegularExpression(QStringLiteral("\\bSdrVideo\\s*\\{"))},
+        {"pinhole.srgbProfile", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*srgbProfile\\b"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));

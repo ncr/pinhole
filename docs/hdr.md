@@ -97,11 +97,13 @@ source; the list is at the end.
   `QImage::convertToColorSpace` runs on Qt's thread pool and keeps values
   above 1 for float formats. QML `Image` has an undocumented `colorSpace`
   property that converts on the CPU at load time [qt-pixmapcache].
-- **Video.** The FFmpeg backend tone maps PQ and HLG in its shaders
-  (BT.2390 style) to the swapchain's peak: 100 nits on SDR. It outputs
-  linear on an scRGB swapchain [qt-videotexturehelper]. It takes the peak
-  of a stream with mastering metadata as `10000 * max_luminance`, which
-  looks like a bug (`max_luminance` is already in nits; unverified)
+- **Video.** The FFmpeg backend has PQ and HLG shaders (BT.2390 style),
+  and outputs linear on an scRGB swapchain [qt-videotexturehelper]. H2
+  found them used only for P010, which is what hardware decoding gives;
+  a frame decoded in software (10-bit planar) is shown as its codes, and
+  the HLG shader breaks colours beyond sRGB. So Pinhole makes HDR frames
+  SDR itself (H2). `QFFmpegVideoBuffer::maxNits()` does take a mastering
+  peak as `10000 * max_luminance`, a bug, but nothing in 6.12 calls it
   [qt-ffmpegvideobuffer].
 - `qt6-shadertools` (the `qsb` tool) is not installed, and Pinhole has no
   shaders of its own yet.
@@ -185,9 +187,9 @@ connector Hyprland can drive in HDR (not possible through DCP today).
 | Gain-map photos, viewer | The SDR base, correct (H1); Info shows the headroom (H2) | Above SDR white, up to the panel's headroom (H4) | Up to the monitor's headroom (H4) |
 | Gain-map photos, grid | The base | The base (no HDR in the grid) | The base |
 | PQ/HLG still photos | Tone mapped at decode (H2) | Shown in range (H4) | Shown in range (H4) |
-| HLG, Dolby Vision 8.4 and HDR10 video | Tone mapped by Qt Multimedia (checked in H2) | In range, in the stage (H3) | In range (H3) |
+| HLG, Dolby Vision 8.4 and HDR10 video | Tone mapped by Pinhole's `SdrVideo` (H2: Qt Multimedia's is wrong) | In range, in the stage (H3) | In range (H3) |
 | Video covers (folders) | Tone mapped by ffmpeg (H2) | Same (covers are SDR) | Same |
-| Live motion | SDR, tone mapped; the stage drops to SDR while it plays (H3) | Same | Same |
+| Live motion | SDR, tone mapped (`SdrVideo`, H2); the stage drops to SDR while it plays (H3) | Same | Same |
 | Exports (Send, "HEIC as JPEG") | JPEG with P3 profile and gain map (H5) | Same | Same |
 | Background plugin | Photo converted to sRGB (H2) | Same (the wallpaper is SDR) | Same |
 | Theme plugin | Palette from sRGB pixels (H2) | Same | Same |
@@ -512,105 +514,135 @@ files' codes as they are: they are H2's.
 
 ### H2: HDR content shown right in SDR
 
-**Files.**
-- `photoprovider.cpp` and `colour.cpp`, for a still whose primary is PQ
-  or HLG (an nclx with transfer 16 or 18; rare: one of 60 HEICs sampled
-  has an nclx at all):
-  - decode as `heif_chroma_interleaved_RRGGBB_LE`;
-  - linearise;
-  - tone map with BT.2390's EETF to SDR white = 203 nits for PQ, and with
-    HLG's OOTF at a 1000-nit reference and system gamma 1.2 for HLG;
-  - convert BT.2020 to sRGB, encode to 8-bit;
-  - run it on the provider thread, in blocks over `QThreadPool`.
-- `core/src/cover.rs`: `ffprobe` also reads `stream=color_transfer`. For
-  `arib-std-b67` or `smpte2084` the filter becomes
-  `zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`
-  before the scale. ffmpeg here has `zscale` and `tonemap`, whose curves
-  are clip, linear, gamma, reinhard, hable and mobius (no BT.2390). Covers made before are made again once:
-  the cover's key gains a version.
-- **Video.** No code unless the check fails. In a self-test, play an HLG
-  clip and a PQ clip made with ffmpeg (`testsrc2`, tagged), and Jacek's
-  own iPhone HLG and Dolby Vision 8.4 clips. Grab the frame and compare
-  the mean of each colour bar with ffmpeg's `zscale`+`tonemap` of the same
-  frame, within 6/255.
-  - If a PQ clip with mastering metadata comes out black (the suspected
-    `10000 *` bug), wrap the player's sink in a `QVideoSink` that corrects
-    `maxLuminance` (Pinhole already links `multimedia-private`). Report it
-    upstream.
-  - Also try `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi` with
-    `LIBVA_DRIVER_NAME=v4l2_request` on an HEVC Main 10 clip and write
-    down whether AVD decodes it. That is information, not a goal of this
-    document.
-- New `app/src/display.cpp`/`.h`, the Wayland side, read only in this
-  phase:
-  - `color-management-v1.xml` from `wayland-protocols` (staging), through
-    `wayland-scanner` in `sources.pri`, as the gestures and idle-inhibit
-    protocols are.
-  - Bind `wp_color_manager_v1`. For each `wl_output`: `get_output` →
-    `get_image_description` → `get_information`.
-  - Collect `primaries_named`, `tf_named`, `luminances` and
-    `target_luminance`, and work out `headroom` (stops) and `wide`
-    (primaries wider than sRGB).
-  - A `Display` object (`hdr`, `headroom`, `wide`) for QML.
-- `pinhole display`: the same, from the command line, with no window. It
-  prints each output's description. It is the oracle for H3's tests, and
-  how Jacek sees what Hyprland reports.
-- New `app/src/gainmap.cpp`/`.h`, metadata only in this phase. For a HEIC:
-  - `heif_image_handle_get_list_of_auxiliary_image_IDs` and
-    `heif_image_handle_get_auxiliary_type`, to find Apple's map;
-  - the `tmap` item through `heif_item_get_item_type` and
-    `heif_item_get_item_data`;
-  - Exif MakerNote tags 33 and 48.
+Landed, after a commit of its own that keeps every self-test off the
+person's own Pictures and clipboard (`selftest.h`): the Contact sheet's had
+written to `~/Pictures/Pinhole` and replaced the clipboard. What was built,
+and where it departs from the plan:
 
-  For a JPEG:
-  - the APP2 MPF index, and the second image's XMP
-    (`HDRGainMap:HDRGainMapVersion`, `HDRGainMapHeadroom`);
-  - Adobe's `hdrgm:` XMP;
-  - ISO's APP2 `urn:iso:std:iso:ts:21496-1`.
+**Stills.** `photoprovider.cpp` decodes a HEIF whose primary's nclx says PQ
+or HLG (transfer 16 or 18) as `heif_chroma_interleaved_RRGGBB_LE`, and
+`colour.cpp`'s `toneMapToSrgb` makes it SDR at its own size, in bands on the
+pool, before it is scaled: each code made linear by a table (PQ's EOTF in
+nits; HLG's inverse OETF, then its OOTF at 1000 nits and gamma 1.2 on the
+pixel's BT.2020 luminance), BT.2390's EETF to SDR white at 203 nits applied
+to the largest channel (so hue stays; anything above the peak is SDR
+white), the nclx's primaries to sRGB through XYZ, clipped, encoded. PQ's
+peak is the content light level, else the mastering display's, else 1000.
+- AVIF goes through libheif too (`.avif` was a photo to the folder source
+  but nothing could show it). This x265 makes no 10-bit HEIC, so the test
+  stills are 10-bit AVIF; the path is the same.
+- Neither Jacek's library nor the cache has a PQ or HLG still: the two
+  edits whose boxes say transfer 16 carry it on their `tmap` (the HDR
+  alternate), not on the picture.
+- A folder's grid thumbnail of one is ImageMagick's, which shows its codes
+  as they are: rare, and left so.
 
-  The result is `{kind: "apple" | "iso" | "pq" | "hlg" | "", headroom:
-  stops}`.
-- `viewer.cpp`: `Q_PROPERTY(QVariantMap hdr)` for the photo shown, read on
-  the provider thread with the decode.
-- **Plugin API 4** (`docs/plugins.md`; begun in H1 with `image://file` and
-  a photo's `thumbPath`), adding:
-  - `pinhole.display` (`hdr`, `headroom`, `wide`);
-  - the viewer's `hdr` for the photo shown;
-  - `pinhole.srgbProfile`, the path of an sRGB ICC installed with Pinhole
-    (`/usr/share/pinhole/sRGB.icc`, written once from
-    `QColorSpace(QColorSpace::SRgb).iccProfile()` and committed under
-    `app/assets/`).
-- `plugins/info`: a photo's line gains "HDR, 2.8 EV" ("HDR, 2,8 EV").
-- `plugins/background`: `magick` gains `-profile <srgbProfile>` before
-  `-resize`, so the wallpaper (an untagged sRGB surface) is in sRGB.
-- `plugins/theme`: `Palette.magickArgs` gains the same, so the palette is
-  taken from the colours the screen shows.
+**Video covers.** `cover.rs` asks ffprobe for the curve with the length.
+For `arib-std-b67` or `smpte2084` the frame goes through
+`zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`
+before it is scaled. A folder's video's key now has `cover::VERSION`, so
+every folder video's cover is made again once. iCloud's videos have
+Apple's thumbnails; the few covers Pinhole made of iCloud videos (only for
+a black thumbnail) stay as they are.
 
-**Performance.**
-- PQ and HLG tone mapping happens at decode, for the rare still that needs
-  it.
-- `gainmap.cpp` reads metadata only: a few kB of Exif and XMP, and no
-  pixels.
-- The grid is untouched.
+**Video in the viewer and Live motion: Qt Multimedia 6.12 is wrong, so
+`SdrVideo` (`sdrvideo.cpp`).** `PINHOLE_SELFTEST=hdrvideo:<dir>` plays
+SMPTE bars made HLG and PQ (10-bit H.264, a PQ one with mastering
+metadata), and Jacek's own iPhone HLG Dolby Vision 8.4 clips, through a
+`MediaPlayer` and `VideoOutput` as the viewer has them, grabs the first
+frame and compares it, block by block, with ffmpeg's tone mappings. What
+Qt does (read in its 6.12 source too):
+- Its HDR shaders are chosen only for P010. HEVC Main 10 is decoded by
+  VA-API through `libva-v4l2_request` on this M2 Pro's AVD (P010, the very
+  frame software decoding gives: checked with ffmpeg), so the iPhone
+  clips get them. Anything decoded in software (H.264 10-bit, AV1, VP9, or
+  HEVC without the shim) is 10-bit planar, whose shader has no transfer
+  function: HLG and PQ are shown as their codes, flat and grey (2.2 of
+  255 off ffmpeg's untouched frame on average, 10.6 at worst).
+- With P010, the HLG shader's EETF never compresses (its `maxLum` is SDR's
+  1.0 in HLG's terms, so the knee is at 1) and it takes no gamut into
+  account: colours beyond sRGB go negative and come out as garbage. One
+  of the two iPhone clips (a vivid screen) shows posterised cyan and brown
+  over its magenta sky (worst block 187 of 255 off).
+- `QFFmpegVideoBuffer::maxNits()` multiplies a mastering peak, already in
+  nits, by 10,000 (the suspected bug, real), but no use of it was found
+  in 6.12, and the PQ bars with mastering metadata come out exactly as
+  those without: a stream's `maxLuminance()` is Qt's default (10,000 for
+  PQ, 1500 for HLG). `hdrInfo()` plays no part in SDR.
 
-**Tests.**
-- A 16-bit PNG made into a PQ HEIC with `heif-enc` (nclx 9/16/9). Its
-  decode matches a reference computed in the test from the same formulas,
-  within 2/255.
-- `cover.rs` unit test: an HLG `testsrc2` clip's cover has mean
-  saturation within 10 % of the SDR clip's. Without the filter it is far
-  below.
-- `gainmap.cpp`:
-  - An iCloud medium from the library (copied, cut to the MPF parts)
-    gives `apple`, 2.79 EV. A HEIC original gives both kinds.
-  - The HEIC's MakerNote headroom and its XMP headroom agree within
-    0.1 EV. This settles linear against stops.
-- `pinhole display` on this machine prints sRGB, gamma 2.2 or sRGB, and
-  80/80 nits: no headroom.
-- The video self-test above.
+So `SdrVideo` sits between the player and the output (the viewer's video,
+the Live plugin's motion). A frame whose transfer is HLG or PQ (planar,
+NV12, P010 or P016) is mapped and made SDR on the CPU by the same maths as
+a still (bilinear chroma, BT.2020's matrix), into an RGB frame reused once
+shown; anything else goes through untouched. 10 ms a 1080p frame and 29 ms
+a 4K one, on the pool: a phone's 1080p at 60 fps, 4K at 30. Through it,
+every clip is within 4 of 255 of the formulas computed in double precision
+from ffmpeg's own decode (worst block: bars 2.9 and 4.0, iPhone 2.8), and
+the iPhone clips are within 4.4 on average of libplacebo's BT.2390 with
+clipping. All three of Qt's faults are worth reporting to Qt; not reported yet.
 
-**In the app:** HDR videos and PQ/HLG stills look right in SDR, folder
-video covers are no longer flat, and Info says which photos are HDR.
+**`display.cpp`, `pinhole display`.** `color-management-v1.xml` through
+`wayland-scanner`; `readOutputColours` binds `wp_color_manager_v1` (at most
+the version generated) and each `wl_output` on a queue of its own, and
+reads each output's description: primaries (named or given), curve,
+luminances, target. Headroom is `log2(target max / reference)`, else max
+over reference; wide is a gamut larger than sRGB's. `ColourDisplay` is
+`pinhole.display` (and `display` to the window's QML), read as the window
+starts and when screens come and go, for the screen the window is on;
+`PINHOLE_HEADROOM` overrides. On this MacBook:
+
+    eDP-1: srgb primaries, compound_power_2_4 curve; 0.2 to 80 nits, SDR white at 80; no HDR headroom; sRGB's gamut
+
+(Hyprland gives sRGB's primaries as numbers, not by name.)
+
+**`gainmap.cpp`.** No pixels: a HEIC's items and a JPEG's markers up to
+the first scan, and the MPF second image's. The result is `{kind,
+headroom}`, ISO's when it parses, else Apple's, else the curve's.
+- A HEIC's Exif and XMP are found by their `cdsc` references: libheif
+  gives an iPhone's Exif (which describes the picture and its edit
+  together) to no handle.
+- The ISO APP2 in a JPEG is named `urn:iso:std:iso:ts:21496:-1`.
+- Apple's mediums carry ISO's metadata beside Apple's XMP: 81 of 200
+  sampled mediums are HDR (the plan's 72 counted Apple's alone), 109 of 112
+  cached HEIC originals have both kinds.
+- **Linear, settled:** over 219 HEICs and 162 mediums, `log2` of
+  `HDRGainMapHeadroom` equals the MakerNote's stops and ISO's alternate
+  headroom within 0.001 EV.
+- Reading one: 0.5 ms a medium, 6 ms a HEIC (libheif reads its boxes), on
+  a thread, as the viewer's file arrives.
+
+**API 4, the rest:** `pinhole.display`, the viewer's `hdr` (read for the
+medium, then the full size), `pinhole.srgbProfile`
+(`share/pinhole/sRGB.icc`, Qt's own sRGB profile, committed in
+`app/assets`), and `SdrVideo` for a plugin's video. Info's format line
+says "HDR, 1.8 EV"; Background's `background keep` and Theme's
+`magickArgs` take the profile (`magick -profile`), so a P3 photo's
+wallpaper and palette are in sRGB.
+
+**Performance**, against the build before H2, interleaved:
+- `--bench` on the fake library, six runs a side: the grid's frames as
+  before. Mean of the phases' sync50 0.170 → 0.185 ms, all of it one
+  phase that flips between two values run to run in both builds (idle at
+  29 columns, 0.40 or 0.73); the other thirteen 0.152 → 0.156. Sync99
+  0.502 → 0.468. Every cell sharp 32 ms after a jump (median), either way.
+- `PINHOLE_SELFTEST=viewer` on the library copy, six runs a side, each
+  build with its own plugins (H2's Live plugin needs H2's `SdrVideo`;
+  without it the old build's motion never plays and its loop seeks look
+  31 ms quicker): HEIC original 285 → 294 ms (median; means 291 → 292),
+  Live Photo original 454 → 480 (means 479 → 482), video first frame 204
+  → 197, loop seek 124 → 124. The HDR read runs on a thread of its own at
+  low priority, never on the pool that decodes the same photo.
+
+**Tests.** `aPqOrHlgStillIsToneMappedAsTheFormulasSay` (every pixel within
+2 of the formulas from libheif's own 16-bit decode, the peak and above
+white), `theEetfKeepsWhatIsBelowItsKneeAndPutsThePeakAtSdrWhite`,
+`aGainMapIsReadFromAJpegsMetadata` (a medium's structure made in the
+test, Apple's and ISO's; Adobe's; cut short anywhere),
+`realGainMapsAgreeInEveryKind` (`PINHOLE_HDR_SAMPLE`),
+`aDisplaysHeadroomIsItsTargetOverSdrWhite`,
+`hdrVideoFramesAreMadeSdrAsTheFormulasSay` (planar and P010, HLG and PQ),
+and in Rust `an_hlg_video_gets_a_cover_as_colourful_as_its_sdr_self`
+(saturation 0.894 against the SDR clip's 0.929; 0.622 untouched).
 
 ### H3: the stage (wide gamut and HDR output)
 
@@ -800,10 +832,11 @@ iPhone HDR photos glow as on the phone.
    waits for the stage's first frame. Zoom and pan drive both from the
    same properties. A plugin layer pinned to the photo can lag one frame
    while panning, 8 ms at 120 Hz.
-6. **Qt Multimedia's HDR peak.** `hdrInfo()` is a constant on Linux, and
-   there is the suspected `10000 *`. *Answer:* H2 checks SDR tone mapping
-   against ffmpeg. In the stage, Hyprland tone maps whatever is above the
-   display. Both are worth reporting upstream.
+6. **Qt Multimedia's HDR.** `hdrInfo()` is a constant on Linux; the
+   `10000 *` is real but unused. *Answer:* H2 found Qt's SDR tone mapping
+   wrong both ways and makes HDR frames SDR itself (`SdrVideo`). For the
+   stage (H3), Qt's linear output needs checking the same way, or
+   `SdrVideo` grows a linear output. Both are worth reporting upstream.
 7. **The CPU cost of conversion at decode.** *Answer:* measured in H1.
    Both `QColorTransform` and lcms2's own transform cost more than the
    decode itself, so the common profile is converted by Pinhole's own
@@ -817,8 +850,9 @@ iPhone HDR photos glow as on the phone.
    accepts both `srgb` and `compound_power_2_4`, and both `gamma22` and
    `ext_srgb`.
 10. **Hardware decode of 10-bit HEVC.** It is not part of HDR, but HDR
-    video is 10-bit. *Answer:* H2 writes down what the VA-API shim does.
-    Without it, FFmpeg decodes in software, as today.
+    video is 10-bit. *Answer:* Qt Multimedia already decodes HEVC Main 10
+    through the VA-API shim on AVD, as P010, the same frame as software
+    (H2).
 
 ## Sources
 

@@ -40,6 +40,8 @@ With no command, the window opens. A command asks the Pinhole service
   storage [--limit <GB>] [--move-to <folder>]
                          where Pinhole keeps its files, and how much room
                          they may take
+  display                what the compositor says of each display: its
+                         colours, its brightness, and any HDR headroom
   plugin new <id>        begin a plugin of your own (docs/plugins.md)
   plugin check [folder]  look a plugin over as Pinhole would load it
   help                   this

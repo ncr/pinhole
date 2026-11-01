@@ -64,6 +64,11 @@ class Viewer : public QObject {
     Q_PROPERTY(int jumpFrom READ jumpFrom NOTIFY motionChanged)
     // Bumped when a sharper image of some photo arrives (imageFor()).
     Q_PROPERTY(int revision READ revision NOTIFY imagesChanged)
+    // What makes the photo shown HDR (gainmap.h): {kind, headroom}, kind
+    // "apple", "iso", "pq" or "hlg" and headroom in stops, read from the
+    // file shown (its medium, then its full size) away from the window's
+    // thread; {} for SDR, a video, or until it is read.
+    Q_PROPERTY(QVariantMap hdr READ hdr NOTIFY hdrChanged)
 
 public:
     Viewer(const Library *library, ServiceClient *service, QObject *parent = nullptr);
@@ -99,6 +104,7 @@ public:
     // The photo at a place in the row, -1 for none.
     Q_INVOKABLE int photoAt(int place) const;
     int revision() const { return m_revision; }
+    QVariantMap hdr() const { return m_hdr; }
     int jumpFrom() const { return m_jumpFrom; }
     // The photo at place `k` of the row (0: the shown one), -1 for none:
     // the neighbours, except during a far jump, where the photo it came
@@ -162,6 +168,7 @@ signals:
     void loadingChanged();
     void motionChanged();
     void imagesChanged();
+    void hdrChanged();
     // Pinched closed: the window should animate the viewer away.
     void closeRequested();
 
@@ -195,6 +202,9 @@ private:
     void setMessage(const QString &message);
     void fitPhoto();
     void remember(int index, const QString &mediumPath);
+    // The HDR of the file now shown, read on a thread.
+    void readHdrOf(const QString &path);
+    void setHdr(const QVariantMap &hdr);
     static QUrl providerUrl(const QString &path);
 
     const Library *m_library;
@@ -213,6 +223,7 @@ private:
     QRectF m_origin;
     QUrl m_image;
     QString m_stage;
+    QVariantMap m_hdr;
     QUrl m_video;
     QString m_message;
     ViewerMotion m_motion;

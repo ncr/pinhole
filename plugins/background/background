@@ -2,11 +2,13 @@
 # The Background plugin's work outside QML; Series' studio sets its videos
 # with it too.
 #
-# background keep <file> <folder> <name> <extension> own|cached
+# background keep <file> <folder> <name> <extension> own|cached [<sRGB profile>]
 #   A photo or video from the service kept where it lasts, as a background
 #   Omarchy can show, and its path said. A .jpg is the photo as it looks
 #   (HEIC and the rest made a JPEG, turned upright, at most a 4K screen's
-#   size: the shell draws with Qt's image readers, which know neither); a
+#   size: the shell draws with Qt's image readers, which know neither; and
+#   in sRGB, from an iPhone's Display P3 or whatever profile it carries,
+#   given an sRGB profile, as the desktop shows it untagged); a
 #   .mkv a video's picture, without its sound (a background is silent), in a
 #   container mpv reads whatever it came in; anything else the file as it
 #   is, linked where it can be. The name ends in a few characters of the
@@ -132,7 +134,7 @@ ours() {
 
 case "${1:-}" in
 keep)
-  from=$2 dir=$3 name=$4 extension=$5 own=$6
+  from=$2 dir=$3 name=$4 extension=$5 own=$6 srgb=${7:-}
   case "$name/$extension" in
     */*/* | *"
 "*) echo "Not a name for a background: $name.$extension" >&2; exit 2 ;;
@@ -196,7 +198,7 @@ keep)
     case "$extension" in
       # Through stdin and stdout: no name (a folder's photo's, or the one
       # kept, named after it) is read as ImageMagick's syntax ("50%off").
-      jpg) magick -[0] -auto-orient -resize '3840x3840>' -quality 92 jpg:- < "$from" > "$part" ;;
+      jpg) magick -[0] -auto-orient ${srgb:+-profile "$srgb"} -resize '3840x3840>' -quality 92 jpg:- < "$from" > "$part" ;;
       mkv) ffmpeg -v error -y -i "$from" -map 0:v:0 -c copy -f matroska "$part" ;;
       # A hard link where the cache and Pictures share a disk: instant, no
       # room taken twice, and it stays when the cache lets its name go.

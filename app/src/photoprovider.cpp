@@ -13,6 +13,12 @@
 
 namespace {
 
+// HEIC, HEIF and AVIF, which libheif reads and Qt does not.
+bool heifByName(const QString &path) {
+    return path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive)
+        || path.endsWith(".avif", Qt::CaseInsensitive);
+}
+
 // The profile a HEIC's pixels are in: its ICC, else its nclx as one.
 QByteArray profileOf(const heif_image_handle *handle) {
     QByteArray icc(qsizetype(heif_image_handle_get_raw_color_profile_size(handle)), Qt::Uninitialized);
@@ -24,6 +30,28 @@ QByteArray profileOf(const heif_image_handle *handle) {
     icc = iccOfNclx(nclx);
     heif_nclx_color_profile_free(nclx);
     return icc;
+}
+
+// A PQ or HLG picture, decoded at 16 bits a channel and tone mapped into
+// sRGB (colour.h). Null if it cannot be.
+QImage decodeHdrHeif(heif_image_handle *handle, const heif_color_profile_nclx &nclx, const heif_decoding_options *options,
+                     const std::atomic<bool> *cancelled) {
+    const bool alpha = heif_image_handle_has_alpha_channel(handle);
+    heif_image *image = nullptr;
+    if (heif_decode_image(handle, &image, heif_colorspace_RGB,
+                          alpha ? heif_chroma_interleaved_RRGGBBAA_LE : heif_chroma_interleaved_RRGGBB_LE, options)
+            .code != heif_error_Ok)
+        return {};
+    QImage out;
+    size_t stride = 0;
+    const uint8_t *data = heif_image_get_plane_readonly2(image, heif_channel_interleaved, &stride);
+    if (data && !(cancelled && *cancelled))
+        out = toneMapToSrgb(data, heif_image_get_width(image, heif_channel_interleaved),
+                            heif_image_get_height(image, heif_channel_interleaved), qsizetype(stride),
+                            heif_image_get_bits_per_pixel_range(image, heif_channel_interleaved), alpha, nclx,
+                            pqPeakOf(handle));
+    heif_image_release(image);
+    return out;
 }
 
 // libheif's pixels scaled straight into the image returned, or, at their
@@ -42,7 +70,24 @@ QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *c
     heif_image_handle *handle = nullptr;
     heif_image *image = nullptr;
     if (heif_context_read_from_file(context, QFile::encodeName(path).constData(), nullptr).code == heif_error_Ok &&
-        heif_context_get_primary_image_handle(context, &handle).code == heif_error_Ok &&
+        heif_context_get_primary_image_handle(context, &handle).code == heif_error_Ok) {
+        // PQ or HLG (a camera's HDR HEIF): 16 bits a channel, tone mapped
+        // into sRGB at its own size, then scaled.
+        heif_color_profile_nclx *nclx = nullptr;
+        if (heif_image_handle_get_nclx_color_profile(handle, &nclx).code == heif_error_Ok && isHdrTransfer(nclx)) {
+            out = decodeHdrHeif(handle, *nclx, options, cancelled);
+            heif_nclx_color_profile_free(nclx);
+            if (!out.isNull() && maxSize.isValid() && (out.width() > maxSize.width() || out.height() > maxSize.height()))
+                out = out.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            heif_image_handle_release(handle);
+            heif_decoding_options_free(options);
+            heif_context_free(context);
+            return out;
+        }
+        if (nclx)
+            heif_nclx_color_profile_free(nclx);
+    }
+    if (handle &&
         // libheif applies the stored rotation and mirroring while decoding.
         heif_decode_image(handle, &image, heif_colorspace_RGB, heif_chroma_interleaved_RGBA, options).code ==
             heif_error_Ok &&
@@ -106,7 +151,7 @@ private:
 
 QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled) {
     QImage image;
-    if (path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive))
+    if (heifByName(path))
         image = decodeHeif(path, maxSize, cancelled);
     if (cancelled && *cancelled)
         return {};
@@ -180,7 +225,7 @@ QImage FileProvider::requestImage(const QString &id, QSize *size, const QSize &r
                                   const QQuickImageProviderOptions &options) {
     const QString path = QUrl::fromPercentEncoding(id.toUtf8());
     // HEIC, which Qt does not read: as the photo provider decodes it.
-    if (path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive)) {
+    if (heifByName(path)) {
         QImage image = decodePhoto(path, requestedSize.width() > 0 && requestedSize.height() > 0 ? requestedSize : QSize());
         if (!image.isNull()) {
             if (size)

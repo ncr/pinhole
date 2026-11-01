@@ -4,6 +4,7 @@
 #include <QImage>
 
 struct heif_color_profile_nclx;
+struct heif_image_handle;
 
 // Every photo in the window's colours (docs/hdr.md, H1). The window is
 // sRGB; a photo's pixels are in whatever its profile says (an iPhone's
@@ -18,8 +19,38 @@ struct heif_color_profile_nclx;
 // QColorTransform or lcms2's own transform, which convert the rest.
 
 // HEIC's colour description (nclx) as an ICC profile, for toSrgb: empty
-// for sRGB, and for PQ and HLG, which are HDR (H2).
+// for sRGB, and for PQ and HLG, which are HDR (toneMapToSrgb).
 QByteArray iccOfNclx(const heif_color_profile_nclx *nclx);
+
+// HDR pictures in SDR (docs/hdr.md, H2). SDR white is 203 nits (BT.2408);
+// an HLG picture is shown on a 1000-nit display with system gamma 1.2.
+constexpr double kSdrWhiteNits = 203;
+constexpr double kHlgPeakNits = 1000;
+
+// Whether an nclx's curve is PQ or HLG.
+bool isHdrTransfer(const heif_color_profile_nclx *nclx);
+// A PQ picture's brightest, in nits: its content light level, else its
+// mastering display's peak, else 1000.
+double pqPeakOf(const heif_image_handle *handle);
+// PQ or HLG pixels as libheif decodes them (16-bit RGB or RGBA, `bits`
+// of each used), in sRGB: made linear (PQ's EOTF; HLG's inverse OETF and
+// its OOTF at 1000 nits), tone mapped to SDR white with BT.2390's EETF on
+// the largest of the three (keeping hue), from the nclx's primaries to
+// sRGB's, clipped and encoded in 8 bits. `peakNits` is PQ's (pqPeakOf).
+// In bands on Qt's thread pool when big.
+QImage toneMapToSrgb(const uchar *data, int width, int height, qsizetype stride, int bits, bool alpha,
+                     const heif_color_profile_nclx &nclx, double peakNits);
+// BT.2390's EETF from a picture whose brightest is `peakNits` to SDR
+// white: nits in, linear light out (1 is SDR white).
+double eetfToSdr(double nits, double peakNits);
+// HLG's inverse OETF: a code from 0 to 1 to scene light from 0 to 1.
+double hlgSceneLight(double code);
+// Linear light from 0 to 1, in kSrgbSteps steps, to 8-bit sRGB codes.
+constexpr int kSrgbSteps = 16384;
+const uint8_t *srgbEncodeTable();
+// PQ's EOTF: a code from 0 to 1 to nits, and back.
+double pqToNits(double code);
+double nitsToPq(double nits);
 
 // `image` made sRGB in place, from the ICC profile `icc`. Nothing is done
 // for none, sRGB, a profile lcms2 cannot read or one not of RGB. RGB32,

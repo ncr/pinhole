@@ -211,7 +211,10 @@ thumbnail. `original`, `full`, `video` and `live` are the files themselves;
 `thumb` (480 px, kept in the library like iCloud's) and `medium` (2048 px,
 made into the cache when first asked for, as iCloud's are downloaded) are
 made with ImageMagick, and a video's by ffmpeg from the most telling of
-seven frames spread across it (`cover.rs`), not a fade from black.
+seven frames spread across it (`cover.rs`), not a fade from black; an HDR
+video's (an iPhone's HLG, PQ) tone mapped to SDR, not flat. A video's key
+also has how its cover is made (`cover::VERSION`), so a change to that
+makes every cover again once.
 ImageMagick reads the file on stdin, so no name is taken for its own
 syntax (`50%off.jpg` would be `500ff.jpg` to it).
 
