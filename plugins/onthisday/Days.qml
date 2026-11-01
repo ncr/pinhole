@@ -3,7 +3,9 @@ import Pinhole.Plugin
 
 // This day in every earlier year with photos of it, the latest first, over
 // the whole window. A photo opens full window, and closing it comes back
-// here; "In the grid" shows a year's where it is among the rest.
+// here; "In the grid" shows a year's where it is among the rest. Photos
+// are library positions: the years are counted again, at once, whenever
+// the library is read again.
 Item {
     id: days
     required property var plugin
@@ -17,38 +19,67 @@ Item {
     // A photo opened from here: closing it comes back.
     property bool away: false
 
-    // Every photo in the order shown, as { s, k, i }: its year's place, its
-    // own in that year, its library position. The keys' cursor is in it.
-    readonly property var flat: {
-        const list = []
-        plugin.years.forEach((year, s) => year.positions.forEach((i, k) => list.push({ s: s, k: k, i: i })))
-        return list
-    }
-    // Where each year starts in it.
+    readonly property var years: plugin.years
+    // Where each year's photos start among them all, in the order shown,
+    // and how many there are; the keys' cursor is one of them.
     readonly property var starts: {
         const list = []
         let n = 0
-        plugin.years.forEach(year => { list.push(n); n += year.positions.length })
+        years.forEach(year => { list.push(n); n += year.photos.length })
+        list.push(n)
         return list
     }
+    readonly property int total: starts[starts.length - 1]
     property int cursor: 0
+    function placeOf(at) {
+        let s = 0
+        while (s + 1 < years.length && starts[s + 1] <= at)
+            ++s
+        return { s: s, k: at - starts[s] }
+    }
+    function photoAt(at) {
+        const place = placeOf(at)
+        return years[place.s].photos[place.k]
+    }
+
+    // The lines of the list, only while it shows (or comes back): each
+    // year's heading, then its photos a row at a time. Only those in
+    // sight are made.
+    readonly property var rows: {
+        if (!shown && !away)
+            return []
+        const list = []
+        years.forEach((year, s) => {
+            list.push({ s: s, k: -1 })
+            for (let k = 0; k < year.photos.length; k += columns)
+                list.push({ s: s, k: k })
+        })
+        return list
+    }
+    function rowOf(at) {
+        const place = placeOf(at)
+        let row = 0
+        for (let s = 0; s < place.s; ++s)
+            row += 1 + Math.ceil(years[s].photos.length / columns)
+        return row + 1 + Math.floor(place.k / columns)
+    }
 
     function open() {
         cursor = 0
-        flick.contentY = 0
         shown = true
+        list.positionViewAtBeginning()
     }
     function close() {
         shown = false
         away = false
     }
     function openPhoto(at) {
-        if (at < 0 || at >= flat.length)
+        if (at < 0 || at >= total)
             return
         cursor = at
         away = true
         shown = false
-        pinhole.openPhoto(flat[at].i)
+        pinhole.openPhoto(photoAt(at))
     }
     function reveal(i) {
         close()
@@ -59,22 +90,24 @@ Item {
         function onOpenChanged() {
             if (!days.pinhole.viewer.open && days.away) {
                 days.away = false
-                days.shown = days.flat.length > 0
+                days.shown = true
+                days.keepInView()
             }
         }
     }
-    // The years changed under it (the library read again, or midnight).
-    onFlatChanged: cursor = Math.min(cursor, Math.max(0, flat.length - 1))
+    // The years changed under it (the library read again, a setting, or
+    // midnight).
+    onTotalChanged: cursor = Math.min(cursor, Math.max(0, total - 1))
 
-    // The keys: across a year's rows, and from one year to the next.
+    // The keys: along a year's rows, and from one year to the next.
     function move(dx, dy) {
-        if (flat.length === 0)
+        if (total === 0)
             return
         if (dx !== 0) {
-            cursor = Math.max(0, Math.min(flat.length - 1, cursor + dx))
+            cursor = Math.max(0, Math.min(total - 1, cursor + dx))
         } else {
-            const at = flat[cursor]
-            const count = plugin.years[at.s].positions.length
+            const at = placeOf(cursor)
+            const count = years[at.s].photos.length
             const column = at.k % columns
             let k = at.k + dy * columns
             let s = at.s
@@ -82,16 +115,16 @@ Item {
                 if (s === 0)
                     return
                 s -= 1
-                const n = plugin.years[s].positions.length
+                const n = years[s].photos.length
                 k = Math.min(n - 1, Math.floor((n - 1) / columns) * columns + column)
             } else if (k >= count) {
                 if (Math.floor(at.k / columns) < Math.floor((count - 1) / columns)) {
                     k = count - 1
                 } else {
-                    if (s === plugin.years.length - 1)
+                    if (s === years.length - 1)
                         return
                     s += 1
-                    k = Math.min(plugin.years[s].positions.length - 1, column)
+                    k = Math.min(years[s].photos.length - 1, column)
                 }
             }
             cursor = starts[s] + k
@@ -99,15 +132,13 @@ Item {
         keepInView()
     }
     function keepInView() {
-        const at = flat[cursor]
-        const section = sections.itemAt(at.s)
-        if (!section)
+        if (total === 0)
             return
-        const top = section.y + section.gridY + Math.floor(at.k / columns) * (cell + gap)
-        if (top < flick.contentY)
-            flick.contentY = Math.max(0, top - section.gridY)
-        else if (top + cell > flick.contentY + flick.height)
-            flick.contentY = Math.min(flick.contentHeight - flick.height, top + cell - flick.height + gap)
+        const row = rowOf(cursor)
+        // A year's first row with its heading.
+        if (placeOf(cursor).k < columns)
+            list.positionViewAtIndex(row - 1, ListView.Contain)
+        list.positionViewAtIndex(row, ListView.Contain)
     }
 
     Repeater {
@@ -117,7 +148,7 @@ Item {
             required property int index
             name: "onthisday." + modelData[0]
             text: qsTr("Choose a photo")
-            section: index === 0 ? "On this day" : ""
+            section: index === 0 ? qsTr("On this day") : ""
             keys: [modelData[1]]
             keysText: "← → ↑ ↓"
             keyLayer: "plugin"
@@ -132,11 +163,11 @@ Item {
     Command {
         name: "onthisday.open"
         text: qsTr("Open the photo")
-        section: "On this day"
+        section: qsTr("On this day")
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: days.shown
+        when: days.shown && days.total > 0
         mouse: qsTr("Click it")
         touchpad: qsTr("Tap it")
         onTriggered: days.openPhoto(days.cursor)
@@ -144,14 +175,14 @@ Item {
     Command {
         name: "onthisday.reveal"
         text: qsTr("Show the photo in the grid")
-        section: "On this day"
+        section: qsTr("On this day")
         keys: ["Shift+Return", "Shift+Enter"]
         keysText: "⇧ ⏎"
         keyLayer: "plugin"
-        when: days.shown && days.flat.length > 0
+        when: days.shown && days.total > 0
         mouse: qsTr("In the grid, beside its year")
         touchpad: qsTr("In the grid, beside its year")
-        onTriggered: days.reveal(days.flat[days.cursor].i)
+        onTriggered: days.reveal(days.photoAt(days.cursor))
     }
     Command {
         id: closeCommand
@@ -194,13 +225,21 @@ Item {
         action: closeCommand
     }
 
+    // Its years emptied while it showed: a setting, or midnight.
+    UiText {
+        anchors.centerIn: parent
+        visible: days.total === 0
+        text: qsTr("Nothing from this day in earlier years.")
+        color: theme.darkForeground
+    }
+
     // The cells: as many across as fit at about a thumbnail's size.
     readonly property real gap: 4
-    readonly property int columns: Math.max(3, Math.floor((flick.width + gap) / (theme.fontSize * 13 + gap)))
-    readonly property real cell: Math.floor((flick.width - (columns - 1) * gap) / columns)
+    readonly property int columns: Math.max(3, Math.floor((list.width + gap) / (theme.fontSize * 13 + gap)))
+    readonly property real cell: Math.floor((list.width - (columns - 1) * gap) / columns)
 
-    Flickable {
-        id: flick
+    ListView {
+        id: list
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: top.bottom
@@ -209,99 +248,83 @@ Item {
         anchors.rightMargin: 16
         anchors.topMargin: 10
         clip: true
-        contentWidth: width
-        contentHeight: column.height + 16
         boundsBehavior: Flickable.StopAtBounds
+        model: days.rows
+        cacheBuffer: Math.max(0, height)
+        footer: Item { height: 16 }
+        delegate: Item {
+            id: line
+            required property var modelData
+            readonly property var year: days.years[modelData.s]
+            readonly property bool heading: modelData.k < 0
+            readonly property real above: heading && modelData.s > 0 ? Math.round(theme.fontSize * 1.4) : 0
+            width: list.width
+            height: heading ? above + inGrid.height + 8 : days.cell + days.gap
 
-        Column {
-            id: column
-            width: flick.width
-            spacing: Math.round(theme.fontSize * 1.4)
-            Repeater {
-                id: sections
-                model: days.plugin.years
-                delegate: Column {
-                    id: section
-                    required property var modelData
-                    required property int index
-                    readonly property real gridY: grid.y
-                    width: column.width
-                    spacing: 8
-                    Item {
-                        width: parent.width
-                        height: Math.max(heading.implicitHeight, inGrid.implicitHeight)
-                        UiText {
-                            id: heading
-                            anchors.verticalCenter: parent.verticalCenter
-                            textFormat: Text.StyledText
-                            text: qsTr("%n years ago", "", section.modelData.ago)
-                                  + " <font color=\"" + theme.darkForeground + "\">· " + section.modelData.year
-                                  + " · " + qsTr("%n photos", "", section.modelData.positions.length) + "</font>"
-                            color: theme.brightForeground
+            UiText {
+                id: headingText
+                visible: line.heading
+                y: line.above + centredIn(inGrid.height)
+                textFormat: Text.StyledText
+                text: !line.heading || !line.year ? ""
+                    : qsTr("%n years ago", "", line.year.ago)
+                      + " <font color=\"" + theme.darkForeground + "\">· " + line.year.label
+                      + " · " + qsTr("%n photos", "", line.year.photos.length) + "</font>"
+                color: theme.brightForeground
+            }
+            ShellButton {
+                id: inGrid
+                visible: line.heading
+                anchors.right: parent.right
+                y: line.above
+                flat: true
+                text: qsTr("In the grid")
+                onTapped: days.reveal(line.year.photos[0])
+            }
+
+            Row {
+                visible: !line.heading
+                spacing: days.gap
+                Repeater {
+                    model: line.heading || !line.year ? [] : line.year.photos.slice(line.modelData.k, line.modelData.k + days.columns)
+                    delegate: Item {
+                        id: tile
+                        required property int modelData
+                        required property int index
+                        readonly property int at: days.starts[line.modelData.s] + line.modelData.k + index
+                        width: days.cell
+                        height: days.cell
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.06)
                         }
-                        ShellButton {
-                            id: inGrid
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            flat: true
-                            text: qsTr("In the grid")
-                            onTapped: days.reveal(section.modelData.positions[0])
+                        Image {
+                            anchors.fill: parent
+                            source: days.pinhole.library.item(tile.modelData).thumbnail ?? ""
+                            sourceSize.width: days.cell * 1.5
+                            sourceSize.height: days.cell * 1.5
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            opacity: status === Image.Ready ? (hover.hovered ? 0.85 : 1) : 0
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
                         }
-                    }
-                    Flow {
-                        id: grid
-                        width: parent.width
-                        spacing: days.gap
-                        Repeater {
-                            model: section.modelData.positions
-                            delegate: Item {
-                                id: tile
-                                required property int modelData
-                                required property int index
-                                readonly property var item: days.pinhole.library.item(modelData)
-                                readonly property int at: (days.starts[section.index] || 0) + tile.index
-                                // Loaded once near the view, and kept.
-                                readonly property real topY: section.y + grid.y + y
-                                readonly property bool near: days.shown && topY < flick.contentY + 2 * flick.height
-                                                             && topY + height > flick.contentY - flick.height
-                                property bool wanted: false
-                                onNearChanged: if (near) wanted = true
-                                Component.onCompleted: wanted = near
-                                width: days.cell
-                                height: days.cell
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.06)
-                                }
-                                Image {
-                                    anchors.fill: parent
-                                    source: tile.wanted ? tile.item.thumbnail : ""
-                                    sourceSize.width: days.cell * 1.5
-                                    sourceSize.height: days.cell * 1.5
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    opacity: status === Image.Ready ? (hover.hovered ? 0.85 : 1) : 0
-                                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                                }
-                                Chip {
-                                    visible: tile.item.video
-                                    anchors.left: parent.left
-                                    anchors.bottom: parent.bottom
-                                    anchors.margins: 6
-                                    text: "▶"
-                                }
-                                // The one the keys are on, while they are in use.
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: "transparent"
-                                    border.width: 2
-                                    border.color: theme.brightForeground
-                                    visible: keymap.input === "keyboard" && days.cursor === tile.at
-                                }
-                                HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: days.openPhoto(tile.at) }
-                            }
+                        Chip {
+                            visible: days.plugin.isVideo[tile.modelData] === true
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 6
+                            text: "▶"
                         }
+                        // The one the keys are on, while they are in use.
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            border.width: 2
+                            border.color: theme.brightForeground
+                            visible: keymap.input === "keyboard" && days.cursor === tile.at
+                        }
+                        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: days.openPhoto(tile.at) }
                     }
                 }
             }

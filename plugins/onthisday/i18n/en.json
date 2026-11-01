@@ -19,6 +19,10 @@
     "one": "Taken a year ago today, in %1.",
     "other": "Taken %n years ago today, in %1."
   },
+  "Taken around this day %n years ago, in %1.": {
+    "one": "Taken around this day a year ago, in %1.",
+    "other": "Taken around this day %n years ago, in %1."
+  },
   "This day in %n earlier years: D in the grid.": {
     "one": "This day in %n earlier year: D in the grid.",
     "other": "This day in %n earlier years: D in the grid."

@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 
 PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(parent), m_library(library) {}
 
@@ -68,6 +69,50 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
         // The thumbnail's average colour, "#rrggbb"; "" before it has one.
         {"avgColor", item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name()},
     };
+}
+
+QVariantList PluginLibrary::field(const QString &name) const {
+    const auto column = [this](auto value) {
+        QVariantList list;
+        list.reserve(m_library->count());
+        for (int i = 0; i < m_library->count(); ++i)
+            list.append(value(m_library->at(i)));
+        return list;
+    };
+    if (name == QLatin1String("date"))
+        return column([](const LibraryItem &item) { return double(item.date); });
+    // Not one of item's: the day it was taken, in local time, as yyyymmdd
+    // (20250108); 0 for a photo with no date. The C library's local time,
+    // a fifteenth of QDateTime's.
+    if (name == QLatin1String("day"))
+        return column([](const LibraryItem &item) {
+            if (item.date <= 0)
+                return 0;
+            const time_t seconds = time_t(item.date / 1000);
+            struct tm local;
+            if (!localtime_r(&seconds, &local))
+                return 0;
+            return (local.tm_year + 1900) * 10000 + (local.tm_mon + 1) * 100 + local.tm_mday;
+        });
+    if (name == QLatin1String("id"))
+        return column([](const LibraryItem &item) { return QString::fromUtf8(item.id); });
+    if (name == QLatin1String("filename"))
+        return column([](const LibraryItem &item) { return item.filename; });
+    if (name == QLatin1String("width"))
+        return column([](const LibraryItem &item) { return int(item.thumbW); });
+    if (name == QLatin1String("height"))
+        return column([](const LibraryItem &item) { return int(item.thumbH); });
+    if (name == QLatin1String("video"))
+        return column([](const LibraryItem &item) { return item.video; });
+    if (name == QLatin1String("live"))
+        return column([](const LibraryItem &item) { return item.live; });
+    if (name == QLatin1String("favorite"))
+        return column([](const LibraryItem &item) { return item.favorite; });
+    if (name == QLatin1String("avgColor"))
+        return column([](const LibraryItem &item) {
+            return item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name();
+        });
+    return {};
 }
 
 int PluginLibrary::indexOf(const QString &id) const {

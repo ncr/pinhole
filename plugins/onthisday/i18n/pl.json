@@ -49,6 +49,12 @@
     "many": "Zrobione dziś %n lat temu, w %1.",
     "other": "Zrobione dziś %n lat temu, w %1."
   },
+  "Taken around this day %n years ago, in %1.": {
+    "one": "Zrobione około tego dnia rok temu, w %1.",
+    "few": "Zrobione około tego dnia %n lata temu, w %1.",
+    "many": "Zrobione około tego dnia %n lat temu, w %1.",
+    "other": "Zrobione około tego dnia %n lat temu, w %1."
+  },
   "Tap it": "Stuknij je",
   "The day": "Ten dzień",
   "This day in %n earlier years: D in the grid.": {

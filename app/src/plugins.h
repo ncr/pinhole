@@ -47,6 +47,11 @@ public:
     // thumbnail (a URL), width and height (of the thumbnail), video, live,
     // favorite. Empty if there is no such photo.
     Q_INVOKABLE QVariantMap item(const QJSValue &photo) const;
+    // One of item's fields for every photo, in the library's order: all
+    // the dates at once, say, without a map made for each photo; or "day",
+    // the day each was taken, in local time, as yyyymmdd. Empty for a
+    // name it has not.
+    Q_INVOKABLE QVariantList field(const QString &name) const;
     // A photo's position from its id, -1 if the library has none.
     Q_INVOKABLE int indexOf(const QString &id) const;
     // A position, or an id, as a position; -1 if neither is one here.
