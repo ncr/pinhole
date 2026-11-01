@@ -99,6 +99,8 @@ struct Scratch {
     log: PathBuf,
     plugin: PathBuf,
     pinholed: Option<Child>,
+    /// More of pinholed's environment than the scratch folders.
+    env: Vec<(&'static str, String)>,
 }
 
 impl Scratch {
@@ -125,6 +127,7 @@ impl Scratch {
             plugin,
             root,
             pinholed: None,
+            env: Vec::new(),
         };
         scratch.switch(Some(true));
         scratch
@@ -154,10 +157,20 @@ impl Scratch {
 
     fn start(&mut self) -> Window {
         let log = std::fs::File::create(&self.log).unwrap();
+        let child = self.pinholed(&self.socket).stderr(log).spawn().unwrap();
+        self.pinholed = Some(child);
+        let mut window = Window::connect(&self.socket);
+        window.event(5, |e| e["event"] == "kinds");
+        window
+    }
+
+    /// pinholed on `socket`, with everything in the scratch folder.
+    fn pinholed(&self, socket: &Path) -> Command {
         let r = |dir: &str| self.root.join(dir);
-        let child = Command::new(env!("CARGO_BIN_EXE_pinholed"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pinholed"));
+        command
             .arg("--socket")
-            .arg(&self.socket)
+            .arg(socket)
             .arg("--auth")
             .arg("/nonexistent/pinhole-auth")
             .env_clear()
@@ -173,15 +186,10 @@ impl Scratch {
             .env("PINHOLE_BUILTIN_PLUGINS", r("builtin"))
             .env("PINHOLE_SYNC_SECS", "5")
             .env("PINHOLE_PROVIDER_SILENCE_SECS", "3")
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(log)
-            .spawn()
-            .unwrap();
-        self.pinholed = Some(child);
-        let mut window = Window::connect(&self.socket);
-        window.event(5, |e| e["event"] == "kinds");
-        window
+            .stdout(Stdio::null());
+        command
     }
 
     fn logged(&self) -> String {
@@ -798,8 +806,9 @@ fn a_providers_files_and_urls_hold_up_no_download_and_are_never_kept_in_memory()
     }
 
     // A photo's medium made from its original by URL: fetched into the
-    // cache's making/, never into TMPDIR, and gone once made.
-    let making = scratch.root.join("data/pinhole/cache/making");
+    // cache's making/ (a folder of its pid's), never into TMPDIR, and
+    // gone once made.
+    let making = scratch.root.join("data/pinhole/cache/making").join(scratch.pinholed.as_ref().unwrap().id().to_string());
     let tmp = scratch.root.join("tmp");
     let stall = scratch.photos().join(".stall");
     std::fs::write(&stall, b"").unwrap();
@@ -870,4 +879,128 @@ fn fifty_thousand_assets_through_the_protocol() {
     let listed_at = meta(&library, "listed_at");
     assert!(until(60, || meta(&library, "listed_at") != listed_at), "not listed again");
     assert!(!scratch.logged().contains("change token"), "{}", scratch.logged());
+}
+
+fn has_ffmpeg() -> bool {
+    Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// A video at `path`, its index first and keyframes every second.
+fn clip(path: &Path, secs: u32) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let made = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", &format!("testsrc2=duration={secs}:size=320x180:rate=25"), "-c:v", "libx264",
+               "-preset", "ultrafast", "-g", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(made.success());
+}
+
+/// A link gone stale (401, 403, 404, 410) before a thumbnail or medium is
+/// made from what it names: prepared again, once, as any other link is,
+/// for a photo's original fetched whole and a video's read by ffmpeg.
+#[test]
+fn a_stale_link_to_make_a_thumbnail_or_medium_from_is_prepared_again() {
+    let ffmpeg = has_ffmpeg();
+    let mut scratch = Scratch::new("stale");
+    photos(&scratch.photos(), 4);
+    if ffmpeg {
+        clip(&scratch.photos().join("v/clip.mp4"), 4);
+    }
+    let n = 4 + ffmpeg as i64;
+    scratch.misbehave(json!({"prepare": "expired"}));
+    let mut window = scratch.start();
+    let answer = window.result("sign_in", json!({"kind": KIND, "folder": scratch.photos(), "password": "ok", "tickets": "url", "all_url": true}));
+    assert_eq!(answer["state"], "signed_in");
+    let library = library_of(&mut window);
+    let prepared = || std::fs::read_to_string(scratch.state().join("prepared.log")).unwrap_or_default();
+    assert!(until(60, || count(&library) == (n, n)), "not listed: {:?}\n{}\n{}", count(&library), prepared(), scratch.logged());
+    if ffmpeg {
+        let prepared = prepared();
+        assert!(prepared.contains("original v/clip.mp4 stale\n") && prepared.contains("original v/clip.mp4 good\n"), "{prepared}");
+    }
+    let medium = window.ask("fetch", json!({"asset": "00/IMG_0002.jpg", "kind": "medium"}));
+    assert_eq!(medium["ok"], true, "{medium:#}\n{}", prepared());
+    let made = image::open(medium["result"]["path"].as_str().unwrap()).unwrap();
+    assert_eq!((made.width(), made.height()), (64, 48));
+    let prepared = prepared();
+    assert!(prepared.contains("original 00/IMG_0002.jpg stale\n") && prepared.contains("original 00/IMG_0002.jpg good\n"), "{prepared}");
+}
+
+/// ffmpeg reads a provider's video from pinholed on the loopback, never
+/// through the proxy `http_proxy` names: one that does not answer fails no
+/// thumbnail. (pinholed reaches the provider's own server by the name
+/// `no_proxy` gives.)
+#[test]
+fn a_video_on_the_loopback_is_read_past_a_proxy() {
+    if !has_ffmpeg() {
+        return;
+    }
+    let mut scratch = Scratch::new("proxy");
+    clip(&scratch.photos().join("v/clip.mp4"), 4);
+    let dead = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    scratch.env = vec![("http_proxy", format!("http://127.0.0.1:{dead}")), ("no_proxy", "localhost".into())];
+    let mut window = scratch.start();
+    let answer = window.result("sign_in", json!({"kind": KIND, "folder": scratch.photos(), "password": "ok", "tickets": "url", "host": "localhost"}));
+    assert_eq!(answer["state"], "signed_in");
+    let library = library_of(&mut window);
+    assert!(until(60, || count(&library) == (1, 1)), "no thumbnail: {:?}\n{}", count(&library), scratch.logged());
+    let served = std::fs::read_to_string(scratch.state().join("served.log")).unwrap_or_default();
+    assert!(served.lines().any(|l| l.starts_with("v/clip.mp4 bytes=")), "{served}");
+}
+
+/// A file one pinholed is making from (a provider's original fetched into
+/// the cache's making/) stays while another starts: the shared service
+/// started again beside a window's own, which shares its cache. What one
+/// that has ended left there goes.
+#[test]
+fn a_service_starting_leaves_what_another_is_making() {
+    let mut scratch = Scratch::new("making");
+    photos(&scratch.photos(), 4);
+    let mut window = scratch.start();
+    let answer = window.result("sign_in", json!({"kind": KIND, "folder": scratch.photos(), "password": "ok", "tickets": "url", "all_url": true}));
+    assert_eq!(answer["state"], "signed_in");
+    let library = library_of(&mut window);
+    assert!(until(60, || count(&library) == (4, 4)), "not listed: {:?}\n{}", count(&library), scratch.logged());
+    let making = scratch.root.join("data/pinhole/cache/making");
+    let parts = || {
+        let mut found = Vec::new();
+        let mut stack = vec![making.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                if entry.file_type().unwrap().is_dir() {
+                    stack.push(entry.path());
+                } else if entry.file_name().to_string_lossy().ends_with(".part") {
+                    found.push(entry.path());
+                }
+            }
+        }
+        found
+    };
+    // One of this pinholed's, part way.
+    let stall = scratch.photos().join(".stall");
+    std::fs::write(&stall, b"").unwrap();
+    let asked = send_fetch(&mut window, "00/IMG_0001.jpg", "medium");
+    assert!(until(20, || !parts().is_empty()), "nothing in {}", making.display());
+    let part = parts().pop().unwrap();
+    // What one that ended left, in a folder of its own (its pid's).
+    let gone = making.join("999999999");
+    std::fs::create_dir_all(&gone).unwrap();
+    std::fs::write(gone.join("left.part"), b"x").unwrap();
+    // Another starts on the same cache.
+    let socket = PathBuf::from("/tmp").join(format!("pinhole-making2-{}.sock", std::process::id()));
+    let log = std::fs::File::create(scratch.root.join("second.log")).unwrap();
+    let mut second = scratch.pinholed(&socket).stderr(log).spawn().unwrap();
+    let mut other = Window::connect(&socket);
+    other.event(5, |e| e["event"] == "kinds");
+    let _ = second.kill();
+    let _ = second.wait();
+    let _ = std::fs::remove_file(&socket);
+    assert!(part.exists(), "{} removed as another started", part.display());
+    assert!(!gone.exists(), "what one that ended left is still there");
+    std::fs::remove_file(&stall).unwrap();
+    let medium = answer_to(&mut window, asked, 20);
+    assert_eq!(medium["ok"], true, "{medium:#}");
+    assert!(parts().is_empty(), "{:?}", parts());
 }

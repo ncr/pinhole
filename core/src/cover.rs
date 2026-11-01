@@ -8,9 +8,9 @@
 //! has little). A frame with almost no spread is dull, whatever its colour;
 //! a dark night scene or a blue one under water still has some.
 
-use std::ffi::OsStr;
+use std::fs::File;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
 use image::RgbImage;
@@ -66,36 +66,77 @@ fn measure(image: &RgbImage) -> (f64, f64) {
     (spread, if count == 0 { 0.0 } else { steps / count as f64 })
 }
 
-/// A JPEG of the video's most telling frame, at most `edge` on the long
-/// side. Background work (background.rs): the caller holds a slot.
-pub fn pick(video: &Path, edge: u32) -> Result<Vec<u8>> {
-    best(video, edge).map(|(_, jpeg)| jpeg)
+/// Where ffmpeg reads a video from.
+#[derive(Clone, Copy)]
+pub enum Input<'a> {
+    /// A file it opens by its path: a folder's, or one pinholed made.
+    Path(&'a Path),
+    /// A file already opened, and found to be one (a provider's path
+    /// ticket): its stdin, which it opens again as /dev/stdin, the very
+    /// file whatever is at its path by then, and seeks in.
+    File(&'a File),
+    /// An HTTP URL on the loopback (process.rs serves a provider's there):
+    /// by that protocol only, as a playlist it is given could name a file,
+    /// and never through a proxy (`http_proxy`), which would be given the
+    /// URL and could not reach it.
+    Url(&'a str),
 }
 
-/// The same of a video ffmpeg reads from `input` (a URL), with
-/// `input_args` (ffmpeg's options for it) before it.
-pub fn pick_from(input: &OsStr, input_args: &[&str], edge: u32) -> Result<Vec<u8>> {
-    best_from(input, input_args, edge).map(|(_, jpeg)| jpeg)
+impl Input<'_> {
+    /// ffmpeg or ffprobe reading it, `before` its options for it.
+    fn command(&self, program: &str, before: &[&str]) -> Result<Command> {
+        let mut command = crate::background::command(program);
+        command.args(["-v", "error"]);
+        if program == "ffmpeg" {
+            // Its stdin is the file, not keys to quit with.
+            command.arg("-nostdin");
+        }
+        command.args(before);
+        match self {
+            Input::Path(path) => {
+                command.args(["-protocol_whitelist", "file", "-i"]).arg(path).stdin(Stdio::null());
+            }
+            Input::File(file) => {
+                command.args(["-protocol_whitelist", "file", "-i", "/dev/stdin"]).stdin(file.try_clone()?);
+            }
+            Input::Url(url) => {
+                // Its reads time out as pinholed's of the provider do.
+                command.args(["-protocol_whitelist", "http,tcp", "-rw_timeout", "60000000", "-i", url]).stdin(Stdio::null());
+                for proxy in ["http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"] {
+                    command.env_remove(proxy);
+                }
+            }
+        }
+        Ok(command)
+    }
+}
+
+/// A JPEG of the video's most telling frame, at most `edge` on the long
+/// side. Background work (background.rs): the caller holds a slot.
+pub fn pick(input: Input, edge: u32) -> Result<Vec<u8>> {
+    best_from(input, edge).map(|(_, jpeg)| jpeg)
 }
 
 /// When the video's most telling frame is, in seconds, and a JPEG of it at
 /// most `edge` on the long side.
 pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
-    best_from(video.as_os_str(), &[], edge)
+    best_from(Input::Path(video), edge)
 }
 
-fn best_from(video: &OsStr, input_args: &[&str], edge: u32) -> Result<(f64, Vec<u8>)> {
+fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
     // A video whose length ffprobe cannot tell, or a very short one, from
     // its start.
-    let times: Vec<f64> = match duration(video, input_args) {
+    let times: Vec<f64> = match duration(input)? {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
     let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
     for at in times {
-        let jpeg = match frame_from(video, input_args, at, edge) {
+        let jpeg = match frame_from(input, at, edge) {
             Ok(jpeg) => jpeg,
+            // One stopped after its deadline: so would the rest be.
+            Err(e) if timed_out(&e) => return Err(e),
             Err(e) => {
                 failed = Some(e);
                 continue;
@@ -109,43 +150,42 @@ fn best_from(video: &OsStr, input_args: &[&str], edge: u32) -> Result<(f64, Vec<
     }
     match best {
         Some((_, at, jpeg)) => Ok((at, jpeg)),
-        None => frame_from(video, input_args, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
+        None => frame_from(input, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
     }
 }
 
 /// A JPEG of the frame `at` seconds in, at most `edge` on the long side.
 pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
-    frame_from(video.as_os_str(), &[], at, edge)
+    frame_from(Input::Path(video), at, edge)
 }
 
-fn frame_from(video: &OsStr, input_args: &[&str], at: f64, edge: u32) -> Result<Vec<u8>> {
+fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
     let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
-    let output = crate::background::command("ffmpeg")
-        .args(["-v", "error", "-threads", "1"])
-        .args(input_args)
-        .args(["-ss", &format!("{at:.3}"), "-i"])
-        .arg(video)
-        .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
-        .stdin(Stdio::null())
-        .output()
-        .context("running ffmpeg")?;
+    let mut ffmpeg = input.command("ffmpeg", &["-threads", "1", "-ss", &format!("{at:.3}")])?;
+    ffmpeg.args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
+    let output = crate::background::output(&mut ffmpeg, crate::background::DEADLINE).context("running ffmpeg")?;
     if output.stdout.is_empty() {
         return Err(anyhow!("no frame at {at:.1} s: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
     Ok(output.stdout)
 }
 
-/// The video's length in seconds, from ffprobe.
-fn duration(video: &OsStr, input_args: &[&str]) -> Option<f64> {
-    let output = crate::background::command("ffprobe")
-        .args(["-v", "error"])
-        .args(input_args)
-        .args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"])
-        .arg(video)
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok().filter(|d: &f64| d.is_finite())
+/// The video's length in seconds, from ffprobe, if it can tell; an error
+/// only when it was stopped after its deadline.
+fn duration(input: Input) -> Result<Option<f64>> {
+    let mut ffprobe = input.command("ffprobe", &[])?;
+    ffprobe.args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]);
+    let output = match crate::background::output(&mut ffprobe, crate::background::DEADLINE) {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(anyhow::Error::from(e).context("running ffprobe")),
+        Err(_) => return Ok(None),
+    };
+    Ok(String::from_utf8_lossy(&output.stdout).trim().parse().ok().filter(|d: &f64| d.is_finite()))
+}
+
+/// Whether a program was stopped after its deadline (background::output).
+pub fn timed_out(e: &anyhow::Error) -> bool {
+    e.chain().any(|e| e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::TimedOut))
 }
 
 #[cfg(test)]
@@ -186,7 +226,7 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
-        let jpeg = pick(&video, 80).unwrap();
+        let jpeg = pick(Input::Path(&video), 80).unwrap();
         let image = image::load_from_memory(&jpeg).unwrap().to_rgb8();
         assert_eq!(image.dimensions(), (80, 45));
         assert!(!dull(&image));

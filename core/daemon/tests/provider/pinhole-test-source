@@ -77,6 +77,9 @@ def entry_for(params):
         entry["fake"] = int(params["fake"])
     if params.get("all_url"):
         entry["all_url"] = True
+    if params.get("host") == "localhost":
+        # Its URLs by that name rather than 127.0.0.1.
+        entry["host"] = "localhost"
     return entry
 
 
@@ -296,9 +299,23 @@ def ticket(entry, want, how=None):
         if not os.path.exists(fifo):
             os.mkfifo(fifo)
         return {"path": fifo}
+    if how == "expired":
+        # A URL whose sign-in has gone stale, the first time each file is
+        # prepared; a good one the next.
+        asked = f"{want['kind']} {want['name']}"
+        try:
+            with open(state("prepared.log")) as f:
+                stale = asked + " stale\n" not in f.read()
+        except OSError:
+            stale = True
+        with open(state("prepared.log"), "a") as f:
+            f.write(asked + (" stale\n" if stale else " good\n"))
+        port = serve(folder)
+        url = f"http://{entry.get('host', '127.0.0.1')}:{port}/" + "/".join(want["name"].split(os.sep))
+        return {"url": url, "headers": {"Authorization": "Bearer stale" if stale else f"Bearer {SECRET}"}}
     if entry.get("tickets") == "url" and (want["kind"] == "thumb" or want["name"].endswith(".mp4") or entry.get("all_url")):
         port = serve(folder)
-        url = f"http://127.0.0.1:{port}/" + "/".join(want["name"].split(os.sep))
+        url = f"http://{entry.get('host', '127.0.0.1')}:{port}/" + "/".join(want["name"].split(os.sep))
         return {"url": url, "headers": {"Authorization": f"Bearer {SECRET}"}}
     return {"path": path}
 

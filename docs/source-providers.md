@@ -77,6 +77,14 @@ moved) is the same: its sources stay in the settings for when it is back.
 Turning a plugin on is trusting it. It runs as you, as every plugin does;
 these rules keep plugins from stepping on each other, not from you.
 
+What it gives pinholed stays yours, not other users' of the computer. A
+video's `url` that ffmpeg reads is served to it by pinholed on 127.0.0.1,
+with your headers added there: at a path no one could guess, which is on
+ffmpeg's command line, where other users can see it, so pinholed answers
+only programs of yours (it asks the kernel whose the other end of each
+connection is), a request head of at most 8 KB and eight at once. ffmpeg
+reads it directly, never through a proxy `http_proxy` names.
+
 ## How it runs
 
 pinholed starts it as
@@ -312,7 +320,11 @@ A rendition is one file of the asset, for a kind the window asks for:
   ticket is quickest. A photo's `url` is fetched whole first, into the
   cache, and only up to 512 MB; a video's is read by ffmpeg, by ranges,
   only what it needs (through pinholed, so your headers are never on a
-  command line).
+  command line). An answer of 401, 403, 404 or 410 to either is a stale
+  ticket, as for any `url`: `prepare` is asked again, once. ImageMagick
+  or ffmpeg still going after three minutes is stopped (a mount that no
+  longer answers), and at most two videos are read from URLs at once,
+  beside, not instead of, a folder's thumbnails.
 - A photo with no `thumb` shows as its average colour, a blank.
 
 pinholed checks every asset before it writes it. One that is not right

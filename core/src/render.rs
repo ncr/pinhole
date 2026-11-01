@@ -4,9 +4,13 @@
 //! ImageMagick, a video's from its most telling frame (cover.rs).
 
 use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
+
+use crate::cover::Input;
 
 /// Long edges of the thumbnail (kept in the library, as iCloud's are) and
 /// of the medium size (made into the cache when first asked for).
@@ -18,40 +22,61 @@ pub fn is_video(path: &Path) -> bool {
     crate::add::VIDEOS.contains(&crate::add::extension(path).as_str())
 }
 
-/// A JPEG of a photo or of a video's frame, at most `edge` on the long
-/// side, the right way up. `video` says which it is, when the file's name
-/// does not.
-pub fn render(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
-    // Only a file: a FIFO or a device would hold whoever reads it, and a
-    // place among background work with it.
+/// `O_NONBLOCK` (Linux, as on x86 and ARM): a FIFO put where a file was is
+/// opened without waiting for a writer.
+pub(crate) const O_NONBLOCK: i32 = 0o4000;
+
+/// The same as `render`, of the file at `path`: only a file (a FIFO or a
+/// device would hold whoever reads it), opened without waiting and found
+/// to be one once open, then read only through what was opened.
+pub fn render_path(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
+    let not_a_file = || anyhow!("{} is not a file", path.display());
     if !std::fs::metadata(path)?.is_file() {
-        return Err(anyhow!("{} is not a file", path.display()));
+        return Err(not_a_file());
     }
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(not_a_file());
+    }
+    let size = if video { None } else { size(&file) };
+    render(&file, size, edge, video)
+}
+
+/// A photo's size in pixels, from its start, if it is a kind `image` reads
+/// (a JPEG). It reads the file: on a mount that may not answer, done where
+/// that holds no one up (process.rs).
+pub fn size(mut file: &File) -> Option<(u32, u32)> {
+    file.seek(SeekFrom::Start(0)).ok()?;
+    image::ImageReader::new(BufReader::new(file)).with_guessed_format().ok()?.into_dimensions().ok()
+}
+
+/// A JPEG of a photo or of a video's frame, at most `edge` on the long
+/// side, the right way up, from a file already opened and found to be a
+/// file: whatever is at its path by now (a FIFO put there) is never what
+/// is read. `size` is the photo's (`size`), if known. Each program that
+/// makes it is stopped after `background::DEADLINE`.
+pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> Result<Vec<u8>> {
     // A video's from its most telling frame (cover.rs).
     if video {
         // Never more at once than background work may take (background.rs).
         let _slot = crate::background::slot();
-        return crate::cover::pick(path, edge);
+        return crate::cover::pick(Input::File(file), edge);
     }
     // On stdin, as jpeg.rs reads it: a name is never taken for
-    // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
-    let file = File::open(path)?;
+    // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it). From
+    // its start, wherever reading its size left it.
+    let mut stdin = file.try_clone()?;
+    stdin.seek(SeekFrom::Start(0))?;
     let fit = format!("{edge}x{edge}>");
     let mut magick = crate::background::command("magick");
     // Decoding a big JPEG at a fraction of its size is much quicker. Only
     // a big one: the hint lets the decoder enlarge a small one too.
-    let big = image::image_dimensions(path).is_ok_and(|(w, h)| w.max(h) > edge * 2);
-    if big {
+    if size.is_some_and(|(w, h)| w.max(h) > edge * 2) {
         magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
     }
-    // The file opened and its size read first: one that takes its time
-    // holds no place among background work meanwhile.
+    magick.args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"]).stdin(stdin);
     let _slot = crate::background::slot();
-    let output = magick
-        .args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
-        .stdin(file)
-        .output()
-        .context("running magick")?;
+    let output = crate::background::output(&mut magick, crate::background::DEADLINE).context("running magick")?;
     if output.stdout.is_empty() {
         return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
     }
@@ -59,9 +84,61 @@ pub fn render(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
 }
 
 /// A JPEG of a video's most telling frame, read from an HTTP URL by
-/// ffmpeg (process.rs serves a provider's on the loopback): by that
-/// protocol only, as a playlist it is given could name a file.
+/// ffmpeg (process.rs serves a provider's on the loopback). It mostly
+/// waits on the network, so it holds a place among those that do, never
+/// one a folder's thumbnails wait for (background.rs).
 pub fn render_video_url(url: &str, edge: u32) -> Result<Vec<u8>> {
-    let _slot = crate::background::slot();
-    crate::cover::pick_from(std::ffi::OsStr::new(url), &["-protocol_whitelist", "http,tcp"], edge)
+    let _slot = crate::background::network_slot();
+    crate::cover::pick(Input::Url(url), edge)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    fn has(program: &str) -> bool {
+        Command::new(program).arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    }
+
+    /// The file opened is what is made, whatever is put at its path after:
+    /// a FIFO there is never opened (it would hold whoever reads it).
+    #[test]
+    fn what_is_made_is_the_file_opened_not_what_is_at_its_path_by_then() {
+        let dir = std::env::temp_dir().join(format!("pinhole-render-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("fifo");
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+
+        let photo = dir.join("photo.jpg");
+        image::RgbImage::from_pixel(1200, 800, image::Rgb([200, 40, 40])).save(&photo).unwrap();
+        let file = File::open(&photo).unwrap();
+        std::fs::rename(&fifo, &photo).unwrap();
+        let size = size(&file);
+        assert_eq!(size, Some((1200, 800)));
+        let started = Instant::now();
+        let jpeg = render(&file, size, 480, false).unwrap();
+        let made = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((made.width(), made.height()), (480, 320));
+        assert!(started.elapsed() < Duration::from_secs(30));
+
+        if has("ffmpeg") {
+            let video = dir.join("clip.mp4");
+            let made = Command::new("ffmpeg")
+                .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=duration=3:size=320x180:rate=10", "-pix_fmt", "yuv420p"])
+                .arg(&video)
+                .status()
+                .unwrap();
+            assert!(made.success());
+            let file = File::open(&video).unwrap();
+            assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+            std::fs::rename(&fifo, &video).unwrap();
+            let jpeg = render(&file, None, 160, true).unwrap();
+            let made = image::load_from_memory(&jpeg).unwrap();
+            assert_eq!((made.width(), made.height()), (160, 90));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

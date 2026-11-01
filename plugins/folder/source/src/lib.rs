@@ -414,7 +414,7 @@ impl FolderSource {
     /// side, the right way up (pinhole-core's render.rs).
     fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
         let path = self.root.join(rel);
-        pinhole_core::render::render(&path, edge, media_of(&path) == Some(Media::Video))
+        pinhole_core::render::render_path(&path, edge, media_of(&path) == Some(Media::Video))
             .with_context(|| format!("could not make an image of {rel}"))
     }
 }

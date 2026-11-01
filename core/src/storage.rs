@@ -81,13 +81,36 @@ fn follow_cache(cache: &Path) {
 }
 
 /// Where a file fetched only to make another of is kept while it is
-/// (process.rs: a provider's original, for its thumbnail): `making/` in
-/// the cache in use, on disk with the photos rather than in memory, and
-/// never among the photos the limit counts. Emptied as the shared
-/// service starts.
+/// (process.rs: a provider's original, for its thumbnail): `making/<pid>/`
+/// in the cache in use, on disk with the photos rather than in memory, and
+/// never among the photos the limit counts. A folder of this pinholed's
+/// own, as a window's service of a library given shares the cache with the
+/// shared service (`forget_making`).
 pub fn making() -> PathBuf {
+    all_making().join(std::process::id().to_string())
+}
+
+fn all_making() -> PathBuf {
     let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     cache.unwrap_or_else(|| std::env::temp_dir().join("pinhole-cache")).join("making")
+}
+
+/// What services that have ended left in making/: the folders of pids no
+/// longer running (and files from before there were any). Never what one
+/// still running is making.
+pub fn forget_making() {
+    let Ok(entries) = std::fs::read_dir(all_making()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let running = name.to_str().and_then(|n| n.parse::<u32>().ok()).is_some_and(|pid| Path::new("/proc").join(pid.to_string()).exists());
+        if running {
+            continue;
+        }
+        let _ = match entry.file_type() {
+            Ok(t) if t.is_dir() => std::fs::remove_dir_all(entry.path()),
+            _ => std::fs::remove_file(entry.path()),
+        };
+    }
 }
 
 /// Whether a file is one being written: a download (`<name>.part`), or a

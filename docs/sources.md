@@ -229,7 +229,11 @@ the person does goes first, and only on four in five of the physical cores
 with their second threads, so the rest stay free however many threads a
 decoder starts itself (libheif does). On an 8-core Ryzen, Pictures/iCloud
 (654 assets) took 37 s at 80% of the CPU, and a single-threaded task beside
-it ran 7% slower instead of twice as slow.
+it ran 7% slower instead of twice as slow. As many run at once as those
+cores have threads; a provider's video read from a URL by ffmpeg, which
+mostly waits on the network, takes one of two places of its own instead.
+One still going after three minutes (a mount that no longer answers) is
+stopped, and its place is free.
 
 ## Choosing a source
 

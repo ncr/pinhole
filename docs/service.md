@@ -490,8 +490,10 @@ recently used go, every two minutes, down to nine tenths of it. A file
 still being written (`<name>.part`, or `<name>.part.<ext>` for one being
 made: a JPEG, an effect) is never counted, moved or evicted. A
 provider's original fetched only to make a thumbnail of
-(docs/source-providers.md) waits in `cache/making/` meanwhile, outside
-the photos counted; the folder is emptied as the service starts.
+(docs/source-providers.md) waits in `cache/making/<pid>/` meanwhile,
+outside the photos counted. A window's service of a library given
+shares the cache, so each has a folder of its own there; any service
+starting removes those of services no longer running.
 
 The window's settings panel changes the folder and the limit with
 `set_storage`; the service keeps them in `~/.config/pinhole/settings.json`

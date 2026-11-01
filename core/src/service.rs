@@ -802,9 +802,10 @@ pub fn run(config: Config) -> Result<()> {
     if given.is_none() {
         shared.storage.resume()?;
         crate::storage::forget_compatible();
-        // What the last one was making from when it ended.
-        let _ = std::fs::remove_dir_all(crate::storage::making());
     }
+    // What services that ended were making from when they did: any
+    // service's to do, as they share the cache.
+    crate::storage::forget_making();
 
     {
         let shared = shared.clone();

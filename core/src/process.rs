@@ -656,15 +656,12 @@ const STUCK_MAX: usize = 4;
 /// medium from: one bigger is no photo to make one of.
 const MAKE_MAX: u64 = 512 << 20;
 
-/// `O_NONBLOCK` (Linux, as on x86 and ARM): a FIFO put where a file was is
-/// opened without waiting for a writer.
-const O_NONBLOCK: i32 = 0o4000;
-
-/// One read of a file done by a thread of its own, which may not come
-/// back (a dead mount): given up on by whoever waits for it, it is counted
-/// in `stuck` until it does.
+/// The reads of a file done by a thread of its own, which may not come
+/// back (a dead mount): given up on by whoever waits for them, or put down
+/// by whoever read them while the thread is still out, it is counted in
+/// `stuck` until the thread has ended.
 struct Watched {
-    /// 0 running, 1 given up on, 2 done.
+    /// 0 running, 1 given up on, 2 ended.
     phase: Mutex<u8>,
     stuck: Arc<AtomicUsize>,
 }
@@ -679,14 +676,23 @@ impl Watched {
     }
 
     /// Back from a call that may block: whether it was given up on
-    /// meanwhile (no longer counted, as it is back).
-    fn back(&self) -> bool {
-        let mut phase = self.phase.lock().unwrap();
+    /// meanwhile, and the thread had better end.
+    fn given_up(&self) -> bool {
+        *self.phase.lock().unwrap() == 1
+    }
+}
+
+/// Held by the thread of a `Watched`, however it ends: it is no longer
+/// counted, nor ever counted after.
+struct Ending(Arc<Watched>);
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        let mut phase = self.0.phase.lock().unwrap();
         if *phase == 1 {
-            *phase = 2;
-            self.stuck.fetch_sub(1, Ordering::SeqCst);
+            self.0.stuck.fetch_sub(1, Ordering::SeqCst);
         }
-        *phase == 2
+        *phase = 2;
     }
 }
 
@@ -699,6 +705,12 @@ fn watched<R: Read + Send + 'static>(
     gap: Duration,
     stuck: &Arc<AtomicUsize>,
 ) -> std::result::Result<Body, FetchError> {
+    // A body put down is counted until its thread is back from the read it
+    // was on, which on a file that answers is at once: a moment for those.
+    let settling = Instant::now();
+    while stuck.load(Ordering::SeqCst) >= STUCK_MAX && settling.elapsed() < Duration::from_millis(100) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let waiting = stuck.load(Ordering::SeqCst);
     if waiting >= STUCK_MAX {
         return Err(FetchError::Failed(anyhow!("{what}: {waiting} reads of this source's files have not come back; none tried until one does")));
@@ -710,8 +722,9 @@ fn watched<R: Read + Send + 'static>(
     std::thread::Builder::new()
         .name("pinholed-file".into())
         .spawn(move || {
+            let _ending = Ending(reading.clone());
             let opened = open();
-            if reading.back() {
+            if reading.given_up() {
                 return;
             }
             let (mut reader, length) = match opened {
@@ -724,7 +737,7 @@ fn watched<R: Read + Send + 'static>(
             loop {
                 let mut buf = vec![0u8; 256 << 10];
                 let read = reader.read(&mut buf);
-                if reading.back() {
+                if reading.given_up() {
                     return;
                 }
                 match read {
@@ -783,29 +796,44 @@ impl Read for Pumped {
     }
 }
 
-/// A file of a path ticket, or bytes `start..=end` of it: only a file
-/// (never a FIFO or a device), read as `watched`.
+impl Drop for Pumped {
+    /// Put down while its thread may still be out on a read: counted until
+    /// that comes back (nothing, when the thread has ended).
+    fn drop(&mut self) {
+        self.watch.give_up();
+    }
+}
+
+/// A path ticket's file, opened: only a file (never a FIFO or a device,
+/// which would hold whoever reads it), and found to be one once open.
+fn open_checked(path: &Path) -> std::result::Result<File, FetchError> {
+    let gone = |e: std::io::Error| match e.kind() {
+        std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
+        _ => FetchError::Failed(anyhow!("{}: {e}", path.display())),
+    };
+    let not_a_file = || FetchError::NotFound(format!("{} is not a file", path.display()));
+    if !std::fs::metadata(path).map_err(gone)?.is_file() {
+        return Err(not_a_file());
+    }
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(crate::render::O_NONBLOCK).open(path).map_err(gone)?;
+    if !file.metadata().map_err(gone)?.is_file() {
+        return Err(not_a_file());
+    }
+    Ok(file)
+}
+
+/// A file of a path ticket, or bytes `start..=end` of it, read as
+/// `watched`.
 fn open_path(path: PathBuf, range: Option<(u64, u64)>, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<Body, FetchError> {
     let what = path.display().to_string();
     watched(what, move || {
-        let gone = |e: std::io::Error| match e.kind() {
-            std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
-            _ => FetchError::Failed(anyhow!("{}: {e}", path.display())),
-        };
-        let not_a_file = || FetchError::NotFound(format!("{} is not a file", path.display()));
-        if !std::fs::metadata(&path).map_err(gone)?.is_file() {
-            return Err(not_a_file());
-        }
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(&path).map_err(gone)?;
-        let meta = file.metadata().map_err(gone)?;
-        if !meta.is_file() {
-            return Err(not_a_file());
-        }
-        let length = meta.len();
+        let mut file = open_checked(&path)?;
+        let failed = |e: std::io::Error| FetchError::Failed(anyhow!("{}: {e}", path.display()));
+        let length = file.metadata().map_err(failed)?.len();
         let n = match range {
             Some((start, end)) => {
-                file.seek(SeekFrom::Start(start)).map_err(gone)?;
+                file.seek(SeekFrom::Start(start)).map_err(failed)?;
                 end.min(length.saturating_sub(1)).saturating_sub(start) + 1
             }
             None => length,
@@ -814,20 +842,44 @@ fn open_path(path: PathBuf, range: Option<(u64, u64)>, gap: Duration, stuck: &Ar
     }, gap, stuck)
 }
 
-/// Whether a path ticket names a file, asked as `watched`: before a
-/// program is started on it, holding a place among background work.
-fn check_path(path: &Path, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<(), FetchError> {
-    open_path(path.to_owned(), Some((0, 0)), gap, stuck).map(drop)
+/// A path ticket's file to make a thumbnail or medium from, opened as
+/// `watched`, and a photo's size read from its start (render::size) the
+/// same way: before a program is started on it, holding a place among
+/// background work, which is given the file itself, never its path again.
+fn open_to_make(path: PathBuf, photo: bool, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<(File, Option<(u32, u32)>), FetchError> {
+    let what = path.display().to_string();
+    let opened: Arc<Mutex<Option<(File, Option<(u32, u32)>)>>> = Arc::default();
+    let put = opened.clone();
+    watched(what, move || {
+        let file = open_checked(&path)?;
+        let size = if photo { crate::render::size(&file) } else { None };
+        *put.lock().unwrap() = Some((file, size));
+        Ok((std::io::empty(), 0))
+    }, gap, stuck)?;
+    let opened = opened.lock().unwrap().take();
+    opened.ok_or_else(|| FetchError::Failed(anyhow!("opened, and then not")))
 }
+
+/// Requests a `Loopback` serves at once: ffmpeg makes one at a time.
+const LOOPBACK_MAX: usize = 8;
+
+/// The longest head of a request to a `Loopback`: ffmpeg's are a few
+/// hundred bytes.
+const HEAD_MAX: u64 = 8 << 10;
 
 /// A provider's URL on the loopback, for ffmpeg to make a video's
 /// thumbnail from: it reads only what it needs, by ranges, and the
 /// ticket's headers (a provider's sign-in) stay in pinholed, never on a
-/// command line. Served until dropped.
+/// command line. Served until dropped, and only to this user's programs:
+/// its URL's path (a token) is on ffmpeg's command line, which other users
+/// can read.
 struct Loopback {
     url: String,
     port: u16,
     stop: Arc<AtomicBool>,
+    /// Whether the provider's server said its URL was stale (401, 403, 404
+    /// or 410), to any request.
+    expired: Arc<AtomicBool>,
 }
 
 impl Loopback {
@@ -835,21 +887,30 @@ impl Loopback {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
         let token = crate::add::uuid();
-        let stop = Arc::new(AtomicBool::new(false));
+        let (stop, expired) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let (stopped, path) = (stop.clone(), format!("/{token}"));
+        let passing = Arc::new(Passing { client, url, headers, path, expired: expired.clone() });
+        let open = Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || {
             for conn in listener.incoming() {
                 if stopped.load(Ordering::SeqCst) {
                     return;
                 }
-                let Ok(conn) = conn else { continue };
-                let (client, url, headers, path) = (client.clone(), url.clone(), headers.clone(), path.clone());
+                let Ok(mut conn) = conn else { continue };
+                if open.fetch_add(1, Ordering::SeqCst) >= LOOPBACK_MAX {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    let _ = conn.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = conn.write_all(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+                    continue;
+                }
+                let (passing, open) = (passing.clone(), open.clone());
                 std::thread::spawn(move || {
-                    let _ = pass_on(conn, &client, &url, &headers, &path);
+                    let _ = pass_on(conn, &passing);
+                    open.fetch_sub(1, Ordering::SeqCst);
                 });
             }
         });
-        Ok(Loopback { url: format!("http://127.0.0.1:{port}/{token}"), port, stop })
+        Ok(Loopback { url: format!("http://127.0.0.1:{port}/{token}"), port, stop, expired })
     }
 }
 
@@ -861,28 +922,76 @@ impl Drop for Loopback {
     }
 }
 
-/// One request to a `Loopback`: passed on to the provider's URL with its
-/// headers and the range asked, and the answer back as it comes.
-fn pass_on(
-    conn: std::net::TcpStream,
-    client: &reqwest::blocking::Client,
-    url: &str,
-    headers: &serde_json::Map<String, Value>,
-    path: &str,
-) -> Result<()> {
+/// What a `Loopback` passes requests on to.
+struct Passing {
+    client: reqwest::blocking::Client,
+    url: String,
+    headers: serde_json::Map<String, Value>,
+    /// Its URL's path.
+    path: String,
+    expired: Arc<AtomicBool>,
+}
+
+extern "C" {
+    fn geteuid() -> u32;
+}
+
+/// The user whose socket the other end of a connection on the loopback
+/// is, from the kernel's table of them (/proc/net/tcp): its local address
+/// is this end's peer, and its remote this end's own.
+fn peer_user(conn: &std::net::TcpStream) -> Option<u32> {
+    let hex = |addr: std::net::SocketAddr| match addr {
+        // As the kernel prints them: the address as a number in this
+        // computer's byte order, the port as one.
+        std::net::SocketAddr::V4(a) => Some(format!("{:08X}:{:04X}", u32::from_ne_bytes(a.ip().octets()), a.port())),
+        std::net::SocketAddr::V6(_) => None,
+    };
+    let (theirs, ours) = (hex(conn.peer_addr().ok()?)?, hex(conn.local_addr().ok()?)?);
+    let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
+    table.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.get(1) == Some(&theirs.as_str()) && fields.get(2) == Some(&ours.as_str()) {
+            fields.get(7)?.parse().ok()
+        } else {
+            None
+        }
+    })
+}
+
+/// One request to a `Loopback`: from a program of this user's, its head no
+/// longer than `HEAD_MAX`, for its path; passed on to the provider's URL
+/// with its headers and the range asked, and the answer back as it comes.
+fn pass_on(conn: std::net::TcpStream, passing: &Passing) -> Result<()> {
+    let mut out = &conn;
+    // SAFETY: a call with no arguments that cannot fail.
+    if peer_user(&conn) != Some(unsafe { geteuid() }) {
+        out.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    }
     conn.set_read_timeout(Some(Duration::from_secs(30)))?;
-    let mut reader = BufReader::new(conn.try_clone()?);
-    let mut out = conn;
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let mut parts = line.split_whitespace();
-    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    let mut range = None;
+    let mut reader = BufReader::new((&conn).take(HEAD_MAX));
+    let mut lines = Vec::new();
     loop {
-        let mut header = String::new();
-        if reader.read_line(&mut header)? == 0 || header.trim().is_empty() {
+        let mut line = Vec::new();
+        reader.read_until(b'\n', &mut line)?;
+        if !line.ends_with(b"\n") {
+            if reader.get_ref().limit() == 0 {
+                out.write_all(b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
+            }
+            // Else it hung up part way.
+            return Ok(());
+        }
+        let line = String::from_utf8_lossy(&line).trim().to_owned();
+        if line.is_empty() {
             break;
         }
+        lines.push(line);
+    }
+    let first = lines.first().map(String::as_str).unwrap_or("");
+    let mut parts = first.split_whitespace();
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let mut range = None;
+    for header in lines.iter().skip(1) {
         if let Some((name, value)) = header.split_once(':') {
             let value = value.trim();
             if name.eq_ignore_ascii_case("range") && value.starts_with("bytes=") && value[6..].chars().all(|c| c.is_ascii_digit() || c == '-') {
@@ -890,12 +999,13 @@ fn pass_on(
             }
         }
     }
-    if target != path || !matches!(method, "GET" | "HEAD") {
+    if target != passing.path || !matches!(method, "GET" | "HEAD") {
         out.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
         return Ok(());
     }
-    let mut request = if method == "HEAD" { client.head(url) } else { client.get(url) };
-    for (name, value) in headers {
+    let client = &passing.client;
+    let mut request = if method == "HEAD" { client.head(&passing.url) } else { client.get(&passing.url) };
+    for (name, value) in &passing.headers {
         request = request.header(name.as_str(), value.as_str().unwrap_or(""));
     }
     if let Some(range) = &range {
@@ -906,6 +1016,9 @@ fn pass_on(
         return Ok(());
     };
     let status = response.status();
+    if matches!(status.as_u16(), 401 | 403 | 404 | 410) {
+        passing.expired.store(true, Ordering::SeqCst);
+    }
     let mut head = format!("HTTP/1.1 {} {}\r\nConnection: close\r\n", status.as_u16(), status.canonical_reason().unwrap_or(""));
     for name in ["content-length", "content-range", "content-type", "accept-ranges"] {
         if let Some(value) = response.headers().get(name).and_then(|v| v.to_str().ok()) {
@@ -1269,50 +1382,58 @@ impl ProcessSource {
         Ok(Body { length: response.content_length(), reader: Box::new(response) })
     }
 
-    /// A thumbnail or medium made from the original, as a folder's are.
+    /// A thumbnail or medium made from the original, as a folder's are. A
+    /// stale ticket of the original's is `Expired`, so that it is prepared
+    /// again, as any other.
     fn make(&self, from: &Value, edge: u32, video: bool) -> std::result::Result<Body, FetchError> {
-        let made = match (from["path"].as_str(), from["url"].as_str()) {
+        let cannot = |e: anyhow::Error| FetchError::Failed(anyhow!("could not make an image of it: {e:#}"));
+        let bytes = match (from["path"].as_str(), from["url"].as_str()) {
             (Some(path), _) => {
-                // A file that answers, before a place among background
-                // work is taken for it.
-                check_path(Path::new(path), FILE_GAP, &self.provider.stuck)?;
-                crate::render::render(Path::new(path), edge, video)
+                // A file that answers, opened before a place among
+                // background work is taken for it.
+                let (file, size) = open_to_make(PathBuf::from(path), !video, FILE_GAP, &self.provider.stuck)?;
+                crate::render::render(&file, size, edge, video).map_err(cannot)?
             }
             (None, Some(url)) if video => {
                 // ffmpeg reads what it needs of it, by ranges.
                 let headers = from["headers"].as_object().cloned().unwrap_or_default();
                 let loopback = Loopback::start(self.http()?.clone(), url.to_owned(), headers).map_err(|e| FetchError::Failed(e.into()))?;
-                crate::render::render_video_url(&loopback.url, edge)
+                match crate::render::render_video_url(&loopback.url, edge) {
+                    Ok(bytes) => bytes,
+                    Err(_) if loopback.expired.load(Ordering::SeqCst) => return Err(FetchError::Expired),
+                    Err(e) => return Err(cannot(e)),
+                }
             }
-            _ => self.make_fetched(from, edge),
+            _ => self.make_fetched(from, edge)?,
         };
-        let bytes = made.map_err(|e| FetchError::Failed(anyhow!("could not make an image of it: {e:#}")))?;
         Ok(Body { length: Some(bytes.len() as u64), reader: Box::new(std::io::Cursor::new(bytes)) })
     }
 
     /// A photo's made from its original fetched by URL: into a part file in
     /// the cache's `making/` (on disk, where the photos are), at most
     /// `MAKE_MAX` of it, and gone once made.
-    fn make_fetched(&self, from: &Value, edge: u32) -> Result<Vec<u8>> {
-        let mut body = self.open(&Ticket(from.to_string()), None).map_err(|e| anyhow!("{e}"))?;
+    fn make_fetched(&self, from: &Value, edge: u32) -> std::result::Result<Vec<u8>, FetchError> {
+        let mut body = self.open(&Ticket(from.to_string()), None)?;
         let too_big = |bytes: u64| anyhow!("its original is {} MB, more than {} MB", bytes >> 20, MAKE_MAX >> 20);
-        if let Some(length) = body.length.filter(|l| *l > MAKE_MAX) {
-            return Err(too_big(length));
-        }
-        let dir = crate::storage::making();
-        std::fs::create_dir_all(&dir)?;
-        let part = dir.join(format!("{}.part", crate::add::uuid()));
         let made = (|| -> Result<Vec<u8>> {
-            let mut file = File::create(&part)?;
-            let copied = std::io::copy(&mut (&mut body.reader).take(MAKE_MAX + 1), &mut file)?;
-            if copied > MAKE_MAX {
-                return Err(too_big(copied));
+            if let Some(length) = body.length.filter(|l| *l > MAKE_MAX) {
+                return Err(too_big(length));
             }
-            drop(file);
-            crate::render::render(&part, edge, false)
+            let dir = crate::storage::making();
+            std::fs::create_dir_all(&dir)?;
+            let part = dir.join(format!("{}.part", crate::add::uuid()));
+            let made = (|| -> Result<Vec<u8>> {
+                let mut file = File::options().read(true).write(true).create_new(true).open(&part)?;
+                let copied = std::io::copy(&mut (&mut body.reader).take(MAKE_MAX + 1), &mut file)?;
+                if copied > MAKE_MAX {
+                    return Err(too_big(copied));
+                }
+                crate::render::render(&file, crate::render::size(&file), edge, false)
+            })();
+            let _ = std::fs::remove_file(&part);
+            made
         })();
-        let _ = std::fs::remove_file(&part);
-        made
+        made.map_err(|e| FetchError::Failed(anyhow!("could not make an image of it: {e:#}")))
     }
 }
 
@@ -1730,7 +1851,7 @@ mod tests {
         assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
         let started = Instant::now();
         assert!(matches!(open_path(fifo.clone(), None, gap, &stuck), Err(FetchError::NotFound(_))));
-        assert!(matches!(check_path(&fifo, gap, &stuck), Err(FetchError::NotFound(_))));
+        assert!(matches!(open_to_make(fifo.clone(), true, gap, &stuck), Err(FetchError::NotFound(_))));
         assert!(started.elapsed() < gap);
         assert!(matches!(open_path(dir.join("gone"), None, gap, &stuck), Err(FetchError::NotFound(_))));
 
@@ -1769,7 +1890,7 @@ mod tests {
         let started = Instant::now();
         let Err(FetchError::Failed(e)) = open_path(file.clone(), None, gap, &stuck) else { panic!("tried") };
         assert!(e.to_string().contains("have not come back"), "{e}");
-        assert!(started.elapsed() < Duration::from_millis(50));
+        assert!(started.elapsed() < Duration::from_millis(300));
         // One comes back: tried again.
         answers.pop().unwrap().write_all(b"x").unwrap();
         let back = Instant::now();
@@ -1792,6 +1913,152 @@ mod tests {
         assert_eq!(stuck.load(Ordering::SeqCst), STUCK_MAX);
         drop(answers);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reads given up on just as they come back, by the thousand: every
+    /// one counted while it is out is no longer once it is back, however
+    /// the two cross.
+    #[test]
+    fn a_read_given_up_on_as_it_comes_back_is_counted_out() {
+        let left: Vec<usize> = std::thread::scope(|scope| {
+            let racing: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let stuck: Arc<AtomicUsize> = Arc::default();
+                        let gap = Duration::from_millis(1);
+                        let started = Instant::now();
+                        while started.elapsed() < Duration::from_secs(4) {
+                            if stuck.load(Ordering::SeqCst) >= STUCK_MAX {
+                                std::thread::sleep(Duration::from_millis(20));
+                                continue;
+                            }
+                            // Opened about when it is given up on.
+                            let _ = watched("race".into(), move || {
+                                std::thread::sleep(gap);
+                                Ok((std::io::empty(), 0))
+                            }, gap, &stuck);
+                        }
+                        let back = Instant::now();
+                        while stuck.load(Ordering::SeqCst) > 0 && back.elapsed() < Duration::from_secs(5) {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        stuck.load(Ordering::SeqCst)
+                    })
+                })
+                .collect();
+            racing.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        assert!(left.iter().all(|l| *l == 0), "counted though back: {left:?}");
+    }
+
+    /// A body put down while its thread still reads: counted until that
+    /// read comes back.
+    #[test]
+    fn a_body_put_down_while_its_read_is_out_is_counted_until_it_is_back() {
+        let stuck: Arc<AtomicUsize> = Arc::default();
+        let (mut ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        ours.write_all(b"some").unwrap();
+        let mut body = watched("a mount gone".into(), move || Ok((Hanging(theirs), 100)), Duration::from_secs(30), &stuck).unwrap();
+        let mut some = [0u8; 4];
+        body.reader.read_exact(&mut some).unwrap();
+        // Its thread now waits on the next read.
+        std::thread::sleep(Duration::from_millis(100));
+        drop(body);
+        assert_eq!(stuck.load(Ordering::SeqCst), 1);
+        ours.write_all(b"more").unwrap();
+        let back = Instant::now();
+        while stuck.load(Ordering::SeqCst) > 0 && back.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(stuck.load(Ordering::SeqCst), 0);
+    }
+
+    /// A request to the loopback: its head, and what came back.
+    fn ask_loopback(port: u16, head: &[u8]) -> String {
+        let mut conn = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let _ = conn.write_all(head);
+        let mut out = Vec::new();
+        let _ = conn.read_to_end(&mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// A server on 127.0.0.1 that answers anything with `body`, to whoever
+    /// sends `x-secret: s3cret`.
+    fn upstream(body: &'static str) -> u16 {
+        let up = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = up.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for conn in up.incoming() {
+                let Ok(mut conn) = conn else { continue };
+                std::thread::spawn(move || {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") && conn.read(&mut byte).unwrap_or(0) == 1 {
+                        head.push(byte[0]);
+                    }
+                    let ok = String::from_utf8_lossy(&head).to_ascii_lowercase().contains("x-secret: s3cret");
+                    let (status, body) = if ok { (200, body) } else { (403, "") };
+                    let _ = conn.write_all(format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+                });
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn whose_end_of_a_connection_on_the_loopback_is_found() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let theirs = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (ours, _) = listener.accept().unwrap();
+        assert_eq!(peer_user(&ours), Some(unsafe { geteuid() }));
+        drop(theirs);
+    }
+
+    #[test]
+    fn the_loopback_passes_on_its_one_url_and_takes_no_long_head_nor_many_at_once() {
+        let up = upstream("SECRET-BYTES");
+        let client = crate::source::download_client(Duration::from_secs(5)).build().unwrap();
+        let mut headers = serde_json::Map::new();
+        headers.insert("x-secret".into(), json!("s3cret"));
+        let lb = Loopback::start(client, format!("http://127.0.0.1:{up}/v.mp4"), headers).unwrap();
+        let token = lb.url.rsplit_once('/').unwrap().1.to_owned();
+        let answer = ask_loopback(lb.port, format!("GET /{token} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes());
+        assert!(answer.starts_with("HTTP/1.1 200") && answer.ends_with("SECRET-BYTES"), "{answer}");
+        // Not its URL: nothing passed on.
+        let answer = ask_loopback(lb.port, b"GET /http://example.com/ HTTP/1.1\r\n\r\n");
+        assert!(answer.starts_with("HTTP/1.1 404") && !answer.contains("SECRET"), "{answer}");
+        // A head longer than any ffmpeg sends: refused at once, never read
+        // to its end.
+        let started = Instant::now();
+        let mut long = format!("GET /{token} HTTP/1.1\r\n").into_bytes();
+        long.extend(std::iter::repeat_n(b'a', 64 << 10));
+        let answer = ask_loopback(lb.port, &long);
+        assert!(answer.starts_with("HTTP/1.1 431"), "{answer}");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        // Many at once, saying nothing: past the most, closed at once.
+        let quiet: Vec<std::net::TcpStream> =
+            (0..LOOPBACK_MAX).map(|_| std::net::TcpStream::connect(("127.0.0.1", lb.port)).unwrap()).collect();
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        let answer = ask_loopback(lb.port, format!("GET /{token} HTTP/1.1\r\n\r\n").as_bytes());
+        assert!(answer.starts_with("HTTP/1.1 503"), "{answer}");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        drop(quiet);
+        let back = Instant::now();
+        let answer = loop {
+            let answer = ask_loopback(lb.port, format!("GET /{token} HTTP/1.1\r\n\r\n").as_bytes());
+            if !answer.starts_with("HTTP/1.1 503") || back.elapsed() > Duration::from_secs(5) {
+                break answer;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(answer.ends_with("SECRET-BYTES"), "{answer}");
+        // Gone with it.
+        let port = lb.port;
+        drop(lb);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
     }
 
     #[test]
