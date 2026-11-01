@@ -230,15 +230,18 @@ function merged(first, later) {
     return all
 }
 
-// Numbers as the panel writes them.
-function decimal(value, places) {
+// Numbers as the panel writes them: no zeros at the end, and given the
+// language's locale (Qt.locale()), in its way: 24,5 in Polish. Without, as
+// a link has them: 24.5.
+function decimal(value, places, locale) {
     const text = value.toFixed(places)
-    return text.indexOf(".") >= 0 ? text.replace(/\.?0+$/, "") : text
+    const plain = text.indexOf(".") >= 0 ? text.replace(/\.?0+$/, "") : text
+    return locale ? plain.replace(".", locale.decimalPoint) : plain
 }
-function shutterText(seconds) {
+function shutterText(seconds, locale) {
     // 0.8 s, not 1/1; from 0.3 s, as cameras write them.
     if (seconds >= 0.3)
-        return decimal(seconds, 1) + " s"
+        return decimal(seconds, 1, locale) + " s"
     // 1/46, not 1/45.98.
     return "1/" + Math.round(1 / seconds) + " s"
 }
@@ -248,14 +251,17 @@ function clock(seconds) {
     const two = n => (n < 10 ? "0" : "") + n
     return h > 0 ? h + ":" + two(m) + ":" + two(s) : m + ":" + two(s)
 }
-function fpsText(fps) {
+function fpsText(fps, locale) {
     // 59.94 is what NTSC's 60 is, and every phone's "60 fps"; an iPhone's,
     // its frame rate varying, averages 59.89.
-    return (Math.abs(fps - Math.round(fps)) < 0.25 ? Math.round(fps) : decimal(fps, 2)) + " fps"
+    return (Math.abs(fps - Math.round(fps)) < 0.25 ? Math.round(fps) : decimal(fps, 2, locale)) + " fps"
 }
-function coordinates(facts) {
-    const one = (value, plus, minus) => decimal(Math.abs(value), 5) + "° " + (value < 0 ? minus : plus)
-    return one(facts.latitude, "N", "S") + ", " + one(facts.longitude, "E", "W")
+function coordinates(facts, locale) {
+    const one = (value, plus, minus) => decimal(Math.abs(value), 5, locale) + "° " + (value < 0 ? minus : plus)
+    // Apart by a semicolon where the decimals have a comma: 49,96471° N;
+    // 18,12345° E.
+    const apart = decimal(0.5, 1, locale).indexOf(",") >= 0 ? "; " : ", "
+    return one(facts.latitude, "N", "S") + apart + one(facts.longitude, "E", "W")
 }
 // OpenStreetMap at the place, a pin on it.
 function mapUrl(facts) {

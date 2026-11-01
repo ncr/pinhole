@@ -255,15 +255,15 @@ PinholePlugin {
     function focalText() {
         if (!facts.focal)
             return ""
-        const focal = Details.decimal(facts.focal, 1) + " mm"
+        const focal = Details.decimal(facts.focal, 1, Qt.locale()) + " mm"
         return facts.focal35 ? qsTr("%1 · %2 mm in 35 mm").arg(focal).arg(Math.round(facts.focal35)) : focal
     }
     function exposureText() {
         const parts = []
         if (facts.aperture)
-            parts.push("ƒ/" + Details.decimal(facts.aperture, 1))
+            parts.push("ƒ/" + Details.decimal(facts.aperture, 1, Qt.locale()))
         if (facts.shutter)
-            parts.push(Details.shutterText(facts.shutter))
+            parts.push(Details.shutterText(facts.shutter, Qt.locale()))
         if (facts.iso)
             parts.push("ISO " + Math.round(facts.iso))
         return parts.join(" · ")
@@ -273,7 +273,7 @@ PinholePlugin {
         if (facts.width && facts.height) {
             parts.push(facts.width + " × " + facts.height)
             if (!item.video)
-                parts.push(Details.decimal(facts.width * facts.height / 1e6, 1) + " MP")
+                parts.push(Details.decimal(facts.width * facts.height / 1e6, 1, Qt.locale()) + " MP")
         }
         if (facts.bytes)
             parts.push(pinhole.sizeText(facts.bytes))
@@ -289,7 +289,7 @@ PinholePlugin {
             if (facts.codec)
                 parts.push(facts.hdr ? facts.codec + ", " + facts.hdr : facts.codec)
             if (facts.fps)
-                parts.push(Details.fpsText(facts.fps))
+                parts.push(Details.fpsText(facts.fps, Qt.locale()))
             if (facts.audio)
                 parts.push(facts.audio)
             if (facts.duration)
@@ -300,7 +300,7 @@ PinholePlugin {
     readonly property bool hasPlace: facts.latitude !== undefined
     function placeText() {
         if (hasPlace)
-            return Details.coordinates(facts) + (facts.altitude !== undefined ? " · " + Math.round(facts.altitude) + " m" : "")
+            return Details.coordinates(facts, Qt.locale()) + (facts.altitude !== undefined ? " · " + Math.round(facts.altitude) + " m" : "")
         if (facts.hasLocation)
             return coming ? qsTr("Yes; where, once the original is here") : qsTr("Yes")
         return coming ? "" : qsTr("None")
