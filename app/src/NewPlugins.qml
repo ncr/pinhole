@@ -2,9 +2,11 @@ import QtQuick
 
 // More than one plugin whose tour has not been seen (a first launch, or a
 // few new at once): one card listing them, each with a line of what it
-// does and Show for its tour, and Later, in place of one tour after
-// another. However it closes, they all count as seen; each tour stays in
-// the side panel. ↑ ↓ choose, ⏎ shows, Esc is Later.
+// does and Show for its tour, in place of one tour after another. A
+// plugin is listed once its tour is ready. Show marks that one seen (its
+// tour does, Tour.qml); Skip all marks them all; Later, Esc or a click
+// beside it leaves them for the next launch. Each tour stays in the side
+// panel. ↑ ↓ choose, ⏎ shows, Esc is Later.
 Item {
     id: root
     anchors.fill: parent
@@ -13,24 +15,39 @@ Item {
     Behavior on opacity { NumberAnimation { duration: 160 } }
 
     property bool shown: false
-    // The plugins listed, by id; and which tours can be shown yet (`tourReady`).
+    // The plugins listed, by id, by name; and which tours can be shown yet
+    // (`tourReady`).
     property var ids: []
     property var ready: id => true
     // The row chosen with the keys.
     property int current: 0
     signal tourRequested(string id)
 
+    function byName(list) {
+        return list.slice().sort((a, b) => plugins.at(a).name.localeCompare(plugins.at(b).name))
+    }
     function open(list) {
-        ids = list
+        ids = byName(list)
         current = 0
         shown = true
     }
-    function close() {
-        if (!shown)
+    // Those ready since it opened, in their places; the row chosen stays.
+    function add(list) {
+        const more = list.filter(id => ids.indexOf(id) < 0)
+        if (more.length === 0)
             return
+        const chosen = ids[current]
+        ids = byName(ids.concat(more))
+        current = Math.max(0, ids.indexOf(chosen))
+    }
+    // Later: none of them seen.
+    function close() {
         shown = false
+    }
+    function skipAll() {
         for (const id of ids)
             plugins.setToured(id)
+        close()
     }
     function show(id) {
         close()
@@ -152,8 +169,22 @@ Item {
                 }
             }
         }
+        // Quieter, at the other end: never these tours.
+        ShellButton {
+            id: skip
+            objectName: "skipAllButton"
+            anchors.left: parent.left
+            anchors.leftMargin: card.padding
+            y: later.y
+            flat: true
+            labelColor: theme.darkForeground
+            text: qsTr("Skip all")
+            hint: ""
+            onTapped: root.skipAll()
+        }
         ShellButton {
             id: later
+            objectName: "laterButton"
             anchors.right: parent.right
             anchors.rightMargin: card.padding
             y: card.height - card.padding - height
@@ -168,7 +199,6 @@ Item {
         else if (y + row.height > scroller.contentY + scroller.height)
             scroller.contentY = y + row.height - scroller.height
     }
-
 
     // Its keys, while it is on top (Command.qml).
     Command {

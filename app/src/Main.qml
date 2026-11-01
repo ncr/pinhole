@@ -538,11 +538,11 @@ ApplicationWindow {
             const shown = actions.filter(a => a.shown)
             let width = 0
             for (const a of shown)
-                width += gridMetrics.advanceWidth(a.text) + pad + spacing
-                    + (level < 1 && a.key !== "" ? gridMetrics.advanceWidth(" " + KeyNames.nameOf(a.key)) : 0)
+                width += gridMetrics.of(a.text) + pad + spacing
+                    + (level < 1 && a.key !== "" ? gridMetrics.of(" " + KeyNames.nameOf(a.key)) : 0)
             return Math.max(0, width - spacing)
         }
-        FontMetrics { id: gridMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+        LabelMetrics { id: gridMetrics }
         Repeater {
             model: gridActions.actions
             delegate: ShellButton {
@@ -572,6 +572,8 @@ ApplicationWindow {
             }
         }
         MoreGroup {
+            id: gridMore
+            objectName: "gridMore"
             visible: gridActions.fit >= 2 && menuItems.length > 0
             floating: true
             groups: gridActions.actions.map(a => [a])
@@ -619,22 +621,22 @@ ApplicationWindow {
         // ShellButton.qml and MenuGroup.qml).
         function widthAt(level) {
             const pad = 2 * Math.round(theme.fontSize * 0.833)
-            const arrow = barMetrics.advanceWidth("▾") + 2 * Math.round(theme.fontSize * 0.5)
-            const key = name => level < 1 ? barMetrics.advanceWidth("  " + name) : 0
+            const arrow = barMetrics.of("▾") + 2 * Math.round(theme.fontSize * 0.5)
+            const key = name => level < 1 ? barMetrics.of("  " + name) : 0
             const count = countText(level)
-            let width = 2 + (count === "" ? 0 : barMetrics.advanceWidth(count) + 2 * theme.fontSize + 5)
-                + barMetrics.advanceWidth(qsTr("Range")) + key("R") + pad + 5
-                + barMetrics.advanceWidth("\uf08a") + key("F") + pad + 5
-                + Math.max(barMetrics.advanceWidth(qsTr("Copy")) + key("C"), barMetrics.advanceWidth("✓ " + qsTr("Copied"))) + pad + arrow
+            let width = 2 + (count === "" ? 0 : barMetrics.of(count) + 2 * theme.fontSize + 5)
+                + barMetrics.of(qsTr("Range")) + key("R") + pad + 5
+                + barMetrics.of("\uf08a") + key("F") + pad + 5
+                + Math.max(barMetrics.of(qsTr("Copy")) + key("C"), barMetrics.of("✓ " + qsTr("Copied"))) + pad + arrow
             for (const group of pluginGroups) {
                 const shown = group.filter(a => a.shown)
                 if (shown.length > 0)
-                    width += 5 + barMetrics.advanceWidth(shown[0].text) + key(KeyNames.nameOf(shown[0].key)) + pad
+                    width += 5 + barMetrics.of(shown[0].text) + key(KeyNames.nameOf(shown[0].key)) + pad
                         + (shown.length > 1 ? arrow : 0)
             }
             return width
         }
-        FontMetrics { id: barMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+        LabelMetrics { id: barMetrics }
 
         UiText {
             anchors.verticalCenter: parent.verticalCenter
@@ -709,45 +711,59 @@ ApplicationWindow {
     }
 
     // Plugins (plugins.h), each loaded while it is on, from its files as
-    // they are now: a plugin whose files change loads again.
-    Repeater {
-        id: pluginLayer
-        model: plugins.ids
-        delegate: Loader {
-            id: pluginLoader
-            required property string modelData
-            // Whose its Commands are (Command.qml).
-            readonly property string pluginId: modelData
-            readonly property var info: (plugins.revision, plugins.at(modelData))
-            // Once the library has been read (plugins.ready).
-            readonly property string main: info.enabled && plugins.ready ? info.main : ""
-            anchors.fill: parent
-            // One plugin over the photos at a time: the one covering above
-            // the rest, and while it does, the others (an overlay as Info's,
-            // one that covered before it) unseen beneath.
-            z: win.coveringPlugin === modelData ? 1 : 0
-            visible: win.coveringPlugin === "" || win.coveringPlugin === modelData
-            property bool completed: false
-            function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
-            onMainChanged: if (completed) load()
-            Component.onCompleted: { completed = true; load() }
-            onLoaded: win.collectPlugins(modelData)
-            onStatusChanged: {
-                // What kept it from loading, said under it in the side panel.
-                if (status === Loader.Error)
-                    plugins.loadFailed(modelData)
-                if (status === Loader.Null || status === Loader.Error)
-                    win.collectPlugins()
-            }
-            Connections {
-                target: pluginLoader.item
-                ignoreUnknownSignals: true
-                function onCoveringChanged() { win.collectPlugins() }
-                function onActionsChanged() { win.collectPlugins() }
-                function onHelpChanged() { win.collectPlugins() }
-                function onStacksChanged() { win.collectPlugins() }
-                function onHiddenChanged() { win.collectPlugins(modelData) }
-                function onTourReadyChanged() { tourDue.restart() }
+    // they are now: a plugin whose files change loads again. In a layer of
+    // their own, so the one covering is above the others only: Pinhole's
+    // panels, the help, the tour and the notices, after this, stay over
+    // them all.
+    Item {
+        id: pluginPlane
+        objectName: "pluginPlane"
+        anchors.fill: parent
+        Repeater {
+            id: pluginLayer
+            model: plugins.ids
+            delegate: Loader {
+                id: pluginLoader
+                required property string modelData
+                // Whose its Commands are (Command.qml).
+                readonly property string pluginId: modelData
+                readonly property var info: (plugins.revision, plugins.at(modelData))
+                // Once the library has been read (plugins.ready).
+                readonly property string main: info.enabled && plugins.ready ? info.main : ""
+                // Turned on in the side panel since the launch: its tour
+                // shows by itself whatever showed at launch (tourDue).
+                readonly property bool switchedOn: info.enabled === true
+                property bool turnedOn: false
+                onSwitchedOnChanged: if (switchedOn && completed) turnedOn = true
+                anchors.fill: parent
+                // One plugin over the photos at a time: the one covering
+                // above the rest, and while it does, the others (an overlay
+                // as Info's, one that covered before it) unseen beneath.
+                z: win.coveringPlugin === modelData ? 1 : 0
+                visible: win.coveringPlugin === "" || win.coveringPlugin === modelData
+                property bool completed: false
+                function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
+                onMainChanged: if (completed) load()
+                Component.onCompleted: { completed = true; load() }
+                onLoaded: win.collectPlugins(modelData)
+                onStatusChanged: {
+                    // What kept it from loading, said under it in the side
+                    // panel.
+                    if (status === Loader.Error)
+                        plugins.loadFailed(modelData)
+                    if (status === Loader.Null || status === Loader.Error)
+                        win.collectPlugins()
+                }
+                Connections {
+                    target: pluginLoader.item
+                    ignoreUnknownSignals: true
+                    function onCoveringChanged() { win.collectPlugins() }
+                    function onActionsChanged() { win.collectPlugins() }
+                    function onHelpChanged() { win.collectPlugins() }
+                    function onStacksChanged() { win.collectPlugins() }
+                    function onHiddenChanged() { win.collectPlugins(modelData) }
+                    function onTourReadyChanged() { tourDue.restart() }
+                }
             }
         }
     }
@@ -850,8 +866,9 @@ ApplicationWindow {
     // A plugin's tour (Tour.qml), from the side panel; and by itself the
     // first time the plugin is on, once it has something to show and the
     // grid is free (a plugin turned on in the side panel: once it closes).
-    // At most one by itself to a launch: with more than one not seen yet,
-    // a card lists them instead (NewPlugins.qml).
+    // Of those on at launch, at most one by itself: with more than one not
+    // seen yet, a card lists them instead (NewPlugins.qml), each once its
+    // tour is ready. A plugin turned on later still shows its own.
     function startTour(id) {
         const item = pluginItem(id)
         if (!item || !item.tour || item.tour.length === 0)
@@ -864,21 +881,40 @@ ApplicationWindow {
         id: tourDue
         interval: 1200
         onTriggered: {
-            if (!autoTours || win.touredThisLaunch || tour.shown || newPlugins.shown || !win.tourFree)
+            if (!autoTours || tour.shown)
                 return
-            const unseen = []
+            // Those on at launch whose tour is not seen, and of them those
+            // ready; those turned on since, ready.
+            const unseen = [], ready = [], turnedOn = []
             for (let i = 0; i < pluginLayer.count; ++i) {
                 const loader = pluginLayer.itemAt(i)
                 const item = loader ? loader.item : null
-                if (item && item.tour && item.tour.length > 0 && !loader.info.toured)
-                    unseen.push(loader.modelData)
+                if (!item || !item.tour || item.tour.length === 0 || loader.info.toured)
+                    continue
+                if (loader.turnedOn) {
+                    if (item.tourReady)
+                        turnedOn.push(loader.modelData)
+                    continue
+                }
+                unseen.push(loader.modelData)
+                if (item.tourReady)
+                    ready.push(loader.modelData)
             }
-            if (unseen.length > 1) {
+            // The card takes in those ready since it showed.
+            if (newPlugins.shown) {
+                newPlugins.add(ready)
+                return
+            }
+            if (!win.tourFree)
+                return
+            if (turnedOn.length > 0) {
+                win.startTour(turnedOn[0])
+            } else if (!win.touredThisLaunch && ready.length > 0) {
                 win.touredThisLaunch = true
-                newPlugins.open(unseen.sort((a, b) => plugins.at(a).name.localeCompare(plugins.at(b).name)))
-            } else if (unseen.length === 1 && win.pluginItem(unseen[0]).tourReady) {
-                win.touredThisLaunch = true
-                win.startTour(unseen[0])
+                if (unseen.length > 1)
+                    newPlugins.open(ready)
+                else
+                    win.startTour(ready[0])
             }
         }
     }
@@ -924,13 +960,14 @@ ApplicationWindow {
             side.shown = false
         }
     }
-    HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
+    // The help over the card, as ? on it takes the keys.
     NewPlugins {
         id: newPlugins
         objectName: "newPlugins"
         ready: id => win.pluginItem(id)?.tourReady ?? false
         onTourRequested: id => win.startTour(id)
     }
+    HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
     Tour { id: tour; objectName: "tour"; grid: grid; photoViewer: win.photoViewer; side: side }
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
@@ -953,7 +990,7 @@ ApplicationWindow {
         : firstRun ? "firstRun"
         : side.shown ? "side"
         : pluginCovering ? "plugin"
-        : selectBar.menuOpen || (photoViewer?.menuOpen ?? false) ? "menu"
+        : selectBar.menuOpen || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
         : viewerShown ? "viewer"
         : "grid"
     Binding { target: keymap; property: "layer"; value: win.keyLayer }

@@ -42,9 +42,13 @@ MenuGroup {
         objectName: "moreButton"
         flat: !more.floating
         floating: more.floating
-        text: qsTr("More") + " ▾"
-        hint: ""
-        active: more.open
+        // ▾ where a key would be, so an arc turning takes its place and
+        // the word stays.
+        text: qsTr("More")
+        hint: "▾"
+        // What one of them is doing shows on it folded: lit, or turning.
+        active: more.open || more.items.some(a => a.shown && a.active)
+        busy: more.items.some(a => a.shown && a.busy)
         onTapped: more.toggle(false)
     }
 

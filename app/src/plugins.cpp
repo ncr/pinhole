@@ -32,7 +32,9 @@
 #include <QQuickItem>
 #include <QQuickItemGrabResult>
 #include <QQuickWindow>
+#include <QMap>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -1056,40 +1058,264 @@ void Plugins::rescan() {
     scan();
 }
 
-QStringList Plugins::apiTwoUses(const QString &dir) {
-    // Each, and the words that use it. Anything added to what a plugin is
-    // given before API 2 is released is API 2's, and goes here.
-    static const QList<std::pair<QString, QRegularExpression>> features = {
-        {"promises", QRegularExpression(QStringLiteral("\\.then\\s*\\("))},
-        {"pinhole.settings", QRegularExpression(QStringLiteral("\\bpinhole\\.settings\\b"))},
-        {"pinhole.notify", QRegularExpression(QStringLiteral("\\bpinhole\\.notify\\b"))},
-        {"pinhole.warn", QRegularExpression(QStringLiteral("\\bpinhole\\.warn\\b"))},
-        {"pinhole.api", QRegularExpression(QStringLiteral("\\bpinhole\\.api\\b"))},
-        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bcoveredBy\\b"))},
-        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bonDismissed\\b"))},
-        {"covered", QRegularExpression(QStringLiteral("\\bcovered\\b"))},
-        {"hidden", QRegularExpression(QStringLiteral("(^|[\\s;{])hidden\\s*:"), QRegularExpression::MultilineOption)},
-        {"avgColor", QRegularExpression(QStringLiteral("\\bavgColor\\b"))},
-        {"library.field", QRegularExpression(QStringLiteral("\\blibrary\\.field\\s*\\("))},
-        {"pinhole.isHidden", QRegularExpression(QStringLiteral("\\b(isHidden|hiddenCount|hiddenChanged|onHiddenChanged)\\b"))},
-        {"run's output", QRegularExpression(QStringLiteral("\\boutput\\s*:"))},
-        {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bkeepAwake\\s*\\("))},
-    };
-    // Its words, not its comments.
-    static const QRegularExpression comments(QStringLiteral("/\\*.*?\\*/|//[^\\n]*"),
-                                             QRegularExpression::DotMatchesEverythingOption);
+namespace {
+
+// QML or JavaScript as code alone, by its tokens: its comments gone, and
+// the words of its strings and regular expressions (a URL's "//", a
+// "hidden:" said), their quotes left; a template's ${…} is code again.
+// Line breaks stay, so what follows is where it was.
+QString codeOnly(const QString &source) {
     QString code;
+    code.reserve(source.size());
+    const qsizetype n = source.size();
+    qsizetype i = 0;
+    // The brace depth, and where each ${ of a template began.
+    int depth = 0;
+    QList<int> templates;
+    // A "/" begins a regular expression where a value would: after an
+    // operator, a bracket or nothing, or a word such as return; else it
+    // divides.
+    auto valueNext = [&code] {
+        qsizetype k = code.size() - 1;
+        while (k >= 0 && code[k].isSpace())
+            --k;
+        if (k < 0)
+            return true;
+        auto wordy = [](QChar c) { return c.isLetterOrNumber() || c == '_' || c == '$'; };
+        if (wordy(code[k])) {
+            qsizetype from = k;
+            while (from > 0 && wordy(code[from - 1]))
+                --from;
+            static const QStringList before = {"return", "typeof", "case", "do",   "else",  "in",   "of",
+                                               "new",    "delete", "void", "throw", "yield", "await"};
+            return before.contains(code.mid(from, k - from + 1));
+        }
+        return QStringLiteral("(,=:[!&|?{};+-*%<>~^").contains(code[k]);
+    };
+    // A template's words, up to its end or its next ${.
+    auto templateWords = [&] {
+        while (i < n) {
+            const QChar c = source[i];
+            if (c == '\\') {
+                i += 2;
+            } else if (c == '`') {
+                code += c;
+                ++i;
+                return;
+            } else if (c == '$' && i + 1 < n && source[i + 1] == '{') {
+                code += QStringLiteral("${");
+                i += 2;
+                templates << depth++;
+                return;
+            } else {
+                if (c == '\n')
+                    code += c;
+                ++i;
+            }
+        }
+    };
+    while (i < n) {
+        const QChar c = source[i];
+        const QChar next = i + 1 < n ? source[i + 1] : QChar();
+        if (c == '/' && next == '/') {
+            while (i < n && source[i] != '\n')
+                ++i;
+        } else if (c == '/' && next == '*') {
+            code += ' ';
+            for (i += 2; i < n && !(source[i] == '*' && i + 1 < n && source[i + 1] == '/'); ++i)
+                if (source[i] == '\n')
+                    code += '\n';
+            i += 2;
+        } else if (c == '"' || c == '\'') {
+            code += c;
+            for (++i; i < n && source[i] != c && source[i] != '\n'; ++i)
+                if (source[i] == '\\')
+                    ++i;
+            code += c;
+            ++i;
+        } else if (c == '`') {
+            code += c;
+            ++i;
+            templateWords();
+        } else if (c == '/' && valueNext()) {
+            // Its flags follow, as a word.
+            code += QStringLiteral("//");
+            bool inClass = false;
+            for (++i; i < n && source[i] != '\n'; ++i) {
+                if (source[i] == '\\')
+                    ++i;
+                else if (source[i] == '[')
+                    inClass = true;
+                else if (source[i] == ']')
+                    inClass = false;
+                else if (source[i] == '/' && !inClass)
+                    break;
+            }
+            ++i;
+        } else if (c == '}' && !templates.isEmpty() && templates.last() == depth - 1) {
+            code += c;
+            ++i;
+            --depth;
+            templates.removeLast();
+            templateWords();
+        } else {
+            if (c == '{')
+                ++depth;
+            else if (c == '}')
+                --depth;
+            code += c;
+            ++i;
+        }
+    }
+    return code;
+}
+
+// Where the bracket at `open` closes, in code alone; else its end.
+qsizetype closing(const QString &code, qsizetype open) {
+    const QChar in = code[open], out = in == '(' ? ')' : in == '[' ? ']' : '}';
+    int depth = 0;
+    for (qsizetype k = open; k < code.size(); ++k) {
+        if (code[k] == in)
+            ++depth;
+        else if (code[k] == out && --depth == 0)
+            return k;
+    }
+    return code.size() - 1;
+}
+
+} // namespace
+
+QStringList Plugins::apiTwoUses(const QString &dir) {
+    // Each, and the words that use it: pinhole's own, or what a plugin's
+    // root sets. Anything added to what a plugin is given before API 2 is
+    // released is API 2's, and goes here.
+    static const QStringList order = {"promises",          "pinhole.settings", "pinhole.notify", "pinhole.warn",
+                                      "pinhole.api",       "pinhole.coveredBy", "pinhole.dismissed", "hidden",
+                                      "avgColor",          "library.field",    "pinhole.isHidden", "run's output",
+                                      "pinhole.keepAwake"};
+    static const QList<std::pair<QString, QRegularExpression>> words = {
+        {"promises", QRegularExpression(QStringLiteral("\\.\\s*then\\s*\\("))},
+        {"pinhole.settings", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*settings\\b"))},
+        {"pinhole.notify", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*notify\\b"))},
+        {"pinhole.warn", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*warn\\b"))},
+        {"pinhole.api", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*api\\b"))},
+        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*coveredBy\\b"))},
+        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*dismissed\\b"))},
+        // A photo's, as library.item gives it.
+        {"avgColor", QRegularExpression(QStringLiteral("\\.\\s*avgColor\\b"))},
+        // pinhole.library's, or by a name of the plugin's for it.
+        {"library.field", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*field\\s*\\("))},
+        {"pinhole.isHidden",
+         QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(isHidden|hiddenCount|hiddenChanged)\\b"))},
+        {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
+    };
+    // pinhole's signals, in a Connections to it.
+    static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
+    static const QRegularExpression toPinhole(
+        QStringLiteral("\\btarget\\s*:\\s*([\\w$]+\\s*\\.\\s*)*pinhole\\s*[;}\\n]"));
+    static const QList<std::pair<QString, QRegularExpression>> handlers = {
+        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bonCoveredByChanged\\b"))},
+        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bonDismissed\\b"))},
+        {"pinhole.isHidden", QRegularExpression(QStringLiteral("\\bonHiddenChanged\\b"))},
+    };
+    // run's options, in its call.
+    static const QRegularExpression run(QStringLiteral("\\bpinhole\\s*\\.\\s*run\\s*\\("));
+    static const QRegularExpression output(QStringLiteral("\\boutput\\s*:"));
+    // A file's root object, its id, and its hidden set.
+    static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
+    static const QRegularExpression rootId(QStringLiteral("(^|[;\\s])id\\s*:\\s*([\\w$]+)"));
+    static const QRegularExpression hiddenSet(QStringLiteral("(^|[;\\s])hidden\\s*:"));
+
+    QSet<QString> uses;
     QDirIterator it(dir, {"*.qml", "*.js"}, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         QFile file(it.next());
-        if (!file.fileName().contains(QLatin1String("/target/")) && file.open(QIODevice::ReadOnly))
-            code += QString::fromUtf8(file.readAll()).remove(comments) + '\n';
+        if (file.fileName().contains(QLatin1String("/target/")) || !file.open(QIODevice::ReadOnly))
+            continue;
+        const QString code = codeOnly(QString::fromUtf8(file.readAll()));
+        for (const auto &[name, pattern] : words)
+            if (code.contains(pattern))
+                uses << name;
+        for (auto match = connections.globalMatch(code); match.hasNext();) {
+            const qsizetype open = match.next().capturedEnd() - 1;
+            const QString block = code.mid(open, closing(code, open) - open + 1);
+            if (block.contains(toPinhole))
+                for (const auto &[name, pattern] : handlers)
+                    if (block.contains(pattern))
+                        uses << name;
+        }
+        for (auto match = run.globalMatch(code); match.hasNext();) {
+            const qsizetype open = match.next().capturedEnd() - 1;
+            if (code.mid(open, closing(code, open) - open + 1).contains(output))
+                uses << QStringLiteral("run's output");
+        }
+        // A PinholePlugin root's hidden: set where it is, or by its id.
+        const auto top = root.match(code);
+        if (!file.fileName().endsWith(QLatin1String(".qml")) || !top.hasMatch()
+            || top.captured(1).section('.', -1) != QLatin1String("PinholePlugin"))
+            continue;
+        const qsizetype open = top.capturedEnd() - 1, end = closing(code, open);
+        // Its own lines: what is inside its children, calls and lists left
+        // out.
+        QString own;
+        int depth = 0;
+        for (qsizetype k = open; k <= end; ++k) {
+            const QChar c = code[k];
+            if (c == '{' || c == '(' || c == '[')
+                ++depth;
+            else if (c == '}' || c == ')' || c == ']')
+                --depth;
+            else if (depth == 1)
+                own += c;
+            if (depth != 1 && !own.endsWith('\n'))
+                own += '\n';
+        }
+        const auto id = rootId.match(own);
+        if (own.contains(hiddenSet)
+            || (id.hasMatch()
+                && code.contains(QRegularExpression("\\b" + QRegularExpression::escape(id.captured(2)) + "\\s*\\.\\s*hidden\\s*=(?!=)"))))
+            uses << QStringLiteral("hidden");
     }
-    QStringList uses;
-    for (const auto &[name, words] : features)
-        if (code.contains(words))
-            uses << name;
-    return uses;
+    QStringList list;
+    for (const QString &name : order)
+        if (uses.contains(name))
+            list << name;
+    return list;
+}
+
+QStringList Plugins::nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others) {
+    // Its files by name, as a qsTr() names them (Translator).
+    auto filesIn = [](const QString &folder, QDirIterator::IteratorFlags flags) {
+        QMap<QString, QString> files;
+        QDirIterator it(folder, {"*.qml", "*.js"}, QDir::Files, flags);
+        while (it.hasNext()) {
+            const QFileInfo info(it.next());
+            if (!info.filePath().contains(QLatin1String("/target/")))
+                files.insert(info.completeBaseName(), info.fileName());
+        }
+        return files;
+    };
+    const QMap<QString, QString> own = filesIn(dir, QDirIterator::Subdirectories);
+    const QMap<QString, QString> pinholes = filesIn(QStringLiteral(":/"), QDirIterator::NoIteratorFlags);
+    const QString self = QDir(dir).canonicalPath();
+    QStringList clashes;
+    for (auto file = own.cbegin(); file != own.cend(); ++file) {
+        // A main file is told apart by its URL.
+        if (file.key() == QLatin1String("Main"))
+            continue;
+        QStringList whose;
+        if (pinholes.contains(file.key()))
+            whose << QStringLiteral("Pinhole's own %1").arg(pinholes.value(file.key()));
+        for (const auto &[id, folder] : others) {
+            if (QDir(folder).canonicalPath() == self)
+                continue;
+            if (const QMap<QString, QString> theirs = filesIn(folder, QDirIterator::Subdirectories); theirs.contains(file.key()))
+                whose << QStringLiteral("%1's %2").arg(id, theirs.value(file.key()));
+        }
+        if (!whose.isEmpty())
+            clashes << QStringLiteral("%1 is named as %2").arg(file.value(), whose.join(QStringLiteral(", ")));
+    }
+    return clashes;
 }
 
 QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QString *main) {
@@ -1365,6 +1591,22 @@ int checkPlugin(const QString &target) {
         err(QStringLiteral("%1: warning: it uses %2, of plugin API 2, and its manifest asks for API %3: give it \"api\": 2.")
                 .arg(name, uses.join(QStringLiteral(", ")))
                 .arg(asked));
+    // A file named as another plugin's, or as one of Pinhole's own: Qt
+    // tells a qsTr() only by its file's name. One of the same id is the
+    // one it replaces, or its copy.
+    QList<std::pair<QString, QString>> others;
+    for (const QString &root : {Plugins::personalDir(), Plugins::builtInDir()})
+        for (const QFileInfo &each : QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            QFile file(each.filePath() + "/manifest.json");
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            const QString other = QJsonDocument::fromJson(file.readAll()).object().value("id").toString(each.fileName());
+            if (other != id)
+                others.append({other, each.filePath()});
+        }
+    for (const QString &clash : Plugins::nameClashes(dir, others))
+        err(QStringLiteral("%1: warning: %2: a qsTr() in it may be given that one's words; give it a name of its own.")
+                .arg(name, clash));
     if (QDir(dir).absolutePath().startsWith(Plugins::personalDir() + '/')
         && QFileInfo::exists(Plugins::builtInDir() + '/' + id + "/manifest.json"))
         out(QStringLiteral("It takes the place of Pinhole's own %1 while it is there.").arg(id));

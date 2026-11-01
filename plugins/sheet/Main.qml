@@ -3,8 +3,9 @@ import Pinhole.Plugin
 
 // Contact sheet: the photos ticked in select mode made one picture to
 // send, an even grid of them or a collage that keeps each whole
-// (Studio.qml). magick makes it from the photos at the size it needs, and
-// it is copied and kept in Pictures/Pinhole, as Series keeps its clips.
+// (SheetStudio.qml). magick makes it from the photos at the size it
+// needs, and it is copied and kept in Pictures/Pinhole, as Series keeps
+// its clips.
 PinholePlugin {
     id: plugin
     covering: studio.shown
@@ -56,7 +57,7 @@ PinholePlugin {
         }
     }
 
-    Studio {
+    SheetStudio {
         id: studio
         objectName: "sheetStudio"
         anchors.fill: parent

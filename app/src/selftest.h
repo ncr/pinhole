@@ -30,8 +30,9 @@ class QQuickWindow;
 // person would (right-click, open, the sides, the wheel, a sideways swipe,
 // the back button, double-click) and report whether each did its job.
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library);
-// PINHOLE_SELFTEST=keys: the window through its states (the grid, select
-// mode and its menu, the viewer, the side panel, the help and sign-in over
+// PINHOLE_SELFTEST=keys: the window through its states (the grid and its
+// More menu, select mode and its menu, the viewer, its menu and its More
+// menu, a More menu closed by Esc, the side panel, the help and sign-in over
 // it, adding a source), saying in each whose the keys are and any key two
 // live commands share; then every command some input cannot do. Fails on
 // either.
@@ -74,11 +75,15 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
                      const QStringList &files);
 
 // PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen them, wait
-// for the New plugins card (more than one tour not seen) or a tour to show
-// by itself; from the card, ⏎ on Series' (or the first ready); step through
-// the tour with → and grab each step into <dir>; check no tour or card
-// follows and that they are marked seen; then ask for Series' again, as
-// the side panel does, Esc, and check none follows. Fails on any.
+// for the New plugins card (more than one tour not seen, each listed
+// ready) or a tour to show by itself. Later (Esc) leaves them unseen and
+// nothing follows; at the next launch (as if) the card lists them again.
+// ⏎ on Series' (or the first ready); step through the tour with → and
+// grab each step into <dir>; check no tour or card follows and that it
+// alone is seen; ask for Series' again, as the side panel does, Esc, and
+// check none follows. Then one of the card's turned off and on again
+// shows its tour by itself; and at the next launch, Skip all marks the
+// rest seen. Fails on any.
 void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
 // PINHOLE_SELFTEST=covering (selftestcovering.cpp): one plugin over the
@@ -87,8 +92,10 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 // then Colours over On this day: the last covers, the other unseen, and
 // Esc goes back to it; Colours over it again and ⏎: On this day closes for
 // good, Esc comes back to Colours alone; the Year calendar over it and ⏎:
-// the grid. In each, whose the keys are and no key shared.
-// Needs photos taken on this day in other years.
+// the grid. In each, whose the keys are and no key shared. Then On this
+// day again, and over it the help, the side panel, the undo notice and a
+// plugin's notice: each above it, by the items' stacking and by the
+// window grabbed. Needs photos taken on this day in other years.
 void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 
 // PINHOLE_SELFTEST=series:<dir>: once Series has found its series, open the

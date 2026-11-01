@@ -128,12 +128,12 @@ Item {
             let most = 0
             for (const a of group.menuItems) {
                 const hint = group.hintOf(a)
-                most = Math.max(most, Math.ceil(metrics.advanceWidth(a.text)
-                    + (hint !== "" ? 2 * theme.fontSize + metrics.advanceWidth(hint) : 0)))
+                most = Math.max(most, Math.ceil(metrics.of(a.text)
+                    + (hint !== "" ? 2 * theme.fontSize + metrics.of(hint) : 0)))
             }
             return most + 2 * Math.round(theme.fontSize * 0.833)
         }
-        FontMetrics { id: metrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+        LabelMetrics { id: metrics }
         Column {
             id: column
             x: 1
@@ -152,6 +152,7 @@ Item {
                     hint: group.hintOf(modelData)
                     usable: modelData.usable !== false
                     active: modelData.active === true
+                    busy: modelData.busy === true
                     onTapped: group.press(modelData)
                     onHoveredChanged: {
                         modelData.hovered = hovered

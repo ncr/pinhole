@@ -324,9 +324,14 @@ public:
     // What is wrong with the plugin in `dir`, if anything; its manifest.
     static QString manifestProblem(const QString &dir, QJsonObject *manifest, QString *main);
     // What the plugin in `dir` uses that came with API 2, by its files'
-    // words ("hidden", "avgColor"): `pinhole plugin check` warns of them
-    // when its manifest asks for API 1.
+    // code, strings and comments aside: pinhole's ("pinhole.notify"), a
+    // photo's avgColor, or its root's ("hidden"). `pinhole plugin check`
+    // warns of them when its manifest asks for API 1.
     static QStringList apiTwoUses(const QString &dir);
+    // The plugin in `dir`'s files named as one of Pinhole's own, or as one
+    // of the `others`' (each its id and folder): a qsTr() in it may be
+    // given that one's words (Translator). `pinhole plugin check` warns.
+    static QStringList nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others);
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);

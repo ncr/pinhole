@@ -431,9 +431,9 @@ Item {
             readonly property var pluginGroups: groupsOf(root.pluginActions)
             function widthAt(level) {
                 const pad = 2 * Math.round(theme.fontSize * 0.833)
-                const arrow = viewerMetrics.advanceWidth("▾") + 2 * Math.round(theme.fontSize * 0.5)
-                const key = name => level < 1 && name !== "" ? viewerMetrics.advanceWidth(" " + name) : 0
-                const words = text => viewerMetrics.advanceWidth(text)
+                const arrow = viewerMetrics.of("▾") + 2 * Math.round(theme.fontSize * 0.5)
+                const key = name => level < 1 && name !== "" ? viewerMetrics.of(" " + name) : 0
+                const words = text => viewerMetrics.of(text)
                 // Each group's button, ▾ and the hairline before it.
                 const groups = [words("") + key("F") + pad]
                 if (viewer.live)
@@ -450,7 +450,7 @@ Item {
                 groups.push(words("✕") + key("Esc") + pad)
                 return 2 + groups.reduce((sum, w) => sum + w, 0) + 5 * (groups.length - 1)
             }
-            FontMetrics { id: viewerMetrics; font.family: theme.font; font.pixelSize: theme.fontSize }
+            LabelMetrics { id: viewerMetrics }
 
             // A favourite or not: a filled heart in the accent, or an empty
             // one (Nerd Font's: the typeface's own ♥ is an outline too).

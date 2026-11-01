@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import "../Days.js" as Days
+import "../CalendarDays.js" as Days
 
 // The counting and the days, without Pinhole: `run` beside this file.
 TestCase {

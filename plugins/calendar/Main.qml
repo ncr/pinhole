@@ -1,6 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
-import "Days.js" as Days
+import "CalendarDays.js" as Days
 
 // Year calendar: every day of every year as a square, lit in the theme's
 // accent by how many photos were taken that day, one row of weeks a year,
@@ -8,19 +8,19 @@ import "Days.js" as Days
 // the photo the grid is on; a day, clicked or picked with the arrows and
 // Enter, is shown in the grid.
 //
-// The library is counted into days (Days.js) from its column of days, at
-// once: again when it is read again while the calendar shows, else when
-// it next opens (or its settings show), so a library being built, read
-// again every few seconds, is not counted each time. What the grid hides
-// (Screenshots' hide mode, say) is not counted, as the grid does not show
-// it.
+// The library is counted into days (CalendarDays.js) from its column of
+// days, at once: again when it is read again while the calendar shows,
+// else when it next opens (or its settings show), so a library being
+// built, read again every few seconds, is not counted each time. What the
+// grid hides (Screenshots' hide mode, say) is not counted, as the grid
+// does not show it.
 PinholePlugin {
     id: plugin
     covering: calendar.shown
 
-    // What was counted (Days.js finish): every year with a photo, oldest
-    // first, each year's row by the year, and how many photos light a
-    // square fully and make it glow: most days stay below.
+    // What was counted (CalendarDays.js finish): every year with a photo,
+    // oldest first, each year's row by the year, and how many photos light
+    // a square fully and make it glow: most days stay below.
     property var years: []
     property var rowOf: ({})
     property int full: 2

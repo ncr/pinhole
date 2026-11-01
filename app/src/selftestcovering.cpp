@@ -1,5 +1,5 @@
-// PINHOLE_SELFTEST=covering: one plugin over the photos at a time
-// (selftest.h).
+// PINHOLE_SELFTEST=covering: one plugin over the photos at a time, and
+// Pinhole's own over it (selftest.h).
 
 #include "selftest.h"
 
@@ -8,6 +8,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QImage>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -34,6 +35,99 @@ QQuickItem *loaderOf(QQuickItem *item, const QString &id) {
         if (QQuickItem *found = loaderOf(child, id))
             return found;
     return nullptr;
+}
+
+// Whether `a` is drawn over `b`: by the first of their ancestors that are
+// siblings, the higher z, else the later child.
+bool drawnAbove(QQuickItem *a, QQuickItem *b) {
+    QList<QQuickItem *> up, other;
+    for (QQuickItem *item = a; item; item = item->parentItem())
+        up.prepend(item);
+    for (QQuickItem *item = b; item; item = item->parentItem())
+        other.prepend(item);
+    qsizetype k = 0;
+    while (k < up.size() && k < other.size() && up[k] == other[k])
+        ++k;
+    if (k == 0 || k >= up.size() || k >= other.size())
+        return false;
+    if (up[k]->z() != other[k]->z())
+        return up[k]->z() > other[k]->z();
+    const QList<QQuickItem *> children = up[k - 1]->childItems();
+    return children.indexOf(up[k]) > children.indexOf(other[k]);
+}
+
+// How much of `item`'s place on the window changed from `before` to
+// `after`, 0 to 1.
+double changed(const QImage &before, const QImage &after, QQuickItem *item) {
+    if (before.size() != after.size() || before.isNull())
+        return 0;
+    const qreal ratio = before.devicePixelRatio();
+    const QRect place = QRectF(item->mapToScene(QPointF(0, 0)) * ratio, item->size() * ratio).toAlignedRect()
+                            .intersected(before.rect());
+    qsizetype differ = 0, all = 0;
+    for (int y = place.top(); y <= place.bottom(); y += 2)
+        for (int x = place.left(); x <= place.right(); x += 2) {
+            const QRgb p = before.pixel(x, y), q = after.pixel(x, y);
+            differ += std::abs(qRed(p) - qRed(q)) + std::abs(qGreen(p) - qGreen(q)) + std::abs(qBlue(p) - qBlue(q)) > 24;
+            ++all;
+        }
+    return all > 0 ? double(differ) / all : 0;
+}
+
+// Pinhole's own over a plugin covering, On this day's: the help, the side
+// panel, the undo notice and a plugin's notice (pinhole.notify), each
+// drawn above it, by the items' stacking and by the window grabbed.
+void overCovering(QQuickWindow *window, std::function<void(bool, const QString &)> check, std::function<void()> done) {
+    QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
+    QObject *history = qmlEngine(window)->rootContext()->contextProperty("history").value<QObject *>();
+    auto item = [window](const char *name) { return window->findChild<QQuickItem *>(QString::fromLatin1(name)); };
+    struct Over {
+        QString name;
+        const char *item;
+        std::function<void()> show, hide;
+        double least;
+    };
+    auto overs = std::make_shared<QList<Over>>(QList<Over>{
+        {"the help (?)", "help", [=] { item("help")->setProperty("shown", true); },
+         [=] { item("help")->setProperty("shown", false); }, 0.3},
+        {"the side panel (Tab)", "sidePanel", [=] { item("sidePanel")->setProperty("shown", true); },
+         [=] { item("sidePanel")->setProperty("shown", false); }, 0.1},
+        {"the undo notice (Ctrl+Z)", "historyNotice", [=] { QMetaObject::invokeMethod(history, "undo"); },
+         [=] { item("historyNotice")->setProperty("opacity", 0); }, 0.02},
+        {"a plugin's notice (pinhole.notify)", "historyNotice",
+         [=] {
+             QMetaObject::invokeMethod(plugins, "notice", Q_ARG(QString, QStringLiteral("pinhole.onthisday")),
+                                       Q_ARG(QString, QStringLiteral("Saved to Pictures, as a plugin says")));
+         },
+         [=] { item("historyNotice")->setProperty("opacity", 0); }, 0.02},
+    });
+    press(window, Qt::Key_D);
+    auto step = std::make_shared<std::function<void(int)>>();
+    *step = [=](int k) {
+        if (k >= overs->size()) {
+            press(window, Qt::Key_Escape);
+            QTimer::singleShot(1200, window, done);
+            return;
+        }
+        const Over &over = (*overs)[k];
+        const QImage before = window->grabWindow();
+        over.show();
+        QTimer::singleShot(900, window, [=] {
+            const Over &over = (*overs)[k];
+            QQuickItem *covering = loaderOf(window->contentItem(), QStringLiteral("pinhole.onthisday"));
+            QQuickItem *own = item(over.item);
+            const QString by = plugins->property("coveredBy").toString();
+            check(by == QLatin1String("pinhole.onthisday") && covering && own && own->isVisible()
+                      && drawnAbove(own, covering),
+                  QStringLiteral("%1 over On this day covering (\"%2\"): above it").arg(over.name, by));
+            const double part = own ? changed(before, window->grabWindow(), own) : 0;
+            check(part >= over.least, QStringLiteral("%1 over On this day: %2% of its place drawn anew (%3% at least)")
+                                         .arg(over.name).arg(qRound(part * 100)).arg(qRound(over.least * 100)));
+            over.hide();
+            QTimer::singleShot(900, window, [=] { (*step)(k + 1); });
+        });
+    };
+    QTimer::singleShot(1500, window, [=] { (*step)(0); });
 }
 
 } // namespace
@@ -117,8 +211,11 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap) {
     auto run = std::make_shared<std::function<void(int)>>();
     *run = [=](int k) {
         if (k >= steps->size()) {
-            say(QStringLiteral("done, %1 failed").arg(*failures));
-            QCoreApplication::exit(*failures ? 1 : 0);
+            // Then Pinhole's own over a plugin covering.
+            overCovering(window, check, [=] {
+                say(QStringLiteral("done, %1 failed").arg(*failures));
+                QCoreApplication::exit(*failures ? 1 : 0);
+            });
             return;
         }
         (*steps)[k].act();

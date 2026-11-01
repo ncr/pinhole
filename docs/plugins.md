@@ -33,7 +33,8 @@ looks it over as Pinhole would load it, without a window: the manifest,
 every QML file it uses and the JavaScript they import, its translations.
 It takes a folder too (`pinhole plugin check .`), and exits 1 if anything is
 wrong, for an editor or a script to run on save. It warns of anything the
-plugin uses of an API newer than its manifest asks for.
+plugin uses of an API newer than its manifest asks for, and of a file named
+as one of another plugin's or of Pinhole's own (see Translations).
 
 ## A whole plugin
 
@@ -108,7 +109,8 @@ its settings, is there as the window first shows. It sets:
   shows the series a photo would join. Where the window is too narrow for
   them all, their keys go from the buttons, then the plugins' buttons fold
   into one, More ▾, whose menu lists them with their keys; the keys work
-  either way, and a group's ⇧ key opens that menu on its row.
+  either way, and a group's ⇧ key opens that menu on its row. More ▾ is
+  lit while one of them is `active`, and turns while one is `busy`.
 - `covering`: true while it is over the photos: the grid's controls fade
   and its keys rest, as for Pinhole's panels. Its own `Shortcut`s and
   `Command`s should be enabled only then. One plugin covers at a time, the
@@ -150,10 +152,13 @@ its settings, is there as the window first shows. It sets:
   `PluginAction`s whose button is lit, and `settings: true` lights its part
   of the side panel. Pinhole shows it by itself the first time the plugin is
   on, once `tourReady` is true and the grid is free, and again from the
-  side panel. Series' shows a series of your own. One tour at most shows
-  by itself in a launch: with more than one not seen yet, a card lists
-  those plugins instead, each with Show for its tour, and once it closes
-  they count as seen.
+  side panel. Series' shows a series of your own. Of the plugins on at
+  launch, one tour at most shows by itself: with more than one not seen
+  yet, a card lists those plugins instead, each once its tour is ready,
+  with Show for its tour (that one then counts as seen), Skip all (they
+  all do) and Later (none does, and the card comes back next launch). A
+  plugin turned on in the side panel shows its own once the panel
+  closes.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle` and `Command` (a key, with what it does in the help),
@@ -237,9 +242,13 @@ the key, the translation its value, or an object of plural forms for a
 counted one. Its catalog is its own: a string in its files is looked up
 there first, then in Pinhole's, and never changes what Pinhole or another
 plugin says. The manifest's `name` and `description` are looked up there
-too, so the side panel and the help name it in the language. (Qt names a
-string's file only by its name: a file named as one of another plugin's,
-other than `Main.qml`, may get that one's words for the same English.)
+too, so the side panel and the help name it in the language. Qt names a
+string's file only by its name, though: a file named as one of another
+plugin's, other than `Main.qml`, may get that one's words for the same
+English, and one named as one of Pinhole's own (`Toggle.qml`,
+`Spinner.qml`…) Pinhole's first. Give each a name of its own, as Contact
+sheet's `SheetStudio.qml` beside Series' `Studio.qml`; `pinhole plugin
+check` warns of one that is not.
 
 ### Trust
 

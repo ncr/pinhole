@@ -1,6 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
-import "Days.js" as Days
+import "CalendarDays.js" as Days
 
 // The calendar, full window: a row of weeks for each year, oldest at the
 // top as in the grid, each day a square in the accent, as bright as it has

@@ -570,14 +570,16 @@ QtObject {
         QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
     }
 
-    // What came with API 2, by a plugin's words, comments aside; and each
-    // of Pinhole's own that uses any asks for API 2.
+    // What came with API 2, by a plugin's code, comments and strings
+    // aside; and each of Pinhole's own that uses any asks for API 2.
     void whatAPluginUsesOfApi2IsFoundAndPinholesOwnAskForIt() {
         QTemporaryDir dir;
         write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
 // avgColor, pinhole.settings: only in a comment
-QtObject {
-    property var hidden: []
+PinholePlugin {
+    id: plugin
+    hidden: []
     property string colour: pinhole.library.item(0).avgColor /* .then( */
 }
 )");
@@ -585,6 +587,46 @@ QtObject {
         write(dir.path() + "/Main.qml", "import QtQuick\nQtObject {}\n");
         write(dir.path() + "/Helper.js", "function go() { pinhole.run('x', []).then(r => r) }\n");
         QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"promises"}));
+        // Its own names and words are not the API's: a child's hidden, its
+        // own covered and output, a URL's // and what follows, a string's
+        // or a regular expression's words, a template's.
+        QFile::remove(dir.path() + "/Helper.js");
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    id: plugin
+    property bool covered: false
+    property string site: "https://example.com/pinhole.notify" // hidden: [1]
+    property string said: 'pinhole.settings: hidden: output: .then('
+    property var pattern: /pinhole\.warn\/"x/
+    property real half: width / 2 / 3
+    Rectangle { hidden: true; property var output: [] }
+    QtObject { id: other; property bool hidden: false }
+    function f(n) { other.hidden = n; return `${n} pinhole.api .avgColor ${"`"}` }
+    function g(o) { return o.run("x", [], { output: l => l }) }
+    Connections { target: grid; function onHiddenChanged() {} function onCoveredByChanged() {} }
+}
+)");
+        QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList());
+        // As they are used: by the root's id, in a template's code, run's
+        // options, a Connections to pinhole as a plugin's part has it.
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin as P
+P.PinholePlugin {
+    id: plugin
+    function f(n) { plugin.hidden = [n]; return `${pinhole.library.item(n).avgColor}` }
+    function g() { pinhole.run("x", [], { timeout: 10, output: line => line }) }
+}
+)");
+        write(dir.path() + "/Part.qml", R"(import QtQuick
+Item {
+    property var host
+    Connections { target: part.host.pinhole; function onCoveredByChanged() {} }
+}
+)");
+        QCOMPARE(Plugins::apiTwoUses(dir.path()), QStringList({"pinhole.coveredBy", "hidden", "avgColor", "run's output"}));
+        // Pinhole's own: each that uses any asks for API 2, and what some
+        // use is found.
         const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
         for (const QFileInfo &plugin : QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
             QFile manifest(plugin.filePath() + "/manifest.json");
@@ -592,6 +634,36 @@ QtObject {
             const int api = QJsonDocument::fromJson(manifest.readAll()).object().value("api").toInt(1);
             const QStringList uses = Plugins::apiTwoUses(plugin.filePath());
             QVERIFY2(api >= 2 || uses.isEmpty(), qPrintable(plugin.fileName() + " uses " + uses.join(", ") + " and asks for API 1"));
+        }
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/screenshots").contains("hidden"));
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/send").contains("run's output"));
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/colour").contains("pinhole.coveredBy"));
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/colour").contains("pinhole.dismissed"));
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/colour").contains("avgColor"));
+        QVERIFY(Plugins::apiTwoUses(builtIn + "/frame").contains("pinhole.keepAwake"));
+    }
+
+    // A plugin's file named as another's, or as one of Pinhole's own, is
+    // warned of; Pinhole's own plugins' are each their own.
+    void aPluginsFileNamedAsAnothersIsWarnedOf() {
+        QTemporaryDir dir;
+        QDir().mkpath(dir.path() + "/mine");
+        QDir().mkpath(dir.path() + "/theirs/parts");
+        write(dir.path() + "/mine/Main.qml", "import QtQuick\nItem {}\n");
+        write(dir.path() + "/mine/Studio.qml", "import QtQuick\nItem {}\n");
+        write(dir.path() + "/mine/Toggle.qml", "import QtQuick\nItem {}\n");
+        write(dir.path() + "/mine/Own.js", "function f() {}\n");
+        write(dir.path() + "/theirs/Main.qml", "import QtQuick\nItem {}\n");
+        write(dir.path() + "/theirs/parts/Studio.qml", "import QtQuick\nItem {}\n");
+        QCOMPARE(Plugins::nameClashes(dir.path() + "/mine", {{"me.mine", dir.path() + "/mine"}, {"me.theirs", dir.path() + "/theirs"}}),
+                 QStringList({"Studio.qml is named as me.theirs's Studio.qml", "Toggle.qml is named as Pinhole's own Toggle.qml"}));
+        const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
+        QList<std::pair<QString, QString>> all;
+        for (const QFileInfo &plugin : QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+            all.append({plugin.fileName(), plugin.filePath()});
+        for (const auto &[id, folder] : all) {
+            const QStringList clashes = Plugins::nameClashes(folder, all);
+            QVERIFY2(clashes.isEmpty(), qPrintable(id + ": " + clashes.join("; ")));
         }
     }
 
