@@ -131,6 +131,9 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     if (platformTheme.startsWith("gtk"))
         qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
+    // A self-test never touches the person's own Pictures or clipboard
+    // (selftest.h): refused here, before anything loads, if it would.
+    guardSelfTest();
 
     // Qt Multimedia, when first used, tries every hardware video decoder
     // FFmpeg knows of (CUDA, VA-API, VDPAU, Vulkan): some 900 ms on an

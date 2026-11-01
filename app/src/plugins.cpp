@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "selftest.h"
 
 #include "encoder.h"
 #include "favourites.h"
@@ -1045,7 +1046,7 @@ void PluginHost::showFile(const QString &path) const {
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
 }
 
-QString PluginHost::picturesDir() const { return QStandardPaths::writableLocation(QStandardPaths::PicturesLocation); }
+QString PluginHost::picturesDir() const { return picturesLocation(); }
 
 bool PluginHost::exists(const QString &path) const { return QFileInfo::exists(path); }
 

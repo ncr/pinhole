@@ -28,6 +28,8 @@
 #include <QtTest>
 
 #include <csignal>
+#include <pwd.h>
+#include <unistd.h>
 #include <lcms2.h>
 #include <turbojpeg.h>
 
@@ -47,6 +49,7 @@
 #include "photoprovider.h"
 #include "thumbnailloader.h"
 #include "scrollphysics.h"
+#include "selftest.h"
 #include "serviceclient.h"
 #include "storage.h"
 #include "theme.h"
@@ -4659,6 +4662,32 @@ private slots:
         QTRY_COMPARE(bench.said().size(), 3);
         QCOMPARE(bench.said().last(), QString("not_found"));
         QVERIFY(mimeData()->hasFormat("image/gif"));
+    }
+
+    void aSelfTestCopiesToItsOwnClipboardAndNeverToRealPictures() {
+        // The account's own Pictures, whatever HOME says; a scratch one is
+        // not.
+        const QString home = QString::fromLocal8Bit(getpwuid(getuid())->pw_dir);
+        QVERIFY(isAccountPictures(home + "/Pictures"));
+        QVERIFY(isAccountPictures(home + "/Pictures/Pinhole/sheet.jpg"));
+        QVERIFY(!isAccountPictures(home + "/PicturesOther"));
+        QTemporaryDir scratch;
+        QVERIFY(!isAccountPictures(scratch.path() + "/Pictures"));
+        // In a self-test a copy is kept in the window, the session's
+        // clipboard as it was; Pictures is the one given.
+        QGuiApplication::clipboard()->clear();
+        qputenv("PINHOLE_SELFTEST", "test");
+        qputenv("XDG_PICTURES_DIR", (scratch.path() + "/Pictures").toUtf8());
+        auto *mime = new QMimeData;
+        mime->setText("kept");
+        setClipboard(mime);
+        QCOMPARE(clipboardNow()->text(), QString("kept"));
+        const QMimeData *session = QGuiApplication::clipboard()->mimeData();
+        QVERIFY(!session || !session->hasText());
+        QCOMPARE(picturesLocation(), scratch.path() + "/Pictures");
+        qunsetenv("PINHOLE_SELFTEST");
+        qunsetenv("XDG_PICTURES_DIR");
+        QCOMPARE(picturesLocation(), QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
     }
 
     void theLastCopyAskedForWinsTheClipboard() {

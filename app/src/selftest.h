@@ -8,6 +8,31 @@
 class Incoming;
 class Keymap;
 class Library;
+class QMimeData;
+
+// Safe by construction (selftestguard.cpp). A self-test (PINHOLE_SELFTEST
+// set) never touches the person's own Pictures or clipboard:
+// - The clipboard is private to the window: what Pinhole copies goes to
+//   setClipboard(), which in a self-test keeps it in the process, and a
+//   self-test reads it back with clipboardNow(). If anything still sets
+//   the session's clipboard, the run ends at once with exit 3.
+// - Pictures comes only from picturesLocation() (pinhole.picturesDir() for
+//   plugins). In a self-test it is XDG_PICTURES_DIR when that is given
+//   (Qt itself reads only user-dirs.dirs), else Qt's; and if it is the
+//   account's own Pictures (~/Pictures of the home in the password file, or
+//   the folder its real ~/.config/user-dirs.dirs names, whatever HOME says),
+//   the run ends with exit 3 before anything is written.
+// - guardSelfTest(), in main() before anything loads: every self-test
+//   (Contact sheet, Series' studio, Copy, Background and the rest alike)
+//   refuses to start, exit 3 and a line saying why, unless Pictures is a
+//   scratch folder. Run them with HOME and XDG_PICTURES_DIR pointed at
+//   scratch folders. It says where Pictures is as the first line.
+bool selfTesting();
+bool isAccountPictures(const QString &path);
+QString picturesLocation();
+void setClipboard(QMimeData *data);
+const QMimeData *clipboardNow();
+void guardSelfTest();
 class LibraryReloader;
 class PhotoGrid;
 class QQuickWindow;

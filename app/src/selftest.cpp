@@ -320,7 +320,7 @@ void runOutgoingSelfTest(const Library &library, Outgoing &outgoing, const QStri
                 outgoing.copy({picks.first()});
                 // Copying sets the clipboard once the file is ready.
                 QTimer::singleShot(8000, [&library, picks] {
-                    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+                    const QMimeData *mime = clipboardNow();
                     std::printf("selftest:   clipboard: %lld file(s), image/png %s (%lld KB), image/jpeg %s, gnome-copied-files %s\n",
                                 mime ? qlonglong(mime->urls().size()) : 0LL,
                                 mime && mime->hasFormat("image/png") ? "yes" : "no",
@@ -673,7 +673,7 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              click(window, centreOf(window, "viewerCopy"));
          },
          [=] {
-             const QMimeData *copied = QGuiApplication::clipboard()->mimeData();
+             const QMimeData *copied = clipboardNow();
              return *ticked && !*bottomLine && copied && copied->hasUrls();
          }, 6000},
         {"Copy again ticks again",
@@ -1859,7 +1859,7 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                         return;
                     poll->stop();
                     grab(QStringLiteral("8-made"));
-                    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+                    const QMimeData *mime = clipboardNow();
                     if (!made.isEmpty())
                         say(QStringLiteral("made %1 (%2) in %3 ms, %4: clipboard image/png %5, image/jpeg %6, uri %7")
                                 .arg(made.value("path").toString(), made.value("size").toString())

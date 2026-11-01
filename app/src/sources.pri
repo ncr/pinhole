@@ -97,6 +97,7 @@ SOURCES += \
     $$PWD/selfteststacks.cpp \
     $$PWD/selftestthrough.cpp \
     $$PWD/selftestcolour.cpp \
+    $$PWD/selftestguard.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

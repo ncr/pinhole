@@ -1,6 +1,7 @@
 #include "outgoing.h"
 
 #include "library.h"
+#include "selftest.h"
 #include "portal.h"
 #include "serviceclient.h"
 
@@ -229,7 +230,7 @@ void Outgoing::toClipboard(const QStringList &files, QObject *context, std::func
                 dropped();
             return;
         }
-        QGuiApplication::clipboard()->setMimeData(clipboardData(files, watcher->result()));
+        setClipboard(clipboardData(files, watcher->result()));
         if (then)
             then();
     });
