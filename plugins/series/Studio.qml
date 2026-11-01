@@ -185,8 +185,19 @@ Item {
             studio.recording.then(file => {
                 studio.making = ""
                 studio.recording = null
-                studio.pinhole.copyFile(file)
-                studio.made = { path: file, name: file.split("/").pop(), size: studio.pinhole.sizeText(studio.pinhole.fileSize(file)) }
+                // Said copied once the clipboard has it (a GIF's first
+                // frame is made a PNG first), not before.
+                const done = { path: file, name: file.split("/").pop(), size: studio.pinhole.sizeText(studio.pinhole.fileSize(file)),
+                               copy: "copying" }
+                studio.made = done
+                const copied = how => {
+                    if (studio.made === done)
+                        studio.made = Object.assign({}, done, { copy: how })
+                }
+                studio.pinhole.copyFile(file).then(() => copied("copied"), error => {
+                    copied("failed")
+                    studio.pinhole.warn(error)
+                })
             }, error => {
                 studio.making = ""
                 studio.recording = null
@@ -654,7 +665,11 @@ Item {
         visible: studio.made !== null || studio.error !== ""
         Chip {
             text: studio.error !== "" ? qsTr("Could not make it: %1").arg(studio.error)
-                : studio.made ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole: %1 · %2").arg(studio.made.name).arg(studio.made.size) : ""
+                : studio.made ? (studio.made.copy === "copied" ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole: %1 · %2")
+                                                               : qsTr("Kept in Pictures/Pinhole: %1 · %2"))
+                                    .arg(studio.made.name).arg(studio.made.size)
+                                + (studio.made.copy === "copying" ? " · " + qsTr("copying…") : "")
+                : ""
             textColor: studio.error !== "" ? theme.red : theme.foreground
         }
         ShellButton {

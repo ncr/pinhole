@@ -1984,28 +1984,53 @@ private slots:
         QImage png;
         QVERIFY(png.loadFromData(image.png, "PNG"));
         QCOMPARE(png.size(), QSize(2560, 1280));
-        // A GIF goes as itself, to move; what is not an image, as a file only.
+        // A GIF goes as itself, to move, and its first frame as a PNG for
+        // what takes only that; what is not an image, as a file only.
         const QString gif = dir.path() + "/clip.gif";
         write(gif, QByteArray("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
                               "\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;", 43));
         const Outgoing::ClipboardImage moving = Outgoing::clipboardImage(gif);
         QCOMPARE(moving.gif.size(), 43);
-        QVERIFY(moving.png.isEmpty() && moving.jpeg.isEmpty());
+        QImage frame;
+        QVERIFY(frame.loadFromData(moving.png, "PNG"));
+        QCOMPARE(frame.size(), QSize(1, 1));
+        QVERIFY(moving.jpeg.isEmpty());
         write(dir.path() + "/notes.txt", "not a picture");
         const Outgoing::ClipboardImage none = Outgoing::clipboardImage(dir.path() + "/notes.txt");
         QVERIFY(none.jpeg.isEmpty() && none.png.isEmpty() && none.gif.isEmpty());
 
-        // A plugin's copyFile, as Pinhole's own copy: the file, and the image.
+        // A plugin's copyFile, as Pinhole's own copy: the file, and the
+        // image; its promise answered once the clipboard has them, not
+        // before, when a paste would still be what was there.
         PluginBench bench({{"t", {}}});
         QVERIFY(bench.host);
         QGuiApplication::clipboard()->clear();
         auto mimeData = [] { return QGuiApplication::clipboard()->mimeData(); };
-        bench.host->copyFile(jpeg);
-        QTRY_VERIFY(mimeData() && mimeData()->hasFormat("image/png"));
+        QStringList saidAsItWasSet = {"not set"};
+        QObject::connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, &bench.engine, [&] {
+            if (mimeData() && mimeData()->hasFormat("image/png"))
+                saidAsItWasSet = bench.said();
+        });
+        bench.engine.globalObject().setProperty("jpeg", jpeg);
+        bench.engine.globalObject().setProperty("gif", gif);
+        bench.js("pinhole.copyFile(jpeg).then(path => said.push('copied ' + path))");
+        QCOMPARE(bench.said(), QStringList());
+        QTRY_COMPARE(bench.said(), QStringList({"copied " + jpeg}));
+        QCOMPARE(saidAsItWasSet, QStringList());
         const QMimeData *mime = mimeData();
+        QVERIFY(mime && mime->hasFormat("image/png"));
         QCOMPARE(mime->data("image/jpeg"), bytes);
         QCOMPARE(mime->urls(), QList<QUrl>({QUrl::fromLocalFile(jpeg)}));
         QVERIFY(mime->data("x-special/gnome-copied-files").startsWith("copy\nfile://"));
+        // A GIF: itself and its first frame.
+        bench.js("pinhole.copyFile(gif).then(() => said.push('gif'))");
+        QTRY_COMPARE(bench.said().size(), 2);
+        QVERIFY(mimeData()->hasFormat("image/gif") && mimeData()->hasFormat("image/png"));
+        // No such file: said so, the clipboard as it was.
+        bench.js(R"(pinhole.copyFile("/no/such/file.jpg").then(null, e => said.push(e.code)))");
+        QTRY_COMPARE(bench.said().size(), 3);
+        QCOMPARE(bench.said().last(), QString("not_found"));
+        QVERIFY(mimeData()->hasFormat("image/gif"));
     }
 
     void aPluginsNoticeIsSaidAsItsOwn() {

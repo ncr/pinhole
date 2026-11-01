@@ -71,8 +71,8 @@ public:
     Q_INVOKABLE void exportTo(const QList<int> &indexes, bool compatible);
 
     // One image file as a chat takes it pasted: its JPEG as it is (a GIF as
-    // it is), and a PNG of at most 2560 px for what takes only that. Empty
-    // for what is not an image. Slow for a big photo: not on the window's
+    // it is), and a PNG of at most 2560 px (a GIF's first frame) for what
+    // takes only that. Empty for what is not an image. Slow for a big photo: not on the window's
     // thread.
     struct ClipboardImage {
         QByteArray jpeg, png, gif;

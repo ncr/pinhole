@@ -38,21 +38,30 @@ PinholePlugin {
     // A video too big to fetch only for this, until asked (⇧I).
     property bool waiting: false
     property double waitingBytes: 0
-    // What was read this time the window is open, by id: back to a photo
-    // is instant without even the cache.
+    // What was read this time the window is open, by id, with the key of
+    // the original it was read from: back to a photo is instant without
+    // even the cache, and an edited one is read again.
     property var known: ({})
-    // A video's original comes by itself only this small: most are tens or
-    // hundreds of MB, which would hold up the viewer's own photos from the
-    // service and push them out of its cache.
-    readonly property double smallVideo: 50 * 1000 * 1000
+    // A video's original comes by itself only this small (50 MB, as
+    // sizeText counts them): most are tens or hundreds of MB, which would
+    // hold up the viewer's own photos from the service and push them out of
+    // its cache. A folder's original is its own file, here already.
+    readonly property double smallVideo: 50 * 1024 * 1024
     readonly property string index: pinhole.library.dir + "/library.sqlite"
 
     readonly property int at: showing ? pinhole.viewer.index : -1
     onAtChanged: look()
     Connections {
         target: pinhole.library
-        // Positions may have moved: the photo shown is looked up again.
+        // Read again, as on every iCloud change: the photo shown, if it is
+        // still the one at its place, only taken again, what is under way
+        // for it going on; else positions moved, and it is looked up again.
         function onChanged() {
+            const it = plugin.at >= 0 ? pinhole.library.item(plugin.at) : {}
+            if (it.id !== undefined && it.id === plugin.photoId) {
+                plugin.item = it
+                return
+            }
             plugin.photoId = ""
             plugin.look()
         }
@@ -109,32 +118,30 @@ PinholePlugin {
         photoId = it.id
         item = it
         trouble = ""
-        if (known[it.id]) {
-            facts = known[it.id]
-            return
-        }
-        facts = {}
-        coming = true
+        // What was read of it before shows at once, kept if its original is
+        // still the one it was read from.
+        const remembered = known[it.id]
+        facts = remembered ? remembered.facts : {}
+        coming = !remembered
         const id = it.id, video = it.video
-        track(pinhole.run("pinhole-info", ["index", index, id, pinhole.cacheDir])).then(result => {
+        indexed(id, track).then(found => {
             if (id !== photoId)
                 return
-            const out = result.stdout
-            const split = out.indexOf("\n--\n")
-            const row = JSON.parse(out.slice(0, split))[0] || {}
-            const cached = out.slice(split + 4).trim()
-            const first = Details.fromIndex(row)
-            if (cached !== "") {
-                try {
-                    take(id, Details.merged(first, JSON.parse(cached)))
-                    return
-                } catch (e) {
-                    // Read again below.
-                }
+            // Read meanwhile (the tour reads ahead), or kept in the cache.
+            const now = known[id]
+            if (now && now.key === found.key) {
+                take(id, now.key, now.facts)
+                return
             }
+            if (found.facts) {
+                take(id, found.key, found.facts)
+                return
+            }
+            const first = found.first
             facts = first
-            pending = { id: id, video: video, key: row.key || "", first: first }
-            if (video && !(first.bytes <= smallVideo)) {
+            coming = true
+            pending = { id: id, video: video, key: found.key, first: first }
+            if (video && !(first.bytes <= smallVideo) && !pinhole.library.key.startsWith("folder:")) {
                 coming = false
                 waiting = true
                 waitingBytes = first.bytes || 0
@@ -143,6 +150,27 @@ PinholePlugin {
             // A second on it first: not for each photo stepped past.
             fetchSoon.restart()
         }).catch(error => failed(id, error, qsTr("The index could not be read: %1")))
+    }
+    // What the index says of a photo, and what was read of its original
+    // before, if that original is still the one: a promise of { key, first,
+    // facts } (facts only if they were kept). `hold` is given the program
+    // run, to cancel.
+    function indexed(id, hold) {
+        return hold(pinhole.run("pinhole-info", ["index", index, id, pinhole.cacheDir])).then(result => {
+            const out = result.stdout
+            const split = out.indexOf("\n--\n")
+            const row = JSON.parse(out.slice(0, split))[0] || {}
+            const cached = out.slice(split + 4).trim()
+            const found = { key: row.key || "", first: Details.fromIndex(row), facts: null }
+            if (cached !== "") {
+                try {
+                    found.facts = Details.merged(found.first, JSON.parse(cached))
+                } catch (e) {
+                    // Read again.
+                }
+            }
+            return found
+        })
     }
     property var pending: null
     Timer {
@@ -156,20 +184,27 @@ PinholePlugin {
     function read(job) {
         if (!job || job.id !== photoId)
             return
+        // Read meanwhile, as the tour does ahead.
+        if (known[job.id] && known[job.id].key === job.key)
+            return
         waiting = false
         coming = true
         reading = true
         track(pinhole.fetch(job.id, "original")).then(path => {
             track(pinhole.run("pinhole-info", ["read", job.video ? "video" : "image", path])).then(result => {
-                const read = Details.fromOriginal(result.stdout)
-                pinhole.run("pinhole-info", ["keep", pinhole.cacheDir, job.id, job.key], { input: JSON.stringify(read) + "\n" })
-                    .catch(pinhole.warn)
-                take(job.id, Details.merged(job.first, read))
+                take(job.id, job.key, Details.merged(job.first, kept(job.id, job.key, result.stdout)))
             }).catch(error => failed(job.id, error, qsTr("The original could not be read: %1")))
         }, error => failed(job.id, error, qsTr("The original could not be fetched: %1"))).catch(pinhole.warn)
     }
-    function take(id, all) {
-        known[id] = all
+    // What pinhole-info read of an original, kept in the cache for it.
+    function kept(id, key, output) {
+        const read = Details.fromOriginal(output)
+        pinhole.run("pinhole-info", ["keep", pinhole.cacheDir, id, key], { input: JSON.stringify(read) + "\n" })
+            .catch(pinhole.warn)
+        return read
+    }
+    function take(id, key, all) {
+        known[id] = { key: key, facts: all }
         if (id === photoId) {
             facts = all
             coming = false
@@ -290,15 +325,37 @@ PinholePlugin {
 
     // The photo under the pointer in the grid, shown full window with the
     // panel open over it; then the photo with a place taken nearest it,
-    // looked for meanwhile, the map's button lit.
+    // looked for meanwhile, the map's button lit. Its facts are read then
+    // too, as the panel reads them, for the button to be there as the step
+    // comes, not seconds after.
     property string placeId
     function findPlace(index) {
         placeId = ""
         const date = pinhole.library.item(index).date
         if (date === undefined)
             return
-        pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))])
-            .then(result => placeId = result.stdout.trim()).catch(pinhole.warn)
+        pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))]).then(result => {
+            placeId = result.stdout.trim()
+            if (placeId !== "")
+                readAhead(placeId)
+        }).catch(pinhole.warn)
+    }
+    function readAhead(id) {
+        if (known[id])
+            return
+        indexed(id, promise => promise).then(found => {
+            if (found.facts) {
+                take(id, found.key, found.facts)
+                return null
+            }
+            return pinhole.fetch(id, "original")
+                .then(path => pinhole.run("pinhole-info", ["read", "image", path]))
+                .then(result => take(id, found.key, Details.merged(found.first, kept(id, found.key, result.stdout))))
+        }).catch(error => {
+            // The step lights no button then: said only if it is ours.
+            if (error.code === "exit" || error.code === "start" || error.code === undefined)
+                pinhole.warn(error)
+        })
     }
     QtObject {
         id: mapLight

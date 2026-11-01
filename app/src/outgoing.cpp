@@ -178,11 +178,10 @@ Outgoing::ClipboardImage Outgoing::clipboardImage(const QString &file) {
     };
     if (reader.format() == "jpeg")
         image.jpeg = bytes();
-    // A GIF moves only as itself.
-    if (reader.format() == "gif") {
+    // A GIF moves only as itself; its first frame as the PNG, for what
+    // takes only that.
+    if (reader.format() == "gif")
         image.gif = bytes();
-        return image;
-    }
     const QSize size = reader.size();
     if (size.isValid() && (size.width() > 2560 || size.height() > 2560))
         reader.setScaledSize(size.scaled(2560, 2560, Qt::KeepAspectRatio));

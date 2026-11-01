@@ -135,6 +135,13 @@ Item {
     Timer { id: moving; interval: 1500 }
     onWidthChanged: moving.restart()
     onHeightChanged: moving.restart()
+    // A button that shows only later (Info's map, once the photo's place
+    // is read) is followed to when it does.
+    readonly property bool actionShown: {
+        const b = action ? action.button : null
+        return !!b && b.visible && b.opacity > 0 && b.width > 0
+    }
+    onActionShownChanged: if (shown) moving.restart()
     FrameAnimation {
         running: root.shown && (moving.running || !root.arrived || root.panelPart !== null)
         onTriggered: root.follow(frameTime)

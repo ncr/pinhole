@@ -183,7 +183,10 @@ public:
                                 const QJSValue &done = {});
     // A file on the clipboard, for pasting into a chat or a file manager:
     // an image as image data too, as Pinhole's own copy has it (Outgoing).
-    Q_INVOKABLE void copyFile(const QString &path) const;
+    // A promise of the path, once the clipboard has it (an image's PNG is
+    // made first, away from the window's thread); rejected with "not_found"
+    // if there is no such file.
+    Q_INVOKABLE QJSValue copyFile(const QString &path);
     // The folder a file is in, in the file manager.
     Q_INVOKABLE void showFile(const QString &path) const;
     // ~/Pictures, or the desktop's own Pictures folder.

@@ -53,10 +53,10 @@ plugin uses of an API newer than its manifest asks for.
 
 `api` is the oldest version of what follows the plugin needs (1 if left
 out); a Pinhole older than that says it needs a newer one and does not load
-it. `pinhole.api` says which one it is running in. API 2 brought promises,
-`pinhole.settings`, `notify`, `warn`, photos by id, `hidden`, `avgColor`,
-`library.field`, `isHidden`, `run`'s `output`, `pinhole.coveredBy` and
-`keepAwake`.
+it. `pinhole.api` says which one it is running in. API 2 brought promises
+(`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
+`hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
+`pinhole.coveredBy` and `keepAwake`.
 
 `Main.qml` beside it:
 
@@ -175,7 +175,8 @@ positions move when the library is read again, ids do not, so keep ids.
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
-| `copyFile(path)`, `showFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is and a PNG of at most 2560 px, a GIF as it is), as Pinhole's own copy has it; its folder in the file manager |
+| `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file |
+| `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
 | `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
@@ -183,8 +184,8 @@ positions move when the library is read again, ids do not, so keep ids.
 
 ### Promises
 
-What takes a while (`fetch`, `run`, `record`) gives a promise, which also
-has `cancel()`:
+What takes a while (`fetch`, `run`, `record`, `copyFile`) gives a
+promise, which also has `cancel()` (`copyFile`'s does nothing):
 
 ```js
 const steadying = pinhole.run("pinhole-series", ["steady", dir].concat(ids), { timeout: 30000 })
@@ -201,6 +202,7 @@ A promise is rejected with an `Error` whose `code` says why:
 | | |
 |---|---|
 | `fetch` | the service's: `not_found` (no such photo in this library), `offline`, … |
+| `copyFile` | `not_found` (no such file) |
 | `run` | `exit` (it ran and did not exit 0: `exitCode`, `stdout`, `stderr` too, and the message is what it wrote to stderr), `start` (it could not be started), `timeout`, `cancelled` |
 | `record` | `failed` (ffmpeg, or the item gone), `cancelled` |
 

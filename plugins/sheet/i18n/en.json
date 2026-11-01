@@ -10,5 +10,9 @@
   "%n from thumbnails, blurrier": {
     "one": "%n from its thumbnail, blurrier",
     "other": "%n from thumbnails, blurrier"
+  },
+  "%n photo(s) no longer in the library, so the sheet was not made": {
+    "one": "%n photo no longer in the library, so the sheet was not made",
+    "other": "%n photos no longer in the library, so the sheet was not made"
   }
 }

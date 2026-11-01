@@ -19,6 +19,12 @@
     "many": "%n zdjęć nie ma już w bibliotece, pominięte",
     "other": "%n zdjęcia nie ma już w bibliotece, pominięte"
   },
+  "%n photo(s) no longer in the library, so the sheet was not made": {
+    "one": "%n zdjęcia nie ma już w bibliotece, więc stykówki nie zrobiono",
+    "few": "%n zdjęć nie ma już w bibliotece, więc stykówki nie zrobiono",
+    "many": "%n zdjęć nie ma już w bibliotece, więc stykówki nie zrobiono",
+    "other": "%n zdjęcia nie ma już w bibliotece, więc stykówki nie zrobiono"
+  },
   "An even grid, like a contact sheet, or a collage that keeps each photo whole; with a gap, a background, a size and the dates if you like. Enter copies it and keeps it in Pictures/Pinhole.": "Równa siatka, jak stykówka, albo kolaż, w którym każde zdjęcie jest całe; z odstępem, tłem, rozmiarem i datami, jeśli chcesz. Enter kopiuje go i zapisuje w Pictures/Pinhole.",
   "Another library is shown, so the contact sheet was closed": "Pokazano inną bibliotekę, więc stykówkę zamknięto",
   "Background": "Tło",
@@ -27,6 +33,7 @@
   "Collage": "Kolaż",
   "Contact sheet": "Stykówka",
   "Copied, and kept in Pictures/Pinhole · %1 · %2": "Skopiowano i zapisano w Pictures/Pinhole · %1 · %2",
+  "copying…": "kopiuję…",
   "Could not make it: %1": "Nie udało się: %1",
   "Dates": "Daty",
   "Dates under the photos": "Daty pod zdjęciami",
@@ -40,6 +47,7 @@
   "In select mode, tick a few photos, then K (Sheet) makes them one picture to send.": "W trybie zaznaczania wybierz kilka zdjęć, a K (Stykówka) zrobi z nich jeden obrazek do wysłania.",
   "In select mode, tick two photos or more, then K.": "W trybie zaznaczania wybierz dwa zdjęcia lub więcej, potem K.",
   "Its button": "Jego przycisk",
+  "Kept in Pictures/Pinhole · %1 · %2": "Zapisano w Pictures/Pinhole · %1 · %2",
   "magick failed": "magick się nie powiódł",
   "magick took too long": "magick trwał za długo",
   "Make": "Zrób",

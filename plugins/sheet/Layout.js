@@ -237,11 +237,13 @@ function rounded(sheet, caption) {
 
 // What magick is given to make the file: the photos (`files`, in the
 // cells' order) on the background, each cut to its cell, and the dates,
-// each in its size in `points` (none where 0). Each photo is made sRGB from its
-// own profile (an iPhone's are Display P3, which shown as sRGB is duller)
-// and the file says it is sRGB: `profile` is sRGB.icc, beside this file,
-// Little CMS's own sRGB (cmsCreate_sRGBProfile) saved as ICC v4, 620 bytes
-// and free of any copyright. As v4 its curves are a formula, not tables: a
+// each in its size in `points` (none where 0). Each photo is made sRGB from
+// its own profile (an iPhone's are Display P3, which shown as sRGB is
+// duller), or without one by ImageMagick's own sums (a CMYK JPEG's colours
+// went in as they were, magenta as green), and the file says it is sRGB:
+// `profile` is sRGB.icc, beside this file, Little CMS's own sRGB
+// (cmsCreate_sRGBProfile) saved as ICC v4, 620 bytes and free of any
+// copyright. As v4 its curves are a formula, not tables: a
 // v2 one's took Little CMS 85 ms a photo to turn round, this one's 3.
 function magickArguments(sheet, files, colours, dates, points, font, profile, out) {
     var args = ["-size", sheet.w + "x" + sheet.h, "xc:" + colours.background, "-background", colours.background]
@@ -250,7 +252,7 @@ function magickArguments(sheet, files, colours, dates, points, font, profile, ou
         var size = c.w + "x" + c.h
         // Decoding a JPEG at no more than twice the cell is much faster.
         args.push("(", "-define", "jpeg:size=" + 2 * c.w + "x" + 2 * c.h, files[i] + "[0]",
-                  "-auto-orient", "-resize", size + "^", "-profile", profile, "-gravity", "center", "-extent", size, ")",
+                  "-auto-orient", "-resize", size + "^", "-profile", profile, "-colorspace", "sRGB", "-gravity", "center", "-extent", size, ")",
                   "-gravity", "NorthWest", "-geometry", "+" + c.x + "+" + c.y, "-composite")
     }
     if (dates.length > 0) {

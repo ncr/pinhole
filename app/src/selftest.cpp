@@ -1144,6 +1144,75 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         say(QStringLiteral("done, %1 failed").arg(*failures));
         QCoreApplication::exit(*failures ? 1 : 0);
     };
+    // PINHOLE_TOUR_PLUGIN=<id>: that plugin's tour alone, as the side panel
+    // starts it, each step waited on until its light has landed on the
+    // button it names (Info's map shows only once its photo's place is
+    // read), how long that took said, and when the button showed.
+    // PINHOLE_TOUR_DWELL: ms on each step at least, as one reading it.
+    if (const QString only = qEnvironmentVariable("PINHOLE_TOUR_PLUGIN"); !only.isEmpty()) {
+        auto poll = std::make_shared<QTimer>();
+        poll->setInterval(50);
+        auto stepClock = std::make_shared<QElapsedTimer>();
+        auto at = std::make_shared<int>(-1);
+        auto shownAfter = std::make_shared<qint64>(-1), landedAfter = std::make_shared<qint64>(-1);
+        const qint64 dwell = qEnvironmentVariableIntValue("PINHOLE_TOUR_DWELL");
+        QObject::connect(poll.get(), &QTimer::timeout, window, [=, &viewer] {
+            window->setProperty("troubleSeen", true);
+            QObject *t = tour(), *c = card();
+            if (*at < 0) {
+                // Whatever showed by itself, looked past; then its tour.
+                if (clock->elapsed() < 4000 || !ready(only))
+                    return;
+                if ((t && t->property("shown").toBool()) || (c && c->property("shown").toBool())) {
+                    key(window, Qt::Key_Escape);
+                    return;
+                }
+                QMetaObject::invokeMethod(window, "startTour", Q_ARG(QVariant, only));
+                *at = 0;
+                stepClock->start();
+                return;
+            }
+            const int steps = t->property("steps").toList().size();
+            auto *tourItem = qobject_cast<QQuickItem *>(t);
+            QObject *action = t->property("action").value<QObject *>();
+            auto *button = action ? action->property("button").value<QQuickItem *>() : nullptr;
+            const qreal pad = t->property("pad").toReal();
+            const QRectF hole(t->property("hx").toReal(), t->property("hy").toReal(), t->property("hw").toReal(), t->property("hh").toReal());
+            QRectF want;
+            if (button && button->isVisible() && button->width() > 0) {
+                want = QRectF(button->mapToItem(tourItem, QPointF(0, 0)), button->size()).adjusted(-pad, -pad, pad, pad);
+                if (*shownAfter < 0)
+                    *shownAfter = stepClock->elapsed();
+            }
+            const bool landed = t->property("lit").toBool() && !want.isNull()
+                                && std::abs(hole.x() - want.x()) + std::abs(hole.y() - want.y())
+                                           + std::abs(hole.width() - want.width()) + std::abs(hole.height() - want.height()) < 2;
+            if (landed && *landedAfter < 0)
+                *landedAfter = stepClock->elapsed();
+            if ((!landed && stepClock->elapsed() < 10000) || stepClock->elapsed() < dwell)
+                return;
+            const QString name = button ? button->objectName() : QStringLiteral("no button");
+            check(landed, QStringLiteral("step %1 of %2: the light on %3 (%4), landed after %5 ms, the button there after %6 ms, viewer %7")
+                              .arg(*at + 1).arg(steps).arg(action ? action->property("text").toString() : QStringLiteral("none"),
+                                                           name.isEmpty() ? QStringLiteral("its button") : name)
+                              .arg(*landedAfter).arg(*shownAfter).arg(viewer.isOpen() ? "open" : "closed"));
+            *shownAfter = *landedAfter = -1;
+            grab(QStringLiteral("%1-step-%2").arg(only).arg(*at + 1));
+            if (++*at < steps) {
+                key(window, Qt::Key_Right);
+                stepClock->restart();
+                return;
+            }
+            poll->stop();
+            key(window, Qt::Key_Escape);
+            QTimer::singleShot(1000, window, [=] {
+                say(describe(QStringLiteral("after the last")));
+                finish();
+            });
+        });
+        poll->start();
+        return;
+    }
     // The plugins the card listed, all to be marked seen once it closed.
     auto listed = std::make_shared<QStringList>();
     // Through the tour shown, then: none follows; Series' again, Esc, and
@@ -1435,13 +1504,19 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                     }
                     const QVariantMap made = s->property("made").toMap();
                     const QString error = s->property("error").toString();
-                    if ((making != "" || (made.isEmpty() && error.isEmpty())) && clock->elapsed() < 900000)
+                    // Said copied once the clipboard has it.
+                    if ((making != "" || (made.isEmpty() && error.isEmpty()) || made.value("copy") == QLatin1String("copying"))
+                        && clock->elapsed() < 900000)
                         return;
                     poll->stop();
                     grab(QStringLiteral("8-made"));
+                    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
                     if (!made.isEmpty())
-                        say(QStringLiteral("made %1 (%2) in %3 ms").arg(made.value("path").toString(), made.value("size").toString())
-                                .arg(clock->elapsed()));
+                        say(QStringLiteral("made %1 (%2) in %3 ms, %4: clipboard image/png %5, image/jpeg %6, uri %7")
+                                .arg(made.value("path").toString(), made.value("size").toString())
+                                .arg(clock->elapsed()).arg(made.value("copy").toString())
+                                .arg(mime && mime->hasFormat("image/png") ? "yes" : "no", mime && mime->hasFormat("image/jpeg") ? "yes" : "no",
+                                     mime && mime->hasUrls() && mime->urls().value(0).toLocalFile() == made.value("path").toString() ? "yes" : "no"));
                     else
                         say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 900 s") : error));
                     // Made again, and Esc at once stops it, the studio
@@ -1455,7 +1530,8 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                                      s->property("note").toString(), s->property("shown").toBool() ? "open" : "closed"));
                         key(window, Qt::Key_Escape);
                         QTimer::singleShot(600, window, [=] {
-                            say(describe(QStringLiteral("after Esc")));
+                            say(describe(QStringLiteral("after Esc")) + QStringLiteral(", %1 of the making's still on its way")
+                                    .arg(studio()->property("makePending").toList().size()));
                             QCoreApplication::exit(made.isEmpty() ? 1 : 0);
                         });
                     });

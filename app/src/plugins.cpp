@@ -652,11 +652,17 @@ QJSValue PluginHost::record(QQuickItem *item, const QJSValue &options, const QJS
     return promise;
 }
 
-void PluginHost::copyFile(const QString &path) const {
-    if (!QFileInfo::exists(path))
-        return;
+QJSValue PluginHost::copyFile(const QString &path) {
+    const int generation = m_generation;
+    // Nothing to stop: the clipboard has it a moment later either way.
+    const Deferred deferred = defer([] {});
+    if (!QFileInfo::exists(path)) {
+        settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such file: %1").arg(path)));
+        return deferred.promise;
+    }
     // As Pinhole's own copy: an image pastes into a chat as one.
-    Outgoing::toClipboard({path}, const_cast<PluginHost *>(this));
+    Outgoing::toClipboard({path}, this, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); });
+    return deferred.promise;
 }
 
 void PluginHost::showFile(const QString &path) const {

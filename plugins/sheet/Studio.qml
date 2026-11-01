@@ -31,10 +31,15 @@ Item {
     property var files: ({})
     // The library it was opened on, by its key.
     property string libraryKey: ""
-    // Bumped as it opens again or stops, so what comes for before is let be.
+    // Bumped as it opens again or closes, so what comes for before is let
+    // be; and the same for making it, bumped as that stops (Esc while it is
+    // made), when the previews still come.
     property int generation: 0
-    // What is on its way (fetches, programs), to cancel.
+    property int makeGeneration: 0
+    // What is on its way (fetches, programs), to cancel: for the preview,
+    // and for making it.
     property var pending: []
+    property var makePending: []
     // The thumbnails' decoded size, about a cell's, for a thousand to fit.
     property int thumbSize: 512
 
@@ -164,7 +169,7 @@ Item {
     // Esc, K or ✕: while one is made, stops it, and says so; else closes.
     function close() {
         if (making !== "") {
-            stop()
+            stopMaking()
             note = qsTr("Cancelled")
             return
         }
@@ -177,21 +182,31 @@ Item {
         const was = pending
         pending = []
         was.forEach(p => p.cancel())
+        stopMaking()
+    }
+    // Making it, let go; the previews still come.
+    function stopMaking() {
+        ++makeGeneration
+        const was = makePending
+        makePending = []
+        was.forEach(p => p.cancel())
         making = ""
     }
-    // A promise kept, to cancel, until it is answered.
-    function keep(promise) {
-        pending.push(promise)
-        const done = () => { const at = pending.indexOf(promise); if (at >= 0) pending.splice(at, 1) }
+    // A promise kept, to cancel, until it is answered: the preview's, or
+    // with `forMaking` the making's.
+    function keep(promise, forMaking) {
+        const list = () => forMaking ? makePending : pending
+        list().push(promise)
+        const done = () => { const at = list().indexOf(promise); if (at >= 0) list().splice(at, 1) }
         promise.then(done, done)
         return promise
     }
     // A photo's file, once: a promise of its path.
-    function fetchFile(id, kind) {
+    function fetchFile(id, kind, forMaking) {
         const key = id + ":" + kind
         if (files[key] !== undefined)
             return Promise.resolve(files[key])
-        return keep(pinhole.fetch(id, kind)).then(path => {
+        return keep(pinhole.fetch(id, kind), forMaking).then(path => {
             files[key] = path
             return path
         })
@@ -225,11 +240,14 @@ Item {
             pinhole.notify(qsTr("The photos ticked are no longer in the library"))
             return
         }
-        if (making !== "")
-            stop()
+        // Being made, it stops, and says so: ⏎ makes it of those left.
+        const wasMaking = making !== ""
+        if (wasMaking)
+            stopMaking()
         aspects = kept.map(n => aspects[n])
         photos = kept.map(n => photos[n])
-        note = qsTr("%n photo(s) no longer in the library, left out", "", gone)
+        note = wasMaking ? qsTr("%n photo(s) no longer in the library, so the sheet was not made", "", gone)
+                         : qsTr("%n photo(s) no longer in the library, left out", "", gone)
     }
 
     // The sheet: each photo fetched as large as its cell needs (the
@@ -238,7 +256,7 @@ Item {
     function make() {
         if (making !== "" || photos.length === 0)
             return
-        const gen = generation
+        const gen = makeGeneration
         const sheet = studio.sheet
         const shot = photos.slice()
         const paths = new Array(shot.length)
@@ -258,23 +276,23 @@ Item {
                 start()
         }
         const start = () => {
-            if (gen !== generation || next >= shot.length)
+            if (gen !== makeGeneration || next >= shot.length)
                 return
             const n = next++
             const p = shot[n]
             const cell = sheet.cells[n]
             const kind = p.video || Math.max(cell.w, cell.h) <= 1280 ? "medium" : "full"
             // Without the full photo, the medium; without that, the
-            // thumbnail, better than none, and said.
-            fetchFile(p.id, kind).then(path => path, error => {
-                if (kind === "medium")
+            // thumbnail, better than none, and said. Stopped, neither.
+            fetchFile(p.id, kind, true).then(path => path, error => {
+                if (kind === "medium" || error.code === "cancelled" || gen !== makeGeneration)
                     throw error
-                return fetchFile(p.id, "medium")
+                return fetchFile(p.id, "medium", true)
             }).then(path => {
-                if (gen === generation)
+                if (gen === makeGeneration)
                     take(n, path)
             }, error => {
-                if (gen !== generation || error.code === "cancelled")
+                if (gen !== makeGeneration || error.code === "cancelled")
                     return
                 ++blurry
                 take(n, localPath(p.thumbnail))
@@ -290,7 +308,7 @@ Item {
             return
         }
         making = "making"
-        const gen = generation
+        const gen = makeGeneration
         const dir = pinhole.picturesDir() + "/Pinhole"
         const base = dir + "/" + day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage"))
         let path = base + ".jpg"
@@ -300,24 +318,34 @@ Item {
         const temp = pinhole.cacheDir + "/sheet.jpg"
         const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], points, plugin.fontFile,
                                             pinhole.dir + "/sRGB.icc", temp)
-        keep(pinhole.run("mkdir", ["-p", dir, pinhole.cacheDir])).then(() => {
-            if (gen !== generation)
+        keep(pinhole.run("mkdir", ["-p", dir, pinhole.cacheDir]), true).then(() => {
+            if (gen !== makeGeneration)
                 return null
             // A minute, and more for many.
-            return keep(pinhole.run("magick", args, { timeout: 60000 + 500 * shot.length }))
+            return keep(pinhole.run("magick", args, { timeout: 60000 + 500 * shot.length }), true)
         }).then(result => {
-            if (result === null || gen !== generation)
+            if (result === null || gen !== makeGeneration)
                 return null
-            return keep(pinhole.run("mv", ["-f", temp, path]))
+            return keep(pinhole.run("mv", ["-f", temp, path]), true)
         }).then(result => {
-            if (result === null || gen !== generation)
+            if (result === null || gen !== makeGeneration)
                 return
             making = ""
-            pinhole.copyFile(path)
-            made = { path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
-                     pixels: sheet.w + " × " + sheet.h, blurry: blurry }
+            // Said copied once the clipboard has it (a big sheet's PNG takes
+            // a moment), not before, when a paste would be what was there.
+            const done = { path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
+                           pixels: sheet.w + " × " + sheet.h, blurry: blurry, copy: "copying" }
+            made = done
+            const copied = how => {
+                if (made === done)
+                    made = Object.assign({}, done, { copy: how })
+            }
+            pinhole.copyFile(path).then(() => copied("copied"), error => {
+                copied("failed")
+                pinhole.warn(error)
+            })
         }, error => {
-            if (gen !== generation || error.code === "cancelled")
+            if (gen !== makeGeneration || error.code === "cancelled")
                 return
             fail(error.code === "timeout" ? qsTr("magick took too long")
                  : (error.message || "").trim().split("\n")[0] || qsTr("magick failed"))
@@ -477,7 +505,10 @@ Item {
         visible: studio.made !== null || studio.error !== "" || studio.note !== ""
         Chip {
             text: studio.error !== "" ? qsTr("Could not make it: %1").arg(studio.error)
-                : studio.made ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole · %1 · %2").arg(studio.made.pixels).arg(studio.made.size)
+                : studio.made ? (studio.made.copy === "copied" ? "✓ " + qsTr("Copied, and kept in Pictures/Pinhole · %1 · %2")
+                                                                       : qsTr("Kept in Pictures/Pinhole · %1 · %2"))
+                                    .arg(studio.made.pixels).arg(studio.made.size)
+                                + (studio.made.copy === "copying" ? " · " + qsTr("copying…") : "")
                                 + (studio.made.blurry > 0 ? " · " + qsTr("%n from thumbnails, blurrier", "", studio.made.blurry) : "")
                 : studio.note
             textColor: studio.error !== "" ? theme.red : studio.made && studio.made.blurry > 0 ? theme.yellow : theme.foreground
