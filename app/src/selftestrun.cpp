@@ -14,6 +14,7 @@
 #include <QElapsedTimer>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
 #include <QWheelEvent>
@@ -71,7 +72,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     }
     // PINHOLE_SELFTEST=help:<file>: the help as images, to check its layout
     // (and each language's) without a screen: <file> its keyboard tab, and
-    // beside it <file>-mouse and <file>-touchpad.
+    // beside it <file>-mouse and <file>-touchpad. Shown after
+    // PINHOLE_SELFTEST_DELAY ms (800): as the window opens, or once it has.
     // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.
     if (name == QLatin1String("shot")) {
         // PINHOLE_SELFTEST_DELAY: how long to wait first, in ms.
@@ -82,23 +84,60 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
     }
     if (name == QLatin1String("help")) {
-        QTimer::singleShot(800, window, [window, arg] {
+        const int delay = qEnvironmentVariableIsSet("PINHOLE_SELFTEST_DELAY") ? qEnvironmentVariableIntValue("PINHOLE_SELFTEST_DELAY") : 800;
+        // Each tab as drawn: its parts apart, none over another, and every
+        // text within its place (none running on into the next part).
+        auto failures = std::make_shared<int>(0);
+        auto apart = [window, failures](const QString &tab) {
+            QQuickItem *board = window->findChild<QQuickItem *>(QStringLiteral("helpBoard"));
+            QList<QRectF> parts;
+            int wider = 0;
+            std::function<void(QQuickItem *, QRectF &)> texts = [&](QQuickItem *item, QRectF &extent) {
+                for (QQuickItem *child : item->childItems()) {
+                    if (const QVariant content = child->property("contentWidth"); content.isValid() && child->property("text").isValid()) {
+                        extent |= child->mapRectToItem(board, QRectF(0, 0, child->width(), child->height()));
+                        wider += content.toReal() > child->width() + 1;
+                    }
+                    texts(child, extent);
+                }
+            };
+            for (QQuickItem *part : board ? board->childItems() : QList<QQuickItem *>()) {
+                QRectF extent;
+                texts(part, extent);
+                if (!extent.isEmpty())
+                    parts.append(extent);
+            }
+            int over = 0;
+            for (int i = 0; i < parts.size(); ++i)
+                for (int j = i + 1; j < parts.size(); ++j)
+                    over += parts[i].intersects(parts[j]);
+            const bool ok = !parts.isEmpty() && over == 0 && wider == 0;
+            std::printf("selftest: %s the %s tab's %lld parts apart (%d over another, %d texts wider than their place)\n",
+                        ok ? "ok  " : "FAIL", qPrintable(tab), static_cast<long long>(parts.size()), over, wider);
+            std::fflush(stdout);
+            if (!ok)
+                ++*failures;
+        };
+        QTimer::singleShot(delay, window, [window, arg, apart, failures] {
             if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
                 help->setProperty("shown", true);
-            QTimer::singleShot(400, window, [window, arg] {
+            QTimer::singleShot(400, window, [window, arg, apart, failures] {
                 QObject *help = window->findChild<QObject *>(QStringLiteral("help"));
                 const QString file = arg;
                 const QString stem = file.left(file.lastIndexOf('.')), suffix = file.mid(file.lastIndexOf('.'));
                 help->setProperty("tab", QStringLiteral("keyboard"));
                 QTimer::singleShot(200, window, [=] {
                     window->grabWindow().save(file);
+                    apart("keyboard");
                     help->setProperty("tab", QStringLiteral("mouse"));
                     QTimer::singleShot(200, window, [=] {
                         window->grabWindow().save(stem + "-mouse" + suffix);
+                        apart("mouse");
                         help->setProperty("tab", QStringLiteral("touchpad"));
                         QTimer::singleShot(200, window, [=] {
                             window->grabWindow().save(stem + "-touchpad" + suffix);
-                            QCoreApplication::quit();
+                            apart("touchpad");
+                            QCoreApplication::exit(*failures ? 1 : 0);
                         });
                     });
                 });

@@ -253,6 +253,7 @@ Item {
                         const part = parts.itemAt(i)
                         if (!part)
                             return
+                        part.measure()
                         heights.push(Math.ceil(part.implicitHeight))
                     }
                     const space = root.columnGap
@@ -298,17 +299,32 @@ Item {
                         id: part
                         required property var modelData
                         required property int index
-                        // Its keys' width, its own.
-                        readonly property int keyWidth: root.widest(modelData.keys.map(k => k[0]))
+                        // Its keys' width, its own, but no more than six
+                        // tenths of the column: longer ones (the mouse's
+                        // and the touchpad's, in words) wrap, and what
+                        // they do keeps the rest.
+                        readonly property int keyWidth: Math.min(root.widest(modelData.keys.map(k => k[0])),
+                                                                 Math.floor((root.columnWidth - root.gap) * 0.6))
                         x: board.places[index]?.x ?? 0
                         y: board.places[index]?.y ?? 0
                         width: root.columnWidth
                         spacing: Math.round(theme.fontSize * 0.4)
                         onImplicitHeightChanged: board.relayout()
+                        // Its height now, its rows' and then its own, not
+                        // as the window next polishes them: the parts are
+                        // made as the help shows (sections), and a window
+                        // drawn at once (a grab, a workspace not shown)
+                        // put them by their titles alone, over each other.
+                        function measure() {
+                            for (const row of children)
+                                if (row.forceLayout)
+                                    row.forceLayout()
+                            forceLayout()
+                        }
                         UiText {
                             x: part.keyWidth + root.gap
                             width: part.width - x
-                            wrapMode: Text.WordWrap
+                            wrapMode: Text.Wrap
                             text: part.modelData.title
                             color: theme.accent
                             bottomPadding: Math.round(theme.fontSize * 0.25)
@@ -320,13 +336,14 @@ Item {
                                 spacing: root.gap
                                 UiText {
                                     width: part.keyWidth
+                                    wrapMode: Text.Wrap
                                     text: parent.modelData[0]
                                     color: theme.brightForeground
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 UiText {
                                     width: part.width - part.keyWidth - root.gap
-                                    wrapMode: Text.WordWrap
+                                    wrapMode: Text.Wrap
                                     text: parent.modelData[1]
                                     color: theme.darkForeground
                                 }
