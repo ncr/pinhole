@@ -105,7 +105,7 @@ impl Scratch {
     fn new(name: &str) -> Scratch {
         let root = std::env::temp_dir().join(format!("pinhole-provider-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for dir in ["home", "config/pinhole/plugins", "data", "state", "cache", "runtime", "builtin", "photos"] {
+        for dir in ["home", "config/pinhole/plugins", "data", "state", "cache", "runtime", "builtin", "photos", "tmp"] {
             std::fs::create_dir_all(root.join(dir)).unwrap();
         }
         // The test source, as a plugin of your own.
@@ -115,8 +115,12 @@ impl Scratch {
         for file in ["manifest.json", "Main.qml", "pinhole-test-source"] {
             std::fs::copy(given.join(file), plugin.join(file)).unwrap();
         }
+        // Not in the scratch folder, which a long TMPDIR puts past the
+        // longest path a socket can have (108 bytes).
+        let socket = PathBuf::from("/tmp").join(format!("pinhole-{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
         let scratch = Scratch {
-            socket: root.join("runtime/pinhole-provider-test.sock"),
+            socket,
             log: root.join("pinholed.log"),
             plugin,
             root,
@@ -164,6 +168,8 @@ impl Scratch {
             .env("XDG_STATE_HOME", r("state"))
             .env("XDG_CACHE_HOME", r("cache"))
             .env("XDG_RUNTIME_DIR", r("runtime"))
+            // Its own, to see that nothing of it is kept there.
+            .env("TMPDIR", r("tmp"))
             .env("PINHOLE_BUILTIN_PLUGINS", r("builtin"))
             .env("PINHOLE_SYNC_SECS", "5")
             .env("PINHOLE_PROVIDER_SILENCE_SECS", "3")
@@ -232,12 +238,20 @@ impl Drop for Scratch {
         for pid in self.providers() {
             let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
+        let _ = std::fs::remove_file(&self.socket);
         if !std::thread::panicking() {
             let _ = std::fs::remove_dir_all(&self.root);
         } else {
             eprintln!("kept {} (pinholed.log there)", self.root.display());
         }
     }
+}
+
+/// The most memory pinholed has had at once, in bytes (VmHWM).
+fn peak_memory(pinholed: &Child) -> u64 {
+    let status = std::fs::read_to_string(format!("/proc/{}/status", pinholed.id())).unwrap();
+    let line = status.lines().find(|l| l.starts_with("VmHWM:")).unwrap();
+    line.split_whitespace().nth(1).unwrap().parse::<u64>().unwrap() * 1024
 }
 
 fn until(secs: u64, mut done: impl FnMut() -> bool) -> bool {
@@ -599,6 +613,19 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
     let thumb_after: String = db(&library).query_row("SELECT thumb_path FROM assets WHERE id = '00/IMG_0000.jpg'", [], |r| r.get(0)).unwrap();
     assert_eq!(thumb_before, thumb_after);
 
+    // A line of its log of 200 MB: its start logged, the rest passed over
+    // as it comes, never kept.
+    window.forget();
+    reset();
+    let peak = peak_memory(scratch.pinholed.as_ref().unwrap());
+    scratch.misbehave(json!({"list": "huge_stderr"}));
+    window.result("sync", json!({}));
+    assert!(until(60, || scratch.logged().contains("test.source: after the long line")), "{}", scratch.logged().len());
+    assert!(scratch.logged().contains(&format!("test.source: {}…\n", "z".repeat(2000))));
+    let grown = peak_memory(scratch.pinholed.as_ref().unwrap()).saturating_sub(peak);
+    assert!(grown < 32 << 20, "pinholed grew by {} MB", grown >> 20);
+    scratch.behave();
+
     // Its log into pinholed's, but not without end.
     window.forget();
     reset();
@@ -704,6 +731,103 @@ fn a_kind_outside_its_plugins_name_is_refused_and_a_plugin_turned_off_stops_its_
     let shown = window.event(10, |e| e["event"] == "source" && e["kind"] == KIND);
     assert_eq!(shown["id"], id.as_str());
     assert_eq!(meta(&library, "listed_at"), listed_at);
+}
+
+/// Ask for a fetch without waiting for its answer: its id.
+fn send_fetch(window: &mut Window, asset: &str, kind: &str) -> u64 {
+    let id = window.next;
+    window.next += 1;
+    writeln!(window.out, "{}", json!({"id": id, "method": "fetch", "params": {"asset": asset, "kind": kind}})).unwrap();
+    id
+}
+
+/// The answer to request `id`, within `secs`.
+fn answer_to(window: &mut Window, id: u64, secs: u64) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(i) = window.heard.iter().position(|l| l["id"] == id) {
+            return window.heard.remove(i);
+        }
+        assert!(Instant::now() < deadline, "no answer to {id} within {secs} s");
+        if let Some(line) = window.line() {
+            window.heard.push(line);
+        }
+    }
+}
+
+#[test]
+fn a_providers_files_and_urls_hold_up_no_download_and_are_never_kept_in_memory() {
+    let has_ffmpeg = Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_ok_and(|s| s.success());
+    let mut scratch = Scratch::new("files");
+    photos(&scratch.photos(), 20);
+    // A video, its index first, keyframes every second: one ffmpeg reads
+    // by ranges, a few frames of it.
+    let video = scratch.photos().join("v/clip.mp4");
+    if has_ffmpeg {
+        std::fs::create_dir_all(video.parent().unwrap()).unwrap();
+        let made = Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=duration=20:size=640x360:rate=25", "-c:v", "libx264", "-preset", "ultrafast",
+                   "-b:v", "4M", "-g", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+            .arg(&video)
+            .status()
+            .unwrap();
+        assert!(made.success());
+    }
+    let n = 20 + has_ffmpeg as i64;
+    let mut window = scratch.start();
+    let answer = window.result("sign_in", json!({"kind": KIND, "folder": scratch.photos(), "password": "ok", "tickets": "url", "all_url": true}));
+    assert_eq!(answer["state"], "signed_in");
+    let library = library_of(&mut window);
+    assert!(until(60, || count(&library) == (n, n)), "not listed: {:?}\n{}", count(&library), scratch.logged());
+    let served = || std::fs::read_to_string(scratch.state().join("served.log")).unwrap_or_default();
+
+    // The video's thumbnail made by ffmpeg from its URL, read by ranges
+    // through pinholed (the ticket's header never on a command line), not
+    // downloaded whole first.
+    if has_ffmpeg {
+        let thumb: String = db(&library).query_row("SELECT thumb_path FROM assets WHERE id = 'v/clip.mp4'", [], |r| r.get(0)).unwrap();
+        let made = image::open(library.join(thumb)).unwrap();
+        assert!(made.width() >= 320, "{}", made.width());
+        let served = served();
+        let asked: Vec<&str> = served.lines().filter_map(|l| l.strip_prefix("v/clip.mp4 ")).collect();
+        assert!(asked.iter().all(|r| r.starts_with("bytes=")), "{asked:?}");
+        assert!(asked.iter().any(|r| *r != "bytes=0-"), "no seek by ranges: {asked:?}");
+    }
+
+    // A photo's medium made from its original by URL: fetched into the
+    // cache's making/, never into TMPDIR, and gone once made.
+    let making = scratch.root.join("data/pinhole/cache/making");
+    let tmp = scratch.root.join("tmp");
+    let stall = scratch.photos().join(".stall");
+    std::fs::write(&stall, b"").unwrap();
+    let asked = send_fetch(&mut window, "00/IMG_0005.jpg", "medium");
+    let part = || std::fs::read_dir(&making).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".part"));
+    let in_tmp = || std::fs::read_dir(&tmp).unwrap().flatten().map(|e| e.file_name()).collect::<Vec<_>>();
+    assert!(until(20, part), "no part in {}; in TMPDIR: {:?}", making.display(), in_tmp());
+    assert_eq!(in_tmp(), Vec::<std::ffi::OsString>::new(), "pinholed wrote in TMPDIR");
+    std::fs::remove_file(&stall).unwrap();
+    let medium = answer_to(&mut window, asked, 20);
+    assert_eq!(medium["ok"], true, "{medium:#}");
+    let made = image::open(medium["result"]["path"].as_str().unwrap()).unwrap();
+    assert_eq!((made.width(), made.height()), (64, 48));
+    assert!(!part(), "a part left in making/");
+
+    // Originals that are FIFOs (or a mount that no longer answers): more
+    // of them than there are downloads, each refused at once, and the
+    // downloads free for what comes next.
+    window.forget();
+    scratch.misbehave(json!({"prepare": "fifo"}));
+    let started = Instant::now();
+    let asked: Vec<u64> = (0..12).map(|i| send_fetch(&mut window, &format!("00/IMG_{i:04}.jpg"), "original")).collect();
+    for id in asked {
+        let answer = answer_to(&mut window, id, 20);
+        assert_eq!(answer["error"]["code"], "not_found", "{answer:#}");
+        assert!(answer["error"]["message"].as_str().unwrap().contains("is not a file"), "{answer:#}");
+    }
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    scratch.behave();
+    let fetched = window.result("fetch", json!({"asset": "00/IMG_0015.jpg", "kind": "original"}));
+    assert_eq!(std::fs::read(fetched["path"].as_str().unwrap()).unwrap(), std::fs::read(scratch.photos().join("00/IMG_0015.jpg")).unwrap());
 }
 
 /// Throughput: 50,000 made-up assets through the protocol, checked and

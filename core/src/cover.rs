@@ -8,6 +8,7 @@
 //! has little). A frame with almost no spread is dull, whatever its colour;
 //! a dark night scene or a blue one under water still has some.
 
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Stdio;
 
@@ -71,19 +72,29 @@ pub fn pick(video: &Path, edge: u32) -> Result<Vec<u8>> {
     best(video, edge).map(|(_, jpeg)| jpeg)
 }
 
+/// The same of a video ffmpeg reads from `input` (a URL), with
+/// `input_args` (ffmpeg's options for it) before it.
+pub fn pick_from(input: &OsStr, input_args: &[&str], edge: u32) -> Result<Vec<u8>> {
+    best_from(input, input_args, edge).map(|(_, jpeg)| jpeg)
+}
+
 /// When the video's most telling frame is, in seconds, and a JPEG of it at
 /// most `edge` on the long side.
 pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
+    best_from(video.as_os_str(), &[], edge)
+}
+
+fn best_from(video: &OsStr, input_args: &[&str], edge: u32) -> Result<(f64, Vec<u8>)> {
     // A video whose length ffprobe cannot tell, or a very short one, from
     // its start.
-    let times: Vec<f64> = match duration(video) {
+    let times: Vec<f64> = match duration(video, input_args) {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
     let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
     for at in times {
-        let jpeg = match frame(video, at, edge) {
+        let jpeg = match frame_from(video, input_args, at, edge) {
             Ok(jpeg) => jpeg,
             Err(e) => {
                 failed = Some(e);
@@ -98,15 +109,21 @@ pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
     }
     match best {
         Some((_, at, jpeg)) => Ok((at, jpeg)),
-        None => frame(video, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
+        None => frame_from(video, input_args, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
     }
 }
 
 /// A JPEG of the frame `at` seconds in, at most `edge` on the long side.
 pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
+    frame_from(video.as_os_str(), &[], at, edge)
+}
+
+fn frame_from(video: &OsStr, input_args: &[&str], at: f64, edge: u32) -> Result<Vec<u8>> {
     let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
     let output = crate::background::command("ffmpeg")
-        .args(["-v", "error", "-threads", "1", "-ss", &format!("{at:.3}"), "-i"])
+        .args(["-v", "error", "-threads", "1"])
+        .args(input_args)
+        .args(["-ss", &format!("{at:.3}"), "-i"])
         .arg(video)
         .args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
         .stdin(Stdio::null())
@@ -119,9 +136,11 @@ pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
 }
 
 /// The video's length in seconds, from ffprobe.
-fn duration(video: &Path) -> Option<f64> {
+fn duration(video: &OsStr, input_args: &[&str]) -> Option<f64> {
     let output = crate::background::command("ffprobe")
-        .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"])
+        .args(["-v", "error"])
+        .args(input_args)
+        .args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"])
         .arg(video)
         .stdin(Stdio::null())
         .output()

@@ -214,10 +214,15 @@ token: pinholed lists everything.
 ```
 
 - A `path` is an absolute path to a file pinholed opens itself (byte
-  ranges by seek, for a video that streams).
+  ranges by seek, for a video that streams). Only a file: a FIFO or a
+  device is `not_found`. A file that does not answer within 30 s (to be
+  opened, or between two reads: a network mount gone) fails, and while
+  four of your source's are still not back, its files are not tried.
 - A `url` is `http` or `https`, fetched by pinholed with your `headers`
   (at most 32), byte ranges by `Range`. An answer of 401, 403, 404 or 410
-  means the ticket is stale: pinholed asks `prepare` again, once.
+  means the ticket is stale: pinholed asks `prepare` again, once. A server
+  that sends nothing for 60 s (the answer, or the next bytes) fails the
+  download; a slow one that keeps sending never does.
 - `not_found` means the file is not there; any other code is the source's
   trouble, as for errors below.
 - Up to 1,000 at once. Thumbnails are asked for in batches as the library
@@ -304,7 +309,10 @@ A rendition is one file of the asset, for a kind the window asks for:
   makes it from the `original` (which the asset must have), with
   ImageMagick, or ffmpeg from a video's most telling frame, as it does a
   folder's. It asks `prepare` for the original's ticket then. A `path`
-  ticket is quickest; a `url` is fetched whole first.
+  ticket is quickest. A photo's `url` is fetched whole first, into the
+  cache, and only up to 512 MB; a video's is read by ffmpeg, by ranges,
+  only what it needs (through pinholed, so your headers are never on a
+  command line).
 - A photo with no `thumb` shows as its average colour, a blank.
 
 pinholed checks every asset before it writes it. One that is not right
@@ -341,6 +349,7 @@ library or pinholed:
 | It ends, or crashes | the same |
 | More than 1,000 assets in one `put`, or ids in one `removed` | that request fails |
 | An asset that is not right | left out and logged |
+| More than 200 lines of stderr in ten seconds, or a line of more than 2,000 bytes | the rest left out of the log (the rest of a long line passed over as it comes, never kept) |
 | Lines for a request that is over, or that was never asked | ignored |
 
 After it stops, the next request starts it again, at most once in ten
@@ -478,5 +487,7 @@ The tests in `core/daemon/tests/provider.rs` run a pinholed of their own
 above: listing 300 photos with thumbnails by `url` and `path` tickets,
 mediums made, originals fetched, changes pushed and followed, files added,
 favourites, sign-in and its codes, a second source added and removed, the
-provider hanging, crashing, flooding and lying, a kind outside its plugin's
-name refused, and the plugin turned off and on.
+provider hanging, crashing, flooding and lying (a 200 MB line of stderr
+among it), a kind outside its plugin's name refused, the plugin turned off
+and on, a video's thumbnail made from its URL by ranges, a medium made from
+a URL in the cache, and FIFOs for originals.

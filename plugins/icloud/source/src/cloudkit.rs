@@ -283,9 +283,11 @@ impl Downloader {
     }
 
     /// The same session with no deadline for the whole download, only for
-    /// connecting: a long video takes minutes.
+    /// connecting and between two reads (`READ_GAP`): a long video takes
+    /// minutes, but a download that stalls fails rather than hold a
+    /// download thread for good.
     pub fn unhurried(&self) -> Result<Downloader> {
-        let http = Client::builder().connect_timeout(Duration::from_secs(30)).timeout(None).gzip(true).build()?;
+        let http = pinhole_core::source::download_client(pinhole_core::source::READ_GAP).gzip(true).build()?;
         Ok(Downloader { http, session: self.session.clone() })
     }
 

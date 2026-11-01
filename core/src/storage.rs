@@ -64,6 +64,23 @@ pub fn forget_compatible() {
     }
 }
 
+/// The cache in use, which `making` is in.
+static CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn follow_cache(cache: &Path) {
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(cache.to_owned());
+}
+
+/// Where a file fetched only to make another of is kept while it is
+/// (process.rs: a provider's original, for its thumbnail): `making/` in
+/// the cache in use, on disk with the photos rather than in memory, and
+/// never among the photos the limit counts. Emptied as the shared
+/// service starts.
+pub fn making() -> PathBuf {
+    let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    cache.unwrap_or_else(|| std::env::temp_dir().join("pinhole-cache")).join("making")
+}
+
 /// What the settings say, any part missing.
 #[derive(Default, Debug, PartialEq)]
 pub struct Settings {
@@ -299,6 +316,7 @@ struct State {
 impl Storage {
     pub fn new(location: PathBuf, library: PathBuf, cache: PathBuf, limit: Option<u64>, settings: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
+        follow_cache(&cache);
         Storage {
             settings,
             state: Mutex::new(State { location, library, cache, limit, moving: false, moving_from: None, moving_total: 0, moving_to: None }),
@@ -499,6 +517,7 @@ impl Storage {
         let mut state = self.state.lock().unwrap();
         state.location = to.to_owned();
         state.cache = to.join("cache");
+        follow_cache(&state.cache);
         state.moving_to = None;
         state.moving = true;
         state.moving_from = Some(old_cache.to_owned());
@@ -590,6 +609,7 @@ impl Storage {
             }
             state.location = to.clone();
             state.cache = to.join("cache");
+            follow_cache(&state.cache);
             state.moving = true;
             state.moving_from = Some(old_cache.clone());
             state.moving_total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum();

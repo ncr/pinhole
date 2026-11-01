@@ -802,6 +802,8 @@ pub fn run(config: Config) -> Result<()> {
     if given.is_none() {
         shared.storage.resume()?;
         crate::storage::forget_compatible();
+        // What the last one was making from when it ended.
+        let _ = std::fs::remove_dir_all(crate::storage::making());
     }
 
     {

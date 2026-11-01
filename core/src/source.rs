@@ -186,6 +186,21 @@ pub struct Body {
     pub length: Option<u64>,
 }
 
+/// The longest a download waits for the next of its bytes (or for the
+/// answer to start): one that stalls (the network gone, a server that
+/// hangs) fails, and a download thread is free again. Not a deadline for
+/// the whole, which for a long video takes minutes.
+pub const READ_GAP: Duration = Duration::from_secs(60);
+
+/// An HTTP client for downloads: 30 s to connect, at most `gap` for the
+/// answer to start and between two reads, and no deadline for the whole.
+pub fn download_client(gap: Duration) -> reqwest::blocking::ClientBuilder {
+    // The blocking client's `timeout` is a deadline for the answer's head
+    // and for each read of its body, not for the whole of it: each read
+    // gives back what has come, so it is the gap between two.
+    reqwest::blocking::Client::builder().connect_timeout(Duration::from_secs(30)).timeout(gap)
+}
+
 #[derive(Debug)]
 pub enum FetchError {
     /// The ticket has gone stale (an expired link): prepare it again.

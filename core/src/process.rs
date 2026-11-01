@@ -20,7 +20,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -142,6 +142,8 @@ struct Provider {
     /// The watch (`Source::watch`), asked again of each process started,
     /// and who hears what it says.
     watching: Mutex<Option<(Value, Tell, Arc<AtomicBool>)>>,
+    /// Reads of its sources' files given up on, not back yet (`watched`).
+    stuck: Arc<AtomicUsize>,
     weak: Weak<Provider>,
 }
 
@@ -156,6 +158,7 @@ impl Provider {
             slot: Mutex::new(Slot { running: None, started: None, generation: 0 }),
             next_id: AtomicU64::new(1),
             watching: Mutex::new(None),
+            stuck: Arc::default(),
             weak: weak.clone(),
         })
     }
@@ -535,6 +538,10 @@ fn read_line(reader: &mut impl BufRead, max: usize, buf: &mut Vec<u8>) -> std::i
             None => (available, false),
         };
         if buf.len() + part.len() > max {
+            // As much as fits, which a log keeps.
+            let fits = max - buf.len();
+            buf.extend_from_slice(&part[..fits]);
+            reader.consume(fits);
             return Ok(Some(false));
         }
         buf.extend_from_slice(part);
@@ -546,10 +553,33 @@ fn read_line(reader: &mut impl BufRead, max: usize, buf: &mut Vec<u8>) -> std::i
     }
 }
 
+/// The rest of a line, up to and with its newline, passed over as it
+/// comes: never kept, however long it is.
+fn skip_line(reader: &mut impl BufRead) -> std::io::Result<()> {
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(());
+        }
+        let (used, newline) = match available.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (available.len(), false),
+        };
+        reader.consume(used);
+        if newline {
+            return Ok(());
+        }
+    }
+}
+
 /// Its stderr, into pinholed's log a line at a time, each after its
 /// plugin's id: at most 200 lines in ten seconds, and 2,000 bytes a line.
 fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
-    let mut stderr = BufReader::new(stderr);
+    log_lines(plugin, stderr, &mut std::io::stderr());
+}
+
+fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
+    let mut stderr = BufReader::new(from);
     let mut buf = Vec::new();
     let (mut since, mut said, mut left_out) = (Instant::now(), 0u32, 0u32);
     loop {
@@ -558,9 +588,8 @@ fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
             Ok(Some(true)) => String::from_utf8_lossy(&buf).into_owned(),
             Ok(Some(false)) => {
                 // The rest of a long line, left out.
-                let mut rest = Vec::new();
                 let text = String::from_utf8_lossy(&buf).into_owned();
-                if stderr.read_until(b'\n', &mut rest).is_err() {
+                if skip_line(&mut stderr).is_err() {
                     break;
                 }
                 format!("{text}…")
@@ -568,22 +597,22 @@ fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
         };
         if since.elapsed() >= Duration::from_secs(10) {
             if left_out > 0 {
-                eprintln!("pinholed: {plugin}: {left_out} lines of its log left out");
+                let _ = writeln!(log, "pinholed: {plugin}: {left_out} lines of its log left out");
             }
             (since, said, left_out) = (Instant::now(), 0, 0);
         }
         if said < 200 {
             said += 1;
-            eprintln!("pinholed: {plugin}: {}", line.trim_end());
+            let _ = writeln!(log, "pinholed: {plugin}: {}", line.trim_end());
         } else {
             if left_out == 0 {
-                eprintln!("pinholed: {plugin}: more than 200 lines of its log in 10 s: the rest of them left out");
+                let _ = writeln!(log, "pinholed: {plugin}: more than 200 lines of its log in 10 s: the rest of them left out");
             }
             left_out += 1;
         }
     }
     if left_out > 0 {
-        eprintln!("pinholed: {plugin}: {left_out} lines of its log left out");
+        let _ = writeln!(log, "pinholed: {plugin}: {left_out} lines of its log left out");
     }
 }
 
@@ -610,6 +639,285 @@ fn intern_list(list: &[String]) -> &'static [&'static str] {
     let leaked: &'static [&'static str] = Box::leak(list.iter().map(|e| intern(e)).collect::<Vec<_>>().into_boxed_slice());
     all.insert(list.to_vec(), leaked);
     leaked
+}
+
+/// How long a provider's file (a path ticket) may take to be found and
+/// opened, and then between two reads of it. A FIFO is refused before it
+/// is opened; a network mount that no longer answers holds a download for
+/// this long, not for good.
+const FILE_GAP: Duration = Duration::from_secs(30);
+
+/// Reads of a source's files given up on (`FILE_GAP`) and not back yet:
+/// while this many are, its files are not tried, so a mount that does not
+/// answer ties up threads of its own, never every download's.
+const STUCK_MAX: usize = 4;
+
+/// The biggest original fetched by URL to make a photo's thumbnail or
+/// medium from: one bigger is no photo to make one of.
+const MAKE_MAX: u64 = 512 << 20;
+
+/// `O_NONBLOCK` (Linux, as on x86 and ARM): a FIFO put where a file was is
+/// opened without waiting for a writer.
+const O_NONBLOCK: i32 = 0o4000;
+
+/// One read of a file done by a thread of its own, which may not come
+/// back (a dead mount): given up on by whoever waits for it, it is counted
+/// in `stuck` until it does.
+struct Watched {
+    /// 0 running, 1 given up on, 2 done.
+    phase: Mutex<u8>,
+    stuck: Arc<AtomicUsize>,
+}
+
+impl Watched {
+    fn give_up(&self) {
+        let mut phase = self.phase.lock().unwrap();
+        if *phase == 0 {
+            *phase = 1;
+            self.stuck.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Back from a call that may block: whether it was given up on
+    /// meanwhile (no longer counted, as it is back).
+    fn back(&self) -> bool {
+        let mut phase = self.phase.lock().unwrap();
+        if *phase == 1 {
+            *phase = 2;
+            self.stuck.fetch_sub(1, Ordering::SeqCst);
+        }
+        *phase == 2
+    }
+}
+
+/// A file opened and read by a thread of its own, `gap` at most waited for
+/// its opening and for each read: whoever reads it is never held up for
+/// good, however the file behaves. `open` gives the reader and its length.
+fn watched<R: Read + Send + 'static>(
+    what: String,
+    open: impl FnOnce() -> std::result::Result<(R, u64), FetchError> + Send + 'static,
+    gap: Duration,
+    stuck: &Arc<AtomicUsize>,
+) -> std::result::Result<Body, FetchError> {
+    let waiting = stuck.load(Ordering::SeqCst);
+    if waiting >= STUCK_MAX {
+        return Err(FetchError::Failed(anyhow!("{what}: {waiting} reads of this source's files have not come back; none tried until one does")));
+    }
+    let watch = Arc::new(Watched { phase: Mutex::new(0), stuck: stuck.clone() });
+    let (opened_tx, opened_rx) = mpsc::sync_channel::<std::result::Result<u64, FetchError>>(1);
+    let (tx, rx) = mpsc::sync_channel::<std::io::Result<Vec<u8>>>(2);
+    let reading = watch.clone();
+    std::thread::Builder::new()
+        .name("pinholed-file".into())
+        .spawn(move || {
+            let opened = open();
+            if reading.back() {
+                return;
+            }
+            let (mut reader, length) = match opened {
+                Ok(opened) => opened,
+                Err(e) => return drop(opened_tx.send(Err(e))),
+            };
+            if opened_tx.send(Ok(length)).is_err() {
+                return;
+            }
+            loop {
+                let mut buf = vec![0u8; 256 << 10];
+                let read = reader.read(&mut buf);
+                if reading.back() {
+                    return;
+                }
+                match read {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        buf.truncate(n);
+                        if tx.send(Ok(buf)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => return drop(tx.send(Err(e))),
+                }
+            }
+        })
+        .map_err(|e| FetchError::Failed(e.into()))?;
+    match opened_rx.recv_timeout(gap) {
+        Ok(Ok(length)) => Ok(Body { length: Some(length), reader: Box::new(Pumped { rx, chunk: Vec::new(), at: 0, gap, watch, what }) }),
+        Ok(Err(e)) => Err(e),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            watch.give_up();
+            Err(FetchError::Failed(anyhow!("{what} did not answer within {} s", gap.as_secs())))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Failed(anyhow!("{what} could not be opened"))),
+    }
+}
+
+/// What the thread of a `watched` file reads, as it comes.
+struct Pumped {
+    rx: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    chunk: Vec<u8>,
+    at: usize,
+    gap: Duration,
+    watch: Arc<Watched>,
+    what: String,
+}
+
+impl Read for Pumped {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.at == self.chunk.len() {
+            match self.rx.recv_timeout(self.gap) {
+                Ok(Ok(chunk)) => (self.chunk, self.at) = (chunk, 0),
+                Ok(Err(e)) => return Err(e),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(0),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.watch.give_up();
+                    let why = format!("{} did not answer within {} s", self.what, self.gap.as_secs());
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, why));
+                }
+            }
+        }
+        let n = (self.chunk.len() - self.at).min(out.len());
+        out[..n].copy_from_slice(&self.chunk[self.at..self.at + n]);
+        self.at += n;
+        Ok(n)
+    }
+}
+
+/// A file of a path ticket, or bytes `start..=end` of it: only a file
+/// (never a FIFO or a device), read as `watched`.
+fn open_path(path: PathBuf, range: Option<(u64, u64)>, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<Body, FetchError> {
+    let what = path.display().to_string();
+    watched(what, move || {
+        let gone = |e: std::io::Error| match e.kind() {
+            std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
+            _ => FetchError::Failed(anyhow!("{}: {e}", path.display())),
+        };
+        let not_a_file = || FetchError::NotFound(format!("{} is not a file", path.display()));
+        if !std::fs::metadata(&path).map_err(gone)?.is_file() {
+            return Err(not_a_file());
+        }
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(&path).map_err(gone)?;
+        let meta = file.metadata().map_err(gone)?;
+        if !meta.is_file() {
+            return Err(not_a_file());
+        }
+        let length = meta.len();
+        let n = match range {
+            Some((start, end)) => {
+                file.seek(SeekFrom::Start(start)).map_err(gone)?;
+                end.min(length.saturating_sub(1)).saturating_sub(start) + 1
+            }
+            None => length,
+        };
+        Ok((file.take(n), n))
+    }, gap, stuck)
+}
+
+/// Whether a path ticket names a file, asked as `watched`: before a
+/// program is started on it, holding a place among background work.
+fn check_path(path: &Path, gap: Duration, stuck: &Arc<AtomicUsize>) -> std::result::Result<(), FetchError> {
+    open_path(path.to_owned(), Some((0, 0)), gap, stuck).map(drop)
+}
+
+/// A provider's URL on the loopback, for ffmpeg to make a video's
+/// thumbnail from: it reads only what it needs, by ranges, and the
+/// ticket's headers (a provider's sign-in) stay in pinholed, never on a
+/// command line. Served until dropped.
+struct Loopback {
+    url: String,
+    port: u16,
+    stop: Arc<AtomicBool>,
+}
+
+impl Loopback {
+    fn start(client: reqwest::blocking::Client, url: String, headers: serde_json::Map<String, Value>) -> std::io::Result<Loopback> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let token = crate::add::uuid();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (stopped, path) = (stop.clone(), format!("/{token}"));
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                if stopped.load(Ordering::SeqCst) {
+                    return;
+                }
+                let Ok(conn) = conn else { continue };
+                let (client, url, headers, path) = (client.clone(), url.clone(), headers.clone(), path.clone());
+                std::thread::spawn(move || {
+                    let _ = pass_on(conn, &client, &url, &headers, &path);
+                });
+            }
+        });
+        Ok(Loopback { url: format!("http://127.0.0.1:{port}/{token}"), port, stop })
+    }
+}
+
+impl Drop for Loopback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // Wakes its listener, which then sees it is stopped.
+        let _ = std::net::TcpStream::connect(("127.0.0.1", self.port));
+    }
+}
+
+/// One request to a `Loopback`: passed on to the provider's URL with its
+/// headers and the range asked, and the answer back as it comes.
+fn pass_on(
+    conn: std::net::TcpStream,
+    client: &reqwest::blocking::Client,
+    url: &str,
+    headers: &serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<()> {
+    conn.set_read_timeout(Some(Duration::from_secs(30)))?;
+    let mut reader = BufReader::new(conn.try_clone()?);
+    let mut out = conn;
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let mut parts = line.split_whitespace();
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let mut range = None;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 || header.trim().is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            let value = value.trim();
+            if name.eq_ignore_ascii_case("range") && value.starts_with("bytes=") && value[6..].chars().all(|c| c.is_ascii_digit() || c == '-') {
+                range = Some(value.to_owned());
+            }
+        }
+    }
+    if target != path || !matches!(method, "GET" | "HEAD") {
+        out.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    }
+    let mut request = if method == "HEAD" { client.head(url) } else { client.get(url) };
+    for (name, value) in headers {
+        request = request.header(name.as_str(), value.as_str().unwrap_or(""));
+    }
+    if let Some(range) = &range {
+        request = request.header(reqwest::header::RANGE, range.as_str());
+    }
+    let Ok(mut response) = request.send() else {
+        out.write_all(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let status = response.status();
+    let mut head = format!("HTTP/1.1 {} {}\r\nConnection: close\r\n", status.as_u16(), status.canonical_reason().unwrap_or(""));
+    for name in ["content-length", "content-range", "content-type", "accept-ranges"] {
+        if let Some(value) = response.headers().get(name).and_then(|v| v.to_str().ok()) {
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
+    head.push_str("\r\n");
+    out.write_all(head.as_bytes())?;
+    if method == "GET" {
+        std::io::copy(&mut response, &mut out)?;
+    }
+    Ok(())
 }
 
 /// A kind of source of a plugin's own, its provider out of process.
@@ -938,13 +1246,7 @@ impl ProcessSource {
         if let Some(client) = self.http.get() {
             return Ok(client);
         }
-        // No deadline for a whole download, only for connecting: a long
-        // video takes minutes.
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .timeout(None)
-            .build()
-            .map_err(|e| FetchError::Failed(e.into()))?;
+        let client = crate::source::download_client(crate::source::READ_GAP).build().map_err(|e| FetchError::Failed(e.into()))?;
         Ok(self.http.get_or_init(|| client))
     }
 
@@ -969,20 +1271,48 @@ impl ProcessSource {
 
     /// A thumbnail or medium made from the original, as a folder's are.
     fn make(&self, from: &Value, edge: u32, video: bool) -> std::result::Result<Body, FetchError> {
-        let made = match from["path"].as_str() {
-            Some(path) => crate::render::render(Path::new(path), edge, video),
-            None => {
-                // Fetched first, into a file to make it from.
-                let mut body = self.open(&Ticket(from.to_string()), None)?;
-                let part = std::env::temp_dir().join(format!("pinhole-make-{}-{}", std::process::id(), crate::add::uuid()));
-                let copied = File::create(&part).and_then(|mut f| std::io::copy(&mut body.reader, &mut f));
-                let made = copied.map_err(anyhow::Error::from).and_then(|_| crate::render::render(&part, edge, video));
-                let _ = std::fs::remove_file(&part);
-                made
+        let made = match (from["path"].as_str(), from["url"].as_str()) {
+            (Some(path), _) => {
+                // A file that answers, before a place among background
+                // work is taken for it.
+                check_path(Path::new(path), FILE_GAP, &self.provider.stuck)?;
+                crate::render::render(Path::new(path), edge, video)
             }
+            (None, Some(url)) if video => {
+                // ffmpeg reads what it needs of it, by ranges.
+                let headers = from["headers"].as_object().cloned().unwrap_or_default();
+                let loopback = Loopback::start(self.http()?.clone(), url.to_owned(), headers).map_err(|e| FetchError::Failed(e.into()))?;
+                crate::render::render_video_url(&loopback.url, edge)
+            }
+            _ => self.make_fetched(from, edge),
         };
         let bytes = made.map_err(|e| FetchError::Failed(anyhow!("could not make an image of it: {e:#}")))?;
         Ok(Body { length: Some(bytes.len() as u64), reader: Box::new(std::io::Cursor::new(bytes)) })
+    }
+
+    /// A photo's made from its original fetched by URL: into a part file in
+    /// the cache's `making/` (on disk, where the photos are), at most
+    /// `MAKE_MAX` of it, and gone once made.
+    fn make_fetched(&self, from: &Value, edge: u32) -> Result<Vec<u8>> {
+        let mut body = self.open(&Ticket(from.to_string()), None).map_err(|e| anyhow!("{e}"))?;
+        let too_big = |bytes: u64| anyhow!("its original is {} MB, more than {} MB", bytes >> 20, MAKE_MAX >> 20);
+        if let Some(length) = body.length.filter(|l| *l > MAKE_MAX) {
+            return Err(too_big(length));
+        }
+        let dir = crate::storage::making();
+        std::fs::create_dir_all(&dir)?;
+        let part = dir.join(format!("{}.part", crate::add::uuid()));
+        let made = (|| -> Result<Vec<u8>> {
+            let mut file = File::create(&part)?;
+            let copied = std::io::copy(&mut (&mut body.reader).take(MAKE_MAX + 1), &mut file)?;
+            if copied > MAKE_MAX {
+                return Err(too_big(copied));
+            }
+            drop(file);
+            crate::render::render(&part, edge, false)
+        })();
+        let _ = std::fs::remove_file(&part);
+        made
     }
 }
 
@@ -1298,24 +1628,7 @@ impl Source for ProcessSource {
         if let Some(url) = ticket["url"].as_str() {
             return self.get(url, ticket["headers"].as_object().unwrap_or(&serde_json::Map::new()), range);
         }
-        let path = PathBuf::from(ticket["path"].as_str().unwrap_or_default());
-        let mut file = File::open(&path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
-            _ => FetchError::Failed(e.into()),
-        })?;
-        let meta = file.metadata().map_err(|e| FetchError::Failed(e.into()))?;
-        if !meta.is_file() {
-            return Err(FetchError::NotFound(format!("{} is not a file", path.display())));
-        }
-        let length = meta.len();
-        match range {
-            Some((start, end)) => {
-                file.seek(SeekFrom::Start(start)).map_err(|e| FetchError::Failed(e.into()))?;
-                let n = end.min(length.saturating_sub(1)).saturating_sub(start) + 1;
-                Ok(Body { length: Some(n), reader: Box::new(file.take(n)) })
-            }
-            None => Ok(Body { length: Some(length), reader: Box::new(file) }),
-        }
+        open_path(PathBuf::from(ticket["path"].as_str().unwrap_or_default()), range, FILE_GAP, &self.provider.stuck)
     }
 
     fn accepts(&self) -> &'static [&'static str] {
@@ -1372,6 +1685,147 @@ mod tests {
         assert_eq!(read_line(&mut reader, 10, &mut buf).unwrap(), Some(true));
         assert_eq!(buf, b"exactly10!");
         assert_eq!(read_line(&mut reader, 10, &mut buf).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn a_long_line_of_its_log_is_cut_and_the_rest_of_it_passed_over() {
+        let mut text = b"short\n".to_vec();
+        text.extend(std::iter::repeat_n(b'y', 5000));
+        text.extend_from_slice(b"\nnext\n");
+        let mut log = Vec::new();
+        log_lines("p", BufReader::with_capacity(64, &text[..]), &mut log);
+        let log = String::from_utf8(log).unwrap();
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.len(), 3, "{log}");
+        assert_eq!(lines[0], "pinholed: p: short");
+        assert_eq!(lines[1], format!("pinholed: p: {}…", "y".repeat(2000)));
+        assert_eq!(lines[2], "pinholed: p: next");
+        // The rest of a line, passed over in pieces, never kept.
+        let mut reader = BufReader::with_capacity(8, &b"0123456789abcdef\nafter"[..]);
+        skip_line(&mut reader).unwrap();
+        let mut rest = String::new();
+        reader.read_to_string(&mut rest).unwrap();
+        assert_eq!(rest, "after");
+    }
+
+    /// A file that answers when told to: its reads wait until then.
+    struct Hanging(std::os::unix::net::UnixStream);
+
+    impl Read for Hanging {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(buf)
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_answer_holds_no_one_up_and_a_fifo_is_not_opened() {
+        let gap = Duration::from_millis(300);
+        let stuck: Arc<AtomicUsize> = Arc::default();
+        let dir = std::env::temp_dir().join(format!("pinhole-watched-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A FIFO is no file: refused at once, never opened.
+        let fifo = dir.join("fifo");
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        let started = Instant::now();
+        assert!(matches!(open_path(fifo.clone(), None, gap, &stuck), Err(FetchError::NotFound(_))));
+        assert!(matches!(check_path(&fifo, gap, &stuck), Err(FetchError::NotFound(_))));
+        assert!(started.elapsed() < gap);
+        assert!(matches!(open_path(dir.join("gone"), None, gap, &stuck), Err(FetchError::NotFound(_))));
+
+        // A file, whole or a range of it.
+        let file = dir.join("a.bin");
+        let bytes: Vec<u8> = (0..1_000_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &bytes).unwrap();
+        let mut body = open_path(file.clone(), None, gap, &stuck).unwrap();
+        assert_eq!(body.length, Some(1_000_000));
+        let mut read = Vec::new();
+        body.reader.read_to_end(&mut read).unwrap();
+        assert_eq!(read, bytes);
+        let mut body = open_path(file.clone(), Some((10, 19)), gap, &stuck).unwrap();
+        let mut read = Vec::new();
+        body.reader.read_to_end(&mut read).unwrap();
+        assert_eq!((body.length, &read[..]), (Some(10), &bytes[10..20]));
+
+        // One whose opening never comes back: given up on after the gap.
+        let mut answers = Vec::new();
+        for _ in 0..STUCK_MAX {
+            let (ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+            let started = Instant::now();
+            let opened = watched("a dead mount".into(), move || {
+                let mut hanging = Hanging(theirs);
+                let mut first = [0u8; 1];
+                hanging.read_exact(&mut first).map_err(anyhow::Error::from)?;
+                Ok((hanging, 100))
+            }, gap, &stuck);
+            let Err(FetchError::Failed(e)) = opened else { panic!("opened") };
+            assert!(e.to_string().contains("did not answer within"), "{e}");
+            assert!(started.elapsed() < gap * 3);
+            answers.push(ours);
+        }
+        assert_eq!(stuck.load(Ordering::SeqCst), STUCK_MAX);
+        // So many not back: the next is not tried at all.
+        let started = Instant::now();
+        let Err(FetchError::Failed(e)) = open_path(file.clone(), None, gap, &stuck) else { panic!("tried") };
+        assert!(e.to_string().contains("have not come back"), "{e}");
+        assert!(started.elapsed() < Duration::from_millis(50));
+        // One comes back: tried again.
+        answers.pop().unwrap().write_all(b"x").unwrap();
+        let back = Instant::now();
+        while stuck.load(Ordering::SeqCst) == STUCK_MAX && back.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(stuck.load(Ordering::SeqCst), STUCK_MAX - 1);
+        assert!(open_path(file.clone(), None, gap, &stuck).is_ok());
+
+        // One that stalls part way: its reader fails after the gap.
+        let (mut ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        ours.write_all(b"some").unwrap();
+        let mut body = watched("a mount gone".into(), move || Ok((Hanging(theirs), 100)), gap, &stuck).unwrap();
+        let mut some = [0u8; 4];
+        body.reader.read_exact(&mut some).unwrap();
+        let started = Instant::now();
+        let e = body.reader.read(&mut some).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() >= gap && started.elapsed() < gap * 3);
+        assert_eq!(stuck.load(Ordering::SeqCst), STUCK_MAX);
+        drop(answers);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_download_that_stalls_fails_after_the_read_gap_and_a_slow_one_does_not() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for (i, conn) in listener.incoming().enumerate() {
+                let mut conn = conn.unwrap();
+                std::thread::spawn(move || {
+                    let mut head = [0u8; 1024];
+                    let _ = conn.read(&mut head);
+                    let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n");
+                    // The first stalls after a byte; the second sends a
+                    // byte every half a gap, slower than a gap in all.
+                    for _ in 0..10 {
+                        let _ = conn.write_all(b"x");
+                        std::thread::sleep(Duration::from_millis(if i == 0 { 5000 } else { 250 }));
+                    }
+                });
+            }
+        });
+        let client = crate::source::download_client(Duration::from_millis(500)).build().unwrap();
+        let url = format!("http://127.0.0.1:{port}/");
+        let mut stalled = client.get(&url).send().unwrap();
+        let started = Instant::now();
+        let mut all = Vec::new();
+        assert!(stalled.read_to_end(&mut all).is_err());
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        let mut slow = client.get(&url).send().unwrap();
+        let mut all = Vec::new();
+        slow.read_to_end(&mut all).unwrap();
+        assert_eq!(all, b"xxxxxxxxxx");
     }
 
     #[test]

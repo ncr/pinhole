@@ -22,12 +22,20 @@ pub fn is_video(path: &Path) -> bool {
 /// side, the right way up. `video` says which it is, when the file's name
 /// does not.
 pub fn render(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
-    // Never more at once than background work may take (background.rs).
-    let _slot = crate::background::slot();
+    // Only a file: a FIFO or a device would hold whoever reads it, and a
+    // place among background work with it.
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(anyhow!("{} is not a file", path.display()));
+    }
     // A video's from its most telling frame (cover.rs).
     if video {
+        // Never more at once than background work may take (background.rs).
+        let _slot = crate::background::slot();
         return crate::cover::pick(path, edge);
     }
+    // On stdin, as jpeg.rs reads it: a name is never taken for
+    // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
+    let file = File::open(path)?;
     let fit = format!("{edge}x{edge}>");
     let mut magick = crate::background::command("magick");
     // Decoding a big JPEG at a fraction of its size is much quicker. Only
@@ -36,9 +44,9 @@ pub fn render(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
     if big {
         magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
     }
-    // On stdin, as jpeg.rs reads it: a name is never taken for
-    // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
-    let file = File::open(path)?;
+    // The file opened and its size read first: one that takes its time
+    // holds no place among background work meanwhile.
+    let _slot = crate::background::slot();
     let output = magick
         .args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
         .stdin(file)
@@ -48,4 +56,12 @@ pub fn render(path: &Path, edge: u32, video: bool) -> Result<Vec<u8>> {
         return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
     }
     Ok(output.stdout)
+}
+
+/// A JPEG of a video's most telling frame, read from an HTTP URL by
+/// ffmpeg (process.rs serves a provider's on the loopback): by that
+/// protocol only, as a playlist it is given could name a file.
+pub fn render_video_url(url: &str, edge: u32) -> Result<Vec<u8>> {
+    let _slot = crate::background::slot();
+    crate::cover::pick_from(std::ffi::OsStr::new(url), &["-protocol_whitelist", "http,tcp"], edge)
 }
