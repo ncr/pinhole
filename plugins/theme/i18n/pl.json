@@ -6,7 +6,7 @@
   "Could not go back to %1: %2": "Nie udało się wrócić do %1: %2",
   "Could not make a theme: %1": "Nie udało się zrobić motywu: %1",
   "Could not set %1 again: %2": "Nie udało się ponownie ustawić %1: %2",
-  "Ctrl+Z sets the theme there was before. The last 12 themes made stay in Omarchy's theme picker, each named Pinhole and the photo's name.": "Ctrl+Z przywraca poprzedni motyw. Ostatnie 12 zrobionych motywów zostaje w wyborze motywów Omarchy, każdy nazwany Pinhole i nazwą zdjęcia.",
+  "Ctrl\u00a0Z sets the theme there was before. The last 12 themes made stay in Omarchy's theme picker, each named Pinhole and the photo's name.": "Ctrl\u00a0Z przywraca poprzedni motyw. Ostatnie 12 zrobionych motywów zostaje w wyborze motywów Omarchy, każdy nazwany Pinhole i nazwą zdjęcia.",
   "Dark": "Ciemny",
   "Here, in the side panel (Tab): the photo's colours strong or muted, and the theme dark, light or as the photo is.": "Tu, w panelu bocznym (Tab): kolory zdjęcia mocne albo stonowane, a motyw ciemny, jasny albo taki jak zdjęcie.",
   "Light": "Jasny",

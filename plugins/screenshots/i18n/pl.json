@@ -5,11 +5,11 @@
     "many": "%n zrzutów ekranu ukrytych",
     "other": "%n zrzutów ekranu ukrytych"
   },
-  "%n screenshots hidden: ⇧S shows them again": {
-    "one": "%n zrzut ekranu ukryty: ⇧S pokaże go znów",
-    "few": "%n zrzuty ekranu ukryte: ⇧S pokaże je znów",
-    "many": "%n zrzutów ekranu ukrytych: ⇧S pokaże je znów",
-    "other": "%n zrzutów ekranu ukrytych: ⇧S pokaże je znów"
+  "%n screenshots hidden: ⇧\u00a0S shows them again": {
+    "one": "%n zrzut ekranu ukryty: ⇧\u00a0S pokaże go znów",
+    "few": "%n zrzuty ekranu ukryte: ⇧\u00a0S pokaże je znów",
+    "many": "%n zrzutów ekranu ukrytych: ⇧\u00a0S pokaże je znów",
+    "other": "%n zrzutów ekranu ukrytych: ⇧\u00a0S pokaże je znów"
   },
   "%n screenshots, each day's one card.": {
     "one": "%n zrzut ekranu.",
@@ -32,6 +32,6 @@
   "The side panel": "Panel boczny",
   "hiding screenshots": "ukrycie zrzutów ekranu",
   "showing screenshots": "pokazanie zrzutów ekranu",
-  "⇧S hides them from the grid, and the viewer passes over them; a button at the top then says how many are away, and brings them back. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again.": "⇧S ukrywa je w siatce, a przeglądarka je pomija; przycisk u góry mówi wtedy, ile ich ukryto, i przywraca je. Ctrl+Z cofa jedno i drugie. To samo tu, w panelu bocznym (Tab), gdzie obejrzysz też ten samouczek jeszcze raz.",
-  "⇧S or the button shows them again, each day's one card; ⇧S hides them again. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again.": "⇧S albo przycisk pokazuje je znów, z każdego dnia jedna karta; ⇧S znów je ukrywa. Ctrl+Z cofa jedno i drugie. To samo tu, w panelu bocznym (Tab), gdzie obejrzysz też ten samouczek jeszcze raz."
+  "⇧\u00a0S hides them from the grid, and the viewer passes over them; a button at the top then says how many are away, and brings them back. Ctrl\u00a0Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again.": "⇧\u00a0S ukrywa je w siatce, a przeglądarka je pomija; przycisk u góry mówi wtedy, ile ich ukryto, i przywraca je. Ctrl\u00a0Z cofa jedno i drugie. To samo tu, w panelu bocznym (Tab), gdzie obejrzysz też ten samouczek jeszcze raz.",
+  "⇧\u00a0S or the button shows them again, each day's one card; ⇧\u00a0S hides them again. Ctrl\u00a0Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again.": "⇧\u00a0S albo przycisk pokazuje je znów, z każdego dnia jedna karta; ⇧\u00a0S znów je ukrywa. Ctrl\u00a0Z cofa jedno i drugie. To samo tu, w panelu bocznym (Tab), gdzie obejrzysz też ten samouczek jeszcze raz."
 }

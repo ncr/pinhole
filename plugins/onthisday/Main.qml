@@ -361,7 +361,7 @@ PinholePlugin {
                 wrapMode: Text.WordWrap
                 color: theme.darkForeground
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: qsTr("Screenshots are hidden from the grid (Screenshots, ⇧S), so not here either.")
+                text: qsTr("Screenshots are hidden from the grid (Screenshots, ⇧\u00a0S), so not here either.")
             }
         }
     }

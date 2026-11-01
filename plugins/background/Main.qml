@@ -11,7 +11,7 @@ import Pinhole.Plugin
 // background is a link to the file, and Omarchy remembers it for the theme
 // to bring back after a switch to another theme and back, so it has to
 // outlast a cache clean. Hidden, as a folder source of Pictures would show
-// each one beside its photo. Each is a step of Pinhole's history: Ctrl+Z
+// each one beside its photo. Each is a step of Pinhole's history: Ctrl Z
 // puts back the background before it. The folder is pruned as one is kept,
 // of what `background keep` wrote there alone: the newest 12 stay, and any
 // in use or a theme will bring back; a file put there otherwise stays, and
@@ -186,13 +186,13 @@ PinholePlugin {
     tour: [
         {
             title: qsTr("Behind everything"),
-            text: qsTr("On a photo shown full window, B makes it the desktop background; a video becomes a moving one. Ctrl+Z puts the one before back."),
+            text: qsTr("On a photo shown full window, B makes it the desktop background; a video becomes a moving one. Ctrl\u00a0Z puts the one before back."),
             open: () => plugin.nearestPhoto(pinhole.currentIndex()),
             action: stillAction
         },
         {
             title: qsTr("Live Photos move"),
-            text: qsTr("On a Live Photo, V (or the ▾ beside Background, ⇧B) makes its motion the background: as taken, or as its Loop if the iPhone set one; ⇧V as a Bounce."),
+            text: qsTr("On a Live Photo, V (or the ▾ beside Background, ⇧\u00a0B) makes its motion the background: as taken, or as its Loop if the iPhone set one; ⇧\u00a0V as a Bounce."),
             open: () => aLivePhoto(),
             action: stillAction
         },

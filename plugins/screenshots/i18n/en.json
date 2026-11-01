@@ -3,9 +3,9 @@
     "one": "%n screenshot hidden",
     "other": "%n screenshots hidden"
   },
-  "%n screenshots hidden: ⇧S shows them again": {
-    "one": "%n screenshot hidden: ⇧S shows it again",
-    "other": "%n screenshots hidden: ⇧S shows them again"
+  "%n screenshots hidden: ⇧\u00a0S shows them again": {
+    "one": "%n screenshot hidden: ⇧\u00a0S shows it again",
+    "other": "%n screenshots hidden: ⇧\u00a0S shows them again"
   },
   "%n screenshots, each day's one card.": {
     "one": "%n screenshot.",

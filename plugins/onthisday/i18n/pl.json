@@ -42,7 +42,7 @@
   "Point at it": "Wskaż je",
   "Reading the library…": "Czytam bibliotekę…",
   "Screenshots": "Zrzuty ekranu",
-  "Screenshots are hidden from the grid (Screenshots, ⇧S), so not here either.": "Zrzuty ekranu są ukryte w siatce (Zrzuty ekranu, ⇧S), więc tu też ich nie ma.",
+  "Screenshots are hidden from the grid (Screenshots, ⇧\u00a0S), so not here either.": "Zrzuty ekranu są ukryte w siatce (Zrzuty ekranu, ⇧\u00a0S), więc tu też ich nie ma.",
   "Settings": "Ustawienia",
   "Show the photo in the grid": "Pokaż zdjęcie w siatce",
   "Taken %n years ago today, in %1.": {

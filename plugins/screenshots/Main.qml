@@ -32,7 +32,7 @@ PinholePlugin {
     stacks: hiding ? [] : days
     hidden: hiding ? shots : []
 
-    // Kept at once, and a step of the history, to undo with Ctrl+Z.
+    // Kept at once, and a step of the history, to undo with Ctrl Z.
     function setHiding(hide) {
         if (hide === hiding)
             return
@@ -46,7 +46,7 @@ PinholePlugin {
         hiding = hide
         // Never quietly: how many went, and the way back.
         if (hide && shots.length > 0)
-            pinhole.notify(qsTr("%n screenshots hidden: ⇧S shows them again", "", shots.length))
+            pinhole.notify(qsTr("%n screenshots hidden: ⇧\u00a0S shows them again", "", shots.length))
     }
 
     // What it found, kept for each source's library in its settings, as
@@ -178,7 +178,7 @@ PinholePlugin {
             onTriggered: plugin.setHiding(false)
         }
     ]
-    // ⇧S hides them again while they are stacked.
+    // ⇧ S hides them again while they are stacked.
     Command {
         name: "screenshots.hide"
         keys: ["Shift+S"]
@@ -201,7 +201,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Or each day's one card"),
-            text: qsTr("⇧S or the button shows them again, each day's one card; ⇧S hides them again. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
+            text: qsTr("⇧\u00a0S or the button shows them again, each day's one card; ⇧\u00a0S hides them again. Ctrl\u00a0Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
             settings: true
         }
     ] : [
@@ -221,7 +221,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Or not there at all"),
-            text: qsTr("⇧S hides them from the grid, and the viewer passes over them; a button at the top then says how many are away, and brings them back. Ctrl+Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
+            text: qsTr("⇧\u00a0S hides them from the grid, and the viewer passes over them; a button at the top then says how many are away, and brings them back. Ctrl\u00a0Z undoes either. Here, in the side panel (Tab), too, and this tour can be shown again."),
             settings: true
         }
     ]
@@ -247,7 +247,7 @@ PinholePlugin {
                     id: hideSwitch
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    hint: "⇧S"
+                    hint: "⇧ S"
                     checked: plugin.hiding
                     onToggled: plugin.setHiding(!checked)
                 }

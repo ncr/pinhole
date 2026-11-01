@@ -11,7 +11,7 @@ import Pinhole.Plugin
 // added to one, a series ungrouped, photos grouped; on a photo, or with the
 // whole series on a screen of its own (Editor.qml). Those edits are kept
 // by the photos' ids, over what the finder finds, and each is a step of
-// Pinhole's history, to undo with Ctrl+Z.
+// Pinhole's history, to undo with Ctrl Z.
 PinholePlugin {
     id: plugin
     covering: studio.shown || editor.shown
@@ -308,12 +308,12 @@ PinholePlugin {
         },
         {
             title: qsTr("GIF or video"),
-            text: qsTr("G makes a series a short clip to send: pick a motion, a pace and a look, then Enter for a GIF or ⇧ Enter for a video."),
+            text: qsTr("G makes a series a short clip to send: pick a motion, a pace and a look, then ⏎ for a GIF or ⇧\u00a0⏎ for a video."),
             action: gridAction
         },
         {
             title: qsTr("Put it right"),
-            text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked. Ctrl+Z undoes any of it."),
+            text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked. Ctrl\u00a0Z undoes any of it."),
             open: () => touring >= 0 && touring < series.length ? series[touring][0] : -1,
             action: seriesAction
         },

@@ -6,7 +6,7 @@ import "Palette.js" as Palette
 // so the whole desktop takes the photo's colours; Pinhole follows the
 // Omarchy theme, so it does too. The palette is Palette.js's, from the
 // photo's colours as magick finds them; the folder and the switch are
-// pinhole-theme's. Ctrl+Z sets the theme there was before.
+// pinhole-theme's. Ctrl Z sets the theme there was before.
 PinholePlugin {
     id: plugin
 
@@ -143,7 +143,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Back again"),
-            text: qsTr("Ctrl+Z sets the theme there was before. The last 12 themes made stay in Omarchy's theme picker, each named Pinhole and the photo's name."),
+            text: qsTr("Ctrl\u00a0Z sets the theme there was before. The last 12 themes made stay in Omarchy's theme picker, each named Pinhole and the photo's name."),
             action: themeAction
         },
         {

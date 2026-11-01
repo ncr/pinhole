@@ -1481,7 +1481,7 @@ ApplicationWindow {
         section: "share"
         bound: false
         keyHelp: false
-        noKeyboard: qsTr("Ctrl+C, then paste there")
+        noKeyboard: qsTr("Ctrl\u00a0C, then paste there")
         mouse: qsTr("Drag photos out")
         touchpad: qsTr("Drag out with three fingers")
     }

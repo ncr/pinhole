@@ -95,7 +95,7 @@ PinholePlugin {
     tour: [
         {
             title: qsTr("Every day, year by year"),
-            text: qsTr("Y shows each day of each year as a square, brighter the more photos it has: a click, or the arrows and Enter, shows that day in the grid."),
+            text: qsTr("Y shows each day of each year as a square, brighter the more photos it has: a click, or ↑\u00a0↓\u00a0←\u00a0→ and ⏎, shows that day in the grid."),
             action: gridAction
         },
         {
