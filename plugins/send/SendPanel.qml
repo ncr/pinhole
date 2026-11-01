@@ -117,25 +117,19 @@ Item {
         fetching = wanted.length
         missing = 0
         unconverted = 0
-        const fetches = wanted.map((w, k) => {
-            const fetch = pinhole.fetch(w.item.id, w.kind)
-            fetch.then(path => {
-                if (job !== generation)
-                    return
-                got[k] = path
-                ++fetched
-            }, error => {
-                if (job !== generation || error.code === "cancelled")
-                    return
-                pinhole.warn(error)
-                ++missing
-            }).catch(pinhole.warn).then(() => {
-                if (job === generation && --left === 0)
-                    convert()
+        const finish = () => {
+            if (job !== generation)
+                return
+            jobs = []
+            const list = []
+            got.forEach((path, k) => {
+                if (path)
+                    list.push({ path: path, name: nameOf(wanted[k].item.filename, path) })
             })
-            return fetch
-        })
-        jobs = fetches
+            files = list
+            filesCompatible = compatible
+            done(list)
+        }
         // HEIC as JPEG: a few at once, by pinhole-send.
         const convert = () => {
             const heic = []
@@ -179,19 +173,25 @@ Item {
                 finish()
             }).catch(pinhole.warn)
         }
-        const finish = () => {
-            if (job !== generation)
-                return
-            jobs = []
-            const list = []
-            got.forEach((path, k) => {
-                if (path)
-                    list.push({ path: path, name: nameOf(wanted[k].item.filename, path) })
+        const fetches = wanted.map((w, k) => {
+            const fetch = pinhole.fetch(w.item.id, w.kind)
+            fetch.then(path => {
+                if (job !== generation)
+                    return
+                got[k] = path
+                ++fetched
+            }, error => {
+                if (job !== generation || error.code === "cancelled")
+                    return
+                pinhole.warn(error)
+                ++missing
+            }).catch(pinhole.warn).then(() => {
+                if (job === generation && --left === 0)
+                    convert()
             })
-            files = list
-            filesCompatible = compatible
-            done(list)
-        }
+            return fetch
+        })
+        jobs = fetches
         if (wanted.length === 0)
             finish()
     }

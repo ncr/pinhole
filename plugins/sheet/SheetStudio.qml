@@ -275,7 +275,8 @@ Item {
             else
                 start()
         }
-        const start = () => {
+        // A function, so that take() above may start the next.
+        function start() {
             if (gen !== makeGeneration || next >= shot.length)
                 return
             const n = next++
