@@ -160,10 +160,29 @@ pub fn output(command: &mut Command) -> std::io::Result<Output> {
     output_within(command, &LIMITS)
 }
 
+/// The programs `output` is running now, by pid: each its own process
+/// group's id while unreaped (a pid is taken out of here as it is reaped,
+/// under this lock), so `stop_all` never stops another's.
+static PROGRAMS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Stop every program `output` is running, and whatever each started: a
+/// service ending (one of a library given) leaves none behind to go on
+/// writing into the cache. Those waiting on them hear an error.
+pub fn stop_all() {
+    let programs = PROGRAMS.lock().unwrap_or_else(|e| e.into_inner());
+    for &pid in programs.iter() {
+        unsafe { kill(-(pid as i32), SIGKILL) };
+        unsafe { kill(pid as i32, SIGKILL) };
+    }
+}
+
 /// The same as `output`, within `limits`.
 pub fn output_within(command: &mut Command, limits: &Limits) -> std::io::Result<Output> {
+    let mut programs = PROGRAMS.lock().unwrap_or_else(|e| e.into_inner());
     let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     let pid = child.id();
+    programs.push(pid);
+    drop(programs);
     let (mut stdout, mut stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
     let child = Arc::new(Mutex::new(child));
     let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
@@ -179,7 +198,13 @@ pub fn output_within(command: &mut Command, limits: &Limits) -> std::io::Result<
         let err = errors.join().unwrap_or_default();
         // Its pipes closed: it has ended, or is about to.
         let status = loop {
-            match waited.lock().unwrap().try_wait() {
+            let mut programs = PROGRAMS.lock().unwrap_or_else(|e| e.into_inner());
+            let status = waited.lock().unwrap().try_wait();
+            if !matches!(status, Ok(None)) {
+                programs.retain(|p| *p != pid);
+            }
+            drop(programs);
+            match status {
                 Ok(Some(status)) => break Ok(status),
                 Ok(None) => std::thread::sleep(Duration::from_millis(2)),
                 Err(e) => break Err(e),

@@ -5,11 +5,12 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
@@ -700,15 +701,16 @@ impl Shared {
         }
     }
 
-    /// Ending with downloads still under way: their part files go, so
-    /// none is left in the cache.
+    /// Ending with downloads still under way: the programs making
+    /// something (ffmpeg, ImageMagick) are stopped, then the part files go,
+    /// so none is left in the cache, nor written there after; and what
+    /// this service was making thumbnails from (making/<pid>/).
     fn abandon(&self) {
-        for path in self.waiting.lock().unwrap().keys() {
-            let _ = std::fs::remove_file(path.with_extension("part"));
-            if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
-                let _ = std::fs::remove_file(path.with_extension(format!("part.{extension}")));
-            }
+        crate::background::stop_all();
+        for path in self.waiting.lock().unwrap_or_else(PoisonError::into_inner).keys() {
+            remove_parts(path);
         }
+        let _ = std::fs::remove_dir_all(crate::storage::making());
     }
 
     fn finish(&self, path: &Path, result: std::result::Result<(), (&str, String)>) {
@@ -720,6 +722,22 @@ impl Shared {
                 Ok(()) => reply.send(Ok(info.clone())),
                 Err((code, message)) => reply.send(Err((code, message.clone()))),
             }
+        }
+    }
+}
+
+/// The part files of a file being got or made (storage::is_part): its
+/// download's `<name>.part`, and what a program making it writes,
+/// `<name>.part.<ext>` and beside it `<name>.part.trf`.
+fn remove_parts(path: &Path) {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return };
+    let part = format!("{stem}.part");
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name == part || name.strip_prefix(&part).is_some_and(|rest| rest.starts_with('.')) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }
@@ -879,17 +897,13 @@ pub fn run(config: Config) -> Result<()> {
     }
 
     let accepted = |stream: UnixStream| {
-        shared.connections.lock().unwrap().0 += 1;
-        let shared = shared.clone();
+        // Counted out however its thread ends, a panic too.
+        let present = Present::new(&shared);
         std::thread::spawn(move || {
-            if let Err(e) = serve(shared.clone(), stream) {
+            if let Err(e) = serve(present.0.clone(), stream) {
                 eprintln!("pinholed: connection ended: {e:#}");
             }
-            let mut connections = shared.connections.lock().unwrap();
-            connections.0 -= 1;
-            if connections.0 == 0 {
-                connections.1 = std::time::Instant::now();
-            }
+            drop(present);
         });
     };
     let Some(linger) = given else {
@@ -900,6 +914,9 @@ pub fn run(config: Config) -> Result<()> {
         return Ok(());
     };
     // A library given: until no window has been connected for a while.
+    // The socket as bound, to tell it from one bound in its place since
+    // (this one's removed, and another service started on its path).
+    let bound = std::fs::symlink_metadata(&shared.config.socket).map(|m| (m.dev(), m.ino())).ok();
     listener.set_nonblocking(true)?;
     loop {
         match listener.accept() {
@@ -907,22 +924,51 @@ pub fn run(config: Config) -> Result<()> {
                 if stream.set_nonblocking(false).is_ok() {
                     accepted(stream);
                 }
+                continue;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                let (count, since) = *shared.connections.lock().unwrap();
-                // Downloads under way end first, half a minute at most: what
-                // they bring is in the shared cache, not left half there.
-                let downloading = shared.in_flight.load(Ordering::Relaxed) > 0;
-                if count == 0 && since.elapsed() >= linger && (!downloading || since.elapsed() >= linger + FINISH_WITHIN) {
-                    eprintln!("pinholed: no window for {} s: done", since.elapsed().as_secs());
-                    // A window coming meanwhile finds none, and starts one.
-                    let _ = std::fs::remove_file(&shared.config.socket);
-                    shared.abandon();
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_millis(50));
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            // Any other (out of files, say): looked at as when none is
+            // waiting, so that it ends all the same.
+            Err(_) => {}
+        }
+        let (count, since) = *shared.connections.lock().unwrap_or_else(PoisonError::into_inner);
+        // Downloads under way end first, half a minute at most: what
+        // they bring is in the shared cache, not left half there.
+        let downloading = shared.in_flight.load(Ordering::Relaxed) > 0;
+        if count == 0 && since.elapsed() >= linger && (!downloading || since.elapsed() >= linger + FINISH_WITHIN) {
+            eprintln!("pinholed: no window for {} s: done", since.elapsed().as_secs());
+            // A window coming meanwhile finds none, and starts one. Only
+            // its own: one bound there since is another service's.
+            let now = std::fs::symlink_metadata(&shared.config.socket).map(|m| (m.dev(), m.ino())).ok();
+            if now.is_some() && now == bound {
+                let _ = std::fs::remove_file(&shared.config.socket);
             }
-            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            shared.abandon();
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A window connected, counted while its thread runs. However that ends,
+/// a panic too, it is counted out, and as the last goes, since when there
+/// has been none is noted: a service of a library given ends a while
+/// after.
+struct Present(Arc<Shared>);
+
+impl Present {
+    fn new(shared: &Arc<Shared>) -> Present {
+        shared.connections.lock().unwrap_or_else(PoisonError::into_inner).0 += 1;
+        Present(shared.clone())
+    }
+}
+
+impl Drop for Present {
+    fn drop(&mut self) {
+        let mut connections = self.0.connections.lock().unwrap_or_else(PoisonError::into_inner);
+        connections.0 -= 1;
+        if connections.0 == 0 {
+            connections.1 = std::time::Instant::now();
         }
     }
 }
@@ -946,10 +992,24 @@ fn bind(socket: &Path) -> Result<UnixListener> {
 
 fn serve(shared: Arc<Shared>, stream: UnixStream) -> Result<()> {
     let out = Window::open(&stream)?;
-    let served = talk(shared.clone(), stream, out.clone());
+    // A bug in answering it (a panic) ends this connection, not the
+    // service: logged, and the window hung up on, so that it connects
+    // afresh rather than wait for answers that will never come.
+    let served = catch_unwind(AssertUnwindSafe(|| talk(shared.clone(), stream, out.clone())))
+        .unwrap_or_else(|panic| Err(anyhow!("answering it panicked ({})", panic_message(&*panic))));
     // Gone, however it went: no more news for it.
-    shared.listeners.lock().unwrap().retain(|other| !Arc::ptr_eq(other, &out));
+    shared.listeners.lock().unwrap_or_else(PoisonError::into_inner).retain(|other| !Arc::ptr_eq(other, &out));
+    let _ = out.stream.shutdown(std::net::Shutdown::Both);
     served
+}
+
+/// What a panic said.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_else(|| "no message".to_owned())
 }
 
 /// A window's requests, answered until it hangs up (or is hung up on).
@@ -1422,7 +1482,9 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
     fetch(shared, db, &json!({"asset": asset, "kind": from.name()}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
     let shared = shared.clone();
     std::thread::spawn(move || {
-        let made = (|| -> std::result::Result<(), (String, String)> {
+        // A panic in making it fails it as an error would: answered, and
+        // no longer under way.
+        let made = catch_unwind(AssertUnwindSafe(|| -> std::result::Result<(), (String, String)> {
             let fetched = rx.recv().map_err(|_| ("unavailable".to_owned(), format!("the {} never came", from.name())))??;
             let source = PathBuf::from(fetched["path"].as_str().unwrap_or_default());
             if let Some(dir) = path.parent() {
@@ -1442,7 +1504,13 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
                 return Err(("unavailable".to_owned(), format!("{e:#}")));
             }
             Ok(())
-        })();
+        }))
+        .unwrap_or_else(|panic| {
+            remove_parts(&path);
+            let why = format!("making the {} panicked ({})", want.name(), panic_message(&*panic));
+            eprintln!("pinholed: {why}");
+            Err(("unavailable".to_owned(), why))
+        });
         shared.finish(&path, made.as_ref().map(|_| ()).map_err(|(code, message)| (code.as_str(), message.clone())));
     });
 }
@@ -1481,7 +1549,17 @@ fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
             }
         }
         for group in groups {
-            lookup(&shared, &mut dbs, group);
+            // A bug in getting them ready (a panic, in a source, say) fails
+            // these files, not every one after with this thread.
+            let paths: Vec<PathBuf> = group.iter().map(|job| job.path.clone()).collect();
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| lookup(&shared, &mut dbs, group))) {
+                let why = format!("getting it ready panicked ({})", panic_message(&*panic));
+                eprintln!("pinholed: {why}");
+                dbs.clear();
+                for path in paths {
+                    shared.finish(&path, Err(("unavailable", why.clone())));
+                }
+            }
         }
     }
 }
@@ -1535,7 +1613,11 @@ fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch:
     if shown {
         shared.set_health(Health::Fine);
     }
-    for (mut job, ticket) in batch.into_iter().zip(tickets) {
+    // A ticket each; any the source gave none for (a bug) is failed, not
+    // left waiting.
+    let mut tickets = tickets.into_iter();
+    for mut job in batch {
+        let ticket = tickets.next().unwrap_or_else(|| Err(FetchError::Failed(anyhow!("the source got it no ticket"))));
         match ticket {
             Ok(ticket) => {
                 job.ticket = Some(ticket);
@@ -1555,7 +1637,20 @@ fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
     loop {
         let job = { rx.lock().unwrap().recv() };
         let Ok(job) = job else { return };
-        match download(&shared, &job) {
+        // A bug in getting it (a panic, in a source, say) fails this file,
+        // not this thread with it: whoever waits is answered, and it no
+        // longer counts as under way.
+        let got = match catch_unwind(AssertUnwindSafe(|| download(&shared, &job))) {
+            Ok(got) => got,
+            Err(panic) => {
+                let why = format!("getting it panicked ({})", panic_message(&*panic));
+                eprintln!("pinholed: {} of {}: {why}", job.stored.want.name(), job.stored.asset);
+                remove_parts(&job.path);
+                shared.finish(&job.path, Err(("unavailable", why)));
+                continue;
+            }
+        };
+        match got {
             Ok(()) => {
                 shared.reached();
                 shared.finish(&job.path, Ok(()))
@@ -1597,7 +1692,9 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
     // Written beside the target and renamed: a reader never sees half a file.
     let part = job.path.with_extension("part");
     let mut stream = None;
-    let result = (|| -> std::io::Result<()> {
+    // A panic in the source's reader fails the download as an error would:
+    // whoever plays it as it comes hears it has ended.
+    let result = catch_unwind(AssertUnwindSafe(|| -> std::io::Result<()> {
         // Readable too: a stream serves from this same handle.
         let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&part)?;
         if job.stored.want.streamable() {
@@ -1622,7 +1719,8 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
         }
         file.sync_data()?;
         std::fs::rename(&part, &job.path)
-    })();
+    }))
+    .unwrap_or_else(|panic| Err(std::io::Error::other(format!("reading it panicked ({})", panic_message(&*panic)))));
     if let Some(s) = &stream {
         s.finish(result.is_ok());
     }
@@ -1647,7 +1745,7 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         let (source, shown) = (shared.source(), shared.shown.load(Ordering::SeqCst));
         // A round that panics (a bug in a source, bad data it trips on) is
         // a round that failed, not the end of every round after it.
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync_round(&shared))) {
+        match catch_unwind(AssertUnwindSafe(|| sync_round(&shared))) {
             Ok(Ok(())) => {
                 shared.set_health(Health::Fine);
                 // Not a round given up as another source was shown.
@@ -1683,11 +1781,7 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
 /// mid-listing), is made afresh from its entry, quietly: it is the same
 /// source, so windows have nothing to read again.
 fn panicked(shared: &Arc<Shared>, source: &dyn Source, shown: u64, panic: &(dyn std::any::Any + Send)) {
-    let what = panic
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| panic.downcast_ref::<&str>().copied())
-        .unwrap_or("no message");
+    let what = panic_message(panic);
     eprintln!("pinholed: sync: the round for {} panicked ({what}); the next one goes on", source.id());
     shared.storage.library_lock.clear_poison();
     if shared.progress.lock().unwrap_or_else(|e| e.into_inner()).take().is_some() {

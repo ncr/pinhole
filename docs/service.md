@@ -30,7 +30,14 @@ its photos fetched as the shared service would, into the same cache. It
 logs to `$XDG_STATE_HOME/pinhole/<its socket's name>.log`, begun afresh,
 and ends once no window has been connected to it for 10 seconds, after
 the downloads under way (half a minute at most: any cut short leave no
-part file in the cache).
+part file in the cache). A window is gone however its connection ended,
+a bug in answering it too (see Transport), and a file not got for a bug
+(a panic in a source) is answered with an error rather than left under
+way. Ending, it stops the programs still making something (ffmpeg,
+ImageMagick: none goes on writing into the cache after it), removes
+what it was making thumbnails from (`cache/making/<pid>/`), and removes
+its socket only if that is still its own: a service started on the same
+path after its socket was removed keeps it.
 
 ## Transport
 
@@ -55,7 +62,8 @@ protocol 0, from before there was one.
 Lines to each window wait in a queue of its own, so a window slow to read
 holds up no other, nor anything the service is doing. One that does not
 read what it is sent for five seconds, or falls 4096 lines behind, is hung
-up on; it connects again and starts afresh.
+up on; it connects again and starts afresh. So is one whose request the
+service tripped over (a panic, a bug): the rest go on.
 
 ```json
 {"id": 7, "method": "fetch", "params": {"asset": "A5379A3C-...", "kind": "medium"}}
