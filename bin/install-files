@@ -26,7 +26,7 @@ install -Dm755 plugins/series/finder/target/release/pinhole-series "$PREFIX/lib/
 install -d "$PREFIX/lib/pinhole/plugins/background/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/manifest.json plugins/background/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/background/i18n" plugins/background/i18n/*.json
-install -Dm755 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/keep
+install -Dm755 -t "$PREFIX/lib/pinhole/plugins/background" plugins/background/background
 install -d "$PREFIX/lib/pinhole/plugins/onthisday/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/onthisday" plugins/onthisday/manifest.json plugins/onthisday/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/onthisday/i18n" plugins/onthisday/i18n/*.json

@@ -195,6 +195,38 @@ Item {
         }
     }
 
+    // The video made as the desktop background, kept as the Background
+    // plugin keeps one: in Pictures/Pinhole/.backgrounds, where no folder
+    // source shows it and no cache clean takes it. Ctrl+Z puts back the one
+    // before.
+    property bool settingBackground: false
+    function makeBackground() {
+        if (!made || settingBackground)
+            return
+        const kept = pinhole.picturesDir() + "/Pinhole/.backgrounds/" + made.name
+        let before = ""
+        settingBackground = true
+        // Kept (linked, as it is on the same disk), then the one set now.
+        pinhole.run("sh", ["-c", 'mkdir -p "${2%/*}" && { ln -f -- "$1" "$2" 2>/dev/null || cp -f -- "$1" "$2"; } && '
+                                 + '{ omarchy-shell shell selectedBackground 2>/dev/null '
+                                 + '|| readlink -f "$HOME/.local/state/omarchy/current/background"; }', "sh", made.path, kept])
+            .then(result => {
+                before = result.stdout.trim()
+                return pinhole.run("omarchy-theme-bg-set", [kept])
+            })
+            .then(() => {
+                pinhole.notify(qsTr("Your moving desktop background now"))
+                if (before !== "" && before !== kept)
+                    pinhole.did(qsTr("setting the background"), () => setBackground(before), () => setBackground(kept))
+            })
+            .catch(error => pinhole.notify(qsTr("Could not set the background: %1").arg(String(error.message).trim())))
+            .then(() => settingBackground = false)
+    }
+    function setBackground(path) {
+        pinhole.run("omarchy-theme-bg-set", [path])
+            .catch(error => pinhole.notify(qsTr("Could not set the background: %1").arg(String(error.message).trim())))
+    }
+
     FrameAnimation {
         running: studio.shown && studio.playing && studio.making === ""
         onTriggered: studio.time = (studio.time + frameTime) % Math.max(0.05, studio.duration)
@@ -419,6 +451,16 @@ Item {
         when: studio.shown && studio.made !== null
         onTriggered: studio.pinhole.showFile(studio.made.path)
     }
+    Command {
+        id: backgroundCommand
+        name: "studio.background"
+        text: qsTr("The video made as the desktop background")
+        section: "Series"
+        keys: ["B"]
+        keyLayer: "plugin"
+        when: studio.shown && studio.made !== null && studio.made.path.endsWith(".mp4") && !studio.settingBackground
+        onTriggered: studio.makeBackground()
+    }
 
     // The file's frames are drawn here, at its size, out of sight under
     // the studio (a picture is taken of it, not of the screen).
@@ -599,6 +641,13 @@ Item {
             floating: true
             text: qsTr("Show")
             action: showCommand
+        }
+        ShellButton {
+            visible: studio.made !== null && studio.made.path.endsWith(".mp4")
+            floating: true
+            text: qsTr("Background")
+            busy: studio.settingBackground
+            action: backgroundCommand
         }
     }
 

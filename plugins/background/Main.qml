@@ -4,13 +4,14 @@ import Pinhole.Plugin
 // Background: the photo shown full window as the desktop background, with
 // Omarchy's own omarchy-theme-bg-set, which draws a still itself and hands
 // a video to OWE. A video is a moving background; a Live Photo's motion
-// (as taken, or forward and back, which loops without a jump) is one from
+// (as taken, or its Loop or Bounce, which loop without a jump) is one from
 // its ▾ menu.
 //
-// What is set is kept in Pictures/Pinhole/Backgrounds, not the cache: the
+// What is set is kept in Pictures/Pinhole/.backgrounds, not the cache: the
 // background is a link to the file, and Omarchy remembers it for the theme
 // to bring back after a switch to another theme and back, so it has to
-// outlast a cache clean. Each one is a step of Pinhole's history: Ctrl+Z
+// outlast a cache clean. Hidden, as a folder source of Pictures would show
+// each one beside its photo. Each is a step of Pinhole's history: Ctrl+Z
 // puts back the background before it.
 PinholePlugin {
     id: plugin
@@ -19,63 +20,66 @@ PinholePlugin {
     property bool working: false
     readonly property var shown: pinhole.viewer.open ? pinhole.library.item(pinhole.viewer.index) : null
 
-    readonly property string folder: pinhole.picturesDir() + "/Pinhole/Backgrounds"
+    readonly property string folder: pinhole.picturesDir() + "/Pinhole/.backgrounds"
     // What the shell draws, and what OWE plays (Omarchy's Util.isVideoPath);
     // a photo in another form is made a JPEG, a video in another put in an
     // MKV as it is.
     readonly property var stills: ["jpg", "png", "webp", "gif", "bmp"]
     readonly property var videos: ["mp4", "m4v", "mov", "webm", "mkv", "avi"]
     // Each way of setting one: the service's rendition, and what the kept
-    // file's name says after the photo's.
+    // file's name says after the photo's. A Live Photo's `loop` is the Loop
+    // set on the iPhone, else its motion as taken.
     readonly property var ways: ({
         still: { kind: "full", tag: "" },
         video: { kind: "full", tag: "" },
-        live: { kind: "live", tag: " Live" },
+        live: { kind: "loop", tag: " Live" },
         bounce: { kind: "bounce", tag: " Bounce" }
     })
 
-    // Where the photo is kept: named for it and when it was taken, so the
-    // same one set again is the same file.
-    function keptPath(item, way, from) {
-        const dot = from.lastIndexOf(".")
-        let extension = dot > from.lastIndexOf("/") ? from.slice(dot + 1).toLowerCase() : ""
-        if (extension === "jpeg")
-            extension = "jpg"
-        if (way === "still")
-            extension = stills.includes(extension) && extension !== "jpg" ? extension : "jpg"
-        else if (!videos.includes(extension))
-            extension = "mkv"
-        const name = item.filename || item.id
-        const base = name.replace(/\.[^.]*$/, "").replace(/\//g, "-")
-        return folder + "/" + base + " " + Qt.formatDateTime(new Date(item.date), "yyyy-MM-dd HH.mm.ss")
-            + ways[way].tag + "." + extension
+    function extensionOf(path) {
+        const name = path.split("/").pop()
+        const dot = name.lastIndexOf(".")
+        return dot > 0 ? name.slice(dot + 1).toLowerCase() : ""
     }
+    function stemOf(path) { return path.split("/").pop().replace(/\.[^.]*$/, "").toLowerCase() }
 
     function setBackground(index, way) {
         if (working)
             return
         const item = pinhole.library.item(index)
-        let kept = "", before = ""
+        let kept = "", before = null
         working = true
         pinhole.fetch(index, ways[way].kind)
-            // A video's full rendition is its edit as an MP4; one without
-            // comes as its streaming rendition.
-            .then(from => way === "video" && !videos.includes(from.split(".").pop().toLowerCase())
-                  ? pinhole.fetch(index, "video") : from)
+            // A video's full rendition is its edit as an MP4, but some have
+            // only a still there: then the video as taken, at its own size.
+            .then(from => way === "video" && !videos.includes(extensionOf(from)) ? pinhole.fetch(index, "original") : from)
             .then(from => {
-                kept = keptPath(item, way, from)
-                return pinhole.run("keep", [from, kept])
+                let extension = extensionOf(from)
+                if (way === "still")
+                    extension = stills.includes(extension) && extension !== "jpg" ? extension : "jpg"
+                else if (!videos.includes(extension))
+                    extension = "mkv"
+                // Named for the photo and when it was taken; `background
+                // keep` adds a few characters of the rendition. A folder's
+                // own file is the photo's name; the cache's are its keys.
+                const name = (item.filename || item.id).replace(/\.[^.]*$/, "").replace(/\//g, "-")
+                    + " " + Qt.formatDateTime(new Date(item.date), "yyyy-MM-dd HH.mm.ss") + ways[way].tag
+                const own = stemOf(from) === stemOf(item.filename || "")
+                return pinhole.run("background", ["keep", from, folder, name, extension, own ? "own" : "cached"])
             })
-            .then(() => current())
-            .then(path => {
-                before = path
+            .then(result => {
+                kept = result.stdout.trim()
+                return current()
+            })
+            .then(now => {
+                before = now
                 return pinhole.run("omarchy-theme-bg-set", [kept])
             })
             .then(() => {
                 pinhole.notify(way === "still" ? qsTr("Your desktop background now")
                                                : qsTr("Your moving desktop background now"))
-                if (before !== "" && before !== kept)
-                    pinhole.did(qsTr("setting the background"), () => apply(before), () => apply(kept))
+                if (before.path !== "" && before.path !== kept)
+                    pinhole.did(qsTr("setting the background"), () => apply(before), () => apply({ path: kept, theme: before.theme }))
             })
             .catch(failed)
             .then(() => working = false)
@@ -86,17 +90,39 @@ PinholePlugin {
         const why = String(error.message || error.code || error).trim().split("\n").pop()
         pinhole.notify(qsTr("Could not set the background: %1").arg(why))
     }
-    // The background set now, as a path ("" if none): the shell's latest
-    // choice, which it points the link at once nothing on screen can flash,
-    // else the link.
+    // The background set now, and the theme it is set under.
     function current() {
-        return pinhole.run("sh", ["-c", 'chosen=$(omarchy-shell shell selectedBackground 2>/dev/null) && [ -f "$chosen" ] && echo "$chosen" '
-                                        + '|| readlink -f "$HOME/.local/state/omarchy/current/background"'])
-            .then(result => result.stdout.trim(), () => "")
+        return pinhole.run("background", ["current"]).then(result => {
+            const lines = result.stdout.split("\n")
+            return { theme: lines[0].trim(), path: (lines[1] || "").trim() }
+        }, () => ({ theme: "", path: "" }))
     }
-    // Undone or done again: the one before, or this one, if it is still there.
-    function apply(path) {
-        pinhole.run("omarchy-theme-bg-set", [path]).catch(failed)
+    // Undone or done again: that one, if it is still there.
+    function apply(background) {
+        pinhole.run("background", ["set", background.path, background.theme]).catch(error => {
+            if (error.exitCode === 3)
+                pinhole.notify(qsTr("The background before went with the theme %1").arg(background.theme))
+            else if (error.exitCode === 4)
+                pinhole.notify(qsTr("The background before is gone: %1").arg(background.path.split("/").pop()))
+            else
+                failed(error)
+        })
+    }
+    // A Live Photo for the tour to show the ▾ on: the newest, found once.
+    property string touringId: ""
+    function aLivePhoto() {
+        if (touringId === "") {
+            touringId = "-"
+            for (let i = pinhole.library.count - 1; i >= 0; --i) {
+                const item = pinhole.library.item(i)
+                if (item.live) {
+                    touringId = item.id
+                    break
+                }
+            }
+        }
+        const index = pinhole.library.indexOf(touringId)
+        return index >= 0 ? index : pinhole.currentIndex()
     }
 
     actions: [
@@ -130,7 +156,7 @@ PinholePlugin {
         PluginAction {
             place: "viewer"
             group: "background"
-            text: qsTr("Bouncing background")
+            text: qsTr("Bounce as background")
             shown: plugin.shown !== null && plugin.shown.live
             usable: !plugin.working
             onTriggered: plugin.setBackground(pinhole.viewer.index, "bounce")
@@ -151,12 +177,13 @@ PinholePlugin {
         },
         {
             title: qsTr("Live Photos move"),
-            text: qsTr("On a Live Photo, the ▾ beside Background (⇧B) makes its motion the background, as taken or bouncing forward and back."),
+            text: qsTr("On a Live Photo, the ▾ beside Background (⇧B) makes its motion the background: as taken, or as its Loop if the iPhone set one, or as a Bounce."),
+            open: () => aLivePhoto(),
             action: stillAction
         },
         {
             title: qsTr("Kept"),
-            text: qsTr("Each one is kept in Pictures/Pinhole/Backgrounds, so it stays when the cache is cleaned and comes back with its theme."),
+            text: qsTr("Each one is kept in Pictures/Pinhole/.backgrounds, hidden from the grid, so it stays when the cache is cleaned and comes back with its theme."),
             settings: true
         }
     ]
@@ -170,12 +197,13 @@ PinholePlugin {
                 wrapMode: Text.WordWrap
                 color: theme.foreground
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
-                text: qsTr("B on a photo shown full window. Each background is kept in Pictures/Pinhole/Backgrounds.")
+                text: qsTr("B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds.")
             }
             ShellButton {
                 text: qsTr("Show the folder")
                 visible: pinhole.exists(plugin.folder)
-                onTapped: pinhole.showFile(plugin.folder)
+                // The folder itself (showFile opens a file's folder).
+                onTapped: pinhole.showFile(plugin.folder + "/")
             }
         }
     }
