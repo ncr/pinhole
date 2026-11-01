@@ -102,13 +102,15 @@ PinholePlugin {
             recount()
             return
         }
+        // Read only; while the service writes the index (as a round
+        // starts), waited for rather than failed.
         const library = pinhole.library.dir + "/library.sqlite"
-        const tables = pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery])
+        const tables = pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.tablesQuery])
         finding = tables
         tables.then(result => {
             if (finding !== tables)
                 return
-            const found = pinhole.run("sqlite3", ["-readonly", library, Find.query(result.stdout.split("\n"))])
+            const found = pinhole.run("sqlite3", ["-readonly", "-cmd", ".timeout 5000", library, Find.query(result.stdout.split("\n"))])
             finding = found
             return found.then(result => {
                 if (finding !== found)
