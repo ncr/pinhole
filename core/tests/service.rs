@@ -134,6 +134,7 @@ fn a_window_meets_the_service_of_a_folder() {
         adopt: None,
         downloads: 2,
         sync_every: None,
+        given: None,
     };
     std::thread::spawn(move || service::run(config));
     let mut window = Window::connect(&socket);
@@ -344,6 +345,7 @@ fn a_window_meets_the_service_of_a_folder() {
         adopt: None,
         downloads: 2,
         sync_every: None,
+        given: None,
     };
     std::thread::spawn(move || service::run(config));
     let mut pinned = Window::connect(&socket);

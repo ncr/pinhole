@@ -16,6 +16,18 @@ own, on `$XDG_RUNTIME_DIR/pinhole-<hash of its path>.sock` unless
 `$PINHOLE_SOCKET` names one: the shared service is never asked for it, nor
 started with it, which would show it to every window after.
 
+That service is started with `--given` too: the library is only read and
+fetched for. Nothing is synced into it (no rounds, the source neither
+followed nor watched: `rounds` names no source), nothing of the cache is
+evicted (the shared service's to do), and a window asking it to change
+anything (`set_source`, `remove_source`, `sign_in`, `submit_code`,
+`sign_out`, `add`, `set_favorite`, `set_storage`) is answered `read_only`.
+A library of another source than the settings' (pinhole-fake's) has
+nothing fetched either (`other_source`); a copy of that source's own has
+its photos fetched as the shared service would, into the same cache. It
+logs to `$XDG_STATE_HOME/pinhole/<its socket's name>.log`, begun afresh,
+and ends once no window has been connected to it for 10 seconds.
+
 ## Transport
 
 A Unix socket at `$XDG_RUNTIME_DIR/pinhole.sock`, one JSON object per line
@@ -374,6 +386,7 @@ A cached file is answered with `path` alone.
 | `needs_sign_in` | the sign-in provider has no valid session |
 | `unavailable` | the source or the network failed; trying again later may work |
 | `bad_request` | unknown method or missing params |
+| `read_only` | a change asked of the service of a library given to a window (`--given`) |
 
 ## Storage
 

@@ -2,6 +2,7 @@
 //! renditions. See docs/service.md.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
@@ -25,6 +26,11 @@ struct Cli {
     /// Downloads at once.
     #[arg(long, default_value_t = 8)]
     downloads: usize,
+    /// The library (--library) is one given to a window, not the shared
+    /// service's: only read and fetched for, never synced, nothing of the
+    /// cache evicted, and the service ends 10 s after its last window.
+    #[arg(long, requires = "library")]
+    given: bool,
 }
 
 fn env_dir(var: &str, fallback: &str) -> PathBuf {
@@ -55,8 +61,9 @@ fn main() -> Result<()> {
         settings,
         // Photos still where the cache was before it moved in with the
         // library come over.
-        adopt: (!cache_given).then(storage::old_cache),
+        adopt: (!cache_given && !cli.given).then(storage::old_cache),
         downloads: cli.downloads,
         sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()),
+        given: cli.given.then_some(Duration::from_secs(10)),
     })
 }

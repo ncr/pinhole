@@ -99,6 +99,10 @@ private:
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(contents);
     }
+    static QString read(const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+    }
 
     // Plugins as the window has them, each of `manifests` (its id, and
     // what its manifest.json says besides) a folder with a Main.qml, and
@@ -1795,8 +1799,10 @@ Item {
                          pinholed = qgetenv("PINHOLED");
         qunsetenv("PINHOLE_SOCKET");
         qputenv("XDG_RUNTIME_DIR", run.path().toUtf8());
-        // A pinholed that only says how it was started.
-        write(run.path() + "/pinholed", "#!/bin/sh\necho \"$@\" > \"$XDG_RUNTIME_DIR/started\"\n");
+        QStandardPaths::setTestModeEnabled(true);
+        // A pinholed that only says how it was started, there and in its
+        // log.
+        write(run.path() + "/pinholed", "#!/bin/sh\necho \"$@\" | tee \"$XDG_RUNTIME_DIR/started\"\n");
         QVERIFY(QFile::setPermissions(run.path() + "/pinholed", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         qputenv("PINHOLED", (run.path() + "/pinholed").toUtf8());
         auto started = [&] {
@@ -1814,11 +1820,17 @@ Item {
         QVERIFY(ServiceClient::socketFor(other.path()) != shared);
         {
             // None there: the service it starts is its own, on its own
-            // socket, never the shared one.
+            // socket, never the shared one; one that only reads the
+            // library given (--given), in a log of its own.
+            const QString logs = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/";
+            const QString log = logs + QFileInfo(own).completeBaseName() + ".log";
+            QFile::remove(log);
             ServiceClient service(given.path());
             QCOMPARE(service.socketPath(), own);
             QTRY_VERIFY(!started().isEmpty());
-            QCOMPARE(started(), "--socket " + own + " --library " + given.path());
+            QCOMPARE(started(), "--socket " + own + " --library " + given.path() + " --given");
+            QTRY_COMPARE(read(log).trimmed(), started());
+            QVERIFY(QFile::remove(log));
         }
         QVERIFY(QFile::remove(run.path() + "/started"));
         {

@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -136,12 +137,20 @@ void ServiceClient::startService() {
     QProcess process;
     process.setProgram(program);
     QStringList arguments{QStringLiteral("--socket"), m_socketPath};
-    if (!m_library.isEmpty())
-        arguments << QStringLiteral("--library") << m_library;
+    QString log = state + "/pinholed.log";
+    if (!m_library.isEmpty()) {
+        // Another library's (pinhole-fake's, a test's copy): a service of
+        // its own that only reads it, never syncs the source into it, and
+        // ends after its last window; in a log of its own, named as its
+        // socket, begun afresh.
+        arguments << QStringLiteral("--library") << m_library << QStringLiteral("--given");
+        log = state + '/' + QFileInfo(m_socketPath).completeBaseName() + ".log";
+        QFile::remove(log);
+    }
     process.setArguments(arguments);
     process.setStandardInputFile(QProcess::nullDevice());
-    process.setStandardOutputFile(state + "/pinholed.log", QIODevice::Append);
-    process.setStandardErrorFile(state + "/pinholed.log", QIODevice::Append);
+    process.setStandardOutputFile(log, QIODevice::Append);
+    process.setStandardErrorFile(log, QIODevice::Append);
     process.startDetached();
 }
 

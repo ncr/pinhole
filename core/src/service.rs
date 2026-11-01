@@ -60,7 +60,19 @@ pub struct Config {
     /// Seconds between rounds of following the source's changes, if not
     /// as often as the source would.
     pub sync_every: Option<u64>,
+    /// A library given to a window (`pinhole --library`) other than the
+    /// shared service's, served to it alone: only read and fetched for.
+    /// Never synced (the source neither followed nor watched, the settings
+    /// not followed), nothing of the cache evicted (the shared service
+    /// does), no move resumed and nothing adopted, nothing changed for a
+    /// window (the source, the storage, favourites, files added); and the
+    /// service ends once no window has been connected for this long.
+    /// None: the shared service.
+    pub given: Option<Duration>,
 }
+
+/// What a window may not ask of a service of a library given (Config::given).
+const CHANGES: [&str; 8] = ["set_source", "remove_source", "sign_out", "sign_in", "submit_code", "add", "set_favorite", "set_storage"];
 
 /// Where to answer one request.
 #[derive(Clone)]
@@ -207,6 +219,9 @@ struct Shared {
     /// set_favorite, done one after another in the order asked: F pressed
     /// twice is a favourite and back, never the other way round.
     favorites: Mutex<mpsc::Sender<(Value, Reply)>>,
+    /// How many connections there are, and since when there have been
+    /// none: a service of a library given ends after a while of none.
+    connections: Mutex<(usize, std::time::Instant)>,
 }
 
 /// When each source was last looked at for changes (the end of its last
@@ -634,6 +649,10 @@ impl Shared {
     }
 
     fn rounds_event(&self) -> Value {
+        // A library given is never looked at for changes: no rounds.
+        if self.config.given.is_some() {
+            return rounds_event(&crate::source::NoSource, &Rounds::default());
+        }
         rounds_event(&*self.source(), &self.rounds.lock().unwrap())
     }
 
@@ -702,6 +721,9 @@ pub fn run(config: Config) -> Result<()> {
     eprintln!("pinholed: photos from {}", if config.source.kind() == "none" { "nowhere".to_owned() } else { config.source.id() });
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());
+    if config.given.is_some() {
+        eprintln!("pinholed: {} given: only read and fetched for, never synced", config.library.display());
+    }
 
     let (lookup_tx, lookup_rx) = mpsc::channel::<Job>();
     let (sync_tx, sync_rx) = mpsc::channel::<()>();
@@ -738,11 +760,16 @@ pub fn run(config: Config) -> Result<()> {
         changing: Mutex::new(()),
         changes: Mutex::new(changes_tx),
         favorites: Mutex::new(favorites_tx),
+        connections: Mutex::new((0, std::time::Instant::now())),
     });
+    let given = shared.config.given;
     // A move of the folder cut short, put right before anything reads or
     // writes the library; one that cannot be, and the service does not
     // start, rather than work on a library not where the settings say.
-    shared.storage.resume()?;
+    // The shared service's to do, not one of a library given.
+    if given.is_none() {
+        shared.storage.resume()?;
+    }
 
     {
         let shared = shared.clone();
@@ -753,12 +780,12 @@ pub fn run(config: Config) -> Result<()> {
         let (shared, rx) = (shared.clone(), download_rx.clone());
         std::thread::spawn(move || download_loop(shared, rx));
     }
-    {
+    if given.is_none() {
         let storage = shared.storage.clone();
         std::thread::spawn(move || storage.evict_loop());
     }
     {
-        if let Some(old) = shared.config.adopt.clone() {
+        if let Some(old) = shared.config.adopt.clone().filter(|_| given.is_none()) {
             shared.storage.adopt(old);
         }
         // Every window reads the library from its new place.
@@ -775,11 +802,13 @@ pub fn run(config: Config) -> Result<()> {
             }
         });
     }
-    {
-        let shared = shared.clone();
-        std::thread::spawn(move || sync_loop(shared, sync_rx));
+    if given.is_none() {
+        {
+            let shared = shared.clone();
+            std::thread::spawn(move || sync_loop(shared, sync_rx));
+        }
+        watch(&shared, &*shared.source());
     }
-    watch(&shared, &*shared.source());
     {
         let shared = shared.clone();
         std::thread::spawn(move || {
@@ -806,16 +835,49 @@ pub fn run(config: Config) -> Result<()> {
         });
     }
 
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+    let accepted = |stream: UnixStream| {
+        shared.connections.lock().unwrap().0 += 1;
         let shared = shared.clone();
         std::thread::spawn(move || {
-            if let Err(e) = serve(shared, stream) {
+            if let Err(e) = serve(shared.clone(), stream) {
                 eprintln!("pinholed: connection ended: {e:#}");
             }
+            let mut connections = shared.connections.lock().unwrap();
+            connections.0 -= 1;
+            if connections.0 == 0 {
+                connections.1 = std::time::Instant::now();
+            }
         });
+    };
+    let Some(linger) = given else {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            accepted(stream);
+        }
+        return Ok(());
+    };
+    // A library given: until no window has been connected for a while.
+    listener.set_nonblocking(true)?;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if stream.set_nonblocking(false).is_ok() {
+                    accepted(stream);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                let (count, since) = *shared.connections.lock().unwrap();
+                if count == 0 && since.elapsed() >= linger {
+                    eprintln!("pinholed: no window for {} s: done", linger.as_secs_f32());
+                    // A window coming meanwhile finds none, and starts one.
+                    let _ = std::fs::remove_file(&shared.config.socket);
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
     }
-    Ok(())
 }
 
 /// Bind the socket, replacing one left behind by a service that is gone,
@@ -887,6 +949,12 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
         };
         let stream = request["params"]["stream"].as_bool() == Some(true);
         let reply = Reply { id: request["id"].clone(), out: Out::Window(out.clone()), stream };
+        // A library given is only read: nothing changed from here.
+        if let Some(method) = request["method"].as_str().filter(|m| shared.config.given.is_some() && CHANGES.contains(m)) {
+            let library = shared.storage.library();
+            reply.send(Err(("read_only", format!("{method}: {} is a library given to a window, only read", library.display()))));
+            continue;
+        }
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
             Some("sync") => {
@@ -1320,10 +1388,14 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
 /// downloads.
 fn lookup_loop(shared: Arc<Shared>, rx: mpsc::Receiver<Job>) {
     // Ready at start: iCloud's provider takes a few seconds to check the
-    // session, which the first request should not have to wait for.
-    if let Err(e) = shared.source().start() {
-        eprintln!("pinholed: {} is not ready yet: {e:#}", shared.source().name());
-        shared.failed(&e);
+    // session, which the first request should not have to wait for. Not
+    // for a library given, fetched for seldom if at all (pinhole-fake's
+    // never is): its source starts as its first photo is asked for.
+    if shared.config.given.is_none() {
+        if let Err(e) = shared.source().start() {
+            eprintln!("pinholed: {} is not ready yet: {e:#}", shared.source().name());
+            shared.failed(&e);
+        }
     }
     let mut dbs: HashMap<PathBuf, (u64, Connection)> = HashMap::new();
     while let Ok(first) = rx.recv() {
