@@ -43,8 +43,12 @@ Item {
     // Each part's rows, [how, what]: the keys, or how with the mouse or
     // the touchpad, as each command says. A plugin's own are under its
     // name, in the language, whatever section they give (but Pinhole's
-    // parts), with what its `help` lists.
+    // parts), with what its `help` lists. Only while it shows: every
+    // command made or gone (a plugin loading, a menu) would make it all
+    // again, unseen, a quarter of a second as the window opens.
     readonly property var sections: {
+        if (!visible)
+            return []
         keymap.revision
         plugins.revision
         const rows = {}

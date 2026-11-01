@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <qpa/qwindowsysteminterface.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -35,12 +36,20 @@ void runHiddenSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
         return QStringLiteral("%1 ms: %2 cells, %3 hidden").arg(since->elapsed()).arg(grid->count()).arg(grid->hiddenCount());
     };
     // Hidden from the first frame on: what was kept is there as the
-    // plugins load, before the window draws.
-    check(grid->hiddenCount() > 0, QStringLiteral("hidden before the first frame (%1)").arg(state()));
+    // plugins load, before the window draws. The first frame's as it was
+    // synchronized (the window's thread waiting meanwhile), said once it
+    // has been swapped.
+    auto synced = std::make_shared<std::atomic<int>>(-1);
+    auto syncing = std::make_shared<QMetaObject::Connection>();
+    *syncing = QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [=] {
+        int none = -1;
+        synced->compare_exchange_strong(none, grid->hiddenCount());
+    }, Qt::DirectConnection);
     auto first = std::make_shared<QMetaObject::Connection>();
     *first = QObject::connect(window, &QQuickWindow::frameSwapped, window, [=] {
         QObject::disconnect(*first);
-        say(QStringLiteral("first frame at %1").arg(state()));
+        QObject::disconnect(*syncing);
+        check(*synced > 0, QStringLiteral("hidden in the first frame (%1 hidden; swapped at %2)").arg(int(*synced)).arg(state()));
     });
     for (int at : {100, 150, 300})
         QTimer::singleShot(at, window, [=] {

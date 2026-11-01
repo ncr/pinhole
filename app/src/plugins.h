@@ -313,6 +313,9 @@ class Plugins : public QObject {
     // still being read on another thread, and what they keep of it shows
     // in the first frame already.
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
+    // As they do, all those on at once: the window gathers what they add
+    // once they all have (allLoaded), not as each does.
+    Q_PROPERTY(bool loadingAll READ loadingAll NOTIFY allLoaded)
 public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
@@ -347,6 +350,7 @@ public:
     // The library has been read the first time (or is not there yet).
     void libraryOpened();
     bool ready() const { return m_ready; }
+    bool loadingAll() const { return m_loadingAll; }
     // The library was read again, or moved: `moved` has each old
     // position's new one, -1 for a photo gone.
     void libraryReloaded(const std::vector<int> &moved);
@@ -422,6 +426,8 @@ signals:
     void notice(const QString &id, const QString &text);
     void coveredByChanged();
     void readyChanged();
+    // Those on as the library was first read have all loaded.
+    void allLoaded();
     // The library was read again: what plugins hide and stack (hiddenOf,
     // stacksOf) is where its photos are now, to be gathered again.
     void positionsMoved();
@@ -462,6 +468,7 @@ private:
     QJsonObject m_config;
     bool m_touching = false;
     bool m_ready = false;
+    bool m_loadingAll = false;
     // The cacheDirs' library as plugins were last told (cacheName).
     QString m_cacheName;
     // The grid's hiddenChanged while plugins were not yet told of a

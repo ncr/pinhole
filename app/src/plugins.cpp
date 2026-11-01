@@ -836,7 +836,12 @@ void Plugins::libraryOpened() {
     if (m_ready)
         return;
     m_ready = true;
+    // Each on loads as this is said (Main.qml), then the window gathers
+    // them all at once.
+    m_loadingAll = true;
     emit readyChanged();
+    m_loadingAll = false;
+    emit allLoaded();
 }
 
 void Plugins::libraryReloaded(const std::vector<int> &moved) {

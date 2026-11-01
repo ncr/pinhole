@@ -772,7 +772,17 @@ ApplicationWindow {
         // The library read again: what each plugin hides and stacks,
         // where those photos are now, until it says again.
         function onPositionsMoved() { win.collectPlugins() }
+        // Those on at launch, gathered once they all have loaded, before
+        // the first frame: each gathered as it loaded rebuilt every
+        // button and list again and again, a second in all.
+        function onAllLoaded() {
+            const loaded = win.loadedMeanwhile
+            win.loadedMeanwhile = []
+            win.collectPlugins(loaded, loaded)
+        }
     }
+    // The plugins that loaded, or gave what they hide, as all loaded.
+    property var loadedMeanwhile: []
     // What the plugins loaded add: their buttons, their keys for the help,
     // the photos they stack into one card or hide, and whether one is over
     // the photos.
@@ -816,6 +826,12 @@ ApplicationWindow {
     function collectPlugins(freshHidden, freshStacks) {
         freshHidden = freshHidden || []
         freshStacks = freshStacks || []
+        if (plugins.loadingAll) {
+            for (const id of freshHidden.concat(freshStacks))
+                if (loadedMeanwhile.indexOf(id) < 0)
+                    loadedMeanwhile.push(id)
+            return
+        }
         const actions = [], help = [], covering = []
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
