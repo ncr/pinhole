@@ -8,8 +8,10 @@ import "Days.js" as Days
 // the photo the grid is on; a day, clicked or picked with the arrows and
 // Enter, is shown in the grid.
 //
-// The library is counted into days (Days.js) from its columns of days and
-// dates, at once, and again whenever it is read again; what the grid hides
+// The library is counted into days (Days.js) from its column of days, at
+// once: again when it is read again while the calendar shows, else when
+// it next opens (or its settings show), so a library being built, read
+// again every few seconds, is not counted each time. What the grid hides
 // (Screenshots' hide mode, say) is not counted, as the grid does not show
 // it.
 PinholePlugin {
@@ -31,8 +33,9 @@ PinholePlugin {
     readonly property int firstWeekday: Qt.locale().firstDayOfWeek
 
     function count() {
+        stale = false
         const library = pinhole.library
-        const done = Days.finish(Days.count(library.field("day"), library.field("date"), library.field("id"), firstWeekday,
+        const done = Days.finish(Days.count(library.field("day"), library.field("id"), firstWeekday,
                                             pinhole.hiddenCount > 0 ? i => pinhole.isHidden(i) : null))
         full = done.full
         glowing = done.glowing
@@ -44,14 +47,27 @@ PinholePlugin {
     }
 
     // Read again, or photos hidden from the grid or shown again: counted
-    // again, once for both when the library's reading moves what is hidden.
+    // again while it shows, once for both when the library's reading moves
+    // what is hidden; else when it is next needed.
+    property bool stale: false
+    function recount() {
+        if (calendar.shown) {
+            Qt.callLater(plugin.count)
+        } else {
+            stale = true
+        }
+    }
+    function fresh() {
+        if (stale)
+            count()
+    }
     Connections {
         target: pinhole.library
-        function onChanged() { Qt.callLater(plugin.count) }
+        function onChanged() { plugin.recount() }
     }
     Connections {
         target: pinhole
-        function onHiddenChanged() { Qt.callLater(plugin.count) }
+        function onHiddenChanged() { plugin.recount() }
     }
     Component.onCompleted: count()
 
@@ -84,6 +100,7 @@ PinholePlugin {
 
     settings: Component {
         UiText {
+            Component.onCompleted: plugin.fresh()
             width: parent ? parent.width : 0
             wrapMode: Text.WordWrap
             color: theme.foreground

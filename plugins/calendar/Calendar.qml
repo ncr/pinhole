@@ -30,6 +30,7 @@ Item {
     Connections {
         target: calendar.plugin
         function onYearsChanged() {
+            calendar.relist()
             if (!calendar.shown)
                 return
             if (calendar.plugin.years.length === 0)
@@ -42,6 +43,42 @@ Item {
             }
         }
     }
+
+    // The plugin over it handed a photo over: closed for good.
+    Connections {
+        target: calendar.pinhole
+        function onDismissed() { calendar.close() }
+    }
+
+    // The list's rows: as many as there are years, each drawing its own
+    // from plugin.years, so the years counted again redraw their squares in
+    // place, the list where it is. Only a year come or gone makes it
+    // anew, the cursor's year then kept where it was on the screen.
+    property int yearCount: 0
+    property var listed: []
+    readonly property var noYear: ({ year: 0, days: 0, offset: 0, total: 0, counts: [], first: [] })
+    function relist() {
+        const now = plugin.years.map(y => y.year)
+        const before = listed
+        listed = now
+        let y = years.contentY
+        if (scrolling.running) {
+            y = scrolling.to
+            scrolling.stop()
+        }
+        if (now.length !== yearCount) {
+            yearCount = now.length
+            years.forceLayout()
+        } else if (now.every((year, i) => year === before[i])) {
+            return
+        }
+        const from = before.indexOf(cursorYear), to = now.indexOf(cursorYear)
+        if (from >= 0 && to >= 0)
+            y += (to - from) * rowHeight
+        const top = years.originY - years.topMargin
+        years.contentY = Math.max(top, Math.min(y, years.originY + years.contentHeight + years.bottomMargin - years.height))
+    }
+    Component.onCompleted: relist()
 
     // Opening: the squares come in, rippling out from the year it opens on.
     property int openRow: 0
@@ -57,6 +94,7 @@ Item {
     // Opened before the library is counted: on its way, and placed once it is.
     property bool waiting: false
     function open() {
+        plugin.fresh()
         today = new Date()
         shown = true
         waiting = !plugin.counted
@@ -416,7 +454,7 @@ Item {
         anchors.topMargin: calendar.headerHeight
         anchors.bottomMargin: calendar.footerHeight
         clip: true
-        model: calendar.plugin.years
+        model: calendar.yearCount
         boundsBehavior: Flickable.StopAtBounds
         cacheBuffer: calendar.rowHeight * 2
         topMargin: Math.round(calendar.cell * 0.5)
@@ -425,8 +463,8 @@ Item {
 
         delegate: Item {
             id: yearRow
-            required property var modelData
             required property int index
+            readonly property var info: calendar.plugin.years[index] ?? calendar.noYear
             readonly property bool current: index === calendar.row
             width: years.width
             height: calendar.rowHeight
@@ -439,7 +477,7 @@ Item {
                 UiText {
                     width: parent.width
                     horizontalAlignment: Text.AlignRight
-                    text: yearRow.modelData.year
+                    text: yearRow.info.year
                     font.pixelSize: Math.round(theme.fontSize * 2.1)
                     font.weight: Font.Bold
                     color: yearRow.current ? theme.brightForeground : theme.foreground
@@ -449,7 +487,7 @@ Item {
                 UiText {
                     width: parent.width
                     horizontalAlignment: Text.AlignRight
-                    text: qsTr("%Ln photos", "", yearRow.modelData.total)
+                    text: qsTr("%Ln photos", "", yearRow.info.total)
                     color: yearRow.current ? calendar.accent : theme.muted
                     font.pixelSize: Math.round(theme.fontSize * 0.857)
                 }
@@ -459,8 +497,8 @@ Item {
                 model: 12
                 UiText {
                     required property int index
-                    readonly property int first: Days.dayOf(Days.dateOf(yearRow.modelData.year, index, 1))
-                    x: calendar.squaresX + Math.floor((first + yearRow.modelData.offset) / 7) * calendar.cell
+                    readonly property int first: Days.dayOf(Days.dateOf(yearRow.info.year, index, 1))
+                    x: calendar.squaresX + Math.floor((first + yearRow.info.offset) / 7) * calendar.cell
                     y: Math.round((calendar.monthHeight - height) / 2) - Math.round(calendar.gap / 2)
                     text: Qt.locale().standaloneMonthName(index, Locale.ShortFormat)
                     color: yearRow.current && calendar.date.getMonth() === index ? theme.foreground : theme.muted
@@ -487,13 +525,13 @@ Item {
                 width: 54 * calendar.cell
                 height: 7 * calendar.cell
                 // Painted again when any of these changes.
-                readonly property var looks: [calendar.ramp, calendar.cell, calendar.sweep, yearRow.modelData, calendar.today,
+                readonly property var looks: [calendar.ramp, calendar.cell, calendar.sweep, yearRow.info, calendar.today,
                                               calendar.plugin.full, calendar.plugin.glowing]
                 onLooksChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
-                    const y = yearRow.modelData
+                    const y = yearRow.info
                     const c = calendar.cell, size = c - calendar.gap
                     const ramp = calendar.ramp
                     const now = calendar.today
@@ -536,13 +574,13 @@ Item {
                 hoverEnabled: true
                 function dayAt(mouse) {
                     const column = Math.floor(mouse.x / calendar.cell), weekday = Math.floor(mouse.y / calendar.cell)
-                    const d = column * 7 + Math.max(0, Math.min(6, weekday)) - yearRow.modelData.offset
-                    return d >= 0 && d < yearRow.modelData.days ? d : -1
+                    const d = column * 7 + Math.max(0, Math.min(6, weekday)) - yearRow.info.offset
+                    return d >= 0 && d < yearRow.info.days ? d : -1
                 }
                 onPositionChanged: mouse => {
                     const d = dayAt(mouse)
-                    if (d >= 0 && (calendar.cursorYear !== yearRow.modelData.year || calendar.day !== d)) {
-                        calendar.cursorYear = yearRow.modelData.year
+                    if (d >= 0 && (calendar.cursorYear !== yearRow.info.year || calendar.day !== d)) {
+                        calendar.cursorYear = yearRow.info.year
                         calendar.day = d
                     }
                 }
@@ -550,7 +588,7 @@ Item {
                     const d = dayAt(mouse)
                     if (d < 0)
                         return
-                    calendar.cursorYear = yearRow.modelData.year
+                    calendar.cursorYear = yearRow.info.year
                     calendar.day = d
                     calendar.jump()
                 }

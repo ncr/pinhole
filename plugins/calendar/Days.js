@@ -32,30 +32,20 @@ function weekdayRow(date, firstWeekday) {
 const monthStarts = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
 
 // Counts the library into days, at once: `days` is each photo's local day
-// as yyyymmdd (library.field("day"), 0 for none), `dates` its date in ms
-// (library.field("date"): a photo before 1970 has no day there, and is
-// counted by its date), `ids` its id. `hidden(i)`, if given, is true for a
+// as yyyymmdd (library.field("day"), before 1970 too; 0 for one with no
+// date, not counted), `ids` its id. `hidden(i)`, if given, is true for a
 // photo hidden from the grid, which is not counted, as the grid does not
-// show it. A date of 0 is none (the library's NULL) and not counted; any
-// other, before 1970 too, is.
-function count(days, dates, ids, firstWeekday, hidden) {
+// show it.
+function count(days, ids, firstWeekday, hidden) {
     const byYear = {}
     let year = null
     for (let i = 0; i < days.length; ++i) {
         const key = days[i]
-        let y, day
-        if (key === 0) {
-            const ms = dates[i]
-            if (ms === 0 || !isFinite(ms))
-                continue
-            const date = new Date(ms)
-            y = date.getFullYear()
-            day = dayOf(date)
-        } else {
-            y = Math.floor(key / 10000)
-            const m = Math.floor(key / 100) % 100
-            day = monthStarts[m - 1] + key % 100 - 1 + (m > 2 && daysIn(y) === 366 ? 1 : 0)
-        }
+        if (key === 0)
+            continue
+        const y = Math.floor(key / 10000)
+        const m = Math.floor(key / 100) % 100
+        const day = monthStarts[m - 1] + key % 100 - 1 + (m > 2 && daysIn(y) === 366 ? 1 : 0)
         if (hidden && hidden(i))
             continue
         if (!year || year.year !== y) {

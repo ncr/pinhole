@@ -7,17 +7,16 @@ TestCase {
     name: "Days"
 
     // A library of these local dates, in time order, ids by position, as
-    // its columns: library.field("day") has 0 for a date before 1970, as
-    // for none.
+    // its columns: library.field("day") has each one's day, before 1970
+    // too, and 0 for none.
     function library(dates) {
         return {
-            days: dates.map(d => d === 0 || d.getTime() <= 0 ? 0 : d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()),
-            dates: dates.map(d => d === 0 ? 0 : d.getTime()),
+            days: dates.map(d => d === 0 ? 0 : d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()),
             ids: dates.map((d, i) => "p" + i)
         }
     }
     function counted(photos, hidden) {
-        return { done: Days.finish(Days.count(photos.days, photos.dates, photos.ids, 1, hidden)) }
+        return { done: Days.finish(Days.count(photos.days, photos.ids, 1, hidden)) }
     }
 
     function test_dates() {
