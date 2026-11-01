@@ -586,7 +586,7 @@ Item {
             model: [
                 ["↑ ↓ ← →", qsTr("a day, a week")],
                 ["PgUp PgDn", qsTr("a year")],
-                ["Enter", qsTr("show in the grid")],
+                ["⏎", qsTr("show in the grid")],
                 ["Esc", qsTr("close")]
             ]
             Row {

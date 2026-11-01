@@ -180,7 +180,7 @@ PinholePlugin {
     help: [
         ["B", qsTr("Make it the desktop background")],
         ["V", qsTr("A Live Photo's motion")],
-        ["⇧V", qsTr("A Live Photo's Bounce")]
+        ["⇧ V", qsTr("A Live Photo's Bounce")]
     ]
 
     tour: [

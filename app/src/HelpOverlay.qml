@@ -1,4 +1,5 @@
 import QtQuick
+import "keys.js" as KeyNames
 
 // The keys and gestures, on ? or the ? button: made from the window's
 // commands (Command.qml, keymap.h), so it says what Pinhole does and no
@@ -77,7 +78,7 @@ Item {
         if (tab === "keyboard")
             for (const s of pluginSections)
                 for (const k of s.keys)
-                    add("plugin:" + s.plugin, k[0], k[1])
+                    add("plugin:" + s.plugin, KeyNames.nameOf(k[0]), k[1])
         const titleOf = s => titles[s] ?? (s.startsWith("plugin:") ? plugins.at(s.slice(7)).name ?? s.slice(7) : s)
         const known = order.filter(s => rows[s] !== undefined)
         const others = Object.keys(rows).filter(s => order.indexOf(s) < 0)

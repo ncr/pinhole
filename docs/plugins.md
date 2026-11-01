@@ -126,7 +126,8 @@ its settings, is there as the window first shows. It sets:
   Colours alone, then to the grid.
 - `settings`: a `Component` shown under its row in the side panel while it
   is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
-- `help`: its keys for the help (?), as `[["key", "what it does"], ...]`,
+- `help`: its keys for the help (?), as `[["key", "what it does"], ...]`
+  (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
   listed under its name with its `Command`s that give a `section` (any
   but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
   Pinhole's are: the heading says whose they are.

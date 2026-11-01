@@ -329,6 +329,7 @@ Item {
         id: backAction
         name: "tour.back"
         keys: ["Left"]
+        keysText: "←"
         keyLayer: "tour"
         when: root.index > 0
         onTriggered: root.go(-1)

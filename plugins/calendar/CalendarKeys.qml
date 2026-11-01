@@ -24,7 +24,7 @@ Item {
         text: qsTr("There: that day in the grid")
         section: "Year calendar"
         keys: ["Return", "Enter", "Space"]
-        keysText: "Enter"
+        keysText: "⏎"
         keyLayer: "plugin"
         when: calendarKeys.shown
         mouse: qsTr("Click a day")
