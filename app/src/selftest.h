@@ -98,11 +98,12 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
 // arrow down in one), Esc between; then select mode's bar and its menus.
 void runActionBarSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
 
-// PINHOLE_SELFTEST=favourite:<folder>: open the newest photo and press F,
-// then F again; then in select mode tick them all and press F, and F
-// again. Report whether each showed at once and after the service
-// answered (the library read again), and grab the bar each time. It really
-// is set: only on a scratch source.
+// PINHOLE_SELFTEST=favourite:<folder>: open the newest photo and press F
+// (the Favourites plugin's heart), then F again; then in select mode tick
+// them all and press F, and F again. Report whether each showed at once
+// and after the service answered (the library read again), and grab the
+// bar each time; with the plugin off, F does nothing. It really is set:
+// only on a scratch source.
 void runFavouriteSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library, const QString &folder);
 
 class Incoming;

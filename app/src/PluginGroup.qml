@@ -52,6 +52,12 @@ MenuGroup {
         visible: group.action !== null
         usable: group.action?.usable ?? true
         active: group.action?.active ?? false
+        labelColor: {
+            const name = group.action?.textColour ?? ""
+            if (name === "")
+                return theme.foreground
+            return ["red", "green", "yellow", "blue", "magenta", "cyan", "accent"].indexOf(name) >= 0 ? theme[name] : name
+        }
         busy: group.action?.busy ?? false
         busyDelay: group.action?.busyDelay ?? 1000
         text: group.action?.text ?? ""

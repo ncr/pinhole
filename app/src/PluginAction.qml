@@ -19,6 +19,10 @@ QtObject {
     property bool usable: true
     // Lit, in the accent.
     property bool active: false
+    // Its words' colour on the button when not lit: a theme colour's name
+    // (red, green, yellow, blue, magenta, cyan, accent) or "#rrggbb"; ""
+    // the theme's text. A favourite's heart is "accent".
+    property string textColour
     // On its way: an arc turns in its key's place, once it has been for
     // `busyDelay` ms (soon, for what is mostly at once: Live's 300).
     property bool busy: false

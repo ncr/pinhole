@@ -116,11 +116,6 @@ Item {
         }
         function onCloseRequested() { root.closeViewer() }
     }
-    Connections {
-        target: favourites
-        enabled: root.shown
-        function onFailed(message) { favoriteGroup.complain(message) }
-    }
 
     NumberAnimation {
         id: growing
@@ -468,9 +463,9 @@ Item {
         }
     }
 
-    // What can be done with it, as one card: its favourite, the plugins'
-    // groups (Live and its effects first), Copy and Export, and back to the
-    // library. Right of the date, as much as fits there (`fit`); under it
+    // What can be done with it, as one card: the plugins' groups (the
+    // heart and Live with its effects first), Copy and Export, and back to
+    // the library. Right of the date, as much as fits there (`fit`); under it
     // when not even the least does.
     Row {
         id: actions
@@ -507,7 +502,7 @@ Item {
             readonly property bool hints: fit < 1
             readonly property bool folded: fit >= 2
             readonly property var pluginGroups: groupsOf(root.pluginActions)
-            // Those of `order` below 0 (Live Photos', a favourite's) stand
+            // Those of `order` below 0 (a favourite's, Live Photos') stand
             // as Pinhole's own buttons do, never folded into More ▾.
             readonly property var standing: pluginGroups.filter(group => group[0].order < 0)
             readonly property var folding: pluginGroups.filter(group => group[0].order >= 0)
@@ -517,7 +512,7 @@ Item {
                 const key = name => level < 1 && name !== "" ? viewerMetrics.of(" " + name) : 0
                 const words = text => viewerMetrics.of(text)
                 // Each group's button, ▾ and the hairline before it.
-                const groups = [words("") + key("F") + pad]
+                const groups = []
                 const shownOf = list => list.map(group => group.filter(a => a.shown)).filter(group => group.length > 0)
                 const button = group => words(group[0].text) + key(KeyNames.nameOf(group[0].key)) + pad + (group.length > 1 ? arrow : 0)
                 for (const group of shownOf(standing))
@@ -536,24 +531,7 @@ Item {
             }
             LabelMetrics { id: viewerMetrics }
 
-            // A favourite or not: a filled heart in the accent, or an empty
-            // one (Nerd Font's: the typeface's own ♥ is an outline too).
-            MenuGroup {
-                id: favoriteGroup
-                ShellButton {
-                    id: favoriteButton
-                    objectName: "favoriteButton"
-                    flat: true
-                    text: viewer.favorite ? "\uf004" : "\uf08a"
-                    labelColor: viewer.favorite ? theme.accent : theme.foreground
-                    key: "F"
-                    keyLayer: "viewer"
-                    section: "photo"
-                    helpText: qsTr("Favourite")
-                    hint: actionBar.hints ? "F" : ""
-                    onTapped: favourites.toggle([viewer.index])
-                }
-            }
+            // First the plugins' that stand: the heart (Favourites), Live.
             Repeater {
                 model: actionBar.standing
                 delegate: PluginGroup {

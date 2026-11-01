@@ -63,7 +63,6 @@
     "other": "Skopiowano %n; części nie udało się pobrać"
   },
   "Copy": "Kopiuj",
-  "Could not change favourites in %1": "Nie udało się zmienić ulubionych w %1",
   "Could not get the photos from %1": "Nie udało się pobrać zdjęć z %1",
   "Could not load from %1": "Nie udało się wczytać z %1",
   "Done": "Gotowe",
@@ -86,8 +85,6 @@
     "other": "Wyeksportowano %n zdjęcia do %1"
   },
   "Faster": "Szybciej",
-  "Favourite": "Ulubione",
-  "Favourites": "Ulubione",
   "Finding your photos in %1": "Szukam Twoich zdjęć w %1",
   "Folder": "Folder",
   "Forget its index? The photos stay in the folder.": "Zapomnieć jego indeks? Zdjęcia zostają w folderze.",
@@ -195,7 +192,6 @@
   "The Pinhole service is not running, so full-size photos and videos will not load.": "Usługa Pinhole nie działa, więc pełne zdjęcia i filmy się nie wczytają.",
   "The Pinhole service running is another version, so some things may not work.": "Działa inna wersja usługi Pinhole, więc nie wszystko może działać.",
   "The Pinhole service running now is older than this window and has to be restarted.": "Działająca usługa Pinhole jest starsza niż to okno i trzeba ją uruchomić ponownie.",
-  "This library is only being looked at here: its favourites cannot be changed": "Ta biblioteka jest tu tylko przeglądana: nie można zmienić jej ulubionych",
   "This library is only being looked at here: its sources are changed in a window of your own library.": "Ta biblioteka jest tu tylko przeglądana: jej źródła zmienia się w oknie własnej biblioteki.",
   "This library is only being looked at here: sign in from a window of your own library.": "Ta biblioteka jest tu tylko przeglądana: zaloguj się w oknie własnej biblioteki.",
   "This library is only being looked at here: storage is set in a window of your own library.": "Ta biblioteka jest tu tylko przeglądana: miejsce na dane ustawia się w oknie własnej biblioteki.",
@@ -254,8 +250,6 @@
   "not signed in to %1": "nie zalogowano do %1",
   "this library is only being looked at here: nothing can be added to it": "ta biblioteka jest tu tylko przeglądana: nie można nic do niej dodać",
   "too large for %1": "za duży dla %1",
-  "adding to favourites": "dodanie do ulubionych",
-  "removing from favourites": "usunięcie z ulubionych",
   "Undone: %1": "Cofnięto: %1",
   "Redone: %1": "Ponowiono: %1",
   "Nothing to undo": "Nic do cofnięcia",

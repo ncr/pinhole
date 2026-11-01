@@ -1,6 +1,7 @@
 #include "plugins.h"
 
 #include "encoder.h"
+#include "favourites.h"
 #include "history.h"
 #include "library.h"
 #include "outgoing.h"
@@ -169,6 +170,12 @@ void PluginLibrary::reloaded() {
     m_positions.clear();
     m_told = m_library->generation();
     emit changed();
+    touched();
+}
+
+void PluginLibrary::touched() {
+    ++m_revision;
+    emit revisionChanged();
 }
 
 bool PluginLibrary::stale() const { return m_told != m_library->generation(); }
@@ -465,6 +472,14 @@ void Plugins::setGrid(PhotoGrid *grid) {
     updateMarkBits();
 }
 
+void Plugins::setFavourites(Favourites *favourites) {
+    if (m_favourites)
+        disconnect(m_favourites, nullptr, m_libraryApi.get(), nullptr);
+    m_favourites = favourites;
+    if (m_favourites)
+        connect(m_favourites, &Favourites::changed, m_libraryApi.get(), &PluginLibrary::touched);
+}
+
 void PluginHost::reveal(const QJSValue &photo) const {
     const int index = m_plugins->library()->positionOf(photo);
     PhotoGrid *grid = m_plugins->grid();
@@ -619,6 +634,61 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
         settle(generation, deferred->resolve,
                !stream ? path : !streamed.isEmpty() ? streamed : QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded));
     }, stream);
+    return promise;
+}
+
+QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
+    // The service's answer cannot be stopped, only no longer waited for:
+    // the photos are set, or put back, either way.
+    auto deferred = std::make_shared<Deferred>();
+    const std::weak_ptr<Deferred> weak = deferred;
+    const int generation = m_generation;
+    *deferred = defer([this, weak, generation] {
+        if (const auto d = weak.lock())
+            settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
+    });
+    const QJSValue promise = deferred->promise;
+    Favourites *favourites = m_plugins->favourites();
+    if (!favourites) {
+        settle(generation, deferred->reject, error(QStringLiteral("unsupported"), QStringLiteral("no favourites here")));
+        return promise;
+    }
+    // Only this library's photos: positions, or ids it has.
+    const Library *data = m_plugins->libraryData();
+    QList<QByteArray> ids;
+    const auto add = [this, data, &ids](const QJSValue &photo) {
+        if (const int index = m_plugins->library()->positionOf(photo); index >= 0)
+            ids.append(data->at(index).id);
+    };
+    if (photos.isArray()) {
+        const int length = photos.property(QStringLiteral("length")).toInt();
+        for (int i = 0; i < length; ++i)
+            add(photos.property(quint32(i)));
+    } else {
+        add(photos);
+    }
+    if (ids.isEmpty()) {
+        settle(generation, deferred->reject, error(QStringLiteral("not_found"), tr("no such photo")));
+        return promise;
+    }
+    // Known once set() returns; its answer comes before that only when
+    // there is none to change.
+    auto changed = std::make_shared<QList<QByteArray>>();
+    *changed = favourites->set(ids, favorite, [this, deferred, generation, changed](const QString &code, const QString &message) {
+        if (!code.isEmpty()) {
+            settle(generation, deferred->reject, error(code, message));
+            return;
+        }
+        QJSEngine *js = engine();
+        if (!js)
+            return;
+        QJSValue list = js->newArray(quint32(changed->size()));
+        for (int i = 0; i < changed->size(); ++i)
+            list.setProperty(quint32(i), QString::fromUtf8(changed->at(i)));
+        QJSValue result = js->newObject();
+        result.setProperty(QStringLiteral("changed"), list);
+        settle(generation, deferred->resolve, result);
+    });
     return promise;
 }
 
@@ -1148,17 +1218,15 @@ void Plugins::updateMarkKinds() {
         QVariantMap map;
         PluginMark *mark;
     };
-    // Pinhole's own: the video and the stack marks, and until the
-    // Favourites plugin is there, its (which gives way to a plugin's of its
-    // id). Live Photos' is the Live Photos plugin's (plugins/live).
+    // Pinhole's own: the video and the stack marks. Live Photos' and
+    // favourites' are their plugins' (plugins/live, plugins/favourites).
     auto core = [](const QString &id, const QString &icon, const QString &colour, int order, const QString &field,
                    bool shown) {
         return Kind{{{"id", id}, {"plugin", QString()}, {"name", id.section('/', 1)}, {"text", QString()},
                      {"icon", icon}, {"colour", colour}, {"order", order}, {"field", field}, {"defaultShown", shown}},
                     nullptr};
     };
-    std::vector<Kind> kinds{core("pinhole.favourites/favorite", "heart", "red", 10, "favorite", true),
-                            core("pinhole/video", "video", "cyan", 20, "video", true),
+    std::vector<Kind> kinds{core("pinhole/video", "video", "cyan", 20, "video", true),
                             core("pinhole/stack", "stack", "magenta", 90, "stack", true)};
     static const QStringList fields{"", "live", "favorite", "video"};
     static const QStringList colours{"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
@@ -1176,13 +1244,12 @@ void Plugins::updateMarkKinds() {
             const QString name = mark->name();
             const QString what = QStringLiteral("its mark \"%1\"").arg(name);
             const QString id = plugin->id + '/' + name;
-            // One of Pinhole's stand-ins gives way to its plugin's.
-            const auto standIn = std::find_if(kinds.begin(), kinds.end(),
-                                              [&id](const Kind &k) { return !k.mark && k.map.value("id") == id; });
             if (!names.match(name).hasMatch())
                 problems << QStringLiteral("a mark's name must be letters, digits, '.', '_' or '-': \"%1\"").arg(name);
             else if (taken.contains(name))
                 problems << QStringLiteral("two marks are named \"%1\"").arg(name);
+            else if (std::any_of(kinds.begin(), kinds.end(), [&id](const Kind &k) { return !k.mark && k.map.value("id") == id; }))
+                problems << QStringLiteral("%1 is Pinhole's own").arg(what);
             else if (!fields.contains(mark->field()))
                 problems << QStringLiteral("%1: no field \"%2\" (live, favorite, video, or none for photos)").arg(what, mark->field());
             else if (!markShape(mark->icon()).valid())
@@ -1192,12 +1259,10 @@ void Plugins::updateMarkKinds() {
                                 .arg(what, mark->colour());
             else if (taken.size() == kMaxMarksEach)
                 problems << QStringLiteral("%1 is left out: %2 marks at most for a plugin").arg(what).arg(kMaxMarksEach);
-            else if (standIn == kinds.end() && int(kinds.size()) >= kMaxMarks)
+            else if (int(kinds.size()) >= kMaxMarks)
                 problems << QStringLiteral("%1 is left out: %2 marks at most in all").arg(what).arg(kMaxMarks);
             else {
                 taken << name;
-                if (standIn != kinds.end())
-                    kinds.erase(standIn);
                 kinds.push_back({{{"id", id}, {"plugin", plugin->id}, {"name", name}, {"text", mark->text()},
                                   {"icon", mark->icon()}, {"colour", mark->colour()}, {"order", mark->order()},
                                   {"field", mark->field()}, {"defaultShown", mark->defaultShown()}},
@@ -1747,7 +1812,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
         {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
         {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
-        {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay or complain"}, {3, "fetch's options"}};
+        {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
+        {3, "pinhole.setFavorite"}, {3, "library.revision"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -1768,7 +1834,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
         {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
-        {"an action's order, hint, busyDelay or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
+        {"pinhole.setFavorite", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*setFavorite\\b"))},
+        // pinhole.library's, or by a name of the plugin's for it.
+        {"library.revision", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*revision\\b"))},
+        {"an action's order, hint, busyDelay, textColour or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
@@ -1785,9 +1854,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     // fetch's, in its call.
     static const QRegularExpression fetch(QStringLiteral("\\bpinhole\\s*\\.\\s*fetch\\s*\\("));
     static const QRegularExpression fetchOptions(QStringLiteral("\\bstream\\s*:"));
-    // A PluginAction's own lines that say its order, hint or busyDelay.
+    // A PluginAction's own lines that say its order, hint, busyDelay or
+    // textColour.
     static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
-    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay)\\s*:"));
+    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay|textColour)\\s*:"));
     // A file's root object, its id, and its hidden set.
     static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
     static const QRegularExpression rootId(QStringLiteral("(^|[;\\s])id\\s*:\\s*([\\w$]+)"));
@@ -1824,7 +1894,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         for (auto match = action.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;
             if (ownLines(code, open).contains(orderOrHint))
-                uses << QStringLiteral("an action's order, hint, busyDelay or complain");
+                uses << QStringLiteral("an action's order, hint, busyDelay, textColour or complain");
         }
         // A PinholePlugin root's hidden: set where it is, or by its id.
         const auto top = root.match(code);

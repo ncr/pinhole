@@ -36,8 +36,8 @@ ApplicationWindow {
         cursorColor: theme.brightForeground
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
-    // A mark's colour as a plugin names it: a theme colour's name, or
-    // "#rrggbb" as it is.
+    // A mark's colour as a plugin names it (an action's too,
+    // PluginGroup.qml): a theme colour's name, or "#rrggbb" as it is.
     function markColour(name) {
         switch (name) {
         case "red": return theme.red
@@ -270,28 +270,6 @@ ApplicationWindow {
     }
 
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
-    // Favourites the service could not set, from select mode (the viewer
-    // says so under its own button).
-    Chip {
-        id: favouriteNotice
-        visible: opacity > 0
-        opacity: 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: grid.selecting ? 72 : 24
-        textColor: theme.darkForeground
-        Timer { id: favouriteNoticeShown; interval: 4000; onTriggered: favouriteNotice.opacity = 0 }
-        Connections {
-            target: favourites
-            enabled: !win.viewerShown
-            function onFailed(message) {
-                favouriteNotice.text = message
-                favouriteNotice.opacity = 1
-                favouriteNoticeShown.restart()
-            }
-        }
-    }
     Chip {
         visible: outgoing.status !== ""
         anchors.horizontalCenter: parent.horizontalCenter
@@ -571,6 +549,7 @@ ApplicationWindow {
                 visible: modelData.shown && gridActions.fit < 2
                 usable: modelData.usable
                 active: modelData.active
+                labelColor: modelData.textColour !== "" ? win.markColour(modelData.textColour) : theme.foreground
                 busy: modelData.busy
                 busyDelay: modelData.busyDelay
                 text: modelData.text
@@ -618,7 +597,7 @@ ApplicationWindow {
     }
 
     // The bar of select mode, as the viewer's (ActionBar.qml): the count in
-    // the accent, Favourite, Copy with Export in its menu, and the plugins'
+    // the accent, Range, Copy with Export in its menu, and the plugins'
     // groups.
     // Fewer words when the window is narrow (`fit`).
     ActionBar {
@@ -665,7 +644,6 @@ ApplicationWindow {
             const count = countText(level)
             let width = 2 + (count === "" ? 0 : barMetrics.of(count) + 2 * theme.fontSize + 5)
                 + barMetrics.of(qsTr("Range")) + key("R") + pad + 5
-                + barMetrics.of("\uf08a") + key("F") + pad + 5
                 + Math.max(barMetrics.of(qsTr("Copy")) + key("C"), barMetrics.of("✓ " + qsTr("Copied"))) + pad + arrow
             for (const group of pluginGroups) {
                 const shown = group.filter(a => a.shown)
@@ -694,25 +672,6 @@ ApplicationWindow {
                 active: grid.rangeNext
                 hint: selectBar.hints ? "R" : ""
                 action: selectRange
-            }
-        }
-        // The ticked photos all favourites (a filled heart in the accent),
-        // or not (an empty one): all made favourites, or none when they all
-        // are.
-        MenuGroup {
-            ShellButton {
-                objectName: "selectFavorite"
-                readonly property bool all: (favourites.revision, grid.selectionCount, favourites.all(grid.selection()))
-                flat: true
-                usable: grid.selectionCount > 0
-                text: all ? "\uf004" : "\uf08a"
-                labelColor: all ? theme.accent : theme.foreground
-                key: "F"
-                keyLayer: "grid"
-                section: "photo"
-                helpText: qsTr("Favourite")
-                hint: selectBar.hints ? "F" : ""
-                onTapped: favourites.toggle(grid.selection())
             }
         }
         Repeater {

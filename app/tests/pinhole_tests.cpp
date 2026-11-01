@@ -828,14 +828,14 @@ PinholePlugin {
     actions: [ PluginAction { text: "a"; order: -10 }, PluginAction { text: "b"; onTriggered: { const p = { order: 1 } } } ]
 }
 )");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay or complain"}}}));
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain"}}}));
         write(dir.path() + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 PinholePlugin {
     actions: [ PluginAction { id: a; text: "a"; onTriggered: { const p = { hint: 1 }; a.complain("no") } } ]
 }
 )");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay or complain"}}}));
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain"}}}));
         write(dir.path() + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 PinholePlugin {
@@ -843,6 +843,20 @@ PinholePlugin {
 }
 )");
         QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{2, {"promises"}}, {3, {"fetch's options"}}}));
+        // A favourite set, the library's revision, an action's words in a
+        // colour (not a property of its own of another name): API 3's.
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    readonly property bool b: (pinhole.library.revision, true)
+    actions: [ PluginAction { textColour: "accent"; onTriggered: pinhole.setFavorite([0], true) },
+               PluginAction { readonly property string colour: "x"; text: colour } ]
+}
+)");
+        QCOMPARE(Plugins::apiUses(dir.path()),
+                 (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain", "pinhole.setFavorite",
+                                              "library.revision"}}}));
+        QVERIFY(Plugins::apiUses(builtIn + "/favourites").value(3).contains("pinhole.setFavorite"));
         QVERIFY(Plugins::apiUses(builtIn + "/series").value(3).contains("pinhole.state"));
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(3).contains("pinhole.cache"));
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(2).contains("hidden"));
@@ -2022,13 +2036,14 @@ PinholePlugin {
             manifests.append(std::pair<QString, QJsonObject>(QStringLiteral("me.p%1").arg(k), {}));
         PluginBench bench(manifests);
         Plugins &plugins = *bench.plugins;
-        // Pinhole's own: video, stack, and until the Favourites plugin is
-        // there its stand-in. Live Photos' is its plugin's (off until
-        // turned on, as plugins/live has it).
-        QCOMPARE(kindIds(plugins), (QStringList{"pinhole.favourites/favorite", "pinhole/video", "pinhole/stack"}));
+        // Pinhole's own: video and stack. Live Photos' and favourites' are
+        // their plugins' (Live off until turned on, as plugins/live has it).
+        QCOMPARE(kindIds(plugins), (QStringList{"pinhole/video", "pinhole/stack"}));
         auto live = mark("live", "live", "live", "yellow", 30);
         live->setDefaultShown(false);
         plugins.setMarks("pinhole.live", {live.get()});
+        auto favourite = mark("favorite", "favorite", "heart", "red", 10);
+        plugins.setMarks("pinhole.favourites", {favourite.get()});
         QSignalSpy kindsChanged(&plugins, &Plugins::markKindsChanged);
         const QStringList pinholes{"pinhole.favourites/favorite", "pinhole/video", "pinhole.live/live", "pinhole/stack"};
         QCOMPARE(kindIds(plugins), pinholes);
@@ -2090,40 +2105,42 @@ PinholePlugin {
         QCOMPARE(plugins.markKinds().size(), Plugins::kMaxMarks);
         QVERIFY(plugins.at("me.p1").value("problem").toString().contains("4 marks at most for a plugin"));
         QVERIFY(!kindIds(plugins).contains("me.p1/m4"));
-        // 3 of Pinhole's, 2 of p0's and four each of p1 to p6 are 29: three
-        // of p7's make 32, and the rest of p7's, p8's and Live Photos' are
-        // left out (here the plugins go by their ids, all in one folder;
-        // installed, Pinhole's own come before one's own).
-        QVERIFY(kindIds(plugins).contains("me.p7/m2") && !kindIds(plugins).contains("me.p7/m3"));
+        // 2 of Pinhole's, 2 of p0's and four each of p1 to p7 are 32, and
+        // p8's, Favourites' and Live Photos' are left out (here the plugins
+        // go by their ids, all in one folder; installed, Pinhole's own come
+        // before one's own).
+        QVERIFY(kindIds(plugins).contains("me.p7/m3") && !kindIds(plugins).contains("me.p7/m4"));
         QVERIFY(!kindIds(plugins).contains("pinhole.live/live"));
-        QVERIFY(plugins.at("me.p7").value("problem").toString().contains("32 marks at most in all"));
+        QVERIFY(!kindIds(plugins).contains("pinhole.favourites/favorite"));
+        QVERIFY(plugins.at("me.p8").value("problem").toString().contains("32 marks at most in all"));
         QVERIFY(!kindIds(plugins).contains("me.p8/m0"));
         // Room made: the next plugin's come in, and are no longer said.
         plugins.setMarks("me.p6", {});
-        QVERIFY(kindIds(plugins).contains("me.p7/m3") && kindIds(plugins).contains("me.p8/m1"));
-        QVERIFY(plugins.at("me.p7").value("problem").toString().contains("4 marks at most for a plugin"));
-        plugins.setMarks("me.p5", {});
+        QVERIFY(kindIds(plugins).contains("me.p8/m3") && !kindIds(plugins).contains("pinhole.favourites/favorite"));
         QVERIFY(plugins.at("me.p8").value("problem").toString().contains("4 marks at most for a plugin"));
+        QVERIFY(!plugins.at("me.p8").value("problem").toString().contains("32 marks"));
+        plugins.setMarks("me.p5", {});
+        QVERIFY(kindIds(plugins).contains("pinhole.favourites/favorite") && kindIds(plugins).contains("pinhole.live/live"));
         plugins.setMarks("me.p8", {many[size_t(7 * 5)].get()});
         QCOMPARE(plugins.at("me.p8").value("problem").toString(), QString());
         for (int k = 1; k < 9; ++k)
             plugins.setMarks(QStringLiteral("me.p%1").arg(k), {});
         QCOMPARE(plugins.markKinds().size(), 6);
 
-        // A plugin of the id of one of Pinhole's stand-ins takes its place.
+        // Favourites' and Live Photos' have no stand-in: gone with their
+        // plugins', and back.
         auto pluginOf = [&](const QString &id) {
             for (const QVariant &kind : plugins.markKinds())
                 if (kind.toMap().value("id") == id)
                     return kind.toMap().value("plugin").toString();
             return QStringLiteral("none");
         };
-        auto favourite = mark("favorite", "favorite", "heart", "red", 10);
-        plugins.setMarks("pinhole.favourites", {favourite.get()});
-        QCOMPARE(plugins.markKinds().size(), 6);
         QCOMPARE(pluginOf("pinhole.favourites/favorite"), QStringLiteral("pinhole.favourites"));
         plugins.setMarks("pinhole.favourites", {});
-        QCOMPARE(pluginOf("pinhole.favourites/favorite"), QString());
-        // Live Photos' has no stand-in: gone with its plugin's, and back.
+        QCOMPARE(pluginOf("pinhole.favourites/favorite"), QStringLiteral("none"));
+        QCOMPARE(plugins.markKinds().size(), 5);
+        plugins.setMarks("pinhole.favourites", {favourite.get()});
+        QCOMPARE(pluginOf("pinhole.favourites/favorite"), QStringLiteral("pinhole.favourites"));
         plugins.setMarks("pinhole.live", {});
         QCOMPARE(pluginOf("pinhole.live/live"), QStringLiteral("none"));
         plugins.setMarks("pinhole.live", {live.get()});
@@ -2228,17 +2245,16 @@ PinholePlugin {
         QQmlEngine::setObjectOwnership(item.get(), QQmlEngine::CppOwnership);
         bench.engine.globalObject().setProperty("item", bench.engine.newQObject(item.get()));
         bench.js("plugins.setMarks('me.a', item.marks)");
-        QCOMPARE(kindIds(*bench.plugins), (QStringList{"me.a/loved", "pinhole.favourites/favorite", "pinhole/video",
-                                                       "me.a/picked", "pinhole/stack"}));
+        QCOMPARE(kindIds(*bench.plugins), (QStringList{"me.a/loved", "pinhole/video", "me.a/picked", "pinhole/stack"}));
         const QVariantMap loved = bench.plugins->markKinds()[0].toMap();
         QCOMPARE(loved.value("colour").toString(), QStringLiteral("blue"));
         QVERIFY(!loved.value("defaultShown").toBool());
-        QCOMPARE(bench.plugins->markKinds()[3].toMap().value("text").toString(), QStringLiteral("Picked"));
+        QCOMPARE(bench.plugins->markKinds()[2].toMap().value("text").toString(), QStringLiteral("Picked"));
         QCOMPARE(bench.plugins->marksOf("me.a"), (QVariantMap{{"picked", QVariantList{1}}}));
         bench.js("item.picked = [0, 'c']");
         QCOMPARE(bench.plugins->marksOf("me.a"), (QVariantMap{{"picked", QVariantList{0, 2}}}));
         item.reset();
-        QTRY_COMPARE(bench.plugins->markKinds().size(), 3);
+        QTRY_COMPARE(bench.plugins->markKinds().size(), 2);
     }
 
     // The kinds' shapes: Pinhole's four, one character, and nothing else;
@@ -2628,83 +2644,242 @@ PinholePlugin {
     }
 
 private slots:
-    // A favourite made in one source's library, undone once another's of
-    // the same ids is shown: not on those, and the service is told whose
-    // they are, should it have the other's already.
-    void aFavouriteIsUndoneOnlyOnTheSourceItWasMadeIn() {
-        QTemporaryDir dir, a, b;
-        makeLibrary(a.path(), {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/a");
-        makeLibrary(b.path(), {{"x.jpg", 1}, {"y.jpg", 2}}, false, "folder:/b");
-        FakeService fake;
-        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
-        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
-        ServiceClient service(dir.path());
-        QTRY_VERIFY(fake.server.hasPendingConnections());
-        fake.peer = fake.server.nextPendingConnection();
-        fake.greet();
-        Library library, other;
+    // The set_favorite requests the stand-in service was asked so far.
+    static QList<QJsonObject> favouritesAsked(FakeService &fake) {
+        fake.read();
+        QList<QJsonObject> found;
+        for (const QJsonObject &line : std::as_const(fake.asked))
+            if (line.value("method").toString() == QLatin1String("set_favorite"))
+                found.append(line);
+        return found;
+    }
+    static QJsonArray assetsOf(const QJsonObject &asked) { return asked.value("params").toObject().value("assets").toArray(); }
+
+    // pinhole.setFavorite: the photos change in memory at once (item(),
+    // the library's revision), the service is asked for those not so
+    // already, whose they are said; the promise has them once it answers,
+    // and what it could not set goes back, rejected with its code; put
+    // back only on the library it was set on, another shown meanwhile.
+    void setFavoriteSetsAtOnceAndPutsBackWhatTheServiceCouldNot() {
+        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        Favourites favourites(&bench.library, bench.service.get());
+        bench.plugins->setFavourites(&favourites);
+        const QString told = ".then(r => said.push('set ' + r.changed.join(' ')), e => said.push('not ' + e.code))";
+        const int revision = bench.js("pinhole.library.revision").toInt();
+        bench.js("pinhole.setFavorite([0, 'b'], true)" + told);
+        QVERIFY(bench.library.at(0).favorite && bench.library.at(1).favorite && !bench.library.at(2).favorite);
+        QVERIFY(bench.js("pinhole.library.item(1).favorite").toBool());
+        QVERIFY(bench.js("pinhole.library.revision").toInt() > revision);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 1);
+        const QJsonObject params = favouritesAsked(bench.fake)[0].value("params").toObject();
+        QCOMPARE(params.value("assets").toArray(), (QJsonArray{"a", "b"}));
+        QVERIFY(params.value("favorite").toBool());
+        QCOMPARE(params.value("source").toString(), QString("folder:/x"));
+        // Not before the service says.
+        QTest::qWait(20);
+        QCOMPARE(bench.said(), QStringList());
+        bench.fake.send({{"id", favouritesAsked(bench.fake)[0].value("id")}, {"ok", true}, {"result", QJsonObject{{"changed", 2}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"set a b"}));
+
+        // Only those not so already; what the service could not set goes back.
+        bench.js("said.length = 0; pinhole.setFavorite([0, 1, 2], true)" + told);
+        QVERIFY(bench.library.at(2).favorite);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 2);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[1]), (QJsonArray{"c"}));
+        bench.fake.send({{"id", favouritesAsked(bench.fake)[1].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "unavailable"}, {"message", "no network"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"not unavailable"}));
+        QVERIFY(!bench.library.at(2).favorite && bench.library.at(0).favorite && bench.library.at(1).favorite);
+
+        // All so already: nothing asked, and none changed.
+        bench.js("said.length = 0; pinhole.setFavorite([0, 1], true)" + told);
+        QTRY_COMPARE(bench.said(), QStringList({"set "}));
+        QCOMPARE(favouritesAsked(bench.fake).size(), 2);
+        // None of them here, or one: not_found, or on the one.
+        bench.js("said.length = 0; pinhole.setFavorite([7, 'zz'], false)" + told);
+        QTRY_COMPARE(bench.said(), QStringList({"not not_found"}));
+        bench.js("said.length = 0; pinhole.setFavorite('zz', false); pinhole.setFavorite(0, false)" + told);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 3);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[2]), (QJsonArray{"a"}));
+        bench.fake.send({{"id", favouritesAsked(bench.fake)[2].value("id")}, {"ok", true}, {"result", QJsonObject{{"changed", 1}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"set a"}));
+
+        // Another source's library shown before the service answers (it
+        // shows that one already: other_source): its photos of the same
+        // ids are not put back, as they were never set.
+        QTemporaryDir otherDir;
+        makeLibrary(otherDir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/y");
+        Library other;
         QString error;
-        QVERIFY(library.open(a.path(), &error));
-        QVERIFY(other.open(b.path(), &error));
-        History history;
-        Favourites favourites(&library, &service, &history);
-        favourites.toggle({0});
-        QVERIFY(library.at(0).favorite);
-        const auto heard = [&] {
-            fake.read();
-            return fake.asked.size();
-        };
-        QTRY_COMPARE(heard(), 1);
-        const QJsonObject asked = fake.asked.first();
-        QCOMPARE(asked.value("method").toString(), QString("set_favorite"));
-        QCOMPARE(asked.value("params").toObject().value("source").toString(), QString("folder:/a"));
-        // Answered as by a service already showing the other.
-        fake.send({{"id", asked.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "other_source"}, {"message", "no"}}}});
-        QTRY_VERIFY(!library.at(0).favorite);
-        favourites.toggle({0});
-        QTRY_COMPARE(heard(), 2);
-        library.swap(other);
-        QVERIFY(history.canUndo());
-        history.undo();
-        QTest::qWait(100);
-        QCOMPARE(heard(), 2);
-        QVERIFY(!library.at(0).favorite);
-        // A photo asked for says whose it is too, once the window says.
-        service.setShown(library.source());
-        service.fetch("x.jpg", "medium", [](bool, const QJsonObject &, const QString &) {});
-        QTRY_COMPARE(heard(), 3);
-        QCOMPARE(fake.asked.last().value("params").toObject().value("source").toString(), QString("folder:/b"));
+        QVERIFY(other.open(otherDir.path(), &error));
+        other.setFavorite(2, true);
+        bench.js("said.length = 0; pinhole.setFavorite(2, true)" + told);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 4);
+        bench.library.swap(other);
+        bench.fake.send({{"id", favouritesAsked(bench.fake)[3].value("id")}, {"ok", false},
+                         {"error", QJsonObject{{"code", "other_source"}, {"message", "not shown"}}}});
+        QTRY_COMPARE(bench.said(), QStringList({"not other_source"}));
+        QVERIFY(bench.library.at(2).favorite);
     }
 
-    // A library given to the window (--library) is only looked at: F says
-    // so, not that the source would not take the change.
-    void aFavouriteInALibraryOnlyLookedAtSaysSo() {
-        QTemporaryDir dir, a;
-        makeLibrary(a.path(), {{"x.jpg", 1}}, false, "folder:/a");
-        FakeService fake;
-        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
-        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
-        ServiceClient service(a.path());
-        QTRY_VERIFY(fake.server.hasPendingConnections());
-        fake.peer = fake.server.nextPendingConnection();
-        fake.greet();
-        Library library;
-        QString error;
-        QVERIFY(library.open(a.path(), &error));
-        History history;
-        Favourites favourites(&library, &service, &history);
-        QSignalSpy failed(&favourites, &Favourites::failed);
-        favourites.toggle({0});
-        const auto asked = [&] {
-            fake.read();
-            return !fake.asked.isEmpty();
+    // plugins/favourites as the window loads it, over a stand-in service:
+    // its mark; the viewer's heart, filled in the accent once a favourite,
+    // at once; each press a step undone and done again through the
+    // service; why not, said under the heart (or at the foot of the window
+    // with no heart showing), and put back; all of them made favourites,
+    // or none when they all are, a few or hundreds; undone only on the
+    // library it was done in.
+    void theFavouritesPluginsHeartSetsAndUndoesAndSaysWhyNot() {
+        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        Favourites favourites(&bench.library, bench.service.get());
+        bench.plugins->setFavourites(&favourites);
+        Keymap keymap;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/favourites/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.favourites&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.js("plugin.shownAction.complained.connect(text => said.push('viewer ' + text));"
+                 "plugin.tickedAction.complained.connect(text => said.push('ticked ' + text))");
+        QSignalSpy notified(bench.host, &PluginHost::notified);
+        auto answer = [&bench](int k, const QString &code = {}) {
+            const QJsonValue id = favouritesAsked(bench.fake)[k].value("id");
+            if (code.isEmpty())
+                bench.fake.send({{"id", id}, {"ok", true}, {"result", QJsonObject{{"changed", 1}}}});
+            else
+                bench.fake.send({{"id", id}, {"ok", false}, {"error", QJsonObject{{"code", code}, {"message", "no"}}}});
         };
-        QTRY_VERIFY(asked());
-        fake.send({{"id", fake.asked.first().value("id")}, {"ok", false},
-                   {"error", QJsonObject{{"code", "read_only"}, {"message", "only read"}}}});
-        QTRY_COMPARE(failed.count(), 1);
-        QVERIFY(failed.first().first().toString().contains("only being looked at"));
-        QVERIFY(!library.at(0).favorite);
+
+        // Its mark: the library's field, a red heart first in the corner, shown.
+        QCOMPARE(bench.js("plugin.marks[0].field").toString(), QString("favorite"));
+        QCOMPARE(bench.js("plugin.marks[0].icon").toString(), QString("heart"));
+        QCOMPARE(bench.js("plugin.marks[0].colour").toString(), QString("red"));
+        QCOMPARE(bench.js("plugin.marks[0].order").toInt(), 10);
+        QVERIFY(bench.js("plugin.marks[0].defaultShown").toBool());
+        QCOMPARE(bench.js("plugin.shownAction.key").toString(), QString("F"));
+        QCOMPARE(bench.js("plugin.shownAction.order").toInt(), -20);
+        QCOMPARE(bench.js("plugin.tickedAction.place").toString(), QString("selection"));
+        QVERIFY(!bench.js("plugin.tickedAction.usable").toBool());
+
+        // F on the photo shown: filled in the accent at once, a step to undo.
+        bench.viewer->openAt(0, {});
+        QCOMPARE(bench.js("plugin.shownAction.text").toString(), QString(QChar(0xf08a)));
+        QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString());
+        bench.js("plugin.shownAction.triggered()");
+        QVERIFY(bench.library.at(0).favorite);
+        QCOMPARE(bench.js("plugin.shownAction.text").toString(), QString(QChar(0xf004)));
+        QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString("accent"));
+        QVERIFY(bench.history.canUndo());
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 1);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[0]), (QJsonArray{"a"}));
+        answer(0);
+        // Undone, and done again: through the service each time.
+        bench.history.undo();
+        QVERIFY(!bench.library.at(0).favorite);
+        QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString());
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 2);
+        QVERIFY(!favouritesAsked(bench.fake)[1].value("params").toObject().value("favorite").toBool());
+        answer(1);
+        bench.history.redo();
+        QVERIFY(bench.library.at(0).favorite);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 3);
+        answer(2);
+        QTest::qWait(20);
+        QCOMPARE(bench.said(), QStringList());
+
+        // What could not be set: said under the heart, and put back.
+        bench.viewer->step(1);
+        QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString());
+        bench.js("plugin.shownAction.triggered()");
+        QVERIFY(bench.library.at(1).favorite);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 4);
+        answer(3, "read_only");
+        QTRY_COMPARE(bench.said(), QStringList({"viewer This library is only being looked at here: its favourites cannot be changed"}));
+        QVERIFY(!bench.library.at(1).favorite);
+        QCOMPARE(bench.js("plugin.shownAction.textColour").toString(), QString());
+        bench.js("plugin.shownAction.triggered()");
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 5);
+        answer(4, "needs_sign_in");
+        QTRY_COMPARE(bench.said().size(), 2);
+        QCOMPARE(bench.said()[1], QString("viewer Not signed in to x"));
+        bench.js("plugin.shownAction.triggered()");
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 6);
+        answer(5, "unavailable");
+        QTRY_COMPARE(bench.said().size(), 3);
+        QCOMPARE(bench.said()[2], QString("viewer Could not change favourites in x"));
+
+        // Several: all made favourites (those not yet), then none.
+        bench.viewer->close();
+        QTRY_VERIFY(!bench.viewer->isOpen());
+        bench.js("said.length = 0; plugin.toggle([0, 1, 2])");
+        QVERIFY(bench.library.at(0).favorite && bench.library.at(1).favorite && bench.library.at(2).favorite);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 7);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[6]), (QJsonArray{"b", "c"}));
+        answer(6);
+        bench.js("plugin.toggle([0, 1, 2])");
+        QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite && !bench.library.at(2).favorite);
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 8);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[7]), (QJsonArray{"a", "b", "c"}));
+        // With no heart showing (undone in the grid, say): at the foot of the window.
+        answer(7, "unavailable");
+        QTRY_COMPARE(notified.size(), 1);
+        QCOMPARE(notified[0][0].toString(), QString("Could not change favourites in x"));
+        QCOMPARE(bench.said(), QStringList());
+        QVERIFY(bench.library.at(0).favorite && bench.library.at(1).favorite && bench.library.at(2).favorite);
+
+        // Undone on the library it was done in only: another's photos of
+        // the same ids are not touched.
+        QTemporaryDir otherDir;
+        makeLibrary(otherDir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/y");
+        Library other;
+        QString error;
+        QVERIFY(other.open(otherDir.path(), &error));
+        bench.library.swap(other);
+        QVERIFY(bench.history.canUndo());
+        bench.history.undo();
+        QTest::qWait(50);
+        QCOMPARE(favouritesAsked(bench.fake).size(), 8);
+        QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite);
+        bench.history.redo();
+        QTest::qWait(50);
+        QCOMPARE(favouritesAsked(bench.fake).size(), 8);
+        QVERIFY(!bench.library.at(0).favorite && !bench.library.at(1).favorite);
+        bench.library.swap(other);
+    }
+
+    // Hundreds ticked: by the library's columns, every one of them asked
+    // for at once, and all of them back to none.
+    void theFavouritesPluginTakesHundredsTickedAtOnce() {
+        QList<std::pair<QByteArray, qint64>> photos;
+        for (int i = 0; i < 300; ++i)
+            photos.append({QByteArray("p") + QByteArray::number(i), 1000 + i});
+        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, photos, true);
+        Favourites favourites(&bench.library, bench.service.get());
+        bench.plugins->setFavourites(&favourites);
+        Keymap keymap;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/favourites/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.favourites&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.library.setFavorite(10, true);
+        bench.js("all = []; for (let i = 0; i < 300; ++i) all.push(i)");
+        QVERIFY(!bench.js("plugin.allFavourites(all)").toBool());
+        bench.js("plugin.toggle(all)");
+        QVERIFY(bench.js("plugin.allFavourites(all)").toBool());
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 1);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[0]).size(), 299);
+        QVERIFY(!assetsOf(favouritesAsked(bench.fake)[0]).contains("p10"));
+        bench.js("plugin.toggle(all)");
+        QTRY_COMPARE(favouritesAsked(bench.fake).size(), 2);
+        QCOMPARE(assetsOf(favouritesAsked(bench.fake)[1]).size(), 300);
+        QVERIFY(!bench.library.at(10).favorite && !bench.library.at(299).favorite);
     }
 
     void aServiceOfAnotherProtocolIsSaidSoAndItsHealthDoesNotHideIt() {

@@ -216,12 +216,14 @@ int main(int argc, char *argv[]) {
     Viewer viewer(&library, &service);
     Outgoing outgoing(&library, &service);
     History history;
-    Favourites favourites(&library, &service, &history);
+    // Favourites set from the window (pinhole.setFavorite, plugins/favourites).
+    Favourites favourites(&library, &service);
     QObject::connect(&favourites, &Favourites::changed, &viewer, &Viewer::favoriteChanged);
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
     Plugins plugins(&library, &service, &viewer, &translator, &history);
+    plugins.setFavourites(&favourites);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
     // What was done to one source's photos is not undone on another's.
@@ -241,7 +243,6 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("keymap", &keymap);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
-    engine.rootContext()->setContextProperty("favourites", &favourites);
     engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);

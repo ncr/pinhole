@@ -59,10 +59,10 @@ it. `pinhole.api` says which one it is running in. API 2 brought promises
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
 `pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
-`hint`, `busyDelay` and `complain`, `fetch`'s options and its Live
-effects, a photo's `effect`, and `sources` in the manifest: a source of
-photos of the plugin's own, whose provider pinholed runs
-([source-providers.md](source-providers.md)).
+`hint`, `busyDelay`, `textColour` and `complain`, `fetch`'s options and its
+Live effects, a photo's `effect`, `setFavorite`, `library.revision`, and
+`sources` in the manifest: a source of photos of the plugin's own, whose
+provider pinholed runs ([source-providers.md](source-providers.md)).
 
 `Main.qml` beside it:
 
@@ -106,12 +106,16 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `shown`, `usable`, `active`, `busy` (its arc turning once
-  it has been for `busyDelay` ms, 1000 unless said), and `onTriggered`.
+  `text`, `key`, `shown`, `usable`, `active` (lit, filled with the
+  accent), `textColour` (its words in a colour while not lit: a theme
+  colour's name, as a mark's `colour`, or `"#rrggbb"`; the theme's text
+  if left out), `busy` (its arc turning once it has been for `busyDelay`
+  ms, 1000 unless said), and `onTriggered`.
   `order` places it among the others of its place, lowest first, then in
   the plugins' order (0 if left out); in select mode's bar, those below 0
   come before Copy, and in the viewer's they stand as Pinhole's own
-  buttons do, never folded into More ▾ (Live Photos' is -10). Its
+  buttons do, never folded into More ▾ (Favourites' heart is -20, Live
+  Photos' -10). Its
   `complain(text)` says what it could not do in a few words under its
   button for four seconds, the button shaking, as Copy does (under More ▾
   while it is folded there).
@@ -190,8 +194,8 @@ its settings, is there as the window first shows. It sets:
   photos it hid stay hidden where they are now until it gives `hidden`
   again (on `library.changed()`, from the ids it keeps).
 - `marks`: marks in the bottom left corner of grid cells, beside
-  Pinhole's own (a video's, a favourite's, a stack's) and its plugins'
-  (Live Photos' on a Live Photo),
+  Pinhole's own (a video's, a stack's) and its plugins' (Favourites' on a
+  favourite, Live Photos' on a Live Photo),
   each a `PluginMark`, four at most (32 in all, Pinhole's among them; one
   past that is left out, and said under the plugin, as is one that is not
   right). Each has a switch of its own under the side panel's "In the
@@ -256,13 +260,14 @@ positions move when the library is read again, ids do not, so keep ids.
 |---|---|
 | `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a
 Live Photo's effect as set on the iPhone: `loop`, `bounce`,
-`long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); and `changed()` when it is read again |
+`long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
 | `viewer` | the photo shown full window: `open`, `index` |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
 | `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the service makes when the source has none): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize`. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
+| `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did` |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |

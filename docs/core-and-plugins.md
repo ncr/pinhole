@@ -494,6 +494,12 @@ and the promise is rejected with the service's `code` (`unsupported`,
 `other_source`, `needs_sign_in`, `unavailable`, `not_found`). The plugin
 records the undo step with `pinhole.did` itself.
 
+As built (B4): `changed` is the ids of the photos that were not so
+already (not a count), and `read_only` and `no_service` are among the
+codes; `not_found` too when none of the photos is in the library.
+`library.revision` (API 3) goes up with every favourite set, by any
+plugin, and every reload, for a binding over `item()`.
+
 ### Sources: `PluginSource` and `pinhole.sources`
 
 `PinholePlugin` gets `property list<QtObject> sources`, each a
@@ -1258,6 +1264,51 @@ API above).
   core's stand-in mark is removed. Also `bin/install-files`, README and
   `docs/plugins.md`.
 - Tests: the above. Undo and redo of a favourite. First frame within 5 %.
+- As built:
+  - The heart is not `active`, which fills a button with the accent: it
+    has always been a filled heart in the accent on a flat button. So a
+    `PluginAction` has `textColour` (a theme colour's name, as a mark's
+    `colour`, or `"#rrggbb"`), drawn by `PluginGroup` and the grid's
+    buttons. Not `colour`: Colours declares a `colour` of its own on its
+    viewer action, which a property of that name would have turned into
+    its button's colour.
+  - The plugin works out the ids to change as it is pressed (those not so
+    already: by `item()` for a few, by the `id` and `favorite` columns for
+    more than 256) and records the step at once, as History had it: Ctrl Z
+    straight after F undoes it, answered or not. The step is undone and
+    done again only while the library it was done in is shown
+    (`library.key`), as `Favourites` checked the source before.
+  - Its complaint: under the heart in the viewer, as before; in select
+    mode over the heart (B2's complaint for the bar at the bottom) rather
+    than the chip at the window's foot; with no heart showing (Ctrl Z in
+    the grid), at the foot (`notify`). In select mode the undo notice of
+    the step that failed covers it, as it covered the foot's chip on main.
+  - F is in the help under the plugin, Favourites, as Live's L moved in
+    B3.
+  - With the plugin off there is no heart, no F and no mark. The Photo
+    frame still offers "Favourites" and shows them: they are the source's
+    (set on the iPhone or at iCloud.com, kept in the library either way),
+    and the plugin is only how Pinhole shows and sets them. A frame left on
+    favourites would otherwise change what it shows for a switch about
+    hearts.
+  - `Favourites` keeps no `History` and has no `toggle`, `all` or
+    `failed`; the window's `favourites` context property is gone
+    (`Plugins::setFavourites`). The core's stand-in mark is gone, and a
+    plugin's mark with the id of one of Pinhole's own is refused.
+  - B3's open point, bounce's medium and full in `viewer` +12 % and
+    +14 %: 9 interleaved pairs of 7c90d0a and its parent say no (medium
+    45 → 43 ms, original 93 → 92, first frame 133 → 94); it was noise.
+  - Tests: `setFavoriteSetsAtOnceAndPutsBackWhatTheServiceCouldNot`,
+    `theFavouritesPluginsHeartSetsAndUndoesAndSaysWhyNot` (plugins/favourites
+    against a stand-in service: the mark, the heart filled at once, undo
+    and redo through the service, `read_only`, `needs_sign_in` and
+    `unavailable` said, put back, several at once, the foot of the window,
+    undone on its library only) and
+    `theFavouritesPluginTakesHundredsTickedAtOnce`; `favourite:` on a
+    scratch folder source gives main's frames byte for byte, and on the
+    copy reaches iCloud's `set_favorite` (no session: "Not signed in to
+    iCloud", put back); with the plugin off, F does nothing and the bars
+    have no heart.
 
 ### B5: one JPEG, used (after A1)
 

@@ -1,75 +1,46 @@
 #include "favourites.h"
 
-#include "history.h"
 #include "serviceclient.h"
 
 #include <QJsonArray>
 #include <QSet>
 
-Favourites::Favourites(Library *library, ServiceClient *service, History *history, QObject *parent)
-    : QObject(parent), m_library(library), m_service(service), m_history(history) {}
+Favourites::Favourites(Library *library, ServiceClient *service, QObject *parent)
+    : QObject(parent), m_library(library), m_service(service) {}
 
-bool Favourites::all(const QList<int> &indexes) const {
-    bool any = false;
-    for (int i : indexes) {
-        if (i < 0 || i >= m_library->count())
-            continue;
-        if (!m_library->at(i).favorite)
-            return false;
-        any = true;
+QList<QByteArray> Favourites::set(const QList<QByteArray> &ids, bool favorite, const Done &done) {
+    // Only those not so already, in the library's order.
+    const QSet<QByteArray> wanted(ids.begin(), ids.end());
+    QList<QByteArray> changing;
+    for (int i = 0; i < m_library->count(); ++i) {
+        const LibraryItem &item = m_library->at(i);
+        if (item.favorite != favorite && wanted.contains(item.id))
+            changing.append(item.id);
     }
-    return any;
-}
-
-void Favourites::toggle(const QList<int> &indexes) {
-    const bool favorite = !all(indexes);
-    // Only those not so already; by id, as a reload may move them before
-    // the service answers.
-    QList<QByteArray> ids;
-    for (int i : indexes) {
-        if (i < 0 || i >= m_library->count() || m_library->at(i).favorite == favorite)
-            continue;
-        ids.append(m_library->at(i).id);
+    if (changing.isEmpty()) {
+        if (done)
+            done(QString(), QString());
+        return changing;
     }
-    if (ids.isEmpty())
-        return;
-    const QString source = m_library->source();
-    set(ids, favorite, source);
-    // Undone, those it changed go back; the rest were so already.
-    m_history->did({}, favorite ? tr("adding to favourites") : tr("removing from favourites"),
-                   [this, ids, favorite, source] { set(ids, !favorite, source); },
-                   [this, ids, favorite, source] { set(ids, favorite, source); });
-}
-
-void Favourites::set(const QList<QByteArray> &ids, bool favorite, const QString &source) {
-    // Another's shown since: not these photos.
-    if (m_library->source() != source)
-        return;
-    QJsonArray assets;
-    for (const QByteArray &id : ids)
-        assets.append(QString::fromUtf8(id));
-    apply(ids, favorite);
+    apply(changing, favorite);
     // And the service, which may have another source's library already
-    // (one that says whose it is not, "", is no other's either).
+    // (one that says whose it is not, "", is no other's either): then
+    // other_source, and they go back.
+    const QString source = m_library->source();
+    QJsonArray assets;
+    for (const QByteArray &id : std::as_const(changing))
+        assets.append(QString::fromUtf8(id));
     const QJsonObject params{{"assets", assets}, {"favorite", favorite}, {"source", source}};
-    m_service->call(QStringLiteral("set_favorite"), params, [this, ids, favorite, source](bool ok, const QJsonObject &, const QString &code) {
-        if (ok)
-            return;
+    m_service->call(QStringLiteral("set_favorite"), params,
+                    [this, changing, favorite, source, done](bool ok, const QJsonObject &result, const QString &code) {
         // Put back as they were, if they are still the ones shown.
-        if (m_library->source() == source)
-            apply(ids, !favorite);
-        const QString source = m_service->sourceName();
-        QString message;
-        if (code == QLatin1String("read_only"))
-            message = tr("This library is only being looked at here: its favourites cannot be changed");
-        else if (code == QLatin1String("needs_sign_in"))
-            message = tr("Not signed in to %1").arg(source);
-        else if (code == QLatin1String("no_service") || m_service->health() == QLatin1String("no_service"))
-            message = tr("The Pinhole service is not running");
-        else
-            message = tr("Could not change favourites in %1").arg(source);
-        emit failed(message);
+        if (!ok && m_library->source() == source)
+            apply(changing, !favorite);
+        if (done)
+            done(ok ? QString() : code.isEmpty() ? QStringLiteral("unavailable") : code,
+                 ok ? QString() : result.value("message").toString());
     });
+    return changing;
 }
 
 void Favourites::apply(const QList<QByteArray> &ids, bool favorite) {

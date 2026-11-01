@@ -148,6 +148,7 @@ plugins/icloud/auth/pyicloud/pinhole-auth  the first provider, on the pyicloud m
 plugins/folder/source/    a folder as a source (crate pinhole-folder)
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/live/             the Live Photos plugin: the mark, L and ⇧ L, the motion and effects over the photo
+plugins/favourites/       the Favourites plugin: the mark, F and its heart in the viewer and select mode, undo
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
@@ -203,7 +204,11 @@ in the side panel; off, a Live Photo shows as its still).
 A Live Photo shows with the effect set on the iPhone (a loop or a bounce
 plays round and round, a long exposure is its frames as one); the ▾ beside
 Live, or ⇧ L, shows it with another, here only: the library keeps its
-own.
+own. F, or the heart beside the date, makes the photo a favourite or not,
+in iCloud too, and in select mode all that is ticked (the Favourites
+plugin, on unless turned off in the side panel; off, there is no heart
+and no mark, and the Photo frame still shows the favourites the source
+has).
 `PINHOLE_SELFTEST=viewer app/build/pinhole` opens one of each kind and
 reports how long every stage took.
 

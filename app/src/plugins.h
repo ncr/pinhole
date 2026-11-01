@@ -21,6 +21,7 @@
 #include "keepawake.h"
 #include "pluginstore.h"
 
+class Favourites;
 class History;
 class QProcess;
 class Library;
@@ -45,11 +46,18 @@ class PluginLibrary : public QObject {
     // is kept. For what a plugin keeps apart for each source, as Series
     // does its edits.
     Q_PROPERTY(QString key READ key NOTIFY changed)
+    // Goes up whenever what item() and field() say may have changed: the
+    // library read again, a favourite set (setFavorite, here or by another
+    // plugin). For bindings over them.
+    Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 public:
     explicit PluginLibrary(const Library *library, QObject *parent = nullptr);
     int count() const;
     QString dir() const;
     QString key() const;
+    int revision() const { return m_revision; }
+    // Something item() says changed in memory (a favourite).
+    void touched();
     // The key of every source added, as the settings say now: what a
     // plugin keeps for one no longer there can go.
     Q_INVOKABLE QStringList keys() const;
@@ -74,9 +82,11 @@ public:
 
 signals:
     void changed();
+    void revisionChanged();
 
 private:
     const Library *m_library;
+    int m_revision = 0;
     // The positions by id, of the library's read m_positionsOf.
     mutable QHash<QByteArray, int> m_positions;
     mutable quint64 m_positionsOf = 0;
@@ -191,6 +201,16 @@ public:
     // MediaPlayer instead of a path, the service's http:// one while it is
     // still downloading, else the file's.
     Q_INVOKABLE QJSValue fetch(const QJSValue &photo, const QString &kind, const QJSValue &done = {});
+    // Photos (a list of positions or ids, or one) made favourites, or not
+    // (favourites.h): at once in the library in memory (the grid's mark,
+    // library.item().favorite), then in the source. A promise of
+    // { changed }, the ids of those that were not so already, once the
+    // service has set them; rejected with its code (unsupported,
+    // other_source, needs_sign_in, unavailable, not_found, read_only,
+    // no_service), the photos put back as they were; not_found too when
+    // none of them is in the library. No undo step: the plugin's own
+    // (did).
+    Q_INVOKABLE QJSValue setFavorite(const QJSValue &photos, bool favorite);
     // Run a program, its own (in its folder) or any on PATH: a promise of
     // { stdout, stderr, code } once it exits 0, rejected with an Error
     // whose `code` is "exit" (and exitCode, stdout, stderr), "start",
@@ -323,8 +343,8 @@ class PluginMark : public QObject {
     // A theme colour's name (red, green, yellow, blue, magenta, cyan,
     // accent), or "#rrggbb".
     Q_PROPERTY(QString colour READ colour WRITE setColour NOTIFY changed)
-    // Left to right in the corner: Pinhole's favourite 10, video 20, Live
-    // 30, stack 90.
+    // Left to right in the corner: a favourite's 10, Pinhole's video 20,
+    // Live 30, Pinhole's stack 90.
     Q_PROPERTY(int order READ order WRITE setOrder NOTIFY changed)
     // The photos whose library field is true ("live", "favorite",
     // "video"); or "" for `photos`.
@@ -433,6 +453,9 @@ public:
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);
+    // What setFavorite sets through (the window's one).
+    void setFavourites(Favourites *favourites);
+    Favourites *favourites() const { return m_favourites; }
     // The engine plugins load in: what it keeps of a plugin's files is
     // dropped when they change, and what it warns of in them is theirs.
     void setEngine(QQmlEngine *engine);
@@ -575,6 +598,7 @@ private:
     Translator *m_translator;
     History *m_history;
     PhotoGrid *m_grid = nullptr;
+    Favourites *m_favourites = nullptr;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
     // Before the plugins, so it outlives their hosts, which let it go.
