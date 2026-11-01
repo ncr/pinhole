@@ -27,11 +27,11 @@ Series, the first plugin, finds photos of one subject taken close together
 and shows each series as one card in the grid; under a photo of one, the
 strip underlines the series. What it finds can be put right: on a photo,
 X takes it out of its series, A adds it to the series beside it, U
-ungroups the series; in select mode, G groups what is ticked. Ctrl+Z
-undoes any of it, as it does a favourite, and Ctrl+⇧Z does it again. It
+ungroups the series; in select mode, G groups what is ticked. Ctrl Z
+undoes any of it, as it does a favourite, and Ctrl ⇧ Z does it again. It
 also (G in the grid, or on a photo of one) makes a series a short GIF or
 video to send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
-shape, held steady; Enter copies it and keeps it in Pictures/Pinhole. It is
+shape, held steady; ⏎ copies it and keeps it in Pictures/Pinhole. It is
 on unless turned off in the side panel.
 
 On this day shows the photos taken on today's date in earlier years, a year
@@ -41,7 +41,7 @@ and whether videos and screenshots count.
 
 Contact sheet makes the photos ticked in select mode one picture to send
 (K): an even grid, or a collage that keeps each photo whole, with a gap, a
-background, a size and the dates if you like; Enter copies it and keeps it
+background, a size and the dates if you like; ⏎ copies it and keeps it
 in Pictures/Pinhole.
 
 Send to phone (O, on a photo or what is ticked) sends photos to a phone or
@@ -53,7 +53,7 @@ Info, on I on a photo, shows its details in a small panel over its corner:
 when it was taken, the camera, lens and exposure, its size and format (a
 video's codec, frame rate and length), and where, with W to open the place
 on OpenStreetMap. It stays open from photo to photo. A video's original over
-50 MB is read only when asked (⇧I).
+50 MB is read only when asked (⇧ I).
 
 Colours finds photos by colour (H): pick one on a wheel, or on a photo the
 ones closest to its colour, or lay the library out by hue as a rainbow wall
@@ -61,7 +61,7 @@ ones closest to its colour, or lay the library out by hue as a rainbow wall
 colour (a sunset, the sea, a forest) and not a red coat on a grey street.
 
 Screenshots keeps screenshots from crowding out the photos: each day's one
-card, or (⇧S, or the side panel) not in the grid at all, with a button
+card, or (⇧ S, or the side panel) not in the grid at all, with a button
 saying how many are away. A screenshot is what iCloud marks as one (an
 iPhone's or an iPad's), a file named as one (screenshot-…, Screenshot …,
 Zrzut ekranu …, hyprshot's, grim's), or a PNG with no place shaped like a
@@ -73,19 +73,19 @@ again whenever you save it: [docs/plugins.md](docs/plugins.md).
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
-as its Loop, and ⇧V its Bounce (both also under ▾, ⇧B). In Series' studio,
+as its Loop, and ⇧ V its Bounce (both also under ▾, ⇧ B). In Series' studio,
 B makes the video just made the background. Each is kept in
 Pictures/Pinhole/.backgrounds, hidden from a folder source: the newest 12,
 and any set now or a theme will bring back; a file put there otherwise is
-never removed. Ctrl+Z puts the one before back.
+never removed. Ctrl Z puts the one before back.
 
 Year calendar (Y in the grid) shows every day of every year as a square in
 the theme's accent, brighter the more photos it has, one row of weeks a
-year; a click, or the arrows and Enter, shows that day in the grid.
+year; a click, or ↑ ↓ ← → and ⏎, shows that day in the grid.
 
 Theme makes an Omarchy theme from the photo shown full window: T (or
 Theme) sets it, the photo as the background and its colours on the whole
-desktop, Pinhole too, the text always readable; Ctrl+Z goes back to the
+desktop, Pinhole too, the text always readable; Ctrl Z goes back to the
 theme before. The last 12 made or used stay in Omarchy's theme picker; a
 copy of one under another name is yours, and stays.
 
@@ -184,15 +184,15 @@ limit can be changed in the side panel, Tab), and logs to
 `~/.local/state/pinhole/pinholed.log`. Its protocol is in
 [docs/service.md](docs/service.md).
 
-Double-click a photo, or press Space or Enter over it, to open it full
+Double-click a photo, or press Space or ⏎ over it, to open it full
 window: the thumbnail at once, the medium rendition in about a second, then
-the original (HEIC through libheif). Left and Right step through, Escape or
+the original (HEIC through libheif). ← and → step through, Esc or
 Space closes, as does dragging the photo up or down (two fingers on a
 touchpad, the left button with a mouse), Space plays and pauses a video, L
 plays a Live Photo's motion.
 A Live Photo shows with the effect set on the iPhone (a loop or a bounce
 plays round and round, a long exposure is its frames as one); the ▾ beside
-Live, or Shift+L, shows it with another, here only: the library keeps its
+Live, or ⇧ L, shows it with another, here only: the library keeps its
 own.
 `PINHOLE_SELFTEST=viewer app/build/pinhole` opens one of each kind and
 reports how long every stage took.
@@ -203,9 +203,9 @@ from a terminal; `PINHOLE_SELFTEST=drop:<dir>` with
 `PINHOLE_SELFTEST_DROP=<file>:<file>` drops files on the window and
 reports, for a scratch source only, since they really are added.
 
-Click selects (Ctrl-click adds, Shift-click a range, Ctrl+A all). Drag
-photos out to any app; Ctrl+C copies them; Ctrl+E exports the originals and
-Ctrl+Shift+E a compatible form (HEIC as JPEG, keeping the date, place and
+Click selects (Ctrl click adds, ⇧ click a range, Ctrl A all). Drag
+photos out to any app; Ctrl C copies them; Ctrl E exports the originals and
+Ctrl ⇧ E a compatible form (HEIC as JPEG, keeping the date, place and
 camera details) to a folder chosen in the desktop's own picker. Originals
 come from iCloud as they are needed.
 

@@ -101,7 +101,10 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `shown`, `usable`, `active`, `busy`, and `onTriggered`. In
+  `text`, `key`, `shown`, `usable`, `active`, `busy`, and `onTriggered`.
+  `key` is a sequence as Qt writes one ("F2", "Shift+S", "Ctrl+Return"),
+  and the button and the help show it as Pinhole names keys: F2, ⇧ S,
+  Ctrl ⏎. In
   the viewer and select mode, actions with the same `group` are one button,
   the first of them shown, with the rest in a menu under ▾ beside it, opened
   with ⇧ and that button's key. Pinhole sets its `hovered` while the pointer
@@ -127,7 +130,7 @@ its settings, is there as the window first shows. It sets:
 - `settings`: a `Component` shown under its row in the side panel while it
   is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
 - `help`: its keys for the help (?), as `[["key", "what it does"], ...]`
-  (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
+  (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
   listed under its name with its `Command`s that give a `section` (any
   but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
   Pinhole's are: the heading says whose they are.
@@ -142,7 +145,7 @@ its settings, is there as the window first shows. It sets:
   as Series does).
 - `hidden`: photos not in the grid at all, a list of library positions,
   as Screenshots hides screenshots. They leave any stack they are in, the
-  viewer's ← and →, its strip and Home/End pass over them, and Ctrl+A and a
+  viewer's ← and →, its strip and Home/End pass over them, and Ctrl A and a
   range leave them out; a plugin can still `openPhoto` one. Say somewhere
   how many are away and how to have them back; with every photo hidden,
   the window says so, and names the plugin. Other plugins see what is
@@ -197,7 +200,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own, and Screenshots what it found as `found:` and the `key`, read as it loads (none for a library whose `key` is `""`, nor past 5,000, and those of sources no longer added gone) |
-| `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
+| `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
