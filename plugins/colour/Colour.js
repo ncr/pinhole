@@ -5,24 +5,37 @@
 // its polar form, lightness L (0 black to 1 white), chroma C (0 grey, a
 // photo's average rarely past 0.15) and hue h in degrees.
 
-function linear(c) {
-    c /= 255
-    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-}
+// sRGB's 0..255 to linear light, looked up: the library's colours are
+// read 50,000 at a time.
+const LINEAR = (() => {
+    const table = new Float64Array(256)
+    for (let i = 0; i < 256; ++i) {
+        const c = i / 255
+        table[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+    }
+    return table
+})()
 function gamma(c) {
     const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055
     return Math.round(255 * Math.max(0, Math.min(1, v)))
 }
 
-// 0xrrggbb to [L, a, b].
-function lab(rgb) {
-    const r = linear(rgb >> 16 & 255), g = linear(rgb >> 8 & 255), b = linear(rgb & 255)
+// 0xrrggbb to [L, a, b]; into `out` from `at` when given, for many at
+// once without an array each.
+function lab(rgb, out, at) {
+    const r = LINEAR[rgb >> 16 & 255], g = LINEAR[rgb >> 8 & 255], b = LINEAR[rgb & 255]
     const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
     const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
     const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
-    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720040 * s,
-            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
-            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]
+    const L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720040 * s
+    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    if (!out)
+        return [L, A, B]
+    out[at] = L
+    out[at + 1] = A
+    out[at + 2] = B
+    return out
 }
 
 // [L, a, b] to linear sRGB, each 0..1 when it is a colour a screen shows.
@@ -118,10 +131,11 @@ function index(colours, dates, ids) {
                    b: new Float32Array(n), C: new Float32Array(n), h: new Float32Array(n), date: new Float64Array(n),
                    shown: null, count: 0, colourful: 0, wheel: null }
     let k = 0
+    const p = new Float64Array(3)
     for (let i = 0; i < colours.length; ++i) {
         if (colours[i] === "")
             continue
-        const p = lab(parseInt(colours[i].slice(1), 16))
+        lab(parseInt(colours[i].slice(1), 16), p, 0)
         data.id[k] = ids[i]
         data.pos[k] = i
         data.L[k] = p[0]

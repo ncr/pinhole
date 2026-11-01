@@ -51,6 +51,7 @@ Item {
         returning = false
         shown = true
         search()
+        photos.positionViewAtBeginning()
     }
     // The photos closest to this one's colour.
     function like(index) {
@@ -68,6 +69,7 @@ Item {
         returning = false
         shown = true
         search()
+        photos.positionViewAtBeginning()
     }
     function close() {
         shown = false
@@ -82,9 +84,13 @@ Item {
         shown = false
         pinhole.openPhoto(index)
     }
+    // The same photos found again (opened again on the same colour) leave
+    // the grid as it is: a list given anew makes every tile again.
     function search() {
         const d = plugin.ensure()
-        results = Colour.nearest(d, targetL, targetA, targetB, resultCount, fromId)
+        const found = Colour.nearest(d, targetL, targetA, targetB, resultCount, fromId)
+        if (found.length !== results.length || found.some((id, i) => id !== results[i]))
+            results = found
     }
     // The photos found that are still in the library; looked for again if
     // none are (another source shown, say).
@@ -127,6 +133,20 @@ Item {
         const p = Colour.fromPolar(targetL, Math.max(0, Math.min(rimChroma, C)), hue)
         pick(targetL, p[1], p[2])
     }
+    // The keys' steps (FinderKeys.qml): round the wheel, out from its grey
+    // middle or in, lighter or darker.
+    function turn(degrees) { pickPolar(Math.max(targetC, 0.04), targetH + degrees) }
+    function strengthen(step) {
+        const r = Math.max(0, Math.min(1, Math.sqrt(targetC / rimChroma) + step))
+        pickPolar(r * r * rimChroma, targetH)
+    }
+    function lighten(step) { pick(targetL + step, targetA, targetB) }
+    // The wall's tiles a step bigger.
+    readonly property bool canGrow: wall.density < wall.densities.length - 1
+    function grow() {
+        if (canGrow)
+            wall.density += 1
+    }
     // While a finger drags on the wheel or a key is held, the photos follow
     // some fifteen times a second (a search is some 10 ms), each time for
     // the colour as it is then.
@@ -158,111 +178,6 @@ Item {
         }
         // The plugin over it handed a photo over: closed for good.
         function onDismissed() { finder.close() }
-    }
-
-    Command {
-        name: "colour.close"
-        keys: ["Escape"]
-        keyLayer: "plugin"
-        when: finder.shown
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: finder.close()
-    }
-    Command {
-        name: "colour.close.h"
-        keys: ["H"]
-        keyLayer: "plugin"
-        when: finder.shown
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: finder.close()
-    }
-    Command {
-        name: "colour.hue"
-        text: qsTr("Hue round the wheel")
-        section: "Colours"
-        keys: ["Left"]
-        keysText: "← →"
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the wheel")
-        touchpad: qsTr("Tap the wheel")
-        onTriggered: finder.pickPolar(Math.max(finder.targetC, 0.04), finder.targetH + 10)
-    }
-    Command {
-        name: "colour.hueBack"
-        keys: ["Right"]
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the wheel")
-        touchpad: qsTr("Tap the wheel")
-        onTriggered: finder.pickPolar(Math.max(finder.targetC, 0.04), finder.targetH - 10)
-    }
-    Command {
-        name: "colour.stronger"
-        text: qsTr("Stronger, greyer")
-        section: "Colours"
-        keys: ["Up"]
-        keysText: "↑ ↓"
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the wheel")
-        touchpad: qsTr("Tap the wheel")
-        onTriggered: {
-            const r = Math.min(1, Math.sqrt(finder.targetC / finder.rimChroma) + 0.05)
-            finder.pickPolar(r * r * finder.rimChroma, finder.targetH)
-        }
-    }
-    Command {
-        name: "colour.greyer"
-        keys: ["Down"]
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the wheel")
-        touchpad: qsTr("Tap the wheel")
-        onTriggered: {
-            const r = Math.max(0, Math.sqrt(finder.targetC / finder.rimChroma) - 0.05)
-            finder.pickPolar(r * r * finder.rimChroma, finder.targetH)
-        }
-    }
-    Command {
-        name: "colour.darker"
-        text: qsTr("Darker, lighter")
-        section: "Colours"
-        keys: ["["]
-        keysText: "[ ]"
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the strip")
-        touchpad: qsTr("Tap the strip")
-        onTriggered: finder.pick(finder.targetL - 0.04, finder.targetA, finder.targetB)
-    }
-    Command {
-        name: "colour.lighter"
-        keys: ["]"]
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
-        autoRepeat: true
-        mouse: qsTr("Click the strip")
-        touchpad: qsTr("Tap the strip")
-        onTriggered: finder.pick(finder.targetL + 0.04, finder.targetA, finder.targetB)
-    }
-    Command {
-        name: "colour.first"
-        text: qsTr("Open the closest")
-        section: "Colours"
-        keys: ["Return", "Enter"]
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find" && finder.results.length > 0
-        mouse: qsTr("Click a photo")
-        touchpad: qsTr("Tap a photo")
-        onTriggered: finder.open(finder.results[0])
     }
 
     Rectangle {
@@ -336,16 +251,6 @@ Item {
             onTapped: wall.density += 1
         }
     }
-    // = as well as +, as for the grid's zoom.
-    Command {
-        name: "colour.bigger"
-        keys: ["="]
-        keyLayer: "plugin"
-        when: finder.shown && finder.mode === "wall" && wall.density < wall.densities.length - 1
-        mouse: qsTr("The + button")
-        touchpad: qsTr("Pinch")
-        onTriggered: wall.density += 1
-    }
     // What is shown, where there is room for it.
     Chip {
         x: top.x + top.width + 6
@@ -406,12 +311,11 @@ Item {
                     anchors.fill: parent
                     // Drawn again when the lightness has moved this much.
                     readonly property real lightness: Math.round(finder.targetL * 50) / 50
+                    // Fainter once there are dots over it.
+                    readonly property bool faint: finder.plugin.colours !== null
                     onLightnessChanged: requestPaint()
                     onWidthChanged: requestPaint()
-                    Connections {
-                        target: finder.plugin
-                        function onColoursChanged() { disc.requestPaint() }
-                    }
+                    onFaintChanged: requestPaint()
                     Connections {
                         target: theme
                         function onChanged() { disc.requestPaint() }
@@ -423,7 +327,7 @@ Item {
                         if (R <= 0)
                             return
                         const bg = theme.background
-                        const faint = finder.plugin.colours ? 0.45 : 1
+                        const faint = disc.faint ? 0.45 : 1
                         const mix = (c, k) => "rgb(" + Math.round(c[0] * k + bg.r * 255 * (1 - k)) + ","
                             + Math.round(c[1] * k + bg.g * 255 * (1 - k)) + "," + Math.round(c[2] * k + bg.b * 255 * (1 - k)) + ")"
                         const stops = 24

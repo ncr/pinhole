@@ -13,20 +13,33 @@ import "Colour.js" as Colour
 // averages to grey. It finds photos that are mostly one colour (sunsets,
 // the sea, a forest, a lit-up evening), and colours are compared as the
 // eye sees them (Colour.js: OKLab).
+//
+// The finder itself, a wheel, a grid and a wall, is made the first time it
+// opens, and kept: most launches never show it.
 PinholePlugin {
     id: plugin
-    covering: finder.shown
+    // The finder once made (Finder.qml), null before.
+    readonly property var finder: view.item
+    covering: finder !== null && finder.shown
+    function made() {
+        view.active = true
+        return view.item
+    }
 
     // The library's colours (Colour.index), by the photos' ids: read when
-    // the finder opens, from the library's columns at once. While a library
-    // is built it changes every few seconds; what the finder shows stays as
-    // it is, and the colours are read again when it next opens.
+    // the finder opens, from the library's columns at once, and while it is
+    // closed some seconds after the library is read again, the changes
+    // meanwhile with it (a library being built changes every few seconds),
+    // so that H opens at once. What the finder shows stays as it is while
+    // it is open, or a photo opened from it; the colours are read again
+    // once it is closed.
     property var colours: null
     property bool stale: false
     // Bumped when the library is read again: what is shown finds its
     // photos' new places by their ids.
     property int revision: 0
     function ensure() {
+        warming.stop()
         if (colours && !stale)
             return colours
         const library = pinhole.library
@@ -35,11 +48,25 @@ PinholePlugin {
         colours = Colour.withHidden(data, hiddenTest())
         return colours
     }
+    readonly property bool finding: finder !== null && (finder.shown || finder.returning)
+    function warm() {
+        if (stale && !finding && !warming.running)
+            warming.start()
+    }
+    // Twelve seconds: On this day reads the library again at ten, and the
+    // two in one frame would be a hitch twice as long.
+    Timer {
+        id: warming
+        interval: 12000
+        onTriggered: if (!plugin.finding) plugin.ensure()
+    }
+    onFindingChanged: warm()
     Connections {
         target: pinhole.library
         function onChanged() {
             plugin.stale = true
             ++plugin.revision
+            plugin.warm()
         }
     }
 
@@ -60,7 +87,8 @@ PinholePlugin {
         ++hiddenRevision
         if (colours && !stale)
             colours = Colour.withHidden(colours, hiddenTest())
-        finder.hiddenMoved()
+        if (finder)
+            finder.hiddenMoved()
     }
 
     // A photo's colour as [L, a, b], or null.
@@ -76,7 +104,7 @@ PinholePlugin {
             text: qsTr("Colours")
             key: "H"
             shown: pinhole.library.count > 0
-            onTriggered: finder.openFinder()
+            onTriggered: plugin.made().openFinder()
         },
         PluginAction {
             id: viewerAction
@@ -85,7 +113,7 @@ PinholePlugin {
             text: qsTr("Same colour")
             key: "H"
             shown: colour !== ""
-            onTriggered: finder.like(pinhole.viewer.index)
+            onTriggered: plugin.made().like(pinhole.viewer.index)
         }
     ]
 
@@ -143,9 +171,13 @@ PinholePlugin {
         }
     }
 
-    Finder {
-        id: finder
+    Loader {
+        id: view
         anchors.fill: parent
-        plugin: plugin
+        active: false
+        // Its `plugin` is this one, the Loader's parent: within the Finder,
+        // `plugin` would be its own property.
+        sourceComponent: Finder { plugin: view.parent }
     }
+    FinderKeys { finder: plugin.finder }
 }
