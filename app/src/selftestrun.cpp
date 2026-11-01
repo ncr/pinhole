@@ -74,6 +74,9 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // (and each language's) without a screen: <file> its keyboard tab, and
     // beside it <file>-mouse and <file>-touchpad. Shown after
     // PINHOLE_SELFTEST_DELAY ms (800): as the window opens, or once it has.
+    // Then the three again at 850, 1200, 1700 and 3200 wide, as
+    // <file>-<width>-<tab>: the card the same on all three at each width.
+    // PINHOLE_LANGUAGE_FILE (a file saying "pl") for another language.
     // PINHOLE_SELFTEST=shot:<file>: the window as it first shows, as an image.
     if (name == QLatin1String("shot")) {
         // PINHOLE_SELFTEST_DELAY: how long to wait first, in ms.
@@ -126,6 +129,49 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 const QString file = arg;
                 const QString stem = file.left(file.lastIndexOf('.')), suffix = file.mid(file.lastIndexOf('.'));
                 help->setProperty("tab", QStringLiteral("keyboard"));
+                // Then at each width the three tabs again, as
+                // <file>-<width>-<tab>: the card where it was and as large
+                // on all three, so that turning from one to the next moves
+                // nothing.
+                auto widths = std::make_shared<QList<int>>(QList<int>{850, 1200, 1700, 3200});
+                auto atWidths = std::make_shared<std::function<void()>>();
+                *atWidths = [=] {
+                    if (widths->isEmpty()) {
+                        QCoreApplication::exit(*failures ? 1 : 0);
+                        return;
+                    }
+                    const int width = widths->takeFirst();
+                    window->resize(width, window->height());
+                    auto rects = std::make_shared<QList<QRectF>>();
+                    auto tabs = std::make_shared<QStringList>(QStringList{"keyboard", "mouse", "touchpad"});
+                    auto next = std::make_shared<std::function<void()>>();
+                    *next = [=] {
+                        if (tabs->isEmpty()) {
+                            const bool same = rects->size() == 3 && (*rects)[0] == (*rects)[1] && (*rects)[1] == (*rects)[2];
+                            QStringList each;
+                            for (const QRectF &r : *rects)
+                                each << QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+                            std::printf("selftest: %s %d wide, the card the same on all three tabs (%s)\n", same ? "ok  " : "FAIL",
+                                        width, qPrintable(each.join(" / ")));
+                            std::fflush(stdout);
+                            *failures += same ? 0 : 1;
+                            (*atWidths)();
+                            return;
+                        }
+                        const QString tab = tabs->takeFirst();
+                        help->setProperty("tab", tab);
+                        QTimer::singleShot(250, window, [=] {
+                            QQuickItem *card = window->findChild<QQuickItem *>(QStringLiteral("helpCard"));
+                            rects->append(card ? QRectF(card->mapToScene(QPointF(0, 0)), card->size()) : QRectF());
+                            window->grabWindow().save(QStringLiteral("%1-%2-%3%4").arg(stem).arg(width).arg(tab, suffix));
+                            apart(QStringLiteral("%1 (%2 wide)").arg(tab).arg(width));
+                            (*next)();
+                        });
+                    };
+                    // The tab before was the touchpad's: the keyboard's
+                    // first, turned to from it.
+                    QTimer::singleShot(300, window, [next] { (*next)(); });
+                };
                 QTimer::singleShot(200, window, [=] {
                     window->grabWindow().save(file);
                     apart("keyboard");
@@ -137,7 +183,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                         QTimer::singleShot(200, window, [=] {
                             window->grabWindow().save(stem + "-touchpad" + suffix);
                             apart("touchpad");
-                            QCoreApplication::exit(*failures ? 1 : 0);
+                            (*atWidths)();
                         });
                     });
                 });
