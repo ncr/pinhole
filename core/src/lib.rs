@@ -13,6 +13,7 @@ pub mod discover;
 pub mod effects;
 pub mod folder;
 pub mod icloud;
+pub mod jpeg;
 pub mod service;
 pub mod source;
 pub mod storage;

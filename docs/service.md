@@ -85,9 +85,10 @@ up on; it connects again and starts afresh.
 
 `kind` picks the rendition: `medium` (about 2048 px), `full` (the photo as
 it looks now: the edit, if it has one), `original` (as taken, unedited),
-`video`, `live` (a Live Photo's motion), and a Live Photo's effects: `loop`,
+`video`, `live` (a Live Photo's motion), a Live Photo's effects: `loop`,
 `bounce` (the motion forward and back) and `long_exposure` (its frames as
-one photo). Which of the source's files serves each was chosen as the
+one photo), and `jpeg` (`full` as a JPEG, for whatever reads no HEIC; see
+below). Which of the source's files serves each was chosen as the
 library was indexed (the index's `renditions`); `rendition` is the source's
 name for it. For iCloud:
 
@@ -108,6 +109,18 @@ a `bounce` is ffmpeg's MP4 of it forward then reversed (about a second); a
 tripod mode) and averaged into a JPEG (about five seconds for a 1920x1440
 motion). They are answered with `rendition: "made"` and kept in the cache
 beside the motion, named after its key, so each is made once.
+
+A `jpeg` of a photo whose `full` is a JPEG is that `full`, answered as a
+`full` would be (its `rendition`, `cached`). Any other photo's is made
+from its `full` with ImageMagick at quality 92, which keeps the EXIF (the
+date, the place, the camera), the colour profile, and turns the pixels
+upright with the orientation set to match; only the first image of a file
+that holds several, and anything see-through on white. It is answered with
+`type: "public.jpeg"`, `rendition: "made"`, and kept in the cache beside
+`full`, as `cache/full/…/<full's key>-jpeg.jpg`: counted as `full` in
+`storage`, under the limit like any photo, and made once (two at a time at
+most; those asking for one being made wait for it). A video has none:
+`not_found`.
 
 A folder's `full`, `original`, `video` and `live` are the files themselves,
 answered with `cached: true` and their own path; its `medium` is made into
@@ -439,6 +452,8 @@ which is committed then. A folder inside the current
 one, or the other way round, is refused, as is one that cannot be written
 or already has a library. Photos in `~/.cache/pinhole`, where the cache
 was before it moved in with the library, move in as the service starts.
+`~/.cache/pinhole/compatible`, where the window made its own JPEGs before
+`jpeg`, is removed then.
 
 ## Links
 

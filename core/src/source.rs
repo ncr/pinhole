@@ -73,12 +73,15 @@ pub enum Want {
     Loop,
     Bounce,
     LongExposure,
+    /// `full` as a JPEG, for whatever reads no HEIC: `full` itself when it
+    /// is one, else made from it (service.rs). Never a source's rendition.
+    Jpeg,
 }
 
 impl Want {
-    pub const ALL: [Want; 9] = [
+    pub const ALL: [Want; 10] = [
         Want::Thumb, Want::Medium, Want::Full, Want::Original, Want::Video, Want::Live,
-        Want::Loop, Want::Bounce, Want::LongExposure,
+        Want::Loop, Want::Bounce, Want::LongExposure, Want::Jpeg,
     ];
 
     pub fn name(self) -> &'static str {
@@ -92,6 +95,7 @@ impl Want {
             Want::Loop => "loop",
             Want::Bounce => "bounce",
             Want::LongExposure => "long_exposure",
+            Want::Jpeg => "jpeg",
         }
     }
 

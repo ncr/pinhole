@@ -93,6 +93,57 @@ fn colour(path: &str) -> [u8; 3] {
     p.map(|c| (c as u32 + 10) as u8 / 20 * 20)
 }
 
+/// A HEIC with an EXIF date, as an iPhone's has one: a JPEG given the
+/// date by hand (an APP1 segment), then turned into a HEIC by ImageMagick,
+/// which carries it over. False where ImageMagick writes no HEIC.
+fn heic(path: &Path, rgb: [u8; 3], taken: &str) -> bool {
+    let jpeg = path.with_extension("source.jpg");
+    photo(&jpeg, rgb);
+    // TIFF, little-endian: IFD0 pointing to the Exif IFD (at 26), which
+    // holds DateTimeOriginal (0x9003), ASCII, 20 bytes (at 44).
+    let mut exif = b"Exif\0\0II*\0".to_vec();
+    for bytes in [&8u32.to_le_bytes()[..], &1u16.to_le_bytes(), &0x8769u16.to_le_bytes(), &4u16.to_le_bytes(),
+                  &1u32.to_le_bytes(), &26u32.to_le_bytes(), &0u32.to_le_bytes(), &1u16.to_le_bytes(),
+                  &0x9003u16.to_le_bytes(), &2u16.to_le_bytes(), &20u32.to_le_bytes(), &44u32.to_le_bytes(),
+                  &0u32.to_le_bytes(), taken.as_bytes(), b"\0"] {
+        exif.extend_from_slice(bytes);
+    }
+    let plain = std::fs::read(&jpeg).unwrap();
+    let mut dated = plain[..2].to_vec();
+    dated.extend_from_slice(&[0xFF, 0xE1]);
+    dated.extend_from_slice(&(exif.len() as u16 + 2).to_be_bytes());
+    dated.extend_from_slice(&exif);
+    dated.extend_from_slice(&plain[2..]);
+    std::fs::write(&jpeg, dated).unwrap();
+    let made = std::process::Command::new("magick")
+        .arg(&jpeg)
+        .args(["-depth", "8"])
+        .arg(format!("heic:{}", path.display()))
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    std::fs::remove_file(&jpeg).unwrap();
+    made && path.exists()
+}
+
+fn identify(path: &str, format: &str) -> String {
+    let out = std::process::Command::new("magick").args(["identify", "-format", format, path]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Every ImageMagick the service runs, logged: a `magick` first on PATH
+/// that notes its arguments and runs the real one.
+fn count_magicks(bin: &Path, log: &Path) {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let Some(real) = std::env::split_paths(&path).map(|dir| dir.join("magick")).find(|p| p.is_file()) else { return };
+    std::fs::create_dir_all(bin).unwrap();
+    let script = bin.join("magick");
+    std::fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n", log.display(), real.display())).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let dirs = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&path));
+    std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+}
+
 fn favourite(library: &Path, id: &str) -> bool {
     let db = rusqlite::Connection::open(library.join("library.sqlite")).unwrap();
     db.query_row("SELECT favorite FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
@@ -113,6 +164,12 @@ fn a_window_meets_the_service_of_a_folder() {
     std::fs::create_dir_all(&photos).unwrap();
     photo(&photos.join("a.jpg"), [200, 40, 40]);
     photo(&photos.join("b.jpg"), [40, 200, 40]);
+    let has_heic = heic(&photos.join("c.heic"), [40, 40, 200], "2024:05:06 07:08:09");
+    let magicks = root.join("magicks.log");
+    count_magicks(&root.join("bin"), &magicks);
+    // JPEGs a window made before the service did: gone as it starts.
+    std::fs::create_dir_all(root.join("cache/pinhole/compatible")).unwrap();
+    std::fs::write(root.join("cache/pinhole/compatible/IMG_0001.jpg"), b"old").unwrap();
     let entry = json!({"kind": "folder", "path": photos});
     let settings = root.join("config/pinhole/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -156,7 +213,8 @@ fn a_window_meets_the_service_of_a_folder() {
     loop {
         let sources = window.ask("sources", json!({}));
         let made = &sources["result"]["sources"][0];
-        if made["count"] == 2 && made["thumbs"] == 2 {
+        let count = 2 + has_heic as u64;
+        if made["count"] == count && made["thumbs"] == count {
             break;
         }
         assert!(Instant::now() < deadline, "no library made: {sources:#}");
@@ -172,6 +230,58 @@ fn a_window_meets_the_service_of_a_folder() {
     let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
     assert_eq!(medium["ok"], true, "{medium:#}");
     assert!(Path::new(medium["result"]["path"].as_str().unwrap()).is_file());
+    assert!(!root.join("cache/pinhole/compatible").exists());
+
+    // A JPEG of a photo that is one is its full: here the file itself.
+    let jpeg = window.ask("fetch", json!({"asset": "a.jpg", "kind": "jpeg"}));
+    assert_eq!(jpeg["ok"], true, "{jpeg:#}");
+    assert_eq!(jpeg["result"]["path"], json!(photos.join("a.jpg")));
+    assert_eq!(jpeg["result"]["type"], "public.jpeg");
+    assert_eq!(jpeg["result"]["rendition"], "a.jpg");
+    assert_eq!(window.ask("fetch", json!({"asset": "nope.jpg", "kind": "jpeg"}))["error"]["code"], "not_found");
+    if has_heic {
+        // A HEIC's is made into the cache beside full and counted with it,
+        // keeping the date it was taken. Asked for by three at once, it is
+        // made once, all three waiting for it.
+        let ids: Vec<u64> = (0..3).map(|i| window.next + i).collect();
+        for id in &ids {
+            writeln!(window.out, "{}", json!({"id": id, "method": "fetch", "params": {"asset": "c.heic", "kind": "jpeg"}})).unwrap();
+        }
+        window.next += ids.len() as u64;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut answers = Vec::new();
+        while answers.len() < ids.len() {
+            assert!(Instant::now() < deadline, "no JPEG: {:#?}", window.heard);
+            if let Some(line) = window.line() {
+                if line["id"].as_u64().is_some_and(|id| ids.contains(&id)) {
+                    answers.push(line);
+                } else {
+                    window.heard.push(line);
+                }
+            }
+        }
+        for made in &answers {
+            assert_eq!(made["ok"], true, "{made:#}");
+            assert_eq!(made["result"]["path"], answers[0]["result"]["path"]);
+            assert_eq!(made["result"]["type"], "public.jpeg");
+            assert_eq!(made["result"]["rendition"], "made");
+            // None found it made already: all waited for the one.
+            assert_eq!(made["result"]["cached"], false);
+        }
+        let path = answers[0]["result"]["path"].as_str().unwrap().to_owned();
+        assert!(path.starts_with(root.join("data/pinhole/cache/full").to_str().unwrap()), "{path}");
+        assert!(path.ends_with("-jpeg.jpg"), "{path}");
+        assert_eq!(identify(&path, "%m"), "JPEG");
+        assert_eq!(identify(&path, "%[EXIF:DateTimeOriginal]"), "2024:05:06 07:08:09");
+        assert_eq!(colour(&path), [40, 40, 200]);
+        let ran = std::fs::read_to_string(&magicks).unwrap_or_default();
+        assert_eq!(ran.lines().filter(|l| l.contains("-jpeg.part.jpg")).count(), 1, "{ran}");
+        let again = window.ask("fetch", json!({"asset": "c.heic", "kind": "jpeg"}));
+        assert_eq!(again["result"]["cached"], true, "{again:#}");
+        assert_eq!(again["result"]["path"], json!(path));
+        let storage = window.ask("storage", json!({}));
+        assert_eq!(storage["result"]["kinds"]["full"], std::fs::metadata(&path).unwrap().len(), "{storage:#}");
+    }
     let missing = window.ask("fetch", json!({"asset": "nope.jpg", "kind": "original"}));
     assert_eq!(missing["error"]["code"], "not_found");
     assert_eq!(window.ask("frobnicate", json!({}))["error"]["code"], "bad_request");

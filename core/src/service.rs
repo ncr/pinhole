@@ -784,6 +784,7 @@ pub fn run(config: Config) -> Result<()> {
     // The shared service's to do, not one of a library given.
     if given.is_none() {
         shared.storage.resume()?;
+        crate::storage::forget_compatible();
     }
 
     {
@@ -1259,6 +1260,9 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     if owner != Some(shared.source().id()) {
         return reply.send(Err(("other_source", format!("the library read holds the photos of {}", owner.as_deref().unwrap_or("no one")))));
     }
+    if want == Want::Jpeg {
+        return jpeg(shared, db, asset, Reply { stream: false, ..reply });
+    }
 
     // The rendition that serves this kind, as the catalog chose it.
     let row = db.query_row(
@@ -1331,28 +1335,50 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
 /// Where in the cache a file of this kind and key goes. The effects go
 /// with the motion (storage.rs counts them as `live`), except a long
 /// exposure the source has, which is the photo itself (iCloud's JPEGFull):
-/// the same file as `full`. Made ones are named after the motion's key.
+/// the same file as `full`. Made ones are named after the key of what they
+/// are made from: the motion's, or for a `jpeg` the `full` it goes beside
+/// (and is counted with).
 fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
     let folder = match want {
         Want::LongExposure if !made => Want::Full,
         Want::Loop | Want::Bounce | Want::LongExposure => Want::Live,
+        Want::Jpeg => Want::Full,
         other => other,
     };
     let suffix = if made { format!("-{}", want.name()) } else { String::new() };
     Path::new(folder.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
 }
 
-/// An effect made from the motion (effects.rs), into the cache beside it:
-/// the motion is fetched as a window would, then ffmpeg makes the effect in
-/// a thread of its own. Requests for one being made wait for it.
-fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: Reply) {
-    let motion = db.query_row(
-        "SELECT key FROM renditions WHERE asset_id = ?1 AND kind = 'live'",
+/// `full` as a JPEG: `full` itself when it is one, else one made from it.
+/// A video has none.
+fn jpeg(shared: &Arc<Shared>, db: &Connection, asset: &str, reply: Reply) {
+    let full = db.query_row(
+        "SELECT coalesce(r.file_type, ''), a.is_video FROM renditions r JOIN assets a ON a.id = r.asset_id
+         WHERE r.asset_id = ?1 AND r.kind = 'full'",
         [asset],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)),
+    );
+    match full {
+        Err(_) => reply.send(Err(("not_found", format!("{asset} has no full rendition to make a JPEG of")))),
+        Ok((_, true)) => reply.send(Err(("not_found", format!("{asset} is a video: it has no JPEG")))),
+        Ok((file_type, _)) if file_type == "public.jpeg" => fetch(shared, db, &json!({"asset": asset, "kind": "full"}), reply),
+        Ok(_) => make(shared, db, asset, Want::Jpeg, reply),
+    }
+}
+
+/// A file made from another into the cache beside it: an effect from the
+/// motion (effects.rs, ffmpeg), a `jpeg` from `full` (jpeg.rs, ImageMagick).
+/// What it is made from is fetched as a window would, then it is made in a
+/// thread of its own. Requests for one being made wait for it.
+fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: Reply) {
+    let from = if want == Want::Jpeg { Want::Full } else { Want::Live };
+    let made_from = db.query_row(
+        "SELECT key FROM renditions WHERE asset_id = ?1 AND kind = ?2",
+        params![asset, from.name()],
         |r| r.get::<_, String>(0),
     );
-    let Ok(key) = motion else {
-        return reply.send(Err(("not_found", format!("{asset} has no motion to make a {} of", want.name()))));
+    let Ok(key) = made_from else {
+        return reply.send(Err(("not_found", format!("{asset} has no {} to make a {} of", from.name(), want.name()))));
     };
     let (file_type, extension) = match want {
         Want::Bounce => ("public.mpeg-4", "mp4"),
@@ -1375,25 +1401,26 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
         shared.in_flight.fetch_add(1, Ordering::Relaxed);
     }
     let (tx, rx) = mpsc::channel();
-    fetch(shared, db, &json!({"asset": asset, "kind": "live"}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
+    fetch(shared, db, &json!({"asset": asset, "kind": from.name()}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
     let shared = shared.clone();
     std::thread::spawn(move || {
         let made = (|| -> std::result::Result<(), (String, String)> {
-            let motion = rx.recv().map_err(|_| ("unavailable".to_owned(), "the motion never came".to_owned()))??;
-            let motion = PathBuf::from(motion["path"].as_str().unwrap_or_default());
+            let fetched = rx.recv().map_err(|_| ("unavailable".to_owned(), format!("the {} never came", from.name())))??;
+            let source = PathBuf::from(fetched["path"].as_str().unwrap_or_default());
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| ("unavailable".to_owned(), e.to_string()))?;
             }
             // Made beside the target and renamed: a reader never sees half a file.
             let part = path.with_extension(format!("part.{extension}"));
             let result = match want {
-                Want::Bounce => crate::effects::bounce(&motion, &part),
-                _ => crate::effects::long_exposure(&motion, &part),
+                Want::Bounce => crate::effects::bounce(&source, &part),
+                Want::Jpeg => crate::jpeg::make(&source, &part),
+                _ => crate::effects::long_exposure(&source, &part),
             }
             .and_then(|()| Ok(std::fs::rename(&part, &path)?));
             if let Err(e) = result {
                 let _ = std::fs::remove_file(&part);
-                eprintln!("pinholed: making the {} of {}: {e:#}", want.name(), motion.display());
+                eprintln!("pinholed: making the {} of {}: {e:#}", want.name(), source.display());
                 return Err(("unavailable".to_owned(), format!("{e:#}")));
             }
             Ok(())

@@ -49,6 +49,19 @@ pub fn old_cache() -> PathBuf {
     std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".cache")).join("pinhole")
 }
 
+/// Where the window kept JPEGs of HEICs before the service made them
+/// (`jpeg`, kept in the cache under the limit): made again when asked for,
+/// so removed as the shared service starts. Nothing else is in it.
+pub fn forget_compatible() {
+    let old = old_cache().join("compatible");
+    if old.is_dir() {
+        match std::fs::remove_dir_all(&old) {
+            Ok(()) => eprintln!("pinholed: removed {}: JPEGs are kept in the cache now", old.display()),
+            Err(e) => eprintln!("pinholed: could not remove {}: {e}", old.display()),
+        }
+    }
+}
+
 /// What the settings say, any part missing.
 #[derive(Default, Debug, PartialEq)]
 pub struct Settings {

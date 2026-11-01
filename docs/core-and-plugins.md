@@ -687,17 +687,30 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   source rendition.
 - `core/src/service.rs`: in `fetch`, `jpeg` finds `full`. If its
   `file_type` is `public.jpeg`, it answers that as is (fetched as `full`).
-  Otherwise `make()` grows a `Want::Jpeg` branch. It fetches `full` through
-  `Out::Service`, then runs `magick <full> -quality 92 jpg:<part>` at
-  normal priority, renames the part, and answers `{path, type:
-  "public.jpeg", rendition: "made"}`. `cached_path` maps `Jpeg` to the
-  `full` folder with the `-jpeg` suffix.
+  A video's is `not_found`. Otherwise `make()` grows a `Want::Jpeg`
+  branch. It fetches `full` through `Out::Service`, then runs
+  `core/src/jpeg.rs` at normal priority, renames the part, and answers
+  `{path, type: "public.jpeg", rendition: "made"}`. `cached_path` maps
+  `Jpeg` to the `full` folder with the `-jpeg` suffix.
+- `core/src/jpeg.rs`: `magick -[0] -background white -alpha remove -alpha
+  off -quality 92 jpg:<part>`, the `full` on stdin. Stdin, because a
+  folder's file name can hold what ImageMagick reads as its own syntax
+  (`[1]`, `*`, `heic:`); `[0]` so an animated GIF makes one file, not
+  `part-0`, `part-1`…; white so a see-through PNG is not black. Two at
+  most at once: one ImageMagick of a 24-megapixel HEIC takes every core
+  for 0.6–0.9 s, and a window may ask for fifty.
 - `core/src/storage.rs`: `forget_compatible()` removes
-  `old_cache()/compatible` once, as the shared service starts.
+  `old_cache()/compatible` as the shared service starts. Until B5 the
+  window still makes its JPEGs there, so it may come back and go again at
+  the next start; after B5 nothing writes it.
 - `core/tests/service.rs`: a folder with a HEIC (made with `magick` in the
   test, skipped without it) and a JPEG. `jpeg` of the HEIC is a JPEG with
   the EXIF date kept (`magick identify -format %[EXIF:DateTimeOriginal]`).
-  `jpeg` of the JPEG is the file itself. A second ask is `cached: true`.
+  `jpeg` of the JPEG is the file itself. Three asks at once run one
+  `magick` (a logging `magick` first on `PATH`) and all say `cached:
+  false`; a fourth is `cached: true`; `storage` counts it in `full`; the
+  old `compatible` folder is gone. `jpeg.rs` has a unit test: a name with
+  `[1]*`, an animated GIF, a see-through PNG, a file that is no photo.
 - `docs/service.md`: the kind.
 - Works alone: nothing asks for it yet.
 
