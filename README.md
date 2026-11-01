@@ -202,9 +202,11 @@ touchpad, the left button with a mouse), Space plays and pauses a video, L
 plays a Live Photo's motion (the Live Photos plugin, on unless turned off
 in the side panel; off, a Live Photo shows as its still).
 A Live Photo shows with the effect set on the iPhone (a loop or a bounce
-plays round and round, a long exposure is its frames as one); the ▾ beside
-Live, or ⇧ L, shows it with another, here only: the library keeps its
-own. F, or the heart beside the date, makes the photo a favourite or not,
+plays round and round, a long exposure is its frames as one); its button
+at the top right is named for the effect shown (Live, Loop, Bounce, Long
+exposure), and the ▾ beside it, or ⇧ L, shows it with another, here
+only: the library keeps its own. F, or the heart, the first of the
+buttons at the top right, makes the photo a favourite or not,
 in iCloud too, and in select mode all that is ticked (the Favourites
 plugin, on unless turned off in the side panel; off, there is no heart
 and no mark, and the Photo frame still shows the favourites the source
