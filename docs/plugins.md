@@ -93,7 +93,9 @@ PinholePlugin {
 
 The root is a `PinholePlugin`. It covers the window, above the photos and
 the viewer and below Pinhole's own panels, and what it shows there is its
-own. It sets:
+own. It loads once the library has been read, before the window's first
+frame: what it sets in `Component.onCompleted` from the library, or from
+its settings, is there as the window first shows. It sets:
 
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
@@ -134,7 +136,9 @@ own. It sets:
   range leave them out; a plugin can still `openPhoto` one. Say somewhere
   how many are away and how to have them back; with every photo hidden,
   the window says so, and names the plugin. Other plugins see what is
-  hidden with `pinhole.isHidden`.
+  hidden with `pinhole.isHidden`. When the library is read again, the
+  photos it hid stay hidden where they are now until it gives `hidden`
+  again (on `library.changed()`, from the ids it keeps).
 - `tour`: a few steps that show what it does, on the photos and buttons as
   they are: `[{ title, text, photo, open, action, settings }, ...]`.
   `photo` is a library position (or a function giving one) the grid goes to
@@ -165,7 +169,7 @@ positions move when the library is read again, ids do not, so keep ids.
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
-| `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes: what a plugin counting or showing photos leaves out, as the grid does |
+| `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
 | `fetch(photo, kind)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`): a promise of its path. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, decoded at its `sourceSize` |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
@@ -173,12 +177,12 @@ positions move when the library is read again, ids do not, so keep ids.
 | `keepAwake(on)` | the screen kept on, no screensaver and no lock, while `on`, as the Photo frame does while it shows; `false` lets it go, and so does the plugin turned off or loaded again, and Pinhole quitting or crashing. Whether the screen is kept on now: not where it cannot be (not on Wayland, the window hidden), which it then is once it can |
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once |
-| `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own |
+| `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept. Series keeps its edits as `edits:` and the library's `key`, so each source's are its own, and Screenshots what it found as `found:` and the `key`, read as it loads |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl+Z and do again with Ctrl+⇧Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes)` | |
-| `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library |
+| `dir`, `cacheDir` | its own folder; a folder for what it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown) |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
 | `id`, `api` | its id; the version of all this |
 

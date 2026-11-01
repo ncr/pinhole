@@ -119,6 +119,12 @@ QVariantList PluginLibrary::field(const QString &name) const {
 }
 
 int PluginLibrary::indexOf(const QString &id) const {
+    // Of the library as it is now, even asked before plugins are told it
+    // was read again (a handler of the grid's news, say).
+    if (m_positionsOf != m_library->generation()) {
+        m_positions.clear();
+        m_positionsOf = m_library->generation();
+    }
     if (m_positions.isEmpty() && m_library->count() > 0) {
         m_positions.reserve(m_library->count());
         for (int i = 0; i < m_library->count(); ++i)
@@ -138,8 +144,11 @@ int PluginLibrary::positionOf(const QJSValue &photo) const {
 
 void PluginLibrary::reloaded() {
     m_positions.clear();
+    m_told = m_library->generation();
     emit changed();
 }
+
+bool PluginLibrary::stale() const { return m_told != m_library->generation(); }
 
 PluginSettings::PluginSettings(PluginHost *host) : QQmlPropertyMap(this, nullptr), m_host(host) {
     const QJsonObject kept = host->m_plugins->settingsOf(host->id());
@@ -334,12 +343,16 @@ int PluginHost::api() const { return Plugins::api; }
 QString PluginHost::coveredBy() const { return m_plugins->coveredBy(); }
 
 QString PluginHost::cacheDir() const {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/" + m_id + '/'
+         + m_plugins->cacheName();
+}
+
+QString Plugins::cacheName() const {
     // library/icloud/<apple id> → icloud-<apple id>.
-    const QDir library(m_plugins->libraryData()->dir());
+    const QDir library(m_library->dir());
     QDir kind(library);
     kind.cdUp();
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/" + m_id + '/'
-         + kind.dirName() + '-' + library.dirName();
+    return kind.dirName() + '-' + library.dirName();
 }
 
 QObject *PluginHost::library() const { return m_plugins->library(); }
@@ -362,7 +375,14 @@ void Plugins::setGrid(PhotoGrid *grid) {
     m_grid = grid;
     m_keepAwake.setWindow(grid->window());
     connect(grid, &PhotoGrid::selectionChanged, this, &Plugins::selectionChanged);
-    connect(grid, &PhotoGrid::hiddenChanged, this, &Plugins::hiddenChanged);
+    // Told once plugins have the library as it is now, the grid's news of
+    // a reload included, so isHidden(id) and their own positions agree.
+    connect(grid, &PhotoGrid::hiddenChanged, this, [this] {
+        if (m_libraryApi->stale())
+            m_hiddenPending = true;
+        else
+            emit hiddenChanged();
+    });
 }
 
 void PluginHost::reveal(const QJSValue &photo) const {
@@ -782,10 +802,47 @@ QString Plugins::builtInDir() {
     return QFileInfo::exists(installed) ? installed : QDir::cleanPath(app + "/../../plugins");
 }
 
-void Plugins::libraryReloaded() {
+void Plugins::libraryOpened() {
+    m_cacheName = cacheName();
+    if (m_ready)
+        return;
+    m_ready = true;
+    emit readyChanged();
+}
+
+void Plugins::libraryReloaded(const std::vector<int> &moved) {
+    // What each plugin hides follows its photos until it gives its own
+    // again, as the grid's do: the window gathers them again at once, as
+    // the grid already has them.
+    for (auto &[id, hidden] : m_hidden) {
+        for (int &i : hidden.now)
+            i = i >= 0 && i < int(moved.size()) ? moved[size_t(i)] : -1;
+        std::erase(hidden.now, -1);
+    }
+    emit positionsMoved();
     m_libraryApi->reloaded();
-    for (const auto &plugin : m_plugins)
-        emit plugin->host->cacheDirChanged();
+    // Only another source's library has a cacheDir of its own; the same
+    // one read again or moved elsewhere has the same.
+    if (const QString name = cacheName(); name != m_cacheName) {
+        m_cacheName = name;
+        for (const auto &plugin : m_plugins)
+            emit plugin->host->cacheDirChanged();
+    }
+    if (std::exchange(m_hiddenPending, false))
+        emit hiddenChanged();
+}
+
+QVariantList Plugins::hiddenOf(const QString &id, const QVariantList &given, bool fresh) {
+    Hidden &hidden = m_hidden[id];
+    std::vector<int> list;
+    list.reserve(size_t(given.size()));
+    for (const QVariant &index : given)
+        list.push_back(index.toInt());
+    if (fresh || list != hidden.given) {
+        hidden.now = list;
+        hidden.given = std::move(list);
+    }
+    return QVariantList(hidden.now.begin(), hidden.now.end());
 }
 
 QVariantMap Plugins::at(const QString &id) const {

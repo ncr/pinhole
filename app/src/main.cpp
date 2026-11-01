@@ -198,7 +198,9 @@ int main(int argc, char *argv[]) {
 
     // Larger renditions come from pinholed.
     // A library given (pinhole-fake's, say) is the one shown whatever source
-    // the service shows; else the service's choice is (library_moved).
+    // the service shows; else the service's choice is (library_moved). One
+    // other than the shared service's has a service of its own, never the
+    // shared one (ServiceClient::socketFor).
     const bool libraryGiven = parser.isSet("library");
     ServiceClient service(libraryGiven ? QDir(libraryDir).absolutePath() : QString());
     // What to call the source until the service says.
@@ -267,6 +269,8 @@ int main(int argc, char *argv[]) {
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
     grid->setTouchpadHold(&hold);
+    // Plugins load now, with the library whole, before the first frame.
+    plugins.libraryOpened();
     // A favourite's mark, the moment it is set.
     QObject::connect(&favourites, &Favourites::changed, grid, [grid] { grid->update(); });
     // A resting finger stops a zoomed photo coasting as well.
@@ -316,7 +320,7 @@ int main(int argc, char *argv[]) {
         if (toNewest)
             grid->scrollToEnd();
         viewer.libraryReloaded(moved);
-        plugins.libraryReloaded();
+        plugins.libraryReloaded(moved);
         favourites.reloaded();
     });
     // Undone on another source's photos of the same ids, a step would

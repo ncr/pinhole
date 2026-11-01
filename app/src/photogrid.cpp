@@ -303,9 +303,13 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved, const std::vector
             selectedBefore.append(n);
     std::sort(selectedBefore.begin(), selectedBefore.end());
     m_zoom = {};
+    const QVariantList hiddenBefore = m_hiddenGiven, stacksBefore = m_stacksGiven;
     rebuildCells(&moved);
-    if (!m_hiddenList.empty())
+    // The same photos, hidden or stacked where they are now.
+    if (m_hiddenGiven != hiddenBefore)
         emit hiddenChanged();
+    if (m_stacksGiven != stacksBefore)
+        emit stacksChanged();
     const bool selectionChanged = selectedBefore != selection();
     m_pendingMoves = std::make_shared<std::vector<int>>(textures ? *textures : moved);
     emit libraryChanged();
@@ -520,6 +524,12 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         for (int &i : m_hiddenList)
             i = mapped(i);
         std::erase(m_hiddenList, -1);
+        // As given, too: what `hidden` and `stacks` read, and what a
+        // plugin giving the same again is compared with.
+        m_hiddenGiven = QVariantList(m_hiddenList.begin(), m_hiddenList.end());
+        m_stacksGiven.clear();
+        for (const auto &stack : m_stackLists)
+            m_stacksGiven.append(QVariant(QVariantList(stack.begin(), stack.end())));
     }
 
     m_cells.clear();

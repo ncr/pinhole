@@ -44,10 +44,16 @@ public:
         m_items.swap(other.m_items);
         m_dir.swap(other.m_dir);
         m_source.swap(other.m_source);
+        ++m_generation;
+        ++other.m_generation;
     }
+    // Which read of it this is: another after each swap, so what holds its
+    // positions knows they are of an older one.
+    quint64 generation() const { return m_generation; }
 
 private:
     QString m_dir;
     QString m_source;
     std::vector<LibraryItem> m_items;
+    quint64 m_generation = 0;
 };

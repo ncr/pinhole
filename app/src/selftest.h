@@ -144,6 +144,15 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
 // and only then let go. Exits 1 if any step fails.
 void runFrameSelfTest(QQuickWindow *window);
 
+// PINHOLE_SELFTEST=hidden:<dir> (selftesthidden.cpp): with a plugin hiding
+// photos (Screenshots, in hide mode, what it found kept): some hidden
+// before the first frame and at 100, 150 and 300 ms, grabbed into <dir>;
+// then a photo with hidden ones on both sides full window, → and ← over
+// them both ways, each neighbour beside it before the key and sliding in
+// after, grabbed under way and done. Exits 1 if any step fails.
+void runHiddenSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer,
+                       const QString &dir);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

@@ -19,8 +19,19 @@ class ServiceClient : public QObject {
 public:
     // `library`: the directory a service this client starts is to serve
     // (the window's --library); empty, the service finds the source's own.
+    // A library other than the one the shared service serves
+    // (Storage::library) has a service of its own, on a socket of its own
+    // (socketFor): the shared one is never started with it, nor asked.
     explicit ServiceClient(const QString &library, QObject *parent = nullptr);
     ~ServiceClient() override;
+
+    // The socket of the service for `library`, empty for the shared one:
+    // $PINHOLE_SOCKET whatever the library; else in $XDG_RUNTIME_DIR,
+    // pinhole.sock, or pinhole-<a hash of the library's path>.sock.
+    static QString socketFor(const QString &library);
+    // Whether two library folders are the same one (a link to it too).
+    static bool sameLibrary(const QString &a, const QString &b);
+    QString socketPath() const { return m_socketPath; }
 
     // Not ok: `result` is the service's error (code and message), empty for
     // the client's own (no_service, incompatible).
@@ -77,9 +88,9 @@ private:
     void giveUp();
     // Whatever waits is answered `code`, unsent requests too.
     void failWaiting(const QString &code);
-    static QString socketPath();
 
     QString m_library;
+    QString m_socketPath;
     QString m_shown;
     bool m_shownKnown = false;
     QJsonObject m_source;

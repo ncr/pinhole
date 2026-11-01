@@ -8,9 +8,13 @@ network access and all writes (to the library too: photos dropped on the
 window are added through it), so the window stays a fast reader. It also
 follows the source's changes and tells the window when the library changed.
 
-The window starts the service if none answers, passing the library it
-shows (`--library`) and the socket (`$PINHOLE_SOCKET`, else
-`$XDG_RUNTIME_DIR/pinhole.sock`).
+The window starts the service if none answers, passing the socket
+(`$PINHOLE_SOCKET`, else `$XDG_RUNTIME_DIR/pinhole.sock`) and a library
+given to the window (`--library`) other than the one the settings name.
+Such a library (pinhole-fake's, a copy for a test) has a service of its
+own, on `$XDG_RUNTIME_DIR/pinhole-<hash of its path>.sock` unless
+`$PINHOLE_SOCKET` names one: the shared service is never asked for it, nor
+started with it, which would show it to every window after.
 
 ## Transport
 

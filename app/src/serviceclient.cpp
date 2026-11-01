@@ -1,6 +1,7 @@
 #include "serviceclient.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -8,7 +9,11 @@
 #include <QProcess>
 #include <QStandardPaths>
 
-ServiceClient::ServiceClient(const QString &library, QObject *parent) : QObject(parent), m_library(library) {
+#include "storage.h"
+
+ServiceClient::ServiceClient(const QString &library, QObject *parent)
+    : QObject(parent), m_library(sameLibrary(library, Storage::library()) ? QString() : library),
+      m_socketPath(socketFor(m_library)) {
     connect(&m_socket, &QLocalSocket::readyRead, this, &ServiceClient::readReplies);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
         m_attempts = 0;
@@ -49,13 +54,34 @@ ServiceClient::~ServiceClient() {
     disconnect(&m_socket, nullptr, this, nullptr);
 }
 
-QString ServiceClient::socketPath() {
+namespace {
+
+QString canonicalDir(const QString &path) {
+    const QString real = QFileInfo(path).canonicalFilePath();
+    return real.isEmpty() ? QDir::cleanPath(QDir(path).absolutePath()) : real;
+}
+
+} // namespace
+
+bool ServiceClient::sameLibrary(const QString &a, const QString &b) {
+    if (a.isEmpty() || b.isEmpty())
+        return a.isEmpty() && b.isEmpty();
+    return canonicalDir(a) == canonicalDir(b);
+}
+
+QString ServiceClient::socketFor(const QString &library) {
     if (const QString path = qEnvironmentVariable("PINHOLE_SOCKET"); !path.isEmpty())
         return path;
     QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (runtime.isEmpty())
         runtime = QDir::homePath() + "/.cache";
-    return runtime + "/pinhole.sock";
+    if (library.isEmpty())
+        return runtime + "/pinhole.sock";
+    // Another library than the shared service's: a service of its own.
+    // The shared one, started for it or asked for it, would show it to
+    // every window, Pinhole's own from the launcher too.
+    const QByteArray hash = QCryptographicHash::hash(canonicalDir(library).toUtf8(), QCryptographicHash::Sha256).toHex();
+    return runtime + "/pinhole-" + QString::fromLatin1(hash.left(12)) + ".sock";
 }
 
 void ServiceClient::setHealth(const QString &health) {
@@ -82,7 +108,7 @@ void ServiceClient::failWaiting(const QString &code) {
 void ServiceClient::connectNow() {
     if (m_socket.state() != QLocalSocket::UnconnectedState)
         return;
-    m_socket.connectToServer(socketPath());
+    m_socket.connectToServer(m_socketPath);
 }
 
 void ServiceClient::startService() {
@@ -109,7 +135,7 @@ void ServiceClient::startService() {
     QDir().mkpath(state);
     QProcess process;
     process.setProgram(program);
-    QStringList arguments{QStringLiteral("--socket"), socketPath()};
+    QStringList arguments{QStringLiteral("--socket"), m_socketPath};
     if (!m_library.isEmpty())
         arguments << QStringLiteral("--library") << m_library;
     process.setArguments(arguments);

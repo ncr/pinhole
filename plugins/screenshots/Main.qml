@@ -49,23 +49,20 @@ PinholePlugin {
             pinhole.notify(qsTr("%n screenshots hidden: ⇧S shows them again", "", shots.length))
     }
 
-    // Where what it found is kept, for this source's library.
-    readonly property string keptFile: pinhole.cacheDir + "/screenshots"
+    // What it found, kept for each source's library in its settings, as
+    // Series keeps its edits: read at once as it loads, which is before the
+    // grid's first frame, so the screenshots never show for a moment and go.
+    property string keptKey: ""
+    // Another source's library than the last: what was kept for it, and
+    // true.
     function loadKept() {
+        const key = "found:" + pinhole.library.key
+        if (key === keptKey)
+            return false
+        keptKey = key
         found = false
-        const file = keptFile
-        pinhole.run("cat", [file]).then(result => {
-            // Found afresh meanwhile, or another library shown since.
-            if (!found && file === keptFile)
-                take(result.stdout.split("\n").filter(id => id !== ""))
-        }, () => {}) // none kept yet
-        find()
-    }
-    function keep(list) {
-        if (list.join("\n") === ids.join("\n"))
-            return
-        pinhole.run("sh", ["-c", "mkdir -p \"${1%/*}\" && cat > \"$1\"", "sh", keptFile], { input: list.join("\n") + "\n" })
-            .catch(pinhole.warn)
+        take(pinhole.setting(key, []))
+        return true
     }
 
     function find() {
@@ -80,12 +77,20 @@ PinholePlugin {
         }
         finding = true
         // Which tables there are, then what it can ask of them.
-        const library = pinhole.library.dir + "/library.sqlite"
+        const key = keptKey, dir = pinhole.library.dir
+        const library = dir + "/library.sqlite"
         pinhole.run("sqlite3", ["-readonly", library, Find.tablesQuery])
             .then(result => pinhole.run("sqlite3", ["-readonly", library, Find.query(result.stdout.split("\n"))]))
             .then(result => {
+                // Another library shown meanwhile: these are the last one's,
+                // neither kept as this one's nor shown; it is looked at next.
+                if (key !== keptKey || dir !== pinhole.library.dir) {
+                    findAgain = true
+                    return
+                }
                 const list = result.stdout.split("\n").filter(id => id !== "")
-                keep(list)
+                if (!pinhole.setSetting(key, list))
+                    pinhole.warn(qsTr("The setting could not be kept"))
                 take(list)
                 found = true
             })
@@ -117,21 +122,21 @@ PinholePlugin {
     }
 
     // The library read again: the same screenshots where they are now at
-    // once, then a look for new ones once it has settled. Another source's
-    // library: what was kept for it.
+    // once (another source's: what was kept for it), then a look for new
+    // ones once it has settled.
     Timer { id: later; interval: 1500; onTriggered: plugin.find() }
     Connections {
         target: pinhole.library
         function onChanged() {
-            plugin.take(plugin.ids)
+            if (!plugin.loadKept())
+                plugin.take(plugin.ids)
             later.restart()
         }
     }
-    Connections {
-        target: pinhole
-        function onCacheDirChanged() { plugin.loadKept() }
+    Component.onCompleted: {
+        loadKept()
+        find()
     }
-    Component.onCompleted: loadKept()
 
     actions: [
         // While they are away, how many, and the way back.

@@ -80,6 +80,7 @@ SOURCES += \
     $$PWD/selftestrun.cpp \
     $$PWD/selftestcovering.cpp \
     $$PWD/selftestframe.cpp \
+    $$PWD/selftesthidden.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

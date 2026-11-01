@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QLocalServer>
@@ -22,6 +23,7 @@
 #include "encoder.h"
 #include "favourites.h"
 #include "history.h"
+#include "keymap.h"
 #include "library.h"
 #include "libraryreloader.h"
 #include "outgoing.h"
@@ -133,6 +135,7 @@ private:
             qputenv("PINHOLE_BUILTIN_PLUGINS", (dir.path() + "/plugins").toUtf8());
             plugins = std::make_unique<Plugins>(&library, service.get(), viewer.get(), translator.get(), &history);
             plugins->setEngine(&engine);
+            plugins->libraryOpened();
             if (!manifests.isEmpty()) {
                 host = qobject_cast<PluginHost *>(plugins->at(manifests.first().first).value("host").value<QObject *>());
                 QQmlEngine::setObjectOwnership(host, QQmlEngine::CppOwnership);
@@ -164,6 +167,11 @@ private:
         void release(QPointF at) {
             QMouseEvent e(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
             mouseReleaseEvent(&e);
+        }
+        // Moved with the button held.
+        void move(QPointF at) {
+            QMouseEvent e(QEvent::MouseMove, at, at, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            mouseMoveEvent(&e);
         }
     };
 
@@ -1398,6 +1406,274 @@ QtObject {
         QCOMPARE(grid.currentIndex(), 2);
         bench.js("pinhole.reveal('a')");
         QCOMPARE(grid.currentIndex(), 0);
+    }
+
+    void aPluginHearsWhatIsHiddenOnceItHasTheLibraryReadAgain() {
+        PluginBench bench({{"me.a", {}}});
+        ThumbnailLoader loader(&bench.library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&bench.library, &loader, nullptr);
+        bench.plugins->setGrid(&grid);
+        grid.setHidden({1});
+        QVERIFY(bench.js("pinhole.isHidden('b')").toBool());
+        bench.js("pinhole.library.changed.connect(() => said.push('changed'));"
+                 "pinhole.hiddenChanged.connect(() => said.push('hidden ' + pinhole.isHidden('b') + ' ' + pinhole.library.indexOf('b')))");
+        QSignalSpy gridHidden(&grid, &PhotoGrid::hiddenChanged);
+        QSignalSpy cacheDir(bench.host, &PluginHost::cacheDirChanged);
+
+        // The same library read again, a photo come in first.
+        QVERIFY(QFile::remove(bench.dir.path() + "/library.sqlite"));
+        makeLibrary(bench.dir.path(), {{"new", 0}, {"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/x");
+        Library reloaded;
+        QString error;
+        QVERIFY(reloaded.open(bench.dir.path(), &error));
+        const std::vector<int> moved{1, 2, 3};
+        grid.rememberAnchor();
+        loader.reload([&] { bench.library.swap(reloaded); });
+        grid.libraryReloaded(moved);
+        // The grid has b hidden where it is now, and says so, its `hidden`
+        // too; the same given again is nothing new.
+        QCOMPARE(gridHidden.count(), 1);
+        QCOMPARE(grid.hidden(), QVariantList{2});
+        QVERIFY(grid.isHidden(2) && !grid.isHidden(1));
+        grid.setHidden({2});
+        QCOMPARE(gridHidden.count(), 1);
+        // Plugins hear of it once they have the library as it is now, and
+        // not twice.
+        QCOMPARE(bench.said(), QStringList());
+        bench.viewer->libraryReloaded(moved);
+        bench.plugins->libraryReloaded(moved);
+        QCOMPARE(bench.said(), QStringList({"changed", "hidden true 2"}));
+        // A photo's position from its id is of the library now even before
+        // plugins are told: as the grid's news reaches them meanwhile.
+        QCOMPARE(bench.js("pinhole.library.indexOf('b')").toInt(), 2);
+        // The same source's library: the same cacheDir.
+        QCOMPARE(cacheDir.count(), 0);
+
+        // Another source's library: another cacheDir.
+        QTemporaryDir other;
+        makeLibrary(other.path(), {{"x", 1}}, false, "folder:/y");
+        Library theirs;
+        QVERIFY(theirs.open(other.path(), &error));
+        const std::vector<int> gone{-1, -1, -1, -1};
+        loader.reload([&] { bench.library.swap(theirs); });
+        QCOMPARE(bench.js("pinhole.library.indexOf('x')").toInt(), 0);
+        grid.libraryReloaded(gone);
+        bench.viewer->libraryReloaded(gone);
+        bench.plugins->libraryReloaded(gone);
+        QCOMPARE(cacheDir.count(), 1);
+        QCOMPARE(grid.hidden(), QVariantList());
+        QCOMPARE(bench.said().last(), QStringLiteral("hidden false -1"));
+    }
+
+    void twoPluginsHiddenPhotosFollowThemThroughAReloadUntilEachGivesItsOwn() {
+        PluginBench bench({{"me.a", {}}, {"me.b", {}}});
+        ThumbnailLoader loader(&bench.library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&bench.library, &loader, nullptr);
+        bench.plugins->setGrid(&grid);
+        // As the window gathers them (Main.qml's collectPlugins).
+        auto gathered = [&](const QVariantList &a, bool aFresh, const QVariantList &b, bool bFresh) {
+            return bench.plugins->hiddenOf("me.a", a, aFresh) + bench.plugins->hiddenOf("me.b", b, bFresh);
+        };
+        // a hidden by one plugin, c by the other.
+        QVariantList hidden = gathered({0}, true, {2}, true);
+        QCOMPARE(hidden, (QVariantList{0, 2}));
+        grid.setHidden(hidden);
+        bench.viewer->setHidden(hidden);
+        QCOMPARE(grid.count(), 1);
+
+        // A photo comes in first.
+        QVERIFY(QFile::remove(bench.dir.path() + "/library.sqlite"));
+        makeLibrary(bench.dir.path(), {{"new", 0}, {"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "folder:/x");
+        Library reloaded;
+        QString error;
+        QVERIFY(reloaded.open(bench.dir.path(), &error));
+        const std::vector<int> moved{1, 2, 3};
+        QSignalSpy positionsMoved(bench.plugins.get(), &Plugins::positionsMoved);
+        grid.rememberAnchor();
+        loader.reload([&] { bench.library.swap(reloaded); });
+        grid.libraryReloaded(moved);
+        bench.viewer->libraryReloaded(moved);
+        bench.plugins->libraryReloaded(moved);
+        QCOMPARE(positionsMoved.count(), 1);
+        // The grid and the viewer hide a and c where they are now, and
+        // say so as they are read.
+        QCOMPARE(grid.hidden(), (QVariantList{1, 3}));
+        QCOMPARE(bench.viewer->hidden(), (QVariantList{1, 3}));
+        QCOMPARE(grid.count(), 2);
+        QSignalSpy gridHidden(&grid, &PhotoGrid::hiddenChanged);
+        QSignalSpy viewerHidden(bench.viewer.get(), &Viewer::hiddenChanged);
+
+        // Gathered again before either gives its own: the same.
+        QCOMPARE(gathered({0}, false, {2}, false), (QVariantList{1, 3}));
+        // One gives its own again, the other not yet: both still right,
+        // and nothing new for the grid or the viewer.
+        hidden = gathered({1}, true, {2}, false);
+        QCOMPARE(hidden, (QVariantList{1, 3}));
+        grid.setHidden(hidden);
+        bench.viewer->setHidden(hidden);
+        QCOMPARE(gridHidden.count(), 0);
+        QCOMPARE(viewerHidden.count(), 0);
+        // The other gives its own: c shows again.
+        hidden = gathered({1}, false, {}, true);
+        QCOMPARE(hidden, QVariantList{1});
+        grid.setHidden(hidden);
+        QCOMPARE(grid.count(), 3);
+        // One loaded again (fresh) with the same positions as before is
+        // taken at its word.
+        QCOMPARE(bench.plugins->hiddenOf("me.b", {2}, true), QVariantList{2});
+    }
+
+    // Pinhole's Screenshots plugin: what it found is there as it loads,
+    // and what it finds of one source's library is never another's.
+    void screenshotsHidesWhatItKeptAtOnceAndNeverOneLibrarysAsAnothers() {
+        PluginBench bench({{"pinhole.screenshots", {}}});
+        // Its library as Find.js asks it, b a screenshot by its name.
+        auto screenshot = [](const QString &dir, const QString &id) {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "shots");
+            db.setDatabaseName(dir + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN has_location INTEGER DEFAULT 0"));
+            QVERIFY(q.exec("UPDATE assets SET filename = 'Screenshot " + id + ".png' WHERE id = '" + id + "'"));
+            db.close();
+            db = {};
+            QSqlDatabase::removeDatabase("shots");
+        };
+        screenshot(bench.dir.path(), "b");
+        bench.plugins->setSettingOf("pinhole.screenshots", "hide", true);
+        bench.plugins->setSettingOf("pinhole.screenshots", "found:folder:/x", QJsonArray{"b"});
+        Keymap keymap;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/screenshots/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.screenshots&load=0");
+        std::unique_ptr<QObject> plugin(
+            component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        auto list = [&](const char *name) {
+            QVariant value = plugin->property(name);
+            if (value.canConvert<QJSValue>())
+                value = value.value<QJSValue>().toVariant();
+            QStringList items;
+            for (const QVariant &item : value.toList())
+                items << item.toString();
+            return items;
+        };
+        // As it loads, nothing waited for: what was kept, hidden.
+        QCOMPARE(list("hidden"), QStringList{"1"});
+        QVERIFY(plugin->property("finding").toBool());
+
+        // Another source's library shown while it looks in this one.
+        bench.engine.globalObject().setProperty("shots", bench.engine.newQObject(plugin.get()));
+        bench.js("shots.idsChanged.connect(() => said.push(shots.ids.join(',')))");
+        QTemporaryDir other;
+        makeLibrary(other.path(), {{"x", 1}, {"y", 2}}, false, "folder:/y");
+        screenshot(other.path(), "y");
+        Library theirs;
+        QString error;
+        QVERIFY(theirs.open(other.path(), &error));
+        bench.library.swap(theirs);
+        bench.plugins->libraryReloaded({-1, -1, -1});
+        QTRY_VERIFY(plugin->property("found").toBool());
+        // What it found in the last one was neither shown nor kept as this
+        // one's: only what was kept for this one (none), then what it found.
+        QCOMPARE(bench.said(), QStringList({"", "y"}));
+        QCOMPARE(list("hidden"), QStringList{"1"});
+        const QJsonObject kept = bench.plugins->settingsOf("pinhole.screenshots");
+        QCOMPARE(kept.value("found:folder:/y").toArray(), QJsonArray{"y"});
+        QCOMPARE(kept.value("found:folder:/x").toArray(), QJsonArray{"b"});
+    }
+
+    void aSweepStaysOnItsPhotosWhenTheCellsChange() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid;
+        grid.setSize(QSizeF(700, 700)); // 7 columns of 100
+        grid.setSources(&library, &loader, nullptr);
+        grid.setSelecting(true);
+        // e ticked, then a sweep from b to c: e stays.
+        grid.press(QPointF(450, 50));
+        grid.release(QPointF(450, 50));
+        QCOMPARE(grid.selection(), QList<int>{4});
+        grid.press(QPointF(150, 50));
+        grid.move(QPointF(250, 350));
+        QCOMPARE(grid.selection(), (QList<int>{1, 2, 4}));
+        // a hidden meanwhile: the sweep goes on from b, and keeps e, though
+        // both are in other cells now.
+        grid.setHidden({0});
+        QCOMPARE(grid.selection(), (QList<int>{1, 2, 4}));
+        grid.move(QPointF(250, 350)); // d's cell now
+        QCOMPARE(grid.selection(), (QList<int>{1, 2, 3, 4}));
+        // b, where it began, hidden too: nothing to sweep from, and the
+        // selection stays as it is.
+        grid.setHidden({0, 1});
+        QCOMPARE(grid.selection(), (QList<int>{2, 3, 4}));
+        grid.move(QPointF(350, 350));
+        QCOMPARE(grid.selectionCount(), 3);
+        QCOMPARE(grid.selection(), (QList<int>{2, 3, 4}));
+        grid.release(QPointF(350, 350));
+        QCOMPARE(grid.selection(), (QList<int>{2, 3, 4}));
+    }
+
+    void aWindowGivenAnotherLibraryHasAServiceOfItsOwn() {
+        QTemporaryDir run, given, other;
+        const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR"), socket = qgetenv("PINHOLE_SOCKET"),
+                         pinholed = qgetenv("PINHOLED");
+        qunsetenv("PINHOLE_SOCKET");
+        qputenv("XDG_RUNTIME_DIR", run.path().toUtf8());
+        // A pinholed that only says how it was started.
+        write(run.path() + "/pinholed", "#!/bin/sh\necho \"$@\" > \"$XDG_RUNTIME_DIR/started\"\n");
+        QVERIFY(QFile::setPermissions(run.path() + "/pinholed", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("PINHOLED", (run.path() + "/pinholed").toUtf8());
+        auto started = [&] {
+            QFile file(run.path() + "/started");
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed() : QString();
+        };
+
+        const QString shared = run.path() + "/pinhole.sock";
+        QCOMPARE(ServiceClient::socketFor({}), shared);
+        const QString own = ServiceClient::socketFor(given.path());
+        QVERIFY(own.startsWith(run.path() + "/pinhole-") && own.endsWith(".sock"));
+        // The same folder however it is named; another's another.
+        QCOMPARE(ServiceClient::socketFor(given.path() + "/"), own);
+        QVERIFY(ServiceClient::socketFor(other.path()) != own);
+        QVERIFY(ServiceClient::socketFor(other.path()) != shared);
+        {
+            // None there: the service it starts is its own, on its own
+            // socket, never the shared one.
+            ServiceClient service(given.path());
+            QCOMPARE(service.socketPath(), own);
+            QTRY_VERIFY(!started().isEmpty());
+            QCOMPARE(started(), "--socket " + own + " --library " + given.path());
+        }
+        QVERIFY(QFile::remove(run.path() + "/started"));
+        {
+            // The library the settings name is the shared service's own: on
+            // its socket, and started without it, as from the launcher.
+            ServiceClient service(Storage::library());
+            QCOMPARE(service.socketPath(), shared);
+            QTRY_VERIFY(!started().isEmpty());
+            QCOMPARE(started(), "--socket " + shared);
+        }
+        // PINHOLE_SOCKET, as a test's, is the one whatever the library.
+        qputenv("PINHOLE_SOCKET", (run.path() + "/test.sock").toUtf8());
+        QCOMPARE(ServiceClient::socketFor(given.path()), run.path() + "/test.sock");
+
+        qputenv("XDG_RUNTIME_DIR", runtime);
+        qputenv("PINHOLED", pinholed);
+        if (socket.isEmpty())
+            qunsetenv("PINHOLE_SOCKET");
+        else
+            qputenv("PINHOLE_SOCKET", socket);
     }
 
     void theViewerFetchesItsRowsNeighboursNotTheHiddenOnes() {

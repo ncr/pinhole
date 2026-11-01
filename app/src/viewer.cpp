@@ -536,8 +536,9 @@ int Viewer::beside(int k) const {
 int Viewer::rowBeside(int k) const {
     if (k == 0)
         return m_index;
-    const int photo = photoAt(placeFrom(k) + k);
-    return photo >= 0 && (photo > m_index) == (k > 0) ? photo : -1;
+    // Always on its side: placeFrom is the place before a hidden photo
+    // going forwards, the one after it going back.
+    return photoAt(placeFrom(k) + k);
 }
 
 void Viewer::step(int delta) {
@@ -764,6 +765,9 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     for (int &i : m_hiddenList)
         i = mapped(i);
     std::erase(m_hiddenList, -1);
+    // As given, too: what `hidden` reads, and what the same given again is
+    // compared with.
+    const QVariantList hiddenBefore = std::exchange(m_hiddenGiven, QVariantList(m_hiddenList.begin(), m_hiddenList.end()));
     if (m_index >= 0) {
         if (const int now = mapped(m_index); now >= 0) {
             // The same photo: nothing on screen changes, only its position,
@@ -777,4 +781,6 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
         }
     }
     rebuildRow();
+    if (m_hiddenGiven != hiddenBefore)
+        emit hiddenChanged();
 }

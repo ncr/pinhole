@@ -214,6 +214,10 @@ core/target/release/pinhole-fake --count 100000   # ~1 min, 6 GB in ~/.local/sha
 app/build/pinhole --library ~/.local/share/pinhole/fake
 ```
 
+A library given so, other than your own, has a service of its own (on a
+socket named after its path), so Pinhole opened from the launcher meanwhile
+still shows your photos.
+
 The two boundaries that are meant to be swapped:
 
 - **Sign-in.** The core starts a provider process and asks it for a session

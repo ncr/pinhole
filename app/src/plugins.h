@@ -12,6 +12,7 @@
 #include <QVariantList>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -61,13 +62,20 @@ public:
     int positionOf(const QJSValue &photo) const;
     // The library was read again: positions moved.
     void reloaded();
+    // Read again, and plugins not yet told (reloaded): what they hold of
+    // it is of the read before.
+    bool stale() const;
 
 signals:
     void changed();
 
 private:
     const Library *m_library;
+    // The positions by id, of the library's read m_positionsOf.
     mutable QHash<QByteArray, int> m_positions;
+    mutable quint64 m_positionsOf = 0;
+    // The read plugins were last told of.
+    quint64 m_told = 0;
 };
 
 // A plugin's settings as properties (pinhole.settings): read them, bind to
@@ -289,6 +297,11 @@ class Plugins : public QObject {
     // (Main.qml says): its keys are the "plugin" layer's, the others wait
     // beneath, unseen. Each plugin has it as pinhole.coveredBy.
     Q_PROPERTY(QString coveredBy READ coveredBy WRITE setCoveredBy NOTIFY coveredByChanged)
+    // The library has been read (or found missing): plugins load from then
+    // on (Main.qml), so they find it whole as they start, nothing of it
+    // still being read on another thread, and what they keep of it shows
+    // in the first frame already.
+    Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
 public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
@@ -315,8 +328,20 @@ public:
     // dropped when they change, and what it warns of in them is theirs.
     void setEngine(QQmlEngine *engine);
     QJSEngine *engine() const;
-    // The library was read again, or moved.
-    void libraryReloaded();
+    // The library has been read the first time (or is not there yet).
+    void libraryOpened();
+    bool ready() const { return m_ready; }
+    // The library was read again, or moved: `moved` has each old
+    // position's new one, -1 for a photo gone.
+    void libraryReloaded(const std::vector<int> &moved);
+    // The name of the source's library among plugins' cacheDirs:
+    // icloud-<apple id>, folder-<path>.
+    QString cacheName() const;
+    // What plugin `id` hides, as Main.qml gathers it: `given`, its
+    // `hidden`, unless it gave the same before the library was read again
+    // and has not given it since (`fresh`, its hiddenChanged): then the
+    // same photos where they are now, until it does.
+    Q_INVOKABLE QVariantList hiddenOf(const QString &id, const QVariantList &given, bool fresh);
 
     QStringList ids() const { return m_ids; }
     QString coveredBy() const { return m_coveredBy; }
@@ -371,6 +396,10 @@ signals:
     // A plugin's few words for the foot of the window (notify).
     void notice(const QString &id, const QString &text);
     void coveredByChanged();
+    void readyChanged();
+    // The library was read again: what plugins hide (hiddenOf) is where
+    // its photos are now, to be gathered again.
+    void positionsMoved();
 
 private:
     struct Plugin {
@@ -407,6 +436,17 @@ private:
     // plugins.json, read once and kept as written.
     QJsonObject m_config;
     bool m_touching = false;
+    bool m_ready = false;
+    // The cacheDirs' library as plugins were last told (cacheName).
+    QString m_cacheName;
+    // The grid's hiddenChanged while plugins were not yet told of a
+    // reload: told after.
+    bool m_hiddenPending = false;
+    // Each plugin's hidden as last given, and those photos' positions now.
+    struct Hidden {
+        std::vector<int> given, now;
+    };
+    std::map<QString, Hidden> m_hidden;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
 };

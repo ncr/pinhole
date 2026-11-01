@@ -719,7 +719,8 @@ ApplicationWindow {
             // Whose its Commands are (Command.qml).
             readonly property string pluginId: modelData
             readonly property var info: (plugins.revision, plugins.at(modelData))
-            readonly property string main: info.enabled ? info.main : ""
+            // Once the library has been read (plugins.ready).
+            readonly property string main: info.enabled && plugins.ready ? info.main : ""
             anchors.fill: parent
             // One plugin over the photos at a time: the one covering above
             // the rest, and while it does, the others (an overlay as Info's,
@@ -730,7 +731,7 @@ ApplicationWindow {
             function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
             onMainChanged: if (completed) load()
             Component.onCompleted: { completed = true; load() }
-            onLoaded: win.collectPlugins()
+            onLoaded: win.collectPlugins(modelData)
             onStatusChanged: {
                 // What kept it from loading, said under it in the side panel.
                 if (status === Loader.Error)
@@ -745,10 +746,16 @@ ApplicationWindow {
                 function onActionsChanged() { win.collectPlugins() }
                 function onHelpChanged() { win.collectPlugins() }
                 function onStacksChanged() { win.collectPlugins() }
-                function onHiddenChanged() { win.collectPlugins() }
+                function onHiddenChanged() { win.collectPlugins(modelData) }
                 function onTourReadyChanged() { tourDue.restart() }
             }
         }
+    }
+    // The library read again: what each plugin hides, where those photos
+    // are now, until it says again.
+    Connections {
+        target: plugins
+        function onPositionsMoved() { win.collectPlugins("") }
     }
     // What the plugins loaded add: their buttons, their keys for the help,
     // the photos they stack into one card or hide, and whether one is over
@@ -775,7 +782,10 @@ ApplicationWindow {
         }
         return null
     }
-    function collectPlugins() {
+    // `fresh`: the plugin whose hidden photos were just given (or which
+    // just loaded); the others' follow their photos through a reload until
+    // they give theirs again (plugins.hiddenOf).
+    function collectPlugins(fresh) {
         const actions = [], help = [], covering = []
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
@@ -789,8 +799,9 @@ ApplicationWindow {
                 help.push({ plugin: loader.modelData, keys: item.help })
             if (item.stacks && item.stacks.length > 0)
                 stacks = stacks.concat(item.stacks)
-            if (item.hidden && item.hidden.length > 0) {
-                hidden = hidden.concat(item.hidden)
+            const away = plugins.hiddenOf(loader.modelData, item.hidden || [], loader.modelData === fresh)
+            if (away.length > 0) {
+                hidden = hidden.concat(away)
                 hiders.push(loader.info.name)
             }
             if (item.covering === true)
