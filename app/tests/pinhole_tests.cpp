@@ -1637,6 +1637,61 @@ Item {
         QCOMPARE(bench.plugins->hiddenOf("me.b", {2}, true), QVariantList{2});
     }
 
+    void twoPluginsStacksFollowTheirPhotosThroughAReloadUntilEachGivesItsOwn() {
+        PluginBench bench({{"me.a", {}}, {"me.b", {}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}});
+        ThumbnailLoader loader(&bench.library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&bench.library, &loader, nullptr);
+        bench.plugins->setGrid(&grid);
+        auto stack = [](int x, int y) { return QVariant(QVariantList{x, y}); };
+        // As the window gathers them (Main.qml's collectPlugins).
+        auto gathered = [&](const QVariantList &a, bool aFresh, const QVariantList &b, bool bFresh) {
+            return bench.plugins->stacksOf("me.a", a, aFresh) + bench.plugins->stacksOf("me.b", b, bFresh);
+        };
+        // a and b one card by one plugin, c and d by the other.
+        QVariantList stacks = gathered({stack(0, 1)}, true, {stack(2, 3)}, true);
+        QCOMPARE(stacks, (QVariantList{stack(0, 1), stack(2, 3)}));
+        grid.setStacks(stacks);
+        QCOMPARE(grid.count(), 2);
+
+        // A photo comes in first: every position moves one on.
+        QVERIFY(QFile::remove(bench.dir.path() + "/library.sqlite"));
+        makeLibrary(bench.dir.path(), {{"new", 0}, {"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}}, false, "folder:/x");
+        Library reloaded;
+        QString error;
+        QVERIFY(reloaded.open(bench.dir.path(), &error));
+        const std::vector<int> moved{1, 2, 3, 4};
+        grid.rememberAnchor();
+        loader.reload([&] { bench.library.swap(reloaded); });
+        grid.libraryReloaded(moved);
+        bench.plugins->libraryReloaded(moved);
+        QCOMPARE(grid.stacks(), (QVariantList{stack(1, 2), stack(3, 4)}));
+        QCOMPARE(grid.count(), 3);
+        QSignalSpy gridStacks(&grid, &PhotoGrid::stacksChanged);
+
+        // Gathered again before either gives its own (as the window does
+        // at once): the same photos, where they are now, never the old
+        // positions, which would put b with c.
+        stacks = gathered({stack(0, 1)}, false, {stack(2, 3)}, false);
+        QCOMPARE(stacks, (QVariantList{stack(1, 2), stack(3, 4)}));
+        grid.setStacks(stacks);
+        QCOMPARE(gridStacks.count(), 0);
+        // One gives its own again, the other not yet: both still right.
+        stacks = gathered({stack(1, 2)}, true, {stack(2, 3)}, false);
+        QCOMPARE(stacks, (QVariantList{stack(1, 2), stack(3, 4)}));
+        grid.setStacks(stacks);
+        QCOMPARE(gridStacks.count(), 0);
+        // The other gives its own, the same positions as before the reload
+        // and so fresh: taken at its word.
+        stacks = gathered({stack(1, 2)}, false, {stack(2, 3)}, true);
+        QCOMPARE(stacks, (QVariantList{stack(1, 2), stack(2, 3)}));
+        // A photo of a stack gone: the rest of it stays together.
+        QCOMPARE(bench.plugins->stacksOf("me.a", {stack(1, 2)}, true), (QVariantList{stack(1, 2)}));
+        bench.plugins->libraryReloaded({-1, -1, 1, 2, 3});
+        QCOMPARE(bench.plugins->stacksOf("me.a", {stack(1, 2)}, false), (QVariantList{QVariant(QVariantList{1})}));
+    }
+
     // Pinhole's Screenshots plugin: what it found is there as it loads,
     // and what it finds of one source's library is never another's.
     void screenshotsHidesWhatItKeptAtOnceAndNeverOneLibrarysAsAnothers() {

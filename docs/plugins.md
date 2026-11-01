@@ -135,7 +135,10 @@ its settings, is there as the window first shows. It sets:
   first one is, shows it and carries the mark for several photos; opening
   it opens that photo, selecting or dragging it takes them all, and the
   strip under a photo shown full window underlines a stack's photos. A
-  photo in another plugin's stack already stays there.
+  photo in another plugin's stack already stays there. When the library is
+  read again, each stack's photos stay together where they are now until
+  it gives `stacks` again (on `library.changed()`, from the ids it keeps,
+  as Series does).
 - `hidden`: photos not in the grid at all, a list of library positions,
   as Screenshots hides screenshots. They leave any stack they are in, the
   viewer's ← and →, its strip and Home/End pass over them, and Ctrl+A and a

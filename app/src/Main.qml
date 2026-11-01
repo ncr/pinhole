@@ -745,7 +745,7 @@ ApplicationWindow {
                 function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
                 onMainChanged: if (completed) load()
                 Component.onCompleted: { completed = true; load() }
-                onLoaded: win.collectPlugins(modelData)
+                onLoaded: win.collectPlugins([modelData], [modelData])
                 onStatusChanged: {
                     // What kept it from loading, said under it in the side
                     // panel.
@@ -760,18 +760,18 @@ ApplicationWindow {
                     function onCoveringChanged() { win.collectPlugins() }
                     function onActionsChanged() { win.collectPlugins() }
                     function onHelpChanged() { win.collectPlugins() }
-                    function onStacksChanged() { win.collectPlugins() }
-                    function onHiddenChanged() { win.collectPlugins(modelData) }
+                    function onStacksChanged() { win.collectPlugins([], [modelData]) }
+                    function onHiddenChanged() { win.collectPlugins([modelData], []) }
                     function onTourReadyChanged() { tourDue.restart() }
                 }
             }
         }
     }
-    // The library read again: what each plugin hides, where those photos
-    // are now, until it says again.
     Connections {
         target: plugins
-        function onPositionsMoved() { win.collectPlugins("") }
+        // The library read again: what each plugin hides and stacks,
+        // where those photos are now, until it says again.
+        function onPositionsMoved() { win.collectPlugins() }
     }
     // What the plugins loaded add: their buttons, their keys for the help,
     // the photos they stack into one card or hide, and whether one is over
@@ -809,10 +809,13 @@ ApplicationWindow {
         }
         return null
     }
-    // `fresh`: the plugin whose hidden photos were just given (or which
-    // just loaded); the others' follow their photos through a reload until
-    // they give theirs again (plugins.hiddenOf).
-    function collectPlugins(fresh) {
+    // `freshHidden`, `freshStacks`: the plugins whose hidden photos or
+    // stacks were just given (or which just loaded); the others' follow
+    // their photos through a reload until they give theirs again
+    // (plugins.hiddenOf, plugins.stacksOf).
+    function collectPlugins(freshHidden, freshStacks) {
+        freshHidden = freshHidden || []
+        freshStacks = freshStacks || []
         const actions = [], help = [], covering = []
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
@@ -824,9 +827,10 @@ ApplicationWindow {
                 actions.push(item.actions[k])
             if (item.help && item.help.length > 0)
                 help.push({ plugin: loader.modelData, keys: item.help })
-            if (item.stacks && item.stacks.length > 0)
-                stacks = stacks.concat(item.stacks)
-            const away = plugins.hiddenOf(loader.modelData, item.hidden || [], loader.modelData === fresh)
+            const stacked = plugins.stacksOf(loader.modelData, item.stacks || [], freshStacks.indexOf(loader.modelData) >= 0)
+            if (stacked.length > 0)
+                stacks = stacks.concat(stacked)
+            const away = plugins.hiddenOf(loader.modelData, item.hidden || [], freshHidden.indexOf(loader.modelData) >= 0)
             if (away.length > 0) {
                 hidden = hidden.concat(away)
                 hiders.push(loader.info.name)

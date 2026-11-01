@@ -162,6 +162,16 @@ void runFrameSelfTest(QQuickWindow *window);
 void runHiddenSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer,
                        const QString &dir);
 
+// PINHOLE_SELFTEST=stacks (selfteststacks.cpp): once the plugins' stacks
+// (Series', Screenshots') have settled, the first five photos taken out of
+// the library on disk and it read again: every stack in the grid is still
+// one of the groups before, by its photos' ids, right after the reload,
+// the next turn, and 0.5, 1.7 and 6 s on; then six reloads in a row, one
+// photo out each, checked 300 ms and 6 s after the last. It changes the
+// library: only a scratch copy in /tmp, given with --library (and a
+// PINHOLE_SOCKET of its own). Exits 1 if any check fails.
+void runStacksSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, LibraryReloader &reloader);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

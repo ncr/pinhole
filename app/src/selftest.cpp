@@ -1378,7 +1378,7 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
     // As the next launch would: the one by itself not yet had.
     auto relaunch = [window] {
         window->setProperty("touredThisLaunch", false);
-        QMetaObject::invokeMethod(window, "collectPlugins", Q_ARG(QVariant, QVariant()));
+        QMetaObject::invokeMethod(window, "collectPlugins", Q_ARG(QVariant, QVariant()), Q_ARG(QVariant, QVariant()));
     };
     // The plugins the card listed; the one shown from it, and the one
     // turned on again.

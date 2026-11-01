@@ -358,6 +358,10 @@ public:
     // and has not given it since (`fresh`, its hiddenChanged): then the
     // same photos where they are now, until it does.
     Q_INVOKABLE QVariantList hiddenOf(const QString &id, const QVariantList &given, bool fresh);
+    // The same of its `stacks` (`fresh`, its stacksChanged): each stack's
+    // photos where they are now until it gives its own again, never one
+    // plugin's of the positions before a reload and another's of after.
+    Q_INVOKABLE QVariantList stacksOf(const QString &id, const QVariantList &given, bool fresh);
 
     QStringList ids() const { return m_ids; }
     QStringList covering() const { return m_covering; }
@@ -418,8 +422,8 @@ signals:
     void notice(const QString &id, const QString &text);
     void coveredByChanged();
     void readyChanged();
-    // The library was read again: what plugins hide (hiddenOf) is where
-    // its photos are now, to be gathered again.
+    // The library was read again: what plugins hide and stack (hiddenOf,
+    // stacksOf) is where its photos are now, to be gathered again.
     void positionsMoved();
 
 private:
@@ -463,11 +467,13 @@ private:
     // The grid's hiddenChanged while plugins were not yet told of a
     // reload: told after.
     bool m_hiddenPending = false;
-    // Each plugin's hidden as last given, and those photos' positions now.
-    struct Hidden {
-        std::vector<int> given, now;
+    // Each plugin's hidden and stacks as last given, and those photos'
+    // positions now.
+    struct Followed {
+        std::vector<int> hiddenGiven, hidden;
+        std::vector<std::vector<int>> stacksGiven, stacks;
     };
-    std::map<QString, Hidden> m_hidden;
+    std::map<QString, Followed> m_followed;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
 };

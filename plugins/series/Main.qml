@@ -122,11 +122,11 @@ PinholePlugin {
         edits = state
         apply()
     }
-    // The edits of the library shown, when another is.
+    // The edits of the library shown, when another is: true then.
     function loadEdits() {
         const key = "edits:" + pinhole.library.key
         if (key === editsKey)
-            return
+            return false
         // Another library: what the finder found was the last one's.
         if (editsKey !== "")
             foundIds = []
@@ -142,6 +142,7 @@ PinholePlugin {
         edits = kept || { manual: [], apart: [] }
         if (found)
             apply()
+        return true
     }
     // The series made by hand, without any that holds one of `ids`.
     function manualWithout(ids) {
@@ -205,12 +206,14 @@ PinholePlugin {
         return lo
     }
 
-    // The library changed: look again, once it has settled.
+    // The library changed: the same series where their photos are now, at
+    // once (it keeps their ids), then a look again once it has settled.
     Timer { id: later; interval: 1500; onTriggered: plugin.find() }
     Connections {
         target: pinhole.library
         function onChanged() {
-            plugin.loadEdits()
+            if (!plugin.loadEdits() && plugin.found)
+                plugin.apply()
             later.restart()
         }
     }

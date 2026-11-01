@@ -840,13 +840,18 @@ void Plugins::libraryOpened() {
 }
 
 void Plugins::libraryReloaded(const std::vector<int> &moved) {
-    // What each plugin hides follows its photos until it gives its own
-    // again, as the grid's do: the window gathers them again at once, as
-    // the grid already has them.
-    for (auto &[id, hidden] : m_hidden) {
-        for (int &i : hidden.now)
+    // What each plugin hides and stacks follows its photos until it gives
+    // its own again, as the grid's do: the window gathers them again at
+    // once, as the grid already has them.
+    const auto follow = [&moved](std::vector<int> &photos) {
+        for (int &i : photos)
             i = i >= 0 && i < int(moved.size()) ? moved[size_t(i)] : -1;
-        std::erase(hidden.now, -1);
+        std::erase(photos, -1);
+    };
+    for (auto &[id, followed] : m_followed) {
+        follow(followed.hidden);
+        for (auto &stack : followed.stacks)
+            follow(stack);
     }
     emit positionsMoved();
     m_libraryApi->reloaded();
@@ -861,17 +866,43 @@ void Plugins::libraryReloaded(const std::vector<int> &moved) {
         emit hiddenChanged();
 }
 
+namespace {
+
+std::vector<int> positions(const QVariantList &list) {
+    std::vector<int> out;
+    out.reserve(size_t(list.size()));
+    for (const QVariant &index : list)
+        out.push_back(index.toInt());
+    return out;
+}
+
+} // namespace
+
 QVariantList Plugins::hiddenOf(const QString &id, const QVariantList &given, bool fresh) {
-    Hidden &hidden = m_hidden[id];
-    std::vector<int> list;
-    list.reserve(size_t(given.size()));
-    for (const QVariant &index : given)
-        list.push_back(index.toInt());
-    if (fresh || list != hidden.given) {
-        hidden.now = list;
-        hidden.given = std::move(list);
+    Followed &followed = m_followed[id];
+    std::vector<int> list = positions(given);
+    if (fresh || list != followed.hiddenGiven) {
+        followed.hidden = list;
+        followed.hiddenGiven = std::move(list);
     }
-    return QVariantList(hidden.now.begin(), hidden.now.end());
+    return QVariantList(followed.hidden.begin(), followed.hidden.end());
+}
+
+QVariantList Plugins::stacksOf(const QString &id, const QVariantList &given, bool fresh) {
+    Followed &followed = m_followed[id];
+    std::vector<std::vector<int>> lists;
+    lists.reserve(size_t(given.size()));
+    for (const QVariant &stack : given)
+        lists.push_back(positions(stack.toList()));
+    if (fresh || lists != followed.stacksGiven) {
+        followed.stacks = lists;
+        followed.stacksGiven = std::move(lists);
+    }
+    QVariantList now;
+    now.reserve(qsizetype(followed.stacks.size()));
+    for (const auto &stack : followed.stacks)
+        now.append(QVariant(QVariantList(stack.begin(), stack.end())));
+    return now;
 }
 
 QVariantMap Plugins::at(const QString &id) const {
