@@ -194,7 +194,9 @@ keep)
     part="$kept.part"
     trap 'rm -f -- "$part"' EXIT
     case "$extension" in
-      jpg) magick "$from[0]" -auto-orient -resize '3840x3840>' -quality 92 "jpg:$part" ;;
+      # Through stdin and stdout: no name (a folder's photo's, or the one
+      # kept, named after it) is read as ImageMagick's syntax ("50%off").
+      jpg) magick -[0] -auto-orient -resize '3840x3840>' -quality 92 jpg:- < "$from" > "$part" ;;
       mkv) ffmpeg -v error -y -i "$from" -map 0:v:0 -c copy -f matroska "$part" ;;
       # A hard link where the cache and Pictures share a disk: instant, no
       # room taken twice, and it stays when the cache lets its name go.

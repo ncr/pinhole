@@ -148,7 +148,7 @@ Item {
             const ids = unknown.map(p => p.id).filter(id => paths[id])
             if (ids.length === 0)
                 return
-            keep(pinhole.run("magick", ["identify", "-ping", "-format", "%w %h %[orientation]\n"].concat(ids.map(id => paths[id] + "[0]")),
+            keep(pinhole.run("magick", ["identify", "-ping", "-format", "%w %h %[orientation]\n"].concat(ids.map(id => Layout.magickFile(paths[id]))),
                              { timeout: 60000 })).then(result => {
                 if (gen !== generation)
                     return

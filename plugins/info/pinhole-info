@@ -50,7 +50,9 @@ read)
     # The first picture of the file (a HEIC can hold several), and the
     # orientation ImageMagick applied: libheif turns a HEIC itself, so its
     # size is as shown and its EXIF's Orientation is no longer to do.
-    magick identify -ping -format '%m %w %h %[orientation]\n%[EXIF:*]' "$original[0]"
+    # On stdin: a folder's file name is never read as ImageMagick's own
+    # syntax ("50%off.jpg" is "500ff.jpg" to it).
+    magick identify -ping -format '%m %w %h %[orientation]\n%[EXIF:*]' -[0] < "$original"
   fi
   ;;
 keep)

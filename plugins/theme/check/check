@@ -73,5 +73,16 @@ check '[[ $(cat "$themes/pinhole-taken-0001/colors.toml") == changed ]]' "and le
 make pinhole-t15-0015
 check '[[ -f $themes/pinhole-t15-0015/preview.png && $(cat "$H/.local/state/omarchy/current/theme.name") == pinhole-t15-0015 ]]' "one of its own made again, replaced"
 
+# A folder's photo whose name ImageMagick would read as its own syntax
+# (%d and %o a frame's number, [1] a frame, * many files): its own pixels.
+odd="$work/Sale 50%d [1]"
+mkdir -p "$odd"
+magick -size 64x48 xc:'#c82828' jpg:- > "$odd/50%off [1]*.jpg"
+magick -size 64x48 xc:'#28c828' jpg:- > "$odd/500ff [1]*.jpg"
+before=$(cat "$H/.local/state/omarchy/current/theme.name")
+printf '[colors]\n' | bash "$script" make pinhole-odd-0001 "$odd/50%off [1]*.jpg" Yaru "$before" '#112233'
+check '[[ $(magick "$themes/pinhole-odd-0001/backgrounds/pinhole-odd-0001.jpg" -format "%[fx:round(p{32,24}.r*9)]%[fx:round(p{32,24}.g*9)]" info:) == 71 ]]' "a photo named 50%off [1]*.jpg made into a theme, from its own pixels"
+check '[[ -s $themes/pinhole-odd-0001/preview.png ]]' "and its preview"
+
 if ((failed == 0)); then echo "theme check: ok"; else echo "theme check: FAILED"; fi
 exit $failed

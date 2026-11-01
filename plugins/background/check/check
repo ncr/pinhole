@@ -139,6 +139,17 @@ ln -s "$work/victim" "$H/out"
 if sh "$script" keep "$H/cache/g.png" "$H/out/.backgrounds" p png cached > /dev/null 2>&1; then fail "a folder through a link out of the test's home refused"; else ok "a folder through a link out of the test's home refused"; fi
 check '[ "$(ls -A "$work/victim")" = v.png ]' "nothing written or pruned out of the test's home"
 
+# A folder's photo whose name ImageMagick would read as its own syntax
+# (%d and %o a frame's number, [1] a frame, * many files), kept under a
+# name of the same kind: made from its own pixels.
+fresh odd
+odd="$H/cache/Sale 50%d [1]"
+mkdir -p "$odd"
+magick -size 64x48 xc:'#c82828' jpg:- > "$odd/50%off [1]*.jpg"
+magick -size 64x48 xc:'#28c828' jpg:- > "$odd/500ff [1]*.jpg"
+kept=$(sh "$script" keep "$odd/50%off [1]*.jpg" "$D" "50%off [1]*" jpg own) || kept=
+check '[ -f "$kept" ] && [ "$(magick - -format "%[fx:round(p{32,24}.r*9)]%[fx:round(p{32,24}.g*9)]" info: < "$kept")" = 71 ]' "a photo named 50%off [1]*.jpg kept as a JPEG of its own pixels"
+
 check '[ ! -s "$work/decoys.log" ]' "Omarchy's own shell and scripts never called"
 [ ! -s "$work/decoys.log" ] || cat "$work/decoys.log"
 if [ $failed -eq 0 ]; then echo "background check: ok"; else echo "background check: FAILED"; fi

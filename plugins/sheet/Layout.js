@@ -235,6 +235,14 @@ function rounded(sheet, caption) {
     return { w: Math.round(sheet.w), h: Math.round(sheet.h), cells: cells }
 }
 
+// A file as magick is given it, its first image: every % doubled, as
+// ImageMagick reads "%d" or "%o" in a name as a frame's number ("50%off.jpg"
+// is "500ff.jpg" to it, and a folder's photo may be called anything).
+// `[1]` and `*` in the name of a file that is there are read as they are.
+function magickFile(path) {
+    return path.replace(/%/g, "%%") + "[0]"
+}
+
 // What magick is given to make the file: the photos (`files`, in the
 // cells' order) on the background, each cut to its cell, and the dates,
 // each in its size in `points` (none where 0). Each photo is made sRGB from
@@ -251,7 +259,7 @@ function magickArguments(sheet, files, colours, dates, points, font, profile, ou
         var c = sheet.cells[i]
         var size = c.w + "x" + c.h
         // Decoding a JPEG at no more than twice the cell is much faster.
-        args.push("(", "-define", "jpeg:size=" + 2 * c.w + "x" + 2 * c.h, files[i] + "[0]",
+        args.push("(", "-define", "jpeg:size=" + 2 * c.w + "x" + 2 * c.h, magickFile(files[i]),
                   "-auto-orient", "-resize", size + "^", "-profile", profile, "-colorspace", "sRGB", "-gravity", "center", "-extent", size, ")",
                   "-gravity", "NorthWest", "-geometry", "+" + c.x + "+" + c.y, "-composite")
     }
@@ -272,6 +280,6 @@ function magickArguments(sheet, files, colours, dates, points, font, profile, ou
             args.push("-annotate", (dx < 0 ? "" : "+") + dx + "+" + dy, dates[i].replace(/\\/g, "\\\\").replace(/%/g, "%%"))
         }
     }
-    args.push("-profile", profile, "-quality", "90", out)
+    args.push("-profile", profile, "-quality", "90", out.replace(/%/g, "%%"))
     return args
 }

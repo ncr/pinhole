@@ -8,9 +8,11 @@
 // still gives text to read.
 
 // The magick arguments that give the photo's colours: a small copy, in
-// twelve clusters, as "count: (r,g,b) #RRGGBB …" lines.
+// twelve clusters, as "count: (r,g,b) #RRGGBB …" lines. Its first image,
+// every % doubled: ImageMagick reads "%d" or "%o" in a name as a frame's
+// number ("50%off.jpg" is "500ff.jpg" to it).
 function magickArgs(path) {
-    return [path + "[0]", "-auto-orient", "-resize", "200x200>", "-colorspace", "sRGB", "-kmeans", "12",
+    return [path.replace(/%/g, "%%") + "[0]", "-auto-orient", "-resize", "200x200>", "-colorspace", "sRGB", "-kmeans", "12",
             "-depth", "8", "-format", "%c", "histogram:info:-"]
 }
 

@@ -167,6 +167,8 @@ thumbnail. `original`, `full`, `video` and `live` are the files themselves;
 made into the cache when first asked for, as iCloud's are downloaded) are
 made with ImageMagick, and a video's by ffmpeg from the most telling of
 seven frames spread across it (`cover.rs`), not a fade from black.
+ImageMagick reads the file on stdin, so no name is taken for its own
+syntax (`50%off.jpg` would be `500ff.jpg` to it).
 
 Following changes is a fresh look at the folder each round, compared with
 the index by path, size and modification time. A folder is not on a

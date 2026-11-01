@@ -17,6 +17,14 @@ if [ $# -eq 0 ]; then
          $(find "$originals" -type f \( -iname '*.mov' -o -iname '*.mp4' \) 2>/dev/null | head -n 2)
 fi
 
+# And one a folder may have, whose name ImageMagick would read as its own
+# syntax (%d and %o a frame's number, [1] a frame, * many files) were it
+# given it: read for what it is.
+mkdir -p "$work/Sale 50%d [1]"
+magick -size 64x48 xc:'#c82828' jpg:- > "$work/Sale 50%d [1]/50%off [1]*.jpg"
+magick -size 32x32 xc:'#28c828' jpg:- > "$work/Sale 50%d [1]/500ff [1]*.jpg"
+set -- "$@" "$work/Sale 50%d [1]/50%off [1]*.jpg"
+
 n=0
 for file in "$@"; do
   n=$((n + 1))
@@ -27,7 +35,7 @@ for file in "$@"; do
     ;;
   *)
     "$HERE/../pinhole-info" read image "$file" > "$work/$n.out"
-    printf '%s\n%s\n' "$file" "$(magick "$file[0]" -auto-orient -format '%w %h' info:)" > "$work/$n.want"
+    printf '%s\n%s\n' "$file" "$(magick -[0] -auto-orient -format '%w %h' info: < "$file")" > "$work/$n.want"
     ;;
   esac
 done

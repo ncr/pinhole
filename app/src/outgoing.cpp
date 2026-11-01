@@ -382,8 +382,13 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
                     QFile::rename(part, converted);
                     hand(converted, out);
                 });
+        // The HEIC in on stdin and the JPEG out on stdout: a folder's file
+        // name is never read as ImageMagick's own syntax ("50%off.heic" is
+        // "500ff.heic" to it).
+        magick->setStandardInputFile(source);
+        magick->setStandardOutputFile(part);
         magick->start(QStringLiteral("magick"),
-                      {source, QStringLiteral("-quality"), QStringLiteral("92"), QStringLiteral("jpg:") + part});
+                      {QStringLiteral("-[0]"), QStringLiteral("-quality"), QStringLiteral("92"), QStringLiteral("jpg:-")});
         return;
     }
 

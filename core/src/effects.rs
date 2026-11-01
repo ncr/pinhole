@@ -29,26 +29,36 @@ pub fn bounce(motion: &Path, out: &Path) -> Result<()> {
 /// hand never holds still for three seconds.
 pub fn long_exposure(motion: &Path, out: &Path) -> Result<()> {
     let frames = frame_count(motion)?;
+    let (motion, out) = (std::path::absolute(motion)?, std::path::absolute(out)?);
+    // The transforms beside the file made, named in the filter graph by
+    // their name alone, ffmpeg running in their folder: a folder's path
+    // (the one everything is kept in is the person's to choose) is never
+    // read as the graph's syntax (`,`, `;`, `[`).
     let transforms = out.with_extension("trf");
+    let folder = transforms.parent().unwrap_or(Path::new("/"));
+    let name = filter_path(Path::new(transforms.file_name().unwrap_or_default()));
     let mut detect = ffmpeg();
     detect
+        .current_dir(folder)
         .arg("-i")
-        .arg(motion)
+        .arg(&motion)
         .arg("-vf")
-        .arg(format!("vidstabdetect=result={}:shakiness=8:accuracy=15:tripod=1", filter_path(&transforms)))
+        .arg(format!("vidstabdetect=result={name}:shakiness=8:accuracy=15:tripod=1"))
         .args(["-f", "null", "-"]);
     let mut average = ffmpeg();
     average
+        .current_dir(folder)
         .arg("-i")
-        .arg(motion)
+        .arg(&motion)
         .arg("-vf")
         .arg(format!(
-            "vidstabtransform=input={}:tripod=1:optzoom=0:crop=keep:interpol=bicubic,tmix=frames={frames},select=eq(n\\,{})",
-            filter_path(&transforms),
+            "vidstabtransform=input={name}:tripod=1:optzoom=0:crop=keep:interpol=bicubic,tmix=frames={frames},select=eq(n\\,{})",
             frames - 1,
         ))
-        .args(["-frames:v", "1", "-q:v", "2", "-f", "image2", "-c:v", "mjpeg"])
-        .arg(out);
+        // One file, by its name as it is: without `-update` a `%d` in it
+        // would be the number of the frame.
+        .args(["-frames:v", "1", "-q:v", "2", "-update", "1", "-f", "image2", "-c:v", "mjpeg"])
+        .arg(&out);
     let result = run(detect).and_then(|()| run(average));
     let _ = std::fs::remove_file(&transforms);
     result
@@ -71,7 +81,8 @@ fn frame_count(motion: &Path) -> Result<u32> {
     }
 }
 
-/// A path inside a filter graph, where `:` and `\` mean something.
+/// A file name inside a filter's options, where `:`, `'` and `\` mean
+/// something.
 fn filter_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "\\\\").replace(':', "\\:").replace('\'', "\\'")
 }
@@ -97,7 +108,7 @@ mod tests {
 
     /// A few seconds of a square moving across a still grey frame.
     fn motion(dir: &Path) -> std::path::PathBuf {
-        let path = dir.join("IMG_0001.MOV");
+        let path = dir.join("IMG 50%off [1].MOV");
         let status = Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=160x120:d=1:r=30", "-vf"])
             .arg("drawbox=x=t*120:y=40:w=30:h=30:c=white:t=fill")
@@ -114,8 +125,11 @@ mod tests {
         if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
             return;
         }
-        let dir = std::env::temp_dir().join(format!("pinhole-effects-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let top = std::env::temp_dir().join(format!("pinhole-effects-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        // Names ffmpeg would read as its own syntax, were they given to it
+        // as they are: a filter graph's, an image sequence's.
+        let dir = top.join("Photos, 50%d [old]; 'x'");
         std::fs::create_dir_all(&dir).unwrap();
         let motion = motion(&dir);
         assert_eq!(frame_count(&motion).unwrap(), 30);
@@ -124,10 +138,10 @@ mod tests {
         bounce(&motion, &bounced).unwrap();
         assert_eq!(frame_count(&bounced).unwrap(), 60);
 
-        let long = dir.join("long.jpg");
+        let long = dir.join("long 50%d.jpg");
         long_exposure(&motion, &long).unwrap();
         assert!(std::fs::read(&long).unwrap().starts_with(&[0xFF, 0xD8]));
-        assert!(!dir.join("long.trf").exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3, "only the motion, the bounce and the long exposure");
+        let _ = std::fs::remove_dir_all(&top);
     }
 }

@@ -102,15 +102,18 @@ make)
   printf '%s\n' "$icons" >"$next/icons.theme"
   printf 'photo=%s\nname=%s\n' "${photo##*/}" "$name" >"$next/$MARK"
   # The photo as the background: upright, at most a 4K screen's size.
-  magick "$photo[0]" -auto-orient -resize '3840x3840>' -quality 92 "$next/backgrounds/$name.jpg"
+  # Files through stdin and stdout, so no name (a folder's photo's) is
+  # read as ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
+  magick -[0] -auto-orient -resize '3840x3840>' -quality 92 jpg:- <"$photo" >"$next/backgrounds/$name.jpg"
   # The preview the theme picker shows: the photo, its palette along the
   # bottom.
   swatches=()
   for colour in "$@"; do
     swatches+=(-size 100x56 "xc:$colour")
   done
-  magick "$next/backgrounds/$name.jpg" -resize '1280x720^' -gravity center -extent 1280x720 \
-    \( "${swatches[@]}" +append -resize '1280x56!' \) -gravity south -composite "$next/preview.png"
+  magick - -resize '1280x720^' -gravity center -extent 1280x720 \
+    \( "${swatches[@]}" +append -resize '1280x56!' \) -gravity south -composite png:- \
+    <"$next/backgrounds/$name.jpg" >"$next/preview.png"
   was="$next.was"
   [[ ! -d $THEMES/$name ]] || mv "$THEMES/$name" "$was"
   mv "$next" "$THEMES/$name"

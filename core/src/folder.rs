@@ -427,10 +427,12 @@ impl FolderSource {
         if big {
             magick.args(["-define", &format!("jpeg:size={}x{}", edge * 2, edge * 2)]);
         }
+        // On stdin, as jpeg.rs reads it: a name is never taken for
+        // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it).
+        let file = File::open(&path).with_context(|| format!("could not make an image of {rel}"))?;
         let output = magick
-            .arg(format!("{}[0]", path.display()))
-            .args(["-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
-            .stdin(Stdio::null())
+            .args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"])
+            .stdin(file)
             .output()
             .context("running magick")?;
         if output.stdout.is_empty() {
@@ -719,6 +721,48 @@ mod tests {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn thumbnails_are_made_whatever_the_files_are_called() {
+        let has = |program: &str| std::process::Command::new(program).arg("-version").stdout(Stdio::null()).status().is_ok_and(|s| s.success());
+        if !has("magick") || !has("ffmpeg") {
+            return;
+        }
+        // Names ImageMagick reads as its own syntax when given them as
+        // they are: `%d`/`%o` as a frame's number, `[1]` as which frame,
+        // `*` as many files, `heic:` as a format. In a folder of such a
+        // name too.
+        let top = temp("names");
+        let dir = top.join("Sale 50%d [1]");
+        std::fs::create_dir_all(&dir).unwrap();
+        let photos = ["50%off.jpg", "IMG [1]*.png", "x%03d.JPG", "heic:odd.jpg", "@list.jpg", "100% done.jpeg"];
+        for name in photos {
+            let format = if name.ends_with(".png") { "png:-" } else { "jpg:-" };
+            let made = std::process::Command::new("magick").args(["-size", "640x480", "xc:#c82828", format]).output().unwrap();
+            std::fs::write(dir.join(name), made.stdout).unwrap();
+        }
+        // Another file a pattern of them would also be.
+        image::RgbImage::from_pixel(64, 64, image::Rgb([40, 200, 40])).save(dir.join("500ff.jpg")).unwrap();
+        let video = "clip 50%d [1].mov";
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=d=1:s=320x240:r=10", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov"])
+            .arg(dir.join(video))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let source = FolderSource::new(dir.clone());
+        for name in photos.iter().chain([&video]) {
+            let jpeg = source.render(name, 64).unwrap_or_else(|e| panic!("{name}: {e:#}"));
+            let picture = image::load_from_memory(&jpeg).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(picture.width().max(picture.height()), 64, "{name}");
+            if *name != video {
+                // Its own pixels, not another file's.
+                let p = picture.to_rgb8().get_pixel(32, 24).0;
+                assert!(p[0] > 150 && p[1] < 100, "{name}: {p:?}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&top);
     }
 
     #[test]

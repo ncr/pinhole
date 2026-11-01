@@ -745,8 +745,14 @@ async fn jpeg(args: &[String]) -> Result<()> {
                 // Written aside, under a name of its own, and moved: two at
                 // once never clash, and a half-made one is never taken.
                 let part = out.with_extension(format!("{}.{k}.part", std::process::id()));
+                // The file in on stdin and the JPEG out on stdout: a
+                // folder's file name is never read as ImageMagick's own
+                // syntax ("50%off.jpg" is "500ff.jpg" to it). Its first
+                // image: one JPEG of an animated GIF.
+                let input = std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
+                let output = std::fs::File::create(&part).with_context(|| format!("writing {}", part.display()))?;
                 let mut magick = tokio::process::Command::new("magick");
-                magick.arg(&path).args(["-quality", "92"]).arg(format!("jpg:{}", part.display()));
+                magick.args(["-[0]", "-quality", "92", "jpg:-"]).stdin(input).stdout(output);
                 // Gone with this, should it be stopped.
                 unsafe {
                     magick.pre_exec(|| {
@@ -754,8 +760,8 @@ async fn jpeg(args: &[String]) -> Result<()> {
                         Ok(())
                     });
                 }
-                let status = magick.kill_on_drop(true).status().await?;
-                if !status.success() {
+                let status = magick.kill_on_drop(true).status().await;
+                if !status.as_ref().is_ok_and(|s| s.success()) {
                     let _ = std::fs::remove_file(&part);
                     bail!("magick could not convert {}", path.display());
                 }
