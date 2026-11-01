@@ -13,7 +13,9 @@
 #   rendition: its cache name, which an edit changes, or for a folder's own
 #   file its time and size; so an edited photo set again is kept anew, and
 #   the same one is the same file. Written aside and renamed, so the shell
-#   never reads half a file. Then the folder pruned (see prune).
+#   never reads half a file. Its name added to the folder's record of what
+#   keep wrote, then the folder pruned (see prune). Refused if the folder
+#   is a link: Pinhole keeps, and prunes, only a folder of its own.
 #
 # background current
 #   The theme's name, then the background set now ("" if none): the shell's
@@ -57,63 +59,125 @@ selected() { timeout 2 "$shell" shell selectedBackground 2>/dev/null || true; }
 
 # How many stay in the folder whatever uses them, the newest.
 KEPT=12
-# All but the newest KEPT in <folder> (by when each was kept, its ctime: a
-# linked one's mtime is its photo's), never <keep> nor one in use: the
-# background set now, one a theme remembers to bring back (omarchy-theme-set
-# keeps its path in theme-backgrounds/<theme>), one a link points at.
+# What keep wrote into the folder, a name a line, the newest last: all that
+# is ever pruned. A file put there any other way (by hand, or moved over
+# from where they were kept at first) is in no record, and stays.
+RECORD=.pinhole-kept
+
+# <folder>'s record made the lines on stdin, written aside and renamed.
+record() {
+  next=$(mktemp -- "$1/$RECORD.XXXXXX.part")
+  cat > "$next"
+  mv -f -- "$next" "$1/$RECORD"
+}
+
+# Every file in use, by its real path: <keep>, the background set now, one a
+# theme remembers to bring back (omarchy-theme-set keeps its path in
+# theme-backgrounds/<theme>), and any a link in Omarchy's backgrounds, its
+# themes or the current theme leads to, through linked folders too (stow's
+# ~/.config/omarchy/backgrounds, a theme that is a working copy elsewhere),
+# as Omarchy's own scripts look, with find -L.
+in_use() {
+  {
+    echo "$1"
+    readlink -f "$state/current/background" 2>/dev/null || true
+    selected
+    cat "$state"/theme-backgrounds/* 2>/dev/null || true
+    find -L "$home/.config/omarchy/backgrounds" "$home/.config/omarchy/themes" "$state/current" \
+      -maxdepth 3 -type f -exec readlink -f {} + 2>/dev/null || true
+  } | while IFS= read -r path; do
+    [ -z "$path" ] || readlink -f -- "$path" 2>/dev/null || true
+  done
+}
+
+# Of the names in <folder>'s record, all but the newest KEPT deleted, never
+# <keep> nor one in use; one whose file is gone left out of it.
 prune() {
   folder=$1 keep=$2
-  [ -d "$folder" ] || return 0
-  used=$(
-    {
-      echo "$keep"
-      readlink -f "$state/current/background" 2>/dev/null || true
-      selected
-      cat "$state"/theme-backgrounds/* 2>/dev/null || true
-      find "$home/.config/omarchy/backgrounds" "$home/.config/omarchy/themes" "$state/current" \
-        -maxdepth 3 -type l -exec readlink -f {} \; 2>/dev/null || true
-    } | while IFS= read -r path; do
-      [ -z "$path" ] || readlink -f -- "$path" 2>/dev/null || true
-    done
-  )
-  ls -tc -- "$folder" | grep -v '\.part$' | tail -n +$((KEPT + 1)) | while IFS= read -r name; do
+  if [ -L "$folder" ] || [ ! -f "$folder/$RECORD" ] || [ -L "$folder/$RECORD" ]; then
+    return 0
+  fi
+  used=$(in_use "$keep")
+  older=$(($(wc -l < "$folder/$RECORD") - KEPT))
+  n=0
+  while IFS= read -r name; do
+    n=$((n + 1))
+    case "$name" in "" | .* | */*) continue ;; esac
     file="$folder/$name"
-    if [ -f "$file" ] && [ ! -L "$file" ] && ! printf '%s\n' "$used" | grep -qxF -- "$(readlink -f -- "$file")"; then
-      rm -f -- "$file"
+    if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+      continue
     fi
-  done
+    if [ "$n" -le "$older" ] && [ -f "$file" ] && [ ! -L "$file" ] \
+      && ! printf '%s\n' "$used" | grep -qxF -- "$(readlink -f -- "$file")"; then
+      rm -f -- "$file"
+      continue
+    fi
+    printf '%s\n' "$name"
+  done < "$folder/$RECORD" | record "$folder"
+}
+
+# Whether <name> is one keep wrote in Pictures/Pinhole/Backgrounds, where
+# they were kept at first: the photo's name, when it was taken, maybe Live
+# or Bounce and the rendition's few characters, and a background's
+# extension.
+ours() {
+  case "${1##*.}" in jpg | png | webp | gif | bmp | mp4 | m4v | mov | webm | mkv | avi) ;; *) return 1 ;; esac
+  stamp='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9].[0-9][0-9].[0-9][0-9]'
+  case "${1%.*}" in
+    ?*" "$stamp | ?*" "$stamp" Live" | ?*" "$stamp" Bounce") return 0 ;;
+    ?*" "$stamp" "?????? | ?*" "$stamp" Live "?????? | ?*" "$stamp" Bounce "??????) return 0 ;;
+  esac
+  return 1
 }
 
 case "${1:-}" in
 keep)
   from=$2 dir=$3 name=$4 extension=$5 own=$6
+  case "$name/$extension" in
+    */*/* | *"
+"*) echo "Not a name for a background: $name.$extension" >&2; exit 2 ;;
+  esac
+  # A test's folder in its home, really: not through a link out of it.
   if [ -n "${PINHOLE_OMARCHY_HOME:-}" ]; then
-    case "$dir" in
-      "$home"/*) ;;
+    case "$(realpath -m -- "$dir")" in
+      "$(cd "$home" && pwd -P)"/*) ;;
       *) echo "Refused: a test keeps its backgrounds in its own home (PINHOLE_OMARCHY_HOME), not $dir" >&2; exit 2 ;;
     esac
   fi
+  if [ -L "$dir" ]; then
+    echo "Refused: $dir is a link; Pinhole keeps its backgrounds only in a folder of its own" >&2
+    exit 2
+  fi
   # Kept in Pictures/Pinhole/Backgrounds at first, where a folder source of
-  # Pictures showed them as photos: moved, with Omarchy's link and what its
-  # themes remember.
+  # Pictures showed them as photos: those moved, with Omarchy's link and
+  # what its themes remember; anything else there left as it is.
   old="${dir%/*}/Backgrounds"
-  if [ -d "$old" ]; then
+  if [ -d "$old" ] && [ ! -L "$old" ]; then
     mkdir -p "$dir"
-    for file in "$old"/*; do
-      [ -f "$file" ] && mv -n -- "$file" "$dir/"
-    done
-    for remembered in "$state"/theme-backgrounds/*; do
-      [ -f "$remembered" ] && sed -i "s|^$old/|$dir/|" "$remembered"
-    done
     shown=$(readlink -f "$state/current/background" 2>/dev/null || true)
-    case "$shown" in
-      "$old"/*) "$bg_set" "$dir/${shown##*/}" || true ;;
-    esac
+    for file in "$old"/*; do
+      each=${file##*/}
+      if [ ! -f "$file" ] || [ -L "$file" ] || ! ours "$each" || [ -e "$dir/$each" ]; then
+        continue
+      fi
+      real=$(readlink -f -- "$file")
+      mv -n -- "$file" "$dir/"
+      for remembered in "$state"/theme-backgrounds/*; do
+        if [ -f "$remembered" ] && [ "$(cat "$remembered")" = "$real" ]; then
+          printf '%s\n' "$dir/$each" > "$remembered"
+        fi
+      done
+      if [ "$shown" = "$real" ]; then
+        "$bg_set" "$dir/$each" || true
+      fi
+    done
     rmdir "$old" 2>/dev/null || true
   fi
   # What a keep stopped halfway left (a plugin loaded again kills it before
   # it can tidy up): written to no more for a minute.
-  [ -d "$dir" ] && find "$dir" -maxdepth 1 -name '*.part' -mmin +1 -delete
+  if [ -d "$dir" ]; then
+    find "$dir" -maxdepth 1 -type f \( -name '* *.part' -o -name "$RECORD.*.part" \) -mmin +1 -delete
+  fi
   stem=${from##*/}
   stem=${stem%.*}
   if [ "$own" = own ]; then
@@ -122,7 +186,9 @@ keep)
   else
     tag=$(printf '%s' "$stem" | cut -c2-7)
   fi
-  kept="$dir/$name $tag.$extension"
+  base="$name $tag.$extension"
+  kept="$dir/$base"
+  wrote=
   if [ ! -s "$kept" ]; then
     mkdir -p "$dir"
     part="$kept.part"
@@ -135,6 +201,11 @@ keep)
       *) ln -- "$from" "$part" 2>/dev/null || cp -- "$from" "$part" ;;
     esac
     mv -f -- "$part" "$kept"
+    wrote=1
+  fi
+  # Recorded as written, or as the newest again if it was.
+  if [ -n "$wrote" ] || grep -qxF -- "$base" "$dir/$RECORD" 2>/dev/null; then
+    { grep -vxF -- "$base" "$dir/$RECORD" 2>/dev/null || true; printf '%s\n' "$base"; } | record "$dir"
   fi
   prune "$dir" "$kept"
   echo "$kept"
@@ -170,7 +241,7 @@ set)
   ;;
 size)
   dir=$2
-  count=$(find "$dir" -maxdepth 1 -type f ! -name '*.part' 2>/dev/null | wc -l)
+  count=$(find "$dir" -maxdepth 1 -type f ! -name '*.part' ! -name '.*' 2>/dev/null | wc -l)
   bytes=$(du -sb -- "$dir" 2>/dev/null | cut -f1)
   echo "$count ${bytes:-0}"
   ;;

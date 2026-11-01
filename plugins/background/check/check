@@ -1,0 +1,145 @@
+#!/bin/sh
+# The background script's pruning checked: plugins/background/check/check.
+# Each case in a home of its own (PINHOLE_OMARCHY_HOME) with stand-ins for
+# Omarchy's shell and omarchy-theme-bg-set, and decoys of both first on
+# PATH that only say they were called: never the desktop's. Whatever the
+# user put in reach (a file by hand, a linked .backgrounds, a link in a
+# linked theme or backgrounds folder, a file in the old Backgrounds) must
+# stay; only what keep wrote goes, all but the newest 12. Exits 1 if
+# anything is off.
+set -eu
+
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+script="$HERE/../background"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+failed=0
+ok() { echo "ok   $1"; }
+fail() { echo "FAIL $1"; failed=1; }
+check() { if eval "$1"; then ok "$2"; else fail "$2"; fi; }
+
+# Stand-ins, and decoys on PATH that log any call.
+mkdir -p "$work/stubs" "$work/decoys"
+cat > "$work/stubs/omarchy-shell" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "shell selectedBackground" ] && cat "$PINHOLE_OMARCHY_HOME/selected" 2>/dev/null
+exit 0
+EOF
+cat > "$work/stubs/omarchy-theme-bg-set" <<'EOF'
+#!/bin/sh
+b=$(realpath -- "$1") && [ -f "$b" ] || exit 1
+mkdir -p "$PINHOLE_OMARCHY_HOME/.local/state/omarchy/current"
+ln -nsf -- "$b" "$PINHOLE_OMARCHY_HOME/.local/state/omarchy/current/background"
+EOF
+for decoy in omarchy-shell omarchy-theme-bg-set omarchy-theme-set; do
+  printf '#!/bin/sh\necho "%s $*" >> "%s/decoys.log"\nexit 1\n' "$decoy" "$work" > "$work/decoys/$decoy"
+done
+chmod +x "$work/stubs/"* "$work/decoys/"*
+export PATH="$work/decoys:$PATH" PINHOLE_OMARCHY_STUBS="$work/stubs"
+
+# A home: its Omarchy, its Pictures/Pinhole/.backgrounds ($D), and photos
+# in its cache to keep.
+fresh() {
+  H="$work/$1"
+  mkdir -p "$H/.local/state/omarchy/current/theme/backgrounds" "$H/.local/state/omarchy/theme-backgrounds" \
+    "$H/.config/omarchy/backgrounds" "$H/.config/omarchy/themes" "$H/Pictures/Pinhole" "$H/cache"
+  echo test > "$H/.local/state/omarchy/current/theme.name"
+  D="$H/Pictures/Pinhole/.backgrounds"
+  export PINHOLE_OMARCHY_HOME="$H"
+}
+# keep <n>: the nth photo kept, its path said; its name p<n>.
+keep() {
+  from="$H/cache/x$(printf '%06d' "$1")abc.png"
+  [ -f "$from" ] || head -c 64 /dev/urandom > "$from"
+  sh "$script" keep "$from" "$D" "p$1" png cached
+}
+user() { mkdir -p "${1%/*}" && echo "the user's own" > "$1"; }
+
+# Kept by keep: the newest 12 stay, the rest go; a file by hand, even one
+# named as keep names them, and one the record names out of the folder
+# stay.
+fresh plain
+user "$D/mine.jpg"
+user "$D/IMG_0001 2024-01-01 10.00.00 abcdef.jpg"
+user "$H/Pictures/elsewhere.png"
+first=$(keep 1)
+check '[ "$first" = "$D/p1 000001.png" ]' "keep says the file it kept"
+i=2; while [ $i -le 15 ]; do keep $i > /dev/null; i=$((i + 1)); done
+printf '../elsewhere.png\n' | cat - "$D/.pinhole-kept" > "$work/r" && mv "$work/r" "$D/.pinhole-kept"
+keep 16 > /dev/null
+check '[ $(ls "$D" | grep -c "^p") -eq 12 ] && [ ! -e "$D/p4 000004.png" ] && [ -e "$D/p5 000005.png" ]' "the newest 12 kept stay, the rest go"
+check '[ $(wc -l < "$D/.pinhole-kept") -eq 12 ]' "the record names those 12"
+check '[ -f "$D/mine.jpg" ] && [ -f "$D/IMG_0001 2024-01-01 10.00.00 abcdef.jpg" ]' "files put in the folder by hand stay"
+check '[ -f "$H/Pictures/elsewhere.png" ]' "a name in the record out of the folder is not followed"
+check '[ "$(sh "$script" size "$D")" = "14 $(du -sb "$D" | cut -f1)" ]' "size counts the files there, not the record"
+
+# In use: the one set now, one a theme remembers, the shell's choice.
+fresh used
+first=$(keep 1); second=$(keep 2); third=$(keep 3)
+ln -s "$first" "$H/.local/state/omarchy/current/background"
+echo "$second" > "$H/.local/state/omarchy/theme-backgrounds/other"
+echo "$third" > "$H/selected"
+i=4; while [ $i -le 20 ]; do keep $i > /dev/null; i=$((i + 1)); done
+check '[ -f "$first" ] && [ -f "$second" ] && [ -f "$third" ] && [ ! -e "$D/p4 000004.png" ]' "one set, one a theme remembers, the shell's choice stay"
+
+# .backgrounds a link to the user's Wallpapers: refused, nothing touched.
+fresh linked
+i=1; while [ $i -le 15 ]; do user "$H/Wallpapers/w$i 2024-01-01 10.00.00.jpg"; i=$((i + 1)); done
+printf 'w1 2024-01-01 10.00.00.jpg\n' > "$H/Wallpapers/.pinhole-kept"
+ln -s "$H/Wallpapers" "$D"
+if keep 1 > /dev/null 2> "$work/err"; then fail "keep into a linked .backgrounds refused"; else ok "keep into a linked .backgrounds refused: $(cat "$work/err")"; fi
+check '[ $(ls "$H/Wallpapers" | wc -l) -eq 15 ] && [ ! -e "$H/Wallpapers/p1 000001.png" ]' "the user's Wallpapers as they were"
+
+# A theme that is a working copy elsewhere, linked into themes/, and
+# Omarchy's backgrounds a stow link: links in them to kept files hold
+# those, however deep in linked folders.
+fresh stowed
+first=$(keep 1); second=$(keep 2)
+mkdir -p "$H/src/mytheme/backgrounds" "$H/dotfiles/backgrounds/test"
+ln -s "$first" "$H/src/mytheme/backgrounds/kept.png"
+ln -s "$H/src/mytheme" "$H/.config/omarchy/themes/mytheme"
+ln -s "$second" "$H/dotfiles/backgrounds/test/kept.png"
+rmdir "$H/.config/omarchy/backgrounds"
+ln -s "$H/dotfiles/backgrounds" "$H/.config/omarchy/backgrounds"
+ln -s "$H/src/mytheme" "$H/src/mytheme/backgrounds/loop"
+i=3; while [ $i -le 20 ]; do keep $i > /dev/null; i=$((i + 1)); done
+check '[ -f "$first" ]' "a kept file a linked theme's link leads to stays"
+check '[ -f "$second" ]' "a kept file a link in a linked backgrounds folder leads to stays"
+check '[ ! -e "$D/p3 000003.png" ]' "the rest still pruned (a folder loop in a theme notwithstanding)"
+
+# Moved over from Pictures/Pinhole/Backgrounds: only what keep named so,
+# with what Omarchy and its themes remember; the user's own left there, and
+# what was moved never pruned, as no record names it.
+fresh moved
+old="$H/Pictures/Pinhole/Backgrounds"
+user "$old/IMG_1 2024-01-02 03.04.05.jpg"
+user "$old/IMG_2 2024-01-02 03.04.05 Live.mov"
+user "$old/IMG_3 2024-01-02 03.04.05 Bounce 1a2b3c.mkv"
+user "$old/holiday.jpg"
+user "$old/notes.txt"
+user "$old/IMG_4 2024-01-02.jpg"
+ln -s "$old/IMG_1 2024-01-02 03.04.05.jpg" "$H/.local/state/omarchy/current/background"
+echo "$old/IMG_2 2024-01-02 03.04.05 Live.mov" > "$H/.local/state/omarchy/theme-backgrounds/other"
+echo "$old/holiday.jpg" > "$H/.local/state/omarchy/theme-backgrounds/mine"
+keep 1 > /dev/null
+check '[ -f "$D/IMG_1 2024-01-02 03.04.05.jpg" ] && [ -f "$D/IMG_2 2024-01-02 03.04.05 Live.mov" ] && [ -f "$D/IMG_3 2024-01-02 03.04.05 Bounce 1a2b3c.mkv" ]' "keep's own moved over"
+check '[ -f "$old/holiday.jpg" ] && [ -f "$old/notes.txt" ] && [ -f "$old/IMG_4 2024-01-02.jpg" ] && [ $(ls "$old" | wc -l) -eq 3 ]' "the user's own left in the old folder"
+check '[ "$(readlink -f "$H/.local/state/omarchy/current/background")" = "$D/IMG_1 2024-01-02 03.04.05.jpg" ]' "the background set now follows it"
+check '[ "$(cat "$H/.local/state/omarchy/theme-backgrounds/other")" = "$D/IMG_2 2024-01-02 03.04.05 Live.mov" ] && [ "$(cat "$H/.local/state/omarchy/theme-backgrounds/mine")" = "$old/holiday.jpg" ]' "what a theme remembers follows; the user's own as it was"
+rm "$H/.local/state/omarchy/current/background" "$H/.local/state/omarchy/theme-backgrounds/other"
+i=2; while [ $i -le 20 ]; do keep $i > /dev/null; i=$((i + 1)); done
+check '[ $(ls "$D" | wc -l) -eq 15 ] && [ -f "$D/IMG_1 2024-01-02 03.04.05.jpg" ]' "what was moved over is never pruned"
+
+# A test's folder only in its home: not beside it, not through a link out.
+fresh guarded
+user "$work/victim/v.png"
+user "$H/cache/g.png"
+if sh "$script" keep "$H/cache/g.png" "$H/../victim" p png cached > /dev/null 2>&1; then fail "a folder beside the test's home refused"; else ok "a folder beside the test's home refused"; fi
+ln -s "$work/victim" "$H/out"
+if sh "$script" keep "$H/cache/g.png" "$H/out/.backgrounds" p png cached > /dev/null 2>&1; then fail "a folder through a link out of the test's home refused"; else ok "a folder through a link out of the test's home refused"; fi
+check '[ "$(ls -A "$work/victim")" = v.png ]' "nothing written or pruned out of the test's home"
+
+check '[ ! -s "$work/decoys.log" ]' "Omarchy's own shell and scripts never called"
+[ ! -s "$work/decoys.log" ] || cat "$work/decoys.log"
+if [ $failed -eq 0 ]; then echo "background check: ok"; else echo "background check: FAILED"; fi
+exit $failed

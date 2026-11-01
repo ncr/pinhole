@@ -1663,6 +1663,28 @@ void runThemeSelfTest(QQuickWindow *window, const Library &library, Viewer &view
     loaded->start();
 }
 
+// A plugin's own check of its script, plugins/<plugin>/check/check, which
+// works in homes of its own: run to its end, what it says said. Found in
+// PINHOLE_BUILTIN_PLUGINS, else in the checkout this window was built in.
+static bool pluginCheckPasses(const QString &plugin, const std::function<void(const QString &)> &say) {
+    const QString name = plugin + "/check/check";
+    QString check;
+    for (const QString &dir : {qEnvironmentVariable("PINHOLE_BUILTIN_PLUGINS"), QCoreApplication::applicationDirPath() + "/../../plugins"})
+        if (check.isEmpty() && !dir.isEmpty() && QFileInfo::exists(dir + '/' + name))
+            check = QDir::cleanPath(dir + '/' + name);
+    if (check.isEmpty()) {
+        say(QStringLiteral("no plugins/%1 here (WRONG)").arg(name));
+        return false;
+    }
+    QProcess process;
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start(QFileInfo(check).absoluteFilePath(), {});
+    const bool ran = process.waitForFinished(180000);
+    for (const QString &line : QString::fromUtf8(process.readAll()).split('\n', Qt::SkipEmptyParts))
+        say(plugin + ": " + line);
+    return ran && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
+
 void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &folder) {
     auto say = [](const QString &line) {
         std::printf("selftest: %s\n", qPrintable(line));
@@ -1707,7 +1729,11 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
         });
         poll->start();
     };
+    // Then the script's pruning, each case in a home of its own
+    // (plugins/background/check/check): whatever the user put in reach
+    // stays.
     auto finish = [=] {
+        *failed = !pluginCheckPasses(QStringLiteral("background"), say) || *failed;
         say(*failed ? QStringLiteral("FAILED") : QStringLiteral("ok"));
         QCoreApplication::exit(*failed ? 1 : 0);
     };

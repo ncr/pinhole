@@ -76,7 +76,8 @@ a video becomes a moving one, and on a Live Photo V its motion, as taken or
 as its Loop, and ⇧V its Bounce (both also under ▾, ⇧B). In Series' studio,
 B makes the video just made the background. Each is kept in
 Pictures/Pinhole/.backgrounds, hidden from a folder source: the newest 12,
-and any set now or a theme will bring back. Ctrl+Z puts the one before back.
+and any set now or a theme will bring back; a file put there otherwise is
+never removed. Ctrl+Z puts the one before back.
 
 Year calendar (Y in the grid) shows every day of every year as a square in
 the theme's accent, brighter the more photos it has, one row of weeks a

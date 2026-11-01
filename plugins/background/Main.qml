@@ -12,9 +12,10 @@ import Pinhole.Plugin
 // to bring back after a switch to another theme and back, so it has to
 // outlast a cache clean. Hidden, as a folder source of Pictures would show
 // each one beside its photo. Each is a step of Pinhole's history: Ctrl+Z
-// puts back the background before it. The folder is pruned as one is kept:
-// the newest 12 stay, and any in use or a theme will bring back (see
-// `background keep`).
+// puts back the background before it. The folder is pruned as one is kept,
+// of what `background keep` wrote there alone: the newest 12 stay, and any
+// in use or a theme will bring back; a file put there otherwise stays, and
+// a .backgrounds that is a link is not used at all.
 PinholePlugin {
     id: plugin
 
