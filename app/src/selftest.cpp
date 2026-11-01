@@ -1178,23 +1178,61 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
             auto *button = action ? action->property("button").value<QQuickItem *>() : nullptr;
             const qreal pad = t->property("pad").toReal();
             const QRectF hole(t->property("hx").toReal(), t->property("hy").toReal(), t->property("hw").toReal(), t->property("hh").toReal());
+            // What the step says it lights, first of: its settings (the
+            // plugin's part of the side panel), its action's button, its
+            // photo's card in the grid (the viewer not over it); else
+            // nothing, and then the light is closed.
+            const QVariant stepValue = t->property("step");
+            const QVariant stepMap = stepValue.metaType() == QMetaType::fromType<QJSValue>() ? stepValue.value<QJSValue>().toVariant() : stepValue;
+            const bool settings = stepMap.toMap().value(QStringLiteral("settings")).toBool();
+            const int photo = t->property("photo").toInt();
+            auto *grid = t->property("grid").value<QQuickItem *>();
+            QObject *photoViewer = t->property("photoViewer").value<QObject *>();
+            const bool covered = photoViewer && photoViewer->property("shown").toBool();
+            QString what, where;
             QRectF want;
-            if (button && button->isVisible() && button->width() > 0) {
-                want = QRectF(button->mapToItem(tourItem, QPointF(0, 0)), button->size()).adjusted(-pad, -pad, pad, pad);
+            if (settings) {
+                what = QStringLiteral("its settings");
+                auto *part = t->property("panelPart").value<QQuickItem *>();
+                where = part ? QStringLiteral("the side panel") : QStringLiteral("not in the side panel");
+                if (part && part->isVisible() && part->width() > 0)
+                    want = QRectF(part->mapToItem(tourItem, QPointF(0, 0)), part->size());
+            } else if (action) {
+                what = action->property("text").toString();
+                if (what.isEmpty())
+                    what = QStringLiteral("its action");
+                where = !button ? QStringLiteral("no button") : button->objectName().isEmpty() ? QStringLiteral("its button") : button->objectName();
+                if (button && button->isVisible() && button->width() > 0)
+                    want = QRectF(button->mapToItem(tourItem, QPointF(0, 0)), button->size());
+            } else if (photo >= 0) {
+                what = QStringLiteral("photo %1").arg(photo);
+                where = covered ? QStringLiteral("under the viewer") : QStringLiteral("the grid");
+                QRectF card;
+                if (grid)
+                    QMetaObject::invokeMethod(grid, "rectOf", Q_RETURN_ARG(QRectF, card), Q_ARG(int, photo));
+                if (grid && !covered && card.width() > 0)
+                    want = grid->mapRectToItem(tourItem, card);
+            } else {
+                what = QStringLiteral("nothing");
+                where = QStringLiteral("no light");
+            }
+            if (!want.isNull()) {
+                want.adjust(-pad, -pad, pad, pad);
                 if (*shownAfter < 0)
                     *shownAfter = stepClock->elapsed();
             }
-            const bool landed = t->property("lit").toBool() && !want.isNull()
-                                && std::abs(hole.x() - want.x()) + std::abs(hole.y() - want.y())
-                                           + std::abs(hole.width() - want.width()) + std::abs(hole.height() - want.height()) < 2;
+            const bool lit = t->property("lit").toBool();
+            const bool landed = what == QLatin1String("nothing")
+                                    ? !lit && hole.width() + hole.height() < 2
+                                    : lit && !want.isNull()
+                                          && std::abs(hole.x() - want.x()) + std::abs(hole.y() - want.y())
+                                                     + std::abs(hole.width() - want.width()) + std::abs(hole.height() - want.height()) < 2;
             if (landed && *landedAfter < 0)
                 *landedAfter = stepClock->elapsed();
             if ((!landed && stepClock->elapsed() < 10000) || stepClock->elapsed() < dwell)
                 return;
-            const QString name = button ? button->objectName() : QStringLiteral("no button");
-            check(landed, QStringLiteral("step %1 of %2: the light on %3 (%4), landed after %5 ms, the button there after %6 ms, viewer %7")
-                              .arg(*at + 1).arg(steps).arg(action ? action->property("text").toString() : QStringLiteral("none"),
-                                                           name.isEmpty() ? QStringLiteral("its button") : name)
+            check(landed, QStringLiteral("step %1 of %2: the light on %3 (%4), landed after %5 ms, what it lights there after %6 ms, viewer %7")
+                              .arg(*at + 1).arg(steps).arg(what, where)
                               .arg(*landedAfter).arg(*shownAfter).arg(viewer.isOpen() ? "open" : "closed"));
             *shownAfter = *landedAfter = -1;
             grab(QStringLiteral("%1-step-%2").arg(only).arg(*at + 1));
