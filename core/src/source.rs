@@ -207,6 +207,11 @@ pub enum FetchError {
     Expired,
     /// The source has no such file.
     NotFound(String),
+    /// The file is there, but what makes an image of it turned it down
+    /// (render::Rejected: damaged, cut short, a kind its decoder does not
+    /// know). That is the file's alone, never the source's health; and it
+    /// is not made again until it changes (`unreadable`).
+    Unreadable(String),
     /// Anything else; `Source::health` tells what it says about the
     /// connection.
     Failed(anyhow::Error),
@@ -216,15 +221,59 @@ impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FetchError::Expired => write!(f, "the link expired"),
-            FetchError::NotFound(what) => write!(f, "{what}"),
+            FetchError::NotFound(what) | FetchError::Unreadable(what) => write!(f, "{what}"),
             FetchError::Failed(e) => write!(f, "{e:#}"),
         }
     }
 }
 
+/// `Unreadable` when a program turned the file down, else `Failed`.
 impl From<anyhow::Error> for FetchError {
     fn from(e: anyhow::Error) -> Self {
-        FetchError::Failed(e)
+        if crate::render::rejected(&e) {
+            FetchError::Unreadable(format!("{e:#}"))
+        } else {
+            FetchError::Failed(e)
+        }
+    }
+}
+
+/// How long a file turned down (`FetchError::Unreadable`) is not made
+/// again, unless it changes first (and so its key does): a program
+/// updated meanwhile may make something of it.
+pub const UNREADABLE_FOR: Duration = Duration::from_secs(6 * 3600);
+
+/// Files turned down at most, kept in mind: past it, none more is.
+const UNREADABLE_MAX: usize = 100_000;
+
+/// Files turned down, by source and key: why, and when.
+static UNREADABLE: std::sync::Mutex<std::collections::BTreeMap<(String, String), (std::time::Instant, String)>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Keeps in mind that the file of `source` (its id) under `key` was turned
+/// down, and `why`.
+pub fn note_unreadable(source: &str, key: &str, why: &str) {
+    let mut all = UNREADABLE.lock().unwrap_or_else(|e| e.into_inner());
+    if all.len() >= UNREADABLE_MAX {
+        all.retain(|_, (at, _)| at.elapsed() < UNREADABLE_FOR);
+    }
+    if all.len() < UNREADABLE_MAX {
+        all.insert((source.to_owned(), key.to_owned()), (std::time::Instant::now(), why.to_owned()));
+    }
+}
+
+/// Why the file of `source` under `key` was turned down, if it was, less
+/// than `UNREADABLE_FOR` ago.
+pub fn unreadable(source: &str, key: &str) -> Option<String> {
+    let mut all = UNREADABLE.lock().unwrap_or_else(|e| e.into_inner());
+    let at = (source.to_owned(), key.to_owned());
+    match all.get(&at) {
+        Some((when, why)) if when.elapsed() < UNREADABLE_FOR => Some(why.clone()),
+        Some(_) => {
+            all.remove(&at);
+            None
+        }
+        None => None,
     }
 }
 

@@ -12,7 +12,7 @@ use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use image::RgbImage;
 
 /// Below this spread of brightness (its standard deviation, of 255) a
@@ -110,6 +110,21 @@ impl Input<'_> {
         }
         Ok(command)
     }
+
+    /// A file's, not a URL's: what goes wrong reading one says something
+    /// of the file (render::Rejected).
+    fn of_file(&self) -> bool {
+        !matches!(self, Input::Url(_))
+    }
+
+    /// `why` it made no image: the file's (render::Rejected), or a URL's.
+    fn turned_down(&self, why: String) -> anyhow::Error {
+        if self.of_file() {
+            crate::render::Rejected(why).into()
+        } else {
+            anyhow!(why)
+        }
+    }
 }
 
 /// A JPEG of the video's most telling frame, at most `edge` on the long
@@ -131,6 +146,7 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
+    let from_start = times == [0.0];
     let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
     for at in times {
@@ -151,7 +167,11 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
     }
     match best {
         Some((_, at, jpeg)) => Ok((at, jpeg)),
-        None => frame_from(input, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
+        // Not the start again, when that is what failed.
+        None => match failed {
+            Some(e) if from_start => Err(e),
+            failed => frame_from(input, 0.0, edge).map(|jpeg| (0.0, jpeg)).map_err(|e| failed.unwrap_or(e)),
+        },
     }
 }
 
@@ -164,9 +184,9 @@ fn frame_from(input: Input, at: f64, edge: u32) -> Result<Vec<u8>> {
     let scale = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
     let mut ffmpeg = input.command("ffmpeg", &["-threads", "1", "-ss", &format!("{at:.3}")])?;
     ffmpeg.args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
-    let output = crate::background::output(&mut ffmpeg).context("running ffmpeg")?;
+    let output = crate::background::output(&mut ffmpeg).map_err(|e| crate::render::failed(e, "ffmpeg", input.of_file()))?;
     if output.stdout.is_empty() {
-        return Err(anyhow!("no frame at {at:.1} s: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(input.turned_down(crate::render::said(&format!("no frame at {at:.1} s"), &output.stderr)));
     }
     Ok(output.stdout)
 }
@@ -178,7 +198,7 @@ fn duration(input: Input) -> Result<Option<f64>> {
     ffprobe.args(["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]);
     let output = match crate::background::output(&mut ffprobe) {
         Ok(output) => output,
-        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(anyhow::Error::from(e).context("running ffprobe")),
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(crate::render::failed(e, "ffprobe", input.of_file())),
         Err(_) => return Ok(None),
     };
     Ok(String::from_utf8_lossy(&output.stdout).trim().parse().ok().filter(|d: &f64| d.is_finite()))

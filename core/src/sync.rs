@@ -165,7 +165,8 @@ enum ThumbResult {
 /// grid's starting screen fills first: from the file already on disk under
 /// its key when there is one, else read through the source (iCloud's are
 /// downloaded, a folder's made from the photo). A ticket that turns out
-/// stale is prepared again, once. `stop` true gives up with `Stopped`
+/// stale is prepared again, once; a file turned down is not tried again
+/// until it changes (source::unreadable). `stop` true gives up with `Stopped`
 /// once the thumbnails under way are in; the rest are made next time.
 pub fn make_thumbs(
     source: &dyn Source,
@@ -186,8 +187,15 @@ pub fn make_thumbs(
         let rows = stmt.query_map([], |r| {
             Ok(Stored { asset: r.get(0)?, want: Want::Thumb, name: r.get(1)?, key: r.get(2)?, file_type: r.get(3)? })
         })?;
+        // Not one whose file was turned down lately and has not changed
+        // since (source::unreadable): a damaged file is not made every
+        // round.
+        let id = source.id();
         for row in rows {
-            wanted.push(row?);
+            let stored = row?;
+            if crate::source::unreadable(&id, &stored.key).is_none() {
+                wanted.push(stored);
+            }
         }
     }
     let mut report = ThumbReport { wanted: wanted.len(), ..Default::default() };
@@ -334,6 +342,11 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
             Err(FetchError::Expired) if !job.retried => return ThumbResult::Expired(job),
             Err(FetchError::Expired) => return ThumbResult::Failed("the link kept expiring".into()),
             Err(FetchError::NotFound(e)) => return ThumbResult::Failed(e),
+            // The file's own: not tried again until it changes.
+            Err(FetchError::Unreadable(why)) => {
+                crate::source::note_unreadable(&source.id(), &job.stored.key, &why);
+                return ThumbResult::Failed(why);
+            }
             Err(FetchError::Failed(_)) if attempt < 3 => {
                 attempt += 1;
                 std::thread::sleep(Duration::from_secs(1 << attempt));
@@ -409,8 +422,9 @@ const COVER_MAX_BYTES: i64 = 1 << 30;
 /// black. The video is fetched as a window would play it, into the library
 /// beside its cover, and gone once the cover is made. A cover made stays,
 /// even one as dull as the video is, so no video is fetched twice; one
-/// already on disk (a library rebuilt) is used as it is. Returns how many
-/// thumbnails were replaced.
+/// already on disk (a library rebuilt) is used as it is; and a video
+/// ffmpeg turns down is not fetched again until it changes
+/// (source::unreadable). Returns how many thumbnails were replaced.
 pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
     struct Dull {
         asset: String,
@@ -457,8 +471,17 @@ pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, s
             if d.size.is_some_and(|s| s > COVER_MAX_BYTES) {
                 continue;
             }
+            // A video ffmpeg turned down lately (damaged, cut short) is
+            // not fetched again for it until it changes.
+            let id = source.id();
+            if crate::source::unreadable(&id, &d.video.key).is_some() {
+                continue;
+            }
             if let Err(e) = make_cover(source, conn, &d.video, &path, d.edge) {
                 eprintln!("cover for {}: {e:#}", d.asset);
+                if crate::render::rejected(&e) {
+                    crate::source::note_unreadable(&id, &d.video.key, &format!("{e:#}"));
+                }
                 continue;
             }
         }

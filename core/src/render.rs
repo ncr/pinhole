@@ -8,7 +8,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 
 use crate::cover::Input;
 
@@ -76,11 +76,59 @@ pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> 
     }
     magick.args(["-[0]", "-auto-orient", "-thumbnail", &fit, "-quality", "82", "jpg:-"]).stdin(stdin);
     let _slot = crate::background::slot();
-    let output = crate::background::output(&mut magick).context("running magick")?;
+    let output = crate::background::output(&mut magick).map_err(|e| failed(e, "magick", true))?;
     if output.stdout.is_empty() {
-        return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(Rejected(said("magick made no image of it", &output.stderr)).into());
     }
     Ok(output.stdout)
+}
+
+/// A file a program turned down: it ran on it and made no image (a file
+/// damaged or cut short, or of a kind its decoder does not know), or went
+/// round in circles on it (`background::spun`). That is the file's alone:
+/// the source it is in is fine, and making it again is not worth trying
+/// until it changes (`FetchError::Unreadable`, source.rs).
+#[derive(Debug)]
+pub struct Rejected(pub String);
+
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Rejected {}
+
+/// Whether a program turned the file down (`Rejected`), whatever was said
+/// of it since.
+pub fn rejected(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Rejected>().is_some()
+}
+
+/// A program of background work that failed (`background::output`): when
+/// it spun on a file (`of_file`; not a URL, whose server may be what went
+/// wrong), the file's (`Rejected`); else as it is: it could not start, or
+/// hung on what does not answer (a mount that has gone), which is the
+/// source's.
+pub(crate) fn failed(e: std::io::Error, program: &str, of_file: bool) -> anyhow::Error {
+    let spun = of_file && crate::background::spun(&e);
+    let e = anyhow::Error::from(e);
+    if spun {
+        e.context(Rejected(format!("running {program}")))
+    } else {
+        e.context(format!("running {program}"))
+    }
+}
+
+/// `what`, and what a program wrote to stderr, on one line, if anything.
+pub(crate) fn said(what: &str, stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let line = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+    match line.char_indices().nth(400) {
+        _ if line.is_empty() => what.to_owned(),
+        Some((cut, _)) => format!("{what}: {}…", &line[..cut]),
+        None => format!("{what}: {line}"),
+    }
 }
 
 /// A JPEG of a video's most telling frame, read from an HTTP URL by
@@ -153,6 +201,48 @@ mod tests {
                 assert_eq!((made.width(), made.height()), size, "{name}");
             }
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file a program makes nothing of is turned down, and says so
+    /// whatever is said of it after; a program that spins on one too. One
+    /// that hangs, or cannot start, is not the file's.
+    #[test]
+    fn a_damaged_file_is_turned_down_and_a_hung_program_is_not_its_fault() {
+        let dir = std::env::temp_dir().join(format!("pinhole-rejected-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut damaged = vec![("empty.jpg", Vec::new()), ("noise.heic", b"ftypheic but nothing after".repeat(40))];
+        if has("ffmpeg") {
+            let clip = dir.join("whole.mp4");
+            let made = Command::new("ffmpeg")
+                .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=2:size=320x180:rate=10", "-pix_fmt", "yuv420p"])
+                .arg(&clip)
+                .status()
+                .unwrap();
+            assert!(made.success());
+            // Cut short before its index (moov, at its end): no frame in it.
+            let bytes = std::fs::read(&clip).unwrap();
+            damaged.push(("cut.mp4", bytes[..bytes.len() / 2].to_vec()));
+        }
+        for (name, bytes) in damaged {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let e = render_path(&path, 480, is_video(&path)).unwrap_err().context("could not make an image of it");
+            assert!(rejected(&e), "{name}: {e:#}");
+        }
+
+        let quick = |cpu| crate::background::Limits { quiet: Duration::from_secs(1), cpu, every: Duration::from_millis(100) };
+        let mut sleeping = crate::background::command("sleep");
+        sleeping.arg("60");
+        let hung = crate::background::output_within(&mut sleeping, &quick(Duration::from_secs(60))).unwrap_err();
+        assert!(!rejected(&failed(hung, "sleep", true)));
+        let mut spinning = crate::background::command("sh");
+        spinning.args(["-c", "while :; do :; done"]);
+        let spun = crate::background::output_within(&mut spinning, &quick(Duration::from_secs(1))).unwrap_err();
+        assert!(rejected(&failed(spun, "sh", true).context("more said of it")));
+        let missing = crate::background::command("/nonexistent/magick").output().unwrap_err();
+        assert!(!rejected(&failed(missing, "magick", true)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -215,7 +215,9 @@ beyond the time of the last look. A folder that is not there (a disk not
 mounted) is an error, `offline`, never an empty library. In the same way,
 what a look cannot read (a folder without permission, a failing disk) is
 unseen, not gone: the photos the library has there stay, favourites and
-all, until a look gets through to them again.
+all, until a look gets through to them again. The folder itself unread is
+an error too, `failing`, as is a photo's file that cannot be read for
+anything but not being there.
 
 Making thumbnails is the slow part: a JPEG takes about 40 ms, but a 12 MP
 HEIC about a CPU-second to decode, in ImageMagick or vips alike. ~/Pictures
@@ -238,6 +240,17 @@ place is free, when it has done nothing for two minutes (no processor time,
 nothing read or written, not waiting for a processor: a mount that no
 longer answers), or has used five minutes of processor time (a file that
 sends a decoder round in circles).
+
+A file the program turns down (it makes no image of it, or spins on it: a
+HEIC or a video cut short, an empty JPEG) is that file's alone, never the
+folder's health: the rest of the folder is fine, and the window says
+nothing of it but that the photo could not be loaded (`unreadable`). It is
+not made again for six hours unless it changes, and so its key does (a
+program updated meanwhile may read it); pinholed keeps that in mind while
+it runs. One that hangs, a folder gone or unreadable, is the folder's:
+`offline` or `failing`, and tried again each round. The same holds for a
+provider's photos made from a file, and for an iCloud video whose cover
+(`cover.rs`) ffmpeg cannot make: it is not fetched again for one.
 
 ## Choosing a source
 

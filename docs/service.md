@@ -469,6 +469,7 @@ A cached file is answered with `path` alone.
 | `not_found` | no such asset, or it has no rendition of that kind |
 | `needs_sign_in` | the sign-in provider has no valid session |
 | `unavailable` | the source or the network failed; trying again later may work |
+| `unreadable` | the file is there, but what makes a `medium` (or thumbnail) of it turned it down: damaged or cut short. The file's alone, the health stays as it is, and asking again answers the same at once until the file changes or six hours have passed |
 | `bad_request` | unknown method or missing params |
 | `read_only` | a change asked of the service of a library given to a window (`--given`) |
 | `turned_off` | a source kind whose plugin is off (see Kinds) |

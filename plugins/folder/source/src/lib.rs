@@ -316,6 +316,11 @@ impl FolderSource {
             walk.unread.extend(self.unread_too.iter().cloned());
         }
         let mut unread = walk.unread;
+        // The folder itself unread (no permission to it): failing, and
+        // nothing of it seen. An error writes nothing, so its photos stay.
+        if unread.iter().any(String::is_empty) {
+            return Err(anyhow!("{} cannot be read", self.root.display()));
+        }
         unread.sort();
         unread.dedup();
         Ok(Look { entries: pair(walk.found), unread })
@@ -608,12 +613,14 @@ impl Source for FolderSource {
     fn prepare(&self, _index: &Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
         Ok(wanted
             .iter()
-            .map(|w| {
-                if self.root.join(&w.name).is_file() {
-                    Ok(Ticket(format!("{}\t{}", w.want.name(), w.name)))
-                } else {
-                    Err(FetchError::NotFound(format!("{} is not in {}", w.name, self.root.display())))
+            .map(|w| match std::fs::metadata(self.root.join(&w.name)) {
+                Ok(meta) if meta.is_file() => Ok(Ticket(format!("{}\t{}", w.want.name(), w.name))),
+                // Not that it is not there: the folder's (a folder without
+                // permission, a failing disk), which its health says.
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    Err(FetchError::Failed(anyhow!("{}: {e}", self.root.join(&w.name).display())))
                 }
+                _ => Err(FetchError::NotFound(format!("{} is not in {}", w.name, self.root.display()))),
             })
             .collect())
     }
@@ -660,7 +667,15 @@ impl Source for FolderSource {
             _ => None,
         };
         if let Some(edge) = edge {
-            let bytes = self.render(rel, edge)?;
+            // Turned down by the program that makes it, the file's alone:
+            // while the folder and the file are still there, as a disk
+            // gone from under a program makes it fail too.
+            let bytes = self.render(rel, edge).map_err(|e| match FetchError::from(e) {
+                FetchError::Unreadable(why) if !(self.root.is_dir() && self.root.join(rel).is_file()) => {
+                    FetchError::Failed(anyhow!("{why}"))
+                }
+                e => e,
+            })?;
             return Ok(Body { length: Some(bytes.len() as u64), reader: Box::new(std::io::Cursor::new(bytes)) });
         }
         let path = self.root.join(rel);

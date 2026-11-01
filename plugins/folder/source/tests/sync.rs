@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use pinhole_core::db;
-use pinhole_core::source::Stopped;
+use pinhole_core::source::{Source, Stopped};
 use pinhole_core::sync::{claim, list, make_covers, make_thumbs, medium_cover_path};
 use pinhole_folder::FolderSource;
 use rusqlite::Connection;
@@ -100,5 +100,47 @@ fn a_video_with_a_dull_thumbnail_gets_a_cover_once() {
     assert!(library.join(medium_cover_path(&thumb)).exists());
     // Made once, never again, however dull.
     assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_video_ffmpeg_turns_down_is_not_tried_for_a_cover_again_until_it_changes() {
+    use std::process::{Command, Stdio};
+    if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("pinhole-turned-down-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (videos, library) = (dir.join("videos"), dir.join("library"));
+    std::fs::create_dir_all(&videos).unwrap();
+    std::fs::create_dir_all(&library).unwrap();
+    let black = |seconds: &str| {
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", &format!("color=black:s=64x36:d={seconds}:r=10"), "-pix_fmt", "yuv420p"])
+            .arg(videos.join("dark.mp4"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    black("3");
+    let source = FolderSource::new(videos.clone());
+    let mut conn = db::open(&library.join("library.sqlite")).unwrap();
+    list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+    make_thumbs(&source, &mut conn, &library, 1, &|_, _| {}, &|| false).unwrap();
+    let key: String = conn.query_row("SELECT key FROM renditions WHERE kind = 'video'", [], |r| r.get(0)).unwrap();
+
+    // Damaged under the library's feet (as an iCloud video fetched for a
+    // cover may be): turned down, and kept in mind.
+    std::fs::write(videos.join("dark.mp4"), b"\0\0\0\x18ftypmp42 and nothing after").unwrap();
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
+    assert!(pinhole_core::source::unreadable(&source.id(), &key).is_some());
+    // Good again, but not looked at since (its key the same): not tried.
+    black("3");
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
+    // Changed, and so listed with another key: its cover is made.
+    black("4");
+    list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+    make_thumbs(&source, &mut conn, &library, 1, &|_, _| {}, &|| false).unwrap();
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1322,6 +1322,10 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
         touch(&path);
         return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true})));
     }
+    // Turned down lately, and not changed since: said again at once.
+    if let Some(why) = crate::source::unreadable(&source.id(), &stored.key) {
+        return reply.send(Err(("unreadable", why)));
+    }
     let path = shared.storage.cache().join(&relative);
     let info = json!({"path": path, "type": file_type, "rendition": rendition, "cached": true});
 
@@ -1541,6 +1545,7 @@ fn lookup(shared: &Shared, dbs: &mut HashMap<PathBuf, (u64, Connection)>, batch:
                 let code = failed(&e);
                 shared.finish(&job.path, Err((code, format!("{e:#}"))))
             }
+            Err(FetchError::Unreadable(why)) => unreadable(shared, &job, why),
             Err(e) => shared.finish(&job.path, Err(("not_found", e.to_string()))),
         }
     }
@@ -1564,12 +1569,22 @@ fn download_loop(shared: Arc<Shared>, rx: Arc<Mutex<mpsc::Receiver<Job>>>) {
             }
             Err(FetchError::Expired) => shared.finish(&job.path, Err(("unavailable", "the download link kept expiring".into()))),
             Err(FetchError::NotFound(e)) => shared.finish(&job.path, Err(("not_found", e))),
+            // The file's alone: the source's health stays as it is.
+            Err(FetchError::Unreadable(why)) => unreadable(&shared, &job, why),
             Err(FetchError::Failed(e)) => {
                 let code = shared.failed(&e);
                 shared.finish(&job.path, Err((code, format!("{e:#}"))))
             }
         }
     }
+}
+
+/// A file turned down by what makes an image of it: kept in mind, so that
+/// it is not made again until it changes (source::unreadable), and said.
+fn unreadable(shared: &Shared, job: &Job, why: String) {
+    eprintln!("pinholed: {} of {}: {why}", job.stored.want.name(), job.stored.asset);
+    crate::source::note_unreadable(&job.source.id(), &job.stored.key, &why);
+    shared.finish(&job.path, Err(("unreadable", why)));
 }
 
 fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
@@ -1749,11 +1764,14 @@ fn sync_round(shared: &Shared) -> Result<()> {
     let result = (|| -> Result<()> {
         let report = crate::sync::catch_up(source.as_ref(), &mut db, &|done, total| building.step("index", done, total), &stop)?;
         let (added, removed) = (report.changes.added.len(), report.changes.removed.len());
-        // Thumbnails for what is new, and on the first round since the
+        // Thumbnails for what is new or edited (its old one forgotten: a
+        // folder's file replaced), and on the first round since the
         // source was shown, for whatever an earlier round left without
-        // one (it gave up when another source was shown). Not every round:
-        // a photo that cannot be made into one is not tried every minute.
-        let missing: i64 = if added > 0 || first {
+        // one (it gave up when another source was shown). Not every round,
+        // and never again for a file turned down until it changes
+        // (source::unreadable).
+        let fresh = added > 0 || report.changes.reasons.contains_key("edited") || first;
+        let missing: i64 = if fresh {
             db.query_row(
                 "SELECT count(*) FROM assets a JOIN renditions r ON r.asset_id = a.id AND r.kind = 'thumb'
                  WHERE a.thumb_path IS NULL",
@@ -1767,6 +1785,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
         let announce = |added: usize, removed: usize| {
             shared.broadcast(json!({"event": "library_changed", "version": version, "added": added, "removed": removed}));
         };
+        let mut made = 0;
         if missing > 0 {
             // What was listed shows at once, as it waits for its
             // thumbnails, rather than when the first of them are made.
@@ -1779,20 +1798,21 @@ fn sync_round(shared: &Shared) -> Result<()> {
             // up left): windows hear how it goes and see the photos as they
             // come, every four seconds.
             let telling = report.listed || missing > 100;
-            crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|done, total| {
+            made = crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|done, total| {
                 if telling {
                     building.step("thumbs", done as u64, total as u64);
                 }
-            }, &stop)?;
+            }, &stop)?
+            .made;
         }
         // A video whose thumbnail shows next to nothing gets a cover of its
         // own (cover.rs), looked for as thumbnails are.
-        let covers = if added > 0 || first { crate::sync::make_covers(source.as_ref(), &mut db, &library, &stop)? } else { 0 };
-        if !report.changes.visible() && missing == 0 && covers == 0 {
+        let covers = if fresh { crate::sync::make_covers(source.as_ref(), &mut db, &library, &stop)? } else { 0 };
+        if !report.changes.visible() && made == 0 && covers == 0 {
             return Ok(());
         }
         eprintln!(
-            "pinholed: sync: library version {version}: {added} new, {removed} removed, {missing} thumbnails wanted, {covers} covers made"
+            "pinholed: sync: library version {version}: {added} new, {removed} removed, {made} of {missing} thumbnails made, {covers} covers made"
         );
         announce(added, removed);
         shared.broadcast(sources_event(shared));

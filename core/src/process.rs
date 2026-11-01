@@ -1410,13 +1410,19 @@ impl ProcessSource {
     /// stale ticket of the original's is `Expired`, so that it is prepared
     /// again, as any other.
     fn make(&self, from: &Value, edge: u32, video: bool) -> std::result::Result<Body, FetchError> {
-        let cannot = |e: anyhow::Error| FetchError::Failed(anyhow!("could not make an image of it: {e:#}"));
+        // Unreadable when the program making it turned the file down.
+        let cannot = |e: anyhow::Error| FetchError::from(e.context("could not make an image of it"));
         let bytes = match (from["path"].as_str(), from["url"].as_str()) {
             (Some(path), _) => {
                 // A file that answers, opened before a place among
                 // background work is taken for it.
                 let (file, size) = open_to_make(PathBuf::from(path), !video, FILE_GAP, &self.provider.stuck)?;
-                crate::render::render(&file, size, edge, video).map_err(cannot)?
+                // The file's alone while it is still there: a disk gone
+                // from under the program makes it fail too.
+                crate::render::render(&file, size, edge, video).map_err(|e| match cannot(e) {
+                    FetchError::Unreadable(why) if !Path::new(path).is_file() => FetchError::Failed(anyhow!("{why}")),
+                    e => e,
+                })?
             }
             (None, Some(url)) if video => {
                 // ffmpeg reads what it needs of it, by ranges.
@@ -1457,7 +1463,7 @@ impl ProcessSource {
             let _ = std::fs::remove_file(&part);
             made
         })();
-        made.map_err(|e| FetchError::Failed(anyhow!("could not make an image of it: {e:#}")))
+        made.map_err(|e| FetchError::from(e.context("could not make an image of it")))
     }
 }
 

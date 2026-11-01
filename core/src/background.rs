@@ -213,7 +213,7 @@ pub fn output_within(command: &mut Command, limits: &Limits) -> std::io::Result<
         Stop::Hung => format!("{program} did nothing for {} s: stopped", limits.quiet.as_secs()),
         Stop::Spinning => format!("{program} used {} s of processor time: stopped", limits.cpu.as_secs()),
     };
-    Err(std::io::Error::new(std::io::ErrorKind::TimedOut, why))
+    Err(std::io::Error::new(std::io::ErrorKind::TimedOut, Stopped { stop, why }))
 }
 
 /// Why a program was stopped (`Limits`).
@@ -221,6 +221,28 @@ pub fn output_within(command: &mut Command, limits: &Limits) -> std::io::Result<
 enum Stop {
     Hung,
     Spinning,
+}
+
+/// What `output` says of a program it stopped, inside its `TimedOut`.
+#[derive(Debug)]
+struct Stopped {
+    stop: Stop,
+    why: String,
+}
+
+impl std::fmt::Display for Stopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.why)
+    }
+}
+
+impl std::error::Error for Stopped {}
+
+/// Whether `output` stopped a program for spinning: something in what it
+/// read sent it round in circles, which says that the input is bad. One
+/// hung says nothing of it, only that what it reads does not answer.
+pub fn spun(e: &std::io::Error) -> bool {
+    e.get_ref().and_then(|e| e.downcast_ref::<Stopped>()).is_some_and(|s| s.stop == Stop::Spinning)
 }
 
 /// What a process has done so far: processor time, in clock ticks, and
@@ -454,6 +476,7 @@ mod tests {
         let e = output_within(&mut sleeping, &quick(quiet)).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
         assert!(e.to_string().contains("did nothing for 1 s"), "{e}");
+        assert!(!spun(&e));
         assert!(started.elapsed() >= quiet && started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
         assert!(gone(&pid), "{pid} not reaped");
@@ -528,6 +551,7 @@ mod tests {
         let e = output_within(command("sh").args(["-c", "while :; do :; done"]), &limits).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
         assert!(e.to_string().contains("used 1 s of processor time"), "{e}");
+        assert!(spun(&e));
     }
 
     /// What is done when it is looked at: a starved program (R, nothing

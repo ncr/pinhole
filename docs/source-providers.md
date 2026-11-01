@@ -347,7 +347,11 @@ The code of an error answer says how the source is doing:
 | anything else | `failing` | something is wrong |
 
 Fetches that fail say `unavailable` to the window (`needs_sign_in` for
-that), a ticket's `not_found` says `not_found`.
+that), a ticket's `not_found` says `not_found`. A thumbnail or medium
+pinholed makes (`"make": true`) from a file that ImageMagick or ffmpeg
+turns down (damaged, cut short) says `unreadable`, and leaves the health
+as it is: that is the file's, not your source's, and it is not made again
+until its key changes.
 
 ## Limits
 
