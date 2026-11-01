@@ -4708,6 +4708,53 @@ private slots:
         QCOMPARE(window->property("beneath").toInt(), 0);
     }
 
+    // `pinhole plugin check` refuses the footguns, each with what to use
+    // instead, and warns of a setting written often, a key as Qt names
+    // it, words shown untranslated and words with no Polish.
+    void checkRefusesTheFootguns() {
+        QTemporaryDir dir;
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+// A ListView { in a comment is none.
+PinholePlugin {
+    id: plugin
+    ListView { }
+    Flickable { }
+    PinchHandler { }
+    MouseArea { onWheel: wheel => {} }
+    Timer { onTriggered: pinhole.setSetting("seen", Date.now()) }
+    Component.onCompleted: {
+        pinhole.run("sqlite3", [pinhole.library.dir + "/library.sqlite", "SELECT 1"])
+        pinhole.run("wl-copy", ["x"])
+        const where = "~/Pictures/Mine"
+        pinhole.notify(qsTr("Press Shift+S to save"))
+    }
+    property string label: "Not translated"
+    property var view: ListView.view
+}
+)");
+        const Plugins::Findings found = Plugins::footguns(dir.path());
+        const QString errors = found.errors.join('\n'), warnings = found.warnings.join('\n');
+        QVERIFY2(errors.contains("Main.qml:6: a ListView") && errors.contains("use ScrollList"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:7: a Flickable") && errors.contains("use ScrollArea"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:8: a PinchHandler") && errors.contains("use PinchZoom"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:9: a MouseArea's onWheel"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:12: sqlite3") && errors.contains("pinhole.query"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:13: wl-copy") && errors.contains("pinhole.copyFile"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:14: ~/Pictures") && errors.contains("pinhole.picturePath"), qPrintable(errors));
+        QCOMPARE(found.errors.size(), 7);
+        QVERIFY2(warnings.contains("Main.qml:10: a setting written in onTriggered"), qPrintable(warnings));
+        QVERIFY2(warnings.contains("\"Shift+S\" names a key"), qPrintable(warnings));
+        QVERIFY2(warnings.contains("i18n/pl.json: there is none"), qPrintable(warnings));
+        // The plugin `pinhole plugin new` makes passes, warning of nothing.
+        write(dir.path() + "/Main.qml", "import QtQuick\nimport Pinhole.Plugin\nPinholePlugin {\n"
+                                        "    settings: Component { ScrollList { model: 3; delegate: UiText { text: qsTr(\"Row\") } } }\n}\n");
+        QDir().mkpath(dir.path() + "/i18n");
+        write(dir.path() + "/i18n/pl.json", "{ \"Row\": \"Wiersz\" }\n");
+        const Plugins::Findings clean = Plugins::footguns(dir.path());
+        QVERIFY2(clean.errors.isEmpty() && clean.warnings.isEmpty(), qPrintable((clean.errors + clean.warnings).join('\n')));
+    }
+
     void aClickThatStopsAPanelPressesNothing() {
         ScrollerBench bench;
         QVERIFY(bench.window);

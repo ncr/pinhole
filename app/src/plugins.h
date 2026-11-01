@@ -566,6 +566,14 @@ public:
     // of the `others`' (each its id and folder): a qsTr() in it may be
     // given that one's words (Translator). `pinhole plugin check` warns.
     static QStringList nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others);
+    // What `pinhole plugin check` refuses in the plugin in `dir` (each
+    // "file:line: what, and what to use instead"), and what it warns of:
+    // the footguns Pinhole's own plugins hit (docs/plugins.md, "What check
+    // looks for").
+    struct Findings {
+        QStringList errors, warnings;
+    };
+    static Findings footguns(const QString &dir);
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);

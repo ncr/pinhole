@@ -2269,6 +2269,234 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     return byApi;
 }
 
+namespace {
+
+// QML or JavaScript with its comments gone and its strings kept, line
+// breaks where they were.
+QString withoutComments(const QString &source) {
+    QString out;
+    out.reserve(source.size());
+    const qsizetype n = source.size();
+    QChar quote;
+    for (qsizetype i = 0; i < n; ++i) {
+        const QChar c = source[i];
+        if (!quote.isNull()) {
+            out += c;
+            if (c == '\\' && i + 1 < n)
+                out += source[++i];
+            else if (c == quote || (c == '\n' && quote != '`'))
+                quote = QChar();
+            continue;
+        }
+        if (c == '"' || c == '\'' || c == '`') {
+            quote = c;
+            out += c;
+        } else if (c == '/' && i + 1 < n && source[i + 1] == '/') {
+            while (i < n && source[i] != '\n')
+                ++i;
+            if (i < n)
+                out += '\n';
+        } else if (c == '/' && i + 1 < n && source[i + 1] == '*') {
+            for (i += 2; i + 1 < n && !(source[i] == '*' && source[i + 1] == '/'); ++i)
+                if (source[i] == '\n')
+                    out += '\n';
+            ++i;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+int lineAt(const QString &text, qsizetype position) { return int(text.left(position).count('\n')) + 1; }
+
+// The handler a statement at `position` is in, if any: "onTriggered",
+// "onWidthChanged"…, or "" in a function or a binding of its own.
+QString handlerAround(const QString &code, qsizetype position) {
+    static const QRegularExpression handler(
+        QStringLiteral("(?:\\b(on[A-Z]\\w*)\\s*:\\s*(?:(?:\\w+|\\([^()]*\\))\\s*=>\\s*)?|\\bfunction\\s+(on[A-Z]\\w*)\\s*\\([^()]*\\)\\s*)$"));
+    static const QRegularExpression objectStart(QStringLiteral("\\b[A-Z][\\w.]*\\s*$"));
+    // The handler's own statement: `onXChanged: pinhole.setSetting(…)`,
+    // on its line or after an object's `{`.
+    qsizetype from = position;
+    while (from > 0 && code[from - 1] != '\n' && code[from - 1] != '{' && code[from - 1] != ';')
+        --from;
+    if (const auto m = QRegularExpression(QStringLiteral("^\\s*(on[A-Z]\\w*)\\s*:")).match(code.mid(from, position - from));
+        m.hasMatch())
+        return m.captured(1);
+    int depth = 0;
+    for (qsizetype k = position - 1; k >= 0; --k) {
+        if (code[k] == '}' || code[k] == ')' || code[k] == ']') {
+            ++depth;
+        } else if (code[k] == '(' || code[k] == '[') {
+            depth = std::max(0, depth - 1);
+        } else if (code[k] == '{') {
+            if (depth > 0) {
+                --depth;
+                continue;
+            }
+            const QString before = code.mid(std::max<qsizetype>(0, k - 160), std::min<qsizetype>(k, 160));
+            if (const auto m = handler.match(before); m.hasMatch())
+                return m.captured(1).isEmpty() ? m.captured(2) : m.captured(1);
+            if (objectStart.match(before).hasMatch())
+                return {};
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+Plugins::Findings Plugins::footguns(const QString &dir) {
+    Findings found;
+    // Each by the words that give it away in its code, strings and
+    // comments aside, and what to use instead.
+    struct Rule {
+        QRegularExpression pattern;
+        QString what;
+        // Looked for in its strings too (codeOnly drops their words).
+        bool inStrings = false;
+    };
+    static const QList<Rule> rules = {
+        {QRegularExpression(QStringLiteral("\\bListView\\s*\\{")),
+         QStringLiteral("a ListView scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollList")},
+        {QRegularExpression(QStringLiteral("\\bGridView\\s*\\{")),
+         QStringLiteral("a GridView scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollGrid")},
+        {QRegularExpression(QStringLiteral("\\b(Flickable|ScrollView)\\s*\\{")),
+         QStringLiteral("a %1 scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollArea")},
+        {QRegularExpression(QStringLiteral("\\b(PinchHandler|PinchArea)\\s*\\{")),
+         QStringLiteral("a %1 zooms not as the grid does, and lets a touchpad's pinch through to the photos: use PinchZoom")},
+        {QRegularExpression(QStringLiteral("\\bWheelHandler\\s*\\{")),
+         QStringLiteral("a WheelHandler: use ScrollList, ScrollGrid or ScrollArea to scroll, a Panel's steps to step")},
+        {QRegularExpression(QStringLiteral("\\bonWheel\\s*:")),
+         QStringLiteral("a MouseArea's onWheel: a Panel or a Card under the controls takes the wheel, ScrollList, ScrollGrid "
+                        "and ScrollArea scroll, a Panel's steps step")},
+        // A program, by its name: a string.
+        {QRegularExpression(QStringLiteral("[\"']sqlite3[\"']")),
+         QStringLiteral("sqlite3 on the library opens it while the service writes it (\"database is locked\"): use pinhole.query"),
+         true},
+        {QRegularExpression(QStringLiteral("[\"'](wl-copy|wl-paste|xclip|xsel)[\"']")),
+         QStringLiteral("%1 sets the session's clipboard, a self-test's too: use pinhole.copyFile"), true},
+        {QRegularExpression(QStringLiteral("[\"']xdg-user-dir[\"']")),
+         QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir"),
+         true},
+        {QRegularExpression(QStringLiteral("\\bPicturesLocation\\b")),
+         QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir")},
+    };
+    // In its strings: Pictures by its path.
+    static const QRegularExpression picturesPath(QStringLiteral("[\"'`][^\"'`\\n]*(~/Pictures|\\$HOME/Pictures|/home/[^/\"']+/Pictures)"));
+    // Words shown as they are, and keys as Qt writes them in what is shown.
+    static const QRegularExpression said(QStringLiteral("\\bqsTr\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+    static const QRegularExpression shown(QStringLiteral(
+        "(?:^|[;{\\s])(text|title|helpText|placeholder|noun)\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"|"
+        "\\b(?:notify|complain)\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+    static const QRegularExpression wordy(QStringLiteral("[A-Za-z]{3,}"));
+    static const QRegularExpression brand(QStringLiteral("^[a-z]+[A-Z]\\w*$"));
+    static const QRegularExpression rawKey(QStringLiteral("\\b(?:(?:Shift|Ctrl|Alt|Meta)\\+\\w+|Return|Escape|PgUp|PgDown|Backspace)\\b"));
+    // A setting written in a handler that runs often, or of what the
+    // library or a list makes.
+    static const QRegularExpression setting(
+        QStringLiteral("\\b(?:pinhole\\s*\\.\\s*setSetting\\s*\\(|pinhole\\s*\\.\\s*settings\\s*\\.\\s*\\w+\\s*=(?!=))"));
+    static const QRegularExpression often(QStringLiteral("^on(Triggered|PositionChanged|Wheel|Moved|\\w+Changed)$"));
+    static const QRegularExpression made(QStringLiteral("\\.(map|filter|concat|slice)\\s*\\(|\\bfield\\s*\\(|\\blibrary\\b|JSON\\.stringify|Date\\.now"));
+
+    QSet<QString> strings;
+    QDirIterator it(dir, {"*.qml", "*.js"}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        const QString file = QDir(dir).relativeFilePath(path);
+        // Its own tests and checks are not the plugin.
+        if (file.startsWith(QLatin1String("check/")) || file.startsWith(QLatin1String("tests/"))
+            || file.contains(QLatin1String("target/")))
+            continue;
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly))
+            continue;
+        const QString source = QString::fromUtf8(f.readAll());
+        const QString code = codeOnly(source);
+        const QString text = withoutComments(source);
+        for (const Rule &rule : rules)
+            for (auto m = rule.pattern.globalMatch(rule.inStrings ? text : code); m.hasNext();) {
+                const auto match = m.next();
+                QString what = rule.what;
+                if (what.contains(QLatin1String("%1")))
+                    what = what.arg(match.captured(1));
+                found.errors << QStringLiteral("%1:%2: %3")
+                                    .arg(file)
+                                    .arg(lineAt(rule.inStrings ? text : code, match.capturedStart()))
+                                    .arg(what);
+            }
+        for (auto m = picturesPath.globalMatch(text); m.hasNext();) {
+            const auto match = m.next();
+            found.errors << QStringLiteral("%1:%2: %3 by hand is the real Pictures in a self-test: use pinhole.picturePath, "
+                                           "or pinhole.picturesDir")
+                                .arg(file)
+                                .arg(lineAt(text, match.capturedStart()))
+                                .arg(match.captured(1));
+        }
+        for (auto m = said.globalMatch(text); m.hasNext();) {
+            const auto match = m.next();
+            strings << QJsonDocument::fromJson("[\"" + match.captured(1).toUtf8() + "\"]").array().at(0).toString();
+            if (const auto key = rawKey.match(match.captured(1)); key.hasMatch())
+                found.warnings << QStringLiteral("%1:%2: \"%3\" names a key as Qt writes it: say it as the buttons do "
+                                                 "(⏎, Esc, ⇧ S, Ctrl Z, ← →)")
+                                      .arg(file)
+                                      .arg(lineAt(text, match.capturedStart()))
+                                      .arg(key.captured(0));
+        }
+        for (auto m = shown.globalMatch(text); m.hasNext();) {
+            const auto match = m.next();
+            const QString words = match.captured(2).isEmpty() ? match.captured(3) : match.captured(2);
+            // A name as it is everywhere (iCloud, iPhone) is no word to translate.
+            if (words.contains(wordy) && !brand.match(words).hasMatch())
+                found.warnings << QStringLiteral("%1:%2: \"%3\" is shown as it is, in every language: qsTr(\"%3\")")
+                                      .arg(file)
+                                      .arg(lineAt(text, match.capturedStart()))
+                                      .arg(words);
+        }
+        for (auto m = setting.globalMatch(code); m.hasNext();) {
+            const auto match = m.next();
+            const QString handler = handlerAround(code, match.capturedStart());
+            const qsizetype end = code.indexOf('\n', match.capturedEnd());
+            const QString rest = code.mid(match.capturedEnd(), end < 0 ? -1 : end - match.capturedEnd());
+            const bool frequent = often.match(handler).hasMatch();
+            if (frequent || rest.contains(made))
+                found.warnings << QStringLiteral("%1:%2: a setting written %3: settings are the user's choices, and "
+                                                 "plugins.json is written again each time; keep what changes often or "
+                                                 "grows in pinhole.state, what can be worked out again in pinhole.cache")
+                                      .arg(file)
+                                      .arg(lineAt(code, match.capturedStart()))
+                                      .arg(frequent ? QStringLiteral("in %1, which runs often").arg(handler)
+                                                    : QStringLiteral("from a list or the library"));
+        }
+    }
+    // Its words in Polish, as Pinhole's tests ask of Pinhole's own: its own
+    // catalog's, or Pinhole's.
+    if (!strings.isEmpty()) {
+        const auto catalog = [](const QString &path) {
+            QFile f(path);
+            return f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
+        };
+        const QJsonObject own = catalog(dir + "/i18n/pl.json"), pinholes = catalog(QStringLiteral(":/i18n/pl.json"));
+        const auto notPinholes = std::count_if(strings.begin(), strings.end(), [&](const QString &s) { return !pinholes.contains(s); });
+        if (!QFileInfo::exists(dir + "/i18n/pl.json")) {
+            if (notPinholes > 0)
+                found.warnings << QStringLiteral("i18n/pl.json: there is none, and %1 of its words are not Pinhole's own: "
+                                                 "they show in English in Polish")
+                                      .arg(notPinholes);
+        } else {
+            QStringList missing;
+            for (const QString &english : strings)
+                if (!own.contains(english) && !pinholes.contains(english))
+                    missing << english;
+            missing.sort();
+            for (const QString &english : missing)
+                found.warnings << QStringLiteral("i18n/pl.json: no Polish for \"%1\"").arg(english);
+        }
+    }
+    return found;
+}
+
 QStringList Plugins::nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others) {
     // Its files by name, as a qsTr() names them (Translator).
     auto filesIn = [](const QString &folder, QDirIterator::IteratorFlags flags) {
@@ -2573,6 +2801,10 @@ int newPlugin(const QString &id) {
         {"description", "What it does, in a sentence."},
         {"entryPoints", QJsonObject{{"main", "Main.qml"}}},
     };
+    // A screen of its own over the photos, as most plugins have: on its
+    // key, the newest photos in a grid that scrolls and pinches as
+    // Pinhole's own, Esc to close. What `pinhole plugin check` asks of a
+    // plugin it has: the kit, every word in qsTr() and in Polish.
     const QByteArray main = QStringLiteral(R"(import QtQuick
 import Pinhole.Plugin
 
@@ -2580,25 +2812,53 @@ import Pinhole.Plugin
 // saving this file loads it again at once.
 PinholePlugin {
     id: plugin
+    property bool open: false
+    covering: open
 
     actions: [
-        PluginAction {
-            place: "grid"
-            text: qsTr("%1")
-            key: "F2"
-            onTriggered: {
-                const photo = pinhole.library.item(pinhole.currentIndex())
-                pinhole.notify(qsTr("%2, one of %3 photos").arg(photo.filename).arg(pinhole.library.count))
+        PluginAction { place: "grid"; text: qsTr("Newest"); key: "F2"; onTriggered: plugin.open = true }
+    ]
+    help: [["F2", qsTr("The newest photos")]]
+    Command { name: "%2.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    // Over the photos while open, taking every click, wheel and pinch.
+    Panel {
+        visible: plugin.open
+        PinchZoom {
+            id: zoom
+            anchors.fill: parent
+            levels: [100, 160, 260]
+            level: 1
+            ScrollGrid {
+                anchors.fill: parent
+                anchors.margins: 16
+                cellWidth: zoom.size
+                cellHeight: zoom.size
+                model: Math.min(1000, pinhole.library.count)
+                delegate: Image {
+                    required property int index
+                    width: zoom.size - 4
+                    height: zoom.size - 4
+                    source: pinhole.library.item(pinhole.library.count - 1 - index).thumbnail ?? ""
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                }
             }
         }
-    ]
-    help: [["F2", qsTr("Say which photo is under the pointer")]]
+    }
 }
-)").arg(name, QStringLiteral("%1"), QStringLiteral("%2")).toUtf8();
-    QDir().mkpath(dir);
-    QSaveFile manifestFile(dir + "/manifest.json"), mainFile(dir + "/Main.qml");
+)").arg(name, id).toUtf8();
+    // Its words in Polish, as Pinhole's own have theirs.
+    const QByteArray polish = QJsonDocument(QJsonObject{{"Newest", QString::fromUtf8("Najnowsze")},
+                                                        {"The newest photos", QString::fromUtf8("Najnowsze zdjęcia")},
+                                                        {name, name},
+                                                        {"What it does, in a sentence.", QString::fromUtf8("Co robi, w jednym zdaniu.")}})
+                                  .toJson();
+    QDir().mkpath(dir + "/i18n");
+    QSaveFile manifestFile(dir + "/manifest.json"), mainFile(dir + "/Main.qml"), polishFile(dir + "/i18n/pl.json");
     if (!manifestFile.open(QIODevice::WriteOnly) || manifestFile.write(QJsonDocument(manifest).toJson()) < 0 || !manifestFile.commit()
-        || !mainFile.open(QIODevice::WriteOnly) || mainFile.write(main) < 0 || !mainFile.commit()) {
+        || !mainFile.open(QIODevice::WriteOnly) || mainFile.write(main) < 0 || !mainFile.commit()
+        || !polishFile.open(QIODevice::WriteOnly) || polishFile.write(polish) < 0 || !polishFile.commit()) {
         err(QStringLiteral("pinhole: could not write %1").arg(tilde(dir)));
         return 1;
     }
@@ -2657,18 +2917,31 @@ int checkPlugin(const QString &target) {
         return 1;
     }
     const int asked = manifest.value("api").toInt(1);
-    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(asked));
     // What it uses of a newer API than it asks for works here, and not in a
-    // Pinhole of the one it asks for, which would load it all the same.
+    // Pinhole of the one it asks for, which would load it all the same and
+    // fail where nobody sees: refused, with the number to give.
     const QMap<int, QStringList> uses = Plugins::apiUses(dir);
     const int needed = uses.isEmpty() ? 1 : uses.lastKey();
     for (auto it = uses.begin(); it != uses.end(); ++it)
         if (asked < it.key())
-            err(QStringLiteral("%1: warning: it uses %2, of plugin API %3, and its manifest asks for API %4: give it \"api\": %5.")
-                    .arg(name, it.value().join(QStringLiteral(", ")))
-                    .arg(it.key())
-                    .arg(asked)
-                    .arg(needed));
+            problems << QStringLiteral("manifest.json: it uses %1, of plugin API %2, and asks for API %3: give it \"api\": %4")
+                            .arg(it.value().join(QStringLiteral(", ")))
+                            .arg(it.key())
+                            .arg(asked)
+                            .arg(needed);
+    // The footguns: refused, or warned of.
+    const Plugins::Findings findings = Plugins::footguns(dir);
+    problems << findings.errors;
+    if (!problems.isEmpty()) {
+        for (const QString &problem : problems)
+            err(QStringLiteral("%1: %2").arg(name, problem));
+        for (const QString &warning : findings.warnings)
+            err(QStringLiteral("%1: warning: %2").arg(name, warning));
+        return 1;
+    }
+    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(asked));
+    for (const QString &warning : findings.warnings)
+        err(QStringLiteral("%1: warning: %2").arg(name, warning));
     // A file named as another plugin's, or as one of Pinhole's own: Qt
     // tells a qsTr() only by its file's name. One of the same id is the
     // one it replaces, or its copy.

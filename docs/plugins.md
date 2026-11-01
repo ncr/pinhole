@@ -18,28 +18,288 @@ copying a built-in there is how to change it.
 pinhole plugin new me.favourites
 ```
 
-makes `~/.config/pinhole/plugins/me.favourites` with a manifest and a
-`Main.qml` that already does something. Turn it on in the side panel, and
-change it: saving any of its files loads it again at once, and stops
-whatever its old self had started. What goes wrong shows in red under it in
-the side panel: QML that does not load, an error thrown, a warning from one
-of its files, each with the file and the line.
+makes `~/.config/pinhole/plugins/me.favourites` with a manifest, a
+`Main.qml` that already does something and its words in Polish: on F2,
+the newest photos on a screen of their own, in a grid that scrolls and
+pinches exactly as Pinhole's does, Esc to close. Turn it on in the side
+panel, and change it: saving any of its files loads it again at once, and
+stops whatever its old self had started. What goes wrong shows in red
+under it in the side panel: QML that does not load, an error thrown, a
+warning from one of its files, each with the file and the line.
+
+Build it from the kit (below) and it is right without knowing why: its
+lists scroll as the grid does, nothing it shows lets a click, a wheel or a
+pinch through to the photos, and what it makes goes where Pinhole's goes.
 
 ```sh
 pinhole plugin check me.favourites
 ```
 
 looks it over as Pinhole would load it, without a window: the manifest,
-every QML file it uses and the JavaScript they import, its translations.
-It takes a folder too (`pinhole plugin check .`), and exits 1 if anything is
-wrong, for an editor or a script to run on save. A manifest's `sources`
+every QML file it uses and the JavaScript they import, its translations,
+and the footguns (What check looks for, below). It takes a folder too
+(`pinhole plugin check .`), and exits 1 if anything is wrong, for an
+editor or a script to run on save. A manifest's `sources`
 are checked as pinholed takes them (a provider's kind namespaced by the
 plugin's id, its program in the folder and runnable, `accepts` and
 `rounds_every_secs` as [source-providers.md](source-providers.md) says),
 so what pinholed would refuse is said here, and under the plugin in the
-side panel. It warns of anything the
-plugin uses of an API newer than its manifest asks for, and of a file named
-as one of another plugin's or of Pinhole's own (see Translations).
+side panel. It refuses anything the plugin uses of an API newer than its
+manifest asks for, saying the number to give, and warns of a file named as
+one of another plugin's or of Pinhole's own (see Translations).
+
+## The kit
+
+What Pinhole's own plugins once wrote by hand, and got wrong, is in
+`Pinhole.Plugin`, right by default:
+
+- `ScrollList`, `ScrollGrid`, `ScrollArea`: a `ListView`, a `GridView` and
+  a `Flickable` (anything larger than its room: give it a `contentWidth`
+  and a `contentHeight`), each scrolled by the wheel and the touchpad
+  exactly as the grid is: the same physics, its inertia, its springs at
+  the ends and its wheel's glide, measured against the grid's own by a
+  self-test (`PINHOLE_SELFTEST=physics`). Up and down, and across where the
+  content is wider (a strip: `orientation: ListView.Horizontal`, which the
+  wheel then moves across too). They take every wheel turn, swipe and pinch
+  over them, at their ends too, so the photos beneath never scroll; one in
+  another (a list in the side panel's settings) moves first, to its end.
+  A click or a touch while one coasts only stops it, as on the grid.
+- `PinchZoom`: what it holds, grown and shrunk through a few sizes as the
+  grid zooms through its columns: a pinch, Ctrl and the wheel, and the
+  sideways wheel, under the fingers and about them, landing on the size
+  nearest where the pinch was heading, eased; `zoomBy(1)`, `zoomBy(-1)` for
+  + and -. `levels` are its sizes, smallest first, `level` the one laid
+  out, `size` that size: lay what it holds out at `size`, and it is drawn
+  larger or smaller while it zooms. A `ScrollGrid` in it passes its
+  pinches on, so a grid of cells scrolls and pinches as Pinhole's.
+- `Panel`: a screen over the photos, its parent's whole room in the theme's
+  background (or a `color`), taking every click, touch, wheel, swipe, pinch
+  and hover, so nothing reaches the photos; `clicked()` where no control is,
+  and with `steps` (`Qt.Horizontal`, `Qt.Vertical`) the wheel and a swipe
+  step: `stepped(1)` the next, `stepped(-1)` the one before (a notch a
+  step, a swipe one), as the Photo frame and the Series editor step.
+- `Card`: a box in the theme, the same: nothing over it goes through. Over
+  the photos for a moment, on a dimmed `Panel` whose click puts it away.
+- `Choices`: one of a few on a row of buttons, each also its number's key:
+  `options` as `[{ value, text }]`, `value`, `chosen(value)`.
+- `ShellButton`'s `complain(text)`: what pressing it could not do, under it
+  for four seconds, the button shaking, as a `PluginAction`'s.
+- `pinhole.picturePath(name, extension)` and `pinhole.copyFile(path)`: a
+  file to make in Pictures/Pinhole, named as Pinhole names what it makes
+  (`name 2.png` when `name.png` is there), and a file on the clipboard. In a
+  self-test both are a scratch folder's and the window's own: never the
+  person's Pictures or clipboard.
+- `pinhole.query(sql, values)`: the library's index asked, read only, away
+  from the window, waiting while the service writes it: a promise of its
+  rows. Never `sqlite3` on the file, which opens it while the service
+  writes ("database is locked"). `pinhole.library.field(name)` has a field
+  of every photo at once, `"day"` among them.
+- `settings`, `state` and `cache` (below): the user's choices, what they
+  made, what can be worked out again.
+
+A plugin covers the photos only while its `covering` is true, under
+Pinhole's own panels and over the other plugins, with the `"plugin"` keys
+its own: the template's `covering: open` is all it takes.
+
+Four examples, each a whole `Main.qml` (beside a manifest asking for
+`"api": 5`), are in `app/tests/examples` and run by a self-test
+(`PINHOLE_SELFTEST=examples`):
+
+A screen of its own with a `ScrollList`, a count in its words (`%n`):
+
+```qml
+import QtQuick
+import Pinhole.Plugin
+
+// F5: how many photos each year has, on a screen of its own.
+PinholePlugin {
+    id: plugin
+    property bool open: false
+    property var years: []
+    covering: open
+    function count() {
+        const counts = {}
+        for (const day of pinhole.library.field("day"))
+            if (day > 0)
+                counts[Math.floor(day / 10000)] = (counts[Math.floor(day / 10000)] ?? 0) + 1
+        years = Object.keys(counts).reverse().map(year => ({ year: year, count: counts[year] }))
+    }
+    actions: [PluginAction { place: "grid"; text: qsTr("Years"); key: "F5"; onTriggered: { plugin.count(); plugin.open = true } }]
+    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    Panel {
+        visible: plugin.open
+        ScrollList {
+            anchors.fill: parent
+            anchors.margins: 32
+            model: plugin.years
+            delegate: UiText {
+                required property var modelData
+                height: 40
+                text: modelData.year + " · " + qsTr("%n photo(s)", "", modelData.count)
+            }
+        }
+    }
+}
+```
+
+A `PinchZoom` over tiles laid out at its `size`:
+
+```qml
+import QtQuick
+import Pinhole.Plugin
+
+// F6: the newest photos' colours as tiles, grown and shrunk by a pinch, Ctrl
+// and the wheel, + and -, through three sizes, as the grid zooms.
+PinholePlugin {
+    id: plugin
+    property bool open: false
+    covering: open
+    actions: [PluginAction { place: "grid"; text: qsTr("Tiles"); key: "F6"; onTriggered: plugin.open = true }]
+    Command { name: "tiles.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "tiles.in"; keys: ["+", "="]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(1) }
+    Command { name: "tiles.out"; keys: ["-"]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(-1) }
+
+    Panel {
+        visible: plugin.open
+        PinchZoom {
+            id: zoom
+            anchors.fill: parent
+            levels: [24, 48, 96]
+            level: 1
+            Flow {
+                anchors.fill: parent
+                Repeater {
+                    model: Math.floor(parent.width / zoom.size) * Math.floor(parent.height / zoom.size)
+                    delegate: Rectangle {
+                        required property int index
+                        width: zoom.size
+                        height: zoom.size
+                        color: pinhole.library.item(pinhole.library.count - 1 - index).avgColor || "transparent"
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+A `Card` on a dimmed `Panel`, with `Choices`, making a file with
+`picturePath` and putting it on the clipboard:
+
+```qml
+import QtQuick
+import Pinhole.Plugin
+
+// F7: a card over the photos asking how big a swatch of the colour of the
+// photo under the pointer to make: 1, 2, 3 or a click; Esc, or a click
+// beside it, puts it away. The swatch is kept in Pictures/Pinhole and put
+// on the clipboard.
+PinholePlugin {
+    id: plugin
+    property bool open: false
+    covering: open
+    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; onTriggered: plugin.open = true }]
+    Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    function make(size) {
+        open = false
+        const photo = pinhole.library.item(pinhole.currentIndex())
+        const path = pinhole.picturePath(photo.filename.replace(/\.[^.]*$/, "") + " " + size, "png")
+        pinhole.run("magick", ["-size", size + "x" + size, "xc:" + photo.avgColor, path])
+            .then(() => pinhole.copyFile(path))
+            .then(() => pinhole.notify(qsTr("Copied, and kept in Pictures")), error => {
+                action.complain(qsTr("Could not make it"))
+                pinhole.warn(error)
+            })
+    }
+
+    Panel { visible: plugin.open; color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.open = false }
+    Card {
+        visible: plugin.open
+        anchors.centerIn: parent
+        width: sizes.width + 48
+        height: sizes.height + 48
+        Choices {
+            id: sizes
+            anchors.centerIn: parent
+            options: [{ value: 64, text: qsTr("Small") }, { value: 256, text: qsTr("Medium") }, { value: 1024, text: qsTr("Large") }]
+            when: plugin.open
+            helpText: qsTr("Size")
+            onChosen: size => plugin.make(size)
+        }
+    }
+}
+```
+
+The index asked with `pinhole.query`, the answer in a `ScrollArea`:
+
+```qml
+import QtQuick
+import Pinhole.Plugin
+
+// F8: the library's files, by how many are videos and how many know where
+// they were taken, asked of its index (docs/sources.md), in a ScrollArea
+// wider and taller than the window.
+PinholePlugin {
+    id: plugin
+    property bool open: false
+    property string report: ""
+    covering: open
+    actions: [PluginAction { place: "grid"; text: qsTr("Places"); key: "F8"; onTriggered: plugin.ask() }]
+    Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    function ask() {
+        open = true
+        pinhole.query("SELECT is_video, has_location, count(*) AS n FROM assets GROUP BY is_video, has_location")
+            .then(rows => report = rows.map(r => (r.is_video ? "video" : "photo") + (r.has_location ? ", placed: " : ": ") + r.n).join("\n"))
+            .catch(pinhole.warn)
+    }
+
+    Panel {
+        visible: plugin.open
+        ScrollArea {
+            anchors.fill: parent
+            anchors.margins: 32
+            contentWidth: text.implicitWidth
+            contentHeight: text.implicitHeight
+            UiText { id: text; text: plugin.report; font.pixelSize: 96 }
+        }
+    }
+}
+```
+
+### What check looks for
+
+`pinhole plugin check` refuses, with what to use instead (each one a
+footgun Pinhole's own plugins hit):
+
+- a `ListView`, `GridView`, `Flickable` or `ScrollView` (`ScrollList`,
+  `ScrollGrid`, `ScrollArea`): they scroll not as the grid does, and at
+  their ends let the wheel through to the photos;
+- a `PinchHandler` or `PinchArea` (`PinchZoom`), a `WheelHandler`, and a
+  `MouseArea`'s `onWheel` (a `Panel` or `Card` under the controls, a
+  `Panel`'s `steps`): a pinch went through to the photos, and a
+  `MouseArea` without `onWheel` lets the wheel through;
+- `sqlite3` (`pinhole.query`);
+- `wl-copy`, `xclip` and the like (`pinhole.copyFile`), and Pictures found
+  by hand, `~/Pictures` or `xdg-user-dir` (`pinhole.picturePath`): a
+  self-test of them wrote to the real Pictures and the session's clipboard;
+- an API newer than the manifest asks for: a Pinhole of that API would load
+  it and fail where nobody sees. `api` stays asked for by hand, since it
+  is what an older Pinhole reads to say it needs a newer one; check says
+  the number to give.
+
+And warns of:
+
+- a setting written in a handler that runs often (`onTriggered`,
+  `on…Changed`) or from a list or the library: settings are the user's
+  choices, and `plugins.json` is written again each time (`state`,
+  `cache`);
+- a key named as Qt writes it in what is shown, `Shift+S` or `Return`, not
+  as the buttons name it (⇧ S, ⏎);
+- words shown as they are, in `text:` or `notify(…)` without `qsTr()`;
+- words in `qsTr()` with no Polish in `i18n/pl.json` (nor Pinhole's own).
 
 ## A whole plugin
 
@@ -59,7 +319,7 @@ as one of another plugin's or of Pinhole's own (see Translations).
 
 `api` is the oldest version of what follows the plugin needs (1 if left
 out); a Pinhole older than that says it needs a newer one and does not load
-it. `pinhole.api` says which one it is running in. API 2 brought promises
+it. `pinhole plugin check` refuses one that asks for less than it uses. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
@@ -74,7 +334,10 @@ one: the root's `sources` (`PluginSource`), `pinhole.sources`,
 right colours and HDR shown right in SDR ([hdr.md](hdr.md)): `image://file`,
 a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
 file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
-`SdrVideo`; and `Scroller`.
+`SdrVideo`; and `Scroller`. API 5 brought the kit: `ScrollList`,
+`ScrollGrid`, `ScrollArea`, `PinchZoom`, `Panel`, `Card`, `Choices`, a
+`ShellButton`'s `complain`, `pinhole.query` and `pinhole.picturePath`; and
+`Scroller` scrolling as the grid does, across too.
 
 `Main.qml` beside it:
 
@@ -159,11 +422,9 @@ its settings, is there as the window first shows. It sets:
   opened over On this day, ⏎ opens a photo, and Esc then comes back to
   Colours alone, then to the grid.
 - `settings`: a `Component` shown under its row in the side panel while it
-  is on, unfolded with a tap on the row (or ⏎ there), as its tour is. The
-  panel scrolls as the grid does; a list of its own in it scrolls so too
-  with a `Scroller` laid over it (below), which has the wheel and the
-  touchpad first while it can still go their way, a swipe to its end, then
-  the panel.
+  is on, unfolded with a tap on the row (or ⏎ there), as its tour is. A
+  `ScrollList` of its own in it has the wheel and the touchpad first while
+  it can still go their way, a swipe to its end, then the panel.
 - `help`: its keys for the help (?), as `[["key", "what it does"], ...]`
   (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
   listed under its name with its `Command`s that give a `section` (any
@@ -296,12 +557,8 @@ its settings, is there as the window first shows. It sets:
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
 `placeholder`, `password`, `done`, `accepted()`), `Command` (a key,
-with what it does in the help) and `Scroller` (laid over a `Flickable` or a
-`ListView` as large as it, `flickable` set to it: the wheel and the
-touchpad move it as they move the grid, coasting and giving a little at
-its ends, a click or a touch only stopping it while it moves; one in the
-side panel is scrolled before the panel, until its end; API 4),
-and `theme` has the Omarchy theme's colours and type, so a plugin can look
+with what it does in the help), the kit (above), and `Scroller`, what
+`ScrollList`, `ScrollGrid` and `ScrollArea` are made of (API 4), and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
 A plugin that plays video puts `SdrVideo` (API 4) between its
@@ -357,6 +614,8 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
+| `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
+| `query(sql, values)` | the library's index (`library.sqlite`, [sources.md](sources.md)) asked, read only, away from the window, waiting up to five seconds while the service writes it: a promise of its rows, each an object by column name, `values` bound to its `?`s; rejected `sql` (its message) or `no_library` (API 5) |
 | `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
 | `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |

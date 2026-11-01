@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "api": 5,
+  "id": "example.ask",
+  "name": "Example ask",
+  "version": "1.0.0",
+  "description": "An example from docs/plugins.md.",
+  "entryPoints": { "main": "Main.qml" }
+}
