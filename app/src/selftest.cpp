@@ -1642,7 +1642,16 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
             });
         });
     }, [=] {
-        check(false, QStringLiteral("no tour nor the card showed by itself in 60 s"));
+        // What it needs, said: plugins on whose tours are not seen yet (in
+        // $XDG_STATE_HOME/pinhole/toured.json, or plugins.json's "toured"
+        // before it moves), and nothing over the window that has the keys.
+        QStringList unseen;
+        for (const QString &id : plugins->property("ids").toStringList())
+            if (!toured(id))
+                unseen << id;
+        check(false, QStringLiteral("no tour nor the card showed by itself in 60 s (tours not seen: %1; keys: %2's)")
+                         .arg(unseen.isEmpty() ? QStringLiteral("none, give it a state folder that has not seen them") : unseen.join(", "),
+                              window->property("keyLayer").toString()));
         finish();
     });
 }

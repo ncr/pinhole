@@ -84,7 +84,10 @@ void runHiddenSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
                 && shownFrom(i + 1, 1) >= 0)
                 photo = i;
         if (photo < 0) {
-            check(false, QStringLiteral("a shown photo with hidden ones on both sides"));
+            check(false, grid->hiddenCount() > 0
+                             ? QStringLiteral("a shown photo with hidden ones on both sides")
+                             : QStringLiteral("a shown photo with hidden ones on both sides: none is hidden; give it a "
+                                              "plugins.json with Screenshots hiding (\"pinhole.screenshots\": {\"hide\": true})"));
             QCoreApplication::exit(1);
             return;
         }

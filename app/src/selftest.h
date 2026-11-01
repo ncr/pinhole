@@ -79,7 +79,9 @@ class Incoming;
 void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &incoming, const QString &dir,
                      const QStringList &files);
 
-// PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen them, wait
+// PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen them (a
+// fresh $XDG_STATE_HOME each run: the tours seen are its
+// pinhole/toured.json, which a run writes), wait
 // for the New plugins card (more than one tour not seen, each listed
 // ready) or a tour to show by itself. Later (Esc) leaves them unseen and
 // nothing follows; at the next launch (as if) the card lists them again.
@@ -161,7 +163,9 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
 void runFrameSelfTest(QQuickWindow *window, const Library &library);
 
 // PINHOLE_SELFTEST=hidden:<dir> (selftesthidden.cpp): with a plugin hiding
-// photos (Screenshots, in hide mode, what it found kept): some hidden
+// photos (Screenshots, in hide mode, what it found kept: run it on a
+// plugins.json with "pinhole.screenshots": {"hide": true}, after a run
+// that found them, or the first frame has none hidden): some hidden
 // before the first frame and at 100, 150 and 300 ms, grabbed into <dir>;
 // then a photo with hidden ones on both sides full window, → and ← over
 // them both ways, each neighbour beside it before the key and sliding in

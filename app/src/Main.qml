@@ -102,8 +102,10 @@ ApplicationWindow {
     }
 
     // The first run: no source yet, so where the photos are is all there is
-    // to ask.
-    readonly property bool firstRun: sources.known && sources.list.length === 0
+    // to ask. Not over a library the window was given (--library): with no
+    // source set up (a scratch HOME, pinhole-fake's library on a new
+    // computer) the picker would cover it and take every key.
+    readonly property bool firstRun: sources.known && sources.list.length === 0 && !libraryGiven
     // Where the photos are, in a sentence: iCloud, or the folder's name
     // (an Apple ID's source is named after its owner, which reads wrong
     // there).

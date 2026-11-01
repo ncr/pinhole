@@ -226,7 +226,9 @@ app/build/pinhole --library ~/.local/share/pinhole/fake
 
 A library given so, other than your own, has a service of its own (on a
 socket named after its path), so Pinhole opened from the launcher meanwhile
-still shows your photos.
+still shows your photos. It is shown even where no source is set up yet (a
+new computer, a scratch `HOME`): the first-run picker is for a window that
+was given none.
 
 The two boundaries that are meant to be swapped:
 

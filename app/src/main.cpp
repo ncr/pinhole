@@ -262,6 +262,9 @@ int main(int argc, char *argv[]) {
                                                           && !parser.isSet("bench"));
     // The line to pinholed, for how the source is doing (service.health).
     engine.rootContext()->setContextProperty("service", &service);
+    // A library given (--library) is what the window is for: no first-run
+    // picker over it, even where no source is set up yet.
+    engine.rootContext()->setContextProperty("libraryGiven", libraryGiven);
     engine.load(QUrl("qrc:/Main.qml"));
     opening.join();
     service.setShown(library.source());
