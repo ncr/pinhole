@@ -21,19 +21,25 @@ Item {
 
     // "find" or "wall".
     property string mode: "find"
-    // The colour looked for, OKLab, and the photo it is from, if any.
+    // The colour looked for, OKLab, and the photo it is from, if any (its
+    // id, and where it is now).
     property real targetL: 0.62
     property real targetA: 0.09
     property real targetB: 0.07
-    property int from: -1
+    property string fromId: ""
+    readonly property int from: (plugin.revision, fromId !== "" ? pinhole.library.indexOf(fromId) : -1)
     readonly property real targetC: Colour.chroma(targetA, targetB)
-    readonly property real targetH: Colour.hue(targetA, targetB)
+    // The hue, kept while the colour is grey, so going grey and back out
+    // with the keys comes back to the hue it went in from.
+    property real hue: 38
+    readonly property real targetH: targetC >= 0.004 ? Colour.hue(targetA, targetB) : hue
     readonly property string targetHex: Colour.hex(targetL, targetA, targetB)
     // How far out the wheel goes: chroma at its rim. A photo's average is
     // rarely past 0.15, and most are under 0.05, so the wheel is drawn by
     // the square root of chroma, giving the middle the room.
     readonly property real rimChroma: 0.22
     readonly property int resultCount: 300
+    // The photos found, closest first, by id.
     property var results: []
     // A photo opened from here: shown again when it closes.
     property bool returning: false
@@ -41,7 +47,7 @@ Item {
     function openFinder() {
         plugin.ensure()
         mode = "find"
-        from = -1
+        fromId = ""
         returning = false
         shown = true
         search()
@@ -55,7 +61,9 @@ Item {
         targetL = c[0]
         targetA = c[1]
         targetB = c[2]
-        from = index
+        if (targetC >= 0.004)
+            hue = targetH
+        fromId = pinhole.library.item(index).id
         mode = "find"
         returning = false
         shown = true
@@ -65,7 +73,9 @@ Item {
         shown = false
         returning = false
     }
-    function open(index) {
+    // A photo found, by its id.
+    function open(id) {
+        const index = pinhole.library.indexOf(id)
         if (index < 0)
             return
         returning = true
@@ -74,22 +84,36 @@ Item {
     }
     function search() {
         const d = plugin.ensure()
-        results = Colour.nearest(d, targetL, targetA, targetB, resultCount, from)
+        results = Colour.nearest(d, targetL, targetA, targetB, resultCount, fromId)
+    }
+    // The photos found that are still in the library; looked for again if
+    // none are (another source shown, say).
+    function keepFound() {
+        const kept = results.filter(id => pinhole.library.indexOf(id) >= 0)
+        if (kept.length === 0)
+            search()
+        else if (kept.length !== results.length)
+            results = kept
     }
     // Picked by hand: no longer a photo's.
     function pick(L, a, b) {
         targetL = Math.max(0.05, Math.min(0.98, L))
         targetA = a
         targetB = b
-        from = -1
-        searching.restart()
+        if (Colour.chroma(a, b) >= 0.004)
+            hue = Colour.hue(a, b)
+        fromId = ""
+        if (!searching.running)
+            searching.start()
     }
     function pickPolar(C, h) {
-        const p = Colour.fromPolar(targetL, Math.max(0, Math.min(rimChroma, C)), (h + 360) % 360)
+        hue = (h + 360) % 360
+        const p = Colour.fromPolar(targetL, Math.max(0, Math.min(rimChroma, C)), hue)
         pick(targetL, p[1], p[2])
     }
-    // While a finger drags on the wheel, the photos follow a few times a
-    // second rather than at every move.
+    // While a finger drags on the wheel or a key is held, the photos follow
+    // some fifteen times a second (a search is some 10 ms), each time for
+    // the colour as it is then.
     Timer { id: searching; interval: 60; onTriggered: finder.search() }
 
     Connections {
@@ -97,15 +121,14 @@ Item {
         function onOpenChanged() {
             if (!finder.pinhole.viewer.open && finder.returning) {
                 finder.returning = false
+                // As it was left: the photos found stay, by their ids, and
+                // the library's colours are read again if it has changed,
+                // for what is looked for next.
+                finder.plugin.ensure()
+                finder.keepFound()
+                wall.keepFound()
                 finder.shown = true
             }
-        }
-    }
-    Connections {
-        target: finder.plugin
-        function onColoursChanged() {
-            if (finder.shown && finder.plugin.colours)
-                finder.search()
         }
     }
 
@@ -122,7 +145,7 @@ Item {
         name: "colour.close.h"
         keys: ["H"]
         keyLayer: "plugin"
-        when: finder.shown && finder.mode === "find"
+        when: finder.shown
         mouse: qsTr("The ✕ button")
         touchpad: qsTr("The ✕ button")
         onTriggered: finder.close()
@@ -249,43 +272,59 @@ Item {
             hint: finder.mode === "find" ? "W" : ""
             onTapped: finder.mode = "wall"
         }
-        Loader {
-            active: finder.mode === "wall"
-            sourceComponent: Row {
-                spacing: 6
-                ShellButton {
-                    text: qsTr("Another")
-                    key: "Space"
-                    keyLayer: "plugin"
-                    hint: "Space"
-                    onTapped: wall.another()
-                }
-                ShellButton {
-                    text: "−"
-                    key: "-"
-                    keyLayer: "plugin"
-                    hint: "-"
-                    usable: wall.density > 0
-                    onTapped: wall.density -= 1
-                }
-                ShellButton {
-                    text: "+"
-                    key: "+"
-                    keyLayer: "plugin"
-                    hint: "+"
-                    usable: wall.density < wall.densities.length - 1
-                    onTapped: wall.density += 1
-                }
-            }
+    }
+    // The wall's own, at the right before ✕; under the row when the window
+    // is too narrow for both.
+    readonly property bool narrow: width < top.width + wallControls.width + closeButton.width + 60
+    Row {
+        id: wallControls
+        visible: finder.mode === "wall"
+        anchors.right: closeButton.left
+        anchors.rightMargin: 6
+        y: finder.narrow ? top.y + top.height + 8 : top.y
+        spacing: 6
+        ShellButton {
+            text: qsTr("Another")
+            key: "Space"
+            keyLayer: "plugin"
+            hint: "Space"
+            onTapped: wall.another()
         }
+        // The text is the key.
+        ShellButton {
+            text: "−"
+            key: "-"
+            keyLayer: "plugin"
+            hint: ""
+            usable: wall.density > 0
+            onTapped: wall.density -= 1
+        }
+        ShellButton {
+            text: "+"
+            key: "+"
+            keyLayer: "plugin"
+            hint: ""
+            usable: wall.density < wall.densities.length - 1
+            onTapped: wall.density += 1
+        }
+    }
+    // = as well as +, as for the grid's zoom.
+    Command {
+        name: "colour.bigger"
+        keys: ["="]
+        keyLayer: "plugin"
+        when: finder.shown && finder.mode === "wall" && wall.density < wall.densities.length - 1
+        mouse: qsTr("The + button")
+        touchpad: qsTr("Pinch")
+        onTriggered: wall.density += 1
     }
     // What is shown, where there is room for it.
     Chip {
         x: top.x + top.width + 6
         y: top.y
-        visible: finder.plugin.colours !== null && x + width + 12 <= closeButton.x
+        visible: finder.plugin.colours !== null && x + width + 12 <= (wallControls.visible && !finder.narrow ? wallControls.x : closeButton.x)
         textColor: theme.darkForeground
-        text: finder.mode === "wall" ? qsTr("%1 of your most colourful photos, by hue").arg(Number(wall.shownCount).toLocaleString(Qt.locale(), "f", 0))
+        text: finder.mode === "wall" ? qsTr("%Ln of your most colourful photos, by hue", "", wall.shownCount)
             : finder.from >= 0 ? qsTr("Closest to this photo's colour") : qsTr("Closest to the colour picked")
     }
     ShellButton {
@@ -524,7 +563,7 @@ Item {
                         asynchronous: true
                     }
                     HoverHandler { cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: finder.open(finder.from) }
+                    TapHandler { onTapped: finder.open(finder.fromId) }
                 }
                 // The colour, when no photo shows it.
                 Rectangle {
@@ -551,7 +590,7 @@ Item {
                 font.pixelSize: Math.round(theme.fontSize * 0.857)
                 text: finder.plugin.colours === null ? ""
                     : qsTr("Each photo is found by its average colour, a dot on the wheel at it. %1 of your %2 have a colour of their own; the rest are near the grey middle, found only by grey.")
-                      .arg(Number(finder.plugin.colourful).toLocaleString(Qt.locale(), "f", 0))
+                      .arg(Number(finder.plugin.colours.colourful).toLocaleString(Qt.locale(), "f", 0))
                       .arg(Number(finder.plugin.colours.n).toLocaleString(Qt.locale(), "f", 0))
             }
         }
@@ -572,9 +611,11 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             delegate: Item {
                 id: cell
-                required property int modelData
-                required property int index
-                readonly property var item: finder.pinhole.library.item(modelData)
+                // A photo's id; where it is now, as the library changes.
+                required property string modelData
+                readonly property int position: (finder.plugin.revision, finder.pinhole.library.indexOf(modelData))
+                readonly property var item: finder.pinhole.library.item(position)
+                visible: position >= 0
                 width: photos.cellWidth
                 height: photos.cellHeight
                 Rectangle {
@@ -588,7 +629,7 @@ Item {
                     Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                     Image {
                         anchors.fill: parent
-                        source: cell.item.thumbnail
+                        source: cell.item.thumbnail ?? ""
                         sourceSize: Qt.size(Math.round(width * Screen.devicePixelRatio), Math.round(height * Screen.devicePixelRatio))
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
@@ -630,7 +671,7 @@ Item {
         id: wall
         visible: finder.mode === "wall"
         anchors.fill: parent
-        anchors.topMargin: top.y + top.height + 16
+        anchors.topMargin: (finder.narrow ? wallControls.y + wallControls.height : top.y + top.height) + 16
         anchors.margins: 16
         finder: finder
     }

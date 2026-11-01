@@ -23,20 +23,33 @@ Item {
     // Red to pink, starting at the pinks.
     readonly property real start: 345
     property int seed: 0
+    // The photos on it, column by column, by id ("" for none): as the
+    // library changes they stay, and find their photos' new places.
     property var tiles: []
-    readonly property int shownCount: tiles.filter(i => i >= 0).length
+    readonly property int shownCount: tiles.filter(id => id !== "").length
+    // Bumped when the wall is laid, for the tiles to come in again.
+    property int generation: 0
 
-    // What the tiles were laid for, so coming back to the wall as it was
-    // (from a photo opened on it) does not lay it again.
+    // What the tiles were laid for: coming back to the wall as it was
+    // (from a photo opened on it), or the library read again, does not lay
+    // it again.
     property var laid: null
     function lay() {
         const d = finder.plugin.colours
         if (!visible || !d)
             return
-        if (laid && laid.colours === d && laid.columns === columns && laid.rows === rows && laid.seed === seed)
+        if (laid && laid.columns === columns && laid.rows === rows && laid.seed === seed)
             return
-        laid = { colours: d, columns: columns, rows: rows, seed: seed }
+        laid = { columns: columns, rows: rows, seed: seed }
         tiles = Colour.wall(d, columns, rows, start, seed)
+        ++generation
+    }
+    // Laid again if none of its photos are in the library any more.
+    function keepFound() {
+        if (tiles.length > 0 && !tiles.some(id => id !== "" && pinhole.library.indexOf(id) >= 0)) {
+            laid = null
+            lay()
+        }
     }
     function another() {
         seed = seed + 1 + Math.floor(Math.random() * 1000)
@@ -47,9 +60,10 @@ Item {
     onColumnsChanged: settle.restart()
     onRowsChanged: settle.restart()
     onVisibleChanged: if (visible) lay()
+    // The colours first read with the wall already open.
     Connections {
         target: wall.finder.plugin
-        function onColoursChanged() { settle.restart() }
+        function onColoursChanged() { if (wall.tiles.length === 0) settle.restart() }
     }
 
     // A pinch makes the tiles bigger or smaller, a step at a time.
@@ -74,21 +88,25 @@ Item {
         width: wall.columns * wall.tile
         height: wall.rows * wall.tile
         anchors.centerIn: parent
+        // A tile a place, kept from wall to wall: only its photo changes,
+        // when the wave from the left reaches it, so a new wall's work is
+        // spread over the frames the wave takes.
         Repeater {
-            model: wall.tiles
+            model: wall.tiles.length
             delegate: Item {
                 id: cell
-                required property int modelData
                 required property int index
+                property string photo: ""
                 readonly property int column: Math.floor(index / wall.rows)
                 readonly property int row: index % wall.rows
-                readonly property var item: modelData >= 0 ? wall.pinhole.library.item(modelData) : null
+                readonly property int position: (wall.finder.plugin.revision, photo !== "" ? wall.pinhole.library.indexOf(photo) : -1)
+                readonly property var item: position >= 0 ? wall.pinhole.library.item(position) : null
                 x: column * wall.tile
                 y: row * wall.tile
                 width: wall.tile
                 height: wall.tile
                 z: hover.hovered ? 2 : 0
-                visible: modelData >= 0
+                visible: item !== null
 
                 Rectangle {
                     id: face
@@ -102,10 +120,18 @@ Item {
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                     border.width: hover.hovered ? 1 : 0
                     border.color: theme.brightForeground
-                    SequentialAnimation on opacity {
+                    SequentialAnimation {
+                        id: wave
                         PauseAnimation { duration: cell.column * 12 + cell.row * 4 }
-                        NumberAnimation { to: 1; duration: 260; easing.type: Easing.OutCubic }
+                        ScriptAction { script: cell.photo = wall.tiles[cell.index] ?? "" }
+                        PropertyAction { target: face; property: "opacity"; value: 0 }
+                        NumberAnimation { target: face; property: "opacity"; to: 1; duration: 260; easing.type: Easing.OutCubic }
                     }
+                    Connections {
+                        target: wall
+                        function onGenerationChanged() { wave.restart() }
+                    }
+                    Component.onCompleted: wave.start()
                     Image {
                         anchors.fill: parent
                         anchors.margins: face.border.width
@@ -120,7 +146,7 @@ Item {
                     }
                 }
                 HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: wall.finder.open(cell.modelData) }
+                TapHandler { onTapped: wall.finder.open(cell.photo) }
             }
         }
     }

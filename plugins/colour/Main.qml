@@ -17,30 +17,34 @@ PinholePlugin {
     id: plugin
     covering: finder.shown
 
-    // The library's colours (Colour.index), read when first wanted (a
-    // quarter of a second for 50,000 photos) and again when wanted after
-    // the library changes.
+    // The library's colours (Colour.index), by the photos' ids: read when
+    // the finder opens, a quarter of a second for 50,000 photos. While a
+    // library is built it changes every few seconds; what the finder shows
+    // stays as it is, and the colours are read again when it next opens.
     property var colours: null
-    property int colourful: 0
+    property bool stale: false
+    // Bumped when the library is read again: what is shown finds its
+    // photos' new places by their ids.
+    property int revision: 0
     function ensure() {
-        if (colours)
+        if (colours && !stale)
             return colours
-        const list = [], dates = []
+        const list = [], dates = [], ids = []
         for (let i = 0; i < pinhole.library.count; ++i) {
             const item = pinhole.library.item(i)
             list.push(item.avgColor)
             dates.push(item.date)
+            ids.push(item.id)
         }
-        colours = Colour.index(list, dates)
-        colourful = Colour.colourful(colours)
+        stale = false
+        colours = Colour.index(list, dates, ids)
         return colours
     }
     Connections {
         target: pinhole.library
         function onChanged() {
-            plugin.colours = null
-            if (finder.shown)
-                plugin.ensure()
+            plugin.stale = true
+            ++plugin.revision
         }
     }
 
@@ -70,16 +74,11 @@ PinholePlugin {
         }
     ]
 
-    // The tour opens on the library's most colourful photo.
-    function brightest() {
-        const d = ensure()
-        let best = -1, chroma = 0
-        for (let k = 0; k < d.n; ++k)
-            if (d.C[k] > chroma && d.L[k] > 0.35 && d.L[k] < 0.85) {
-                chroma = d.C[k]
-                best = d.at[k]
-            }
-        return best
+    // The tour's "same colour" opens on a photo that shows it well
+    // (Colour.example).
+    function example() {
+        const id = Colour.example(ensure())
+        return id !== "" ? pinhole.library.indexOf(id) : -1
     }
     tourReady: pinhole.library.count > 0
     tour: [
@@ -91,7 +90,7 @@ PinholePlugin {
         {
             title: qsTr("Same colour"),
             text: qsTr("On a photo, H shows the photos closest to its colour."),
-            open: () => brightest(),
+            open: () => example(),
             action: viewerAction
         },
         {
@@ -120,9 +119,10 @@ PinholePlugin {
             color: theme.foreground
             font.pixelSize: Math.round(theme.fontSize * 0.857)
             Component.onCompleted: if (pinhole.library.count > 0) plugin.ensure()
-            text: plugin.colours === null ? qsTr("Reading the photos' colours…")
+            text: pinhole.library.count === 0 ? qsTr("No photos here yet.")
+                : plugin.colours === null ? qsTr("Reading the photos' colours…")
                 : qsTr("%1 of %2 photos have a colour of their own to find by; the rest average to grey. H in the grid, or on a photo.")
-                  .arg(Number(plugin.colourful).toLocaleString(Qt.locale(), "f", 0))
+                  .arg(Number(plugin.colours.colourful).toLocaleString(Qt.locale(), "f", 0))
                   .arg(Number(plugin.colours.n).toLocaleString(Qt.locale(), "f", 0))
         }
     }
