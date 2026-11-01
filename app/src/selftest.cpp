@@ -9,6 +9,7 @@
 #include "photogrid.h"
 #include "photoprovider.h"
 #include "plugins.h"
+#include "storage.h"
 #include "viewer.h"
 
 #include <QClipboard>
@@ -27,6 +28,7 @@
 #include <QJSValue>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QStandardPaths>
 #include <QRegularExpression>
 #include <QQuickItem>
@@ -66,6 +68,55 @@ int findIndex(const Library &library, const QString &where) {
         if (library.at(i).id == id)
             return i;
     return -1;
+}
+
+// The newest assets matching `where` (on `assets a`) whose `kind` this
+// computer has: a folder's, all of them (its files are here); iCloud's,
+// those in the cache (named as the service names them, service.rs
+// cached_path), so a test needs no network and no session. Library
+// positions, newest first, at most `most`.
+QList<int> findHere(const Library &library, const QString &kind, const QString &where, int most) {
+    const bool folder = library.source().startsWith(QLatin1String("folder:"));
+    QList<QByteArray> ids;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "selftest-here");
+        db.setDatabaseName(library.dir() + "/library.sqlite");
+        db.setConnectOptions("QSQLITE_OPEN_READONLY");
+        if (db.open()) {
+            QSqlQuery q(db);
+            q.prepare("SELECT a.id, r.key FROM assets a JOIN renditions r ON r.asset_id = a.id AND r.kind = ? WHERE " + where
+                      + " ORDER BY a.asset_date DESC");
+            q.addBindValue(kind);
+            const QString cache = Storage::folder() + "/cache/" + kind + '/';
+            if (q.exec())
+                while (q.next() && ids.size() < most) {
+                    const QString key = q.value(1).toString();
+                    bool here = folder;
+                    if (!here) {
+                        // sync.rs thumb_path: the key made a file name, in
+                        // a folder of its hash's last byte.
+                        QString safe = key;
+                        safe.replace('/', '_').replace('+', '-');
+                        quint32 hash = 0;
+                        for (const char byte : key.toUtf8())
+                            hash = hash * 31 + quint8(byte);
+                        const QString bucket = QStringLiteral("%1").arg(hash & 0xff, 2, 16, QLatin1Char('0'));
+                        here = !QDir(cache + bucket).entryList({safe + ".*"}, QDir::Files).isEmpty();
+                    }
+                    if (here)
+                        ids.append(q.value(0).toString().toUtf8());
+                }
+        }
+    }
+    QSqlDatabase::removeDatabase("selftest-here");
+    QList<int> found;
+    for (const QByteArray &id : std::as_const(ids))
+        for (int i = library.count() - 1; i >= 0; --i)
+            if (library.at(i).id == id) {
+                found.append(i);
+                break;
+            }
+    return found;
 }
 
 namespace {
@@ -497,7 +548,32 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
     auto video = [window] { return window->findChild<QObject *>(QStringLiteral("photoViewer")); };
     auto at = [video] { return video()->property("videoPosition").toDouble(); };
     auto length = [video] { return video()->property("videoDuration").toDouble(); };
-    const int clip = findIndex(library, "a.is_video AND a.duration BETWEEN 40 AND 300");
+    // A video, and the photo Copy copies, that are on this computer: the
+    // test is of the window, not of the network (or a session to fetch
+    // with, which a scratch profile never has).
+    const int clip = findHere(library, "video", "a.is_video AND a.duration BETWEEN 40 AND 300", 1).value(0, -1);
+    // Where the photos stepped through are, `start` the first opened: ten
+    // in a row from start - 3, each a photo of its own (no video, which
+    // does not zoom; none in a stack or hidden, which the viewer steps
+    // over or through otherwise), start + 5's full size here for Copy.
+    const QList<int> copyable = findHere(library, "full", "NOT a.is_video", 400);
+    auto pickStart = [grid, &library, copyable] {
+        QSet<int> grouped;
+        for (const QVariant &stack : grid->stacks())
+            for (const QVariant &at : stack.toList())
+                grouped.insert(at.toInt());
+        for (const QVariant &at : grid->hidden())
+            grouped.insert(at.toInt());
+        for (const int copied : copyable) {
+            const int first = copied - 5;
+            bool plain = first - 3 >= 0 && copied + 1 < library.count();
+            for (int i = first - 3; plain && i <= copied + 1; ++i)
+                plain = !library.at(i).video && !grouped.contains(i) && !grid->rectOf(i).isEmpty();
+            if (plain)
+                return first;
+        }
+        return -1;
+    };
     auto mark = std::make_shared<double>(0);
     auto start = std::make_shared<int>(-1);
     // The grid's size, which is the content's: tiled on screen, the window
@@ -534,13 +610,22 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return grid->animating(); }, 100},
         {"a two-finger tap stops it, and opens nothing", [=] { click(window, middle(), Qt::RightButton); },
          [=, &viewer] { return !grid->animating() && !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
-        {"a two-finger tap on a photo opens nothing",
-         [=] {
-             *start = grid->indexAt(middle().x(), middle().y());
-             click(window, middle(), Qt::RightButton);
+        {"the photos to step through in the middle", [=] {
+             *start = pickStart();
+             if (*start >= 0)
+                 grid->jumpToFraction(std::clamp((grid->rectOf(*start).center().y() + grid->scrollFraction() * grid->scrollRange()
+                                                  - grid->height() / 2) / std::max(1.0, grid->scrollRange()), 0.0, 1.0));
          },
+         [=] {
+             if (*start < 0)
+                 std::printf("selftest:      (no ten photos in a row with the full size of the sixth here: a folder's library, or "
+                             "a copy of one with its cache)\n");
+             return *start >= 0 && grid->rectOf(*start).intersects(QRectF(0, 0, grid->width(), grid->height()));
+         }},
+        {"a two-finger tap on a photo opens nothing",
+         [=] { click(window, grid->rectOf(*start).center(), Qt::RightButton); },
          [=, &viewer] { return !viewer.isOpen() && grid->selectionCount() == 0 && popups() == 0; }},
-        {"a click opens the photo, selecting nothing", [=] { click(window, middle()); },
+        {"a click opens the photo, selecting nothing", [=] { click(window, grid->rectOf(*start).center()); },
          [=, &viewer] { return viewer.isOpen() && viewer.index() == *start && grid->selectionCount() == 0; }, 900},
         {"clicking the right side shows the next", [=] { click(window, atRight()); },
          [&viewer, start] { return viewer.index() == *start + 1; }},
@@ -822,9 +907,16 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          }, 3800},
         {"S starts selecting", [=] { key(window, Qt::Key_S, {}, QStringLiteral("s")); },
          [=] { return grid->selecting(); }},
+        // Over the ten photos stepped through before, each a cell of its
+        // own (none stacked or hidden, which a range of positions would
+        // count and the grid would not), the grid still.
+        {"the ten photos stepped through in the middle again", [=] {
+             grid->jumpToFraction(std::clamp((grid->rectOf(*start).center().y() + grid->scrollFraction() * grid->scrollRange()
+                                              - grid->height() / 2) / std::max(1.0, grid->scrollRange()), 0.0, 1.0));
+         },
+         [=] { return !grid->animating() && grid->rectOf(*start - 3).top() >= 0 && grid->rectOf(*start + 6).bottom() <= grid->height(); }},
         {"a drag across the photos ticks every one from start to end", [=] {
-             const int from = grid->indexAt(grid->width() * 0.2, grid->height() * 0.3);
-             const int to = grid->indexAt(grid->width() * 0.7, grid->height() * 0.6);
+             const int from = *start - 3, to = *start + 6;
              *mark = to - from + 1;
              const QPointF a = grid->rectOf(from).center(), b = grid->rectOf(to).center();
              mouse(window, QEvent::MouseButtonPress, a, Qt::LeftButton);
@@ -832,7 +924,11 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
                  mouse(window, QEvent::MouseMove, a + (b - a) * (i / 10.0), Qt::LeftButton);
              mouse(window, QEvent::MouseButtonRelease, b, Qt::LeftButton);
          },
-         [=] { return grid->selecting() && grid->selectionCount() == int(*mark); }},
+         [=] {
+             if (grid->selectionCount() != int(*mark))
+                 std::printf("selftest:      (%d ticked, %d wanted)\n", grid->selectionCount(), int(*mark));
+             return grid->selecting() && grid->selectionCount() == int(*mark);
+         }},
         {"held at the top edge, the grid scrolls on and the ticks follow", [=] {
              grid->clearSelection();
              const QPointF a = grid->rectOf(grid->indexAt(grid->width() * 0.5, grid->height() * 0.7)).center();
@@ -895,7 +991,34 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
             (*run)(k + 1);
         });
     };
-    QTimer::singleShot(1200, window, [run] { (*run)(0); });
+    // Once the plugins' stacks and hidden photos have come (Series' and
+    // Screenshots', found after the start: none for three seconds), within
+    // a minute: the photos stepped through are chosen among those in no
+    // stack.
+    // A scratch profile has no session, so the source shown needs signing
+    // in: its card in the middle (over the photos clicked) looked past, as
+    // Look around first does, each time it would come back.
+    window->setProperty("troubleSeen", true);
+    onChange(window, "troubleSeen", window, [window] {
+        if (!window->property("troubleSeen").toBool())
+            window->setProperty("troubleSeen", true);
+    });
+    auto quiet = std::make_shared<QElapsedTimer>();
+    quiet->start();
+    QObject::connect(grid, &PhotoGrid::stacksChanged, window, [quiet] { quiet->restart(); });
+    QObject::connect(grid, &PhotoGrid::hiddenChanged, window, [quiet] { quiet->restart(); });
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto settled = std::make_shared<std::function<void()>>();
+    *settled = [=] {
+        if (clock->elapsed() < 1200 || (quiet->elapsed() < 3000 && clock->elapsed() < 60000)) {
+            QTimer::singleShot(100, window, [settled] { (*settled)(); });
+            return;
+        }
+        std::printf("selftest: the grid settled after %lld ms\n", static_cast<long long>(clock->elapsed()));
+        (*run)(0);
+    };
+    (*settled)();
 }
 
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder) {

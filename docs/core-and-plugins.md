@@ -1517,6 +1517,31 @@ would mean writing throwaway code.
     (no Apple session, a stand-in sign-in provider): iCloud off, the card,
     Turn on iCloud (1), and the 49,079 photos back with no listing.
 
+- After the review:
+  - Opened with a source plugin off, the window kept the last library on
+    screen: the service shows `library/none`, which it makes only when it
+    switches, and a reload of a folder with no `library.sqlite` failed and
+    kept what was shown. `LibraryReloader` now reads a missing library as
+    an empty one (a damaged one still keeps what is shown); while
+    `sourcesOff` the grid is not drawn and takes no pointer, its plugins'
+    buttons go, and the card has a backdrop of its own.
+  - One's own copy of a source plugin is not turned on from the card: its
+    button ("Turn on iCloud…", on 1 like the others) opens the side panel
+    at its switch, where the trust line is. The copy's line names the
+    password only for a kind that signs in (the service's `needs_sign_in`,
+    or its `PluginSource.signIn`); a copy of Folders reads the photos of
+    the sources shown with it. In Polish: "kopia wtyczki %1", so any name
+    stays in its own form.
+  - The side panel's `Scroller` lets a press or a touch that stops it only
+    stop it. A `Scroller` within another's `Flickable` (over a plugin's
+    list in its settings) has the wheel and the touchpad first while it,
+    or one within it, can still go their way; a raw `Flickable` within
+    gets none (the panel scrolls). Plugins get `Scroller` in
+    `Pinhole.Plugin`, the start of their views scrolling as the grid does.
+  - `PINHOLE_SELFTEST=sourcesoff:` checks what it says: no photo while off
+    (at the start and turned off while open), back on 1, and, on a folder
+    source, a round after it comes back with `listed_at` unchanged.
+
 ### What can run side by side
 
 | A track (cargo build) | B track (qmake build) |

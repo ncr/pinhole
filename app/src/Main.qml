@@ -37,7 +37,11 @@ ApplicationWindow {
         // The pointer is the grid's only while its keys are: under a panel,
         // a card, a menu, the viewer or a plugin's screen nothing that
         // comes through moves it, zooms it, selects or opens.
-        covered: win.keyLayer !== "grid"
+        covered: win.keyLayer !== "grid" || win.sourcesOff
+        // No source shown, no photos: the library is library/none's, empty
+        // (LibraryReloader), and until it is read the last one's are not
+        // drawn under the card saying so.
+        opacity: win.sourcesOff ? 0 : 1
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
     // A mark's colour as a plugin names it (an action's too,
@@ -175,59 +179,104 @@ ApplicationWindow {
     }
 
     // The plugins sources come from all off: which to turn on, each a
-    // button (1, 2), and the side panel for the rest.
-    Column {
+    // button (1, 2), and the side panel for the rest. One's own copy is
+    // not turned on from here: its button opens the side panel at its
+    // switch, which says what trusting it means.
+    readonly property var sourcesOffButtons: {
+        const ids = addedPluginsOff.concat(ownSourcePluginsOff.filter(id => addedPluginsOff.indexOf(id) < 0))
+        return (plugins.revision, ids.slice(0, 9))
+    }
+    readonly property var personalSourcesOff: (plugins.revision, addedPluginsOff.filter(id => plugins.at(id).personal))
+    Rectangle {
         id: sourcesOffCard
         objectName: "sourcesOff"
         anchors.centerIn: parent
         visible: win.sourcesOff && win.chromeUp
         opacity: win.chrome
-        spacing: theme.fontSize
-        width: Math.min(parent.width - 48, 560)
-        UiText {
-            width: parent.width
-            text: win.addedPluginsOff.length > 0 ? qsTr("Your sources' plugins are off: %1").arg(win.pluginNames(win.addedPluginsOff))
-                                                 : qsTr("No source of photos is on")
-            color: theme.brightForeground
-            font.pixelSize: Math.round(theme.fontSize * 1.333)
-            wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignHCenter
-        }
-        UiText {
-            width: parent.width
-            text: win.addedPluginsOff.length > 0
-                  ? qsTr("Their sources and photos are still on this computer: turned on, they show again at once.")
-                  : qsTr("Where the photos come from is a plugin's: %1.").arg(win.pluginNames(win.ownSourcePlugins))
-            wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignHCenter
-        }
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 8
-            topPadding: Math.round(theme.fontSize * 0.5)
-            Repeater {
-                // Those the sources added are of first.
-                model: win.addedPluginsOff.filter(id => !plugins.at(id).personal)
-                       .concat(win.ownSourcePluginsOff.filter(id => win.addedPluginsOff.indexOf(id) < 0)).slice(0, 9)
-                delegate: ShellButton {
-                    required property string modelData
-                    required property int index
-                    objectName: "turnOn:" + modelData
-                    active: index === 0
-                    text: qsTr("Turn on %1").arg(plugins.at(modelData).name)
-                    key: String(index + 1)
-                    keyLayer: "grid"
-                    usable: win.sourcesOff
-                    onTapped: plugins.setEnabled(modelData, true)
+        width: Math.min(parent.width - 32, 600)
+        height: sourcesOffContent.implicitHeight + 2 * Math.round(theme.fontSize * 1.714)
+        radius: Math.min(4, theme.radius)
+        color: theme.background
+        border.width: 1
+        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+        // Over whatever is beneath: a click on it reaches nothing there.
+        Shield { anchors.fill: parent }
+        Column {
+            id: sourcesOffContent
+            anchors.centerIn: parent
+            spacing: theme.fontSize
+            width: parent.width - 2 * Math.round(theme.fontSize * 1.714)
+            UiText {
+                width: parent.width
+                text: win.addedPluginsOff.length > 0 ? qsTr("Your sources' plugins are off: %1").arg(win.pluginNames(win.addedPluginsOff))
+                                                     : qsTr("No source of photos is on")
+                color: theme.brightForeground
+                font.pixelSize: Math.round(theme.fontSize * 1.333)
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+            UiText {
+                width: parent.width
+                text: win.addedPluginsOff.length > 0
+                      ? qsTr("Their sources and photos are still on this computer: turned on, they show again at once.")
+                      : qsTr("Where the photos come from is a plugin's: %1.").arg(win.pluginNames(win.ownSourcePlugins))
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+            UiText {
+                visible: win.personalSourcesOff.length > 0
+                width: parent.width
+                text: (win.personalSourcesOff.length === 1
+                       ? qsTr("Your own copy of %1 is off: the side panel says what it can see, beside its switch.")
+                       : qsTr("Your own copies of %1 are off: the side panel says what they can see, beside their switches."))
+                      .arg(win.pluginNames(win.personalSourcesOff))
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Flow {
+                // Centred, a line after another as the card has room.
+                width: Math.min(parent.width, buttonsWidth)
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 8
+                topPadding: Math.round(theme.fontSize * 0.5)
+                readonly property real buttonsWidth: {
+                    let w = 0
+                    for (let i = 0; i < turnOnButtons.count; ++i)
+                        w += (turnOnButtons.itemAt(i)?.width ?? 0) + spacing
+                    return Math.max(0, w - spacing)
+                }
+                Repeater {
+                    id: turnOnButtons
+                    // Those the sources added are of first.
+                    model: win.sourcesOffButtons
+                    delegate: ShellButton {
+                        required property string modelData
+                        required property int index
+                        readonly property bool personal: plugins.at(modelData).personal === true
+                        objectName: "turnOn:" + modelData
+                        active: index === 0
+                        text: (personal ? qsTr("Turn on %1…") : qsTr("Turn on %1")).arg(plugins.at(modelData).name)
+                        key: String(index + 1)
+                        keyLayer: "grid"
+                        usable: win.sourcesOff
+                        onTapped: {
+                            if (!personal) {
+                                plugins.setEnabled(modelData, true)
+                                return
+                            }
+                            side.shown = true
+                            side.showPlugin(modelData)
+                        }
+                    }
                 }
             }
-        }
-        UiText {
-            width: parent.width
-            text: qsTr("Or in the side panel (Tab), under Plugins.")
-            color: theme.darkForeground
-            wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignHCenter
+            UiText {
+                width: parent.width
+                text: qsTr("Or in the side panel (Tab), under Plugins.")
+                color: theme.darkForeground
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
     }
 
@@ -419,7 +468,9 @@ ApplicationWindow {
         anchors.left: newestButton.opacity > 0 ? newestButton.right : parent.left
         anchors.leftMargin: newestButton.opacity > 0 ? 8 : 16
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 16
+        // Over the viewer, above its row of photos and a video's bar: a
+        // tap meant for one of them never signs in.
+        anchors.bottomMargin: win.viewerShown ? win.photoViewer.stripHeight + 24 : 16
         // The sign-in and service problems in the theme's red; offline in
         // its muted text.
         text: (service.health === "offline" ? "" : "● ") + message
@@ -628,7 +679,7 @@ ApplicationWindow {
     Row {
         id: gridActions
         objectName: "gridActions"
-        visible: win.chromeUp && !win.firstRun && !grid.selecting
+        visible: win.chromeUp && !win.firstRun && !win.sourcesOff && !grid.selecting
         opacity: win.chrome
         anchors.top: parent.top
         anchors.right: selectButton.visible ? selectButton.left : parent.right

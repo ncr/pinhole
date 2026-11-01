@@ -29,6 +29,8 @@ struct LibraryReloader::Read {
     std::vector<int> moved, textures;
     // The same source's library as the one shown.
     bool same = true;
+    // No library.sqlite there: read as an empty one.
+    bool missing = false;
     qint64 readMs = 0;
 };
 
@@ -78,7 +80,11 @@ void LibraryReloader::reload() {
         auto read = std::make_shared<Read>();
         read->dir = dir;
         QString error;
-        if (!read->fresh.open(dir, &error)) {
+        // None there is an empty one, not the last one's photos kept: the
+        // service shows nothing (library/none, its sources' plugins off, or
+        // none added) or has not made it yet. It is read once it is there.
+        read->missing = !QFile::exists(dir + "/library.sqlite");
+        if (!read->fresh.open(dir, &error) && !read->missing) {
             std::fprintf(stderr, "pinhole: reloading the library: %s\n", qPrintable(error));
             QMetaObject::invokeMethod(this, [this] {
                 m_reading = false;
@@ -130,6 +136,10 @@ void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
     emit reloaded(read->moved, read->textures, std::exchange(m_toNewest, false));
     if (!read->same)
         emit otherSource();
+    if (read->missing)
+        m_wait.start();
+    else
+        m_wait.stop();
     std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                  m_library->count(), before, read->readMs, swapping.elapsed());
     m_reading = false;

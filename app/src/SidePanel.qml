@@ -391,6 +391,10 @@ Item {
         keys: ["Delete", "Backspace"]
         keyLayer: "side"
         when: root.confirming < 0 && root.focusIndex < root.sourceCount
+        // By a pointer, Remove on a source's row; with no source there is
+        // no row, and nothing to remove.
+        noMouse: root.sourceCount === 0 ? qsTr("No source to remove") : ""
+        noTouchpad: root.sourceCount === 0 ? qsTr("No source to remove") : ""
         onTriggered: {
             root.askingFor = null
             root.confirming = root.focusIndex
@@ -656,8 +660,10 @@ Item {
                 Component.onDestruction: root.dropStop(addButton)
                 action: addAction
             }
-            // The sources' keys, a pair after another as the line has room.
+            // The sources' keys, a pair after another as the line has room;
+            // with no source, none of them does anything.
             Flow {
+                visible: root.sourceCount > 0
                 x: Math.round(theme.fontSize * 0.714)
                 width: parent.width - 2 * x
                 topPadding: 4
@@ -982,8 +988,15 @@ Item {
                     // One that brings sources of photos: what turning it
                     // off keeps, and, one's own, what trusting it means.
                     readonly property bool bringsSources: (info.sources || []).length > 0 && info.error === ""
+                    // Its kinds' sources sign in (iCloud's): as pinholed
+                    // says of the kind, on or off, or as the plugin's own
+                    // PluginSource does once it is on.
+                    readonly property bool signsIn: (sources.kinds, (info.sources || []).some(kind =>
+                        sources.kinds.some(k => k.kind === kind && k.needs_sign_in === true)
+                        || (item?.sources ?? []).some(s => s.kind === kind && s.signIn)))
                     readonly property string trust: !bringsSources ? ""
-                        : info.copy ? qsTr("Your own copy of %1: it sees the password you type.").arg(info.name)
+                        : info.copy && signsIn ? qsTr("Your own copy of %1: it sees the password you type.").arg(info.name)
+                        : info.copy ? qsTr("Your own copy of %1: it reads the photos of every source you show with it.").arg(info.name)
                         : info.personal ? qsTr("It reads your photos, and the accounts you sign in to with it. Turn it on only if you trust it.")
                         : ""
                     // The gutter its chevron stands in, as a source's glyph does.

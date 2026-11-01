@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "api": 4,
+  "id": "test.scrolls",
+  "name": "Scrolls test",
+  "version": "1.0.0",
+  "description": "For PINHOLE_SELFTEST=through: settings with a list and a long text of their own to scroll, inside the side panel.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

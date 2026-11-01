@@ -385,10 +385,15 @@ Item {
                 color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12)
             }
             Item {
+                id: footer
+                // Beside whichever button shows: Sign in, or at the code,
+                // Send a new code (none while no password was typed).
+                readonly property Item button: go.visible ? go : newCode.visible ? newCode : null
                 width: parent.width
-                height: go.height
+                height: Math.max(go.height, footnote.implicitHeight)
                 UiText {
-                    width: parent.width - go.width - theme.fontSize
+                    id: footnote
+                    width: parent.width - (footer.button ? footer.button.width + theme.fontSize : 0)
                     y: centredIn(parent.height)
                     wrapMode: Text.WordWrap
                     color: theme.darkForeground
@@ -397,6 +402,7 @@ Item {
                 ShellButton {
                     id: go
                     anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: !root.codeStage
                     active: root.ready && !root.busy
                     usable: root.ready && !root.busy
@@ -404,7 +410,9 @@ Item {
                     action: submitAction
                 }
                 ShellButton {
+                    id: newCode
                     anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: root.codeStage && password.text !== ""
                     usable: !root.busy
                     text: qsTr("Send a new code")

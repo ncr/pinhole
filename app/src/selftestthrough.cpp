@@ -7,7 +7,9 @@
 #include "viewer.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QGuiApplication>
+#include <QRegularExpression>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QPointingDevice>
@@ -269,7 +271,24 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
     QObject::connect(grid, &PhotoGrid::zoomingChanged, window, hear("zoomed"));
     QObject::connect(grid, &PhotoGrid::dragRequested, window, hear("dragged photos out"));
     QObject::connect(view, &Viewer::openChanged, window, hear("the viewer"));
+    // The grid laid out again (a plugin's stacks or hidden photos coming
+    // in, Series' and Screenshots' found after the start): it keeps the
+    // photo in the middle where it was, so the first photo moves and the
+    // scroll fraction changes with no input at all.
+    auto relaid = std::make_shared<int>(0);
+    auto quietSince = std::make_shared<QElapsedTimer>();
+    quietSince->start();
+    QObject::connect(grid, &PhotoGrid::cellsChanged, window, [relaid, quietSince] {
+        ++*relaid;
+        quietSince->restart();
+    });
+    QObject::connect(grid, &PhotoGrid::stacksChanged, window, [relaid, quietSince] {
+        ++*relaid;
+        quietSince->restart();
+    });
     auto top = std::make_shared<double>(0);
+    // A step not done yet (a probe tried again): the next waits for it.
+    auto busy = std::make_shared<bool>(false);
     auto still = [grid, top, heard] {
         heard->clear();
         *top = grid->rectOf(0).top();
@@ -295,14 +314,18 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
     auto add = [steps](const QString &what, std::function<void()> act, int wait = 700) { steps->append({what, act, wait}); };
 
     // Each kind of input at each point: none reaches the grid, and the
-    // first point of each that does is named.
+    // first point of each that does is named. Laid out again meanwhile by
+    // a plugin (`relaid`), with nothing reaching it at any point, it is
+    // tried once more: that moved it, not the input.
     auto probe = [=](const QString &over, std::function<QList<QPointF>()> points, QList<Kind> kinds,
                               std::function<QQuickItem *(QQuickWindow *)> within) {
         for (const Kind &kind : kinds) {
-            add(QStringLiteral("%1 over %2").arg(kind.name, over), [=] {
+            auto attempt = std::make_shared<std::function<void(int)>>();
+            *attempt = [=](int tries) {
                 if (grid->animating())
                     grid->jumpToFraction(grid->scrollFraction());
                 still();
+                const int relaidBefore = *relaid;
                 QString first;
                 int reached = 0;
                 const QList<QPointF> at = points();
@@ -316,6 +339,16 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 }
                 QTimer::singleShot(650, window, [=] {
                     const QStringList got = untouched();
+                    const bool layout = *relaid != relaidBefore && reached == 0
+                                        && QStringList(got).filter(QRegularExpression("^(scrolled|moved)$")).size() == got.size();
+                    if (!got.isEmpty() && layout && tries < 2) {
+                        say(QStringLiteral("the grid was laid out again during %1 over %2, and nothing reached it: once more")
+                                .arg(kind.name, over));
+                        *busy = true;
+                        QTimer::singleShot(300, window, [=] { (*attempt)(tries + 1); });
+                        return;
+                    }
+                    *busy = false;
                     check(got.isEmpty() && !at.isEmpty(),
                           QStringLiteral("%1 over %2, at %3 points: %4%5").arg(kind.name, over).arg(at.size())
                               .arg(got.isEmpty() ? QStringLiteral("the grid took none")
@@ -327,7 +360,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                         *extraWait = 1000;
                     }
                 });
-            }, 700);
+            };
+            add(QStringLiteral("%1 over %2").arg(kind.name, over), [=] { (*attempt)(0); }, 700);
         }
     };
 
@@ -449,9 +483,151 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             check(turned != was && back == was,
                   QStringLiteral("a click on the Videos switch in the panel turns it %1 and the next back").arg(turned ? "on" : "off"));
         }, 300);
-        add(QStringLiteral("the panel at its top, %1").arg(wide), [=] {
-            scroller()->setProperty("contentY", 0);
+        // A click or a touch tap on a switch while the panel coasts stops
+        // the panel there, and that is all: the switch does not turn.
+        for (const bool byTouch : {false, true}) {
+            const QString how = byTouch ? QStringLiteral("a touch tap") : QStringLiteral("a click");
+            add(QStringLiteral("%1 on a switch while the panel coasts, %2").arg(how, wide), [=] {
+                scroller()->setProperty("contentY", 0);
+                still();
+                swipe(window, panelRect().center(), {0, -5}, 4);
+                const double lifted = contentY();
+                QTimer::singleShot(60, window, [=] {
+                    QQuickItem *toggle = item("markSwitch:pinhole/video");
+                    if (!toggle) {
+                        check(false, QStringLiteral("the Videos switch is in the panel"));
+                        return;
+                    }
+                    const QPointF at = toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2));
+                    const bool was = toggle->property("checked").toBool();
+                    const double y = contentY();
+                    const bool coasting = y > lifted + 0.5;
+                    if (byTouch)
+                        touch(window, {at});
+                    else
+                        click(window, at);
+                    const bool turned = toggle->property("checked").toBool() != was;
+                    QTimer::singleShot(300, window, [=] {
+                        const double on = contentY() - y;
+                        check(coasting && panelRect().contains(at) && !turned && std::abs(on) < 1 && untouched().isEmpty(),
+                              QStringLiteral("%1 on the Videos switch while the panel coasts (%2 px from %3, at %4) stops it "
+                                             "(%5 px on after) and turns nothing (the switch %6), the grid still")
+                                  .arg(how).arg(qRound(y - lifted)).arg(qRound(lifted)).arg(qRound(y)).arg(qRound(on))
+                                  .arg(turned ? QStringLiteral("TURNED") : QStringLiteral("as it was")));
+                        // Put back, for what follows.
+                        if (turned)
+                            click(window, toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2)));
+                    });
+                });
+            }, 900);
+        }
+        // Then, at rest, the same switch answers the first click.
+        add(QStringLiteral("a switch at rest after a coast, %1").arg(wide), [=] {
+            QQuickItem *toggle = item("markSwitch:pinhole/video");
+            const QPointF at = toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2));
+            const bool was = toggle->property("checked").toBool();
+            click(window, at);
+            const bool turned = toggle->property("checked").toBool() != was;
+            if (turned)
+                click(window, at);
+            check(turned && toggle->property("checked").toBool() == was,
+                  QStringLiteral("at rest, a click on the Videos switch turns it, and another back"));
         }, 300);
+        // A plugin's settings with scrollables of their own (the test
+        // plugin test.scrolls, app/tests/scrolls): the wheel and the
+        // touchpad over one move it while it can go their way, the panel
+        // not; at its end, the panel.
+        auto nested = [window](const char *name) { return findItem(window->contentItem(), QString::fromLatin1(name)); };
+        auto nestedY = [nested](const char *name) {
+            QQuickItem *f = nested(name);
+            return f ? f->property("contentY").toDouble() : -1.0;
+        };
+        auto nestedMost = [nested](const char *name) {
+            QQuickItem *f = nested(name);
+            return f ? std::max(0.0, f->property("contentHeight").toDouble() - f->height()) : -1.0;
+        };
+        auto centreOf = [nested](const char *name) {
+            QQuickItem *f = nested(name);
+            return f ? f->mapToScene(QPointF(f->width() / 2, f->height() / 2)) : QPointF();
+        };
+        add(QStringLiteral("a plugin's settings with a list and a text, %1").arg(wide), [=] {
+            QObject *side = item("sidePanel");
+            QMetaObject::invokeMethod(side, "showPlugin", Q_ARG(QVariant, QStringLiteral("test.scrolls")));
+        }, 900);
+        add(QStringLiteral("the plugin's list in view, %1").arg(wide), [=] {
+            QQuickItem *list = nested("testNestedList");
+            QQuickItem *text = nested("testNestedTextView");
+            check(list && text, QStringLiteral("the test plugin test.scrolls shows its settings in the panel (its list %1, its text %2)")
+                                    .arg(list ? "there" : "MISSING", text ? "there" : "MISSING"));
+            if (!list || !text)
+                return;
+            // The two in the middle of the panel.
+            const double inPanel = list->mapToItem(scroller()->property("contentItem").value<QQuickItem *>(), QPointF(0, 0)).y();
+            scroller()->setProperty("contentY", std::max(0.0, inPanel - scroller()->height() / 3));
+            list->setProperty("contentY", 0);
+        }, 400);
+        for (const char *name : {"testNestedList", "testNestedTextView"}) {
+            const QString what = QString::fromLatin1(name) == QLatin1String("testNestedList") ? QStringLiteral("list")
+                                                                                              : QStringLiteral("text");
+            add(QStringLiteral("a notch over the plugin's %1, %2").arg(what, wide), [=] {
+                still();
+                QQuickItem *f = nested(name);
+                if (!f)
+                    return;
+                f->setProperty("contentY", 0);
+                const double panel = contentY();
+                wheel(window, centreOf(name), {0, -15}, {0, -120});
+                QTimer::singleShot(700, window, [=] {
+                    check(nestedY(name) > 5 && std::abs(contentY() - panel) < 0.5 && untouched().isEmpty(),
+                          QStringLiteral("a notch over the plugin's %1 moves it (%2 px), not the panel (%3 px), the grid still")
+                              .arg(what).arg(qRound(nestedY(name))).arg(qRound(contentY() - panel)));
+                });
+            }, 900);
+            add(QStringLiteral("a swipe over the plugin's %1, %2").arg(what, wide), [=] {
+                still();
+                QQuickItem *f = nested(name);
+                if (!f)
+                    return;
+                f->setProperty("contentY", 0);
+                const double panel = contentY();
+                swipe(window, centreOf(name), {0, -6}, 6);
+                QTimer::singleShot(900, window, [=] {
+                    check(nestedY(name) > 20 && std::abs(contentY() - panel) < 0.5 && untouched().isEmpty(),
+                          QStringLiteral("a swipe over the plugin's %1 moves it (%2 px), not the panel (%3 px), the grid still")
+                              .arg(what).arg(qRound(nestedY(name))).arg(qRound(contentY() - panel)));
+                });
+            }, 1100);
+            add(QStringLiteral("a notch over the plugin's %1 at its end, %2").arg(what, wide), [=] {
+                still();
+                QQuickItem *f = nested(name);
+                if (!f)
+                    return;
+                f->setProperty("contentY", nestedMost(name));
+                const double panel = contentY();
+                wheel(window, centreOf(name), {0, -15}, {0, -120});
+                QTimer::singleShot(700, window, [=] {
+                    check(std::abs(nestedY(name) - nestedMost(name)) < 0.5 && contentY() > panel + 5 && untouched().isEmpty(),
+                          QStringLiteral("at the end of the plugin's %1 (%2 of %3), a notch over it moves the panel (%4 px), the grid still")
+                              .arg(what).arg(qRound(nestedY(name))).arg(qRound(nestedMost(name))).arg(qRound(contentY() - panel)));
+                });
+            }, 900);
+            add(QStringLiteral("a notch back over the plugin's %1 at its end, %2").arg(what, wide), [=] {
+                still();
+                const double panel = contentY(), was = nestedY(name);
+                wheel(window, centreOf(name), {0, 15}, {0, 120});
+                QTimer::singleShot(700, window, [=] {
+                    check(nestedY(name) < was - 5 && std::abs(contentY() - panel) < 0.5 && untouched().isEmpty(),
+                          QStringLiteral("a notch back over the plugin's %1 at its end moves it back (%2 px), not the panel, the grid still")
+                              .arg(what).arg(qRound(nestedY(name) - was)));
+                });
+            }, 900);
+        }
+        // Folded again: what follows is of the panel's own rows (a touch
+        // drag on the list would drag the list).
+        add(QStringLiteral("the plugin's settings folded, the panel at its top, %1").arg(wide), [=] {
+            QMetaObject::invokeMethod(item("sidePanel"), "unfold", Q_ARG(QVariant, QStringLiteral("test.scrolls")), Q_ARG(QVariant, false));
+            scroller()->setProperty("contentY", 0);
+        }, 500);
         // A notch glides: under way a frame or two later, there at once
         // after; it is the panel that moved.
         add(QStringLiteral("a notch moves the panel, %1").arg(wide), [=] {
@@ -675,7 +851,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                     QTimer::singleShot(wait, window, [poll] { (*poll)(); });
                     return;
                 }
-                if (grid->animating() && ++*waited < 60) {
+                if ((grid->animating() || *busy) && ++*waited < 60) {
                     QTimer::singleShot(50, window, [poll] { (*poll)(); });
                     return;
                 }
@@ -684,6 +860,19 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             (*poll)();
         });
     };
-    // Once the photos are in and the window has its size.
-    QTimer::singleShot(2500, window, [=] { (*run)(0); });
+    // Once the photos are in, the window has its size and the plugins'
+    // stacks and hidden photos have come (none for two seconds), within a
+    // minute.
+    auto clock = std::make_shared<QElapsedTimer>();
+    clock->start();
+    auto settled = std::make_shared<std::function<void()>>();
+    *settled = [=] {
+        if (clock->elapsed() < 2500 || (quietSince->elapsed() < 2000 && clock->elapsed() < 60000)) {
+            QTimer::singleShot(100, window, [settled] { (*settled)(); });
+            return;
+        }
+        say(QStringLiteral("the grid settled after %1 ms: %2 cells, laid out %3 times").arg(clock->elapsed()).arg(grid->count()).arg(*relaid));
+        (*run)(0);
+    };
+    (*settled)();
 }

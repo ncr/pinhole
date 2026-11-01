@@ -43,6 +43,19 @@ class QString;
 // The library position of the newest asset matching an SQL condition on
 // the index's `assets a`; -1 if none.
 int findIndex(const Library &library, const QString &where);
+// Those of the newest, at most `most`, whose rendition `kind` ("full",
+// "video") is on this computer: all of a folder's, iCloud's in the cache.
+// A test that opens or copies one needs no network, nor a session.
+QList<int> findHere(const Library &library, const QString &kind, const QString &where, int most);
+
+// How the self-tests are run (each its own window, on workspace 5 for one
+// drawn on screen): HOME's Pictures or XDG_PICTURES_DIR and every
+// XDG_*_HOME a scratch folder of its own, a fresh state folder (no Apple
+// session in it, ever), a copy of a real config, its
+// own PINHOLE_SOCKET, and a stand-in sign-in provider (PINHOLE_AUTH) that
+// never talks to Apple. On a library, --library a reflink copy of one
+// (with its cache, in the same XDG_DATA_HOME). What each needs besides is
+// said with it.
 
 // A slot for a signal a self-test hears by name (a QML property's notify):
 // calls `f` at once, while it lives.
@@ -78,14 +91,23 @@ void runReloadSelfTest(const Library &library, PhotoGrid *grid, Viewer &viewer);
 class QQuickWindow;
 // PINHOLE_SELFTEST=mouse: drive the window with a mouse and a touchpad as a
 // person would (right-click, open, the sides, the wheel, a sideways swipe,
-// the back button, double-click) and report whether each did its job.
+// the back button, double-click) and report whether each did its job. In
+// a real window that draws its frames (the viewer's animations run on
+// them): on workspace 5, floating, as a tiled window on a workspace not
+// shown draws none. On a library whose photos are here: a folder's, or a
+// copy of iCloud's with its cache; the photos stepped through, once the
+// plugins' stacks have come, ten in a row in no stack, the one copied with
+// its full size there, and the video played with its video, so neither
+// waits on the network. With no session the source needs signing in: its
+// card in the middle is looked past. Exits 1 if any step fails.
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library);
 // PINHOLE_SELFTEST=keys: the window through its states (the grid and its
 // More menu, select mode and its menu, the viewer, its menu and its More
 // menu, a More menu closed by Esc, the side panel, the help and sign-in over
 // it, adding a source), saying in each whose the keys are and any key two
 // live commands share; then every command some input cannot do. Fails on
-// either.
+// either. With a source or none (Remove, on a source's row, then has
+// nothing to remove), on any library.
 class Keymap;
 void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap);
 // PINHOLE_SELFTEST=inputs:<dir>: on screen, what the keys, the mouse and the
@@ -127,11 +149,19 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
 // with a sign-in provider of its own only (PINHOLE_AUTH), never Apple.
 void runSourcesSelfTest(QQuickWindow *window, const QString &folder);
 
-// PINHOLE_SELFTEST=sourcesoff:<folder>: with the plugins of the sources
-// added turned off, the middle says so (frame 0-off, the side panel 1-side),
-// and 1 (Turn on iCloud) brings the photos back: how many and how soon.
-// Exits 1 if the middle says nothing or no photo comes within 30 s.
-void runSourcesOffSelfTest(QQuickWindow *window, const QString &folder);
+// PINHOLE_SELFTEST=sourcesoff:<folder>: with the plugin of the source
+// shown turned off at the start, without --library: the middle says so on
+// its own backdrop, the grid empty and its buttons gone (frame 0-off, the
+// side panel at its switch 1-side); 1 turns it on and the photos come
+// back, how soon (2-on, once its listing has settled); turned off again
+// while the window is open they go (3-off-again), and on again by its
+// button they come back at once (4-on-again), and the source is followed,
+// not listed again: its library's listed_at as before, a round since.
+// Run it on a source that can be listed without signing in (a folder of a
+// few photos as the settings' source, Folders off in plugins.json): an
+// iCloud source with no session never has a round, and that fails.
+// Exits 1 if any step fails.
+void runSourcesOffSelfTest(QQuickWindow *window, const Library &library, const QString &folder);
 
 // PINHOLE_SELFTEST=actionbar:<folder>: the newest Live Photo in a series
 // full window; grab its bar, then with each menu open on its key (and the
@@ -193,8 +223,15 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 // scrolls, zooms, selects, opens nor drags anything out. And the panel
 // itself: a notch glides it, a swipe moves it and coasts, and spun or
 // flicked into either end it stops there, pulled a quarter of its height
-// past it at most, a coast bouncing a few lines. With <dir>, the panel at
-// either end and pulled on past it, as images there. Exits 1 if any fails.
+// past it at most, a coast bouncing a few lines; a click or a touch tap on
+// a switch while it coasts stops it and turns nothing. A plugin's settings
+// with a list and a text of their own, each with a Scroller over it (the
+// test plugin app/tests/scrolls, among the plugins: PINHOLE_BUILTIN_PLUGINS
+// a folder with it): the wheel and a swipe over each move it, not the
+// panel, until its end, then the panel. Begins once the plugins' stacks and hidden photos have come; a
+// probe the grid was laid out again during, with nothing reaching it, is
+// tried once more. With <dir>, the panel at either end and pulled on past
+// it, as images there. Exits 1 if any fails.
 void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &dir);
 
 // PINHOLE_SELFTEST=series:<dir>: once Series has found its series, open the

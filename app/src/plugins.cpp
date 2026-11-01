@@ -10,6 +10,7 @@
 #include "photogrid.h"
 #include "photoprovider.h"
 #include "portal.h"
+#include "scroller.h"
 #include "serviceclient.h"
 #include "sources.h"
 #include "storage.h"
@@ -1289,6 +1290,8 @@ void Plugins::registerTypes() {
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
     // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
     qmlRegisterType<SdrVideo>("Pinhole.Plugin", 1, 0, "SdrVideo");
+    // The side panel's scrolling, for a plugin's own list (scroller.h).
+    qmlRegisterType<Scroller>("Pinhole.Plugin", 1, 0, "Scroller");
 }
 
 namespace {

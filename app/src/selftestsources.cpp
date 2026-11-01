@@ -5,10 +5,16 @@
 
 #include "selftest.h"
 
+#include "library.h"
+
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QQmlContext>
+#include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTimer>
 #include <qpa/qwindowsysteminterface.h>
 
@@ -18,6 +24,31 @@
 #include <vector>
 
 namespace {
+
+void say(const QString &line) {
+    std::printf("selftest: %s\n", qPrintable(line));
+    std::fflush(stdout);
+}
+
+// A value of the library's meta in `dir` (listed_at, synced_at); empty if
+// it has none.
+QString metaOf(const QString &dir, const char *key) {
+    QString value;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("sourcesoff"));
+        db.setDatabaseName(dir + "/library.sqlite");
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (db.open()) {
+            QSqlQuery q(db);
+            q.prepare(QStringLiteral("SELECT value FROM meta WHERE key = ?"));
+            q.addBindValue(QString::fromLatin1(key));
+            if (q.exec() && q.next())
+                value = q.value(0).toString();
+        }
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("sourcesoff"));
+    return value;
+}
 
 void key(QQuickWindow *window, int code, const QString &text = {}) {
     QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, code, Qt::NoModifier, text);
@@ -119,49 +150,178 @@ void runSourcesSelfTest(QQuickWindow *window, const QString &dir) {
     (*run)(0);
 }
 
-void runSourcesOffSelfTest(QQuickWindow *window, const QString &dir) {
+void runSourcesOffSelfTest(QQuickWindow *window, const Library &library, const QString &dir) {
     auto grab = [window, dir](const QString &name) {
         window->grabWindow().save(dir + '/' + name + ".png");
-        std::printf("selftest: %s\n", qPrintable(name));
-        std::fflush(stdout);
+        say(name);
     };
     auto count = [window] {
         QObject *grid = window->findChild<QObject *>(QStringLiteral("grid"));
         return grid ? grid->property("count").toInt() : -1;
     };
+    auto shown = [window](const char *name) {
+        QQuickItem *item = window->findChild<QQuickItem *>(QString::fromLatin1(name));
+        return item && item->isVisible() && item->opacity() > 0;
+    };
+    auto failures = std::make_shared<int>(0);
+    auto check = [failures](bool ok, const QString &what) {
+        say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
+        *failures += ok ? 0 : 1;
+    };
+    QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
+    // Until `done` holds, polled every 50 ms, then `then` with how long it
+    // took, or -1 after `within` ms.
+    auto waitFor = [window](std::function<bool()> done, int within, std::function<void(qint64)> then) {
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto poll = std::make_shared<std::function<void()>>();
+        *poll = [=] {
+            if (done())
+                return then(clock->elapsed());
+            if (clock->elapsed() > within)
+                return then(-1);
+            QTimer::singleShot(50, window, [poll] { (*poll)(); });
+        };
+        (*poll)();
+    };
+    // The plugin the first button turns on, its library's folder and its
+    // listing's meta, as they were with its photos shown.
+    auto plugin = std::make_shared<QString>();
+    auto folder = std::make_shared<QString>();
+    auto listedAt = std::make_shared<QString>();
+    auto syncedAt = std::make_shared<QString>();
+    auto photos = std::make_shared<int>(0);
+    auto finish = [=] {
+        say(QStringLiteral("done, %1 failed").arg(*failures));
+        QCoreApplication::exit(*failures ? 1 : 0);
+    };
+    // Its button's key, 1. One's own copy is not turned on by it: the side
+    // panel opens at its switch, which says what trusting it means (frame
+    // `frame`), and the switch turns it on.
+    auto turnOn = [=](const QString &frame, std::function<void()> then) {
+        key(window, Qt::Key_1, QStringLiteral("1"));
+        QVariantMap info;
+        QMetaObject::invokeMethod(plugins, "at", Q_RETURN_ARG(QVariantMap, info), Q_ARG(QString, *plugin));
+        if (!info.value("personal").toBool())
+            return then();
+        QTimer::singleShot(800, window, [=] {
+            QObject *side = window->findChild<QObject *>(QStringLiteral("sidePanel"));
+            const bool opened = side->property("shown").toBool();
+            check(opened && count() == 0,
+                  QStringLiteral("1 on one's own copy (%1) opens the side panel at its switch (%2), turning nothing on (%3 photos)")
+                      .arg(*plugin, opened ? "open" : "NOT open").arg(count()));
+            grab(frame);
+            QMetaObject::invokeMethod(plugins, "setEnabled", Q_ARG(QString, *plugin), Q_ARG(bool, true));
+            side->setProperty("shown", false);
+            then();
+        });
+    };
+    // 6. Back on: its photos at once, and the source followed, not listed
+    // again: a round after it came back (a source that can be listed
+    // without signing in, such as a folder), the listing as before.
+    auto backAgain = [=] {
+        const int before = count();
+        turnOn(QStringLiteral("4-copy-side"), [=] { waitFor([=] { return count() > 0; }, 30000, [=](qint64 ms) {
+            check(before == 0 && ms >= 0 && count() > 0,
+                  QStringLiteral("on again by its button: %1 photos back %2 ms after the key (%3 before it was off)").arg(count()).arg(ms).arg(*photos));
+            grab("4-on-again");
+            waitFor([=] { return metaOf(*folder, "synced_at").toLongLong() > syncedAt->toLongLong(); }, 60000, [=](qint64 ms) {
+                const QString listed = metaOf(*folder, "listed_at");
+                check(ms >= 0 && listed == *listedAt,
+                      ms < 0 ? QStringLiteral("no round followed the source after it came back (synced at %1 still): nothing shows it was "
+                                              "not listed again; run it on a source that is listed without signing in, a folder")
+                                   .arg(*syncedAt)
+                             : QStringLiteral("not listed again: listed at %1 before it was off and still after, followed at %2")
+                                   .arg(*listedAt, metaOf(*folder, "synced_at")));
+                finish();
+            });
+        }); });
+    };
+    // 5. Off again while the window is open: the photos go, the card says
+    // so, and the grid's buttons go with them.
+    auto offAgain = [=] {
+        // As it is now: a round since its listing settled counts as before.
+        *listedAt = metaOf(*folder, "listed_at");
+        *syncedAt = metaOf(*folder, "synced_at");
+        *photos = count();
+        QMetaObject::invokeMethod(plugins, "setEnabled", Q_ARG(QString, *plugin), Q_ARG(bool, false));
+        waitFor([=] { return count() == 0 && shown("sourcesOff"); }, 30000, [=](qint64 ms) {
+            QTimer::singleShot(600, window, [=] {
+                check(ms >= 0 && count() == 0 && shown("sourcesOff") && !shown("gridActions") && !shown("selectButton"),
+                      QStringLiteral("turned off while open: the photos go %1 ms after, %2 in the grid, the card %3, the grid's buttons %4")
+                          .arg(ms).arg(count()).arg(shown("sourcesOff") ? "shown" : "NOT shown")
+                          .arg(shown("gridActions") || shown("selectButton") ? "STILL THERE" : "gone"));
+                grab("3-off-again");
+                // A second at least, so a round after it comes back is a
+                // second on from the last one before.
+                QTimer::singleShot(1200, window, backAgain);
+            });
+        });
+    };
+    // 4. Its listing settled: listed, and a round done since, with the
+    // same photos for a moment.
+    auto settled = [=] {
+        *folder = library.dir();
+        auto steady = std::make_shared<int>(-1);
+        auto since = std::make_shared<QElapsedTimer>();
+        since->start();
+        waitFor([=] {
+            if (count() != *steady) {
+                *steady = count();
+                since->restart();
+            }
+            return !metaOf(*folder, "listed_at").isEmpty() && !metaOf(*folder, "synced_at").isEmpty() && since->elapsed() > 3000;
+        }, 120000, [=](qint64 ms) {
+            *listedAt = metaOf(*folder, "listed_at");
+            *syncedAt = metaOf(*folder, "synced_at");
+            *photos = count();
+            say(QStringLiteral("%1 photos in %2: listed at %3, followed at %4 (settled %5 ms on)")
+                    .arg(*photos).arg(*folder, listedAt->isEmpty() ? QStringLiteral("never") : *listedAt, *syncedAt).arg(ms));
+            grab("2-on");
+            QTimer::singleShot(1200, window, offAgain);
+        });
+    };
+    // 1. At the start, its plugin off: the card on its own backdrop and no
+    // photo, nor any of the grid's buttons.
     QTimer::singleShot(2500, window, [=] {
-        QQuickItem *card = window->findChild<QQuickItem *>(QStringLiteral("sourcesOff"));
-        const bool shown = card && card->isVisible();
-        std::printf("selftest: %s the plugins being off said in the middle (%d photos)\n", shown ? "ok  " : "FAIL", count());
+        const bool card = shown("sourcesOff");
+        const bool buttons = shown("gridActions") || shown("selectButton") || shown("zoomButtons");
+        check(card && count() == 0 && !buttons,
+              QStringLiteral("the plugins being off said in the middle, %1 photos in the grid, its buttons %2")
+                  .arg(count()).arg(buttons ? "STILL THERE" : "gone"));
         grab("0-off");
+        // A Repeater's buttons are its parent item's children, not the
+        // window's QObjects.
+        std::function<void(QQuickItem *)> look = [&](QQuickItem *item) {
+            if (item->objectName().startsWith(QLatin1String("turnOn:")) && item->property("key").toString() == QLatin1String("1"))
+                *plugin = item->objectName().mid(7);
+            for (QQuickItem *child : item->childItems())
+                look(child);
+        };
+        look(window->contentItem());
+        if (!card || plugin->isEmpty()) {
+            check(false, QStringLiteral("a Turn on button on 1"));
+            return finish();
+        }
+        // 2. The side panel at its switch.
         QObject *side = window->findChild<QObject *>(QStringLiteral("sidePanel"));
         side->setProperty("shown", true);
         QTimer::singleShot(800, window, [=] {
-            QMetaObject::invokeMethod(side, "showPlugin", Q_ARG(QVariant, QStringLiteral("pinhole.icloud")));
+            QMetaObject::invokeMethod(side, "showPlugin", Q_ARG(QVariant, *plugin));
             QTimer::singleShot(600, window, [=] {
                 grab("1-side");
                 side->setProperty("shown", false);
                 QTimer::singleShot(500, window, [=] {
-                    // Turn on iCloud: its button's key.
-                    key(window, Qt::Key_1, QStringLiteral("1"));
-                    auto clock = std::make_shared<QElapsedTimer>();
-                    clock->start();
-                    auto poll = std::make_shared<std::function<void()>>();
-                    *poll = [=] {
-                        const int n = count();
-                        if (n > 0 || clock->elapsed() > 30000) {
-                            std::printf("selftest: %s %d photos back %lld ms after the key\n", n > 0 ? "ok  " : "FAIL", n,
-                                        static_cast<long long>(clock->elapsed()));
-                            std::fflush(stdout);
-                            QTimer::singleShot(1500, window, [=] {
-                                grab("2-on");
-                                QCoreApplication::exit(n > 0 && shown ? 0 : 1);
-                            });
-                            return;
-                        }
-                        QTimer::singleShot(50, window, *poll);
-                    };
-                    (*poll)();
+                    // 3. Turn it on. None were there before it (checked
+                    // above): these are its.
+                    turnOn(QStringLiteral("1-copy-side"), [=] {
+                        waitFor([=] { return count() > 0; }, 30000, [=](qint64 ms) {
+                            check(ms >= 0, QStringLiteral("%1 photos back %2 ms after it was turned on (%3)").arg(count()).arg(ms).arg(*plugin));
+                            if (ms < 0)
+                                return finish();
+                            settled();
+                        });
+                    });
                 });
             });
         });

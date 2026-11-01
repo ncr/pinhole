@@ -16,7 +16,9 @@ class ThumbnailLoader;
 // photos), on a thread of its own; the swap on this one, with the decoders
 // idle (ThumbnailLoader::reload). A change announced while one is read
 // reads once more after it. Everything that holds positions follows its
-// photos through `reloaded`. GUI thread.
+// photos through `reloaded`. A folder with no library in it (library/none,
+// while the service shows no source) is an empty library, never the last
+// one's photos kept on screen. GUI thread.
 class LibraryReloader : public QObject {
     Q_OBJECT
 public:

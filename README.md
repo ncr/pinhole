@@ -180,7 +180,8 @@ app/bin/test                 # unit tests: scroll physics, viewer motion, transl
 `PINHOLE_BENCH_GRAB=<folder>` saves the window 20 times a second (slow on
 screen; recording the window with `wf-recorder -g` shows real timing).
 `PINHOLE_SELFTEST=mouse` drives clicks, swipes, pinches and select mode
-with synthetic events and reports each step; `PINHOLE_SELFTEST=through`
+with synthetic events and reports each step (in a floating window, on
+photos this computer has: app/src/selftest.h); `PINHOLE_SELFTEST=through`
 does the same over everything that lies over the photos (the side panel at
 its ends, the date, the help and the other cards, menus, the viewer) and
 fails if any of it reaches the grid.

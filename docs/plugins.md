@@ -74,7 +74,7 @@ one: the root's `sources` (`PluginSource`), `pinhole.sources`,
 right colours and HDR shown right in SDR ([hdr.md](hdr.md)): `image://file`,
 a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
 file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
-`SdrVideo`.
+`SdrVideo`; and `Scroller`.
 
 `Main.qml` beside it:
 
@@ -159,7 +159,11 @@ its settings, is there as the window first shows. It sets:
   opened over On this day, ⏎ opens a photo, and Esc then comes back to
   Colours alone, then to the grid.
 - `settings`: a `Component` shown under its row in the side panel while it
-  is on, unfolded with a tap on the row (or ⏎ there), as its tour is.
+  is on, unfolded with a tap on the row (or ⏎ there), as its tour is. The
+  panel scrolls as the grid does; a list of its own in it scrolls so too
+  with a `Scroller` laid over it (below), which has the wheel and the
+  touchpad first while it can still go their way, a swipe to its end, then
+  the panel.
 - `help`: its keys for the help (?), as `[["key", "what it does"], ...]`
   (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
   listed under its name with its `Command`s that give a `section` (any
@@ -291,8 +295,12 @@ its settings, is there as the window first shows. It sets:
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
-`placeholder`, `password`, `done`, `accepted()`) and `Command` (a key,
-with what it does in the help),
+`placeholder`, `password`, `done`, `accepted()`), `Command` (a key,
+with what it does in the help) and `Scroller` (laid over a `Flickable` or a
+`ListView` as large as it, `flickable` set to it: the wheel and the
+touchpad move it as they move the grid, coasting and giving a little at
+its ends, a click or a touch only stopping it while it moves; one in the
+side panel is scrolled before the panel, until its end; API 4),
 and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
@@ -451,5 +459,16 @@ of your own that brings a source, the side panel says so: "It reads your
 photos, and the accounts you sign in to with it. Turn it on only if you
 trust it." A copy of iCloud's plugin in your folder (the same id) replaces
 its QML only, never pinholed's Rust, and its row says: "Your own copy of
-iCloud: it sees the password you type." It is off, iCloud's sources with
-it, until you turn it on.
+iCloud: it sees the password you type." (a copy of one whose sources never
+sign in, Folders', that it reads the photos of every source shown with
+it). It is off, iCloud's sources with it, until you turn it on: the middle
+of the window then says so, and its button there opens the side panel at
+its switch rather than turning it on.
+
+What every plugin can see of the sources follows from that. Reading
+`pinhole.sources` is open to every plugin, whatever kinds its manifest
+names: `list` (each source's `name`, an Apple ID's account or a folder's
+`path`, its count), `current`, `health`, `progress`, `rounds` and
+`discovered` (the icloudpd sign-ins and the folders found), `discover()`,
+and `show(id)`, which switches the source the window shows. Only what adds,
+signs in to or out of a source is kept to the kinds the manifest names.

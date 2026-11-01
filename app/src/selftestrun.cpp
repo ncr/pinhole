@@ -535,7 +535,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     if (name == QLatin1String("sources"))
         runSourcesSelfTest(window, arg);
     if (name == QLatin1String("sourcesoff"))
-        runSourcesOffSelfTest(window, arg);
+        runSourcesOffSelfTest(window, library, arg);
     if (name == QLatin1String("favourite"))
         runFavouriteSelfTest(window, grid, viewer, library, arg);
     if (name == QLatin1String("tour"))

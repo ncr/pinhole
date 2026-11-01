@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <utility>
 
 namespace {
 QPointer<TouchpadHold> theHold;
@@ -107,13 +109,103 @@ void Scroller::tick() {
         m_window->update();
 }
 
+bool Scroller::canMove(double dy) const {
+    if (!m_flickable || dy == 0)
+        return false;
+    const double y = contentY();
+    const double origin = m_flickable->property("originY").toDouble();
+    const double top = origin - m_flickable->property("topMargin").toDouble();
+    const double bottom = std::max(top, origin + m_flickable->property("contentHeight").toDouble()
+                                            + m_flickable->property("bottomMargin").toDouble() - m_flickable->height());
+    // Up the wheel or the fingers, up the content: towards its top.
+    return dy > 0 ? y > top + 0.5 : y < bottom - 0.5;
+}
+
+Scroller *Scroller::innerAt(QPointF scenePosition, double dy) const {
+    QQuickItem *content = m_flickable ? m_flickable->property("contentItem").value<QQuickItem *>() : nullptr;
+    if (!content || dy == 0)
+        return nullptr;
+    // Front to back, as the pointer meets them: the first Scroller there
+    // that, or one within it, can still go this way.
+    std::function<Scroller *(QQuickItem *)> look = [&](QQuickItem *item) -> Scroller * {
+        const QList<QQuickItem *> children = item->childItems();
+        for (auto it = children.crbegin(); it != children.crend(); ++it) {
+            QQuickItem *child = *it;
+            if (!child->isVisible() || !child->isEnabled())
+                continue;
+            // What a clipped item holds shows only within it.
+            if (child->clip() && !child->contains(child->mapFromScene(scenePosition)))
+                continue;
+            if (auto *inner = qobject_cast<Scroller *>(child)) {
+                if (inner->contains(inner->mapFromScene(scenePosition))
+                    && (inner->canMove(dy) || inner->innerAt(scenePosition, dy)))
+                    return inner;
+                continue;
+            }
+            if (Scroller *found = look(child))
+                return found;
+        }
+        return nullptr;
+    };
+    return look(content);
+}
+
 void Scroller::wheelEvent(QWheelEvent *event) {
     // Every one is its own, whatever it does here: none goes on beneath.
     event->accept();
+    take(event);
+}
+
+void Scroller::take(const QWheelEvent *event) {
     if (!m_flickable || (event->modifiers() & Qt::ControlModifier))
         return;
     const QPoint pixels = event->pixelDelta(), angle = event->angleDelta();
     const double t = double(event->timestamp());
+    const double dy = !pixels.isNull() ? pixels.y() : angle.y() / 8.0;
+    // A Scroller within that can still go this way has it first: a swipe,
+    // decided at its first movement, its to its end (and the momentum
+    // after); a notch, each.
+    switch (event->phase()) {
+    case Qt::ScrollBegin:
+        m_inner = nullptr;
+        m_swipeDecided = false;
+        m_swipeBegan = event->timestamp();
+        break;
+    case Qt::ScrollUpdate:
+    case Qt::ScrollMomentum:
+        if (!m_swipeDecided && dy != 0) {
+            m_swipeDecided = true;
+            if ((m_inner = innerAt(event->scenePosition(), dy))) {
+                // Its, from the fingers landing; this one's still where
+                // they landed.
+                m_physics.end(t);
+                apply();
+                QWheelEvent began(event->position(), event->globalPosition(), QPoint(), QPoint(), event->buttons(),
+                                  event->modifiers(), Qt::ScrollBegin, event->inverted(), event->source(),
+                                  event->pointingDevice());
+                began.setTimestamp(m_swipeBegan);
+                m_inner->take(&began);
+            }
+        }
+        if (m_inner) {
+            m_inner->take(event);
+            return;
+        }
+        break;
+    case Qt::ScrollEnd:
+        if (m_inner) {
+            m_inner->take(event);
+            return;
+        }
+        break;
+    case Qt::NoScrollPhase:
+        if (std::abs(angle.y()) >= std::abs(angle.x()) && !(angle.isNull() && std::abs(pixels.x()) > std::abs(pixels.y())))
+            if (Scroller *inner = innerAt(event->scenePosition(), dy)) {
+                inner->take(event);
+                return;
+            }
+        break;
+    }
     pickUp();
     syncBounds();
     // As the grid takes them (PhotoGrid::wheelEvent): a touchpad's begin,
@@ -154,26 +246,66 @@ bool Scroller::event(QEvent *event) {
     return QQuickItem::event(event);
 }
 
-void Scroller::stopAt(QPointF scenePosition) {
+bool Scroller::stopAt(QPointF scenePosition) {
     if (!isVisible() || !isEnabled() || !(m_physics.animating() || m_physics.tracking()))
-        return;
+        return false;
     if (!contains(mapFromScene(scenePosition)))
-        return;
+        return false;
+    // Moved by something else meanwhile (a drag, its keys): not this one's
+    // to stop.
+    if (!m_flickable || std::abs(contentY() - m_written) > 0.5)
+        return false;
     // A click or a touch on it while it moves: it stops there, as the grid
     // does (and a two-finger tap is a click of the right button).
     m_physics.stop();
     apply();
+    return true;
 }
 
 bool Scroller::eventFilter(QObject *watched, QEvent *event) {
-    // Seen on its way into the window, and passed on untouched.
+    // Seen on its way into the window. Passed on untouched, but for the
+    // press or touch that stops it moving: that, and what follows of it to
+    // its release, only stops it (a switch under it is not also turned).
     switch (event->type()) {
     case QEvent::MouseButtonPress:
-        stopAt(static_cast<QMouseEvent *>(event)->scenePosition());
+    case QEvent::MouseButtonDblClick: {
+        const auto *mouse = static_cast<QMouseEvent *>(event);
+        if (m_stopped & mouse->button())
+            return true;
+        if (event->type() == QEvent::MouseButtonPress && stopAt(mouse->scenePosition())) {
+            m_stopped |= mouse->button();
+            return true;
+        }
+        break;
+    }
+    case QEvent::MouseMove:
+        if (m_stopped != Qt::NoButton) {
+            // A button let go where this never heard it: done with it.
+            m_stopped &= static_cast<QMouseEvent *>(event)->buttons();
+            return true;
+        }
+        break;
+    case QEvent::MouseButtonRelease:
+        if (const auto *mouse = static_cast<QMouseEvent *>(event); m_stopped & mouse->button()) {
+            m_stopped &= ~mouse->button();
+            return true;
+        }
         break;
     case QEvent::TouchBegin:
-        if (const auto *touch = static_cast<QTouchEvent *>(event); !touch->points().isEmpty())
-            stopAt(touch->points().first().scenePosition());
+        if (const auto *touch = static_cast<QTouchEvent *>(event);
+            !touch->points().isEmpty() && stopAt(touch->points().first().scenePosition())) {
+            m_touchStopped = true;
+            return true;
+        }
+        break;
+    case QEvent::TouchUpdate:
+        if (m_touchStopped)
+            return true;
+        break;
+    case QEvent::TouchEnd:
+    case QEvent::TouchCancel:
+        if (std::exchange(m_touchStopped, false))
+            return true;
         break;
     default:
         break;

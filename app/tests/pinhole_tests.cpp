@@ -37,6 +37,8 @@
 #include <libheif/heif.h>
 #include <turbojpeg.h>
 
+#include <qpa/qwindowsysteminterface.h>
+
 #include "colour.h"
 #include "display.h"
 #include "gainmap.h"
@@ -2240,6 +2242,47 @@ Item {
         QCOMPARE(library.dir(), QDir(other.path()).absolutePath());
     }
 
+    // The service showing no source (its sources' plugins off): its library
+    // is library/none, which pinholed may not have made. The window shows
+    // nothing then, not the last source's photos, and the photos come back
+    // with the source.
+    void aLibraryThatIsNotThereIsAnEmptyOne() {
+        QTemporaryDir root;
+        const QString icloud = root.path() + "/library/icloud/me", none = root.path() + "/library/none";
+        QVERIFY(QDir().mkpath(icloud));
+        makeLibrary(icloud, {{"a.jpg", 1}, {"b.jpg", 2}}, false, "icloud:me");
+        Library library;
+        QString error;
+        QVERIFY(library.open(icloud, &error));
+        ThumbnailLoader loader(&library, 1);
+        LibraryReloader reloader(&library, &loader, icloud);
+        std::vector<std::vector<int>> moves;
+        connect(&reloader, &LibraryReloader::reloaded, this,
+                [&](const std::vector<int> &moved, const std::vector<int> &, bool) { moves.push_back(moved); });
+        int others = 0;
+        connect(&reloader, &LibraryReloader::otherSource, this, [&] { ++others; });
+        reloader.moveTo(none);
+        QTRY_COMPARE(moves.size(), size_t(1));
+        QCOMPARE(library.count(), 0);
+        QCOMPARE(library.dir(), QDir(none).absolutePath());
+        QCOMPARE(moves[0], (std::vector<int>{-1, -1}));
+        QCOMPARE(others, 1);
+        // Read again while still not there: still nothing, quietly.
+        reloader.reload();
+        QTRY_COMPARE(moves.size(), size_t(2));
+        QCOMPARE(library.count(), 0);
+        // The source back: its photos.
+        reloader.moveTo(icloud);
+        QTRY_COMPARE(library.count(), 2);
+        QCOMPARE(library.source(), QString("icloud:me"));
+        // One there that cannot be read is no empty one: what is shown stays.
+        QVERIFY(QDir().mkpath(root.path() + "/broken"));
+        write(root.path() + "/broken/library.sqlite", "not a database");
+        reloader.moveTo(root.path() + "/broken");
+        QTest::qWait(300);
+        QCOMPARE(library.count(), 2);
+    }
+
     void aLibrarySaysWhoseItIsAndAMovedOneIsTheSameOne() {
         // Two folders' libraries named alike (as a-b/c and a/b-c both were
         // folder/a-b-c once), and the first one moved elsewhere.
@@ -4439,6 +4482,186 @@ private slots:
             QVERIFY(::kill(pid, 0) != 0);
         QVERIFY(clock.elapsed() >= 900);
         QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
+    }
+
+private:
+    // A panel the Scroller scrolls (SidePanel.qml), with a list of its own
+    // in it, as a plugin's settings may have, and a switch: shown, and the
+    // wheel and the touchpad given to it as the window gets them.
+    struct ScrollerBench {
+        QQmlEngine engine;
+        std::unique_ptr<QObject> made;
+        QQuickWindow *window = nullptr;
+        QQuickItem *panel = nullptr, *list = nullptr, *toggle = nullptr;
+        quint64 time = 1000000;
+        explicit ScrollerBench() {
+            QQmlComponent component(&engine);
+            component.setData(R"(import QtQuick
+                import Pinhole
+                Window {
+                    width: 400; height: 400
+                    property alias panel: panel
+                    property alias list: list
+                    property alias toggle: toggle
+                    property int beneath: 0
+                    MouseArea { anchors.fill: parent; onWheel: wheel => beneath++; onClicked: beneath++ }
+                    Flickable {
+                        id: panel
+                        anchors.fill: parent
+                        contentHeight: column.height
+                        boundsBehavior: Flickable.StopAtBounds
+                        clip: true
+                        Column {
+                            id: column
+                            width: 400
+                            Item { width: 400; height: 100 }
+                            Rectangle {
+                                id: toggle
+                                property int clicks: 0
+                                width: 100; height: 40
+                                MouseArea { anchors.fill: parent; onClicked: toggle.clicks++ }
+                            }
+                            Item { width: 400; height: 60 }
+                            Item {
+                                width: 400; height: 120
+                                ListView {
+                                    id: list
+                                    anchors.fill: parent
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    model: 30
+                                    delegate: Rectangle { width: 400; height: 20 }
+                                }
+                                Scroller { anchors.fill: parent; flickable: list }
+                            }
+                            Item { width: 400; height: 3000 }
+                        }
+                    }
+                    Scroller { anchors.fill: parent; flickable: panel }
+                })", QUrl());
+            made.reset(component.create());
+            if (!made)
+                qWarning() << component.errorString();
+            window = qobject_cast<QQuickWindow *>(made.get());
+            if (!window)
+                return;
+            window->show();
+            panel = window->property("panel").value<QQuickItem *>();
+            list = window->property("list").value<QQuickItem *>();
+            toggle = window->property("toggle").value<QQuickItem *>();
+        }
+        double y(QQuickItem *f) const { return f->property("contentY").toDouble(); }
+        QPointF centre(QQuickItem *item) const { return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)); }
+        // A swipe's phases come from a touchpad, a notch from the mouse.
+        static const QPointingDevice *touchpad() {
+            static QPointingDevice *device = [] {
+                auto *d = new QPointingDevice(QStringLiteral("test touchpad"), 4713, QInputDevice::DeviceType::TouchPad,
+                                              QPointingDevice::PointerType::Finger,
+                                              QInputDevice::Capability::Position | QInputDevice::Capability::Scroll
+                                                  | QInputDevice::Capability::PixelScroll,
+                                              5, 0);
+                QWindowSystemInterface::registerInputDevice(d);
+                return d;
+            }();
+            return device;
+        }
+        void wheel(QPointF at, QPoint pixels, QPoint angle, Qt::ScrollPhase phase = Qt::NoScrollPhase) {
+            QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, Qt::NoModifier, phase, false,
+                              Qt::MouseEventNotSynthesized,
+                              phase != Qt::NoScrollPhase ? touchpad() : QPointingDevice::primaryPointingDevice());
+            event.setTimestamp(time += 8);
+            QGuiApplication::sendEvent(window, &event);
+        }
+        // Two fingers: a begin, `steps` of `by`, an end.
+        void swipe(QPointF at, QPoint by, int steps) {
+            time += 1000;
+            wheel(at, {}, {}, Qt::ScrollBegin);
+            for (int i = 0; i < steps; ++i)
+                wheel(at, by, by * 8, Qt::ScrollUpdate);
+            wheel(at, {}, {}, Qt::ScrollEnd);
+        }
+        void click(QPointF at) {
+            for (const QEvent::Type type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+                QMouseEvent event(type, at, window->mapToGlobal(at), Qt::LeftButton,
+                                  type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton, Qt::NoModifier);
+                event.setTimestamp(time += 8);
+                QGuiApplication::sendEvent(window, &event);
+            }
+        }
+    };
+
+private slots:
+    // A list within the panel, a Scroller of its own over it, that can still
+    // go the way the wheel goes has it first, a notch and a swipe alike; at
+    // its end, the panel; back from its end, the list again. Nothing
+    // reaches what is beneath.
+    void aListInAPanelScrollsFirst() {
+        ScrollerBench bench;
+        QVERIFY(bench.window);
+        QVERIFY(QTest::qWaitForWindowExposed(bench.window));
+        const QPointF overList = bench.centre(bench.list);
+        // A notch down: the list, not the panel.
+        bench.wheel(overList, {0, -15}, {0, -120});
+        QTRY_VERIFY(bench.y(bench.list) > 5);
+        QTest::qWait(300);
+        QCOMPARE(bench.y(bench.panel), 0.0);
+        // A swipe down: the list again, by the fingers.
+        bench.list->setProperty("contentY", 0);
+        bench.swipe(overList, {0, -6}, 6);
+        QTRY_VERIFY(bench.y(bench.list) > 20);
+        QTest::qWait(300);
+        QCOMPARE(bench.y(bench.panel), 0.0);
+        // At its end: the panel takes them.
+        const double end = bench.list->property("contentHeight").toDouble() - bench.list->height();
+        bench.list->setProperty("contentY", end);
+        bench.wheel(overList, {0, -15}, {0, -120});
+        QTRY_VERIFY(bench.y(bench.panel) > 5);
+        QCOMPARE(bench.y(bench.list), end);
+        // A swipe from there too, the panel following the fingers.
+        const double panelWas = bench.y(bench.panel);
+        bench.swipe(bench.centre(bench.list), {0, -6}, 6);
+        QTRY_VERIFY(bench.y(bench.panel) > panelWas + 20);
+        QCOMPARE(bench.y(bench.list), end);
+        // Back up over it, still at its end, in view again: the list.
+        QTest::qWait(1500);
+        bench.panel->setProperty("contentY", 100);
+        const double panelNow = bench.y(bench.panel);
+        bench.wheel(bench.centre(bench.list), {0, 15}, {0, 120});
+        QTRY_VERIFY(bench.y(bench.list) < end - 5);
+        QTest::qWait(300);
+        QCOMPARE(bench.y(bench.panel), panelNow);
+        QCOMPARE(bench.window->property("beneath").toInt(), 0);
+    }
+
+    // A click on a switch while the panel coasts stops it there, and does
+    // nothing else: the switch is not pressed (with iCloud's, a slip would
+    // turn a source off). At rest, the next click presses it.
+    void aClickThatStopsAPanelPressesNothing() {
+        ScrollerBench bench;
+        QVERIFY(bench.window);
+        QVERIFY(QTest::qWaitForWindowExposed(bench.window));
+        auto *toggle = bench.toggle;
+        // Clicked at rest: pressed.
+        bench.click(bench.centre(toggle));
+        QCOMPARE(toggle->property("clicks").toInt(), 1);
+        // Flung gently beside the list, so the switch stays in view as it
+        // coasts.
+        bench.swipe(QPointF(300, 50), {0, -3}, 4);
+        QTest::qWait(40);
+        const double coasting = bench.y(bench.panel);
+        QTest::qWait(40);
+        QVERIFY2(bench.y(bench.panel) > coasting, "the panel coasts");
+        const QPointF at = bench.centre(toggle);
+        QVERIFY(at.y() > 0 && at.y() < bench.window->height());
+        bench.click(at);
+        const double stopped = bench.y(bench.panel);
+        QCOMPARE(toggle->property("clicks").toInt(), 1);
+        QTest::qWait(200);
+        QCOMPARE(bench.y(bench.panel), stopped);
+        // At rest again: pressed.
+        bench.click(bench.centre(toggle));
+        QCOMPARE(toggle->property("clicks").toInt(), 2);
+        QCOMPARE(bench.window->property("beneath").toInt(), 0);
     }
 
     // A field that took the keys and was then hidden or turned off: Pinhole's
