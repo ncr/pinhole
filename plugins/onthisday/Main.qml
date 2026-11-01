@@ -9,7 +9,8 @@ import "../screenshots/Find.js" as Find
 // again, at once and whole (its columns of days and of videos, not a
 // photo at a time), before anything can be opened by a position gone or
 // of another library; today's photos, a new day's at midnight and the
-// settings' are then a look-up.
+// settings' are then a look-up. What the grid hides is left out, as it
+// is there.
 PinholePlugin {
     id: plugin
     covering: days.shown
@@ -125,6 +126,9 @@ PinholePlugin {
         // The 28th of February in a year without a 29th has the 29th's
         // photos of the years with one.
         const leapDay = month === 1 && date === 28 && new Date(thisYear, 1, 29).getMonth() === 2
+        // What the grid hides (Screenshots' hide mode, say) is left out,
+        // as the grid leaves it out.
+        const hiding = pinhole.hiddenCount > 0
         const list = []
         for (let year = thisYear - 1; firstYear > 0 && year >= firstYear; --year) {
             // This date that year, the 29th of February the 28th when
@@ -144,7 +148,8 @@ PinholePlugin {
                 const runs = byDay[key] || []
                 for (let r = 0; r < runs.length; r += 2)
                     for (let i = runs[r]; i < runs[r + 1]; ++i)
-                        if ((videos || !isVideo[i]) && (screenshots || !shotAt[i]))
+                        if ((videos || !isVideo[i]) && (screenshots || !shotAt[i])
+                                && !(hiding && pinhole.isHidden(i)))
                             photos.push(i)
             }
             if (photos.length === 0)
@@ -173,6 +178,14 @@ PinholePlugin {
     Connections {
         target: pinhole.library
         function onChanged() { plugin.index() }
+    }
+    // Photos hidden from the grid, or shown again: counted again. After the
+    // library's own change, when it is read again too (the grid's comes
+    // first), so the days are this reading's and the overlay stays as it is
+    // when none of its photos moved.
+    Connections {
+        target: pinhole
+        function onHiddenChanged() { Qt.callLater(plugin.recount) }
     }
     Component.onCompleted: index()
     // Midnight: another day's photos. Looked at every minute rather than
