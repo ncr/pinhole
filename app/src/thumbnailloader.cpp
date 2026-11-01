@@ -1,5 +1,6 @@
 #include "thumbnailloader.h"
 
+#include "colour.h"
 #include "library.h"
 
 #include <QElapsedTimer>
@@ -12,9 +13,12 @@
 namespace {
 
 // Reads and decodes one JPEG at 1/(2^level) of its size into RGBX, the
-// layout the GPU takes without conversion. A null image means the file is
-// missing or broken; the grid keeps showing the cell's average colour.
-QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<unsigned char> &buffer) {
+// layout the GPU takes without conversion, in sRGB: its ICC profile, read
+// with it, says what it was in (colour.h). Given `icc`, the profile is
+// handed back there instead, to convert later (a mosaic's tile, once
+// small). A null image means the file is missing or broken; the grid keeps
+// showing the cell's average colour.
+QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<unsigned char> &buffer, QByteArray *icc = nullptr) {
     FILE *f = std::fopen(path.constData(), "rb");
     if (!f)
         return {};
@@ -41,6 +45,17 @@ QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<un
     QImage image(TJSCALED(width, factor), TJSCALED(height, factor), QImage::Format_RGBX8888);
     if (tj3Decompress8(tj, buffer.data(), buffer.size(), image.bits(), int(image.bytesPerLine()), TJPF_RGBX) != 0)
         return {};
+    QByteArray profile;
+    unsigned char *data = nullptr;
+    size_t length = 0;
+    if (tj3GetICCProfile(tj, &data, &length) == 0 && data) {
+        profile = QByteArray(reinterpret_cast<const char *>(data), qsizetype(length));
+        tj3Free(data);
+    }
+    if (icc)
+        *icc = profile;
+    else
+        toSrgb(image, profile);
     return image;
 }
 
@@ -62,7 +77,8 @@ QImage buildPage(tjhandle tj, const Library &library, int page, std::vector<unsi
         const int shortEdge = std::min(item.thumbW, item.thumbH);
         while (level < 3 && (shortEdge >> (level + 1)) >= kMosaicTile)
             level += 1;
-        const QImage image = decodeJpeg(tj, item.thumbPath, level, buffer);
+        QByteArray icc;
+        const QImage image = decodeJpeg(tj, item.thumbPath, level, buffer, &icc);
         if (image.isNull()) {
             const QRgb c = item.avgColor;
             for (int row = 0; row < kMosaicTile; ++row) {
@@ -72,9 +88,10 @@ QImage buildPage(tjhandle tj, const Library &library, int page, std::vector<unsi
             continue;
         }
         const int s = std::min(image.width(), image.height());
-        const QImage tile = image.copy((image.width() - s) / 2, (image.height() - s) / 2, s, s)
-                                .scaled(kMosaicTile, kMosaicTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                                .convertToFormat(QImage::Format_RGBX8888);
+        QImage tile = image.copy((image.width() - s) / 2, (image.height() - s) / 2, s, s)
+                          .scaled(kMosaicTile, kMosaicTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                          .convertToFormat(QImage::Format_RGBX8888);
+        toSrgb(tile, icc);
         for (int row = 0; row < kMosaicTile; ++row)
             std::memcpy(out.scanLine(y + row) + x * 4, tile.constScanLine(row), kMosaicTile * 4);
     }
@@ -82,6 +99,15 @@ QImage buildPage(tjhandle tj, const Library &library, int page, std::vector<unsi
 }
 
 } // namespace
+
+QImage decodeThumbnail(const QByteArray &path, int level) {
+    tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
+    tj3Set(tj, TJPARAM_SAVEMARKERS, 4);
+    std::vector<unsigned char> buffer;
+    QImage image = decodeJpeg(tj, path, level, buffer);
+    tj3Destroy(tj);
+    return image;
+}
 
 ThumbnailLoader::ThumbnailLoader(const Library *library, int threads, QObject *parent)
     : QObject(parent), m_library(library) {
@@ -188,6 +214,8 @@ size_t ThumbnailLoader::queued() {
 
 void ThumbnailLoader::run() {
     tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
+    // The ICC profile (APP2) read with the header, and no other marker.
+    tj3Set(tj, TJPARAM_SAVEMARKERS, 4);
     std::vector<unsigned char> buffer;
     QElapsedTimer timer;
     for (;;) {

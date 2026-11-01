@@ -2,6 +2,7 @@
 
 #include "library.h"
 #include "photogrid.h"
+#include "photoprovider.h"
 #include "serviceclient.h"
 
 #include <QDateTime>
@@ -44,9 +45,7 @@ QUrl Viewer::providerUrl(const QString &path) {
 }
 
 QUrl Viewer::thumbnail() const {
-    if (m_index < 0 || m_index >= m_library->count())
-        return {};
-    return QUrl::fromLocalFile(QFile::decodeName(m_library->at(m_index).thumbPath));
+    return thumbnailAt(m_index);
 }
 
 qreal Viewer::aspect() const {
@@ -306,7 +305,8 @@ int Viewer::photoAt(int place) const {
 QUrl Viewer::thumbnailAt(int index) const {
     if (index < 0 || index >= m_library->count())
         return {};
-    return QUrl::fromLocalFile(QFile::decodeName(m_library->at(index).thumbPath));
+    // In sRGB, as the grid draws it (FileProvider).
+    return FileProvider::urlOf(QFile::decodeName(m_library->at(index).thumbPath));
 }
 
 QUrl Viewer::imageFor(int index) const {

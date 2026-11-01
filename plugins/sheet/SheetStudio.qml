@@ -108,14 +108,14 @@ Item {
         stop()
         let list = Array.from(indexes).map(i => {
             const item = pinhole.library.item(i)
-            return { id: item.id, date: item.date, video: item.video, thumbnail: String(item.thumbnail),
+            return { id: item.id, date: item.date, video: item.video, thumbnail: String(item.thumbnail), thumbPath: item.thumbPath,
                      aspect: item.width > 0 && item.height > 0 ? item.width / item.height : 0 }
         }).filter(p => p.id !== undefined).sort((a, b) => a.date - b.date)
         over = Math.max(0, list.length - Layout.MOST)
         list = list.slice(0, Layout.MOST)
         // A photo of no known shape is taken as 4:3 until its medium says.
         aspects = list.map(p => p.aspect > 0 ? p.aspect : 4 / 3)
-        photos = list.map(p => ({ id: p.id, date: p.date, video: p.video, thumbnail: p.thumbnail }))
+        photos = list.map(p => ({ id: p.id, date: p.date, video: p.video, thumbnail: p.thumbnail, thumbPath: p.thumbPath }))
         libraryKey = pinhole.library.key
         sharp = {}
         files = {}
@@ -131,7 +131,7 @@ Item {
             if (gen !== generation)
                 return
             const more = Object.assign({}, sharp)
-            more[p.id] = "file://" + path
+            more[p.id] = "image://file/" + encodeURIComponent(path)
             sharp = more
         }, () => {}).catch(pinhole.warn))
         // The shape of those that had none, from their mediums, all at once.
@@ -210,9 +210,6 @@ Item {
             files[key] = path
             return path
         })
-    }
-    function localPath(url) {
-        return url.startsWith("file://") ? decodeURIComponent(url.slice(7)) : ""
     }
 
     // The library read again, as when photos come or go, or another
@@ -296,7 +293,7 @@ Item {
                 if (gen !== makeGeneration || error.code === "cancelled")
                     return
                 ++blurry
-                take(n, localPath(p.thumbnail))
+                take(n, p.thumbPath || "")
             }).catch(pinhole.warn)
         }
         for (let k = 0; k < 6; ++k)

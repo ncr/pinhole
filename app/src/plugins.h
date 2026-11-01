@@ -514,8 +514,9 @@ public:
     // The version of what a plugin is given. A manifest's "api" asks for
     // at least this; a plugin asking for more says it needs a newer
     // Pinhole. 2: promises, pinhole.settings, notify, photos by id. 3:
-    // marks, pinhole.state and pinhole.cache.
-    static constexpr int api = 3;
+    // marks, pinhole.state and pinhole.cache. 4: photos in sRGB
+    // (image://file, a photo's thumbPath; docs/hdr.md).
+    static constexpr int api = 4;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

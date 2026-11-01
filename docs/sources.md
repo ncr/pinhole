@@ -104,7 +104,8 @@ assets          id, filename, item_type, asset_date, added_date, favorite,
 renditions      asset_id, kind (thumb|medium|full|original|video|live|
                 loop|bounce|long_exposure),
                 name, key, width, height, size, file_type
-meta            key, value: change_token, library_version, source
+meta            key, value: change_token, library_version, source,
+                average_colour
 
 icloud_assets   asset_id, master_id, change_tag, rank, subtype
 icloud_resources  asset_id, kind (Original, JPEGMed, ...), width, height,
@@ -121,6 +122,12 @@ its tables, so the core never names them.
 
 A rendition's `key` is what its cached file and thumbnail are named by.
 For iCloud it is the file's checksum.
+
+`avg_color` is the thumbnail's average colour in sRGB: the average of its
+codes, through its ICC profile (`core/src/colour.rs`), as the window shows
+the thumbnail itself ([hdr.md](hdr.md)). A library from before that has
+its averages made sRGB once, by the first round of a service that knows
+(meta `average_colour` = `srgb`).
 
 ## The service
 

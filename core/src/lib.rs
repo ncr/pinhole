@@ -11,6 +11,7 @@
 
 pub mod add;
 pub mod background;
+pub mod colour;
 pub mod cover;
 pub mod db;
 pub mod effects;

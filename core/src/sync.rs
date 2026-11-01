@@ -356,13 +356,14 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     } };
 
     // The grid draws the average colour until it has decoded the thumbnail,
-    // and crops by the real dimensions.
+    // and crops by the real dimensions. In sRGB, as the window shows the
+    // thumbnail (colour.rs).
     let image = match image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg) {
         Ok(i) => i.to_rgb8(),
         Err(e) => return ThumbResult::Failed(format!("not a JPEG: {e}")),
     };
     let (w, h) = image.dimensions();
-    let colour = average_colour(&image);
+    let colour = crate::colour::average_in_srgb(average_colour(&image), crate::colour::jpeg_icc(&bytes).as_deref());
     if fetched {
         if let Err(e) = write_beside(&path, &bytes) {
             return ThumbResult::Failed(e.to_string());
@@ -370,6 +371,50 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     }
     let bytes = if fetched { bytes.len() as u64 } else { 0 };
     ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
+}
+
+/// Average colours from before they were sRGB (docs/hdr.md, H1), made so
+/// once: each thumbnail's profile read again (its markers only) and its
+/// average put through it, as a thumbnail's is now when it is made. A few
+/// seconds for 50,000. How many changed; the library's version moves on if
+/// any did. Asked to stop, it leaves them all for the next round.
+pub fn srgb_averages(conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
+    use rayon::prelude::*;
+    if db::meta(conn, "average_colour").as_deref() == Some("srgb") {
+        return Ok(0);
+    }
+    let rows: Vec<(String, String, u32)> = conn
+        .prepare("SELECT id, thumb_path, avg_color FROM assets WHERE thumb_path IS NOT NULL AND avg_color IS NOT NULL")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let changed: Vec<(&str, u32)> = rows
+        .par_iter()
+        .filter_map(|(id, path, colour)| {
+            if stop() {
+                return None;
+            }
+            let icc = crate::colour::jpeg_icc_of_file(&library.join(path)).ok().flatten()?;
+            let now = crate::colour::average_in_srgb(*colour, Some(&icc));
+            (now != *colour).then_some((id.as_str(), now))
+        })
+        .collect();
+    if stop() {
+        return Err(Stopped.into());
+    }
+    let tx = conn.transaction()?;
+    {
+        let mut update = tx.prepare_cached("UPDATE assets SET avg_color = ?2 WHERE id = ?1")?;
+        for (id, colour) in &changed {
+            update.execute(params![id, colour])?;
+        }
+    }
+    if !changed.is_empty() {
+        let version = db::meta(&tx, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0i64) + 1;
+        db::set_meta(&tx, "library_version", &version.to_string())?;
+    }
+    db::set_meta(&tx, "average_colour", "srgb")?;
+    tx.commit()?;
+    Ok(changed.len())
 }
 
 /// What the grid draws until it has decoded the thumbnail.
@@ -486,9 +531,10 @@ pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, s
             }
         }
         let image = image::open(&path)?.to_rgb8();
+        let icc = crate::colour::jpeg_icc_of_file(&path).ok().flatten();
         conn.execute(
             "UPDATE assets SET thumb_path = ?2, thumb_w = ?3, thumb_h = ?4, avg_color = ?5 WHERE id = ?1",
-            params![d.asset, d.cover, image.width(), image.height(), average_colour(&image)],
+            params![d.asset, d.cover, image.width(), image.height(), crate::colour::average_in_srgb(average_colour(&image), icc.as_deref())],
         )?;
         made += 1;
     }
@@ -536,5 +582,54 @@ mod tests {
         assert!(p.ends_with("/AQn-dI2mCHvNQz6vj_K4BvumTtZV.jpg"));
         assert_eq!(p.matches('/').count(), 2);
         assert_eq!(p, thumb_path("AQn+dI2mCHvNQz6vj/K4BvumTtZV"));
+    }
+
+    #[test]
+    fn average_colours_from_before_are_made_srgb_once() {
+        let dir = std::env::temp_dir().join(format!("pinhole-averages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("thumbs")).unwrap();
+        let p3 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../app/tests/data/display-p3.icc")).unwrap();
+        // A deep red thumbnail as an iPhone's, its profile in APP2 after
+        // SOI, and the same with none.
+        let mut plain = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut plain)
+            .encode(&[200, 30, 40].repeat(64), 8, 8, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let mut tagged = plain[..2].to_vec();
+        tagged.extend([0xff, 0xe2]);
+        tagged.extend(((2 + 14 + p3.len()) as u16).to_be_bytes());
+        tagged.extend(b"ICC_PROFILE\0");
+        tagged.extend([1, 1]);
+        tagged.extend(&p3);
+        tagged.extend(&plain[2..]);
+        std::fs::write(dir.join("thumbs/p3.jpg"), &tagged).unwrap();
+        std::fs::write(dir.join("thumbs/plain.jpg"), &plain).unwrap();
+        let mut conn = db::open(&dir.join("library.sqlite")).unwrap();
+        let red = 0xc81e28u32;
+        for id in ["p3", "plain", "gone"] {
+            conn.execute("INSERT INTO assets (id, thumb_path, avg_color) VALUES (?1, ?2, ?3)", params![id, format!("thumbs/{id}.jpg"), red])
+                .unwrap();
+        }
+        let colour = |conn: &Connection, id: &str| -> u32 {
+            conn.query_row("SELECT avg_color FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        // Stopped: none of them, and asked again next round.
+        assert!(srgb_averages(&mut conn, &dir, &|| true).is_err());
+        assert_eq!(colour(&conn, "p3"), red);
+        assert_eq!(db::meta(&conn, "average_colour"), None);
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 1);
+        // Redder in sRGB's codes, as the window shows the thumbnail.
+        let p3 = colour(&conn, "p3");
+        assert!(p3 >> 16 > 0xc8 && (p3 >> 8 & 0xff) < 0x1e, "{p3:06x}");
+        assert_eq!(p3, crate::colour::average_in_srgb(red, crate::colour::jpeg_icc(&tagged).as_deref()));
+        // Untagged, or its thumbnail gone: as it was.
+        assert_eq!(colour(&conn, "plain"), red);
+        assert_eq!(colour(&conn, "gone"), red);
+        assert_eq!(db::meta(&conn, "library_version").as_deref(), Some("1"));
+        // Once only.
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 0);
+        assert_eq!(colour(&conn, "p3"), p3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

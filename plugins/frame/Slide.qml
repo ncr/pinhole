@@ -98,7 +98,8 @@ Item {
         medium.then(path => {
             if (slide.serial !== loading)
                 return
-            slide.sharp = "file://" + path
+            // In sRGB, whatever its profile (docs/plugins.md).
+            slide.sharp = "image://file/" + encodeURIComponent(path)
             slide.failure = ""
             slide.settled = true
         }, error => {

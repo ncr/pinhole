@@ -89,7 +89,7 @@ Item {
         for (const i of positions) {
             pinhole.fetch(i, "medium").then(path => {
                 if (studio.k === k)
-                    studio.all = studio.all.map(s => s.index === i ? Object.assign({}, s, { sharp: "file://" + path }) : s)
+                    studio.all = studio.all.map(s => s.index === i ? Object.assign({}, s, { sharp: "image://file/" + encodeURIComponent(path) }) : s)
             }, () => {}).catch(pinhole.warn)
         }
         // How each is moved against the first, for Steady: the last

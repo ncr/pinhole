@@ -201,7 +201,10 @@ limit can be changed in the side panel, Tab), and logs to
 
 Double-click a photo, or press Space or ⏎ over it, to open it full
 window: the thumbnail at once, the medium rendition in about a second, then
-the original (HEIC through libheif). ← and → step through, Esc or
+the original (HEIC through libheif). Every photo is in its right colours,
+in the grid and the plugins too: an iPhone's Display P3, and any other
+profile a photo carries, made the screen's sRGB as it is decoded
+([docs/hdr.md](docs/hdr.md)). ← and → step through, Esc or
 Space closes, as does dragging the photo up or down (two fingers on a
 touchpad, the left button with a mouse), Space plays and pauses a video, L
 plays a Live Photo's motion (the Live Photos plugin, on unless turned off

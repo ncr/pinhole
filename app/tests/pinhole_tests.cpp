@@ -1,11 +1,15 @@
 #include <QClipboard>
+#include <QColorSpace>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QProcess>
 #include <QSaveFile>
 #include <QSettings>
 #include <QLocalServer>
@@ -19,11 +23,15 @@
 #include <QQuickWindow>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include <csignal>
+#include <lcms2.h>
+#include <turbojpeg.h>
 
+#include "colour.h"
 #include "encoder.h"
 #include "favourites.h"
 #include "history.h"
@@ -846,6 +854,9 @@ PinholePlugin {
         // So are its state and its cache; its cacheDir is not.
         write(dir.path() + "/Main.qml", "import QtQuick\nItem { property var a: pinhole.state.x; property var b: pinhole.cache [\"y\"]; property string c: pinhole.cacheDir }\n");
         QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"pinhole.state", "pinhole.cache"}}}));
+        // A thumbnail's file: API 4's; its URL not.
+        write(dir.path() + "/Main.qml", "import QtQuick\nItem { property string a: \"image://file/\" + encodeURIComponent(p); property string b: item.thumbPath; property url c: item.thumbnail; property string d: \"image://photo/\" }\n");
+        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{4, {"a photo's thumbPath"}}}));
         // A layer over the viewer's photo, an action's order, hint and
         // complaint, and fetch's options: API 3's.
         write(dir.path() + "/Main.qml", R"(import QtQuick
@@ -1527,6 +1538,300 @@ Item {
         QCOMPARE(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200)).size(), QSize(200, 150));
         std::atomic<bool> dropped{true};
         QVERIFY(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200), &dropped).isNull());
+    }
+
+    // Colour (colour.h): a picture of flat patches, each 16 px square, in
+    // the codes given, tagged with `icc` if any, as a JPEG of quality 100.
+    static QImage patches(const std::vector<QRgb> &codes) {
+        QImage picture(16 * int(codes.size()), 16, QImage::Format_RGB32);
+        for (size_t k = 0; k < codes.size(); ++k)
+            for (int y = 0; y < 16; ++y)
+                for (int x = 0; x < 16; ++x)
+                    picture.setPixel(16 * int(k) + x, y, codes[k]);
+        return picture;
+    }
+    static QByteArray saveJpeg(const QString &path, QImage picture, const QByteArray &icc) {
+        if (!icc.isEmpty())
+            picture.setColorSpace(QColorSpace::fromIccProfile(icc));
+        if (!picture.save(path, "JPEG", 100))
+            return {};
+        return QFile::encodeName(path);
+    }
+    // The middle of patch k, as decoded.
+    static QRgb patch(const QImage &image, int k) { return image.pixel(16 * k + 8, 8); }
+    static bool near(QRgb a, QRgb b, int within) {
+        return std::abs(qRed(a) - qRed(b)) <= within && std::abs(qGreen(a) - qGreen(b)) <= within && std::abs(qBlue(a) - qBlue(b)) <= within;
+    }
+    // What lcms2 makes of codes in `icc`, relative colorimetric to sRGB: the
+    // reference, by a path of lcms2's own.
+    static QRgb lcms2Srgb(const QByteArray &icc, QRgb code) {
+        cmsHPROFILE from = cmsOpenProfileFromMem(icc.constData(), cmsUInt32Number(icc.size())), to = cmsCreate_sRGBProfile();
+        cmsHTRANSFORM t = cmsCreateTransform(from, TYPE_RGB_8, to, TYPE_RGB_8, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOCACHE);
+        const uchar in[3] = {uchar(qRed(code)), uchar(qGreen(code)), uchar(qBlue(code))};
+        uchar out[3];
+        cmsDoTransform(t, in, out, 1);
+        cmsDeleteTransform(t);
+        cmsCloseProfile(from);
+        cmsCloseProfile(to);
+        return qRgb(out[0], out[1], out[2]);
+    }
+    static QByteArray testData(const QString &name) {
+        QFile file(QStringLiteral(PINHOLE_TEST_DATA "/") + name);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }
+
+    void aDisplayP3PhotoIsShownInSrgbEverywhereItIsDecoded() {
+        QTemporaryDir dir;
+        // Pure green, a deep red, a mid grey, as an iPhone would write them
+        // (Apple's own Display P3 profile, from a real thumbnail).
+        const QByteArray p3 = testData("display-p3.icc");
+        QVERIFY(!p3.isEmpty());
+        const std::vector<QRgb> codes = {qRgb(0, 255, 0), qRgb(200, 30, 40), qRgb(128, 128, 128)};
+        const QByteArray file = saveJpeg(dir.path() + "/p3.jpg", patches(codes), p3);
+        QVERIFY(!file.isEmpty());
+        // The viewer's medium and full size (decodePhoto), the grid's
+        // thumbnails (the loader) and every Image of a thumbnail
+        // (image://file): each in sRGB, as lcms2 has it.
+        FileProvider files;
+        QSize size;
+        const QImage decoded[] = {decodePhoto(QFile::decodeName(file), QSize()), decodeThumbnail(file, 0),
+                                  files.requestImage(QString::fromUtf8(QUrl::toPercentEncoding(QFile::decodeName(file))), &size,
+                                                     QSize(), QQuickImageProviderOptions())};
+        for (const QImage &image : decoded) {
+            QCOMPARE(image.size(), QSize(48, 16));
+            // P3's green is outside sRGB: sRGB's green, clipped.
+            QVERIFY2(near(patch(image, 0), qRgb(0, 255, 0), 1), qPrintable(QColor(patch(image, 0)).name()));
+            QVERIFY2(near(patch(image, 1), lcms2Srgb(p3, qRgb(200, 30, 40)), 2), qPrintable(QColor(patch(image, 1)).name()));
+            // The red is redder in sRGB's codes than P3's: it was shown too
+            // dull before.
+            QVERIFY(qRed(patch(image, 1)) > 205 && qGreen(patch(image, 1)) < 25);
+            QVERIFY(near(patch(image, 2), qRgb(128, 128, 128), 1));
+        }
+        QCOMPARE(size, QSize(48, 16));
+    }
+
+    void anUntaggedPhotoComesBackByteForByte() {
+        QTemporaryDir dir;
+        const QByteArray file = saveJpeg(dir.path() + "/plain.jpg", patches({qRgb(0, 255, 0), qRgb(200, 30, 40)}), {});
+        QImageReader reader(QFile::decodeName(file));
+        const QImage plain = reader.read().convertToFormat(QImage::Format_RGB32);
+        QCOMPARE(decodePhoto(QFile::decodeName(file), QSize()).convertToFormat(QImage::Format_RGB32), plain);
+        // The loader's as turbojpeg alone gives it.
+        tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
+        QFile in(QFile::decodeName(file));
+        QVERIFY(in.open(QIODevice::ReadOnly));
+        const QByteArray bytes = in.readAll();
+        QImage turbo(32, 16, QImage::Format_RGBX8888);
+        QVERIFY(tj3DecompressHeader(tj, reinterpret_cast<const uchar *>(bytes.constData()), size_t(bytes.size())) == 0);
+        QVERIFY(tj3Decompress8(tj, reinterpret_cast<const uchar *>(bytes.constData()), size_t(bytes.size()), turbo.bits(),
+                               int(turbo.bytesPerLine()), TJPF_RGBX) == 0);
+        tj3Destroy(tj);
+        QCOMPARE(decodeThumbnail(file, 0), turbo);
+        // sRGB's own profile, as a camera writes it: nothing done either.
+        const QByteArray tagged = saveJpeg(dir.path() + "/srgb.jpg", patches({qRgb(0, 255, 0), qRgb(200, 30, 40)}),
+                                           QColorSpace(QColorSpace::SRgb).iccProfile());
+        QCOMPARE(patch(decodeThumbnail(tagged, 0), 1), patch(decodeThumbnail(file, 0), 1));
+    }
+
+    void everyProfileOfARealLibraryConvertsAsLcms2Does() {
+        // A gradient through every hue and level, in each profile Jacek's
+        // thumbnails carry that is not sRGB: Display P3, and the "Camera RGB
+        // Profile" of older iPhones; and one of tables (A2B0) rather than a
+        // matrix, which lcms2 converts.
+        QImage picture(256, 64, QImage::Format_RGB32);
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 256; ++x)
+                picture.setPixelColor(x, y, QColor::fromHsv(x * 359 / 255, 255 - y * 2, 255 - (x * y) % 200));
+        QByteArray tables;
+        {
+            cmsHPROFILE profile = cmsCreateProfilePlaceholder(nullptr);
+            cmsSetProfileVersion(profile, 4.3);
+            cmsSetDeviceClass(profile, cmsSigInputClass);
+            cmsSetColorSpace(profile, cmsSigRgbData);
+            cmsSetPCS(profile, cmsSigXYZData);
+            cmsWriteTag(profile, cmsSigMediaWhitePointTag, cmsD50_XYZ());
+            // P3's primaries (D50), behind sRGB's curve, as a pipeline.
+            const double matrix[9] = {0.5151, 0.2920, 0.1571, 0.2412, 0.6922, 0.0666, -0.0011, 0.0419, 0.7841};
+            const double parameters[5] = {2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045};
+            cmsToneCurve *curve = cmsBuildParametricToneCurve(nullptr, 4, parameters);
+            cmsToneCurve *curves[3] = {curve, curve, curve};
+            // As ICC v4 has an A2B0 of curves, a matrix and curves (none).
+            cmsPipeline *pipeline = cmsPipelineAlloc(nullptr, 3, 3);
+            cmsPipelineInsertStage(pipeline, cmsAT_END, cmsStageAllocToneCurves(nullptr, 3, curves));
+            cmsPipelineInsertStage(pipeline, cmsAT_END, cmsStageAllocMatrix(nullptr, 3, 3, matrix, nullptr));
+            cmsPipelineInsertStage(pipeline, cmsAT_END, cmsStageAllocToneCurves(nullptr, 3, nullptr));
+            cmsWriteTag(profile, cmsSigAToB0Tag, pipeline);
+            cmsUInt32Number size = 0;
+            cmsSaveProfileToMem(profile, nullptr, &size);
+            tables.resize(size);
+            cmsSaveProfileToMem(profile, tables.data(), &size);
+            cmsPipelineFree(pipeline);
+            cmsFreeToneCurve(curve);
+            cmsCloseProfile(profile);
+        }
+        for (const QByteArray &icc : {testData("display-p3.icc"), testData("camera-rgb.icc"), tables}) {
+            QVERIFY(!icc.isEmpty());
+            QImage converted = picture.copy();
+            toSrgb(converted, icc);
+            QVERIFY(converted != picture);
+            int worst = 0;
+            for (int y = 0; y < 64; ++y)
+                for (int x = 0; x < 256; ++x) {
+                    const QRgb a = converted.pixel(x, y), b = lcms2Srgb(icc, picture.pixel(x, y));
+                    worst = std::max({worst, std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                }
+            QVERIFY2(worst <= 1, qPrintable(QStringLiteral("%1 codes apart").arg(worst)));
+            // Whole and in parts on every core, the same.
+            QImage big = picture.scaled(2048, 640);
+            QImage expected = big.copy(0, 0, 2048, 8);
+            toSrgb(big, icc);
+            toSrgb(expected, icc);
+            QCOMPARE(big.copy(0, 0, 2048, 8), expected);
+        }
+    }
+
+    void aHeicSaysItsColoursByNclxOrByProfile() {
+        if (QStandardPaths::findExecutable("heif-enc").isEmpty())
+            QSKIP("no heif-enc");
+        QTemporaryDir dir;
+        const std::vector<QRgb> codes = {qRgb(0, 255, 0), qRgb(200, 30, 40), qRgb(128, 128, 128)};
+        const QByteArray p3 = testData("display-p3.icc");
+        // Lossless, as RGB: the codes as they were.
+        QVERIFY(patches(codes).save(dir.path() + "/plain.png"));
+        auto encode = [&](const QString &png, const QString &heic, const QStringList &nclx) {
+            QProcess process;
+            process.start("heif-enc", QStringList{"-L", "-o", heic} + nclx + QStringList{png});
+            return process.waitForFinished(30000) && process.exitCode() == 0;
+        };
+        // An iPhone's edit says P3 by nclx (primaries 12, transfer BT.709).
+        QVERIFY(encode(dir.path() + "/plain.png", dir.path() + "/nclx.heic",
+                       {"--colour_primaries", "12", "--transfer_characteristic", "1", "--matrix_coefficients", "0"}));
+        // A PNG's iCCP becomes the HEIC's profile.
+        QImage tagged = patches(codes);
+        tagged.setColorSpace(QColorSpace::fromIccProfile(p3));
+        QVERIFY(tagged.save(dir.path() + "/p3.png"));
+        QVERIFY(encode(dir.path() + "/p3.png", dir.path() + "/icc.heic", {}));
+        // And one that says sRGB.
+        QVERIFY(encode(dir.path() + "/plain.png", dir.path() + "/srgb.heic",
+                       {"--colour_primaries", "1", "--transfer_characteristic", "13", "--matrix_coefficients", "0"}));
+        for (const QString name : {"nclx.heic", "icc.heic"}) {
+            const QImage image = decodePhoto(dir.path() + '/' + name, QSize());
+            QCOMPARE(image.size(), QSize(48, 16));
+            QVERIFY2(near(patch(image, 0), qRgb(0, 255, 0), 1), qPrintable(name + ": " + QColor(patch(image, 0)).name()));
+            QVERIFY2(near(patch(image, 1), lcms2Srgb(p3, qRgb(200, 30, 40)), 2), qPrintable(name + ": " + QColor(patch(image, 1)).name()));
+            QVERIFY(near(patch(image, 2), qRgb(128, 128, 128), 1));
+        }
+        const QImage plain = decodePhoto(dir.path() + "/srgb.heic", QSize());
+        for (int k = 0; k < 3; ++k)
+            QVERIFY(near(patch(plain, k), codes[size_t(k)], 1));
+        // Scaled first, then converted: the same colours.
+        const QImage small = decodePhoto(dir.path() + "/nclx.heic", QSize(24, 8));
+        QCOMPARE(small.size(), QSize(24, 8));
+        QVERIFY(near(small.pixel(4, 4), qRgb(0, 255, 0), 2));
+    }
+
+    void whatDecodingAndColourCostOnRealPhotos() {
+        // PINHOLE_DECODE_SAMPLE: a file listing real photos' files, one a
+        // line (thumbnails, HEIC originals), for what decoding them and
+        // making them sRGB cost on this computer; skipped without.
+        if (qEnvironmentVariableIsEmpty("PINHOLE_DECODE_SAMPLE"))
+            QSKIP("no PINHOLE_DECODE_SAMPLE");
+        QFile list(qEnvironmentVariable("PINHOLE_DECODE_SAMPLE"));
+        QVERIFY(list.open(QIODevice::ReadOnly));
+        const QByteArray p3 = testData("display-p3.icc");
+        struct Cost {
+            int count = 0, tagged = 0;
+            qint64 decode = 0, convert = 0, whole = 0;
+        } thumbs, fulls;
+        qint64 fullConvert = 0;
+        tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
+        tj3Set(tj, TJPARAM_SAVEMARKERS, 4);
+        QElapsedTimer clock;
+        for (const QByteArray &line : list.readAll().split('\n')) {
+            if (line.isEmpty())
+                continue;
+            const QString path = QFile::decodeName(line);
+            if (path.endsWith(".jpg")) {
+                // Decoded alone, as before: turbojpeg into RGBX.
+                QFile in(path);
+                if (!in.open(QIODevice::ReadOnly))
+                    continue;
+                const QByteArray bytes = in.readAll();
+                clock.start();
+                if (tj3DecompressHeader(tj, reinterpret_cast<const uchar *>(bytes.constData()), size_t(bytes.size())) != 0)
+                    continue;
+                QImage image(tj3Get(tj, TJPARAM_JPEGWIDTH), tj3Get(tj, TJPARAM_JPEGHEIGHT), QImage::Format_RGBX8888);
+                tj3Decompress8(tj, reinterpret_cast<const uchar *>(bytes.constData()), size_t(bytes.size()), image.bits(), int(image.bytesPerLine()), TJPF_RGBX);
+                thumbs.decode += clock.nsecsElapsed();
+                uchar *icc = nullptr;
+                size_t length = 0;
+                tj3GetICCProfile(tj, &icc, &length);
+                const QByteArray profile = icc ? QByteArray(reinterpret_cast<const char *>(icc), qsizetype(length)) : QByteArray();
+                tj3Free(icc);
+                clock.start();
+                toSrgb(image, profile);
+                thumbs.convert += clock.nsecsElapsed();
+                clock.start();
+                decodeThumbnail(QFile::encodeName(path), 0);
+                thumbs.whole += clock.nsecsElapsed();
+                thumbs.count += 1;
+                thumbs.tagged += !profile.isEmpty();
+            } else {
+                // At the size the viewer asks on Jacek's screen, and whole
+                // (zoomed in).
+                clock.start();
+                QImage image = decodePhoto(path, QSize(3456, 2234));
+                fulls.whole += clock.nsecsElapsed();
+                clock.start();
+                QImage whole = decodePhoto(path, QSize());
+                fulls.decode += clock.nsecsElapsed();
+                if (image.isNull() || whole.isNull())
+                    continue;
+                // What making it sRGB costs at each size: P3 to sRGB again.
+                clock.start();
+                toSrgb(image, p3);
+                fulls.convert += clock.nsecsElapsed();
+                clock.start();
+                toSrgb(whole, p3);
+                fullConvert += clock.nsecsElapsed();
+                fulls.count += 1;
+            }
+        }
+        tj3Destroy(tj);
+        if (thumbs.count)
+            std::printf("thumbnails: %d (%d tagged): decode %.3f ms, sRGB %.3f ms (%.3f ms each tagged), loader's whole %.3f ms\n",
+                        thumbs.count, thumbs.tagged, thumbs.decode / 1e6 / thumbs.count, thumbs.convert / 1e6 / thumbs.count,
+                        thumbs.tagged ? thumbs.convert / 1e6 / thumbs.tagged : 0.0, thumbs.whole / 1e6 / thumbs.count);
+        if (fulls.count)
+            std::printf("full size HEIC: %d at 3456x2234 at most: decode, scale and sRGB %.1f ms, of it sRGB %.1f ms; whole: "
+                        "%.1f ms, of it sRGB %.1f ms\n",
+                        fulls.count, fulls.whole / 1e6 / fulls.count, fulls.convert / 1e6 / fulls.count,
+                        fulls.decode / 1e6 / fulls.count, fullConvert / 1e6 / fulls.count);
+    }
+
+    void anImageOfAFileIsTheSizeAnImageOfItsFileWouldBe() {
+        // image://file sizes as file:// would: sourceSize and fillMode.
+        QTemporaryDir dir;
+        QImage picture(400, 300, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        QVERIFY(picture.save(dir.path() + "/a.jpg", "JPEG"));
+        const QString id = QString::fromUtf8(QUrl::toPercentEncoding(dir.path() + "/a.jpg"));
+        FileProvider files;
+        QSize size;
+        QQuickImageProviderOptions crop, fit;
+        crop.setPreserveAspectRatioCrop(true);
+        fit.setPreserveAspectRatioFit(true);
+        QCOMPARE(files.requestImage(id, &size, QSize(72, 72), crop).size(), QSize(96, 72));
+        QCOMPARE(size, QSize(400, 300));
+        // Qt's own sums (loadSize): fit and crop cover what is asked, a
+        // stretched one fits in it.
+        QCOMPARE(files.requestImage(id, &size, QSize(72, 72), fit).size(), QSize(96, 72));
+        QCOMPARE(files.requestImage(id, &size, QSize(72, 72), QQuickImageProviderOptions()).size(), QSize(72, 54));
+        QCOMPARE(files.requestImage(id, &size, QSize(0, 150), crop).size(), QSize(200, 150));
+        QCOMPARE(files.requestImage(id, &size, QSize(), crop).size(), QSize(400, 300));
+        QVERIFY(files.requestImage(QStringLiteral("%2Fno%2Fsuch.jpg"), &size, QSize(), crop).isNull());
+        QCOMPARE(FileProvider::urlOf(QStringLiteral("/a b/c#d.jpg")).toEncoded(), QByteArray("image://file/%2Fa%20b%2Fc%23d.jpg"));
+        QVERIFY(FileProvider::urlOf(QString()).isEmpty());
     }
 
     void aReadOfALibraryShownNoLongerIsDroppedAndAnotherSourcesPhotosAreOthers() {

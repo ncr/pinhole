@@ -6,13 +6,16 @@
 #include <QString>
 #include <QThreadPool>
 #include <QTimer>
+#include <QUrl>
+#include <private/qquickpixmap_p.h>
 
 #include <atomic>
 
 // Decode a photo file at no more than `maxSize` (any size if invalid), with
 // its orientation applied: HEIC through libheif, everything else through
-// Qt's readers. `cancelled`, if given, set while it decodes: given up at the
-// next chance, and a null image.
+// Qt's readers; in sRGB, whatever profile it carries (colour.h).
+// `cancelled`, if given, set while it decodes: given up at the next chance,
+// and a null image.
 QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled = nullptr);
 
 // "image://photo/<url-encoded path>" for QML, decoded off the GUI thread:
@@ -36,4 +39,21 @@ private:
     QThreadPool m_pool;
     QTimer m_trim;
     std::atomic<int> m_decoding{0};
+};
+
+// "image://file/<url-encoded path>": a file as an Image shows a file:// URL
+// (at the size its sourceSize and fillMode make, upright as autoTransform
+// says, at once or on Qt Quick's own thread as asynchronous says, kept in
+// the same cache), but in sRGB, whatever profile it carries (colour.h).
+// The library's thumbnails, wherever they are shown (the viewer, a
+// plugin's item `thumbnail`), and the medium renditions plugins fetch.
+class FileProvider : public QQuickImageProviderWithOptions {
+public:
+    FileProvider() : QQuickImageProviderWithOptions(QQuickImageProvider::Image) {}
+    QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize,
+                        const QQuickImageProviderOptions &options) override;
+    using QQuickImageProviderWithOptions::requestImage;
+
+    // The URL that shows `path` so.
+    static QUrl urlOf(const QString &path);
 };

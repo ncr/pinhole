@@ -235,6 +235,7 @@ int main(int argc, char *argv[]) {
     Keymap keymap;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
+    engine.addImageProvider(QStringLiteral("file"), new FileProvider);
     engine.addImageProvider(QStringLiteral("mark"), new MarkProvider);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     // Which file a qsTr() in JavaScript is in: Pinhole's, or which plugin's.

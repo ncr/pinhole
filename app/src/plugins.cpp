@@ -6,6 +6,7 @@
 #include "library.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "photoprovider.h"
 #include "portal.h"
 #include "serviceclient.h"
 #include "sources.h"
@@ -85,7 +86,10 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
         {"id", QString::fromUtf8(item.id)},
         {"date", double(item.date)},
         {"filename", item.filename},
-        {"thumbnail", item.thumbPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(QFile::decodeName(item.thumbPath))},
+        // For an Image, in sRGB (FileProvider); the file itself, to hand
+        // to a program.
+        {"thumbnail", FileProvider::urlOf(QFile::decodeName(item.thumbPath))},
+        {"thumbPath", QFile::decodeName(item.thumbPath)},
         {"width", int(item.thumbW)},
         {"height", int(item.thumbH)},
         {"video", item.video},
@@ -2007,7 +2011,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
         {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
         {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
-        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}};
+        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2042,6 +2046,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"fetch's loop, bounce, long_exposure or jpeg",
          QRegularExpression(QStringLiteral("\\bkind\\s*[:=]\\s*[\"'](loop|bounce|long_exposure|jpeg)[\"']"))},
         {"a photo's effect", QRegularExpression(QStringLiteral("\\bfield\\s*\\(\\s*[\"']effect[\"']\\s*\\)"))},
+        // The thumbnail's file beside its URL. (image://file, API 4's too,
+        // is in a string, whose words are not looked at.)
+        {"a photo's thumbPath", QRegularExpression(QStringLiteral("\\.\\s*thumbPath\\b"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));

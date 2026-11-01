@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 2,
+  "api": 4,
   "id": "pinhole.frame",
   "name": "Photo frame",
   "version": "1.0.0",

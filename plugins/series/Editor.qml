@@ -92,7 +92,7 @@ Item {
         sharp = s
         pinhole.fetch(tile.id, "medium").then(path => {
             const now = Object.assign({}, editor.sharp)
-            now[tile.id] = "file://" + path
+            now[tile.id] = "image://file/" + encodeURIComponent(path)
             editor.sharp = now
         }, () => {}).catch(pinhole.warn)
     }

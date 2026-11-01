@@ -1,5 +1,8 @@
 #include "photoprovider.h"
 
+#include "colour.h"
+
+#include <QColorSpace>
 #include <QFile>
 #include <QImageReader>
 #include <QRunnable>
@@ -10,8 +13,23 @@
 
 namespace {
 
+// The profile a HEIC's pixels are in: its ICC, else its nclx as one.
+QByteArray profileOf(const heif_image_handle *handle) {
+    QByteArray icc(qsizetype(heif_image_handle_get_raw_color_profile_size(handle)), Qt::Uninitialized);
+    if (!icc.isEmpty() && heif_image_handle_get_raw_color_profile(handle, icc.data()).code == heif_error_Ok)
+        return icc;
+    heif_color_profile_nclx *nclx = nullptr;
+    if (heif_image_handle_get_nclx_color_profile(handle, &nclx).code != heif_error_Ok)
+        return {};
+    icc = iccOfNclx(nclx);
+    heif_nclx_color_profile_free(nclx);
+    return icc;
+}
+
 // libheif's pixels scaled straight into the image returned, or, at their
 // own size, handed over as they are: no copy of a 4032x3024 photo first.
+// Made sRGB once scaled, so a 12 MP photo shown at 3456 px converts 3456
+// px.
 QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled) {
     heif_context *context = heif_context_alloc();
     heif_decoding_options *options = heif_decoding_options_alloc();
@@ -30,7 +48,8 @@ QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *c
             heif_error_Ok &&
         !(cancelled && *cancelled)) {
         size_t stride = 0;
-        const uint8_t *data = heif_image_get_plane_readonly2(image, heif_channel_interleaved, &stride);
+        // Writable: converted where it is.
+        uint8_t *data = heif_image_get_plane2(image, heif_channel_interleaved, &stride);
         const int width = heif_image_get_width(image, heif_channel_interleaved);
         const int height = heif_image_get_height(image, heif_channel_interleaved);
         // Opaque, as photos are: scaled as it is, not converted first.
@@ -45,6 +64,7 @@ QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *c
                 [](void *image) { heif_image_release(static_cast<heif_image *>(image)); }, image);
             image = nullptr;
         }
+        toSrgb(out, profileOf(handle));
     }
     if (image)
         heif_image_release(image);
@@ -109,6 +129,13 @@ QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *
             }
         }
         image = reader.read();
+        // In the profile it carried (QImageReader keeps it, as JPEG and
+        // PNG have it); a CMYK JPEG, as Qt reads one, by Qt.
+        if (image.format() == QImage::Format_CMYK8888)
+            image = image.colorSpace().isValid() ? image.convertedToColorSpace(QColorSpace(QColorSpace::SRgb), QImage::Format_RGB32)
+                                                 : image.convertToFormat(QImage::Format_RGB32);
+        else
+            toSrgb(image);
     }
     if (!image.isNull() && maxSize.isValid() && (image.width() > maxSize.width() || image.height() > maxSize.height()))
         image = image.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -141,4 +168,40 @@ QQuickImageResponse *PhotoProvider::requestImageResponse(const QString &id, cons
 void PhotoProvider::decoded() {
     if (--m_decoding == 0)
         QMetaObject::invokeMethod(&m_trim, qOverload<>(&QTimer::start), Qt::QueuedConnection);
+}
+
+QUrl FileProvider::urlOf(const QString &path) {
+    if (path.isEmpty())
+        return {};
+    return QUrl(QStringLiteral("image://file/") + QString::fromUtf8(QUrl::toPercentEncoding(path)));
+}
+
+QImage FileProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize,
+                                  const QQuickImageProviderOptions &options) {
+    const QString path = QUrl::fromPercentEncoding(id.toUtf8());
+    // HEIC, which Qt does not read: as the photo provider decodes it.
+    if (path.endsWith(".heic", Qt::CaseInsensitive) || path.endsWith(".heif", Qt::CaseInsensitive)) {
+        QImage image = decodePhoto(path, requestedSize.width() > 0 && requestedSize.height() > 0 ? requestedSize : QSize());
+        if (!image.isNull()) {
+            if (size)
+                *size = image.size();
+            return image;
+        }
+    }
+    // As Qt Quick reads a file (qquickpixmapcache.cpp, readImage).
+    QImageReader reader(path);
+    reader.setDecideFormatFromContent(true);
+    if (options.autoTransform() != QQuickImageProviderOptions::UsePluginDefaultTransform)
+        reader.setAutoTransform(options.autoTransform() == QQuickImageProviderOptions::ApplyTransform);
+    const QSize original = reader.size();
+    const QSize scaled = loadSize(original, requestedSize, reader.format(), options);
+    if (scaled.isValid())
+        reader.setScaledSize(scaled);
+    if (!options.sourceClipRect().isNull())
+        reader.setScaledClipRect(options.sourceClipRect().toRect());
+    QImage image = reader.read();
+    if (size)
+        *size = original.isValid() ? original : image.size();
+    toSrgb(image);
+    return image;
 }

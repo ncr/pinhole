@@ -39,6 +39,10 @@ inline quint64 pageKey(int page) { return (quint64(1) << 63) | quint64(page); }
 inline bool isPageKey(quint64 key) { return key >> 63; }
 inline int keyPage(quint64 key) { return int(key & ~(quint64(1) << 63)); }
 
+// One JPEG as the loader decodes it, at 1/(2^level) of its size, in sRGB
+// (for tests).
+QImage decodeThumbnail(const QByteArray &path, int level);
+
 struct DecodedThumb {
     quint64 key;
     QImage image;

@@ -1,11 +1,11 @@
 # Everything of the window but main(): the app (pinhole.pro) and its tests
 # (tests/pinhole_tests.pro) build the same files from this one list.
 
-QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent gui-private qml-private multimedia-private
+QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent gui-private qml-private quick-private multimedia-private
 CONFIG += c++20
 INCLUDEPATH += $$PWD
 
-LIBS += -lturbojpeg -lwayland-client -lheif
+LIBS += -lturbojpeg -lwayland-client -lheif -llcms2
 
 # The pointer-gestures protocol, for the touchpad hold gesture Qt does not
 # bind (see touchpadhold.h), generated from the system's protocol files.
@@ -39,6 +39,7 @@ HEADERS += \
     $$PWD/keepawake.h \
     $$PWD/serviceclient.h \
     $$PWD/photoprovider.h \
+    $$PWD/colour.h \
     $$PWD/viewer.h \
     $$PWD/viewermotion.h \
     $$PWD/outgoing.h \
@@ -73,6 +74,7 @@ SOURCES += \
     $$PWD/keepawake.cpp \
     $$PWD/serviceclient.cpp \
     $$PWD/photoprovider.cpp \
+    $$PWD/colour.cpp \
     $$PWD/viewer.cpp \
     $$PWD/viewermotion.cpp \
     $$PWD/outgoing.cpp \

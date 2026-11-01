@@ -10,3 +10,5 @@ SOURCES += pinhole_tests.cpp
 RESOURCES += ../src/resources.qrc
 # The real catalogs, so a broken translation shows up here.
 DEFINES += PINHOLE_I18N=\\\"$$PWD/../src/i18n\\\"
+# Colour profiles of real photos (colour tests).
+DEFINES += PINHOLE_TEST_DATA=\\\"$$PWD/data\\\"

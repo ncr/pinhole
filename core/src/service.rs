@@ -1844,6 +1844,21 @@ fn sync_round(shared: &Shared) -> Result<()> {
     if source.kind() == "none" {
         return Ok(());
     }
+    // Once, for a library from before average colours were sRGB: of its
+    // own thumbnails, so whether or not the source is ready.
+    {
+        let _writing = shared.storage.library_lock.lock().unwrap();
+        let library = shared.storage.library();
+        if library.join("library.sqlite").exists() {
+            let mut db = crate::db::open(&library.join("library.sqlite"))?;
+            let averages = crate::sync::srgb_averages(&mut db, &library, &stop)?;
+            if averages > 0 {
+                let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
+                eprintln!("pinholed: library version {version}: {averages} average colours made sRGB");
+                shared.broadcast(json!({"event": "library_changed", "version": version, "added": 0, "removed": 0}));
+            }
+        }
+    }
     // Nothing is made for a source not ready, such as pinhole.icloud's
     // with no account signed in to yet.
     source.start()?;

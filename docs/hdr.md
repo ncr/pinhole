@@ -109,12 +109,13 @@ source; the list is at the end.
 ### Pinhole
 
 - **Decoding.** `photoprovider.cpp`'s `decodePhoto` reads HEIC through
-  libheif into 8-bit RGBA, and everything else through `QImageReader`. The
-  colour profile is never looked at. `thumbnailloader.cpp` decodes the
-  grid's thumbnails and mediums with turbojpeg into `RGBX8888`, and builds
-  mosaics from them. The grid draws them with `QSGTextureMaterial` from the
-  atlas. Library items' `thumbnail` is a `file://` URL, which the viewer
-  and nine plugin files use in plain `Image`s.
+  libheif into 8-bit RGBA, and everything else through `QImageReader`.
+  `thumbnailloader.cpp` decodes the grid's thumbnails and mediums with
+  turbojpeg into `RGBX8888`, and builds mosaics from them. The grid draws
+  them with `QSGTextureMaterial` from the atlas. Until H1 the colour
+  profile was never looked at, and library items' `thumbnail` was a
+  `file://` URL, which the viewer and nine plugin files used in plain
+  `Image`s. Since H1 every one of these is sRGB (below).
 - **The window.** It uses Vulkan when there is a GPU (`main.cpp`), with an
   opaque, untagged sRGB surface.
 - **pinholed.** `render.rs` makes folder thumbnails and mediums with
@@ -225,11 +226,33 @@ These are the open questions, decided.
 - **Rendering intent** is relative colorimetric, with clipping to sRGB.
   Untagged images are sRGB. Any embedded ICC is honoured, "Camera RGB
   Profile" too.
-- **The conversion engine is `QColorSpace`/`QColorTransform`,** with no new
-  dependency, and one transform cached per profile per thread. If H1's
-  measurement shows a 480 px thumbnail costing more than 1 ms, lcms2 (already
-  installed, 8-bit optimised transforms) replaces it behind the same
-  function.
+- **The conversion engine is lcms2 and a matrix of Pinhole's own,** one
+  conversion kept per profile per thread. The design said
+  `QColorSpace`/`QColorTransform`, with lcms2 behind the same function if a
+  480 px thumbnail cost more than 1 ms. H1 measured 300 of Jacek's
+  thumbnails: `QColorTransform` 0.9–1.9 ms a tagged one, lcms2's own 8-bit
+  transform 2.1–2.6 ms, against 0.62 ms to decode it. Every profile in his
+  library is three curves and a matrix (Display P3, "Camera RGB Profile",
+  sRGB, "Generic RGB", "Composite NTSC"). So lcms2 reads the profiles, and
+  converts a profile of tables (A2B0) if one comes; a profile of curves and
+  a matrix goes through a table per channel to linear light, the matrix,
+  and a table of 16,384 steps back to sRGB, four pixels at a time on NEON:
+  0.31 ms a tagged 480 px thumbnail, within one code of lcms2
+  (`app/src/colour.cpp`). lcms2 becomes a dependency of the package.
+- **The average colour is sRGB too.** The design kept it as pinholed
+  computed it, a placeholder. But Colours finds photos by it, and the grid
+  shows it until the converted thumbnail replaces it. pinholed puts each
+  thumbnail's average through the thumbnail's profile
+  (`core/src/colour.rs`), and a library from before has its averages made
+  sRGB once, at the first round (26,475 of Jacek's 49,079 changed, about
+  three seconds).
+- **Thumbnails are `image://file/<path>`,** not `image://photo/`. The photo
+  provider is asynchronous only, on its own two threads, and scales to fit
+  `sourceSize`. The viewer's thumbnail is drawn in the opening's first
+  frame (`asynchronous: false`), and plugins' `Image`s ask for crops and
+  for one side only. `FileProvider` loads a file exactly as an `Image` loads
+  a `file://` URL (Qt Quick's own `loadSize`, its thread or at once), and
+  makes it sRGB. Plugins show the mediums they fetch the same way.
 - **Headroom comes from Wayland, never from `hdrInfo()`.** It comes from
   `wp_color_management_surface_feedback_v1` on the main window's surface:
   `H = target_max_luminance / reference_luminance` of the preferred
@@ -341,65 +364,151 @@ workspace 5, as CLAUDE.md says.
   - In that case `cm = "dp3"` in his own `monitors.lua` would make the
     whole desktop right. That is his call: Pinhole never touches it.
   - Write the answer here.
+- **Recorded** on `main` (46f1b26, then f23e8db) with two yardsticks H0
+  added: the bench's last line, what the loader spent on each thumbnail,
+  medium and mosaic page; and `PINHOLE_SELFTEST=colour:<dir>`, the frames
+  to compare colours by (H1). Six runs, interleaved with H1's:
+  - `--bench`, offscreen, 1400x900: on the fake library (untagged), mean
+    of the phases' sync50 0.134 ms and sync99 0.411 ms; on a copy of
+    Jacek's library, 0.168 and 0.481 ms.
+  - Filling: after each random jump, every cell in view sharp after 32 ms
+    (median), 109 decodes a second.
+  - The loader: a thumbnail of the copy 2.25 ms on its eight threads, a
+    mosaic page 140–400 ms; alone, 0.62 ms to decode a 480 px thumbnail.
+  - `PINHOLE_SELFTEST=viewer` (the copy, its renditions cached), medians
+    of two rounds: HEIC medium 36–51 ms, HEIC original 241–266 ms, JPEG
+    original 69–78 ms, Live Photo original 476–493 ms.
+- **The panel check is not made yet.** The photo for it, found in the
+  library by how much of it is red and green beyond sRGB:
+  `IMG_4520.HEIC`, a night photo under red and green
+  lights.
+  A daylight one beside it:
+  `IMG_3841.HEIC`, a saturated red on green.
+  - Both screens at full brightness, Night Light and True Tone off.
+  - Open it full window in Pinhole and in Photos on the iPhone, side by
+    side.
+  - The answer: not yet.
 
 ### H1: every photo in the right colours
 
+Landed. What was built, and where it departs from the plan above it:
+
 **Files.**
 - New `app/src/colour.cpp`/`.h`:
-  - `QColorSpace colourSpaceOf(const QByteArray &icc)`;
-  - `QColorSpace colourSpaceOfNclx(const heif_color_profile_nclx *)`, for
-    the primaries and transfer;
-  - `void toSrgb(QImage &, const QColorSpace &)`. It skips sRGB and
-    invalid spaces, and keeps a `thread_local QHash<QByteArray,
-    QColorTransform>` keyed by the ICC bytes. Display P3 is nearly every
-    hit.
-- `photoprovider.cpp`:
-  - In `decodeHeif`, read `heif_image_handle_get_color_profile_type`. For
-    `prof`/`rICC` use `heif_image_handle_get_raw_color_profile`, and for
-    `nclx` use `heif_image_handle_get_nclx_color_profile`.
-  - Convert after scaling, so a 12 MP photo shown at 3456 px converts
-    3456 px, not 12 MP.
-  - `QImageReader` images already carry `colorSpace()`, so convert them the
-    same way.
-- `thumbnailloader.cpp`:
-  - Set `TJPARAM_SAVEMARKERS` to keep APP2, then `tj3GetICCProfile`
-    (libjpeg-turbo 3.2.1 has it).
-  - `decodeJpeg` converts each thumbnail and medium before it is
-    uploaded or put in a mosaic.
-  - The average colour stays as pinholed computed it. It is a placeholder.
-- `library.cpp`: an item's `thumbnail` becomes `image://photo/<path>`, so
-  the viewer and every plugin `Image` get converted pixels with no change
-  of their own. `thumbPath` stays a path.
-  - The provider pool gets a third thread for the viewer's strip of
-    thumbnails if the self-tests show waiting.
-  - The QML pixmap cache keys by URL, so caching is unchanged.
-- `viewer.cpp`: `thumbnail()` and `thumbnailAt()` return the same
-  provider URLs.
-- `docs/plugins.md`: `thumbnail` is now a provider URL. Use `thumbPath`
-  for a file to hand to a program.
+  - `void toSrgb(QImage &, const QByteArray &icc)`, and `toSrgb(QImage &)`
+    for what Qt's readers give (their `colorSpace()`'s ICC). It does
+    nothing with no profile, with sRGB's (to within a code), and with one
+    lcms2 cannot read or not of RGB. A `thread_local QHash<QByteArray, …>`
+    keyed by the ICC bytes keeps each thread's conversions; Display P3 is
+    nearly every hit.
+  - The engine is lcms2 and a matrix of Pinhole's own (Decisions): lcms2
+    reads the profile; three curves and a matrix are converted by tables
+    and the matrix, on NEON four pixels at a time; anything else by
+    lcms2's transform. An image over a megapixel is converted in bands of
+    64 rows on Qt's thread pool.
+  - `QByteArray iccOfNclx(const heif_color_profile_nclx *)`, an nclx as an
+    ICC profile lcms2 makes from its primaries and curve, rather than a
+    `QColorSpace`: the one path for both.
+  - **An iPhone's edit says BT.709 and means sRGB's curve.** Of the
+    cached HEICs, 363 of 373 `full`s and 107 of 112 originals carry an ICC
+    profile; the other five of each say nclx 12/1/6 (P3, BT.709,
+    BT.601). Decoded as they are, their codes are their Display P3
+    medium's to within half a code on average (five checked). So
+    transfer 1, 6, 14 and 15 are taken as sRGB's curve, as 13 and 2 are;
+    8, 4 and 5 are linear, 2.2 and 2.8; PQ and HLG are left as they are
+    for H2.
+- `photoprovider.cpp`: `decodeHeif` reads the ICC (`prof`, `rICC`) first,
+  else the nclx, and converts once scaled; it now takes libheif's plane
+  writable, so the photo at its own size is converted where it is, with no
+  copy. A `QImageReader` image is converted by its own `colorSpace()`; a
+  CMYK JPEG by Qt.
+- `thumbnailloader.cpp`: `TJPARAM_SAVEMARKERS` 4 (the ICC alone) and
+  `tj3GetICCProfile`; `decodeJpeg` converts each thumbnail and medium, and
+  each mosaic tile once it is 64 px.
+- **`FileProvider`, `image://file/<path>`** (Decisions), in
+  `photoprovider.cpp`, for an item's `thumbnail` (`plugins.cpp`, the item
+  of `library.item`), the viewer's `thumbnail()` and `thumbnailAt()`, and
+  the mediums Frame, Series and Contact sheet fetch. The provider pool
+  needed no third thread: the strip's thumbnails load on Qt Quick's thread,
+  as they did.
+- **Plugin API 4 begins here**: `image://file` and a photo's `thumbPath`
+  (the thumbnail's file, for a program; Contact sheet's fallback). Frame,
+  Series and Contact sheet ask for 4. H2 adds the rest of API 4.
+- `core/src/colour.rs`: a thumbnail's average colour through its profile,
+  in pinholed (Decisions), and `sync::srgb_averages`, once per library, at
+  the start of a round whether or not the source is ready.
+- `PINHOLE_SELFTEST=colour:<dir>` (`selftestcolour.cpp`): photos in the
+  grid at 3, 13 and 29 columns, full window as they open and once sharp,
+  and Colours' finder and wall, for comparing frames. A window on a
+  workspace not shown draws no frames of its own, and offscreen draws no
+  grid, so it steps the grid itself and draws each frame with a grab.
 
-**Performance.**
-- The conversion runs on the loader threads and in the provider pool,
-  never on the render thread, and never per frame.
-- The grid's draw path and atlas are unchanged.
-- Budget: the bench's frame times within 5 %, and the fill phase's
-  decode rate within 15 %. Over that, lcms2 replaces `QColorTransform`
-  (`cmsCreateTransform` with `TYPE_RGBA_8`, cached the same way).
+**Performance**, measured on Jacek's library copy (H0 has the numbers
+before):
+- A 480 px thumbnail: 0.62 ms to decode, 0.31 ms more to make sRGB when it
+  is tagged (183 of 300 sampled; 0.19 ms over all of them). In the bench,
+  on the loader's eight busy threads, a thumbnail of the library copy took
+  2.25 ms before and 2.59 ms after (medians of six runs).
+- A HEIC original (24 of the library's, three times each, alternating with
+  the decode as it was, twice): +17 to +18 ms whole (355 → 372 ms, +5 %),
+  +4 to +11 ms at the viewer's 3456x2234 (about 375 ms, +1 to +3 %). 12 MP
+  alone converts in about 4 ms on the pool.
+- The grid, `--bench` six times a side, on the fake library (untagged) and
+  on the library copy (tagged): the frames are the same. Mean of the
+  phases' sync50, fake 0.134 → 0.131 ms, copy 0.168 → 0.150; sync99 copy
+  0.481 → 0.480. The fake's sync99 came out 0.411 → 0.447, and the
+  29-column phases that make it, measured again six times a side, 1.017 →
+  1.030 (+1.3 %): run-to-run noise, as the draw path is untouched. Every
+  p99 frame interval within a millisecond of before.
+- Filling: after each of the bench's random jumps every cell in view was
+  sharp after 32 ms (median), before and after, in all 24 runs; 109
+  decodes a second either way.
+- `PINHOLE_SELFTEST=viewer` passes (ten runs a side). Its stage times
+  scatter more than H1's cost: the HEIC original came 241–301 ms after it
+  was asked for before H1, and 226–337 ms after, as it decodes beside the
+  self-test's own whole decode of it and the neighbours' mediums. Four
+  more runs with the conversion kept on the decoding thread (no bands on
+  the pool) were no quicker (243–336 ms).
 
-**Tests** (`app/tests/pinhole_tests.cpp`).
-- Write a JPEG tagged with `QColorSpace(QColorSpace::DisplayP3).iccProfile()`
-  holding P3 pure green and a P3 grey. After `decodePhoto` the green is
-  sRGB (0, 255, 0) clipped, and the grey is unchanged.
-- The same through `thumbnailloader`'s `decodeJpeg`.
-- An untagged JPEG comes back byte for byte.
-- A HEIC made with `heif-enc` and an nclx of primaries 12 (P3) converts
-  like the JPEG.
-- A "Camera RGB Profile" thumbnail from the real library (copied into the
-  test data, 64 px) converts without error.
-- `PINHOLE_SELFTEST=viewer` still passes, its times within budget.
+**Tests** (`app/tests/pinhole_tests.cpp`, `core/src/colour.rs`,
+`core/src/sync.rs`):
+- A JPEG of P3 green, a deep red and a grey, tagged with Apple's own
+  Display P3 profile (from a real thumbnail, `app/tests/data`): through
+  `decodePhoto`, the loader (`decodeThumbnail`) and `image://file` the
+  green is sRGB (0, 255, 0) clipped, the red within 2 of lcms2's, the grey
+  unchanged.
+- An untagged JPEG comes back byte for byte, through Qt's reader and
+  turbojpeg; one tagged sRGB is not touched.
+- A gradient of every hue in Display P3, the "Camera RGB Profile" (the
+  profile, not the photo, in the test data) and a profile of tables:
+  within one code of lcms2's own transform, whole and in bands alike.
+- HEICs made with `heif-enc`: nclx 12/1 and an ICC convert like the JPEG,
+  nclx 1/13 is left alone, and scaled first the colours hold.
+- `image://file` sizes as `file://` does.
+- In Rust: the profile parser against lcms2 on both real profiles, a
+  profile split over APP2 markers, and the averages made sRGB once.
+
+**Proof on real photos** (frames from `PINHOLE_SELFTEST=colour`, before and
+after, on the library copy; the reference is lcms2 converting the before
+frame's codes, which are the photo's own):
+- `IMG_4520.HEIC` (a night photo under red and green
+  lights), its thumbnail in the grid at 3 columns: the after frame is
+  lcms2's to 0.44 of a code on average (median 0); its reddest patch was
+  (254.6, 6.0, 81.7) as P3 codes drawn as sRGB, is (255.0, 0.0, 76.0), and
+  lcms2 says (255.0, 0.0, 75.9). Full window: 0.30 on average, 99 % within
+  2.
+- `IMG_3841.HEIC` (red on green, in daylight): a green patch (43.3, 237.8,
+  173.4) is (0.0, 241.8, 168.3), lcms2 (0.0, 241.8, 168.4).
+- `IMG_8903.HEIC` and `IMG_7725.HEIC` full window at their sharpest (the
+  HEIC full size and original): 0.06 and 0.05 of a code on average, 99.9 %
+  within 2.
+- The grid at 13 and 29 columns (mosaics), every photo in view: 99.4 % and
+  99 % of pixels are as before (untagged, sRGB) or as lcms2 makes P3 of
+  them; the rest are other profiles' (Camera RGB) and edges.
 
 **In the app:** iPhone photos look as saturated as on the phone, in the
-grid, the viewer and every plugin.
+grid, the viewer and every plugin. Theme and Background still read the
+files' codes as they are: they are H2's.
 
 ### H2: HDR content shown right in SDR
 
@@ -463,7 +572,8 @@ grid, the viewer and every plugin.
   stops}`.
 - `viewer.cpp`: `Q_PROPERTY(QVariantMap hdr)` for the photo shown, read on
   the provider thread with the decode.
-- **Plugin API 4** (`docs/plugins.md`):
+- **Plugin API 4** (`docs/plugins.md`; begun in H1 with `image://file` and
+  a photo's `thumbPath`), adding:
   - `pinhole.display` (`hdr`, `headroom`, `wide`);
   - the viewer's `hdr` for the photo shown;
   - `pinhole.srgbProfile`, the path of an sRGB ICC installed with Pinhole
@@ -694,9 +804,11 @@ iPhone HDR photos glow as on the phone.
    there is the suspected `10000 *`. *Answer:* H2 checks SDR tone mapping
    against ffmpeg. In the stage, Hyprland tone maps whatever is above the
    display. Both are worth reporting upstream.
-7. **The CPU cost of conversion at decode.** *Answer:* measured in H1
-   against a 15 % budget on the decode rate, with lcms2 as the named
-   replacement.
+7. **The CPU cost of conversion at decode.** *Answer:* measured in H1.
+   Both `QColorTransform` and lcms2's own transform cost more than the
+   decode itself, so the common profile is converted by Pinhole's own
+   tables: half a decode for a tagged thumbnail, on the loader's threads,
+   and the grid's frames as before (H1).
 8. **libheif cannot decode the hidden `tmap` image.** *Answer:* Apple's
    legacy map is in every such file here, and H4a covers it.
 9. **Hyprland's colour management changes under us** (protocol version 2
