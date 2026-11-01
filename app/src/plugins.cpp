@@ -186,14 +186,18 @@ PluginSettings::PluginSettings(PluginHost *host) : QQmlPropertyMap(this, nullptr
         insert(it.key(), it.value().toVariant());
 }
 
+QStringList PluginSettings::keys() const { return m_host->m_plugins->settingsOf(m_host->id()).keys(); }
+
 QVariant PluginSettings::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.
     const QVariant value = input.metaType() == QMetaType::fromType<QJSValue>()
                                ? input.value<QJSValue>().toVariant(QJSValue::ConvertJSObjects)
                                : input;
-    if (!m_host->m_plugins->setSettingOf(m_host->id(), key, QJsonValue::fromVariant(value)))
+    const QJsonValue json = QJsonValue::fromVariant(value);
+    if (!m_host->m_plugins->setSettingOf(m_host->id(), key, json))
         m_host->report(tr("Its setting “%1” could not be kept.").arg(key));
-    return value;
+    // Taken out: undefined, as one never set is.
+    return json.isNull() || json.isUndefined() ? QVariant() : value;
 }
 
 void PluginJob::cancel() {
@@ -583,8 +587,9 @@ void PluginHost::settingsChanged() {
         if (m_settings->value(it.key()) != value)
             m_settings->insert(it.key(), value);
     }
-    // One set to null is gone.
-    for (const QString &key : m_settings->keys())
+    // One set to null is gone (every key the map has had: its own keys()
+    // are those kept).
+    for (const QString &key : m_settings->QQmlPropertyMap::keys())
         if (!kept.contains(key) && m_settings->value(key).isValid())
             m_settings->clear(key);
 }

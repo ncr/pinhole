@@ -116,6 +116,8 @@ PluginStoreMap::PluginStoreMap(PluginStore *store, const QString &id, QObject *p
         insert(it.key(), it.value().toVariant());
 }
 
+QStringList PluginStoreMap::keys() const { return m_store->values(m_id).keys(); }
+
 QVariant PluginStoreMap::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.
     const QVariant value = input.metaType() == QMetaType::fromType<QJSValue>()

@@ -3563,6 +3563,15 @@ private slots:
         QVERIFY(bench.host->setSetting("size", 4));
         QCOMPARE(bound->property("size").toInt(), 4);
         QCOMPARE(bench.js("pinhole.settings.size").toInt(), 4);
+        // Null takes one out: it reads as one never set, keys() leaves it
+        // out, and so does plugins.json.
+        QCOMPARE(bench.js("pinhole.settings.keys().sort().join(' ')").toString(), QString("edits:folder:/x size"));
+        bench.js("pinhole.settings.size = null");
+        QVERIFY(bench.js("pinhole.settings.size === undefined").toBool());
+        QCOMPARE(bench.js("pinhole.settings.keys().join(' ')").toString(), QString("edits:folder:/x"));
+        QVERIFY(!QJsonDocument::fromJson(read(file.fileName()).toUtf8())["settings"]["t"].toObject().contains("size"));
+        bench.js("pinhole.settings.size = 5");
+        QCOMPARE(bench.js("pinhole.settings.keys().sort().join(' ')").toString(), QString("edits:folder:/x size"));
     }
 
     // A plugin's state and cache: properties as its settings are, kept
@@ -3611,9 +3620,14 @@ private slots:
         std::unique_ptr<QObject> bound(component.create());
         QVERIFY2(bound, qPrintable(component.errorString()));
         QVERIFY(bound->property("shown").toBool());
+        QCOMPARE(bench.js("pinhole.state.keys().sort().join(' ')").toString(), QString("edits:folder:/x shown"));
         bench.js("pinhole.state.shown = null");
         QVERIFY(!bound->property("shown").toBool());
         QVERIFY(bench.js("pinhole.state.shown").isUndefined());
+        // … and keys() leaves it out, as the file does (below).
+        QCOMPARE(bench.js("pinhole.state.keys().join(' ')").toString(), QString("edits:folder:/x"));
+        bench.js("pinhole.cache.gone = 1; pinhole.cache.gone = null");
+        QCOMPARE(bench.js("pinhole.cache.keys().join(' ')").toString(), QString("found:folder:/x"));
         // The same value again writes nothing.
         bench.plugins->flush();
         const QDateTime written = QFileInfo(cache).lastModified();

@@ -79,6 +79,9 @@ class PluginStoreMap : public QQmlPropertyMap {
     Q_OBJECT
 public:
     PluginStoreMap(PluginStore *store, const QString &id, QObject *parent = nullptr);
+    // Those it has: one set to null is taken out (QQmlPropertyMap keeps
+    // a key once it has had it, as undefined).
+    Q_INVOKABLE QStringList keys() const;
 
 protected:
     QVariant updateValue(const QString &key, const QVariant &input) override;
