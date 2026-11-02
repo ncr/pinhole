@@ -125,9 +125,14 @@ A `jpeg` of a photo whose `full` is a JPEG is that `full`, answered as a
 from its `full` with ImageMagick at quality 92, which keeps the EXIF (the
 date, the place, the camera), the colour profile, and turns the pixels
 upright with the orientation set to match; only the first image of a file
-that holds several, and anything see-through on white. It is answered with
+that holds several, and anything see-through on white. A HEIC's gain map
+(an iPhone's HDR) goes with it: the JPEG becomes an Ultra HDR JPEG, the
+map ISO 21496-1's (Apple's legacy map turned into ISO's form) in an MPF
+second image, written by libultrahdr, the JPEG itself and its segments as
+they were (docs/hdr.md, H5). It is answered with
 `type: "public.jpeg"`, `rendition: "made"`, and kept in the cache beside
-`full`, as `cache/full/…/<full's key>-jpeg.jpg`: counted as `full` in
+`full`, as `cache/full/…/<full's key>-jpeg2.jpg` (`-jpeg.jpg` before HEICs
+kept their gain map, made again when asked for): counted as `full` in
 `storage`, under the limit like any photo, and made once (two at a time at
 most; those asking for one being made wait for it). A video has none:
 `not_found`.

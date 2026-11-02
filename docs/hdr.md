@@ -939,21 +939,57 @@ medium; H3's as well).
 
 ### H5: HDR kept when photos leave
 
-- `core/src/jpeg.rs`. For a HEIC with a gain map (found with `heif-dec
-  --with-aux`, which writes the auxiliary images, or with `heif-info`):
-  - make the base as today (`magick`, P3 profile kept);
-  - turn Apple's map into ISO form: for each pixel `L = log2(1 + (Hi - 1)
-    * g)` over `[0, log2 Hi]`, with gamma 1 and offsets 0;
-  - write an Ultra HDR JPEG with libultrahdr's API-4 encoder (compressed
-    base, compressed map, metadata), through a few `extern "C"`
-    declarations by hand, as `main.cpp` does for Vulkan.
-- Android, Chrome and Apple since iOS 18 read it.
-- Copy and Export send originals as they are, and keep everything already.
-- **Tests.**
-  - `jpeg` of a HEIC with a map is a JPEG that libultrahdr decodes back to
-    the map within 2/255.
-  - Its base is byte for byte today's JPEG.
-  - A HEIC without a map is as today.
+Landed. What was built, and where it departs from the plan:
+
+- **Where:** `core/src/jpeg.rs`, so every JPEG made of a HEIC keeps it:
+  export as JPEG (Ctrl ⇧ E), drag and copy in the compatible form, and
+  Send's "HEIC as JPEG" all ask pinholed for `jpeg`. The base is made as
+  before (`magick`, quality 92, the P3 profile and EXIF kept); then
+  `core/src/gainmap.rs` reads the HEIC's map through libheif and writes an
+  Ultra HDR JPEG with libultrahdr's API-4 encoder (the JPEG as it is, the
+  map compressed, the metadata), declared by hand as `main.cpp` declares
+  Vulkan. Without a map, or should that fail, the JPEG is as before.
+- **Which map:** ISO's `tmap` when it parses, its metadata kept as the
+  iPhone wrote it (the design converted Apple's always; ISO's is the
+  iPhone's own description of the same pixels, and exact); else Apple's,
+  made ISO's as planned: each code `g` to
+  `log2(1 + (Hi - 1) g) / log2 Hi`, boosts 1 to `Hi`, gamma 1, offsets 0,
+  `Hi` from the map's XMP, else the MakerNote. The map is written at its
+  own size (a quarter of the pixels), JPEG at 90.
+- **libultrahdr writes both** ISO 21496-1's APP2 and Adobe's `hdrgm` XMP,
+  and keeps every segment of the base where it was; ImageMagick reads the
+  result as "UHDR" and decodes its SDR picture, the same pixels as before.
+- **Cache:** made JPEGs are named `-jpeg2.jpg` (`jpeg::VERSION`), so one made
+  before is made again, with its map, the next time it is asked for.
+
+**Tested.**
+- `a_map_attached_is_read_back_by_libultrahdr`: libultrahdr's probe reads
+  back the metadata written and the map within 2 of 255; the base decodes
+  to the very picture.
+- `a_heics_gain_map_goes_with_its_jpeg` (`PINHOLE_HDR_HEIC`, a real
+  HEIC): an iPhone 16 Pro Max HEIC (ISO's map, 2.38 stops) and an edit with
+  Apple's alone (1.80 stops from its MakerNote): libultrahdr reads the map
+  back (mean 0.35 and 0.32 of 255, 99.9 % within 4, not the plan's 2: JPEG
+  at 90 does not keep the grain of a map that is HEVC already that close,
+  0.004 of a stop on average, a seventh at the worst pixel); the primary's scan is today's byte for byte
+  and every segment of today's JPEG is in it. A HEIC without a map makes
+  the JPEG it made before (`any_photo_becomes_a_jpeg`).
+- `an_iphones_tmap_is_read_as_libultrahdr_takes_it`, `apples_map_becomes_isos`.
+- `PINHOLE_SELFTEST=outgoing` on a folder with that HEIC, into scratch
+  Pictures: `IMG_0001.jpg`, "UHDR 4284x5712", with the HEIC's capture time,
+  camera, GPS and orientation tags. Against today's JPEG of the
+  same HEIC: `exiv2 -pa` the same, all 59 tags; ImageMagick's picture of
+  it 0 pixels apart; `ultrahdr_app -m 1` decodes it to linear half float
+  with its map. 5.17 MB against 4.69 MB (+10 %); the Apple-only edit 4.34
+  against 4.14 MB (+5 %).
+- Send's self-test (`PINHOLE_SELFTEST_SEND=jpeg`) inside `unshare -rn` (a
+  dummy interface for LocalSend's multicast; its test receiver): "Sent 1
+  file to Test phone", the file received the exported one byte for byte,
+  an Ultra HDR JPEG.
+
+**In the app:** a HEIC exported, dragged, copied or sent as JPEG keeps its
+HDR: on an iPhone (iOS 18), Android or in Chrome it shows above SDR white
+as the HEIC did; elsewhere it is the JPEG it was.
 
 ## Risks, and the answers
 

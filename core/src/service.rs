@@ -1415,7 +1415,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
 /// exposure the source has, which is the photo itself (iCloud's JPEGFull):
 /// the same file as `full`. Made ones are named after the key of what they
 /// are made from: the motion's, or for a `jpeg` the `full` it goes beside
-/// (and is counted with).
+/// (and is counted with): `-jpeg2` since a HEIC's JPEG keeps its gain map.
 fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
     let folder = match want {
         Want::LongExposure if !made => Want::Full,
@@ -1423,7 +1423,10 @@ fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
         Want::Jpeg => Want::Full,
         other => other,
     };
-    let suffix = if made { format!("-{}", want.name()) } else { String::new() };
+    // A made JPEG's name says its version: one made before HEICs kept their
+    // gain map (jpeg.rs) is made again.
+    let version = if want == Want::Jpeg { crate::jpeg::VERSION } else { "" };
+    let suffix = if made { format!("-{}{version}", want.name()) } else { String::new() };
     Path::new(folder.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
 }
 

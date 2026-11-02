@@ -280,12 +280,12 @@ fn a_window_meets_the_service_of_a_folder() {
         }
         let path = answers[0]["result"]["path"].as_str().unwrap().to_owned();
         assert!(path.starts_with(root.join("data/pinhole/cache/full").to_str().unwrap()), "{path}");
-        assert!(path.ends_with("-jpeg.jpg"), "{path}");
+        assert!(path.ends_with("-jpeg2.jpg"), "{path}");
         assert_eq!(identify(&path, "%m"), "JPEG");
         assert_eq!(identify(&path, "%[EXIF:DateTimeOriginal]"), "2024:05:06 07:08:09");
         assert_eq!(colour(&path), [40, 40, 200]);
         let ran = std::fs::read_to_string(&magicks).unwrap_or_default();
-        assert_eq!(ran.lines().filter(|l| l.contains("-jpeg.part.jpg")).count(), 1, "{ran}");
+        assert_eq!(ran.lines().filter(|l| l.contains("-jpeg2.part.jpg")).count(), 1, "{ran}");
         let again = window.ask("fetch", json!({"asset": "c.heic", "kind": "jpeg"}));
         assert_eq!(again["result"]["cached"], true, "{again:#}");
         assert_eq!(again["result"]["path"], json!(path));
