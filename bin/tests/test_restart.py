@@ -1,4 +1,6 @@
 """Exercise installer restarts with real processes, without opening GUI windows."""
+import fcntl
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -174,6 +176,27 @@ int main(int argc, char **argv) {
         self.assertIn('source checkout', result.stdout)
         self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 2)
         self.assertIn(f'stop|{window.pid}', self.lines())
+
+    def test_background_build_worker_does_not_keep_installer_lock(self):
+        installer = self.installer("""python3 - <<'WORKER'
+import subprocess
+from pathlib import Path
+p = subprocess.Popen(['sleep', '60'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=False, start_new_session=True)
+Path('worker.pid').write_text(str(p.pid))
+WORKER""")
+        result = subprocess.run([str(installer), '--non-interactive'], capture_output=True, text=True,
+                                env=dict(self.env, PREFIX=str(self.prefix), PINHOLE_RUST_BUILDER='cargo',
+                                         PINHOLE_KEEP_RUNNING='1'), timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pid = int((self.checkout / 'worker.pid').read_text())
+        try:
+            key = hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16]
+            lock = self.root / 'state/pinhole' / ('update-' + key + '.lock')
+            with lock.open('w') as stream:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.kill(pid, 15)
 
 
 if __name__ == '__main__':

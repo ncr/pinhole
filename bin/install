@@ -76,7 +76,8 @@ run_install() {
         echo 'Use your OS package manager for system installations.' >&2
         exit 2
     fi
-    bin/build
+    # The installer keeps the lock; background compiler daemons must not inherit it.
+    python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
     if [ -n "${PINHOLE_EXPECTED_COMMIT:-}" ]; then
         if [ "$(git rev-parse HEAD)" != "$PINHOLE_EXPECTED_COMMIT" ] || [ -n "$(git status --porcelain)" ]; then
             echo 'Checkout changed while Pinhole was building; no installation was activated. Your edits were kept.' >&2
