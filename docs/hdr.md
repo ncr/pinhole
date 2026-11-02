@@ -266,7 +266,9 @@ These are the open questions, decided.
 - **One swapchain format: scRGB.** If the Vulkan surface does not offer
   `HDRExtendedSrgbLinear`, there is no stage, logged once. There is no
   HDR10 fallback: Qt Multimedia's linear output and the photo shader
-  would both need a second PQ path for no display we know of.
+  would both need a second PQ path for no display we know of. (On this
+  MacBook today the surface offers no fp16 at all, though it offers
+  HDR10's colour space at 10 bits: H3.)
 - **The stage needs a transparent main window,** which is chosen when the
   window is made. The display is read before the window is made. If the
   output gains headroom while Pinhole is open (another monitor, a
@@ -274,7 +276,8 @@ These are the open questions, decided.
   is made. Headroom changes within an HDR output apply at once.
 - **A user switch, "Full HDR" ("Pełny HDR").** It is in the side panel,
   on by default, and shown only when the display has headroom. Off keeps
-  the stage at SDR. Apple has the same choice. There is no other setting.
+  the stage at SDR white (its gamut stays). Apple has the same choice.
+  There is no other setting.
 - **Gain maps.** Prefer ISO 21496-1 when it parses (it is per channel and
   more exact), and use Apple's legacy map otherwise. Every HEIC sampled here with
   one has both, so H4a (Apple only) already covers Jacek's library. The weight
@@ -288,11 +291,12 @@ These are the open questions, decided.
   libheif 1.23 has no gain-map API, so the HEIC `tmap` is parsed by
   Pinhole. Its gain-map PR is still open [libheif-1503].
 - **`qt6-shadertools`** is a make dependency since H2's `VideoView`, for
-  `qsb`; H3's stage shaders use it too.
+  `qsb`; H3's stage shader (`photo.frag`) uses it too.
 - **Private Qt API, once.** Placing the stage below the main window needs
   `QtWaylandClient::QWaylandWindow::subSurfaceWindow()->place_below()`.
-  Qt's `lower()` ignores subsurfaces. It is behind one function, with a
-  version check: on a Qt it was not built against, there is no stage.
+  Qt's `lower()` ignores subsurfaces. It is behind one function
+  (`placeSubsurfaceBelowParent`, `stage.cpp`), with a version check: on a
+  Qt it was not built against, there is no stage.
 - **JPEG XL stays out.** Pinhole does not read JPEG XL at all yet.
 
 ## The maths
@@ -537,8 +541,13 @@ peak is the content light level, else the mastering display's, else 1000.
 - Neither Jacek's library nor the cache has a PQ or HLG still: the two
   edits whose boxes say transfer 16 carry it on their `tmap` (the HDR
   alternate), not on the picture.
-- A folder's grid thumbnail of one is ImageMagick's, which shows its codes
-  as they are: rare, and left so.
+- A folder's grid thumbnail of one was ImageMagick's, which shows its
+  codes as they are. Since H3, `render.rs` reads a HEIF's or AVIF's boxes
+  for the primary item's nclx (`pitm`, `ipma`, `colr` in `ipco`), and a PQ
+  or HLG one is made by ffmpeg as a video's frame is and tone mapped by
+  `cover.rs`'s `tone_map` (`an_hdr_still_is_tone_mapped_as_a_video_frame_is`:
+  an HLG grey of 0.75 is SDR white, 255, where ImageMagick made 191).
+  Thumbnails made before stay as they were: no such still has been seen.
 
 **Video covers.** `cover.rs` asks ffprobe for the curve with the length
 (and a PQ stream's mastering peak). For `arib-std-b67` or `smpte2084`
@@ -552,7 +561,10 @@ iPhone clip's cover was a third darker than the video playing from it
 (JPEG and scaling). A folder's video's key has `cover::VERSION` (3), so
 every folder video's cover is made again once. iCloud's videos have
 Apple's thumbnails; the few covers Pinhole made of iCloud videos (only for
-a black thumbnail) stay as they are.
+a black thumbnail, 33 in Jacek's library) are made again once since H3
+where that is cheap: an HLG or PQ video's whose file is on this computer,
+needing no fetch (the library's meta `covers` is `cover::VERSION` after;
+`an_hdr_videos_cover_from_before_is_made_again_once`). The rest stay.
 
 **Video in the viewer and Live motion: Qt Multimedia 6.12 is wrong, so
 `VideoView` (`videoview.cpp`; at first `SdrVideo`).**
@@ -681,99 +693,155 @@ and in Rust `an_hlg_video_gets_a_cover_as_colourful_as_its_sdr_self`
 
 ### H3: the stage (wide gamut and HDR output)
 
-**Files.**
-- New `app/src/stage.cpp`/`.h` and `app/src/Stage.qml`:
-  - **The stage window.** A `QQuickWindow` whose parent is the main window
-    (a subsurface on Wayland). Before it is shown, its
-    `_qt_sg_hdr_format` is set to `scrgb`. Pinhole does not set its
-    `QSurfaceFormat` colour space: Mesa tags the surface, and a second
-    `get_surface` on it is a protocol error.
-  - **Placed below** through the private API, behind one function.
-  - **Content.** It holds the backdrop (the theme's background, made
-    linear on the CPU) and the photo. Its geometry follows `viewer.zoom`,
-    `panX` and `panY`, exactly as `frame` in `PhotoViewer.qml` does.
-  - **Shown** only when `viewer.open && progress === 1 && offset === 0 &&
-    dismiss === 0`.
-  - **Sync.** The subsurface is set to sync. The main window turns its
-    photo and backdrop transparent only after the stage's first
-    `frameSwapped`, so both changes reach the screen in one commit.
-- `app/src/shaders/photo.frag`, compiled with `qsb` in `sources.pri`. It
-  takes:
-  - the base texture, RGBA8, in the photo's own encoding: P3 is not
-    converted for the stage;
-  - a 3x3 to linear sRGB;
-  - later (H4) the gain-map texture and parameters.
+Landed. What was built, and where it departs from the plan:
 
-  It writes linear premultiplied scRGB.
-- `photoprovider.cpp`: a stage request (`image://stage/<path>`) returns
-  the decode without `toSrgb`, with its colour space as the texture's
-  matrix. The main window's texture stays the sRGB one, for the motion.
-- `main.cpp`: before the window is made, `Display` decides whether the
-  stage is wanted (`headroom > 0 || wide`, or
-  `PINHOLE_STAGE=force|off`). If so, the main window gets an alpha
-  channel and `color: "transparent"` under its root, and `Main.qml`
-  draws its own background.
-- `display.cpp`: `get_surface_feedback` on the main window's surface,
-  then `get_preferred_parametric` and `preferred_changed`. Headroom is
-  followed live.
-- **Video in the stage.** When the stage is up, the viewer's
-  `VideoOutput` moves into `Stage.qml` (`MediaPlayer.videoOutput` is
-  switched while the viewer is settled). Qt Multimedia then writes linear
-  scRGB itself. Its peak is Qt's constant 1000 nits, and Hyprland tone
-  maps the rest. While the viewer moves, the poster image is drawn in the
-  main window as today.
-- `PinholePlugin.holdSdr` (API 4). While any plugin's is true, the stage
-  fades to SDR. The Live plugin sets it while motion plays, since its
-  video is SDR in the main window.
-- `SidePanel.qml`: the "Full HDR" switch, shown when `display.hdr`.
+**When there is one.** `main.cpp` makes a `Stage` (`stage.h`) before the
+window, from what `ColourDisplay` read of the outputs: wanted where the
+display has headroom or a gamut wider than sRGB, or with
+`PINHOLE_STAGE=force`; never with `PINHOLE_STAGE=off`. Not wanted (this
+panel: `pinhole display` says sRGB, 80 of 80 nits), the window is made as
+before: opaque, its colour the theme's, no stage, no shaders loaded. Wanted,
+`Main.qml` makes the window transparent and draws its own background, and
+once the window has drawn, its swapchain is asked whether the surface offers
+scRGB (`isFormatSupported(HDRExtendedSrgbLinear)`). Without it there is no
+stage, said once; forced, the stage runs on an ordinary swapchain, its
+output clipped and in sRGB's curve, which tests its coming and going.
 
-**Performance.**
-- With no headroom and no wide gamut (this panel today), none of this
-  exists. The window is made exactly as before, opaque and with no alpha.
-- With the stage, the grid is `visible: false` while the stage is shown,
-  so the frame cost is the stage's two quads plus the chrome.
-- The stage keeps its own copy of the shown photo's texture (48 MB for
-  12 MP), freed when the viewer leaves the photo.
-- The main window's alpha costs the compositor one blend of the window,
-  only on displays that have the stage.
+**This MacBook offers no scRGB today.** Hyprland's DRM backend advertises
+fp16 (`AB4H`) dmabufs, but honeykrisp's WSI offers a Wayland surface no
+`R16G16B16A16_SFLOAT` (8- and 10-bit formats only, in every colour space;
+listed by a small Vulkan probe, `MESA_VK_WSI_DEBUG=sw` and `linear` alike).
+So even forced, the stage on this panel would be an SDR one; with real HDR
+it waits on Mesa. In a nested Hyprland with a headless output (below) Mesa
+offers fp16, and everything here was tested there.
 
-**Tests**, all on this machine, with nothing it cannot do:
-- `PINHOLE_STAGE=force PINHOLE_HEADROOM=2` self-test on workspace 5:
-  - `QRhiSwapChain::isFormatSupported(HDRExtendedSrgbLinear)` on the
-    stage. If false, this phase stops here: honeykrisp plus Hyprland do
-    not offer fp16 scRGB, and the fix is upstream.
-  - `grabWindow()` of the stage gives `Format_RGBA16FPx4`. The backdrop
-    reads the theme's linear value. A P3 green test photo reads
-    (-0.2249, 1.0421, -0.0786) × its level, within 1e-3. This is the exact
-    value Pinhole hands Hyprland.
-  - `WAYLAND_DEBUG=client` shows the stage's surface given
-    `set_image_description` with `ext_linear`, the sRGB primaries and the
-    extended target volume. It also shows the stage placed below its
-    parent.
-  - With the stage forced on SDR, a screenshot (`grim`, 8-bit, which is
-    all it can write [grim-png]) of the settled viewer matches one with
-    the stage off within 2/255. This proves the hand-over is seamless and
-    that Hyprland maps scRGB back to the same SDR.
-- **Headroom from a real compositor.**
-  - A nested Hyprland, its own config, started on workspace 5 as a
-    window, with its output given `supports_hdr = 1` and `cm = "hdr"`.
-    `pinhole display` and the feedback inside it must report a headroom.
-  - That a Wayland-backend output accepts the `hdr` preset is
-    unverified: it is the first thing this step tries.
-  - If it does not, Weston 15's headless backend with
-    `color-management=true` and an HDR output is the second try
-    [weston-ini]. It is not installed, and installing it needs Jacek's
-    root password.
-  - Jacek's own monitors are never configured.
-- **The parsing of feedback events** is unit tested with synthetic
-  luminances: 203/1000 gives 2.30 EV; 80/80 gives 0; a missing target
-  falls back to max.
-- `PINHOLE_SELFTEST=viewer` and `--bench` with the stage off are
-  unchanged.
+**The window.** `Stage.qml`, a `QQuickWindow` made by `Stage::make` and
+made a child of the main window (`QWindow::setParent`: a Wayland
+subsurface; QML's `Window` has no `parent` in 6.12, and a `Loader`'s window
+reparented so crashed on exit). Before it is shown its `_qt_sg_hdr_format`
+is `scrgb` and its `QSurfaceFormat` colour space linear sRGB: **Mesa 26.3
+makes the fp16 swapchain but does not tag the surface**, which the
+compositor would then take as sRGB's curve, so Qt tags it
+(`wp_color_management_surface_v1.set_image_description`: `srgb` primaries,
+`ext_linear`). Should a later Mesa tag it too, that is a second
+`get_surface`, a protocol error: the thing to check when Mesa changes.
 
-**In the app:** nothing changes on this panel unless the stage is forced
-or Hyprland is set to `dp3`. With `dp3`, P3 photos in the viewer show
-their full gamut.
+**Placed below** by `placeSubsurfaceBelowParent()`, the one use of Qt
+Wayland's private classes (`QWaylandWindow::subSurfaceWindow()`,
+`place_below`), only when `qVersion()` is the Qt it was built with; else no
+stage. **The subsurface stays desynchronised** (Qt makes it so), not
+synchronised as planned: synchronised, the stage's fade and its video would
+show only when the main window happens to commit.
+
+**The hand-over** (`Stage.qml`), frame by frame. Settled (open, grown,
+`offset` and `dismiss` 0, not closing), the stage decodes the viewer's
+sharpest image; then it is shown, empty and transparent, and placed below;
+after two frames of the main window (which commits the stacking) it draws
+its backdrop and photo; after two frames of its own, `handedOver`: the main
+window stops drawing its backdrop, photo and video (`PhotoViewer.staged`),
+the grid and its own background go, and the fade starts. Going back, the
+main window draws the photo again first, and only after two frames of it is
+the stage hidden and its texture let go.
+
+**The photo: `StagePhoto`**, a `QQuickItem` with its own material
+(`shaders/photo.frag`), not `image://stage/`: an image URL cannot carry the
+matrix. It decodes the very file and size of the viewer's sharpest image
+(`decodePhoto(…, &profile)`, which leaves the pixels in their profile) on a
+thread of its own, keeps them as RGBA8, and draws each code through the
+profile's own tables and matrix (`stageColourOf`, the same that `toSrgb`
+converts by; a profile of tables is made sRGB first). **Filtered by hand**:
+the four texels converted, the clipped values filtered in sRGB's curve as
+the main window filters its sRGB texture, the unclipped in the curve
+extended. With the texture's own filtering the hand-over was off by up to
+15 codes at saturated edges; by hand, by one at most. Its geometry is the
+viewer's frame's (`frameItem`), bound to it.
+
+**Weights.** `fade` 0 to 1 in 400 ms from the hand-over; `hold` to 0 while
+any plugin's `holdSdr` (400 ms each way); `full`, the side panel's Full HDR.
+The gamut shown is `fade × hold`; the headroom used, `fade × hold × full`
+of the display's, in stops. On an SDR stage both are 0.
+
+**Video** is not switched between outputs. The stage's `VideoView`
+`follows` the viewer's: each frame given to the viewer's is given to it too,
+and the one it has at once, so a paused video shows. Its `linear` makes the
+HDR shader (`hdrvideo.frag`) write linear light, and Qt's own shaders for
+other frames their scRGB variant; its `headroom` is `2^(headroom × weight)`.
+
+**Headroom from the compositor.** `ColourDisplay::followSurface` binds
+`wp_color_manager_v1` on a queue of its own and hands it to Qt's, asks
+`get_surface_feedback` for the window's surface and
+`get_preferred_parametric`, and asks again on each `preferred_changed`; the
+description's events are read as an output's (`DescriptionReader`). The
+preferred description, once given, is what `display.headroom` and `wide`
+are, and a change is said on stderr. `PINHOLE_HEADROOM` still overrides.
+
+**`holdSdr`** is **API 6** (API 5 was taken by the kit): a plugin root's
+property; Live Photos sets it while its motion plays. **Full HDR**
+("Pełny HDR") is under a "Display" heading in the side panel, shown only
+when `display.hdr`, kept in `window.conf` (`display/fullHdr`).
+
+**Tested** in a nested Hyprland of its own (its config, its socket, its
+HOME; the host window disabled and a headless output created inside it, so
+nothing showed on Jacek's screen), whose output takes `cm = "hdr"`,
+`supports_hdr = 1`: `pinhole display` there says "bt2020 primaries,
+st2084_pq curve; 0.005 to 1000 nits, SDR white at 203; HDR, 2.30 stops".
+`PINHOLE_SELFTEST=stage:<dir>` (`selfteststage.cpp`) reads back the stage's
+swapchain image after rendering (`QRhi::readBackTexture`; Qt 6.12's
+`grabWindow()` returns an fp16 swapchain as 8-bit codes), RGBA16F:
+- the stage's swapchain scRGB, its window a child of the main one, placed
+  below;
+- the stage's first frame, where the main window has turned transparent,
+  against the SDR photo the main window drew there: 311,685 pixels, mean
+  0.22 of a code, worst 1;
+- the backdrop the theme's in linear light (0.00439, 0.00439, 0.00699);
+- the main window's alpha 0 over the photo and backdrop, its chrome opaque;
+- faded in, 2.9 % of a Display P3 photo's pixels beyond sRGB (below 0);
+- a Display P3 green (0, 255, 0) read back as (-0.2249, 1.0420, -0.0786);
+- zoomed 2.2× and panned, the stage's photo and the viewer's frame the same
+  rectangle at every one of 187 steps;
+- a plugin's `holdSdr`, and Live Photos' motion played: the stage at SDR
+  meanwhile, and back;
+- an HLG clip through the stage's `VideoView` at the headroom (2 stops,
+  4×): brightest 4.0; at 1×, the main window's frame to within a code;
+- closed, the main window draws the photo again before the stage goes.
+
+With no `PINHOLE_HEADROOM` the stage came by itself on that output (2.30
+stops, from the surface's preferred description), and the output switched
+to `cm = "srgb"` while the window ran (its config changed and reloaded), the
+window said at once: "the window's display now: … SDR white at 80; no HDR
+headroom". On that SDR output, forced, a `grim` of the output with the
+stage faded in and one with the stage held back (the main window's SDR
+photo) are the same to the bit.
+
+`WAYLAND_DEBUG=client` shows it: `wl_subsurface.set_desync`,
+`place_below(main surface)`, `create_parametric_creator`,
+`set_primaries_named(1)`, `set_tf_named(5)` (ext_linear),
+`set_image_description` on the stage's surface; `get_surface_feedback` and
+`get_preferred_parametric` on the main window's.
+
+Unit tests: the preferred description's events (203 of 1000: 2.30 EV; 80
+of 80: 0; no target: the maximum), `stageColourOf` against `toSrgb` (every
+code of each primary within a code, clipped; P3's green column), and the
+stage wanted only where the display shows more, or forced.
+
+**Performance.** On this panel the stage does not exist and the window is
+made as before; what runs is one more registry round trip and the
+preferred description's events, at start. Against main (51a9a8e),
+interleaved on this panel:
+- the first frame (`PINHOLE_SELFTEST=hidden`, the library copy, eight runs
+  a side after a warm-up): from start 426 → 441 ms (median), 446 → 444 ms
+  (mean);
+- `--bench` on the fake library, nine runs a side: the phases' sync50
+  0.201 → 0.169 ms, sync99 0.494 → 0.535 ms, all of the difference in two
+  pinch phases that land at 0.45 or 0.8 ms run to run in both builds; the
+  other twelve within 0.01 ms, and every p99 interval within 1.1 ms;
+- `PINHOLE_SELFTEST=viewer`, three runs a side, all passing: HEIC original
+  280 → 279 ms, Live Photo original 515 → 483, video first frame 203 →
+  192, loop seek 125 → 124.
+
+**In the app:** nothing changes on this panel. Forced on, the viewer's
+photo is the same; on a display with headroom and fp16 swapchains, P3
+photos show their full gamut and HDR video goes above SDR white.
 
 ### H4: gain maps in the stage
 
@@ -785,7 +853,7 @@ their full gamut.
 
   Rotation follows the base (libheif applies it to auxiliary images, to
   be checked; JPEG MPF maps follow the primary's Exif orientation).
-- `image://stage/` returns the base and a second texture `R8` (a
+- `StagePhoto` decodes the base and a second texture `R8` (a
   `QImage::Format_Grayscale8`, outside the atlas). The shader gets the
   kind, `Hi`, the display headroom, Full HDR, `holdSdr` and the fade, and
   applies the maths above. Bilinear sampling of the smaller map is the
@@ -857,14 +925,17 @@ iPhone HDR photos glow as on the phone.
    right for what the compositor says.
 3. **honeykrisp plus Hyprland may not offer an fp16 scRGB surface.**
    *Answer:* H3's first test. Without it there is no stage, and H4 waits.
-   That is no loss on this panel today.
+   That is no loss on this panel today. *Found:* on this panel's Hyprland
+   it does not (honeykrisp's WSI offers no fp16 format there, though the
+   compositor advertises `AB4H`); in a nested Hyprland on a headless output
+   it does, and H3 and H4 are tested there.
 4. **Private Qt API for the subsurface's stacking.** *Answer:* one
    function, a check against the Qt version built with, and no stage
    otherwise. Upstream Qt should honour `lower()` for subsurfaces, and a
    patch is worth sending.
 5. **Two windows out of step.** *Answer:* the stage only shows while the
-   viewer is settled. The subsurface is synchronised, and the hand-over
-   waits for the stage's first frame. Zoom and pan drive both from the
+   viewer is settled, and the hand-over waits for the stage's frames with
+   the photo (the subsurface desynchronised: H3). Zoom and pan drive both from the
    same properties. A plugin layer pinned to the photo can lag one frame
    while panning, 8 ms at 120 Hz.
 6. **Qt Multimedia's HDR.** `hdrInfo()` is a constant on Linux; the

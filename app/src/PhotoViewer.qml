@@ -30,6 +30,30 @@ Item {
     // A menu of its bar is open, and has the arrows, ⏎ and Esc.
     readonly property bool menuOpen: actionBar.menuOpen
 
+    // The stage shows the photo (Stage.qml, docs/hdr.md H3): here its
+    // backdrop, image and video are not drawn, and the window is
+    // transparent where they were; the rest (the bar, the plugins' layers)
+    // as ever.
+    property bool staged: false
+    // For the stage: where the photo is, its video, and the sharpest image
+    // shown now, { source, size, mipmap }, or null.
+    readonly property Item frameItem: frame
+    readonly property VideoView videoView: videoOutput
+    readonly property bool videoShown: viewer.video && videoPlayer.playbackState !== MediaPlayer.StoppedState
+    readonly property var sharpest: {
+        const of = (image, mipmap) => ({ source: image.source, size: Qt.size(image.implicitWidth, image.implicitHeight),
+                                         mipmap: mipmap })
+        if (detailImage.status === Image.Ready && detailImage.opacity >= 1)
+            return of(detailImage, true)
+        if (originalImage.status === Image.Ready && originalImage.opacity >= 1)
+            return of(originalImage, false)
+        if (mediumImage.status === Image.Ready)
+            return of(mediumImage, false)
+        if (thumbnailImage.status === Image.Ready)
+            return of(thumbnailImage, false)
+        return null
+    }
+
     visible: shown
     // 0: the photo's cell in the grid. 1: fitted to the window.
     property real progress: 0
@@ -132,6 +156,7 @@ Item {
         anchors.fill: parent
         color: theme.darkerBackground
         opacity: root.progress * root.chrome
+        visible: !root.staged
     }
 
     // The photos beside the shown one, two each side, where the row puts
@@ -182,11 +207,13 @@ Item {
 
         // Sharpest last: each one covers the one below once it has loaded.
         Image {
+            id: thumbnailImage
             anchors.fill: parent
             source: viewer.thumbnail
             fillMode: Image.PreserveAspectCrop
             asynchronous: false
             smooth: true
+            visible: !root.staged
         }
         // The medium rendition: the same image the photo had beside this
         // one, so stepping onto it shows it sharp at once.
@@ -197,6 +224,7 @@ Item {
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+            visible: !root.staged
         }
         Image {
             id: originalImage
@@ -206,6 +234,7 @@ Item {
             sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 120 } }
+            visible: !root.staged
         }
         // Zoomed in: the original at its full size, decoded once it is
         // wanted, so detail holds up close.
@@ -217,6 +246,7 @@ Item {
             mipmap: true
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 120 } }
+            visible: !root.staged
             readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
             onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
@@ -232,7 +262,7 @@ Item {
         VideoView {
             id: videoOutput
             anchors.fill: parent
-            visible: viewer.video && videoPlayer.playbackState !== MediaPlayer.StoppedState
+            visible: root.videoShown && !root.staged
             fillMode: VideoView.PreserveAspectCrop
         }
 

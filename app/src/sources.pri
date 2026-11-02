@@ -2,7 +2,7 @@
 # (tests/pinhole_tests.pro) build the same files from this one list.
 
 QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent gui-private qml-private quick-private multimedia-private \
-    multimediaquick-private
+    multimediaquick-private waylandclient-private
 CONFIG += c++20
 INCLUDEPATH += $$PWD
 
@@ -30,20 +30,24 @@ BUILD_VERSION_DATA = "$${LITERAL_HASH}pragma once"
 BUILD_VERSION_DATA += "$${LITERAL_HASH}define PINHOLE_BUILD_COMMIT \"$$PINHOLE_BUILD_COMMIT\""
 write_file($$GENERATED/buildversion.h, BUILD_VERSION_DATA)
 
-# The HDR video shader (videoview.h), baked by Qt's qsb for every graphics
-# API the window may use, the vertex shader batchable as the scene graph
-# asks; into a resource file of its own.
+# The HDR video shader (videoview.h) and the stage's photo's (stage.h),
+# baked by Qt's qsb for every graphics API the window may use, the vertex
+# shaders batchable as the scene graph asks; into a resource file of their
+# own.
 QSB = $$[QT_HOST_BINS]/qsb
 QSB_TARGETS = --glsl \'100 es,120,150\' --hlsl 50 --msl 12
 SHADERS_OUT = $$GENERATED/shaders
 !system(mkdir -p $$SHADERS_OUT && \
     $$QSB -b $$QSB_TARGETS -o $$SHADERS_OUT/hdrvideo.vert.qsb $$PWD/shaders/hdrvideo.vert && \
-    $$QSB $$QSB_TARGETS -o $$SHADERS_OUT/hdrvideo.frag.qsb $$PWD/shaders/hdrvideo.frag): \
+    $$QSB $$QSB_TARGETS -o $$SHADERS_OUT/hdrvideo.frag.qsb $$PWD/shaders/hdrvideo.frag && \
+    $$QSB -b $$QSB_TARGETS -o $$SHADERS_OUT/photo.vert.qsb $$PWD/shaders/photo.vert && \
+    $$QSB $$QSB_TARGETS -o $$SHADERS_OUT/photo.frag.qsb $$PWD/shaders/photo.frag): \
     error("qsb could not bake the shaders: Qt Shader Tools (qt6-shadertools) is needed to build")
 write_file($$SHADERS_OUT/shaders.qrc, $$list("<RCC><qresource prefix=\"/shaders\">" \
-    "<file>hdrvideo.vert.qsb</file>" "<file>hdrvideo.frag.qsb</file>" "</qresource></RCC>"))
+    "<file>hdrvideo.vert.qsb</file>" "<file>hdrvideo.frag.qsb</file>" \
+    "<file>photo.vert.qsb</file>" "<file>photo.frag.qsb</file>" "</qresource></RCC>"))
 RESOURCES += $$SHADERS_OUT/shaders.qrc
-OTHER_FILES += $$PWD/shaders/hdrvideo.vert $$PWD/shaders/hdrvideo.frag
+OTHER_FILES += $$PWD/shaders/hdrvideo.vert $$PWD/shaders/hdrvideo.frag $$PWD/shaders/photo.vert $$PWD/shaders/photo.frag
 SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
     $$GENERATED/idle-inhibit-unstable-v1-protocol.c \
     $$GENERATED/color-management-v1-protocol.c
@@ -73,6 +77,7 @@ HEADERS += \
     $$PWD/display.h \
     $$PWD/sdrvideo.h \
     $$PWD/videoview.h \
+    $$PWD/stage.h \
     $$PWD/viewer.h \
     $$PWD/viewermotion.h \
     $$PWD/outgoing.h \
@@ -115,6 +120,7 @@ SOURCES += \
     $$PWD/display.cpp \
     $$PWD/sdrvideo.cpp \
     $$PWD/videoview.cpp \
+    $$PWD/stage.cpp \
     $$PWD/viewer.cpp \
     $$PWD/viewermotion.cpp \
     $$PWD/outgoing.cpp \
@@ -140,6 +146,7 @@ SOURCES += \
     $$PWD/selftestcolour.cpp \
     $$PWD/selftestguard.cpp \
     $$PWD/selftesthdr.cpp \
+    $$PWD/selfteststage.cpp \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \

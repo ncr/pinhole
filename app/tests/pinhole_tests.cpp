@@ -41,6 +41,8 @@
 
 #include "colour.h"
 #include "display.h"
+#include "stage.h"
+#include "color-management-v1-client-protocol.h"
 #include "gainmap.h"
 #include "sdrvideo.h"
 #include "encoder.h"
@@ -2318,6 +2320,93 @@ Item {
         QVERIFY(!display.hdr());
         qputenv("PINHOLE_HEADROOM", "2");
         QVERIFY(display.hdr() && display.headroom() == 2);
+        qunsetenv("PINHOLE_HEADROOM");
+    }
+
+    // What the compositor would have the window be (docs/hdr.md, H3): the
+    // preferred description's events read as they come, as an output's.
+    void aSurfacesPreferredDescriptionGivesTheHeadroom() {
+        const auto *info = static_cast<const wp_image_description_info_v1_listener *>(descriptionInfoListener());
+        // PQ, SDR white at 203 nits, shown on a 1000-nit target.
+        DescriptionReader hdr;
+        info->tf_named(&hdr, nullptr, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
+        info->primaries_named(&hdr, nullptr, WP_COLOR_MANAGER_V1_PRIMARIES_BT2020);
+        info->luminances(&hdr, nullptr, 50, 10000, 203);
+        info->target_luminance(&hdr, nullptr, 50, 1000);
+        info->done(&hdr, nullptr);
+        QVERIFY(hdr.done && hdr.colour.described);
+        QVERIFY(std::abs(hdr.colour.headroom() - 2.30) < 0.01);
+        QVERIFY(hdr.colour.wide());
+        // This panel's: 80 of 80, no headroom.
+        DescriptionReader sdr;
+        info->luminances(&sdr, nullptr, 2000, 80, 80);
+        info->target_luminance(&sdr, nullptr, 2000, 80);
+        info->done(&sdr, nullptr);
+        QCOMPARE(sdr.colour.headroom(), 0.0);
+        // No target: the maximum, over SDR white.
+        DescriptionReader untargeted;
+        info->luminances(&untargeted, nullptr, 50, 1000, 203);
+        info->done(&untargeted, nullptr);
+        QVERIFY(std::abs(untargeted.colour.headroom() - std::log2(1000.0 / 203)) < 1e-9);
+    }
+
+    // The stage's colours (stage.h): a photo's codes by the same tables and
+    // matrix toSrgb uses, its gamut kept beyond sRGB; clipped, toSrgb's.
+    void theStageHasAPhotosOwnColoursAndClippedTheyAreTheWindows() {
+        StageColour colour;
+        QVERIFY(stageColourOf(testData("display-p3.icc"), colour));
+        // P3's green in linear sRGB: the matrix's second column.
+        QVERIFY(std::abs(colour.matrix[1] + 0.2249) < 1e-3 && std::abs(colour.matrix[4] - 1.0421) < 1e-3
+                && std::abs(colour.matrix[7] + 0.0786) < 1e-3);
+        // Every code of a ramp of each primary and grey, clipped and
+        // encoded, is toSrgb's within a code.
+        QImage codes(256, 4, QImage::Format_RGBX8888);
+        for (int v = 0; v < 256; ++v) {
+            codes.setPixel(v, 0, qRgb(v, 0, 0));
+            codes.setPixel(v, 1, qRgb(0, v, 0));
+            codes.setPixel(v, 2, qRgb(0, 0, v));
+            codes.setPixel(v, 3, qRgb(v, v / 2, 255 - v));
+        }
+        QImage converted = codes.copy();
+        toSrgb(converted, testData("display-p3.icc"));
+        auto encode = [](double l) {
+            l = std::clamp(l, 0.0, 1.0);
+            return 255 * (l <= 0.0031308 ? 12.92 * l : 1.055 * std::pow(l, 1 / 2.4) - 0.055);
+        };
+        int worst = 0;
+        bool beyond = false;
+        for (int y = 0; y < 4; ++y)
+            for (int v = 0; v < 256; ++v) {
+                const QRgb in = codes.pixel(v, y), out = converted.pixel(v, y);
+                const double light[3] = {colour.linear[0][qRed(in)], colour.linear[1][qGreen(in)], colour.linear[2][qBlue(in)]};
+                const int want[3] = {qRed(out), qGreen(out), qBlue(out)};
+                for (int k = 0; k < 3; ++k) {
+                    const double l = colour.matrix[k * 3] * light[0] + colour.matrix[k * 3 + 1] * light[1] + colour.matrix[k * 3 + 2] * light[2];
+                    beyond = beyond || l < -1e-3;
+                    worst = std::max(worst, std::abs(int(std::lround(encode(l))) - want[k]));
+                }
+            }
+        QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
+        QVERIFY(beyond);
+        // None, and sRGB's: sRGB's curve, nothing between.
+        QVERIFY(stageColourOf(QByteArray(), colour));
+        QCOMPARE(colour.matrix[0], 1.f);
+        QCOMPARE(colour.matrix[1], 0.f);
+        QVERIFY(std::abs(colour.linear[1][128] - 0.21586) < 1e-4);
+    }
+
+    // The stage only where it is wanted: never on this panel's sRGB, unless
+    // forced.
+    void theStageIsMadeOnlyWhereTheDisplayShowsMore() {
+        ColourDisplay display;
+        QVERIFY(!Stage(&display).wanted());
+        qputenv("PINHOLE_STAGE", "force");
+        QVERIFY(Stage(&display).wanted());
+        qputenv("PINHOLE_STAGE", "off");
+        qputenv("PINHOLE_HEADROOM", "2");
+        QVERIFY(!Stage(&display).wanted());
+        qunsetenv("PINHOLE_STAGE");
+        QVERIFY(Stage(&display).wanted());
         qunsetenv("PINHOLE_HEADROOM");
     }
 

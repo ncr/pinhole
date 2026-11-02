@@ -354,7 +354,8 @@ file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
 `ScrollGrid`, `ScrollArea`, `PinchZoom`, `Panel`, `Card`, `Choices`, a
 `ShellButton`'s `complain`, `pinhole.query`, `pinhole.picturePath` and
 `VideoView`; and
-`Scroller` scrolling as the grid does, across too.
+`Scroller` scrolling as the grid does, across too. API 6 brought the
+root's `holdSdr` ([hdr.md](hdr.md), H3).
 
 `Main.qml` beside it:
 
@@ -570,6 +571,13 @@ its settings, is there as the window first shows. It sets:
   all do) and Later (none does, and the card comes back next launch). A
   plugin turned on in the side panel shows its own once the panel
   closes.
+- `holdSdr` (API 6): while true, a photo shown full window is kept at SDR.
+  On a display that shows more (a wider gamut, HDR), the viewer's photo is
+  drawn beneath the window by Pinhole's stage ([hdr.md](hdr.md), H3);
+  while any plugin holds it, what lies beyond sRGB and SDR white fades out
+  in 400 ms, and back in once none does. For something SDR drawn over the
+  photo, so that it starts and ends on the same picture: Live Photos holds
+  it while its motion plays. Elsewhere it does nothing.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,

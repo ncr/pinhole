@@ -498,3 +498,21 @@ void toSrgb(QImage &image) {
     if (space.isValid() && space != QColorSpace(QColorSpace::SRgb))
         toSrgb(image, space.iccProfile());
 }
+
+bool stageColourOf(const QByteArray &icc, StageColour &colour) {
+    const Conversion *c = icc.isEmpty() ? nullptr : &conversionFor(icc);
+    if (c && c->kind == Conversion::Kind::Matrix) {
+        std::copy(&c->linear[0][0], &c->linear[0][0] + 3 * 256, &colour.linear[0][0]);
+        std::copy(c->matrix, c->matrix + 9, colour.matrix);
+        return true;
+    }
+    // sRGB's: its curve, nothing between.
+    for (int v = 0; v < 256; ++v) {
+        const double e = v / 255.0;
+        const float l = float(e <= 0.04045 ? e / 12.92 : std::pow((e + 0.055) / 1.055, 2.4));
+        colour.linear[0][v] = colour.linear[1][v] = colour.linear[2][v] = l;
+    }
+    for (int k = 0; k < 9; ++k)
+        colour.matrix[k] = k % 4 == 0 ? 1.f : 0.f;
+    return !c || c->kind == Conversion::Kind::None;
+}

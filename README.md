@@ -255,7 +255,10 @@ profile a photo carries, made the screen's sRGB as it is decoded
 iPhone's HDR and Dolby Vision videos and their covers, and photos in PQ
 or HLG, are tone mapped rather than flat or broken, and Info (I) says how
 many stops an HDR photo's highlights reach; `pinhole display` prints what
-the compositor says each screen can show. ← and → step through, Esc or
+the compositor says each screen can show. On a screen that shows more than
+sRGB, a photo full window shows its whole gamut and HDR video goes above
+white, once the photo is still (Full HDR in the side panel, on such a
+screen only); on an sRGB screen nothing of that is made. ← and → step through, Esc or
 Space closes, as does dragging the photo up or down (two fingers on a
 touchpad, the left button with a mouse), Space plays and pauses a video, L
 plays a Live Photo's motion (the Live Photos plugin, on unless turned off

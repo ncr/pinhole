@@ -58,7 +58,7 @@ QImage decodeHdrHeif(heif_image_handle *handle, const heif_color_profile_nclx &n
 // own size, handed over as they are: no copy of a 4032x3024 photo first.
 // Made sRGB once scaled, so a 12 MP photo shown at 3456 px converts 3456
 // px.
-QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled) {
+QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled, QByteArray *profile) {
     heif_context *context = heif_context_alloc();
     heif_decoding_options *options = heif_decoding_options_alloc();
     // Asked between tiles (an iPhone's HEIC is a grid of them).
@@ -109,7 +109,10 @@ QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *c
                 [](void *image) { heif_image_release(static_cast<heif_image *>(image)); }, image);
             image = nullptr;
         }
-        toSrgb(out, profileOf(handle));
+        if (profile)
+            *profile = profileOf(handle);
+        else
+            toSrgb(out, profileOf(handle));
     }
     if (image)
         heif_image_release(image);
@@ -149,10 +152,12 @@ private:
 
 } // namespace
 
-QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled) {
+QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled, QByteArray *profile) {
     QImage image;
+    if (profile)
+        profile->clear();
     if (heifByName(path))
-        image = decodeHeif(path, maxSize, cancelled);
+        image = decodeHeif(path, maxSize, cancelled, profile);
     if (cancelled && *cancelled)
         return {};
     // Not HEIF after all, whatever its name says (iCloud calls a loop's
@@ -176,11 +181,19 @@ QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *
         image = reader.read();
         // In the profile it carried (QImageReader keeps it, as JPEG and
         // PNG have it); a CMYK JPEG, as Qt reads one, by Qt.
-        if (image.format() == QImage::Format_CMYK8888)
+        if (image.format() == QImage::Format_CMYK8888) {
             image = image.colorSpace().isValid() ? image.convertedToColorSpace(QColorSpace(QColorSpace::SRgb), QImage::Format_RGB32)
                                                  : image.convertToFormat(QImage::Format_RGB32);
-        else
+        } else if (profile) {
+            const QColorSpace space = image.colorSpace();
+            if (space.isValid() && space != QColorSpace(QColorSpace::SRgb))
+                *profile = space.iccProfile();
+            // One Qt made of its own and has no profile of: made sRGB here.
+            if (profile->isEmpty())
+                toSrgb(image);
+        } else {
             toSrgb(image);
+        }
     }
     if (!image.isNull() && maxSize.isValid() && (image.width() > maxSize.width() || image.height() > maxSize.height()))
         image = image.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);

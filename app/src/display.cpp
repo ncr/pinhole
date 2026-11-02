@@ -2,6 +2,8 @@
 
 #include <QGuiApplication>
 #include <QScreen>
+#include <QWindow>
+#include <qpa/qplatformwindow_p.h>
 
 #include <cmath>
 #include <cstdio>
@@ -60,12 +62,11 @@ struct Read {
     struct Output {
         wl_output *output = nullptr;
         uint32_t global = 0;
-        OutputColour colour;
+        DescriptionReader reader;
         wp_color_management_output_v1 *cm = nullptr;
         wp_image_description_v1 *description = nullptr;
         wp_image_description_info_v1 *info = nullptr;
         bool ready = false;
-        bool done = false;
     };
     std::vector<std::unique_ptr<Output>> outputs;
 };
@@ -95,7 +96,7 @@ const wl_output_listener kOutput = {
     [](void *, wl_output *, uint32_t, int32_t, int32_t, int32_t) {},
     [](void *, wl_output *) {},
     [](void *, wl_output *, int32_t) {},
-    [](void *data, wl_output *, const char *name) { static_cast<Read::Output *>(data)->colour.name = QString::fromUtf8(name); },
+    [](void *data, wl_output *, const char *name) { static_cast<Read::Output *>(data)->reader.colour.name = QString::fromUtf8(name); },
     [](void *, wl_output *, const char *) {},
 };
 
@@ -114,7 +115,7 @@ const wp_color_management_output_v1_listener kCmOutput = {
 const wp_image_description_v1_listener kDescription = {
     // failed
     [](void *data, wp_image_description_v1 *, uint32_t, const char *msg) {
-        static_cast<Read::Output *>(data)->colour.failed = QString::fromUtf8(msg);
+        static_cast<Read::Output *>(data)->reader.colour.failed = QString::fromUtf8(msg);
     },
     // ready
     [](void *data, wp_image_description_v1 *, uint32_t) { static_cast<Read::Output *>(data)->ready = true; },
@@ -122,14 +123,14 @@ const wp_image_description_v1_listener kDescription = {
     [](void *data, wp_image_description_v1 *, uint32_t, uint32_t) { static_cast<Read::Output *>(data)->ready = true; },
 };
 
-OutputColour &colourOf(void *data) { return static_cast<Read::Output *>(data)->colour; }
+OutputColour &colourOf(void *data) { return static_cast<DescriptionReader *>(data)->colour; }
 
 const wp_image_description_info_v1_listener kInfo = {
     // done
     [](void *data, wp_image_description_info_v1 *) {
-        auto *o = static_cast<Read::Output *>(data);
-        o->done = true;
-        o->colour.described = true;
+        auto *reader = static_cast<DescriptionReader *>(data);
+        reader->done = true;
+        reader->colour.described = true;
     },
     // icc_file: not read, closed.
     [](void *, wp_image_description_info_v1 *, int32_t fd, uint32_t) { close(fd); },
@@ -174,7 +175,186 @@ const wp_image_description_info_v1_listener kInfo = {
     [](void *, wp_image_description_info_v1 *, uint32_t) {},
 };
 
+// The window's preferred description being read: its information's events
+// as an output's, and once done, said to the display.
+struct Preferred : DescriptionReader {
+    ColourDisplay::Feedback *feedback = nullptr;
+};
+
+void preferredDone(void *data, wp_image_description_info_v1 *);
+
+const wp_image_description_info_v1_listener kPreferredInfo = [] {
+    wp_image_description_info_v1_listener listener = kInfo;
+    listener.done = preferredDone;
+    return listener;
+}();
+
 } // namespace
+
+const void *descriptionInfoListener() {
+    return &kInfo;
+}
+
+// What the compositor would have the window's surface be
+// (wp_color_management_surface_feedback_v1), on Qt's own event queue, so
+// that its events come on the window's thread as they happen.
+struct ColourDisplay::Feedback {
+    ColourDisplay *owner = nullptr;
+    wl_display *display = nullptr;
+    wp_color_manager_v1 *manager = nullptr;
+    bool parametric = false;
+    bool bound = false;
+    wl_surface *surface = nullptr;
+    wp_color_management_surface_feedback_v1 *feedback = nullptr;
+    // The one being read now; asked again once it is, if it changed
+    // meanwhile.
+    wp_image_description_v1 *description = nullptr;
+    wp_image_description_info_v1 *info = nullptr;
+    Preferred reading;
+    bool again = false;
+
+    ~Feedback() {
+        detach();
+        if (manager)
+            wp_color_manager_v1_destroy(manager);
+    }
+    void bind();
+    void attach(wl_surface *s);
+    void detach();
+    void ask();
+    void forget();
+};
+
+namespace {
+
+const wp_color_manager_v1_listener kFeedbackManager = {
+    [](void *, wp_color_manager_v1 *, uint32_t) {},
+    [](void *data, wp_color_manager_v1 *, uint32_t feature) {
+        if (feature == WP_COLOR_MANAGER_V1_FEATURE_PARAMETRIC)
+            static_cast<ColourDisplay::Feedback *>(data)->parametric = true;
+    },
+    [](void *, wp_color_manager_v1 *, uint32_t) {},
+    [](void *, wp_color_manager_v1 *, uint32_t) {},
+    [](void *, wp_color_manager_v1 *) {},
+};
+
+void onFeedbackGlobal(void *data, wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
+    auto *f = static_cast<ColourDisplay::Feedback *>(data);
+    if (std::strcmp(interface, wp_color_manager_v1_interface.name) != 0 || f->manager)
+        return;
+    f->manager = static_cast<wp_color_manager_v1 *>(wl_registry_bind(
+        registry, name, &wp_color_manager_v1_interface, std::min<uint32_t>(version, uint32_t(wp_color_manager_v1_interface.version))));
+    wp_color_manager_v1_add_listener(f->manager, &kFeedbackManager, f);
+}
+
+const wl_registry_listener kFeedbackRegistry = {onFeedbackGlobal, onGlobalRemove};
+
+const wp_color_management_surface_feedback_v1_listener kSurfaceFeedback = {
+    // preferred_changed
+    [](void *data, wp_color_management_surface_feedback_v1 *, uint32_t) { static_cast<ColourDisplay::Feedback *>(data)->ask(); },
+    // preferred_changed2
+    [](void *data, wp_color_management_surface_feedback_v1 *, uint32_t, uint32_t) {
+        static_cast<ColourDisplay::Feedback *>(data)->ask();
+    },
+};
+
+void preferredReady(void *data) {
+    auto *f = static_cast<ColourDisplay::Feedback *>(data);
+    f->info = wp_image_description_v1_get_information(f->description);
+    wp_image_description_info_v1_add_listener(f->info, &kPreferredInfo, static_cast<DescriptionReader *>(&f->reading));
+}
+
+const wp_image_description_v1_listener kPreferredDescription = {
+    // failed: none for now
+    [](void *data, wp_image_description_v1 *, uint32_t, const char *) { static_cast<ColourDisplay::Feedback *>(data)->forget(); },
+    // ready, ready2
+    [](void *data, wp_image_description_v1 *, uint32_t) { preferredReady(data); },
+    [](void *data, wp_image_description_v1 *, uint32_t, uint32_t) { preferredReady(data); },
+};
+
+void preferredDone(void *data, wp_image_description_info_v1 *) {
+    auto *reading = static_cast<Preferred *>(static_cast<DescriptionReader *>(data));
+    reading->done = true;
+    reading->colour.described = true;
+    ColourDisplay::Feedback *f = reading->feedback;
+    const OutputColour colour = reading->colour;
+    // The information is gone with its done; the description is let go.
+    wp_image_description_info_v1_destroy(f->info);
+    f->info = nullptr;
+    f->forget();
+    f->owner->preferredRead(colour);
+    if (f->again)
+        f->ask();
+}
+
+} // namespace
+
+void ColourDisplay::Feedback::bind() {
+    bound = true;
+    // Bound on a queue of its own, then handed to Qt's: its events come
+    // with the window's from then on.
+    wl_event_queue *queue = wl_display_create_queue(display);
+    auto *wrapper = static_cast<wl_display *>(wl_proxy_create_wrapper(display));
+    wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(wrapper), queue);
+    wl_registry *registry = wl_display_get_registry(wrapper);
+    wl_registry_add_listener(registry, &kFeedbackRegistry, this);
+    wl_display_roundtrip_queue(display, queue);
+    // What it supports.
+    if (manager) {
+        wl_display_roundtrip_queue(display, queue);
+        wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(manager), nullptr);
+    }
+    wl_registry_destroy(registry);
+    wl_proxy_wrapper_destroy(wrapper);
+    wl_event_queue_destroy(queue);
+}
+
+void ColourDisplay::Feedback::attach(wl_surface *s) {
+    detach();
+    if (!s || !display)
+        return;
+    if (!bound)
+        bind();
+    if (!manager || !parametric)
+        return;
+    surface = s;
+    feedback = wp_color_manager_v1_get_surface_feedback(manager, surface);
+    wp_color_management_surface_feedback_v1_add_listener(feedback, &kSurfaceFeedback, this);
+    ask();
+}
+
+void ColourDisplay::Feedback::forget() {
+    if (info)
+        wp_image_description_info_v1_destroy(info);
+    if (description)
+        wp_image_description_v1_destroy(description);
+    info = nullptr;
+    description = nullptr;
+}
+
+void ColourDisplay::Feedback::detach() {
+    forget();
+    if (feedback)
+        wp_color_management_surface_feedback_v1_destroy(feedback);
+    feedback = nullptr;
+    surface = nullptr;
+    again = false;
+}
+
+void ColourDisplay::Feedback::ask() {
+    if (!feedback)
+        return;
+    if (description) {
+        again = true;
+        return;
+    }
+    again = false;
+    reading = Preferred();
+    reading.feedback = this;
+    description = wp_color_management_surface_feedback_v1_get_preferred_parametric(feedback);
+    wp_image_description_v1_add_listener(description, &kPreferredDescription, this);
+    wl_display_flush(display);
+}
 
 double OutputColour::headroom() const {
     if (referenceLum <= 0)
@@ -267,20 +447,20 @@ QList<OutputColour> readOutputColours(wl_display *display, QString *why) {
             if (!o->ready)
                 continue;
             o->info = wp_image_description_v1_get_information(o->description);
-            wp_image_description_info_v1_add_listener(o->info, &kInfo, o.get());
+            wp_image_description_info_v1_add_listener(o->info, &kInfo, &o->reader);
         }
         // Each until its done.
         for (int i = 0; i < 4; ++i) {
             bool all = true;
             for (auto &o : read.outputs)
-                all = all && (!o->info || o->done);
+                all = all && (!o->info || o->reader.done);
             if (all)
                 break;
             wl_display_roundtrip_queue(display, queue);
         }
     }
     for (auto &o : read.outputs) {
-        result << o->colour;
+        result << o->reader.colour;
         // The info is gone with its done (a destructor event).
         if (o->info)
             wp_image_description_info_v1_destroy(o->info);
@@ -319,6 +499,38 @@ void ColourDisplay::refresh() {
     emit changed();
 }
 
+ColourDisplay::~ColourDisplay() = default;
+
+void ColourDisplay::followSurface(QWindow *window) {
+    auto *wayland = qGuiApp ? qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>() : nullptr;
+    auto *native = window ? window->nativeInterface<QNativeInterface::Private::QWaylandWindow>() : nullptr;
+    if (!wayland || !native)
+        return;
+    m_feedback = std::make_unique<Feedback>();
+    m_feedback->owner = this;
+    m_feedback->display = wayland->display();
+    connect(native, &QNativeInterface::Private::QWaylandWindow::surfaceCreated, this,
+            [this, native] { m_feedback->attach(native->surface()); });
+    connect(native, &QNativeInterface::Private::QWaylandWindow::surfaceDestroyed, this, [this] { m_feedback->detach(); });
+    m_feedback->attach(native->surface());
+}
+
+const OutputColour *ColourDisplay::preferred() const {
+    return m_preferred.described ? &m_preferred : nullptr;
+}
+
+void ColourDisplay::preferredRead(const OutputColour &colour) {
+    const double before = headroom();
+    const bool wideBefore = wide();
+    m_preferred = colour;
+    ++m_preferredCount;
+    // Said when it is not what was known before (the outputs as the
+    // window started, or the last one): the display changed under it.
+    if (std::abs(headroom() - before) > 0.01 || wide() != wideBefore)
+        std::fprintf(stderr, "pinhole: the window's display now: %s\n", qPrintable(colour.describe()));
+    emit changed();
+}
+
 void ColourDisplay::setScreen(QScreen *screen) {
     if (screen == m_screen)
         return;
@@ -339,11 +551,15 @@ double ColourDisplay::headroom() const {
     const double forced = qEnvironmentVariable("PINHOLE_HEADROOM").toDouble(&given);
     if (given)
         return std::max(forced, 0.0);
+    if (const OutputColour *p = preferred())
+        return p->headroom();
     const OutputColour *o = current();
     return o && o->described ? o->headroom() : 0;
 }
 
 bool ColourDisplay::wide() const {
+    if (const OutputColour *p = preferred())
+        return p->wide();
     const OutputColour *o = current();
     return o && o->described && o->wide();
 }

@@ -537,7 +537,7 @@ public:
     // (image://file, a photo's thumbPath; docs/hdr.md). 5: the kit
     // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
     // Choices), pinhole.query and pinhole.picturePath.
-    static constexpr int api = 5;
+    static constexpr int api = 6;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

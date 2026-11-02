@@ -44,4 +44,9 @@ Item {
     // `tourReady`, and again from the side panel.
     property var tour: []
     property bool tourReady: true
+    // While true, a photo shown full window is kept at SDR: on a display
+    // that shows more (wide gamut, HDR), what is beyond fades out, and back
+    // in once no plugin asks. For something SDR drawn over the photo, as
+    // Live Photos' motion is (API 6).
+    property bool holdSdr: false
 }

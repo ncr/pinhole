@@ -47,6 +47,10 @@ PinholePlugin {
 
     // The layer over the Live Photo shown now, while it is (LiveLayer.qml).
     property var liveLayer: null
+    // The motion is SDR, drawn over the photo: on a display that shows the
+    // photo brighter or more colourful (docs/hdr.md), it is kept at SDR
+    // meanwhile, so the motion starts and ends on the same picture.
+    holdSdr: liveLayer !== null && liveLayer.playing
     // One player for the motion, as the viewer had: made the first time a
     // motion plays (Qt Multimedia is read then, not as Pinhole starts),
     // and lent to the layer of the photo shown, inside it.

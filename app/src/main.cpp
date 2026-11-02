@@ -42,6 +42,7 @@
 #include "selftest.h"
 #include "serviceclient.h"
 #include "sources.h"
+#include "stage.h"
 #include "storage.h"
 #include "updater.h"
 #include "viewer.h"
@@ -218,6 +219,7 @@ int main(int argc, char *argv[]) {
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     qmlRegisterType<SdrVideo>("Pinhole", 1, 0, "SdrVideo");
     qmlRegisterType<VideoView>("Pinhole", 1, 0, "VideoView");
+    qmlRegisterType<StagePhoto>("Pinhole", 1, 0, "StagePhoto");
     // What a plugin's QML imports (docs/plugins.md).
     Plugins::registerTypes();
     FrameStats stats;
@@ -251,6 +253,10 @@ int main(int argc, char *argv[]) {
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
     Timeline timeline;
+    // Wide gamut and HDR in the viewer (stage.h): decided now, from what
+    // the display says, as the window is made with an alpha channel for
+    // it. On a display of sRGB alone, none: the window as it always was.
+    Stage stage(plugins.display());
     // What was done to one source's photos is not undone on another's.
     QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
@@ -276,6 +282,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("updater", &updater);
     engine.rootContext()->setContextProperty("plugins", &plugins);
     engine.rootContext()->setContextProperty("display", plugins.display());
+    engine.rootContext()->setContextProperty("stage", &stage);
     engine.rootContext()->setContextProperty("markChoices", &markChoices);
     engine.rootContext()->setContextProperty("timeline", &timeline);
     plugins.setEngine(&engine);
@@ -315,9 +322,13 @@ int main(int argc, char *argv[]) {
     viewer.setTimeline(&timeline);
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
-    // What the display the window is on can show.
+    // What the display the window is on can show, and what the compositor
+    // would have the window's surface be, as it changes.
     plugins.display()->setScreen(window->screen());
     QObject::connect(window, &QWindow::screenChanged, plugins.display(), &ColourDisplay::setScreen);
+    plugins.display()->followSurface(window);
+    // The stage's window, where there is one: a child of this one.
+    stage.make(&engine, window);
     grid->setTouchpadHold(&hold);
     // Plugins load now, with the library whole, before the first frame.
     plugins.libraryOpened();

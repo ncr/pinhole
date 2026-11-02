@@ -2143,7 +2143,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"},
         {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
-        {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}};
+        {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2194,6 +2194,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.query", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*query\\s*\\("))},
         {"pinhole.picturePath", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*picturePath\\b"))},
         {"VideoView", QRegularExpression(QStringLiteral("\\bVideoView\\s*\\{"))},
+        // Its root's, kept at SDR while true.
+        {"holdSdr", QRegularExpression(QStringLiteral("\\bholdSdr\\s*:"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));

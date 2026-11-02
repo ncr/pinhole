@@ -4,7 +4,8 @@
 // Y'CbCr to R'G'B' by its matrix; its light (HLG's inverse OETF and OOTF
 // at 1000 nits, PQ's EOTF); BT.2390's EETF on the largest channel, to SDR
 // white (203 nits) times the headroom; its primaries to sRGB's; clipped to
-// the headroom, and sRGB's curve (extended above 1).
+// the headroom, and sRGB's curve (extended above 1), or, in the stage's
+// scRGB, linear light as it is.
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -28,7 +29,8 @@ layout(std140, binding = 0) uniform buf {
     // PQ of the peak; PQ of the target over it; the knee; whether the
     // peak is above the target (else nits clipped at the target).
     vec4 knee;
-    // Opacity; the planes (2: Y' and CbCr, 3: Y', Cb, Cr).
+    // Opacity; the planes (2: Y' and CbCr, 3: Y', Cb, Cr); linear light
+    // (1, scRGB) or sRGB's curve (0).
     vec4 more;
 };
 
@@ -99,5 +101,8 @@ void main() {
     float most = max(light.r, max(light.g, light.b));
     light *= most > 1e-6 ? eetf(min(most, curve.y)) / most : 1.0 / kSdrWhite;
     vec3 rgb = clamp(vec3(dot(gamut0.xyz, light), dot(gamut1.xyz, light), dot(gamut2.xyz, light)), 0.0, curve.w);
-    fragColor = vec4(encodeSrgb(rgb.r), encodeSrgb(rgb.g), encodeSrgb(rgb.b), 1.0) * more.x;
+    if (more.z > 0.5)
+        fragColor = vec4(rgb, 1.0) * more.x;
+    else
+        fragColor = vec4(encodeSrgb(rgb.r), encodeSrgb(rgb.g), encodeSrgb(rgb.b), 1.0) * more.x;
 }

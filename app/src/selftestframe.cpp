@@ -112,11 +112,12 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
         // the screen is let go within seconds.
         *still = [=, &library] {
             // A photo with both, the frame on it alone: a wide one, which
-            // covers a wide window, its medium soft at that size.
-            const int index = findIndex(library, QStringLiteral(
+            // covers a wide window, its medium soft at that size. Its full
+            // size here, so that nothing waits on the network.
+            const QList<int> found = findHere(library, QStringLiteral("full"), QStringLiteral(
                 "NOT a.is_video AND EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'medium' "
-                "AND r.width > r.height) "
-                "AND EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'full')"));
+                "AND r.width > r.height)"), 1);
+            const int index = found.isEmpty() ? -1 : found[0];
             if (index >= 0) {
                 const QString id = QString::fromUtf8(library.at(index).id);
                 QMetaObject::invokeMethod(frame, "start", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
@@ -245,8 +246,9 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
         // A photo with no medium rendition (one in eight of a library)
         // shows sharp: its full size in the medium's place.
         *bare = [=, &library] {
-            const int index = findIndex(library, QStringLiteral("NOT a.is_video AND NOT EXISTS (SELECT 1 FROM renditions r "
-                                                                "WHERE r.asset_id = a.id AND r.kind = 'medium')"));
+            const QList<int> found = findHere(library, QStringLiteral("full"), QStringLiteral(
+                "NOT a.is_video AND NOT EXISTS (SELECT 1 FROM renditions r WHERE r.asset_id = a.id AND r.kind = 'medium')"), 1);
+            const int index = found.isEmpty() ? -1 : found[0];
             if (index < 0) {
                 std::printf("selftest: no photo without a medium in the library\n");
                 return (*fromViewer)();

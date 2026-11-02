@@ -65,6 +65,13 @@ class VideoView : public QQuickItem {
     Q_PROPERTY(qreal headroom READ headroom WRITE setHeadroom NOTIFY headroomChanged)
     // Frames drawn so far: new ones the window took, for a test to count.
     Q_PROPERTY(int framesDrawn READ framesDrawn NOTIFY framesDrawnChanged)
+    // Linear light out, for a window whose swapchain is scRGB (the stage,
+    // docs/hdr.md H3): an HDR frame by Pinhole's shader without sRGB's
+    // curve, any other by Qt's own shaders for such a swapchain.
+    Q_PROPERTY(bool linear READ linear WRITE setLinear NOTIFY linearChanged)
+    // Another view whose frames this one shows too, as they come: the
+    // stage's copy of the viewer's video, which plays to the viewer's.
+    Q_PROPERTY(VideoView *follows READ follows WRITE setFollows NOTIFY followsChanged)
 public:
     enum FillMode {
         Stretch = Qt::IgnoreAspectRatio,
@@ -88,6 +95,10 @@ public:
     qreal headroom() const { return m_headroom; }
     void setHeadroom(qreal headroom);
     int framesDrawn() const { return m_drawnShown; }
+    bool linear() const { return m_linear; }
+    void setLinear(bool linear);
+    VideoView *follows() const { return m_follows; }
+    void setFollows(VideoView *view);
 
 signals:
     void fillModeChanged();
@@ -96,6 +107,8 @@ signals:
     void hdrChanged();
     void headroomChanged();
     void framesDrawnChanged();
+    void linearChanged();
+    void followsChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
@@ -118,6 +131,9 @@ private:
     QRectF m_contentRect;
     bool m_hdr = false;
     qreal m_headroom = 1;
+    bool m_linear = false;
+    QPointer<VideoView> m_follows;
+    QMetaObject::Connection m_following;
     // The frame to draw next, and whether it is new; held while either
     // thread touches it.
     QMutex m_lock;

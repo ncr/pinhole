@@ -56,6 +56,17 @@ QList<int> findHere(const Library &library, const QString &kind, const QString &
 // never talks to Apple. On a library, --library a reflink copy of one
 // (with its cache, in the same XDG_DATA_HOME). What each needs besides is
 // said with it.
+//
+// A copy of an iCloud library is fetched for only by a service whose source
+// is that library's (its meta says whose): with no Apple session in the
+// scratch state there is none, and every fetch is turned down as another
+// source's (other_source), so nothing past the thumbnails ever comes. So
+// the scratch config gets a settings.json naming the copy's source
+// ({"sources": [{"kind": "icloud", "account": "<apple id>"}], "source":
+// ...}), and the copy lies anywhere but that source's own library path in
+// XDG_DATA_HOME: there, the window would take it for the shared service's
+// and start one that syncs. Given elsewhere, its service is a --given one,
+// which only reads it and serves what is in the cache.
 
 // A slot for a signal a self-test hears by name (a QML property's notify):
 // calls `f` at once, while it lives.
@@ -366,6 +377,27 @@ void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QString
 // draws under 55 frames a second of a 60 fps video, lags by over 50 ms, or
 // a seek does not play on.
 void runHdrPlaySelfTest(QQuickWindow *window, const QStringList &videos);
+
+// PINHOLE_SELFTEST=stage:<dir> (selfteststage.cpp): the stage (stage.h,
+// docs/hdr.md H3), with PINHOLE_STAGE=force or on a display that has it,
+// read back as Pinhole hands it to the compositor (grabWindow of the stage:
+// RGBA16F on an scRGB swapchain), frames in <dir> (.pfm, linear). A photo
+// opened (PINHOLE_SELFTEST_PHOTOS: a photo, a Live Photo and a video, by
+// ids; else the newest whose medium is here): the main window's SDR photo
+// grabbed as the stage has it decoded; at the hand-over, the stage's
+// pixels against those (fade 0), the backdrop the theme's in linear light,
+// the main window transparent where the stage shows and its chrome
+// opaque; once faded in, the photo's gamut beyond sRGB; a Display P3
+// green (PINHOLE_SELFTEST_P3, the profile) as P3's green in linear sRGB;
+// zoomed and panned, both windows' photo in the same place every step; a
+// plugin's holdSdr, and Live Photos' motion played, the stage at SDR
+// meanwhile; the viewer's video in the stage; an HLG clip
+// (PINHOLE_SELFTEST_VIDEOS) through VideoView in the stage, above SDR
+// white at the display's headroom and the main window's at 1; closed, the
+// main window drawing the photo before the stage goes. Exits 1 if any
+// check fails. In a compositor that draws frames: run it in a nested
+// Hyprland on a headless output (docs/hdr.md).
+void runStageSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
 
 // What a self-test drives.
 struct SelfTestContext {

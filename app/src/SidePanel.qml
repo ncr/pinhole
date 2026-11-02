@@ -942,6 +942,37 @@ Item {
                       .arg(storage.size(storage.minLimit)).arg(storage.size(storage.defaultLimit))
             }
 
+            // Only on a display that shows more than SDR white (stage.h).
+            Item { width: 1; height: Math.round(theme.fontSize * 1.5); visible: display.hdr }
+            Heading { text: qsTr("Display"); visible: display.hdr }
+            Item {
+                visible: display.hdr
+                x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
+                height: hdrSwitch.height
+                UiText {
+                    width: parent.width - hdrSwitch.width - theme.fontSize
+                    y: centredIn(parent.height)
+                    text: qsTr("Full HDR")
+                    color: theme.brightForeground
+                    elide: Text.ElideRight
+                }
+                Toggle {
+                    id: hdrSwitch
+                    objectName: "fullHdrSwitch"
+                    lit: root.focusedStop === hdrSwitch
+                    Component.onCompleted: root.addStop(hdrSwitch)
+                    Component.onDestruction: root.dropStop(hdrSwitch)
+                    anchors.right: parent.right
+                    checked: stage.fullHdr
+                    onToggled: stage.fullHdr = !stage.fullHdr
+                }
+            }
+            Note {
+                visible: display.hdr
+                text: qsTr("Photos and videos as bright as the display can show them. Off, nothing is brighter than white.")
+            }
+
             Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
             Heading { text: qsTr("In the grid") }
             Note { text: qsTr("Photo order") }

@@ -15,8 +15,12 @@
 // its orientation applied: HEIC through libheif, everything else through
 // Qt's readers; in sRGB, whatever profile it carries (colour.h).
 // `cancelled`, if given, set while it decodes: given up at the next chance,
-// and a null image.
-QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled = nullptr);
+// and a null image. With `profile`, the pixels are left in the profile
+// they carry, which it is set to (empty for sRGB's): for the stage, which
+// draws them as they are (stage.h); a PQ or HLG picture still comes tone
+// mapped into sRGB.
+QImage decodePhoto(const QString &path, QSize maxSize, const std::atomic<bool> *cancelled = nullptr,
+                   QByteArray *profile = nullptr);
 
 // "image://photo/<url-encoded path>" for QML, decoded off the GUI thread:
 // the viewer's full size and the Photo frame's. On two threads of its own,

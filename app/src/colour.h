@@ -63,3 +63,17 @@ void toSrgb(QImage &image, const QByteArray &icc);
 // The same, from the colour space Qt's readers give an image (its ICC
 // profile, as it was in the file).
 void toSrgb(QImage &image);
+
+// How the stage draws a photo's pixels as they are in the file (docs/hdr.md,
+// H3): each channel's code made linear light by a table, then a matrix to
+// linear sRGB, which keeps what lies outside sRGB (below 0, above 1). The
+// same tables and matrix toSrgb converts by, so that the stage clipped to
+// sRGB is the window's photo.
+struct StageColour {
+    float linear[3][256];
+    float matrix[9];
+};
+// For the profile `icc`: none (sRGB), or three curves and a matrix, true.
+// A profile of tables, or one not of RGB, false: the pixels are to be made
+// sRGB first (toSrgb), and `colour` is sRGB's.
+bool stageColourOf(const QByteArray &icc, StageColour &colour);

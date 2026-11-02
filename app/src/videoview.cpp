@@ -59,7 +59,10 @@ Planes planesOf(QVideoFrameFormat::PixelFormat format) {
 struct ShaderKey {
     QString vertex, fragment;
     bool hdr = false;
-    bool operator==(const ShaderKey &o) const { return vertex == o.vertex && fragment == o.fragment && hdr == o.hdr; }
+    bool linear = false;
+    bool operator==(const ShaderKey &o) const {
+        return vertex == o.vertex && fragment == o.fragment && hdr == o.hdr && linear == o.linear;
+    }
 };
 
 QSGMaterialType *typeFor(const ShaderKey &key) {
@@ -81,7 +84,7 @@ struct HdrUniforms {
     float gamut[12];  // the primaries' matrix to sRGB's, by rows
     float curve[4];   // HLG (1) or PQ (0), peak nits, target nits, headroom
     float knee[4];    // PQ of the peak, PQ of the target over it, the knee, above (1)
-    float more[4];    // opacity, planes
+    float more[4];    // opacity, planes, linear (1) or sRGB's curve (0)
 };
 static_assert(sizeof(HdrUniforms) == 208);
 
@@ -266,6 +269,7 @@ VideoView::VideoView(QQuickItem *parent) : QQuickItem(parent), m_pool(std::make_
 }
 
 VideoView::~VideoView() {
+    disconnect(m_following);
     disconnect(&m_sink, nullptr, this, nullptr);
     if (m_window)
         m_window->scheduleRenderJob(new Release(m_pool), QQuickWindow::NoStage);
@@ -294,6 +298,31 @@ void VideoView::setHeadroom(qreal headroom) {
     m_headroom = headroom;
     update();
     emit headroomChanged();
+}
+
+void VideoView::setLinear(bool linear) {
+    if (linear == m_linear)
+        return;
+    m_linear = linear;
+    update();
+    emit linearChanged();
+}
+
+void VideoView::setFollows(VideoView *view) {
+    if (view == m_follows)
+        return;
+    disconnect(m_following);
+    m_follows = view;
+    if (view) {
+        // On the player's thread, as its own view takes them; the one it
+        // has now at once, so a paused video shows too.
+        m_following = connect(&view->m_sink, qOverload<const QVideoFrame &>(&QVideoSink::videoFrameChanged), &m_sink,
+                              &QVideoSink::setVideoFrame, Qt::DirectConnection);
+        m_sink.setVideoFrame(view->m_sink.videoFrame());
+    } else {
+        m_sink.setVideoFrame({});
+    }
+    emit followsChanged();
 }
 
 void VideoView::take(const QVideoFrame &frame) {
@@ -432,12 +461,14 @@ QSGNode *VideoView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     const bool hdr = isHdr(format) && planesOf(format.pixelFormat()).count > 0;
     ShaderKey key;
     key.hdr = hdr;
+    key.linear = m_linear;
     if (hdr) {
         key.vertex = QStringLiteral(":/shaders/hdrvideo.vert.qsb");
         key.fragment = QStringLiteral(":/shaders/hdrvideo.frag.qsb");
     } else {
         key.vertex = QVideoTextureHelper::vertexShaderFileName(format);
-        key.fragment = QVideoTextureHelper::fragmentShaderFileName(format, rhi);
+        key.fragment = QVideoTextureHelper::fragmentShaderFileName(
+            format, rhi, m_linear ? QRhiSwapChain::HDRExtendedSrgbLinear : QRhiSwapChain::SDR);
     }
     if (node && !(node->m_key == key)) {
         delete node;
@@ -451,8 +482,10 @@ QSGNode *VideoView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         m_pool->setCurrentFrame(frame);
         ++m_drawn;
     }
-    if (hdr)
+    if (hdr) {
         node->m_material.m_hdr = hdrUniformsFor(format, m_headroom);
+        node->m_material.m_hdr.more[2] = m_linear ? 1 : 0;
+    }
     node->markDirty(QSGNode::DirtyMaterial);
 
     // Where each corner of the picture shown is in the frame: its

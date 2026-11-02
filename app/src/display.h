@@ -5,7 +5,10 @@
 #include <QPointer>
 #include <QString>
 
+#include <memory>
+
 class QScreen;
+class QWindow;
 struct wl_display;
 
 // What the compositor says of each display, through the Wayland colour
@@ -38,6 +41,15 @@ struct OutputColour {
     QString describe() const;
 };
 
+// An image description's information (wp_image_description_info_v1) read
+// as its events come, an output's or a surface's preferred one alike:
+// `data` of descriptionInfoListener(), a wp_image_description_info_v1_listener.
+struct DescriptionReader {
+    OutputColour colour;
+    bool done = false;
+};
+const void *descriptionInfoListener();
+
 // Every output's, from a connection to the compositor: what it does not
 // say is left out. `why` says why there are none (no colour management).
 // Its own event queue: safe on Qt's own connection, between its events.
@@ -46,7 +58,11 @@ QList<OutputColour> readOutputColours(wl_display *display, QString *why = nullpt
 // The display the window is on, for QML and plugins (pinhole.display):
 // whether it can show HDR, by how many stops, and whether it is wide
 // gamut. Read as the window starts and when screens come and go; the
-// output the window is on (setScreen), else the first.
+// output the window is on (setScreen), else the first. Once the window is
+// made, what the compositor would have its surface be instead (its
+// preferred image description, wp_color_management_surface_feedback_v1),
+// followed live: read again each time the compositor says it changed (the
+// window moved to another display, its brightness taken into HDR).
 // PINHOLE_HEADROOM=<stops> says the headroom instead, for tests.
 class ColourDisplay : public QObject {
     Q_OBJECT
@@ -55,6 +71,7 @@ class ColourDisplay : public QObject {
     Q_PROPERTY(bool wide READ wide NOTIFY changed)
 public:
     explicit ColourDisplay(QObject *parent = nullptr);
+    ~ColourDisplay() override;
 
     bool hdr() const { return headroom() > 0.05; }
     double headroom() const;
@@ -63,14 +80,30 @@ public:
     void setScreen(QScreen *screen);
     // Read them all again.
     void refresh();
+    // Follows the preferred description of `window`'s surface, as long as
+    // it has one (on Wayland, with colour management).
+    void followSurface(QWindow *window);
+    // The window's preferred description, once the compositor has given
+    // it; else null.
+    const OutputColour *preferred() const;
+    // How many times it has come (for tests).
+    int preferredCount() const { return m_preferredCount; }
 
 signals:
     void changed();
+
+public:
+    struct Feedback;
+    // The preferred description came (from Feedback).
+    void preferredRead(const OutputColour &colour);
 
 private:
     const OutputColour *current() const;
     QList<OutputColour> m_outputs;
     QPointer<QScreen> m_screen;
+    std::unique_ptr<Feedback> m_feedback;
+    OutputColour m_preferred;
+    int m_preferredCount = 0;
 };
 
 // `pinhole display`: each output's description, as the compositor gives

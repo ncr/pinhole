@@ -11,12 +11,20 @@ ApplicationWindow {
     visible: true
     title: "Pinhole"
     // Everything takes the Omarchy theme's colours (theme.*, colors.toml),
-    // live: a light theme makes a light Pinhole.
-    color: theme.background
+    // live: a light theme makes a light Pinhole. With the stage under it
+    // (stage.h), the window has an alpha channel and draws its own
+    // background, which goes where the stage shows.
+    color: stage.wanted ? "transparent" : theme.background
 
     Material.theme: theme.light ? Material.Light : Material.Dark
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
+
+    Rectangle {
+        anchors.fill: parent
+        visible: stage.wanted && !win.staged
+        color: theme.background
+    }
 
     PhotoGrid {
         id: grid
@@ -24,7 +32,7 @@ ApplicationWindow {
         anchors.fill: parent
         focus: true
         accent: theme.accent
-        background: win.color
+        background: theme.background
         stacks: win.pluginStacks
         hidden: win.pluginHidden
         // Every kind of mark, Pinhole's and the plugins' (plugins.markKinds),
@@ -40,8 +48,8 @@ ApplicationWindow {
         covered: win.keyLayer !== "grid" || win.sourcesOff
         // No source shown, no photos: the library is library/none's, empty
         // (LibraryReloader), and until it is read the last one's are not
-        // drawn under the card saying so.
-        opacity: win.sourcesOff ? 0 : 1
+        // drawn under the card saying so. Not under the stage either.
+        opacity: win.sourcesOff || win.staged ? 0 : 1
         onActivated: (index, rect) => viewer.openAt(index, rect)
     }
     // A mark's colour as a plugin names it (an action's too,
@@ -75,7 +83,7 @@ ApplicationWindow {
         border.color: theme.accent
         border.width: 3
         opacity: 0
-        visible: opacity > 0 && index >= 0
+        visible: opacity > 0 && index >= 0 && !win.staged
         SequentialAnimation {
             id: revealFade
             NumberAnimation { target: revealMark; property: "opacity"; to: 1; duration: 120 }
@@ -438,6 +446,24 @@ ApplicationWindow {
     }
     readonly property PhotoViewer photoViewer: viewerLoader.item
     readonly property bool viewerShown: photoViewer?.shown ?? false
+
+    // Wide gamut and HDR under the settled photo (Stage.qml): made only
+    // where the display can show them, or forced (stage.h); a child window
+    // of this one.
+    readonly property var stageWindow: stage.window
+    // The stage shows the photo: the window transparent there.
+    readonly property bool staged: stage.window?.handedOver ?? false
+    Binding { target: win.photoViewer; property: "staged"; value: win.staged; when: win.photoViewer !== null }
+    // Any plugin asks for SDR (PinholePlugin.holdSdr).
+    readonly property bool pluginsHoldSdr: {
+        let hold = false
+        for (let i = 0; i < pluginLayer.count; ++i) {
+            const loader = pluginLayer.itemAt(i)
+            if (loader && loader.item && loader.item.holdSdr === true)
+                hold = true
+        }
+        return hold
+    }
 
     Chip {
         anchors.bottom: parent.bottom
