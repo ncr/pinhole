@@ -105,8 +105,9 @@ source; the list is at the end.
   SDR itself (H2). `QFFmpegVideoBuffer::maxNits()` does take a mastering
   peak as `10000 * max_luminance`, a bug, but nothing in 6.12 calls it
   [qt-ffmpegvideobuffer].
-- `qt6-shadertools` (the `qsb` tool) is not installed, and Pinhole has no
-  shaders of its own yet.
+- `qt6-shadertools` (the `qsb` tool) was not installed, and Pinhole had no
+  shaders of its own (since H2's `VideoView`, `hdrvideo.frag`, it is a
+  make dependency).
 
 ### Pinhole
 
@@ -123,8 +124,9 @@ source; the list is at the end.
 - **pinholed.** `render.rs` makes folder thumbnails and mediums with
   `magick -thumbnail`, which keeps the ICC profile (checked: a P3 medium's
   thumbnail stays "Display P3"). `jpeg.rs`, the one JPEG, keeps the
-  profile too. `cover.rs` takes a video's frame with ffmpeg and no tone
-  mapping, so an HLG folder video's cover comes out flat.
+  profile too. `cover.rs` took a video's frame with ffmpeg and no tone
+  mapping, so an HLG folder video's cover came out flat (since H2 it is
+  tone mapped as the window plays the video: BT.2390, below).
 - **The video player** is `MediaPlayer` and `VideoOutput` in
   `PhotoViewer.qml`. The Live plugin plays motion in its own viewer layer.
 - **Info** labels HDR10, HLG and Dolby Vision video.
@@ -187,9 +189,9 @@ connector Hyprland can drive in HDR (not possible through DCP today).
 | Gain-map photos, viewer | The SDR base, correct (H1); Info shows the headroom (H2) | Above SDR white, up to the panel's headroom (H4) | Up to the monitor's headroom (H4) |
 | Gain-map photos, grid | The base | The base (no HDR in the grid) | The base |
 | PQ/HLG still photos | Tone mapped at decode (H2) | Shown in range (H4) | Shown in range (H4) |
-| HLG, Dolby Vision 8.4 and HDR10 video | Tone mapped by Pinhole's `SdrVideo` (H2: Qt Multimedia's is wrong) | In range, in the stage (H3) | In range (H3) |
+| HLG, Dolby Vision 8.4 and HDR10 video | Tone mapped on the GPU by Pinhole's `VideoView` (H2: Qt Multimedia's is wrong) | In range, in the stage (H3) | In range (H3) |
 | Video covers (folders) | Tone mapped by ffmpeg (H2) | Same (covers are SDR) | Same |
-| Live motion | SDR, tone mapped (`SdrVideo`, H2); the stage drops to SDR while it plays (H3) | Same | Same |
+| Live motion | SDR, tone mapped (`VideoView`, H2); the stage drops to SDR while it plays (H3) | Same | Same |
 | Exports (Send, "HEIC as JPEG") | JPEG with P3 profile and gain map (H5) | Same | Same |
 | Background plugin | Photo converted to sRGB (H2) | Same (the wallpaper is SDR) | Same |
 | Theme plugin | Palette from sRGB pixels (H2) | Same | Same |
@@ -285,7 +287,8 @@ These are the open questions, decided.
   dependency in H4b, to read Ultra HDR JPEGs, and in H5, to write them.
   libheif 1.23 has no gain-map API, so the HEIC `tmap` is parsed by
   Pinhole. Its gain-map PR is still open [libheif-1503].
-- **`qt6-shadertools`** becomes a make dependency in H3, for `qsb`.
+- **`qt6-shadertools`** is a make dependency since H2's `VideoView`, for
+  `qsb`; H3's stage shaders use it too.
 - **Private Qt API, once.** Placing the stage below the main window needs
   `QtWaylandClient::QWaylandWindow::subSurfaceWindow()->place_below()`.
   Qt's `lower()` ignores subsurfaces. It is behind one function, with a
@@ -537,16 +540,23 @@ peak is the content light level, else the mastering display's, else 1000.
 - A folder's grid thumbnail of one is ImageMagick's, which shows its codes
   as they are: rare, and left so.
 
-**Video covers.** `cover.rs` asks ffprobe for the curve with the length.
-For `arib-std-b67` or `smpte2084` the frame goes through
-`zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`
-before it is scaled. A folder's video's key now has `cover::VERSION`, so
+**Video covers.** `cover.rs` asks ffprobe for the curve with the length
+(and a PQ stream's mastering peak). For `arib-std-b67` or `smpte2084`
+ffmpeg scales the frame and gives it as 16-bit R'G'B' (a PAM of
+`rgb48be`, full range), and `tone_map` makes it SDR in the window's very
+maths (`hdrvideo.frag`): HLG's OOTF at 1000 nits or PQ's EOTF, BT.2390's
+EETF on the largest channel, BT.2020 to sRGB, clipped. At first it was
+ffmpeg's Hable at SDR white 203 nits (`tonemap` has no BT.2390), and an
+iPhone clip's cover was a third darker than the video playing from it
+(mean 74 of 255 against 106); now the cover is the playback's within 1.2 %
+(JPEG and scaling). A folder's video's key has `cover::VERSION` (3), so
 every folder video's cover is made again once. iCloud's videos have
 Apple's thumbnails; the few covers Pinhole made of iCloud videos (only for
 a black thumbnail) stay as they are.
 
 **Video in the viewer and Live motion: Qt Multimedia 6.12 is wrong, so
-`SdrVideo` (`sdrvideo.cpp`).** `PINHOLE_SELFTEST=hdrvideo:<dir>` plays
+`VideoView` (`videoview.cpp`; at first `SdrVideo`).**
+`PINHOLE_SELFTEST=hdrvideo:<dir>` plays
 SMPTE bars made HLG and PQ (10-bit H.264, a PQ one with mastering
 metadata), and Jacek's own iPhone HLG Dolby Vision 8.4 clips, through a
 `MediaPlayer` and `VideoOutput` as the viewer has them, grabs the first
@@ -570,16 +580,40 @@ Qt does (read in its 6.12 source too):
   those without: a stream's `maxLuminance()` is Qt's default (10,000 for
   PQ, 1500 for HLG). `hdrInfo()` plays no part in SDR.
 
-So `SdrVideo` sits between the player and the output (the viewer's video,
-the Live plugin's motion). A frame whose transfer is HLG or PQ (planar,
-NV12, P010 or P016) is mapped and made SDR on the CPU by the same maths as
-a still (bilinear chroma, BT.2020's matrix), into an RGB frame reused once
-shown; anything else goes through untouched. 10 ms a 1080p frame and 29 ms
-a 4K one, on the pool: a phone's 1080p at 60 fps, 4K at 30. Through it,
-every clip is within 4 of 255 of the formulas computed in double precision
-from ffmpeg's own decode (worst block: bars 2.9 and 4.0, iPhone 2.8), and
-the iPhone clips are within 4.4 on average of libplacebo's BT.2390 with
-clipping. All three of Qt's faults are worth reporting to Qt; not reported yet.
+So at first `SdrVideo` sat between the player and the output, mapping a
+frame whose transfer is HLG or PQ and making it SDR on the CPU by the same
+maths as a still. Right, but slow: reading back each hardware frame and
+the maths per pixel took 612 % CPU for an iPhone's 1080p60 Dolby Vision
+clip and 746 % for 4K60 HLG, which showed 29 of its 60 frames a second.
+
+`VideoView` is what shows video now (the viewer, the Live plugin's motion,
+the Frame plugin, any plugin's, which `plugin check` keeps from a
+`VideoOutput`): a `QQuickItem` that is the player's video output and
+draws its frames itself. The decoder's frame goes to the GPU as a
+`VideoOutput`'s does (Qt's `QVideoFrameTexturePool`, the hardware frame's
+own planes), and an HLG or PQ one (planar, NV12, P010 or P016) is drawn by
+Pinhole's shader, `shaders/hdrvideo.frag` (baked by `qsb` at build), in the
+still's maths: Y'CbCr by its matrix, its light, BT.2390's EETF on the
+largest channel to SDR white times `headroom`, BT.2020 to sRGB, clipped to
+the headroom, sRGB's curve. `headroom` is 1 now; H3's stage gives it the
+display's, and the values above 1 stay, in extended sRGB. Any other frame
+is drawn by Qt's own shaders, as a `VideoOutput` draws it. Only where the
+GPU samples no 16-bit textures is an HDR frame made SDR on the CPU first
+(`toneMapFrame`); `SdrVideo` stays for plugins of API 4, and hands its
+frames to a `VideoView` untouched. Its sink, as a `VideoOutput`'s, also
+says a frame came without giving it: a QML handler given each frame keeps
+them in JavaScript until the collector runs, and the hardware decoder ran
+out of its 64 surfaces within a second.
+
+Through it every clip is within 6 of 255 of the formulas computed in
+double precision from ffmpeg's own decode, block by block (iPhone Dolby
+Vision mean 0.6, worst 2.7; 4K HLG 0.5 and 2.5), as with `SdrVideo`.
+`PINHOLE_SELFTEST=hdrplay` plays each through a `VideoOutput` and a
+`VideoView`, a frame drawn every 16 ms: both clips 60 frames a second
+drawn, the frame given 28 ms behind the player's clock on average (as
+the `VideoOutput`'s), a seek playing on, and the CPU the `VideoOutput`'s
+within the noise (63 % against 71 % for the Dolby Vision clip, 70 against
+72 for 4K HLG, most of it the test's own grabbing of every frame). All three of Qt's faults are worth reporting to Qt; not reported yet.
 
 **`display.cpp`, `pinhole display`.** `color-management-v1.xml` through
 `wayland-scanner`; `readOutputColours` binds `wp_color_manager_v1` (at most
@@ -614,7 +648,8 @@ headroom}`, ISO's when it parses, else Apple's, else the curve's.
 **API 4, the rest:** `pinhole.display`, the viewer's `hdr` (read for the
 medium, then the full size), `pinhole.srgbProfile`
 (`share/pinhole/sRGB.icc`, Qt's own sRGB profile, committed in
-`app/assets`), and `SdrVideo` for a plugin's video. Info's format line
+`app/assets`), and `SdrVideo` for a plugin's video (`VideoView` since
+API 5). Info's format line
 says "HDR, 1.8 EV"; Background's `background keep` and Theme's
 `magickArgs` take the profile (`magick -profile`), so a P3 photo's
 wallpaper and palette are in sRGB.
@@ -834,9 +869,9 @@ iPhone HDR photos glow as on the phone.
    while panning, 8 ms at 120 Hz.
 6. **Qt Multimedia's HDR.** `hdrInfo()` is a constant on Linux; the
    `10000 *` is real but unused. *Answer:* H2 found Qt's SDR tone mapping
-   wrong both ways and makes HDR frames SDR itself (`SdrVideo`). For the
-   stage (H3), Qt's linear output needs checking the same way, or
-   `SdrVideo` grows a linear output. Both are worth reporting upstream.
+   wrong both ways and makes HDR frames SDR itself (`VideoView`'s shader).
+   For the stage (H3), `VideoView`'s `headroom` maps to the display's
+   headroom instead of SDR white, in the same shader. Both are worth reporting upstream.
 7. **The CPU cost of conversion at decode.** *Answer:* measured in H1.
    Both `QColorTransform` and lcms2's own transform cost more than the
    decode itself, so the common profile is converted by Pinhole's own

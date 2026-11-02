@@ -1,7 +1,8 @@
 # Everything of the window but main(): the app (pinhole.pro) and its tests
 # (tests/pinhole_tests.pro) build the same files from this one list.
 
-QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent gui-private qml-private quick-private multimedia-private
+QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent gui-private qml-private quick-private multimedia-private \
+    multimediaquick-private
 CONFIG += c++20
 INCLUDEPATH += $$PWD
 
@@ -23,6 +24,20 @@ IDLE_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/unstable
 system(wayland-scanner client-header $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-client-protocol.h && \
     wayland-scanner private-code $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-protocol.c)
 INCLUDEPATH += $$GENERATED
+# The HDR video shader (videoview.h), baked by Qt's qsb for every graphics
+# API the window may use, the vertex shader batchable as the scene graph
+# asks; into a resource file of its own.
+QSB = $$[QT_HOST_BINS]/qsb
+QSB_TARGETS = --glsl \'100 es,120,150\' --hlsl 50 --msl 12
+SHADERS_OUT = $$GENERATED/shaders
+!system(mkdir -p $$SHADERS_OUT && \
+    $$QSB -b $$QSB_TARGETS -o $$SHADERS_OUT/hdrvideo.vert.qsb $$PWD/shaders/hdrvideo.vert && \
+    $$QSB $$QSB_TARGETS -o $$SHADERS_OUT/hdrvideo.frag.qsb $$PWD/shaders/hdrvideo.frag): \
+    error("qsb could not bake the shaders: Qt Shader Tools (qt6-shadertools) is needed to build")
+write_file($$SHADERS_OUT/shaders.qrc, $$list("<RCC><qresource prefix=\"/shaders\">" \
+    "<file>hdrvideo.vert.qsb</file>" "<file>hdrvideo.frag.qsb</file>" "</qresource></RCC>"))
+RESOURCES += $$SHADERS_OUT/shaders.qrc
+OTHER_FILES += $$PWD/shaders/hdrvideo.vert $$PWD/shaders/hdrvideo.frag
 SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
     $$GENERATED/idle-inhibit-unstable-v1-protocol.c \
     $$GENERATED/color-management-v1-protocol.c
@@ -49,6 +64,7 @@ HEADERS += \
     $$PWD/gainmap.h \
     $$PWD/display.h \
     $$PWD/sdrvideo.h \
+    $$PWD/videoview.h \
     $$PWD/viewer.h \
     $$PWD/viewermotion.h \
     $$PWD/outgoing.h \
@@ -88,6 +104,7 @@ SOURCES += \
     $$PWD/gainmap.cpp \
     $$PWD/display.cpp \
     $$PWD/sdrvideo.cpp \
+    $$PWD/videoview.cpp \
     $$PWD/viewer.cpp \
     $$PWD/viewermotion.cpp \
     $$PWD/outgoing.cpp \

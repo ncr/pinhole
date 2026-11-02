@@ -8,7 +8,32 @@ namespace {
 // distance over the reports' span plus one interval, so two reports 1 ms
 // apart do not read as a 100,000 px/s flick.
 constexpr double kReportMs = 8;
+// How far past an end a coast may bounce: this share of the view.
+constexpr double kBounceShare = 0.25;
 } // namespace
+
+void ScrollPhysics::bounce(bool coasting) {
+    // The spring from x past the end at speed v outwards goes no further
+    // than x + v/(omega·e): a coast's 40,000 px/s some 1,200 px, past a
+    // short view's whole length. So the speed is eased in under the one
+    // that stops at a quarter of the view: a slow bounce as it was, a fast
+    // one no further, whatever the surface. A coast's step past the end
+    // shrinks with its speed; a drag's stretch stays as the fingers left it.
+    const double over = overscroll();
+    if (over != 0 && m_velocity != 0 && (m_velocity > 0) == (over > 0)) {
+        const double omega = 5.0 / m_p.springSeconds;
+        const double limit = kBounceShare * m_extent;
+        double past = std::abs(over);
+        if (coasting) {
+            const double most = limit * omega * M_E;
+            past *= std::abs(most * std::tanh(m_velocity / most) / m_velocity);
+            m_position = boundFor(m_position) + (over > 0 ? past : -past);
+        }
+        const double most = std::max(0.0, limit - past) * omega * M_E;
+        m_velocity = most > 0 ? most * std::tanh(m_velocity / most) : 0;
+    }
+    m_mode = Mode::Spring;
+}
 
 void ScrollPhysics::setBounds(double min, double max, double extent) {
     m_min = min;
@@ -116,9 +141,9 @@ void ScrollPhysics::end(double tMs) {
     m_samples.clear();
 
     if (overscroll() != 0) {
-        // Let go past an end: back from there, with all its speed, as a
-        // coast into it.
-        m_mode = Mode::Spring;
+        // Let go past an end: back from there, with its speed, as a coast
+        // into it.
+        bounce(false);
     } else if (std::abs(m_velocity) >= m_p.throwAbove)
         m_mode = Mode::Coasting;
     else
@@ -226,7 +251,7 @@ bool ScrollPhysics::step(double dt) {
             m_position += m_velocity * s;
             m_velocity *= std::pow(m_p.decayPerMs, s * 1000);
             if (overscroll() != 0) {
-                m_mode = Mode::Spring; // ran into an end: bounce
+                bounce(true); // ran into an end
             } else if (std::abs(m_velocity) < m_p.stopBelow) {
                 m_velocity = 0;
                 m_mode = Mode::Idle;

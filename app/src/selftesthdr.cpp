@@ -1,5 +1,6 @@
 // PINHOLE_SELFTEST=hdrvideo:<dir>: HDR videos as Qt Multimedia shows them
-// in SDR, against ffmpeg's tone mapping of the same frame (selftest.h).
+// in SDR, against ffmpeg's tone mapping of the same frame; and
+// PINHOLE_SELFTEST=hdrplay: how they play (selftest.h).
 
 #include "selftest.h"
 
@@ -9,6 +10,8 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QImage>
+#include <QMediaMetaData>
+#include <QMediaPlayer>
 #include <QProcess>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -16,13 +19,18 @@
 #include <QQuickItemGrabResult>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QVideoFrame>
+#include <QVideoSink>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
+
+#include <sys/resource.h>
 
 namespace {
 
@@ -38,20 +46,20 @@ Rectangle {
     height: parent ? parent.height : 0
     property alias source: player.source
     readonly property int status: player.mediaStatus
-    readonly property rect shown: out.contentRect
+    readonly property rect shown: pinhole ? view.contentRect : out.contentRect
     readonly property bool hasFrame: player.hasVideo
-    // Through Pinhole's SdrVideo, as the viewer has it, or straight to
-    // the VideoOutput, as Qt alone shows it.
+    // Through Pinhole's VideoView, as the viewer has it, or a VideoOutput,
+    // as Qt alone shows it.
     property bool pinhole: true
-    SdrVideo { id: sdr; output: out }
-    MediaPlayer { id: player; videoOutput: pinhole ? sdr : out }
-    VideoOutput { id: out; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+    MediaPlayer { id: player; videoOutput: pinhole ? view : out }
+    VideoOutput { id: out; visible: !pinhole; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+    VideoView { id: view; visible: pinhole; anchors.fill: parent; fillMode: VideoView.PreserveAspectFit }
     function showFirst() { player.pause() }
 }
 )";
 
 // ffmpeg's tone mappings to compare with, by name: the filter before the
-// frame is scaled. "hable203" is cover.rs's.
+// frame is scaled. "hable203" was cover.rs's at first.
 struct Reference {
     const char *name;
     const char *filter;
@@ -231,7 +239,7 @@ void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QString
             QCoreApplication::exit(*failed ? 1 : 0);
             return;
         }
-        // Each video as Qt alone shows it, then through SdrVideo.
+        // Each video as Qt alone shows it, then through VideoView.
         const QString path = videos[i / 2];
         const bool pinhole = i % 2 == 1;
         auto *player = qobject_cast<QQuickItem *>(component->create(qmlContext(window->contentItem())));
@@ -294,7 +302,7 @@ void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QString
                             best = QLatin1String(r.name);
                         }
                     }
-                    // Through SdrVideo: an HDR frame within 6 of 255 of the
+                    // Through VideoView: an HDR frame within 6 of 255 of the
                     // formulas, block by block; an SDR one of its codes.
                     if (pinhole) {
                         QImage want = formulas(path, qt.size());
@@ -323,6 +331,159 @@ void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QString
             });
         });
         poll->start();
+    };
+    QTimer::singleShot(2000, window, [next] { (*next)(0); });
+}
+
+namespace {
+
+// As the viewer plays a video, the player and its output named.
+const char kPlayback[] = R"(
+import QtQuick
+import QtMultimedia
+import Pinhole
+Rectangle {
+    color: "black"
+    width: parent ? parent.width : 0
+    height: parent ? parent.height : 0
+    property alias source: player.source
+    property bool pinhole: true
+    readonly property alias player: player
+    readonly property alias view: view
+    MediaPlayer { id: player; videoOutput: pinhole ? view : out; loops: MediaPlayer.Infinite; audioOutput: AudioOutput { volume: 0 } }
+    VideoOutput { id: out; visible: !pinhole; anchors.fill: parent }
+    VideoView { id: view; visible: pinhole; anchors.fill: parent }
+}
+)";
+
+double cpuSeconds() {
+    rusage usage{};
+    getrusage(RUSAGE_SELF, &usage);
+    return double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
+           + double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+}
+
+} // namespace
+
+void runHdrPlaySelfTest(QQuickWindow *window, const QStringList &videos) {
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    window->resize(960, 540);
+    auto *component = new QQmlComponent(qmlEngine(window->contentItem()), window);
+    component->setData(kPlayback, QUrl());
+    auto failed = std::make_shared<int>(0);
+    auto next = std::make_shared<std::function<void(int)>>();
+    *next = [=](int i) {
+        if (i >= videos.size() * 2) {
+            say(QStringLiteral("done, %1 failed").arg(*failed));
+            QCoreApplication::exit(*failed ? 1 : 0);
+            return;
+        }
+        // Each as Qt alone shows it, then through VideoView.
+        const QString path = videos[i / 2];
+        const bool pinhole = i % 2 == 1;
+        const QString name = QFileInfo(path).completeBaseName()
+                             + (pinhole ? QStringLiteral(", VideoView") : QStringLiteral(", VideoOutput"));
+        auto *item = qobject_cast<QQuickItem *>(component->create(qmlContext(window->contentItem())));
+        if (!item) {
+            say(QStringLiteral("FAIL the player: %1").arg(component->errorString()));
+            QCoreApplication::exit(1);
+            return;
+        }
+        item->setParentItem(window->contentItem());
+        item->setZ(1e6);
+        item->setProperty("pinhole", pinhole);
+        auto *player = item->property("player").value<QMediaPlayer *>();
+        auto *view = item->property("view").value<QObject *>();
+        // Each frame given, and its time in the stream.
+        struct Given {
+            std::atomic<int> frames{0};
+            std::atomic<qint64> at{-1};
+        };
+        auto given = std::make_shared<Given>();
+        QObject::connect(player->videoSink(), &QVideoSink::videoFrameChanged, item, [given](const QVideoFrame &frame) {
+            ++given->frames;
+            if (frame.isValid())
+                given->at = frame.startTime() / 1000;
+        }, Qt::DirectConnection);
+        item->setProperty("source", QUrl::fromLocalFile(path));
+        player->play();
+        struct Measure {
+            int given = 0, drawn = 0, renders = 0, lags = 0;
+            double cpu = 0, lagSum = 0, lagMost = 0;
+            QElapsedTimer clock;
+            bool on = false;
+        };
+        auto m = std::make_shared<Measure>();
+        // A frame drawn every 16 ms; the lag of the frame given behind the
+        // player's clock (the audio's) as it is.
+        auto *frames = new QTimer(item);
+        frames->setInterval(16);
+        QObject::connect(frames, &QTimer::timeout, item, [=] {
+            window->grabWindow();
+            if (!m->on)
+                return;
+            ++m->renders;
+            const qint64 at = given->at.load();
+            if (at >= 0 && player->playbackState() == QMediaPlayer::PlayingState) {
+                const double lag = std::abs(double(player->position() - at));
+                // Not as a loop wraps round.
+                if (lag < 1000) {
+                    m->lagSum += lag;
+                    m->lagMost = std::max(m->lagMost, lag);
+                    ++m->lags;
+                }
+            }
+        });
+        frames->start();
+        QTimer::singleShot(1500, item, [=] {
+            m->given = given->frames;
+            m->drawn = view->property("framesDrawn").toInt();
+            m->cpu = cpuSeconds();
+            m->clock.start();
+            m->on = true;
+        });
+        QTimer::singleShot(5500, item, [=] {
+            const double seconds = m->clock.elapsed() / 1000.0;
+            const double perSecond = (given->frames - m->given) / seconds;
+            const double drawn = (view->property("framesDrawn").toInt() - m->drawn) / seconds;
+            const double cpu = 100 * (cpuSeconds() - m->cpu) / seconds;
+            const double lag = m->lags ? m->lagSum / m->lags : 1e9;
+            m->on = false;
+            QString line = QStringLiteral("%1: %2 frames a second given").arg(name).arg(perSecond, 0, 'f', 1);
+            if (pinhole)
+                line += QStringLiteral(", %1 drawn").arg(drawn, 0, 'f', 1);
+            line += QStringLiteral(" (%1 renders a second), CPU %2 %, lag mean %3 ms, most %4 ms")
+                        .arg(m->renders / seconds, 0, 'f', 1)
+                        .arg(cpu, 0, 'f', 0)
+                        .arg(lag, 0, 'f', 1)
+                        .arg(m->lagMost, 0, 'f', 0);
+            const double rate = player->metaData().value(QMediaMetaData::VideoFrameRate).toDouble();
+            const bool ok = !pinhole || ((rate < 50 || drawn >= 55) && lag <= 50);
+            say(line + (ok ? QString() : QStringLiteral(" FAIL")));
+            if (!ok)
+                ++*failed;
+            player->setPosition(1000);
+            const int before = given->frames;
+            QTimer::singleShot(1000, item, [=] {
+                const qint64 at = player->position();
+                const int after = given->frames - before;
+                const bool on = at >= 1500 && at <= 2600 && after >= 0.6 * (rate > 0 ? rate : 25);
+                say(QStringLiteral("%1: a second after a seek to 1 s, at %2 ms, %3 frames given%4")
+                        .arg(name)
+                        .arg(at)
+                        .arg(after)
+                        .arg(on ? QString() : QStringLiteral(" FAIL")));
+                if (!on && pinhole)
+                    ++*failed;
+                frames->stop();
+                player->stop();
+                item->deleteLater();
+                QTimer::singleShot(300, window, [=] { (*next)(i + 1); });
+            });
+        });
     };
     QTimer::singleShot(2000, window, [next] { (*next)(0); });
 }

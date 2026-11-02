@@ -1,6 +1,7 @@
 #include "sdrvideo.h"
 
 #include "colour.h"
+#include "videoview.h"
 
 #include <QImage>
 #include <QtMultimedia/private/qplatformvideosink_p.h>
@@ -269,6 +270,7 @@ void SdrVideo::setOutput(QObject *output) {
     {
         QMutexLocker done(&m_busy);
         m_targetSink = sink;
+        m_passThrough = qobject_cast<VideoView *>(output) != nullptr;
     }
     // The output's graphics, as its own sink has them: given them, the
     // player hands over a hardware frame to be drawn as it is, which the
@@ -287,8 +289,11 @@ void SdrVideo::frame(const QVideoFrame &frame) {
     QMutexLocker busy(&m_busy);
     if (!m_targetSink)
         return;
-    const QVideoFrame sdr = frame.isValid() ? toneMapFrame(frame, &m_buffers) : QVideoFrame();
-    const bool hdr = sdr.isValid();
+    // To a VideoView, which tone maps as it draws: as it is.
+    const auto transfer = frame.surfaceFormat().colorTransfer();
+    const bool tagged = transfer == QVideoFrameFormat::ColorTransfer_STD_B67 || transfer == QVideoFrameFormat::ColorTransfer_ST2084;
+    const QVideoFrame sdr = frame.isValid() && !m_passThrough ? toneMapFrame(frame, &m_buffers) : QVideoFrame();
+    const bool hdr = m_passThrough ? frame.isValid() && tagged : sdr.isValid();
     if (hdr != m_hdr)
         QMetaObject::invokeMethod(this, [this, hdr] {
             if (hdr != m_hdr) {
@@ -296,5 +301,5 @@ void SdrVideo::frame(const QVideoFrame &frame) {
                 emit hdrChanged();
             }
         }, Qt::QueuedConnection);
-    m_targetSink->setVideoFrame(hdr ? sdr : frame);
+    m_targetSink->setVideoFrame(sdr.isValid() ? sdr : frame);
 }

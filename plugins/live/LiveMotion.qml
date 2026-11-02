@@ -16,14 +16,9 @@ Item {
     readonly property bool stalled: player.position <= 0 || player.mediaStatus === MediaPlayer.StalledMedia
     signal failed()
 
-    // A motion in HDR (HLG) made SDR on its way, as the viewer's video is.
-    SdrVideo {
-        id: sdr
-        output: output
-    }
     MediaPlayer {
         id: player
-        videoOutput: sdr
+        videoOutput: output
         loops: motion.looping ? MediaPlayer.Infinite : 1
         onPlaybackStateChanged: if (playbackState === MediaPlayer.StoppedState) output.visible = false
         onErrorOccurred: {
@@ -31,10 +26,12 @@ Item {
             motion.failed()
         }
     }
-    VideoOutput {
+    // A motion in HDR (HLG) tone mapped as it is drawn, as the viewer's
+    // video is.
+    VideoView {
         id: output
         anchors.fill: parent
         visible: false
-        fillMode: VideoOutput.PreserveAspectCrop
+        fillMode: VideoView.PreserveAspectCrop
     }
 }

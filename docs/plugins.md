@@ -275,16 +275,31 @@ PinholePlugin {
 footgun Pinhole's own plugins hit):
 
 - a `ListView`, `GridView`, `Flickable` or `ScrollView` (`ScrollList`,
-  `ScrollGrid`, `ScrollArea`): they scroll not as the grid does, and at
+  `ScrollGrid`, `ScrollArea`), and a `TableView`, `TreeView`, `PathView`,
+  `Tumbler` or `SwipeView`: they scroll not as the grid does, and at
   their ends let the wheel through to the photos;
-- a `PinchHandler` or `PinchArea` (`PinchZoom`), a `WheelHandler`, and a
-  `MouseArea`'s `onWheel` (a `Panel` or `Card` under the controls, a
-  `Panel`'s `steps`): a pinch went through to the photos, and a
-  `MouseArea` without `onWheel` lets the wheel through;
-- `sqlite3` (`pinhole.query`);
+- a `PinchHandler`, `PinchArea` or `MultiPointTouchArea` (`PinchZoom`), a
+  `WheelHandler`, and a `MouseArea`'s `onWheel` (a `Panel` or `Card` under
+  the controls, a `Panel`'s `steps`): a pinch went through to the photos,
+  and a `MouseArea` without `onWheel` lets the wheel through; so is one
+  over the whole window, a `MouseArea` filling the plugin's root (or an
+  `Item` filling it): what a plugin shows over the photos goes in a
+  `Panel`;
+- `Qt.createQmlObject`: QML made from a string, which check cannot look
+  over (a file of the plugin's, with a `Loader` or `Qt.createComponent`);
+- a `VideoOutput` or QtMultimedia's `Video` (`VideoView`): they show HDR
+  video wrong;
+- `sqlite3` (`pinhole.query`), named anywhere in a string: by its path,
+  in a shell's line (`sh -c "…"`), put together (`"sqlite" + "3"`);
 - `wl-copy`, `xclip` and the like (`pinhole.copyFile`), and Pictures found
-  by hand, `~/Pictures` or `xdg-user-dir` (`pinhole.picturePath`): a
-  self-test of them wrote to the real Pictures and the session's clipboard;
+  by hand, `~/Pictures`, a `/Pictures` to build a path with, or
+  `xdg-user-dir` (`pinhole.picturePath`), in a string or a shell's line: a
+  self-test of them wrote to the real Pictures and the session's
+  clipboard. The words a plugin shows, in `qsTr()`, are not looked at
+  ("Kept in ~/Pictures/Pinhole" is fine). `pinhole.run` refuses the same
+  programs as it runs them, however their names were made: by name or
+  path, after `env` and the like, or in a shell's line (`sh -c`), with an
+  error `refused` saying what to use;
 - an API newer than the manifest asks for: a Pinhole of that API would load
   it and fail where nobody sees. `api` stays asked for by hand, since it
   is what an older Pinhole reads to say it needs a newer one; check says
@@ -298,7 +313,8 @@ And warns of:
   `cache`);
 - a key named as Qt writes it in what is shown, `Shift+S` or `Return`, not
   as the buttons name it (⇧ S, ⏎);
-- words shown as they are, in `text:` or `notify(…)` without `qsTr()`;
+- words shown as they are, in `text:`, `notify(…)` or the `help` without
+  `qsTr()`;
 - words in `qsTr()` with no Polish in `i18n/pl.json` (nor Pinhole's own).
 
 ## A whole plugin
@@ -336,7 +352,8 @@ a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
 file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
 `SdrVideo`; and `Scroller`. API 5 brought the kit: `ScrollList`,
 `ScrollGrid`, `ScrollArea`, `PinchZoom`, `Panel`, `Card`, `Choices`, a
-`ShellButton`'s `complain`, `pinhole.query` and `pinhole.picturePath`; and
+`ShellButton`'s `complain`, `pinhole.query`, `pinhole.picturePath` and
+`VideoView`; and
 `Scroller` scrolling as the grid does, across too.
 
 `Main.qml` beside it:
@@ -366,7 +383,7 @@ PinholePlugin {
             onTriggered: pinhole.notify(qsTr("%1 favourites").arg(plugin.count))
         }
     ]
-    help: [["F2", "Count favourites"]]
+    help: [["F2", qsTr("Count favourites")]]
 }
 ```
 
@@ -561,17 +578,22 @@ with what it does in the help), the kit (above), and `Scroller`, what
 `ScrollList`, `ScrollGrid` and `ScrollArea` are made of (API 4), and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
-A plugin that plays video puts `SdrVideo` (API 4) between its
-`MediaPlayer` and its `VideoOutput`, as the viewer does, so that an HDR
-video (an iPhone's HLG or Dolby Vision, PQ) shows right in SDR: Qt
-Multimedia shows one either flat and grey or, decoded by the hardware,
-with its brightest colours broken ([hdr.md](hdr.md), H2). Any other video
-goes through as it is. `hdr` says whether the frames are being made SDR.
+A plugin that plays video shows it with a `VideoView` (API 5), the
+viewer's own, as a `MediaPlayer`'s `videoOutput`: an HDR video (an
+iPhone's HLG or Dolby Vision, PQ) is tone mapped on the GPU as it is
+drawn, so it shows right in SDR, where Qt Multimedia's `VideoOutput` (and
+its `Video`) shows one flat and grey or, decoded by the hardware, with its
+brightest colours broken ([hdr.md](hdr.md), H2). Any other video is drawn
+as a `VideoOutput` draws it. It has a `VideoOutput`'s `fillMode`,
+`contentRect` and `endOfStreamPolicy`; `hdr` says whether the frames are
+HDR, and `framesDrawn` counts the frames it has drawn. `plugin check`
+refuses a `VideoOutput` and a `Video`. (API 4's `SdrVideo` between a
+player and a `VideoOutput` made HDR SDR on the CPU, seven cores for a 4K
+clip; it still works, and hands a `VideoView` its frames untouched.)
 
 ```qml
-SdrVideo { id: sdr; output: video }
-MediaPlayer { source: url; videoOutput: sdr }
-VideoOutput { id: video }
+MediaPlayer { source: url; videoOutput: video }
+VideoView { id: video; anchors.fill: parent; fillMode: VideoView.PreserveAspectCrop }
 ```
 
 Pinhole's keys are application shortcuts, and a field with the keys takes
@@ -600,7 +622,7 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
 | `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the service makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)` (API 4): as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
 | `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did` |
-| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later |
+| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). `cancel()` asks it to end (SIGTERM) and kills it a second later. `sqlite3`, a clipboard tool (`wl-copy`, `xclip`…) and `xdg-user-dir` are refused, by name, path or in a shell's line: rejected with `refused` (`pinhole.query`, `copyFile`, `picturePath`) |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |
 | `keepAwake(on)` | the screen kept on, no screensaver and no lock, while `on`, as the Photo frame does while it shows; `false` lets it go, and so does the plugin turned off or loaded again, and Pinhole quitting or crashing. Whether the screen is kept on now: not where it cannot be (not on Wayland, the window hidden, or on a workspace not shown), which it then is once it can |

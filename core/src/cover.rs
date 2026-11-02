@@ -9,8 +9,10 @@
 //! a dark night scene or a blue one under water still has some.
 //!
 //! An HDR video's frame (HLG, as an iPhone records, or PQ) is tone mapped
-//! to SDR as it is taken (docs/hdr.md, H2): its codes read as SDR's are
-//! flat and grey.
+//! to SDR as it is taken (docs/hdr.md, H2), as the window plays it
+//! (app/src/shaders/hdrvideo.frag): its codes read as SDR's are flat and
+//! grey, and a cover in another curve would jump in brightness as the
+//! video starts.
 
 use std::fs::File;
 use std::path::Path;
@@ -29,15 +31,131 @@ const DULL: f64 = 6.0;
 const CANDIDATES: u32 = 7;
 
 /// How covers are made: part of a folder's video's key, so that its cover
-/// is made again once when this changes. 2: HDR tone mapped.
-pub const VERSION: &str = "2";
+/// is made again once when this changes. 2: HDR tone mapped. 3: by
+/// BT.2390, as the window plays it.
+pub const VERSION: &str = "3";
 
-/// An HDR frame made SDR: linear light with SDR white at 203 nits
-/// (BT.2408), BT.2020 to BT.709, Hable's curve on the highlights, then
-/// BT.709 again. ffmpeg's tonemap has no BT.2390; Hable's is the nearest
-/// of its curves.
-const TONE_MAP: &str =
-    "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+/// SDR white, in nits (BT.2408).
+const SDR_WHITE: f64 = 203.0;
+/// HLG's display peak, in nits.
+const HLG_PEAK: f64 = 1000.0;
+const PQ_M1: f64 = 2610.0 / 16384.0;
+const PQ_M2: f64 = 2523.0 / 4096.0 * 128.0;
+const PQ_C1: f64 = 3424.0 / 4096.0;
+const PQ_C2: f64 = 2413.0 / 4096.0 * 32.0;
+const PQ_C3: f64 = 2392.0 / 4096.0 * 32.0;
+
+/// A video's HDR curve.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Curve {
+    Hlg,
+    /// PQ, with its peak in nits.
+    Pq(f64),
+}
+
+fn pq_to_nits(e: f64) -> f64 {
+    let p = e.clamp(0.0, 1.0).powf(1.0 / PQ_M2);
+    10000.0 * ((p - PQ_C1).max(0.0) / (PQ_C2 - PQ_C3 * p)).powf(1.0 / PQ_M1)
+}
+
+fn nits_to_pq(nits: f64) -> f64 {
+    let y = (nits / 10000.0).clamp(0.0, 1.0).powf(PQ_M1);
+    ((PQ_C1 + PQ_C2 * y) / (1.0 + PQ_C3 * y)).powf(PQ_M2)
+}
+
+/// HLG's inverse OETF: a code to scene light from 0 to 1.
+fn hlg_to_scene(e: f64) -> f64 {
+    let e = e.clamp(0.0, 1.0);
+    if e <= 0.5 { e * e / 3.0 } else { (((e - 0.55991073) / 0.17883277).exp() + 0.28466892) / 12.0 }
+}
+
+/// BT.2390's EETF from a source peaking at `peak` nits to SDR white: nits
+/// to linear SDR, 1 its white (colour.cpp's eetfToSdr).
+fn eetf_to_sdr(nits: f64, peak: f64) -> f64 {
+    if peak <= SDR_WHITE {
+        return nits.min(SDR_WHITE) / SDR_WHITE;
+    }
+    let top = nits_to_pq(peak);
+    let max_lum = nits_to_pq(SDR_WHITE) / top;
+    let knee = 1.5 * max_lum - 0.5;
+    let e1 = (nits_to_pq(nits) / top).min(1.0);
+    let mut e2 = e1;
+    if e1 >= knee {
+        let t = (e1 - knee) / (1.0 - knee);
+        let (t2, t3) = (t * t, t * t * t);
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * knee + (t3 - 2.0 * t2 + t) * (1.0 - knee) + (-2.0 * t3 + 3.0 * t2) * max_lum;
+    }
+    pq_to_nits(e2 * top).min(SDR_WHITE) / SDR_WHITE
+}
+
+/// An HDR pixel's R'G'B' (BT.2020, 0 to 1) in sRGB, 8 bits, as the window
+/// plays it: its light (HLG's OOTF at 1000 nits; PQ's EOTF), BT.2390's EETF
+/// on the largest channel, BT.2020 to sRGB, clipped.
+fn tone_map(rgb: [f64; 3], curve: Curve) -> [u8; 3] {
+    let mut c = rgb;
+    let peak = match curve {
+        Curve::Hlg => {
+            for v in &mut c {
+                *v = hlg_to_scene(*v);
+            }
+            let ys = (0.2627 * c[0] + 0.6780 * c[1] + 0.0593 * c[2]).clamp(0.0, 1.0);
+            let gain = HLG_PEAK * ys.powf(0.2);
+            for v in &mut c {
+                *v *= gain;
+            }
+            HLG_PEAK
+        }
+        Curve::Pq(peak) => {
+            for v in &mut c {
+                *v = pq_to_nits(*v);
+            }
+            peak
+        }
+    };
+    let most = c[0].max(c[1]).max(c[2]);
+    let f = if most > 1e-6 { eetf_to_sdr(most.min(peak), peak) / most } else { 1.0 / SDR_WHITE };
+    const TO_SRGB: [[f64; 3]; 3] = [[1.6605, -0.5876, -0.0728], [-0.1246, 1.1329, -0.0083], [-0.0182, -0.1006, 1.1187]];
+    let mut out = [0u8; 3];
+    for (k, row) in TO_SRGB.iter().enumerate() {
+        let v = ((row[0] * c[0] + row[1] * c[1] + row[2] * c[2]) * f).clamp(0.0, 1.0);
+        let v = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+        out[k] = (v * 255.0).round() as u8;
+    }
+    out
+}
+
+/// A PAM of 16-bit RGB (ffmpeg's `pam` of `rgb48be`) as its R'G'B', 0 to 1.
+fn read_pam(bytes: &[u8]) -> Option<(u32, u32, Vec<[f64; 3]>)> {
+    let end = bytes.windows(7).position(|w| w == b"ENDHDR\n")? + 7;
+    let header = std::str::from_utf8(&bytes[..end]).ok()?;
+    let (mut width, mut height, mut depth, mut max) = (0u32, 0u32, 0u32, 0u32);
+    for line in header.lines() {
+        let mut words = line.split_whitespace();
+        match (words.next(), words.next().and_then(|v| v.parse::<u32>().ok())) {
+            (Some("WIDTH"), Some(v)) => width = v,
+            (Some("HEIGHT"), Some(v)) => height = v,
+            (Some("DEPTH"), Some(v)) => depth = v,
+            (Some("MAXVAL"), Some(v)) => max = v,
+            _ => {}
+        }
+    }
+    if depth != 3 || max != 65535 || width == 0 || height == 0 {
+        return None;
+    }
+    let data = &bytes[end..];
+    let n = width as usize * height as usize;
+    if data.len() < n * 6 {
+        return None;
+    }
+    let pixels = data[..n * 6]
+        .chunks_exact(6)
+        .map(|p| {
+            let v = |i: usize| u16::from_be_bytes([p[i], p[i + 1]]) as f64 / 65535.0;
+            [v(0), v(2), v(4)]
+        })
+        .collect();
+    Some((width, height, pixels))
+}
 
 /// Whether a cover shows next to nothing.
 pub fn dull(image: &RgbImage) -> bool {
@@ -162,7 +280,7 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
         Some(d) if d >= 1.0 => (1..=CANDIDATES).map(|i| d * i as f64 / (CANDIDATES + 1) as f64).collect(),
         _ => vec![0.0],
     };
-    let hdr = probe.hdr;
+    let hdr = probe.curve;
     let from_start = times == [0.0];
     let mut best: Option<(f64, f64, Vec<u8>)> = None;
     let mut failed = None;
@@ -195,19 +313,34 @@ fn best_from(input: Input, edge: u32) -> Result<(f64, Vec<u8>)> {
 /// A JPEG of the frame `at` seconds in, at most `edge` on the long side.
 pub fn frame(video: &Path, at: f64, edge: u32) -> Result<Vec<u8>> {
     let input = Input::Path(video);
-    frame_from(input, at, edge, probe(input)?.hdr)
+    frame_from(input, at, edge, probe(input)?.curve)
 }
 
-fn frame_from(input: Input, at: f64, edge: u32, hdr: bool) -> Result<Vec<u8>> {
+/// An HDR frame, scaled, comes as 16-bit R'G'B' (its own matrix, full
+/// range) and is tone mapped here (tone_map), then made a JPEG.
+fn frame_from(input: Input, at: f64, edge: u32, hdr: Option<Curve>) -> Result<Vec<u8>> {
     let fit = format!("scale={edge}:{edge}:force_original_aspect_ratio=decrease");
-    let scale = if hdr { format!("{TONE_MAP},{fit}") } else { fit };
     let mut ffmpeg = input.command("ffmpeg", &["-threads", "1", "-ss", &format!("{at:.3}")])?;
-    ffmpeg.args(["-frames:v", "1", "-vf", &scale, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
+    ffmpeg.args(["-frames:v", "1", "-vf"]);
+    if hdr.is_some() {
+        ffmpeg.args([&format!("{fit}:out_range=pc,format=rgb48be"), "-f", "image2pipe", "-vcodec", "pam", "-"]);
+    } else {
+        ffmpeg.args([&fit, "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]);
+    }
     let output = crate::background::output(&mut ffmpeg).map_err(|e| crate::render::failed(e, "ffmpeg", input.of_file()))?;
     if output.stdout.is_empty() {
         return Err(input.turned_down(crate::render::said(&format!("no frame at {at:.1} s"), &output.stderr)));
     }
-    Ok(output.stdout)
+    let Some(curve) = hdr else { return Ok(output.stdout) };
+    let (width, height, pixels) =
+        read_pam(&output.stdout).ok_or_else(|| input.turned_down(format!("no frame read at {at:.1} s")))?;
+    let mut image = RgbImage::new(width, height);
+    for (pixel, rgb) in image.pixels_mut().zip(pixels) {
+        *pixel = image::Rgb(tone_map(rgb, curve));
+    }
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85).encode_image(&image)?;
+    Ok(jpeg)
 }
 
 /// What ffprobe tells of a video.
@@ -215,28 +348,48 @@ fn frame_from(input: Input, at: f64, edge: u32, hdr: bool) -> Result<Vec<u8>> {
 struct Probe {
     /// Its length in seconds, if it can tell.
     duration: Option<f64>,
-    /// Its picture's curve is HLG or PQ.
-    hdr: bool,
+    /// Its picture's curve, if HLG or PQ.
+    curve: Option<Curve>,
 }
 
 /// The video's length and whether it is HDR, from ffprobe; an error only
 /// when it was stopped, hung or spinning.
 fn probe(input: Input) -> Result<Probe> {
     let mut ffprobe = input.command("ffprobe", &["-select_streams", "v:0"])?;
-    ffprobe.args(["-show_entries", "format=duration:stream=color_transfer", "-of", "default=noprint_wrappers=1"]);
+    ffprobe.args([
+        "-show_entries",
+        "format=duration:stream=color_transfer:stream_side_data=max_luminance",
+        "-of",
+        "default=noprint_wrappers=1",
+    ]);
     let output = match crate::background::output(&mut ffprobe) {
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(crate::render::failed(e, "ffprobe", input.of_file())),
         Err(_) => return Ok(Probe::default()),
     };
     let mut probe = Probe::default();
+    let (mut transfer, mut peak) = (String::new(), None::<f64>);
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         match line.trim().split_once('=') {
             Some(("duration", d)) => probe.duration = d.parse().ok().filter(|d: &f64| d.is_finite()),
-            Some(("color_transfer", t)) => probe.hdr = matches!(t, "arib-std-b67" | "smpte2084"),
+            Some(("color_transfer", t)) => transfer = t.to_string(),
+            // Its mastering display's, "10000000/10000" in nits.
+            Some(("max_luminance", l)) => {
+                peak = match l.split_once('/') {
+                    Some((a, b)) => a.parse::<f64>().ok().zip(b.parse::<f64>().ok()).map(|(a, b)| a / b),
+                    None => l.parse().ok(),
+                }
+            }
             _ => {}
         }
     }
+    probe.curve = match transfer.as_str() {
+        "arib-std-b67" => Some(Curve::Hlg),
+        // As the window has it: 1000 nits unless it says a peak above SDR
+        // white and below PQ's top.
+        "smpte2084" => Some(Curve::Pq(peak.filter(|p| *p > SDR_WHITE && *p < 10000.0).unwrap_or(1000.0))),
+        _ => None,
+    };
     Ok(probe)
 }
 
@@ -302,8 +455,24 @@ mod tests {
         s / (image.width() * image.height()) as f64
     }
 
+    /// The window's mapping (app/src/shaders/hdrvideo.frag): HLG's
+    /// reference white (75 %, 203 nits) is BT.2390's 0.78 of SDR white,
+    /// its peak SDR white, as colour.cpp's eetfToSdr has them.
     #[test]
-    fn an_hlg_video_gets_a_cover_as_colourful_as_its_sdr_self() {
+    fn hdr_is_tone_mapped_as_the_window_plays_it() {
+        assert_eq!(tone_map([0.75; 3], Curve::Hlg), [229; 3]);
+        assert_eq!(tone_map([1.0; 3], Curve::Hlg), [255; 3]);
+        assert_eq!(tone_map([0.0; 3], Curve::Hlg), [0; 3]);
+        // PQ's 1000 nits at a 1000-nit peak: SDR white; 203 nits under it.
+        assert_eq!(tone_map([nits_to_pq(1000.0); 3], Curve::Pq(1000.0)), [255; 3]);
+        assert_eq!(tone_map([nits_to_pq(203.0); 3], Curve::Pq(1000.0)), [229; 3]);
+        // A saturated BT.2020 red beyond sRGB, clipped, not wrapped.
+        let red = tone_map([0.75, 0.0, 0.0], Curve::Hlg);
+        assert!(red[0] > 200 && red[1] == 0 && red[2] == 0, "{red:?}");
+    }
+
+    #[test]
+    fn an_hlg_video_gets_a_cover_more_colourful_than_its_codes() {
         if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
             return;
         }
@@ -338,10 +507,12 @@ mod tests {
         let cover = |video: &Path| image::load_from_memory(&pick(Input::Path(video), 160).unwrap()).unwrap().to_rgb8();
         let (s_sdr, s_hlg) = (saturation(&cover(&sdr)), saturation(&cover(&hlg)));
         // Its codes read as SDR's, as before: far greyer.
-        let flat = image::load_from_memory(&frame_from(Input::Path(&hlg), 1.0, 160, false).unwrap()).unwrap().to_rgb8();
+        let flat = image::load_from_memory(&frame_from(Input::Path(&hlg), 1.0, 160, None).unwrap()).unwrap().to_rgb8();
         let s_flat = saturation(&flat);
         eprintln!("saturation: SDR {s_sdr:.3}, HLG tone mapped {s_hlg:.3}, HLG as SDR {s_flat:.3}");
-        assert!((s_hlg - s_sdr).abs() <= 0.1 * s_sdr, "HLG {s_hlg:.3} against SDR {s_sdr:.3}");
+        // zscale's HLG is not BT.2100's own (no OOTF as BT.2100 has it), so
+        // not as colourful as the SDR it came from; far more than its codes.
+        assert!(s_hlg > 1.15 * s_flat, "HLG {s_hlg:.3} against its codes {s_flat:.3}");
         assert!(s_flat < 0.85 * s_sdr, "untouched HLG {s_flat:.3} against SDR {s_sdr:.3}");
         let _ = std::fs::remove_dir_all(&dir);
     }

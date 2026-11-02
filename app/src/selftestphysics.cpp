@@ -244,7 +244,7 @@ void press(QQuickWindow *window, int key) {
 
 } // namespace
 
-void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid) {
+void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir) {
     auto failures = std::make_shared<int>(0);
     auto check = [failures](bool ok, const QString &what) {
         say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
@@ -374,6 +374,45 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid) {
                                      .arg(grids.back(), 0, 'f', 3));
     };
 
+    // A hard flick into the top, let go short of it, from 3000 px below it
+    // (or the bottom): how far past the end the coast bounces, at most a
+    // quarter of the view (`extent`); a frame of it at its furthest, named
+    // `frame`, in `dir`.
+    auto bounce = [=](const QString &name, const Mover &mover, const std::function<void(double)> &jump, double extent,
+                      const QString &frame) {
+        Gesture flick{"a hard flick", {{0, {}, {}, Qt::ScrollBegin}}};
+        for (int i = 1; i <= 3; ++i)
+            flick.inputs.push_back({i * 8.0, {0, 60}, {0, 480}, Qt::ScrollUpdate});
+        flick.inputs.push_back({32, {}, {}, Qt::ScrollEnd});
+        clockBase += 10000;
+        const double low = mover.ends().first;
+        jump(std::min(low + 3000, mover.ends().second));
+        double furthest = 0;
+        bool grabbed = false;
+        size_t next = 0;
+        for (int k = 0; k < kFrames; ++k) {
+            const double t = k * kFrame * 1000;
+            while (next < flick.inputs.size() && flick.inputs[next].t <= t)
+                deliver(window, flick.inputs[next++], mover.at, clockBase);
+            mover.advance(kFrame);
+            const double past = low - mover.position();
+            // Past its furthest: the frame before was it, near enough.
+            if (!grabbed && furthest > 1 && past < furthest) {
+                grabbed = true;
+                if (!dir.isEmpty())
+                    window->grabWindow().save(QStringLiteral("%1/%2.png").arg(dir, frame));
+            }
+            if (t > 32)
+                furthest = std::max(furthest, past);
+        }
+        check(furthest <= 0.25 * extent + 2, QStringLiteral("%1, a hard flick into its top: %2 px past it at most, of a "
+                                                           "view of %3 px (a quarter: %4)")
+                                                 .arg(name)
+                                                 .arg(furthest, 0, 'f', 0)
+                                                 .arg(extent, 0, 'f', 0)
+                                                 .arg(0.25 * extent, 0, 'f', 0));
+    };
+
     // The steps: the grid's curves, then each plugin's screen.
     struct Step {
         QString what;
@@ -392,6 +431,14 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid) {
                            say(QStringLiteral("the grid, %1: %2 px in 1.6 s").arg(g.name).arg(gridCurves->last().back(), 0, 'f', 1));
                        }
                        *gridPinch = gridPinchCurve();
+                       // Its top's thumbnails come, for the bounce's frame.
+                       grid->jumpToFraction(0);
+                   },
+                   2000});
+    steps->append({"the grid bounced", [=] {
+                       bounce(QStringLiteral("the grid"), gridMover,
+                              [grid](double at) { grid->jumpToFraction(at / std::max(1.0, grid->scrollRange())); },
+                              grid->height(), QStringLiteral("grid-bounce"));
                        grid->jumpToFraction(0.5);
                    },
                    300});
@@ -430,6 +477,12 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid) {
                                f->setProperty("topMargin", before);
                                f->setProperty("bottomMargin", after);
                                f->setProperty("contentY", -before.toDouble());
+                           }
+                           if (f && name == QLatin1String("the side panel")) {
+                               const Mover mover = scrollerMover(name, scroller);
+                               bounce(name, mover, [f](double at) { f->setProperty("contentY", at); }, f->height(),
+                                      QStringLiteral("panel-bounce"));
+                               f->setProperty("contentY", -f->property("topMargin").toDouble());
                            }
                            shown(false);
                        },

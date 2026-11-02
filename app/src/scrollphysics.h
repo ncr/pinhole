@@ -117,6 +117,9 @@ private:
     double overscroll() const;
     double rubberBand(double over) const;
     double boundFor(double position) const;
+    // Past an end, a spring brings it back, from a coast (`coasting`) or a
+    // drag let go there: never further out than a quarter of the view.
+    void bounce(bool coasting);
 
     Params m_p;
     double m_min = 0, m_max = 0, m_extent = 1000;

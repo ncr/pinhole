@@ -8,7 +8,7 @@ license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
          'libjpeg-turbo' 'libheif' 'lcms2' 'wayland' 'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv' 'sqlite')
 optdepends=('localsend: Send to phone opens its window for a device not listed')
-makedepends=('rust' 'gcc' 'make' 'wayland-protocols')
+makedepends=('rust' 'gcc' 'make' 'wayland-protocols' 'qt6-shadertools')
 # makepkg's LTO makes GCC bitcode of the C in sqlite and ring, which the
 # core's linker (lld) cannot read.
 options=('!lto')

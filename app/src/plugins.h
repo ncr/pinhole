@@ -574,6 +574,12 @@ public:
         QStringList errors, warnings;
     };
     static Findings footguns(const QString &dir);
+    // Why pinhole.run refuses to run `program` with `arguments`, else "":
+    // sqlite3 (pinhole.query), a clipboard tool (pinhole.copyFile) or
+    // xdg-user-dir (pinhole.picturePath), by name or path, after env and
+    // the like, or in a shell's line (`sh -c "…"`): what check refuses in
+    // the code, however the name was made.
+    static QString refusedRun(const QString &program, const QStringList &arguments);
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);

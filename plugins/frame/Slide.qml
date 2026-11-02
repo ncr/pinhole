@@ -414,10 +414,12 @@ Item {
             visible: opacity > 0
             Behavior on opacity { enabled: slide.running; NumberAnimation { duration: 500 } }
         }
-        VideoOutput {
+        // An HDR clip (an iPhone's HLG) tone mapped as it is drawn, as the
+        // viewer's is.
+        VideoView {
             id: clipOutput
             anchors.fill: parent
-            fillMode: VideoOutput.PreserveAspectCrop
+            fillMode: VideoView.PreserveAspectCrop
             visible: false
         }
     }

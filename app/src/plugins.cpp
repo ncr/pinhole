@@ -1,5 +1,6 @@
 #include "plugins.h"
 #include "sdrvideo.h"
+#include "videoview.h"
 #include "selftest.h"
 
 #include "encoder.h"
@@ -881,6 +882,17 @@ QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
 }
 
 QJSValue PluginHost::run(const QString &program, const QStringList &arguments, const QJSValue &options) {
+    // What check refuses, however its name was made: not run.
+    if (const QString refused = Plugins::refusedRun(program, arguments); !refused.isEmpty()) {
+        qWarning().noquote() << m_id + ":" << refused;
+        if (options.isCallable()) {
+            call(options, {-1, QString(), refused});
+            return {};
+        }
+        const Deferred deferred = defer([] {});
+        settle(m_generation, deferred.reject, error(QStringLiteral("refused"), refused));
+        return deferred.promise;
+    }
     QString path = program;
     if (!program.contains('/') && QFileInfo(m_dir + '/' + program).isExecutable())
         path = m_dir + '/' + program;
@@ -1386,6 +1398,9 @@ void Plugins::registerTypes() {
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
     // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
     qmlRegisterType<SdrVideo>("Pinhole.Plugin", 1, 0, "SdrVideo");
+    // A player's video drawn right, HDR tone mapped on the GPU (API 5): what
+    // a plugin shows video with, never a VideoOutput.
+    qmlRegisterType<VideoView>("Pinhole.Plugin", 1, 0, "VideoView");
     // The grid's scrolling over a Flickable of one's own (scroller.h, API
     // 4): ScrollList, ScrollGrid and ScrollArea are each one with it.
     qmlRegisterType<Scroller>("Pinhole.Plugin", 1, 0, "Scroller");
@@ -2128,7 +2143,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"},
         {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
-        {5, "pinhole.query"}, {5, "pinhole.picturePath"}};
+        {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -2178,6 +2193,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"Choices", QRegularExpression(QStringLiteral("\\bChoices\\s*\\{"))},
         {"pinhole.query", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*query\\s*\\("))},
         {"pinhole.picturePath", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*picturePath\\b"))},
+        {"VideoView", QRegularExpression(QStringLiteral("\\bVideoView\\s*\\{"))},
     };
     // pinhole's signals, in a Connections to it.
     static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
@@ -2310,6 +2326,61 @@ QString withoutComments(const QString &source) {
 
 int lineAt(const QString &text, qsizetype position) { return int(text.left(position).count('\n')) + 1; }
 
+// The text with the words given to qsTr() blanked, every character in its
+// place: words shown ("Kept in ~/Pictures/Pinhole") are not code.
+QString withoutShownWords(const QString &text) {
+    static const QRegularExpression tr(QStringLiteral("\\bqsTr(?:anslate|Id)?\\s*\\("));
+    QString out = text;
+    for (auto m = tr.globalMatch(text); m.hasNext();) {
+        qsizetype k = m.next().capturedEnd();
+        int depth = 1;
+        QChar quote;
+        while (k < text.size() && depth > 0) {
+            const QChar c = text[k];
+            if (!quote.isNull()) {
+                if (c == '\\' && k + 1 < text.size()) {
+                    out[k] = out[k + 1] = ' ';
+                    k += 2;
+                    continue;
+                }
+                if (c == quote)
+                    quote = QChar();
+                else if (c != '\n')
+                    out[k] = ' ';
+            } else if (c == '"' || c == '\'' || c == '`') {
+                quote = c;
+            } else if (c == '(') {
+                ++depth;
+            } else if (c == ')') {
+                --depth;
+            }
+            ++k;
+        }
+    }
+    return out;
+}
+
+// The type of the object whose `{` holds `position` ("PinholePlugin",
+// "Item"), without its module's name, and where that `{` is; -1 if none.
+std::pair<QString, qsizetype> enclosingObject(const QString &code, qsizetype position) {
+    static const QRegularExpression type(QStringLiteral("(?:\\w+\\s*\\.\\s*)?(\\w+)\\s*$"));
+    int depth = 0;
+    for (qsizetype k = position - 1; k >= 0; --k) {
+        const QChar c = code[k];
+        if (c == '}' || c == ')' || c == ']') {
+            ++depth;
+        } else if (c == '{' || c == '(' || c == '[') {
+            if (depth > 0) {
+                --depth;
+            } else if (c == '{') {
+                const qsizetype from = std::max<qsizetype>(0, k - 80);
+                return {type.match(code.mid(from, k - from)).captured(1), k};
+            }
+        }
+    }
+    return {QString(), -1};
+}
+
 // The handler a statement at `position` is in, if any: "onTriggered",
 // "onWidthChanged"…, or "" in a function or a binding of its own.
 QString handlerAround(const QString &code, qsizetype position) {
@@ -2347,6 +2418,37 @@ QString handlerAround(const QString &code, qsizetype position) {
 
 } // namespace
 
+QString Plugins::refusedRun(const QString &program, const QStringList &arguments) {
+    static const QStringList refused = {"sqlite3", "wl-copy", "wl-paste", "xclip", "xsel", "xdg-user-dir"};
+    // Run what they are given: a program and its arguments.
+    static const QStringList wrappers = {"env",   "nice",   "nohup", "setsid", "timeout", "stdbuf", "ionice", "flock",
+                                         "xargs", "time",   "sudo",  "doas",   "uwsm",    "uwsm-app", "app2unit",
+                                         "systemd-run", "busybox"};
+    // Run a line of their own: its words looked at.
+    static const QStringList shells = {"sh", "bash", "dash", "zsh", "ksh", "mksh", "fish", "busybox"};
+    static const QRegularExpression named(
+        QStringLiteral("(?<![\\w.-])(sqlite3|wl-copy|wl-paste|xclip|xsel|xdg-user-dir)(?![\\w.-])"));
+    auto why = [](const QString &name) {
+        if (name == QLatin1String("sqlite3"))
+            return tr("sqlite3 is refused: it opens the library while the service writes it. Use pinhole.query");
+        if (name == QLatin1String("xdg-user-dir"))
+            return tr("xdg-user-dir is refused: in a self-test it finds the real Pictures. Use pinhole.picturePath");
+        return tr("%1 is refused: it sets the session's clipboard, a self-test's too. Use pinhole.copyFile").arg(name);
+    };
+    const QString base = QFileInfo(program).fileName();
+    if (refused.contains(base))
+        return why(base);
+    if (wrappers.contains(base) || shells.contains(base))
+        for (const QString &argument : arguments)
+            if (const QString name = QFileInfo(argument).fileName(); refused.contains(name))
+                return why(name);
+    if (shells.contains(base))
+        for (const QString &argument : arguments)
+            if (const auto m = named.match(argument); m.hasMatch())
+                return why(m.captured(1));
+    return {};
+}
+
 Plugins::Findings Plugins::footguns(const QString &dir) {
     Findings found;
     // Each by the words that give it away in its code, strings and
@@ -2364,27 +2466,55 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
          QStringLiteral("a GridView scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollGrid")},
         {QRegularExpression(QStringLiteral("\\b(Flickable|ScrollView)\\s*\\{")),
          QStringLiteral("a %1 scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollArea")},
-        {QRegularExpression(QStringLiteral("\\b(PinchHandler|PinchArea)\\s*\\{")),
+        {QRegularExpression(QStringLiteral("\\b(TableView|TreeView|HorizontalHeaderView|VerticalHeaderView)\\s*\\{")),
+         QStringLiteral("a %1 scrolls not as the grid does, and lets the wheel through to the photos at its ends: use ScrollGrid "
+                        "or ScrollArea")},
+        {QRegularExpression(QStringLiteral("\\b(PathView|Tumbler|SwipeView)\\s*\\{")),
+         QStringLiteral("a %1 flicks not as the grid does, and lets the wheel through to the photos: use ScrollList, or a "
+                        "Panel's steps")},
+        {QRegularExpression(QStringLiteral("\\b(PinchHandler|PinchArea|MultiPointTouchArea)\\s*\\{")),
          QStringLiteral("a %1 zooms not as the grid does, and lets a touchpad's pinch through to the photos: use PinchZoom")},
+        // QML made from a string: what it holds is never looked at.
+        {QRegularExpression(QStringLiteral("\\bQt\\s*\\.\\s*createQmlObject\\s*\\(")),
+         QStringLiteral("Qt.createQmlObject makes QML from a string, which check cannot look over: put it in a file of the "
+                        "plugin's, made with a Loader or Qt.createComponent")},
+        // Video: Qt's own output shows HDR wrong.
+        {QRegularExpression(QStringLiteral("\\bVideoOutput\\s*\\{")),
+         QStringLiteral("a VideoOutput shows an HDR video (an iPhone's) flat and grey, or its brightest colours broken: use "
+                        "VideoView")},
         {QRegularExpression(QStringLiteral("\\bWheelHandler\\s*\\{")),
          QStringLiteral("a WheelHandler: use ScrollList, ScrollGrid or ScrollArea to scroll, a Panel's steps to step")},
         {QRegularExpression(QStringLiteral("\\bonWheel\\s*:")),
          QStringLiteral("a MouseArea's onWheel: a Panel or a Card under the controls takes the wheel, ScrollList, ScrollGrid "
                         "and ScrollArea scroll, a Panel's steps step")},
-        // A program, by its name: a string.
-        {QRegularExpression(QStringLiteral("[\"']sqlite3[\"']")),
+        // A program, by its name anywhere in a string: on its own, by its
+        // path, in a shell's line (`sh -c "…"`, backticks); or put together.
+        // (pinhole.run refuses them too, whatever made the name.)
+        {QRegularExpression(QStringLiteral("[\"'`][^\"'`\\n]*(?<![\\w.-])(sqlite3)(?![\\w.-])|\\b(sqlite)[\"'`]\\s*\\+\\s*[\"'`]3")),
          QStringLiteral("sqlite3 on the library opens it while the service writes it (\"database is locked\"): use pinhole.query"),
          true},
-        {QRegularExpression(QStringLiteral("[\"'](wl-copy|wl-paste|xclip|xsel)[\"']")),
+        {QRegularExpression(QStringLiteral("[\"'`][^\"'`\\n]*(?<![\\w.-])(wl-copy|wl-paste|xclip|xsel)(?![\\w.-])")),
          QStringLiteral("%1 sets the session's clipboard, a self-test's too: use pinhole.copyFile"), true},
-        {QRegularExpression(QStringLiteral("[\"']xdg-user-dir[\"']")),
+        {QRegularExpression(QStringLiteral("[\"'`][^\"'`\\n]*(?<![\\w.-])(xdg-user-dir)(?![\\w.-])")),
          QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir"),
          true},
         {QRegularExpression(QStringLiteral("\\bPicturesLocation\\b")),
          QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir")},
     };
-    // In its strings: Pictures by its path.
-    static const QRegularExpression picturesPath(QStringLiteral("[\"'`][^\"'`\\n]*(~/Pictures|\\$HOME/Pictures|/home/[^/\"']+/Pictures)"));
+    // In its strings: Pictures by its path, whole or a part to build one
+    // with ("/Pictures/Pinhole/").
+    static const QRegularExpression picturesPath(
+        QStringLiteral("[\"'`][^\"'`\\n]*?((?:~|\\$HOME|\\$\\{HOME\\}|/home/[^/\"'`]+)?/Pictures)(?![\\w-])"));
+    // QtMultimedia's Video, a VideoOutput of its own.
+    static const QRegularExpression multimedia(QStringLiteral("^\\s*import\\s+QtMultimedia\\b"), QRegularExpression::MultilineOption);
+    static const QRegularExpression video(QStringLiteral("\\bVideo\\s*\\{"));
+    // A MouseArea over the whole window: the wheel and a pinch go through
+    // it to the photos.
+    static const QRegularExpression mouseArea(QStringLiteral("\\bMouseArea\\s*\\{"));
+    static const QRegularExpression fills(QStringLiteral("\\banchors\\s*\\.\\s*fill\\s*:\\s*parent\\b"));
+    // The help's words: each entry's second string.
+    static const QRegularExpression helpList(QStringLiteral("\\bhelp\\s*:\\s*\\["));
+    static const QRegularExpression helpEntry(QStringLiteral("\\[\\s*(?:\"(?:[^\"\\\\]|\\\\.)*\"|[^,\\]]*)\\s*,\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
     // Words shown as they are, and keys as Qt writes them in what is shown.
     static const QRegularExpression said(QStringLiteral("\\bqsTr\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
     static const QRegularExpression shown(QStringLiteral(
@@ -2415,24 +2545,47 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         const QString source = QString::fromUtf8(f.readAll());
         const QString code = codeOnly(source);
         const QString text = withoutComments(source);
+        // Its strings but the words it shows.
+        const QString literals = withoutShownWords(text);
         for (const Rule &rule : rules)
-            for (auto m = rule.pattern.globalMatch(rule.inStrings ? text : code); m.hasNext();) {
+            for (auto m = rule.pattern.globalMatch(rule.inStrings ? literals : code); m.hasNext();) {
                 const auto match = m.next();
                 QString what = rule.what;
                 if (what.contains(QLatin1String("%1")))
                     what = what.arg(match.captured(1));
                 found.errors << QStringLiteral("%1:%2: %3")
                                     .arg(file)
-                                    .arg(lineAt(rule.inStrings ? text : code, match.capturedStart()))
+                                    .arg(lineAt(rule.inStrings ? literals : code, match.capturedStart()))
                                     .arg(what);
             }
-        for (auto m = picturesPath.globalMatch(text); m.hasNext();) {
+        for (auto m = picturesPath.globalMatch(literals); m.hasNext();) {
             const auto match = m.next();
             found.errors << QStringLiteral("%1:%2: %3 by hand is the real Pictures in a self-test: use pinhole.picturePath, "
                                            "or pinhole.picturesDir")
                                 .arg(file)
-                                .arg(lineAt(text, match.capturedStart()))
+                                .arg(lineAt(literals, match.capturedStart()))
                                 .arg(match.captured(1));
+        }
+        if (multimedia.match(code).hasMatch())
+            for (auto m = video.globalMatch(code); m.hasNext();)
+                found.errors << QStringLiteral("%1:%2: a Video shows an HDR video (an iPhone's) flat and grey, or its "
+                                               "brightest colours broken: use a MediaPlayer and a VideoView")
+                                    .arg(file)
+                                    .arg(lineAt(code, m.next().capturedStart()));
+        // A MouseArea filling the plugin's root, or what fills it.
+        for (auto m = mouseArea.globalMatch(code); m.hasNext();) {
+            const auto match = m.next();
+            if (!fills.match(ownLines(code, match.capturedEnd() - 1)).hasMatch())
+                continue;
+            auto [type, open] = enclosingObject(code, match.capturedStart());
+            while ((type == QLatin1String("Item") || type == QLatin1String("Rectangle")) && fills.match(ownLines(code, open)).hasMatch())
+                std::tie(type, open) = enclosingObject(code, open);
+            if (type == QLatin1String("PinholePlugin"))
+                found.errors << QStringLiteral("%1:%2: a MouseArea over the whole window lets the wheel and a touchpad's "
+                                               "pinch through to the photos: put what the plugin shows in a Panel, which "
+                                               "takes them")
+                                    .arg(file)
+                                    .arg(lineAt(code, match.capturedStart()));
         }
         for (auto m = said.globalMatch(text); m.hasNext();) {
             const auto match = m.next();
@@ -2443,6 +2596,20 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                       .arg(file)
                                       .arg(lineAt(text, match.capturedStart()))
                                       .arg(key.captured(0));
+        }
+        // The help's words, each entry's second.
+        for (auto m = helpList.globalMatch(text); m.hasNext();) {
+            const qsizetype open = m.next().capturedEnd() - 1;
+            const QString list = text.mid(open, closing(text, open) - open + 1);
+            for (auto e = helpEntry.globalMatch(list); e.hasNext();) {
+                const auto entry = e.next();
+                const QString words = entry.captured(1);
+                if (words.contains(wordy) && !brand.match(words).hasMatch())
+                    found.warnings << QStringLiteral("%1:%2: \"%3\" is shown as it is, in every language: qsTr(\"%3\")")
+                                          .arg(file)
+                                          .arg(lineAt(text, open + entry.capturedStart(1)))
+                                          .arg(words);
+            }
         }
         for (auto m = shown.globalMatch(text); m.hasNext();) {
             const auto match = m.next();

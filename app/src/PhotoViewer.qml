@@ -220,24 +220,20 @@ Item {
             readonly property bool wanted: viewer.zoom > 1.3 && originalImage.status === Image.Ready
             onWantedChanged: if (wanted && source.toString() === "") source = originalImage.source
         }
-        // HDR video (an iPhone's HLG, Dolby Vision) made SDR on its way
-        // (sdrvideo.h); any other as it is.
-        SdrVideo {
-            id: sdrVideo
-            output: videoOutput
-        }
         MediaPlayer {
             id: videoPlayer
             source: viewer.video ? viewer.videoSource : ""
-            videoOutput: sdrVideo
+            videoOutput: videoOutput
             audioOutput: AudioOutput { muted: root.muted || silent }
             onSourceChanged: if (source.toString() !== "" && viewer.open) play()
         }
-        VideoOutput {
+        // HDR video (an iPhone's HLG, Dolby Vision) tone mapped as it is
+        // drawn (videoview.h); any other as Qt draws it.
+        VideoView {
             id: videoOutput
             anchors.fill: parent
             visible: viewer.video && videoPlayer.playbackState !== MediaPlayer.StoppedState
-            fillMode: VideoOutput.PreserveAspectCrop
+            fillMode: VideoView.PreserveAspectCrop
         }
 
         // The plugins' layers, in their order, each made afresh for each

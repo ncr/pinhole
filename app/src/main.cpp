@@ -31,6 +31,7 @@
 #include "commands.h"
 #include "display.h"
 #include "sdrvideo.h"
+#include "videoview.h"
 #include "history.h"
 #include "markchoices.h"
 #include "marks.h"
@@ -207,6 +208,7 @@ int main(int argc, char *argv[]) {
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     qmlRegisterType<SdrVideo>("Pinhole", 1, 0, "SdrVideo");
+    qmlRegisterType<VideoView>("Pinhole", 1, 0, "VideoView");
     // What a plugin's QML imports (docs/plugins.md).
     Plugins::registerTypes();
     FrameStats stats;

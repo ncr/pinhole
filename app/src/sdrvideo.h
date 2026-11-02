@@ -24,6 +24,11 @@
 // channel, BT.2020 to sRGB, clipped; on the CPU, in bands on Qt's thread
 // pool, and handed on as an RGB frame. Any other frame is handed on as it
 // is, untouched.
+//
+// Slow: a 4K60 HLG clip takes seven cores and shows half its frames. What
+// shows video now is VideoView (videoview.h), which tone maps on the GPU;
+// SdrVideo stays for plugins of API 4, and hands frames to a VideoView
+// untouched.
 class SdrVideo : public QObject {
     Q_OBJECT
     // The VideoOutput (or a QVideoSink) the frames go on to.
@@ -55,6 +60,9 @@ private:
     QMutex m_busy;
     QVideoSink *m_targetSink = nullptr;
     std::atomic<bool> m_hdr{false};
+    // The output is a VideoView, which tone maps on the GPU as it draws:
+    // every frame handed on as it is.
+    bool m_passThrough = false;
     QMetaObject::Connection m_rhiFollow;
     // Pictures the frames made are drawn into, used again once shown.
     QList<QImage> m_buffers;

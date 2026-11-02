@@ -366,9 +366,10 @@ private slots:
     }
 
     void aFastCoastBouncesOnPastTheEnd() {
-        // Coasting fast into the end, or lifted fast past it: it goes on
-        // past it as far as its speed takes it, the grid and every panel
-        // alike (a Scroller has no gentler tuning), and comes back.
+        // Coasting fast into the end, or lifted fast past it: the grid and
+        // every panel alike (a Scroller has no gentler tuning), never
+        // further than a quarter of the view (or the drag's own stretch),
+        // and it comes back.
         for (const bool lifted : {false, true}) {
             ScrollPhysics p;
             p.setBounds(0, 3000, 1000);
@@ -384,8 +385,29 @@ private slots:
                 p.step(1.0 / 120);
                 most = std::max(most, p.position() - 3000);
             }
-            QVERIFY2(most - atLift > 150, qPrintable(QString::number(most - atLift)));
+            // Coasting, on past the end; lifted already stretched past a
+            // quarter, no further than the fingers took it.
+            if (!lifted)
+                QVERIFY2(most > 150, qPrintable(QString::number(most)));
+            QVERIFY2(most <= std::max(atLift, 250.0) + 0.5, qPrintable(QStringLiteral("%1, lifted at %2").arg(most).arg(atLift)));
             QCOMPARE(p.position(), 3000.0);
+        }
+        // The fastest flick into the end of a short panel (916 px): once
+        // 1,435 px past it, all its rows out of sight; now a quarter of it.
+        for (const double extent : {916.0, 3200.0}) {
+            ScrollPhysics p;
+            p.setBounds(0, 20000, extent);
+            p.jumpTo(10000);
+            p.fling(40000);
+            double most = 0;
+            for (int i = 0; i < 2000 && p.animating(); ++i) {
+                p.step(1.0 / 120);
+                most = std::max(most, p.position() - 20000);
+            }
+            // The tall one's slower bounce as it was, under its quarter.
+            QVERIFY2((extent > 1000 || most > 0.2 * extent) && most <= 0.25 * extent + 0.5,
+                     qPrintable(QStringLiteral("%1 past a view of %2").arg(most).arg(extent)));
+            QCOMPARE(p.position(), 20000.0);
         }
     }
 
@@ -4745,6 +4767,89 @@ PinholePlugin {
         write(dir.path() + "/i18n/pl.json", "{ \"Row\": \"Wiersz\" }\n");
         const Plugins::Findings clean = Plugins::footguns(dir.path());
         QVERIFY2(clean.errors.isEmpty() && clean.warnings.isEmpty(), qPrintable((clean.errors + clean.warnings).join('\n')));
+    }
+
+    // A reviewer's careless ways round check, each refused; and words
+    // shown that only name a program or Pictures are not.
+    void checkRefusesTheEvasions() {
+        QTemporaryDir dir;
+        write(dir.path() + "/Main.qml", R"qml(import QtQuick
+import QtQuick.Controls as C
+import QtMultimedia
+import Pinhole.Plugin
+PinholePlugin {
+    id: plugin
+    Component.onCompleted: {
+        Qt.createQmlObject("import QtQuick; Flickable { anchors.fill: parent }", plugin)
+        const prog = "sqlite" + "3"
+        pinhole.run("/usr/bin/sqlite3", ["x"])
+        pinhole.run("sh", ["-c", "sqlite3 x .tables"])
+        pinhole.run(`sqlite3`, ["x"])
+        pinhole.run("sh", ["-c", "wl-copy < f"])
+        const pics = pinhole.library.dir.split("/").slice(0, 3).join("/") + "/Pictures/Pinhole/x.png"
+        pinhole.run("sh", ["-c", "cp f $(xdg-user-dir PICTURES)"])
+    }
+    TableView { anchors.fill: parent }
+    PathView { model: 10 }
+    C.Tumbler { model: 10 }
+    MultiPointTouchArea { anchors.fill: parent }
+    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
+    Item {
+        anchors.fill: parent
+        MouseArea { anchors.fill: parent }
+    }
+    Panel { MouseArea { anchors.fill: parent } }
+    VideoOutput { }
+    Video { }
+    help: [["F9", "Untranslated help"], ["F10", qsTr("Translated")]]
+}
+)qml");
+        const Plugins::Findings found = Plugins::footguns(dir.path());
+        const QString errors = found.errors.join('\n'), warnings = found.warnings.join('\n');
+        for (const char *want : {"Main.qml:8: Qt.createQmlObject", "Main.qml:9: sqlite3", "Main.qml:10: sqlite3",
+                                 "Main.qml:11: sqlite3", "Main.qml:12: sqlite3", "Main.qml:13: wl-copy",
+                                 "Main.qml:14: /Pictures by hand", "Main.qml:15: Pictures found by hand",
+                                 "Main.qml:17: a TableView", "Main.qml:18: a PathView", "Main.qml:19: a Tumbler",
+                                 "Main.qml:20: a MultiPointTouchArea", "Main.qml:21: a MouseArea over the whole window",
+                                 "Main.qml:24: a MouseArea over the whole window", "Main.qml:27: a VideoOutput",
+                                 "Main.qml:28: a Video shows"})
+            QVERIFY2(errors.contains(QLatin1String(want)), qPrintable(QStringLiteral("%1 not in:\n%2").arg(want, errors)));
+        // The MouseArea in a Panel is the Panel's.
+        QVERIFY2(!errors.contains("Main.qml:26:"), qPrintable(errors));
+        QCOMPARE(found.errors.size(), 16);
+        QVERIFY2(warnings.contains("Main.qml:29: \"Untranslated help\" is shown as it is"), qPrintable(warnings));
+        QVERIFY2(!warnings.contains("Translated\" is shown"), qPrintable(warnings));
+
+        // Words shown that name them: no program run, no path built.
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    actions: [PluginAction { place: "grid"; text: qsTr("Kept in ~/Pictures/Pinhole"); key: "F9"
+                             onTriggered: pinhole.notify(qsTr("Needs sqlite3 no more")) }]
+}
+)");
+        QDir().mkpath(dir.path() + "/i18n");
+        write(dir.path() + "/i18n/pl.json", "{ \"Kept in ~/Pictures/Pinhole\": \"W ~/Obrazy/Pinhole\", "
+                                            "\"Needs sqlite3 no more\": \"Już bez sqlite3\" }\n");
+        const Plugins::Findings words = Plugins::footguns(dir.path());
+        QVERIFY2(words.errors.isEmpty() && words.warnings.isEmpty(), qPrintable((words.errors + words.warnings).join('\n')));
+    }
+
+    // pinhole.run refuses what check does, however its name was made.
+    void runRefusesWhatCheckDoes() {
+        QVERIFY(Plugins::refusedRun("sqlite3", {"x"}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun(QStringLiteral("sqlite") + "3", {}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun("/usr/bin/sqlite3", {}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun("sh", {"-c", "sqlite3 x .tables"}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun("bash", {"-c", "echo `sqlite3 x`"}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun("env", {"A=1", "/usr/bin/sqlite3", "x"}).contains("pinhole.query"));
+        QVERIFY(Plugins::refusedRun("sh", {"-c", "wl-copy < f"}).contains("wl-copy"));
+        QVERIFY(Plugins::refusedRun("xclip", {"-i"}).contains("pinhole.copyFile"));
+        QVERIFY(Plugins::refusedRun("sh", {"-c", "cp f \"$(xdg-user-dir PICTURES)\""}).contains("pinhole.picturePath"));
+        // Its own programs, and the names inside other words, run.
+        QVERIFY(Plugins::refusedRun("magick", {"in.png", "out.png"}).isEmpty());
+        QVERIFY(Plugins::refusedRun("sh", {"-c", "cat > \"$1\"", "sh", "/tmp/x.txt"}).isEmpty());
+        QVERIFY(Plugins::refusedRun("sh", {"-c", "ls /usr/lib/libsqlite3.so"}).isEmpty());
     }
 
     void aClickThatStopsAPanelPressesNothing() {

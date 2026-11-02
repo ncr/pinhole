@@ -10,8 +10,10 @@
 #   in sRGB, from an iPhone's Display P3 or whatever profile it carries,
 #   given an sRGB profile, as the desktop shows it untagged); a
 #   .mkv a video's picture, without its sound (a background is silent), in a
-#   container mpv reads whatever it came in; anything else the file as it
-#   is, linked where it can be. The name ends in a few characters of the
+#   container mpv reads whatever it came in; any other still (a PNG, WebP,
+#   GIF) in sRGB too, in its own format, if it carries another profile (an
+#   iPhone screenshot's Display P3), else the file as it is, linked where
+#   it can be. The name ends in a few characters of the
 #   rendition: its cache name, which an edit changes, or for a folder's own
 #   file its time and size; so an edited photo set again is kept anew, and
 #   the same one is the same file. Written aside and renamed, so the shell
@@ -200,9 +202,21 @@ keep)
       # kept, named after it) is read as ImageMagick's syntax ("50%off").
       jpg) magick -[0] -auto-orient ${srgb:+-profile "$srgb"} -resize '3840x3840>' -quality 92 jpg:- < "$from" > "$part" ;;
       mkv) ffmpeg -v error -y -i "$from" -map 0:v:0 -c copy -f matroska "$part" ;;
-      # A hard link where the cache and Pictures share a disk: instant, no
-      # room taken twice, and it stays when the cache lets its name go.
-      *) ln -- "$from" "$part" 2>/dev/null || cp -- "$from" "$part" ;;
+      # A still in another profile (an iPhone screenshot's Display P3) made
+      # sRGB, as the desktop shows a background, in its own format; one in
+      # sRGB or untagged as it is: a hard link where the cache and Pictures
+      # share a disk, instant, no room taken twice, and it stays when the
+      # cache lets its name go.
+      *)
+        profile=
+        if [ -n "$srgb" ]; then
+          profile=$(magick "$extension:-[0]" -format '%[profile:icc]' info: < "$from" 2>/dev/null || true)
+        fi
+        case "$profile" in
+          "" | *sRGB* | *srgb*) ln -- "$from" "$part" 2>/dev/null || cp -- "$from" "$part" ;;
+          *) magick "$extension:-[0]" -auto-orient -profile "$srgb" -quality 92 "$extension:-" < "$from" > "$part" ;;
+        esac
+        ;;
     esac
     mv -f -- "$part" "$kept"
     wrote=1

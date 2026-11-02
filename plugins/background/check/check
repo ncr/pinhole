@@ -163,6 +163,17 @@ if [ -f "$srgb" ] && [ -f "$p3" ]; then
   check '[ -f "$kept" ] && [ "$(magick "$kept" -format "%[fx:abs(round(p{32,24}.r*255)-239)<=3 && abs(round(p{32,24}.g*255)-65)<=3]" info:)" = 1 ] && [ "$(magick "$kept" -format "%[profile:icc]" info:)" != "Display P3" ]' "a Display P3 photo kept in sRGB"
   kept=$(sh "$script" keep "$H/cache/plain.jpg" "$D" "plain" jpg own "$srgb") || kept=
   check '[ -f "$kept" ] && [ "$(magick "$kept" -format "%[fx:abs(round(p{32,24}.g*255)-200)<=2]" info:)" = 1 ]' "an untagged photo kept with its codes"
+  # A PNG (an iPhone screenshot) in Display P3: made sRGB, a PNG still. One
+  # in sRGB, and one untagged, linked as they are.
+  magick -size 64x48 xc:'rgb(220,80,60)' -profile "$p3" png:- > "$H/cache/p3.png"
+  magick -size 64x48 xc:'rgb(220,80,60)' -profile "$srgb" png:- > "$H/cache/srgb.png"
+  magick -size 64x48 xc:'rgb(40,200,80)' png:- > "$H/cache/plain.png"
+  kept=$(sh "$script" keep "$H/cache/p3.png" "$D" "p3png" png own "$srgb") || kept=
+  check '[ -f "$kept" ] && [ "$(magick "$kept" -format "%m %[fx:abs(round(p{32,24}.r*255)-239)<=3 && abs(round(p{32,24}.g*255)-65)<=3]" info:)" = "PNG 1" ] && [ "$(magick "$kept" -format "%[profile:icc]" info:)" != "Display P3" ] && [ ! "$kept" -ef "$H/cache/p3.png" ]' "a Display P3 PNG kept in sRGB, as a PNG"
+  kept=$(sh "$script" keep "$H/cache/srgb.png" "$D" "srgbpng" png own "$srgb") || kept=
+  check '[ -f "$kept" ] && [ "$kept" -ef "$H/cache/srgb.png" ]' "an sRGB PNG kept as it is, linked"
+  kept=$(sh "$script" keep "$H/cache/plain.png" "$D" "plainpng" png own "$srgb") || kept=
+  check '[ -f "$kept" ] && [ "$kept" -ef "$H/cache/plain.png" ]' "an untagged PNG kept as it is, linked"
 fi
 
 check '[ ! -s "$work/decoys.log" ]' "Omarchy's own shell and scripts never called"

@@ -223,8 +223,10 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 // and let go, on the grid and on Colours' wall (a PinchZoom): the same size
 // under the fingers, and the same easing to where each lands. Offscreen
 // or anywhere: no frame of the window's drives them. Needs photos taken on
-// this day in other years.
-void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid);
+// this day in other years. Then a hard flick into the top of the grid and
+// of the side panel: the bounce past the end goes a quarter of the view at
+// most; a frame of each at its furthest in <dir>, if given.
+void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &dir = {});
 
 // PINHOLE_SELFTEST=examples[:<dir>] (selftestphysics.cpp): the examples in
 // docs/plugins.md, each a plugin in app/tests/examples, among the plugins
@@ -350,10 +352,20 @@ void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
 // MediaPlayer and VideoOutput as the viewer has them, paused on its first
 // frame over the window; the frame grabbed into <dir> as <name>-qt.png,
 // and beside it ffmpeg's tone mappings of the same frame (zscale and
-// tonemap: hable at SDR white 203 nits, as cover.rs; hable, mobius and
+// tonemap: hable at SDR white 203 nits, as cover.rs was; hable, mobius and
 // clip at 100; and the codes as they are), each compared by the means of
 // 16x9 blocks: the mean and the largest difference, out of 255.
 void runHdrVideoSelfTest(QQuickWindow *window, const QString &dir, const QStringList &videos);
+// PINHOLE_SELFTEST=hdrplay (selftesthdr.cpp): each video of
+// PINHOLE_SELFTEST_VIDEOS played as Qt alone shows it (a VideoOutput) and
+// as Pinhole does (VideoView), in a window of 960x540; a frame drawn every
+// 16 ms (grabWindow, as a window on a workspace not shown draws none of
+// its own). Over four seconds: frames given and drawn a second, the CPU
+// the process took, and how far the frame given lags the player's clock;
+// then a seek to 1 s, and where it plays a second later. Fails when VideoView
+// draws under 55 frames a second of a 60 fps video, lags by over 50 ms, or
+// a seek does not play on.
+void runHdrPlaySelfTest(QQuickWindow *window, const QStringList &videos);
 
 // What a self-test drives.
 struct SelfTestContext {
