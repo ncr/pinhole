@@ -1,0 +1,15 @@
+{
+  "Recent additions": "Ostatnio dodane",
+  "Find photos received or imported recently, even when they were taken years ago.": "Znajdź zdjęcia otrzymane lub zaimportowane ostatnio, nawet jeśli wykonano je wiele lat temu.",
+  "Photos added recently, whatever their capture date": "Ostatnio dodane zdjęcia, niezależnie od daty wykonania",
+  "Could not read recent additions. Try opening this view again.": "Nie udało się odczytać ostatnio dodanych zdjęć. Otwórz ten widok ponownie.",
+  "Newest additions first. A received photo keeps the date it was taken in the main grid.": "Najnowsze dodatki na początku. W głównej siatce otrzymane zdjęcie zachowuje datę wykonania.",
+  "Reading the library…": "Odczytuję bibliotekę…",
+  "No photos here yet.": "Nie ma tu jeszcze zdjęć.",
+  "Added %1": "Dodano %1",
+  "Taken %1": "Wykonano %1",
+  "In the grid": "W siatce",
+  "Show more": "Pokaż więcej",
+  "Open the photo": "Otwórz zdjęcie",
+  "Show the photo in the grid": "Pokaż zdjęcie w siatce"
+}

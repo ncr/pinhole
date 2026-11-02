@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QElapsedTimer>
+#include <QImage>
 #include <QPointF>
 #include <QQuickItem>
 #include <QTimer>
@@ -351,6 +352,14 @@ private:
     // The stacks or the hidden photos given changed: the cells again, the
     // view staying on the photo at its top.
     void relayCells();
+    // Layout slots before the oldest photo: the newest always ends a full row.
+    int leadingSlots(int columns) const { return count() ? (columns - count() % columns) % columns : 0; }
+    int slotOf(int cell, int columns) const { return cell + leadingSlots(columns); }
+    QRectF preludeRect(const Layer &layer) const;
+    QImage preludeImage(QSize size, qreal dpr) const;
+    bool preludeAt(QPointF point) const;
+    bool m_pressPrelude = false;
+    quint64 m_cellsVersion = 0;
     double strideFor(int columns) const;
     double maxScroll(int columns) const;
     // Put the view at `y`, within the ends, stopping any motion.

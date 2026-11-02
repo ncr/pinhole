@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Activate a complete same-filesystem stage, restoring it on an error."""
+from pathlib import Path
+import os
+import sys
+
+stage, destination = map(Path, sys.argv[1:])
+backup = stage / ".previous"
+paths = [
+    "lib/pinhole", "share/pinhole",
+    "share/icons/hicolor/scalable/apps/pinhole.svg",
+    "share/applications/pinhole.desktop",
+    # Resources are in place before any next launch can use the new binary.
+    "bin/pinhole-auth", "bin/pinhole-update", "bin/pinholed", "bin/pinhole",
+]
+activated = []
+try:
+    for relative in paths:
+        current = destination / relative
+        previous = backup / relative
+        current.parent.mkdir(parents=True, exist_ok=True)
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        existed = os.path.lexists(current)
+        if existed:
+            os.replace(current, previous)
+        activated.append((relative, existed, False))
+        os.replace(stage / relative, current)
+        activated[-1] = (relative, existed, True)
+except BaseException:
+    # Renames can fail (permissions, storage, external removal) even after
+    # every input copied successfully. Put every previous path back.
+    for relative, existed, moved in reversed(activated):
+        current = destination / relative
+        if moved:
+            recovered = stage / relative
+            recovered.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(current, recovered)
+        if existed:
+            os.replace(backup / relative, current)
+    raise

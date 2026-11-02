@@ -61,6 +61,7 @@
 #include "selftest.h"
 #include "serviceclient.h"
 #include "storage.h"
+#include "updater.h"
 #include "theme.h"
 #include "translator.h"
 #include "viewer.h"
@@ -258,6 +259,78 @@ private slots:
     // A client that finds no service starts one: never a real pinholed
     // from a test, whose socket a fake service holds.
     void initTestCase() { qputenv("PINHOLED", "/bin/false"); }
+
+    // Real asynchronous process replies: checking cannot install, repeated
+    // clicks cannot start a second build, and a failed build stays retryable.
+    void updaterChecksThenBuildsOnlyWhenAsked() {
+        QTemporaryDir prefix;
+        QVERIFY(prefix.isValid());
+        const auto before = qgetenv("PINHOLE_INSTALL_PREFIX");
+        const auto restored = qScopeGuard([&] {
+            if (before.isNull()) qunsetenv("PINHOLE_INSTALL_PREFIX");
+            else qputenv("PINHOLE_INSTALL_PREFIX", before);
+        });
+        qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
+        QDir().mkpath(prefix.path() + "/bin");
+        QDir().mkpath(prefix.path() + "/share/pinhole");
+        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"local"})");
+        const QString helper = prefix.path() + "/bin/pinhole-update";
+        write(helper, R"(#!/bin/sh
+if [ "$1" = --check ]; then
+  printf '%s\n' '{"available":true,"revision":"1234567890"}'
+else
+  printf '%s\n' '{"revision":"1234567890","log":"/tmp/pinhole-update-test.log"}'
+fi
+)");
+        QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        Updater updater;
+        QVERIFY(updater.supported());
+        QCOMPARE(updater.state(), "idle");
+        updater.apply();
+        QCOMPARE(updater.state(), "idle");
+        updater.check();
+        QCOMPARE(updater.state(), "checking");
+        QTRY_COMPARE(updater.state(), "available");
+        QCOMPARE(updater.revision(), "12345678");
+        updater.apply();
+        QCOMPARE(updater.state(), "updating");
+        updater.apply();
+        QTRY_COMPARE(updater.state(), "ready");
+        QCOMPARE(updater.logPath(), "/tmp/pinhole-update-test.log");
+        updater.check();
+        QCOMPARE(updater.state(), "ready");
+    }
+
+    void updaterBuildFailureKeepsRunningAndCanBeCheckedAgain() {
+        QTemporaryDir prefix;
+        const auto before = qgetenv("PINHOLE_INSTALL_PREFIX");
+        const auto restored = qScopeGuard([&] {
+            if (before.isNull()) qunsetenv("PINHOLE_INSTALL_PREFIX");
+            else qputenv("PINHOLE_INSTALL_PREFIX", before);
+        });
+        qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
+        QDir().mkpath(prefix.path() + "/bin");
+        QDir().mkpath(prefix.path() + "/share/pinhole");
+        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"package"})");
+        const QString helper = prefix.path() + "/bin/pinhole-update";
+        write(helper, R"(#!/bin/sh
+printf '%s\n' '{"error":"network"}'
+exit 1
+)");
+        QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        Updater updater;
+        QVERIFY(updater.perUser());
+        updater.check();
+        QTRY_COMPARE(updater.state(), "error");
+        QCOMPARE(updater.error(), "network");
+        write(helper, R"(#!/bin/sh
+printf '%s\n' '{"available":false,"revision":"1234567890"}'
+)");
+        updater.check();
+        QTRY_COMPARE(updater.state(), "current");
+        QVERIFY(updater.error().isEmpty());
+    }
+
 
     // Undo and redo, as Ctrl+Z and Ctrl+⇧Z take them.
     void historyUndoesAndRedoesInTurn() {
@@ -2356,6 +2429,78 @@ Item {
         QCOMPARE(asked.size(), 2);
     }
 
+    void everyGridLevelClosesWithAFullPhotoRow() {
+        QTemporaryDir dir;
+        QList<std::pair<QByteArray, qint64>> rows;
+        for (int i = 0; i < 93; ++i)
+            rows.append({QByteArray::number(i), i * 86400000LL});
+        makeLibrary(dir.path(), rows);
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(870, 1740));
+        grid.setSources(&library, &loader, nullptr);
+        for (int level = 0; level < PhotoGrid::levelCount(); ++level) {
+            const int columns = PhotoGrid::columnsAt(level);
+            grid.setColumnsNow(columns);
+            for (int n = 1; n <= 93; ++n) {
+                QVariantList hidden;
+                for (int i = n; i < 93; ++i)
+                    hidden.append(i);
+                grid.setHidden(hidden);
+                grid.scrollToStart();
+                const double stride = grid.stride();
+                const int leading = (columns - n % columns) % columns;
+                QCOMPARE(grid.rectOf(0).left(), leading * stride);
+                for (int col = 0; col < leading; ++col)
+                    QCOMPARE(grid.indexAt((col + 0.5) * stride, stride / 2), -1);
+                QCOMPARE(grid.indexAt((leading + 0.5) * stride, stride / 2), 0);
+                QCOMPARE(grid.anchor().index, 0);
+                grid.scrollToEnd();
+                QCOMPARE(grid.rectOf(n - 1).left(), (columns - 1) * stride);
+                // If there are at least enough photos for one row, every
+                // column of the final row is a real, distinct photo.
+                if (n >= columns) {
+                    const double y = grid.rectOf(n - 1).center().y();
+                    for (int col = 0; col < columns; ++col)
+                        QCOMPARE(grid.indexAt((col + 0.5) * stride, y), n - columns + col);
+                }
+            }
+        }
+    }
+
+    void theHistoryCoverIsUsefulButNeverASelectablePhoto() {
+        QTemporaryDir dir;
+        QList<std::pair<QByteArray, qint64>> rows;
+        for (int i = 0; i < 93; ++i)
+            rows.append({QByteArray::number(i), i});
+        makeLibrary(dir.path(), rows);
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid;
+        grid.setSize(QSizeF(700, 400));
+        grid.setSources(&library, &loader, nullptr);
+        grid.scrollToStart();
+        QSignalSpy opened(&grid, &PhotoGrid::activated);
+        QCOMPARE(grid.indexAt(50, 50), -1);
+        grid.setSelecting(true);
+        grid.press({50, 50});
+        grid.release({50, 50});
+        QCOMPARE(grid.selectionCount(), 0);
+        QCOMPARE(grid.scrollPosition(), 0.0);
+        grid.setSelecting(false);
+        grid.press({50, 50});
+        grid.release({50, 50});
+        for (int frame = 0; frame < 240; ++frame)
+            grid.advance(1.0 / 120);
+        QVERIFY(grid.atNewest());
+        QCOMPARE(opened.count(), 0);
+    }
+
     void aStackIsOneCardAndStaysWithItsPhotosThroughAReload() {
         QTemporaryDir dir, after;
         makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});
@@ -2375,9 +2520,9 @@ Item {
         grid.setStacks({QVariantList{1, 2, 3}, QVariantList{3, 4}});
         QCOMPARE(grid.count(), 4);
         QCOMPARE(grid.rectOf(3), grid.rectOf(1));
-        QCOMPARE(grid.rectOf(4).left(), 200.0);
-        QCOMPARE(grid.indexAt(150, 50), 1);
-        QCOMPARE(grid.indexAt(250, 50), 4);
+        QCOMPARE(grid.rectOf(4).left(), 500.0);
+        QCOMPARE(grid.indexAt(450, 50), 1);
+        QCOMPARE(grid.indexAt(550, 50), 4);
 
         // Selecting the card selects its photos.
         grid.selectAll();
@@ -2416,14 +2561,14 @@ Item {
         // a and c hidden: the rest close up, and nothing shows them.
         grid.setHidden({0, 2});
         QCOMPARE(grid.count(), 4);
-        QCOMPARE(grid.indexAt(50, 50), 1);
-        QCOMPARE(grid.indexAt(150, 50), 3);
+        QCOMPARE(grid.indexAt(350, 50), 1);
+        QCOMPARE(grid.indexAt(450, 50), 3);
         // A hidden photo's cell is where it would be: the next shown.
         QCOMPARE(grid.rectOf(0), grid.rectOf(1));
         QCOMPARE(grid.rectOf(2), grid.rectOf(3));
         QVERIFY(grid.isHidden(2) && !grid.isHidden(3));
         QCOMPARE(grid.hiddenCount(), 2);
-        QCOMPARE(grid.rectOf(4).left(), 200.0);
+        QCOMPARE(grid.rectOf(4).left(), 500.0);
         // Ctrl+A ticks only what shows.
         grid.selectAll();
         QCOMPARE(grid.selection(), (QList<int>{1, 3, 4, 5}));
@@ -2438,7 +2583,7 @@ Item {
         // A stack whose card is hidden stands where its next photo is.
         grid.setHidden({1});
         QCOMPARE(grid.count(), 4);
-        QCOMPARE(grid.indexAt(150, 50), 2);
+        QCOMPARE(grid.indexAt(450, 50), 2);
         QCOMPARE(grid.rectOf(3), grid.rectOf(2));
         grid.setStacks({});
 
@@ -2456,9 +2601,9 @@ Item {
         loader.reload([&] { library.swap(reloaded); });
         grid.libraryReloaded(moved);
         QCOMPARE(grid.count(), 5);
-        QCOMPARE(grid.indexAt(50, 50), 0);
-        QCOMPARE(grid.indexAt(150, 50), 2);
-        QCOMPARE(grid.indexAt(250, 50), 4);
+        QCOMPARE(grid.indexAt(250, 50), 0);
+        QCOMPARE(grid.indexAt(350, 50), 2);
+        QCOMPARE(grid.indexAt(450, 50), 4);
 
         // Nothing hidden: a cell to each photo again.
         grid.setHidden({});
@@ -2490,7 +2635,7 @@ Item {
         QCOMPARE(grid.indexAt(550, 650), 197);
         grid.setHidden({});
         QCOMPARE(grid.scrollFraction(), 1.0);
-        QCOMPARE(grid.indexAt(350, 650), 199); // 200 photos, a row of 4 last
+        QCOMPARE(grid.indexAt(650, 650), 199); // the newest always closes the last row
     }
 
     void theCursorAndAPressStayOnTheirPhotosWhenTheCellsChange() {
@@ -2522,16 +2667,16 @@ Item {
         // Pressed on d, released after a photo before it was hidden: d
         // opens, not the photo now in its place.
         QSignalSpy opened(&grid, &PhotoGrid::activated);
-        grid.press(QPointF(350, 50));
+        grid.press(grid.rectOf(3).center());
         grid.setHidden({0});
-        grid.release(QPointF(350, 50));
+        grid.release(grid.rectOf(3).center());
         QCOMPARE(opened.count(), 1);
         QCOMPARE(opened.first().first().toInt(), 3);
         // Pressed on d, released after d was hidden: nothing opens.
         grid.setHidden({});
-        grid.press(QPointF(350, 50));
+        grid.press(grid.rectOf(3).center());
         grid.setHidden({3});
-        grid.release(QPointF(350, 50));
+        grid.release(grid.rectOf(3).center());
         QCOMPARE(opened.count(), 1);
     }
 
@@ -3236,17 +3381,17 @@ PinholePlugin {
         grid.setSources(&library, &loader, nullptr);
         grid.setSelecting(true);
         // e ticked, then a sweep from b to c: e stays.
-        grid.press(QPointF(450, 50));
-        grid.release(QPointF(450, 50));
+        grid.press(grid.rectOf(4).center());
+        grid.release(grid.rectOf(4).center());
         QCOMPARE(grid.selection(), QList<int>{4});
-        grid.press(QPointF(150, 50));
-        grid.move(QPointF(250, 350));
+        grid.press(grid.rectOf(1).center());
+        grid.move(grid.rectOf(2).center());
         QCOMPARE(grid.selection(), (QList<int>{1, 2, 4}));
         // a hidden meanwhile: the sweep goes on from b, and keeps e, though
         // both are in other cells now.
         grid.setHidden({0});
         QCOMPARE(grid.selection(), (QList<int>{1, 2, 4}));
-        grid.move(QPointF(250, 350)); // d's cell now
+        grid.move(grid.rectOf(3).center()); // d's cell now
         QCOMPARE(grid.selection(), (QList<int>{1, 2, 3, 4}));
         // b, where it began, hidden too: nothing to sweep from, and the
         // selection stays as it is.

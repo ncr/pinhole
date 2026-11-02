@@ -689,6 +689,40 @@ Item {
             }
 
             Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
+            Heading { text: qsTr("Pinhole updates") }
+            UpdateStatus { id: updateStatus }
+            Note { text: updateStatus.text }
+            Note {
+                visible: updater.perUser
+                height: visible ? implicitHeight : 0
+                text: qsTr("Updates install for your user, without a password.")
+            }
+            Flow {
+                x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
+                spacing: 6
+                ShellButton {
+                    id: updateButton
+                    objectName: "updateButton"
+                    text: updateStatus.button
+                    usable: updater.supported && !updateStatus.busy
+                    busy: updateStatus.busy
+                    lit: root.focusedStop === updateButton
+                    Component.onCompleted: root.addStop(updateButton)
+                    Component.onDestruction: root.dropStop(updateButton)
+                    onTapped: updateStatus.press()
+                }
+                ShellButton {
+                    id: updateLogButton
+                    text: qsTr("Show update log")
+                    visible: updater.logPath !== "" && updater.state === "error"
+                    lit: root.focusedStop === updateLogButton
+                    Component.onCompleted: root.addStop(updateLogButton)
+                    Component.onDestruction: root.dropStop(updateLogButton)
+                    onTapped: updater.showLog()
+                }
+            }
+
             Heading { text: qsTr("Storage") }
 
             // Where.

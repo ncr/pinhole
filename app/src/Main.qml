@@ -597,6 +597,40 @@ ApplicationWindow {
         action: newest
     }
 
+    // A quiet invitation, only over the idle grid. Dismissing it keeps the
+    // update available in settings; no photo or keyboard focus is taken.
+    UpdateStatus { id: updateStatus }
+    Row {
+        id: updateNotice
+        objectName: "updateNotice"
+        property bool dismissed: false
+        visible: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp
+                 && !dismissed && ["available", "updating", "ready"].indexOf(updater.state) >= 0
+        anchors.right: parent.right
+        anchors.bottom: helpButton.top
+        anchors.rightMargin: 16
+        anchors.bottomMargin: 8
+        spacing: 4
+        ShellButton {
+            floating: true
+            text: updater.state === "updating" ? qsTr("Updating…")
+                  : updater.state === "ready" ? qsTr("Restart to finish updating") : qsTr("Update available")
+            usable: !updateStatus.busy
+            busy: updater.state === "updating"
+            onTapped: updateStatus.press()
+        }
+        ShellButton {
+            floating: true
+            text: "×"
+            width: height
+            onTapped: updateNotice.dismissed = true
+        }
+        Connections {
+            target: updater
+            function onChanged() { if (updater.state === "ready") updateNotice.dismissed = false }
+        }
+    }
+
     // Every key, on ? or this. Settings are in the side panel (Tab or ",").
     ShellButton {
         id: helpButton

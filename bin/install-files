@@ -7,9 +7,22 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PREFIX="$1"
 cd "$ROOT"
+install -d "$PREFIX"
+DESTINATION="$(CDPATH= cd -- "$PREFIX" && pwd)"
+PINHOLE_RUNTIME_PREFIX="${PINHOLE_RUNTIME_PREFIX:-$DESTINATION}"
+export PINHOLE_RUNTIME_PREFIX
+PREFIX="$(mktemp -d "$DESTINATION/.pinhole-install.XXXXXX")"
+trap 'rm -rf "$PREFIX"' EXIT HUP INT TERM
 
-install -Dm755 app/build/pinhole "$PREFIX/bin/pinhole"
-install -Dm755 core/target/release/pinholed "$PREFIX/bin/pinholed"
+# Replace executables by rename, so an update can leave the current app
+# open until its owner chooses Restart (and never follows developer links).
+put_program() {
+  install -Dm755 "$1" "$2.new"
+  mv -f "$2.new" "$2"
+}
+put_program app/build/pinhole "$PREFIX/bin/pinhole"
+put_program core/target/release/pinholed "$PREFIX/bin/pinholed"
+put_program bin/update "$PREFIX/bin/pinhole-update"
 # pinhole-sync was the commands before `pinhole <command>`, and wrote the
 # library itself: gone, so nothing but pinholed writes it.
 rm -f "$PREFIX/bin/pinhole-sync"
@@ -17,7 +30,7 @@ rm -f "$PREFIX/bin/pinhole-sync"
 # cache on first use (see plugins/icloud/auth/PROTOCOL.md). It is the
 # pinhole.icloud plugin's, but goes beside pinholed, where pinholed looks
 # for it.
-install -Dm755 plugins/icloud/auth/pyicloud/pinhole-auth "$PREFIX/bin/pinhole-auth"
+put_program plugins/icloud/auth/pyicloud/pinhole-auth "$PREFIX/bin/pinhole-auth"
 # Pinhole's own plugins (docs/plugins.md), each its folder as it is in the
 # checkout, with its helpers built.
 install -d "$PREFIX/lib/pinhole/plugins/series/i18n"
@@ -80,3 +93,10 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/frame/i18n" plugins/frame/i18n/*.
 install -Dm644 app/assets/sRGB.icc "$PREFIX/share/pinhole/sRGB.icc"
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"
 install -Dm644 pkgbuild/pinhole.desktop "$PREFIX/share/applications/pinhole.desktop"
+install -d "$PREFIX/lib/pinhole/plugins/recent/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/recent" plugins/recent/manifest.json plugins/recent/*.qml
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/recent/i18n" plugins/recent/i18n/*.json
+"$ROOT/bin/install-metadata" "$PREFIX"
+# Only a complete staged tree can replace the running installation.
+"$ROOT/bin/activate-install" "$PREFIX" "$DESTINATION"
+rm -f "$DESTINATION/bin/pinhole-sync"

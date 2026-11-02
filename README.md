@@ -99,10 +99,18 @@ all, or those taken on this day in other years, shuffled or in order,
 videos and Live Photos moving. The screen stays on while it shows. Esc or
 a click stops it, ← → step, and a two-finger tap or Space holds it still.
 
+Recent additions (⇧ N) shows received and imported photos newest first by
+when they joined the library. Each card shows the added and capture dates;
+open a photo or use In the grid to find its place in the main chronology.
+The main grid ends in a complete row; spare cells before its oldest photo
+form a history card with the library's years, colours and a jump to the newest.
+
 ## Install
 
 ```bash
-bin/install                  # builds the package and installs it (asks for your password)
+bin/install                  # guided terminal UI: developer, local or package install
+bin/install --dev            # launcher runs this checkout directly; no package or password
+bin/install --package        # pacman package for everyone (asks for your password)
 ```
 
 Then open Pinhole from the launcher and add a source in the side panel
@@ -122,11 +130,34 @@ pinhole help                 # every command: sources, show, remove, sync, add, 
 Each asks the Pinhole service, `pinholed`, and starts it if it is not
 running; only the service writes the library.
 
-Working on Pinhole, `bin/install-local` builds the checkout into `~/.local`
-instead, with no password and no package, and stops a running window so the
-launcher opens the new one.
+Working on Pinhole, `bin/install --dev` builds the checkout and links the
+launcher, service and plugins to it. QML plugins stay live in the repository.
+`bin/install-local --dev` does the same without the terminal UI;
+`bin/install-local` copies the build into `~/.local` instead. Each stops a
+running window so the next launch is the new one. `PREFIX` changes the local
+installation folder. `--non-interactive` bypasses the menu, for scripts.
+
+Pinhole quietly checks `main` hourly. A small Update button, also in the
+side panel under Pinhole updates, builds the new version while you browse;
+choose Restart when it is ready. A packaged installation updates just your
+account, without a root password. Developer updates require a clean `main`
+checkout and only fast-forward it, preserving local work.
 
 ## Development
+
+`bin/build` builds the Rust helpers and Qt window. Rust builds prefer
+[Blaze](https://github.com/indexable-inc/blaze), installed by `bin/setup-blaze`
+(the installer prepares it too). One wrapper, `bin/build-rust`, is shared by
+local, developer and package builds. `PINHOLE_RUST_BUILDER=blaze` requires
+Blaze; `PINHOLE_RUST_BUILDER=cargo` selects Cargo explicitly. The default
+`auto` tries Blaze and visibly retries with Cargo if Blaze cannot build a
+target. Cargo remains available for compiler compatibility, without a
+separate build configuration or dependency lockfile.
+
+Compatibility checked on 2026-11-02: Blaze stable `0.20261027.0` cannot
+compile the Series helper's scoped threads (`writable static MIN`); canary
+`0.20261030.1` exits while loading that helper and the main workspace. These builds currently use
+the visible Cargo fallback; acceleration is not claimed for them.
 
 Status: two spikes grown into an app. The iCloud API probe is in
 [docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
@@ -155,6 +186,7 @@ plugins/series/           the Series plugin; finder/ is pinhole-series, which fi
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
+plugins/recent/           Recent additions: received photos by when they joined the library
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             the Info plugin; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files
@@ -278,7 +310,7 @@ echo '{"id":1,"method":"import_icloudpd","params":{"apple_id":"you@example.com"}
 Then, from the repository root:
 
 ```bash
-cargo build --release --workspace --manifest-path core/Cargo.toml
+bin/build-rust build --release --workspace --manifest-path core/Cargo.toml
 core/target/release/pinhole-probe count
 core/target/release/pinhole-probe walk --parallel 4
 core/target/release/pinhole-probe stats

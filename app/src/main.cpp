@@ -41,6 +41,7 @@
 #include "serviceclient.h"
 #include "sources.h"
 #include "storage.h"
+#include "updater.h"
 #include "viewer.h"
 #include "theme.h"
 #include "thumbnailloader.h"
@@ -235,6 +236,7 @@ int main(int argc, char *argv[]) {
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);
+    Updater updater;
     Plugins plugins(&library, &service, &viewer, &translator, &history);
     plugins.setFavourites(&favourites);
     plugins.setSources(&sources);
@@ -262,6 +264,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("incoming", &incoming);
     engine.rootContext()->setContextProperty("storage", &storage);
     engine.rootContext()->setContextProperty("sources", &sources);
+    engine.rootContext()->setContextProperty("updater", &updater);
     engine.rootContext()->setContextProperty("plugins", &plugins);
     engine.rootContext()->setContextProperty("display", plugins.display());
     engine.rootContext()->setContextProperty("markChoices", &markChoices);

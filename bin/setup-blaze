@@ -1,0 +1,11 @@
+#!/bin/sh
+# The upstream stable installer verifies release SHA256 checksums. Keep its
+# programs separate from Cargo's so existing Rust tools are left alone.
+set -eu
+data="${XDG_DATA_HOME:-$HOME/.local/share}/pinhole"
+installer="$(mktemp)"
+trap 'rm -f "$installer"' EXIT HUP INT TERM
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+    https://ix.dev/blaze -o "$installer"
+CARGO_HOME="$data/tools" BLAZE_HOME="${BLAZE_HOME:-$data/blaze}" \
+    sh "$installer" "$@"

@@ -15,6 +15,7 @@
 #include <QQuickWindow>
 #include <QSGGeometryNode>
 #include <QSGOpacityNode>
+#include <QSGSimpleTextureNode>
 #include <QSGTexture>
 #include <QSGTextureMaterial>
 #include <QSGVertexColorMaterial>
@@ -197,6 +198,8 @@ struct GridRenderState {
     struct Slot {
         QSGOpacityNode *opacity = nullptr;
         QSGGeometryNode *placeholders = nullptr;
+        QSGSimpleTextureNode *prelude = nullptr;
+        QString preludeKey;
         std::unordered_map<qint64, QSGGeometryNode *> groups;
         // The cells' rounded corners: the background drawn over each
         // corner outside its arc, above the photos of the same layer.
@@ -288,7 +291,10 @@ void PhotoGrid::setTouchpadHold(TouchpadHold *hold) {
 }
 
 PhotoGrid::Anchor PhotoGrid::anchor() const {
-    const int index = indexAt(0, 0);
+    int index = indexAt(0, 0);
+    // The top-left can be the history card. Anchor to the first real photo.
+    if (index < 0 && count() > 0)
+        index = libraryAt(0);
     return {index, index >= 0 ? rectOf(index).top() : 0, m_scroll >= maxScroll(m_columns) - stride()};
 }
 
@@ -366,8 +372,8 @@ int PhotoGrid::cellAt(qreal x, qreal y) const {
     const double s = stride();
     const int col = std::clamp(int(x / s), 0, m_columns - 1);
     const int row = int((y + m_scroll) / s);
-    const int index = row * m_columns + col;
-    return index < count() ? index : -1;
+    const int index = row * m_columns + col - leadingSlots(m_columns);
+    return index >= 0 && index < count() ? index : -1;
 }
 
 int PhotoGrid::currentIndex() const {
@@ -487,6 +493,7 @@ void PhotoGrid::relayCells() {
 }
 
 void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
+    ++m_cellsVersion;
     auto mapped = [&](int old) {
         if (!moved)
             return old;
@@ -690,6 +697,7 @@ void PhotoGrid::mousePressEvent(QMouseEvent *event) {
     touched(double(event->timestamp()), "click");
     m_pressAt = event->position();
     m_pressIndex = cellAt(event->position().x(), event->position().y());
+    m_pressPrelude = event->button() == Qt::LeftButton && preludeAt(event->position());
     m_dragged = false;
     event->accept();
     // Any other button (a two-finger tap is the right one) was only a
@@ -729,13 +737,15 @@ void PhotoGrid::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void PhotoGrid::sweep() {
+    if (count() == 0)
+        return;
     // The cell under the pointer, or off the photos (in a gap, past an
     // edge, after the last) the nearest one.
     const double s = stride();
     const int rows = (count() + m_columns - 1) / m_columns;
     const int column = std::clamp(int(m_sweepAt.x() / s), 0, m_columns - 1);
     const int row = std::clamp(int(std::floor((m_scroll + m_sweepAt.y()) / s)), 0, rows - 1);
-    const int index = std::min(row * m_columns + column, count() - 1);
+    const int index = std::clamp(row * m_columns + column - leadingSlots(m_columns), 0, count() - 1);
     // The photo it began on hidden meanwhile: nothing to sweep from.
     if (index < 0 || m_pressIndex < 0)
         return;
@@ -767,6 +777,11 @@ void PhotoGrid::mouseReleaseEvent(QMouseEvent *event) {
     }
     if (m_dragged || event->button() != Qt::LeftButton)
         return;
+    if (m_pressPrelude && !m_pressStopped && !m_covered && preludeAt(event->position()) &&
+        (event->position() - m_pressAt).manhattanLength() < 6) {
+        glideToNewest();
+        return;
+    }
     const int index = m_pressIndex;
     const auto mods = event->modifiers();
     if (index < 0)
@@ -946,7 +961,7 @@ void PhotoGrid::setCursorShown(bool shown) {
 
 void PhotoGrid::revealCell(int cell) {
     const double s = stride();
-    const double top = (cell / m_columns) * s, bottom = top + s;
+    const double top = (slotOf(cell, m_columns) / m_columns) * s, bottom = top + s;
     const double target = m_physics.target();
     double want = target;
     if (top < target)
@@ -973,10 +988,11 @@ void PhotoGrid::keepCursorInView() {
     const int rows = (count() + m_columns - 1) / m_columns;
     const int first = std::clamp(int(std::ceil(m_scroll / s - 0.01)), 0, rows - 1);
     const int last = std::clamp(int(std::floor((m_scroll + height()) / s + 0.01)) - 1, first, rows - 1);
-    const int row = m_cursor / m_columns;
+    const int slot = slotOf(m_cursor, m_columns);
+    const int row = slot / m_columns;
     if (row >= first && row <= last)
         return;
-    m_cursor = std::min(count() - 1, std::clamp(row, first, last) * m_columns + m_cursor % m_columns);
+    m_cursor = std::clamp(std::clamp(row, first, last) * m_columns + slot % m_columns - leadingSlots(m_columns), 0, count() - 1);
     update();
 }
 
@@ -993,7 +1009,7 @@ void PhotoGrid::moveCursor(int dx, int dy, bool extend) {
     m_cursorStepped = now;
     // Not shown yet, or left behind: shown first, where the pointer is.
     const double s = stride();
-    const int row = m_cursor / std::max(1, m_columns);
+    const int row = slotOf(m_cursor, m_columns) / std::max(1, m_columns);
     const bool inView = m_cursor >= 0 && m_cursor < count() && (row + 1) * s > m_scroll && row * s < m_scroll + height();
     if (!inView) {
         m_cursor = pointedCell();
@@ -1100,7 +1116,7 @@ void PhotoGrid::updateDateLabel() {
         const QLocale locale;
         auto dateOf = [this](int cell) { return QDateTime::fromMSecsSinceEpoch(m_library->at(libraryAt(cell)).date).date(); };
         // A row belongs to the date of its first photo.
-        const QDate from = dateOf(first * columns);
+        const QDate from = dateOf(std::max(0, first * columns - leadingSlots(columns)));
 
         if (unit == Year) {
             label = QString::number(from.year());
@@ -1114,7 +1130,7 @@ void PhotoGrid::updateDateLabel() {
         } else {
             label = locale.toString(from, QStringLiteral("d MMMM yyyy"));
             if (unit == DayRange) {
-                const QDate to = dateOf(std::min(count() - 1, (last + 1) * columns - 1));
+                const QDate to = dateOf(std::min(count() - 1, (last + 1) * columns - 1 - leadingSlots(columns)));
                 if (to != from) {
                     if (to.year() != from.year())
                         label = locale.toString(from, QStringLiteral("d MMMM yyyy")) + QStringLiteral(" – ") +
@@ -1152,14 +1168,98 @@ qreal PhotoGrid::scrollFraction() const {
 QRectF PhotoGrid::cellRect(int index, const Layer &l) const {
     const double s = strideFor(l.columns);
     const double size = (s - gapFor(l.columns)) * l.scale;
-    const double x = (index % l.columns) * s;
-    const double y = (index / l.columns) * s;
+    const int slot = slotOf(index, l.columns);
+    const double x = (slot % l.columns) * s;
+    const double y = (slot / l.columns) * s;
     return {l.at.x() + (x - l.pin.x()) * l.scale, l.at.y() + (y - l.pin.y()) * l.scale, size, size};
+}
+
+QRectF PhotoGrid::preludeRect(const Layer &l) const {
+    const int leading = leadingSlots(l.columns);
+    if (!leading)
+        return {};
+    const double s = strideFor(l.columns);
+    return {l.at.x() - l.pin.x() * l.scale, l.at.y() - l.pin.y() * l.scale,
+            (leading * s - gapFor(l.columns)) * l.scale, (s - gapFor(l.columns)) * l.scale};
+}
+
+bool PhotoGrid::preludeAt(QPointF point) const {
+    return !m_zoom.active && !m_selecting && preludeRect(Layer{m_columns, 1, {0, m_scroll}, {0, 0}, 1}).contains(point);
+}
+
+QImage PhotoGrid::preludeImage(QSize size, qreal dpr) const {
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(dpr);
+    image.fill(m_background);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    const double w = size.width() / dpr, h = size.height() / dpr;
+    const double inset = std::clamp(h * 0.1, 8.0, 24.0);
+    const bool light = m_background.lightnessF() > 0.5;
+    const QColor ink = light ? QColor(20, 24, 29) : QColor(241, 242, 246);
+    QColor tint = m_accent;
+    tint.setAlphaF(light ? 0.16 : 0.24);
+    QLinearGradient wash(0, 0, w, h);
+    wash.setColorAt(0, tint);
+    tint.setAlphaF(0.02);
+    wash.setColorAt(1, tint);
+    p.fillRect(QRectF(0, 0, w, h), wash);
+
+    // An aperture made from the library's own colours: a quiet, personal
+    // cover instead of stock artwork or repeated photos.
+    const QPointF centre(w - h * 0.08, h * 0.22);
+    for (int i = 0; i < 5; ++i) {
+        QColor c = QColor::fromRgb(m_library->at(libraryAt((count() - 1) * i / 4)).avgColor);
+        c.setAlphaF(0.20);
+        p.setPen(QPen(c, std::max(1.0, h * 0.025)));
+        const double r = h * (0.18 + i * 0.095);
+        p.drawEllipse(centre, r, r);
+    }
+    const QLocale locale;
+    const auto dateOf = [this](int cell) { return QDateTime::fromMSecsSinceEpoch(m_library->at(libraryAt(cell)).date).date(); };
+    const QDate oldest = dateOf(0), newest = dateOf(count() - 1);
+    const bool wide = w > 180 && h > 100;
+    const bool words = w > 125 && h > 72;
+    auto text = [&](QRectF box, QString value, double px, bool bold, QColor colour) {
+        QFont font;
+        font.setPixelSize(std::max(8, int(px)));
+        font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
+        p.setFont(font);
+        p.setPen(colour);
+        value = p.fontMetrics().elidedText(value, Qt::ElideRight, int(box.width()));
+        p.drawText(box, Qt::AlignLeft | Qt::AlignVCenter, value);
+    };
+    const double font = std::clamp(h * 0.15, 14.0, 38.0);
+    const QString years = oldest.year() == newest.year() || !wide
+        ? QString::number(oldest.year())
+        : QStringLiteral("%1 – %2").arg(oldest.year()).arg(newest.year());
+    const double bottom = h - inset - std::max(3.0, h * 0.04);
+    if (wide) {
+        QColor muted = ink;
+        muted.setAlphaF(0.65);
+        text({inset, bottom - font * 3.7, w - inset * 2, font}, tr("History begins here"), font * 0.40, false, muted);
+        text({inset, bottom - font * 2.65, w - inset * 2, font * 1.2}, years, font, true, ink);
+        text({inset, bottom - font * 1.25, w - inset * 2, font * 0.65}, tr("%n photos", "", m_library->count()), font * 0.43, false, muted);
+        text({inset, bottom - font * 0.45, w - inset * 2, font * 0.65}, tr("Latest photos") + QStringLiteral("  ↘"), font * 0.43, true, ink);
+    } else if (words) {
+        text({inset, bottom - font * 2, w - inset * 2, font}, years, font, true, ink);
+        text({inset, bottom - font * 0.8, w - inset * 2, font * 0.8}, tr("Latest photos") + QStringLiteral("  ↘"), font * 0.7, false, ink);
+    } else if (h > 45 && w > 45) {
+        text({inset, bottom - font * 1.7, w - inset * 2, font}, years, font, true, ink);
+        text({inset, bottom - font * 0.6, w - inset * 2, font * 0.8}, QStringLiteral("↘"), font * 0.8, false, ink);
+    }
+    const int samples = std::min(count(), std::max(1, int(w / 8)));
+    const double stripe = w / samples;
+    for (int i = 0; i < samples; ++i)
+        p.fillRect(QRectF(i * stripe, h - std::max(3.0, h * 0.04), stripe + 0.5, h),
+                   QColor::fromRgb(m_library->at(libraryAt(samples == 1 ? 0 : (count() - 1) * i / (samples - 1))).avgColor));
+    return image;
 }
 
 QPointF PhotoGrid::pinIn(int columns) const {
     const double s = strideFor(columns);
-    return {(m_zoom.index % columns + m_zoom.fraction.x()) * s, (m_zoom.index / columns + m_zoom.fraction.y()) * s};
+    const int slot = slotOf(m_zoom.index, columns);
+    return {(slot % columns + m_zoom.fraction.x()) * s, (slot / columns + m_zoom.fraction.y()) * s};
 }
 
 int PhotoGrid::levelForColumns(int columns) const {
@@ -1271,8 +1371,10 @@ void PhotoGrid::beginZoom(QPointF at) {
     const QPointF content = l.pin + (at - l.at) / l.scale;
     const int col = std::clamp(int(std::floor(content.x() / s)), 0, l.columns - 1);
     const int row = std::max(0, int(std::floor(content.y() / s)));
-    int index = row * l.columns + col;
+    int index = row * l.columns + col - leadingSlots(l.columns);
     QPointF fraction(content.x() / s - col, content.y() / s - row);
+    if (index < 0)
+        index = 0; // The history card zooms around the oldest photo.
     if (index >= count()) {
         // Past the last photo: pin the last one, at the same point in it.
         index = std::max(0, count() - 1);
@@ -1794,6 +1896,13 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             slot.placeholders->setMaterial(new QSGVertexColorMaterial);
             slot.placeholders->setFlag(QSGNode::OwnsMaterial);
             slot.opacity->appendChildNode(slot.placeholders);
+            slot.prelude = new QSGSimpleTextureNode;
+            QImage transparent(1, 1, QImage::Format_ARGB32_Premultiplied);
+            transparent.fill(Qt::transparent);
+            slot.prelude->setTexture(window()->createTextureFromImage(transparent));
+            slot.prelude->setOwnsTexture(true);
+            slot.prelude->setFiltering(QSGTexture::Linear);
+            slot.opacity->appendChildNode(slot.prelude);
             slot.corners = new QSGGeometryNode;
             auto *cornerGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
             cornerGeometry->setDrawingMode(QSGGeometry::DrawTriangles);
@@ -1939,8 +2048,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     auto keptRange = [&](int lo, int hi) {
         for (size_t k = 0; k < drawn.size(); ++k) {
             const int margin = std::max(int(height() / strideFor(drawn[k].columns) * 3) + 2, k == 0 ? lookahead + 2 : 0);
-            const int from = std::max(0, ranges[k].firstRow - margin) * drawn[k].columns;
-            const int to = (ranges[k].lastRow + margin) * drawn[k].columns;
+            const int from = std::max(0, std::max(0, ranges[k].firstRow - margin) * drawn[k].columns - leadingSlots(drawn[k].columns));
+            const int to = (ranges[k].lastRow + margin) * drawn[k].columns - leadingSlots(drawn[k].columns);
             const int libraryFrom = libraryAt(std::min(from, count() - 1));
             const int libraryTo = to >= count() ? std::numeric_limits<int>::max() : libraryAt(to);
             if (hi >= libraryFrom && lo < libraryTo)
@@ -2059,7 +2168,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         int lastWantedPage = -1;
         for (int row = r.firstRow; row <= r.lastRow; ++row) {
             for (int col = r.firstCol; col <= r.lastCol; ++col) {
-                const int cell = row * l.columns + col;
+                const int cell = row * l.columns + col - leadingSlots(l.columns);
+                if (cell < 0)
+                    continue;
                 if (cell >= count())
                     break;
                 const QRectF rect = cellRect(cell, l);
@@ -2197,7 +2308,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const int toRow = down ? r.lastRow + ahead : r.firstRow - 1;
         const int lastPage = (m_library->count() - 1) / kMosaicCount;
         // The page of a row's first photo.
-        auto pageAt = [&](int row) { return libraryAt(std::clamp(row * m_columns, 0, count() - 1)) / kMosaicCount; };
+        auto pageAt = [&](int row) { return libraryAt(std::clamp(row * m_columns - leadingSlots(m_columns), 0, count() - 1)) / kMosaicCount; };
         auto wantPages = [&](int a, int b) {
             for (int p = std::max(0, a); p <= std::min(lastPage, b); ++p)
                 if (!rs.pages.contains(p))
@@ -2220,7 +2331,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         auto prefetchRows = [&](int fromRow, int toRow) {
             for (int row = fromRow; row <= toRow; ++row) {
                 for (int c = 0; c < m_columns; ++c) {
-                    const int cell = row * m_columns + c;
+                    const int cell = row * m_columns + c - leadingSlots(m_columns);
                     if (cell < 0 || cell >= count())
                         continue;
                     const int i = libraryAt(cell);
@@ -2399,6 +2510,32 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         if (slot.opacity->opacity() != opacity)
             slot.opacity->setOpacity(opacity);
 
+        // One cover across the unused beginning of the first row, drawn
+        // with its layer so it scrolls and cross-fades exactly like photos.
+        QRectF cover;
+        if (size_t(k) < drawn.size())
+            cover = preludeRect(drawn[size_t(k)]);
+        if (!cover.isEmpty() && cover.intersects(view)) {
+            const int columns = drawn[size_t(k)].columns;
+            const QSize pixels(std::max(1, int(std::round((leadingSlots(columns) * strideFor(columns) - gapFor(columns)) * dpr))),
+                               std::max(1, int(std::round((strideFor(columns) - gapFor(columns)) * dpr))));
+            const QString key = QStringLiteral("%1/%2/%3/%4/%5/%6/%7/%8/%9/%10")
+                .arg(pixels.width()).arg(pixels.height()).arg(dpr).arg(count()).arg(m_library->generation())
+                .arg(m_library->dir()).arg(m_background.name()).arg(m_accent.name())
+                .arg(tr("History begins here") + tr("Latest photos") + tr("%n photos", "", m_library->count())).arg(m_cellsVersion);
+            if (slot.preludeKey != key || !slot.prelude->texture()) {
+                QSGTexture *previous = slot.prelude->texture();
+                slot.prelude->setOwnsTexture(false);
+                slot.prelude->setTexture(window()->createTextureFromImage(preludeImage(pixels, dpr)));
+                slot.prelude->setOwnsTexture(true);
+                delete previous;
+                slot.preludeKey = key;
+            }
+            slot.prelude->setRect(cover);
+        } else {
+            slot.prelude->setRect(QRectF());
+        }
+
         QSGGeometry *g = slot.placeholders->geometry();
         g->allocate(int(b.colours.size() * 6));
         auto *v = g->vertexDataAsColoredPoint2D();
@@ -2547,7 +2684,8 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         if (!m_selected.empty()) {
             const Layer &l = drawn.front();
             const Range &r = ranges.front();
-            const int from = r.firstRow * l.columns, to = std::min(count(), (r.lastRow + 1) * l.columns);
+            const int from = std::max(0, r.firstRow * l.columns - leadingSlots(l.columns));
+            const int to = std::min(count(), (r.lastRow + 1) * l.columns - leadingSlots(l.columns));
             for (auto it = m_selected.lower_bound(from); it != m_selected.end() && *it < to; ++it)
                 frames.push_back(cellRect(*it, l));
         }
@@ -2556,7 +2694,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         if (m_cursorShown && m_cursor >= 0 && m_cursor < count()) {
             const Layer &l = drawn.front();
             const Range &r = ranges.front();
-            if (m_cursor >= r.firstRow * l.columns && m_cursor < (r.lastRow + 1) * l.columns)
+            if (slotOf(m_cursor, l.columns) >= r.firstRow * l.columns && slotOf(m_cursor, l.columns) < (r.lastRow + 1) * l.columns)
                 cursorFrame = cellRect(m_cursor, l);
         }
         // Each: a border, and a check badge in the bottom right corner, square

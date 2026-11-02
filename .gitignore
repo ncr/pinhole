@@ -6,3 +6,6 @@ __pycache__/
 /pkgbuild/pkg/
 /pkgbuild/src/
 *.pkg.tar.*
+.tools/
+/plugins/series/pinhole-series
+/plugins/send/pinhole-send

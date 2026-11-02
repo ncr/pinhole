@@ -6,7 +6,7 @@ pkgdesc='A fast, on-demand iCloud Photos browser for Omarchy'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
-         'libjpeg-turbo' 'libheif' 'lcms2' 'wayland' 'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv' 'sqlite')
+         'libjpeg-turbo' 'libheif' 'lcms2' 'wayland' 'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv' 'sqlite' 'python' 'git')
 optdepends=('localsend: Send to phone opens its window for a device not listed')
 makedepends=('rust' 'gcc' 'make' 'wayland-protocols' 'qt6-shadertools')
 # makepkg's LTO makes GCC bitcode of the C in sqlite and ring, which the
@@ -17,14 +17,11 @@ sha256sums=()
 
 build() {
   cd "$startdir/.."
-  cargo build --release --locked --workspace --manifest-path core/Cargo.toml
-  cargo build --release --locked --manifest-path plugins/series/finder/Cargo.toml
-  cargo build --release --locked --manifest-path plugins/send/sender/Cargo.toml
-  app/bin/build
+  bin/build
 }
 
 package() {
   cd "$startdir/.."
-  bin/install-files "$pkgdir/usr"
+  PINHOLE_INSTALL_MODE=package PINHOLE_RUNTIME_PREFIX=/usr bin/install-files "$pkgdir/usr"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

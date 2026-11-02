@@ -49,6 +49,7 @@ HEADERS += \
     $$PWD/marks.h \
     $$PWD/markchoices.h \
     $$PWD/storage.h \
+    $$PWD/updater.h \
     $$PWD/sources.h \
     $$PWD/thumbnailloader.h \
     $$PWD/photogrid.h \
@@ -89,6 +90,7 @@ SOURCES += \
     $$PWD/marks.cpp \
     $$PWD/markchoices.cpp \
     $$PWD/storage.cpp \
+    $$PWD/updater.cpp \
     $$PWD/sources.cpp \
     $$PWD/thumbnailloader.cpp \
     $$PWD/photogrid.cpp \

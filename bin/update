@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Check origin/main without changing a checkout; install only on request.
+
+stdout is one JSON object for the window. Build and network diagnostics go
+into a private log, never into a popup over someone's photos.
+"""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+
+class UpdateError(Exception):
+    pass
+
+
+def git(*args, cwd=None, log=None):
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes -oConnectTimeout=15")
+    result = subprocess.run(["git", *args], cwd=cwd, env=env, text=True,
+                            stdout=subprocess.PIPE, stderr=log or subprocess.PIPE, timeout=120)
+    if result.returncode:
+        raise UpdateError("network" if args[0] in ("ls-remote", "clone", "fetch") else "failed")
+    return result.stdout.strip()
+
+
+def remote_revision(metadata, log=None):
+    output = git("ls-remote", "--exit-code", metadata["repository"], "refs/heads/main", log=log)
+    revision = output.split()[0] if output else ""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+        raise UpdateError("network")
+    return revision
+
+
+def apply(metadata, target, log):
+    prefix = Path(metadata["prefix"]).resolve()
+    mode = metadata.get("mode", "local")
+    if mode == "package" or prefix == Path("/usr"):
+        # The system package stays managed by pacman. The desktop launcher
+        # can select a current per-user build without a root prompt.
+        prefix = Path.home() / ".local"
+        mode = "local"
+    if mode == "developer":
+        checkout = Path(metadata["source"]).resolve()
+        # Never switch branches, discard files, rebase, or reset local work.
+        if git("status", "--porcelain", cwd=checkout, log=log):
+            raise UpdateError("dirty")
+        if git("branch", "--show-current", cwd=checkout, log=log) != "main":
+            raise UpdateError("branch")
+        git("fetch", "--no-tags", metadata["repository"], "refs/heads/main", cwd=checkout, log=log)
+        if git("rev-parse", "FETCH_HEAD", cwd=checkout, log=log) != target:
+            raise UpdateError("changed")
+        if subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", target], cwd=checkout).returncode:
+            raise UpdateError("diverged")
+        git("merge", "--ff-only", target, cwd=checkout, log=log)
+        command = [str(checkout / "bin/install-local"), "--dev"]
+    else:
+        # Keep the build tree between updates: Rust/Qt's caches make later
+        # updates incremental. The working repository is never touched.
+        cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "pinhole/update"
+        checkout = cache / "checkout"
+        cache.mkdir(parents=True, exist_ok=True)
+        if not checkout.exists():
+            git("clone", "--no-checkout", "--single-branch", "--branch", "main",
+                metadata["repository"], str(checkout), log=log)
+        git("fetch", "--no-tags", metadata["repository"], "refs/heads/main", cwd=checkout, log=log)
+        if git("rev-parse", "FETCH_HEAD", cwd=checkout, log=log) != target:
+            raise UpdateError("changed")
+        git("checkout", "--detach", target, cwd=checkout, log=log)
+        command = [str(checkout / "bin/install-local")]
+    env = dict(os.environ, PREFIX=str(prefix), PINHOLE_KEEP_RUNNING="1")
+    result = subprocess.run(command, cwd=checkout, env=env, stdout=log, stderr=log)
+    if result.returncode:
+        raise UpdateError("build")
+    return prefix / "share/pinhole/update.json"
+
+
+def restart(metadata, pid, args):
+    # Let the old window close and release its socket before launching the
+    # new one. Only the default library service belongs to this install.
+    for _ in range(100):
+        if not Path(f"/proc/{pid}").exists():
+            break
+        time.sleep(.1)
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    socket = os.environ.get("PINHOLE_SOCKET", str(runtime / "pinhole.sock"))
+    if "--library" not in args:
+        for process in Path("/proc").iterdir():
+            if not process.name.isdigit():
+                continue
+            try:
+                argv = (process / "cmdline").read_bytes().split(b"\0")
+                if Path(os.fsdecode(argv[0])).name == "pinholed" and b"--socket" in argv:
+                    at = argv.index(b"--socket")
+                    if os.fsdecode(argv[at + 1]) == socket:
+                        os.kill(int(process.name), signal.SIGTERM)
+            except (OSError, IndexError):
+                continue
+    launcher = str(Path(metadata["prefix"]) / "bin/pinhole")
+    os.execv(launcher, [launcher, *args])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--check", action="store_true")
+    action.add_argument("--apply", action="store_true")
+    action.add_argument("--restart", action="store_true")
+    parser.add_argument("--metadata", required=True)
+    parser.add_argument("--pid", type=int, default=0)
+    parser.add_argument("args", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    log_path = None
+    try:
+        metadata = json.loads(Path(args.metadata).read_text())
+        if args.restart:
+            restart(metadata, args.pid, args.args[1:] if args.args[:1] == ["--"] else args.args)
+            return
+        if args.check:
+            target = remote_revision(metadata)
+            print(json.dumps({"revision": target, "available": target != metadata["commit"]}))
+            return
+        state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "pinhole"
+        state.mkdir(parents=True, exist_ok=True)
+        with (state / "update.lock").open("w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise UpdateError("busy")
+            fd, log_path = tempfile.mkstemp(prefix="update-", suffix=".log", dir=state)
+            with os.fdopen(fd, "w") as log:
+                target = remote_revision(metadata, log)
+                installed_metadata = apply(metadata, target, log)
+            print(json.dumps({"revision": target, "log": log_path, "metadata": str(installed_metadata)}))
+    except (UpdateError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        code = str(error) if isinstance(error, UpdateError) else "failed"
+        print(json.dumps({"error": code, "log": log_path or ""}))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -9,27 +9,44 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
+install -d "$PREFIX"
+PREFIX="$(CDPATH= cd -- "$PREFIX" && pwd)"
 cd "$ROOT"
 
-cargo build --release --locked --workspace --manifest-path core/Cargo.toml
-cargo build --release --locked --manifest-path plugins/series/finder/Cargo.toml
-cargo build --release --locked --manifest-path plugins/send/sender/Cargo.toml
-app/bin/build
+mode=local
+case "${1:-}" in
+  --dev | --developer) mode=developer; shift ;;
+esac
+if [ "$#" -gt 0 ]; then echo 'Usage: bin/install-local [--dev]' >&2; exit 2; fi
+"$ROOT/bin/build"
 
-"$ROOT/bin/install-files" "$PREFIX"
-sed -i "s|^Exec=.*|Exec=$PREFIX/bin/pinhole|" "$PREFIX/share/applications/pinhole.desktop"
+if [ "$mode" = developer ]; then
+  "$ROOT/bin/install-dev" "$PREFIX"
+else
+  PINHOLE_INSTALL_MODE=local "$ROOT/bin/install-files" "$PREFIX"
+  python3 - "$PREFIX" <<'PY'
+from pathlib import Path
+import sys
+prefix = Path(sys.argv[1])
+entry = prefix / 'share/applications/pinhole.desktop'
+command = str(prefix / 'bin/pinhole').replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
+entry.write_text(entry.read_text().replace('Exec=pinhole', 'Exec="' + command + '"'))
+PY
+fi
 update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
 
 # Only the installed ones: windows run from a checkout (self-tests, other
 # worktrees) and the services they started on sockets of their own stay.
+if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
 for pid in $(pgrep -x pinhole || true); do
   case "$(readlink "/proc/$pid/exe" || true)" in
-    /usr/bin/pinhole* | "$PREFIX"/bin/pinhole*) kill "$pid" || true ;;
+    /usr/bin/pinhole* | "$PREFIX"/bin/pinhole* | "$ROOT"/app/build/pinhole*) kill "$pid" || true ;;
   esac
 done
 socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pinhole.sock"
 for pid in $(pgrep -x pinholed || true); do
   tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q -- "--socket $socket " && kill "$pid" || true
 done
+fi
 
-echo "Installed $(git rev-parse --short HEAD) into $PREFIX"
+echo "Installed $(git rev-parse --short HEAD) into $PREFIX ($mode)"

@@ -1,0 +1,49 @@
+#!/bin/sh
+# One compiler choice for the installer, packages and developer builds.
+set -eu
+
+builder="${PINHOLE_RUST_BUILDER:-auto}"
+case "$builder" in
+    auto | blaze)
+        BLAZE_HOME="${BLAZE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pinhole/blaze}"
+        export BLAZE_HOME
+        if [ -n "${PINHOLE_BLAZE:-}" ]; then
+            program="$PINHOLE_BLAZE"
+        elif command -v blaze >/dev/null 2>&1; then
+            program=blaze
+        elif [ -x "${CARGO_HOME:-$HOME/.cargo}/bin/blaze" ]; then
+            program="${CARGO_HOME:-$HOME/.cargo}/bin/blaze"
+        else
+            program="${XDG_DATA_HOME:-$HOME/.local/share}/pinhole/tools/bin/blaze"
+        fi
+        if ! command -v "$program" >/dev/null 2>&1; then
+            if [ "$builder" = auto ]; then
+                echo 'Blaze is missing; using Cargo. Run bin/setup-blaze to enable faster builds.' >&2
+                exec cargo "$@"
+            fi
+            echo 'Blaze is missing. Run bin/setup-blaze first (or set PINHOLE_RUST_BUILDER=cargo).' >&2
+            exit 127
+        fi
+        ;;
+    cargo) program=cargo ;;
+    *) echo "Unknown Rust builder: $builder (use auto, blaze or cargo)." >&2; exit 2 ;;
+esac
+if [ "$builder" = auto ]; then
+    log="$(mktemp)"
+    trap 'rm -f "$log"' EXIT HUP INT TERM
+    if "$program" "$@" >"$log" 2>&1; then
+        cat "$log"
+        exit 0
+    else
+        status=$?
+        cat "$log" >&2
+        # An unavailable compiler feature must not make the app impossible
+        # to install. Cargo still validates the project with the same flags.
+        if [ "$status" -ne 101 ]; then exit "$status"; fi
+        echo 'Blaze could not build this target; retrying with Cargo (no acceleration for this build).' >&2
+        rm -f "$log"
+        trap - EXIT HUP INT TERM
+        exec cargo "$@"
+    fi
+fi
+exec "$program" "$@"

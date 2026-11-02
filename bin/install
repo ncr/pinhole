@@ -1,7 +1,79 @@
 #!/bin/sh
-# Build and install the package, so Pinhole shows up in the app launcher.
+# Guided installation; flags keep the same path usable over SSH and in CI.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-cd "$ROOT/pkgbuild"
-exec makepkg -fsi "$@"
+cd "$ROOT"
+mode=""
+interactive=1
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dev | --developer) mode=developer ;;
+        --local) mode=local ;;
+        --package) mode=package ;;
+        --non-interactive | --yes) interactive=0 ;;
+        --help | -h)
+            cat <<'HELP'
+Usage: bin/install [--dev | --local | --package] [--non-interactive]
+
+  --dev       Run directly from this checkout; no package or root password.
+  --local     Copy a build into ~/.local; no root password.
+  --package   Build and install a pacman package (sudo may ask for a password).
+
+Interactive terminals get a guided menu. Without one the default is package.
+PREFIX changes ~/.local for developer/local installs.
+PINHOLE_RUST_BUILDER=cargo explicitly selects Cargo instead of Blaze.
+HELP
+            exit 0 ;;
+        *) echo "Unknown option: $1 (see --help)." >&2; exit 2 ;;
+    esac
+    shift
+done
+ui=0
+if [ "$interactive" = 1 ] && [ -t 0 ] && [ -t 1 ] && command -v gum >/dev/null 2>&1; then ui=1; fi
+if [ "$ui" = 1 ]; then
+    gum style --border rounded --border-foreground 75 --padding '1 3' \
+        --bold '◉  Pinhole' 'Your photos. Close at hand.'
+    if [ -z "$mode" ]; then
+        choice="$(gum choose --header 'How should Pinhole live on this computer?' \
+            'Developer · run this checkout' 'Local · install for this account' 'Package · install for everyone')" || exit 130
+        case "$choice" in Developer*) mode=developer ;; Local*) mode=local ;; Package*) mode=package ;; *) exit 130 ;; esac
+    fi
+fi
+mode="${mode:-package}"
+if [ "${PINHOLE_RUST_BUILDER:-auto}" != cargo ]; then
+    if ! PINHOLE_RUST_BUILDER=blaze bin/build-rust --version >/dev/null 2>&1; then
+        if [ "$ui" = 1 ]; then
+            gum spin --spinner dot --title 'Preparing Blaze, the fast Rust compiler…' --show-error -- bin/setup-blaze
+        else
+            echo 'Preparing Blaze, the fast Rust compiler…'
+            bin/setup-blaze
+        fi
+    fi
+fi
+run_install() {
+    case "$mode" in
+        developer) bin/install-local --dev ;;
+        local) bin/install-local ;;
+        package) (cd pkgbuild && makepkg -fsi) ;;
+    esac
+}
+# sudo keeps its terminal; local installs show a spinner and preserve logs.
+if [ "$ui" = 1 ] && [ "$mode" != package ]; then
+    state="${XDG_STATE_HOME:-$HOME/.local/state}/pinhole"
+    mkdir -p "$state"
+    log="$state/install.log"
+    if [ "$mode" = developer ]; then
+        gum spin --title 'Building Pinhole and linking this checkout…' --show-error -- \
+            sh -c '"$1/bin/install-local" --dev >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
+    else
+        gum spin --title 'Building Pinhole and installing for your account…' --show-error -- \
+            sh -c '"$1/bin/install-local" >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
+    fi
+    gum style --foreground 78 --bold '✓  Pinhole is ready. Open it from your launcher.'
+    gum style --faint "Mode: $mode · Build log: $log"
+else
+    echo "Installing Pinhole ($mode)…"
+    run_install
+    echo 'Pinhole is ready. Open it from your launcher.'
+fi

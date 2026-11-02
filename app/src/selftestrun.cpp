@@ -24,12 +24,13 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <limits>
 #include <vector>
 
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "physics", "examples"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "physics", "examples", "recent"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -46,6 +47,62 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     Incoming &incoming = context.incoming;
     Outgoing &outgoing = context.outgoing;
     Keymap &keymap = context.keymap;
+    // Exercise the real recent-additions plugin and its asynchronous query,
+    // against the library given to this test. No originals are fetched.
+    if (name == QLatin1String("recent")) {
+        QTimer::singleShot(2000, window, [window, grid, arg] {
+            grid->setColumnsNow(7);
+            grid->cursorToEnd();
+            window->grabWindow().save(arg + "/grid-bottom.png");
+            grid->cursorToStart();
+            QVariant instance;
+            QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, instance),
+                                      Q_ARG(QVariant, QStringLiteral("pinhole.recent")));
+            QObject *plugin = instance.value<QObject *>();
+            if (!plugin || !QMetaObject::invokeMethod(plugin, "openRecent")) {
+                std::fprintf(stderr, "selftest: recent: plugin did not load\n");
+                return QCoreApplication::exit(1);
+            }
+            auto *poll = new QTimer(window);
+            auto elapsed = std::make_shared<QElapsedTimer>();
+            elapsed->start();
+            poll->setInterval(100);
+            QObject::connect(poll, &QTimer::timeout, window, [=] {
+                QObject *panel = plugin->findChild<QObject *>("recentPhotos");
+                if ((!panel || panel->property("loading").toBool()) && elapsed->elapsed() < 10000)
+                    return;
+                poll->stop();
+                const QVariant value = panel ? panel->property("rows") : QVariant();
+                const QVariantList rows = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toList() : value.toList();
+                bool ok = panel && panel->property("shown").toBool()
+                          && panel->property("problem").toString().isEmpty() && !rows.isEmpty();
+                qint64 previous = std::numeric_limits<qint64>::max();
+                for (const QVariant &entry : rows) {
+                    const QVariantMap row = entry.toMap();
+                    const qint64 added = row.value("added_date").isNull() ? row.value("asset_date").toLongLong()
+                                                                         : row.value("added_date").toLongLong();
+                    ok = ok && !row.value("id").toString().isEmpty() && added <= previous;
+                    previous = added;
+                }
+                std::printf("selftest: recent: %lld rows, newest additions first: %s\n", qlonglong(rows.size()), ok ? "PASS" : "FAIL");
+                QTimer::singleShot(2000, window, [=]() mutable {
+                    window->grabWindow().save(arg + "/recent.png");
+                    if (panel)
+                        QMetaObject::invokeMethod(panel, "reveal");
+                    ok = ok && panel && !panel->property("shown").toBool();
+                    QTimer::singleShot(1500, window, [=] {
+                        window->grabWindow().save(arg + "/revealed.png");
+                        grid->cursorToStart();
+                        QTimer::singleShot(1500, window, [=] {
+                            window->grabWindow().save(arg + "/grid-top.png");
+                            QCoreApplication::exit(ok ? 0 : 1);
+                        });
+                    });
+                });
+            });
+            poll->start();
+        });
+    }
     // PINHOLE_SELFTEST=sourcesfade:<dir>: the side panel coming in and going
     // again, the photos dimming behind it and the grid's controls fading, as
     // frames in <dir> (on screen, for the photos to be drawn).
