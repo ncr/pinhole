@@ -115,10 +115,12 @@ form a history card with the library's years, colours and a jump to the newest.
 
 ## Install
 
+Binary releases are installed, updated and removed with the OS package manager.
+For development or running your own checkout:
+
 ```bash
-bin/install                  # guided terminal UI: developer, local or package install
-bin/install --dev            # launcher runs this checkout directly; no package or password
-bin/install --package        # pacman package for everyone (asks for your password)
+bin/install                  # terminal UI; build and run directly from this checkout
+bin/install --non-interactive # the same source install without the UI
 bin/install --uninstall      # remove this account's install; keep photos/settings/repo
 ```
 
@@ -139,11 +141,17 @@ pinhole help                 # every command: sources, show, remove, sync, add, 
 Each asks the Pinhole service, `pinholed`, and starts it if it is not
 running; only the service writes the library.
 
-Working on Pinhole, `bin/install --dev` builds the checkout and links the
-launcher, service and plugins to it. QML plugins stay live in the repository.
-`bin/install --local` copies the build into `~/.local` instead. Each stops a
-running window so the next launch is the new one. `PREFIX` changes the local
-installation folder. `--non-interactive` bypasses the menu, for scripts.
+`bin/install` builds the checkout and links the launcher, service and plugins to
+it in `~/.local`, without a package or root password. QML plugins stay live in
+the repository. After a successful install, running windows and their service
+are stopped, then those windows reopen with their original arguments and
+session environment. If Pinhole was closed, it stays closed. A failed build
+leaves running processes alone. `PREFIX` changes the installation folder;
+`--non-interactive` bypasses the menu for scripts. `--dev` remains an alias
+for existing developer update helpers.
+
+Package maintainers build separately with `cd pkgbuild && makepkg -s`;
+`bin/install` does not build or install packages.
 
 Developer installations quietly check `main` hourly. A small Update button, also in the
 side panel under Pinhole updates, builds the new version while you browse;
@@ -162,6 +170,7 @@ custom plugins and source checkout. It never removes a system package.
 `bin/blaze-version` and installed by `bin/setup-blaze` (the installer prepares
 it too). `bin/build-rust` is shared by developer, local and package builds.
 Build errors stop the build; there is no automatic Cargo fallback.
+See [measured Rust rebuild times](docs/build-performance.md) for a local comparison.
 `PINHOLE_RUST_BUILDER=cargo` explicitly selects the reference compiler when
 needed, including CI checks of Blaze's generated code.
 

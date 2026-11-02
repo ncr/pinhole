@@ -6,12 +6,12 @@ Jacek develops Pinhole and tries each change in the app he opens with Super+Spac
 without asking:
 
 1. Commit it and land it on `main` (a fast-forward push; this repository has no merge queue).
-2. Install it on this computer with `bin/install --dev --non-interactive`: it builds the checkout and links
-   the launcher directly to the repository, needs no root password and no package, and stops the running
-   window and its pinholed so the next launch is the new version.
+2. Install it on this computer with `bin/install --non-interactive`: it builds the checkout and links
+   the launcher directly to the repository, needs no root password and no package, and restarts any running
+   windows and their pinholed after successful installation. A closed app stays closed.
 
-Then say what changed in the app. `bin/install` is the single public installer: `--dev` for this loop,
-`--package` for a pacman package, `--uninstall` to remove only this account's installed code while keeping
+Then say what changed in the app. `bin/install` is the single public source installer (`--dev` is a compatibility alias),
+`--uninstall` to remove only this account's installed code while keeping
 photos, settings and the repository. Package updates and removal belong to the OS package manager;
 in-app updates apply only to developer installations.
 

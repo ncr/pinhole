@@ -1,4 +1,4 @@
-# Builds the package from this checkout: bin/install runs makepkg here.
+# Package maintainers build from this checkout with: cd pkgbuild && makepkg -s.
 pkgname=pinhole
 pkgver=1.0.0
 pkgrel=1
