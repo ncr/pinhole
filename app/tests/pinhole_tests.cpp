@@ -49,6 +49,7 @@
 #include "keymap.h"
 #include "sources.h"
 #include "library.h"
+#include "timeline.h"
 #include "libraryreloader.h"
 #include "markchoices.h"
 #include "marks.h"
@@ -259,6 +260,152 @@ private slots:
     // A client that finds no service starts one: never a real pinholed
     // from a test, whose socket a fake service holds.
     void initTestCase() { qputenv("PINHOLED", "/bin/false"); }
+
+    // Source dates stay intact: only presentation order changes. An older
+    // photo received yesterday belongs at the newest end for thirty days.
+    void timelineKeepsRecentAdditionsTogetherThenReturnsThemToCaptureOrder() {
+        QTemporaryDir dir;
+        const qint64 day = 86400000;
+        qint64 now = QDateTime(QDate(2026, 11, 2), QTime(12, 0), QTimeZone::UTC).toMSecsSinceEpoch();
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000},
+                                 {"e", 5000}, {"f", 6000}, {"g", 7000}, {"h", 8000}});
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "added-fixture");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN added_date INTEGER"));
+            const QList<qint64> dates{now - 2 * day, now - 45 * day, now - day, now - 31 * day,
+                                      0, now - Timeline::recentWindow, now - 2 * day, now + day};
+            for (int i = 0; i < dates.size(); ++i) {
+                q.prepare("UPDATE assets SET added_date = ? WHERE id = ?");
+                q.addBindValue(dates[i]);
+                q.addBindValue(QString(QChar('a' + i)));
+                QVERIFY(q.exec());
+            }
+        }
+        QSqlDatabase::removeDatabase("added-fixture");
+        Library library;
+        QString error;
+        QVERIFY2(library.open(dir.path(), &error), qPrintable(error));
+        Timeline timeline(dir.path() + "/window.conf", nullptr, [&] { return now; });
+        QCOMPARE(timeline.mode(), "smart");
+        timeline.setLibrary(&library);
+        QCOMPARE(timeline.order(), (std::vector<int>{1, 3, 4, 7, 5, 0, 6, 2}));
+        QCOMPARE(library.at(0).id, QByteArray("a"));
+        QCOMPARE(library.at(0).date, 1000LL);
+        QCOMPARE(timeline.dateOf(0), now - 2 * day);
+        QVERIFY(!timeline.recentlyAdded(7)); // future/invalid dates stay out
+        QSignalSpy changed(&timeline, &Timeline::orderChanged);
+        timeline.refresh();
+        QCOMPARE(changed.count(), 0);
+        ++now; // exactly thirty days is recent; one ms past it is archived
+        timeline.refresh();
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(timeline.order(), (std::vector<int>{1, 3, 4, 5, 7, 0, 6, 2}));
+        timeline.setMode("added");
+        QCOMPARE(timeline.order(), (std::vector<int>{4, 1, 3, 5, 0, 6, 2, 7}));
+        QCOMPARE(timeline.dateOf(4), library.at(4).date); // missing added date
+        Timeline remembered(dir.path() + "/window.conf");
+        QCOMPARE(remembered.mode(), "added");
+        timeline.setMode("taken");
+        QCOMPARE(timeline.order(), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
+        QCOMPARE(timeline.dateOf(0), library.at(0).date);
+        timeline.setMode("unknown");
+        QCOMPARE(timeline.mode(), "taken");
+    }
+
+    void gridAndViewerFollowTimelineWithoutChangingPluginPositions() {
+        QTemporaryDir dir;
+        const qint64 now = 1793620800000LL, day = 86400000;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}});
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "grid-added");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN added_date INTEGER"));
+            const QList<qint64> dates{now - 2 * day, now - 60 * day, now - day, now - 50 * day};
+            for (int i = 0; i < dates.size(); ++i) {
+                q.prepare("UPDATE assets SET added_date = ? WHERE id = ?");
+                q.addBindValue(dates[i]); q.addBindValue(QString(QChar('a' + i)));
+                QVERIFY(q.exec());
+            }
+        }
+        QSqlDatabase::removeDatabase("grid-added");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        Timeline timeline(dir.path() + "/window.conf", nullptr, [=] { return now; });
+        timeline.setLibrary(&library);
+        ThumbnailLoader loader(&library, 1);
+        PhotoGrid grid;
+        grid.setWidth(600); grid.setHeight(500);
+        grid.setSources(&library, &loader, nullptr);
+        grid.setTimeline(&timeline);
+        grid.setColumnsNow(3);
+        QCOMPARE(timeline.order(), (std::vector<int>{1, 3, 0, 2}));
+        const auto slot = [&](int photo) { const QRectF r = grid.rectOf(photo); return std::pair(r.top(), r.left()); };
+        QVERIFY(slot(1) < slot(0));
+        QVERIFY(slot(1) < slot(3));
+        grid.setSelecting(true);
+        grid.setCursorShown(true);
+        grid.putCursorOn(0); grid.tickCursor();
+        QCOMPARE(grid.selection(), QList<int>{0});
+        timeline.setMode("taken");
+        QCOMPARE(grid.selection(), QList<int>{0});
+        QCOMPARE(grid.currentIndex(), 0);
+        timeline.setMode("smart");
+        ServiceClient service(dir.path());
+        Viewer viewer(&library, &service);
+        viewer.setTimeline(&timeline);
+        QCOMPARE(viewer.photoAt(0), 1);
+        QCOMPARE(viewer.photoAt(2), 0);
+        viewer.openAt(0, {});
+        viewer.step(1); QCOMPARE(viewer.index(), 2);
+        viewer.step(-1); QCOMPARE(viewer.index(), 0);
+        viewer.step(-1); QCOMPARE(viewer.index(), 3); // larger capture index, earlier grid position
+        viewer.goTo(3); QCOMPARE(viewer.index(), 2);
+        viewer.setHidden({0});
+        QCOMPARE(viewer.count(), 3);
+        viewer.openAt(0, {}); // a plugin may open a hidden photo directly
+        viewer.step(1); QCOMPARE(viewer.index(), 2);
+        viewer.openAt(0, {});
+        viewer.step(-1); QCOMPARE(viewer.index(), 3);
+        grid.setStacks({QVariant(QVariantList{1, 0})});
+        grid.setHidden({2});
+        QCOMPARE(grid.count(), 2);
+        QCOMPARE(grid.stackOf(0), 0);
+        QCOMPARE(grid.rectOf(0), grid.rectOf(1));
+        QVERIFY(grid.rectOf(3).top() <= grid.rectOf(1).top());
+        QVERIFY(grid.rectOf(3).left() < grid.rectOf(1).left());
+        // Reload added dates without moving library positions or selections.
+        grid.rememberAnchor();
+        Library fresh;
+        QVERIFY(fresh.open(dir.path(), &error));
+        loader.reload([&] { library.swap(fresh); });
+        timeline.libraryReloaded();
+        grid.libraryReloaded({0, 1, 2, 3});
+        viewer.libraryReloaded({0, 1, 2, 3});
+        QCOMPARE(grid.stackOf(0), 0);
+        QCOMPARE(viewer.index(), 3);
+        QCOMPARE(library.at(0).id, QByteArray("a"));
+    }
+
+    void librariesWithoutAddedDatesKeepTheirCaptureOrder() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        Timeline timeline(dir.path() + "/window.conf");
+        timeline.setLibrary(&library);
+        QCOMPARE(library.at(0).added, 0LL);
+        QCOMPARE(timeline.order(), (std::vector<int>{0, 1}));
+        timeline.setMode("added");
+        QCOMPARE(timeline.order(), (std::vector<int>{0, 1}));
+        QCOMPARE(timeline.dateOf(1), 2000LL);
+    }
 
     // Real asynchronous process replies: checking cannot install, repeated
     // clicks cannot start a second build, and a failed build stays retryable.

@@ -361,15 +361,48 @@ ApplicationWindow {
         opacity: win.chrome
         x: sourcesButton.visible ? sourcesButton.x + sourcesButton.width + 6 : 16
         y: 16
-        text: win.switchedTo !== "" ? win.switchedTo : grid.dateLabel
+        text: (win.switchedTo !== "" ? win.switchedTo : grid.dateLabel) + "  ▾"
         morphing: true
         centred: false
         textColor: theme.brightForeground
         border.color: win.switchedTo !== "" ? theme.accent
                     : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
-        // Over the photos, not a hole in them: a click, the wheel or a
-        // pinch on it does nothing (a click opened the photo beneath).
         Shield { anchors.fill: parent; z: -1 }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: win.inGrid; onTapped: orderMenu.toggle(false) }
+    }
+    PluginAction {
+        id: smartOrder
+        text: qsTr("Smart order")
+        active: timeline.mode === "smart"
+        onTriggered: timeline.mode = "smart"
+    }
+    PluginAction {
+        id: takenOrder
+        text: qsTr("Date taken")
+        active: timeline.mode === "taken"
+        onTriggered: timeline.mode = "taken"
+    }
+    PluginAction {
+        id: addedOrder
+        text: qsTr("Date added")
+        active: timeline.mode === "added"
+        onTriggered: timeline.mode = "added"
+    }
+    MenuGroup {
+        id: orderMenu
+        objectName: "orderMenu"
+        x: dateLabel.x + dateLabel.width
+        y: dateLabel.y
+        z: 10
+        visible: dateLabel.visible && win.inGrid
+        arrowShown: false
+        keyLayer: "grid"
+        menuKey: "Ctrl+Shift+O"
+        menuText: qsTr("Photo order")
+        section: qsTr("Photo order")
+        items: [smartOrder, takenOrder, addedOrder]
+        Item { width: 0; height: dateLabel.height }
     }
 
     // A library being built: how far, at the foot.
@@ -1266,7 +1299,7 @@ ApplicationWindow {
         : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"
         : pluginCovering ? "plugin"
-        : selectBar.menuOpen || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
+        : orderMenu.open || selectBar.menuOpen || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
         : viewerShown ? "viewer"
         : "grid"
     Binding { target: keymap; property: "layer"; value: win.keyLayer }

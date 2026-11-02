@@ -2,6 +2,7 @@
 
 #include "gainmap.h"
 #include "library.h"
+#include "timeline.h"
 #include "photogrid.h"
 #include "photoprovider.h"
 #include "serviceclient.h"
@@ -246,6 +247,15 @@ void Viewer::setHidden(const QVariantList &hidden) {
     emit hiddenChanged();
 }
 
+void Viewer::setTimeline(Timeline *timeline) {
+    if (m_timeline)
+        disconnect(m_timeline, nullptr, this, nullptr);
+    m_timeline = timeline;
+    if (timeline)
+        connect(timeline, &Timeline::orderChanged, this, &Viewer::rebuildRow);
+    rebuildRow();
+}
+
 void Viewer::rebuildRow() {
     const int n = m_library->count();
     std::vector<char> hidden;
@@ -256,13 +266,17 @@ void Viewer::rebuildRow() {
             hidden.assign(size_t(n), 0);
         hidden[size_t(i)] = 1;
     }
-    m_rowMapped = !hidden.empty();
+    m_rowMapped = !hidden.empty() || m_timeline;
     m_row.clear();
     if (m_rowMapped) {
         m_row.reserve(size_t(n));
-        for (int i = 0; i < n; ++i)
-            if (!hidden[size_t(i)])
+        m_rowPositions.resize(size_t(n));
+        for (int place = 0; place < n; ++place) {
+            const int i = m_timeline ? m_timeline->order()[size_t(place)] : place;
+            m_rowPositions[size_t(i)] = int(m_row.size());
+            if (hidden.empty() || !hidden[size_t(i)])
                 m_row.push_back(i);
+        }
     }
     m_jumpFrom = -1;
     if (m_open)
@@ -276,7 +290,7 @@ int Viewer::count() const { return m_rowMapped ? int(m_row.size()) : m_library->
 int Viewer::placeOf(int index) const {
     if (!m_rowMapped)
         return index;
-    return int(std::lower_bound(m_row.begin(), m_row.end(), index) - m_row.begin());
+    return index >= 0 && index < int(m_rowPositions.size()) ? m_rowPositions[size_t(index)] : count();
 }
 
 int Viewer::place() const { return m_index < 0 ? -1 : placeOf(m_index); }
@@ -293,7 +307,8 @@ int Viewer::stepTarget(int delta, int *place) const {
     const int photo = photoAt(to);
     // Never back the other way: a hidden photo shown past either end of
     // the row has nothing beyond it.
-    if (photo < 0 || photo == m_index || (photo > m_index) != (delta > 0))
+    const auto rank = [this](int index) { return m_timeline ? m_timeline->positionOf(index) : index; };
+    if (photo < 0 || photo == m_index || (rank(photo) > rank(m_index)) != (delta > 0))
         return -1;
     if (place)
         *place = to;
@@ -455,7 +470,8 @@ void Viewer::goTo(int place) {
     const int index = photoAt(place);
     if (index < 0 || index == m_index)
         return;
-    const int delta = place - placeFrom(index > m_index ? 1 : -1);
+    const bool forward = m_timeline ? m_timeline->positionOf(index) > m_timeline->positionOf(m_index) : index > m_index;
+    const int delta = place - placeFrom(forward ? 1 : -1);
     if (std::abs(delta) <= 1) {
         step(delta);
         return;

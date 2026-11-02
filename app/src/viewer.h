@@ -19,6 +19,8 @@ class ServiceClient;
 // thumbnail at once, then the medium rendition, then the full size, each
 // from pinholed. A video plays once its file is here. A Live Photo's motion
 // and effects are the Live Photos plugin's (plugins/live), over the photo.
+class Timeline;
+
 class Viewer : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool open READ isOpen NOTIFY openChanged)
@@ -52,7 +54,7 @@ class Viewer : public QObject {
     // (ViewerMotion::hold()).
     Q_PROPERTY(bool takesInput READ takesInput WRITE setTakesInput NOTIFY takesInputChanged)
     Q_PROPERTY(bool zoomed READ zoomed NOTIFY motionChanged)
-    // The row the photos lie in: the library's, without the photos hidden
+    // The row the photos lie in: the timeline's, without the photos hidden
     // from the grid (library positions, Main.qml), so ←, →, the carousel
     // and the ends pass over those. `count` is the photos in it, `place`
     // the shown one's place there.
@@ -99,6 +101,7 @@ public:
     bool zoomed() const { return m_motion.zoomed(); }
     QVariantList hidden() const { return m_hiddenGiven; }
     void setHidden(const QVariantList &hidden);
+    void setTimeline(Timeline *timeline);
     int count() const;
     int place() const;
     // The photo at a place in the row, -1 for none.
@@ -208,8 +211,10 @@ private:
     static QUrl providerUrl(const QString &path);
 
     const Library *m_library;
+    Timeline *m_timeline = nullptr;
+    std::vector<int> m_rowPositions;
     ServiceClient *m_service;
-    // The library positions in the row, in order, while any is hidden
+    // The library positions in the row, in presentation order, while sorted or hidden
     // (`m_rowMapped`); the hidden ones as given, through any reload since.
     QVariantList m_hiddenGiven;
     std::vector<int> m_hiddenList;

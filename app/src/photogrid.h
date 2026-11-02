@@ -43,7 +43,8 @@ struct GridRenderState;
 // grid settles on one level, scale, alignment and fade animating together.
 //
 // A cell is usually one photo, but a plugin can stack several into one card
-// (a series): the grid then lays out cells, each showing the library
+// (a series): the timeline chooses its original or latest-added cover.
+// The grid then lays out cells, each showing the library
 // position it stands for, and everything it says to the rest of Pinhole
 // (indexAt, rectOf, activated, selection) is in library positions, a
 // stacked photo's being its card's. A plugin can also hide photos (as
@@ -51,12 +52,14 @@ struct GridRenderState;
 // PINHOLE_INPUT_LOG=<file>: append a line about an input event there.
 void logInput(const QString &line);
 
+class Timeline;
+
 class PhotoGrid : public QQuickItem {
     Q_OBJECT
     // Cells: photos, a stack counting once.
     Q_PROPERTY(int count READ count NOTIFY cellsChanged)
     // Photos shown as one card, each a list of library positions: the card
-    // stands where its first one is and shows it. A photo already in an
+    // uses its first photo, or its latest addition in addition order. A photo already in an
     // earlier stack stays there. Plugins' stacks, gathered (Main.qml).
     Q_PROPERTY(QVariantList stacks READ stacks WRITE setStacks NOTIFY stacksChanged)
     // Photos not in the grid at all, library positions: no cell, and out of
@@ -122,6 +125,7 @@ public:
     ~PhotoGrid() override;
 
     void setSources(const Library *library, ThumbnailLoader *loader, FrameStats *stats);
+    void setTimeline(Timeline *timeline);
     // The library was read again and its positions moved: `moved[old]` is
     // each photo's new position, or -1 if it is gone. Call right after the
     // swap; the view keeps the photos it showed, or stays at the newest end.
@@ -395,6 +399,7 @@ private:
     QPointF pinIn(int columns) const;
 
     const Library *m_library = nullptr;
+    Timeline *m_timeline = nullptr;
     ThumbnailLoader *m_loader = nullptr;
     // Cell to library position, and back (-1: hidden); both empty while
     // every cell is one photo. Each stack's photos by its card's position,

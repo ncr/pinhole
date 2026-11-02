@@ -2,6 +2,7 @@
 
 #include "framestats.h"
 #include "library.h"
+#include "timeline.h"
 #include "marks.h"
 #include "thumbnailloader.h"
 #include "touchpadhold.h"
@@ -28,6 +29,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 
@@ -279,6 +281,16 @@ void PhotoGrid::setSources(const Library *library, ThumbnailLoader *loader, Fram
     scrollToEnd();
 }
 
+void PhotoGrid::setTimeline(Timeline *timeline) {
+    if (m_timeline)
+        disconnect(m_timeline, nullptr, this, nullptr);
+    m_timeline = timeline;
+    if (timeline)
+        connect(timeline, &Timeline::orderChanged, this, &PhotoGrid::relayCells);
+    if (m_library)
+        relayCells();
+}
+
 void PhotoGrid::setTouchpadHold(TouchpadHold *hold) {
     m_hold = hold;
     connect(hold, &TouchpadHold::began, this, [this](quint32 time, quint32 fingers) {
@@ -418,8 +430,13 @@ int PhotoGrid::nearestCell(int index) const {
         return std::min(index, n - 1);
     if (const int cell = cellOf(index); cell >= 0)
         return cell;
-    // The cells' photos are in order.
-    const auto next = std::lower_bound(m_cells.begin(), m_cells.end(), index);
+    // Hidden photos still have a place in the presentation order.
+    const auto rank = [this](int photo) {
+        return m_timeline ? m_timeline->positionOf(photo) : photo;
+    };
+    const int position = m_timeline ? m_timeline->positionOf(index) : index;
+    const auto next = std::lower_bound(m_cells.begin(), m_cells.end(), position,
+                                      [&](int photo, int place) { return rank(photo) < place; });
     return std::min(int(next - m_cells.begin()), n - 1);
 }
 
@@ -475,14 +492,11 @@ void PhotoGrid::relayCells() {
     const QList<int> selectedBefore = selection();
     rebuildCells();
     emit cellsChanged();
-    int index = before.index;
-    if (index >= 0)
-        while (index < (m_library ? m_library->count() : 0) && cellOf(index) < 0)
-            ++index;
+    const int cell = nearestCell(before.index);
     if (before.atEnd)
         scrollToEnd();
-    else if (index >= 0 && cellOf(index) >= 0)
-        setScroll(m_scroll + rectOf(index).top() - before.offset);
+    else if (cell >= 0)
+        setScroll(m_scroll + rectOf(libraryAt(cell)).top() - before.offset);
     else
         setScroll(m_scroll);
     if (selection() != selectedBefore)
@@ -568,13 +582,21 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         }
         if (photos.size() < 2)
             continue;
+        int cover = photos.front();
+        if (m_timeline && (m_timeline->mode() == "added" || std::any_of(photos.begin(), photos.end(),
+                [this](int i) { return m_timeline->recentlyAdded(i); }))) {
+            // In a recently extended series, show the newly received photo
+            // itself. Opening this card then enters that part of the viewer.
+            cover = *std::max_element(photos.begin(), photos.end(), [this](int a, int b) {
+                return m_timeline->positionOf(a) < m_timeline->positionOf(b);
+            });
+        }
         for (int i : photos)
-            card[size_t(i)] = photos.front();
-        const int cover = photos.front();
+            card[size_t(i)] = cover;
         std::sort(photos.begin(), photos.end());
         m_stackOf.emplace(cover, std::move(photos));
     }
-    if (!m_stackOf.empty() || !hidden.empty()) {
+    if (!m_stackOf.empty() || !hidden.empty() || m_timeline) {
         auto cardOf = [&](int i) { return card.empty() ? -1 : card[size_t(i)]; };
         m_cellOf.assign(size_t(n), -1);
         m_cells.reserve(size_t(n));
@@ -583,6 +605,13 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
                 m_cellOf[size_t(i)] = int(m_cells.size());
                 m_cells.push_back(i);
             }
+        }
+        if (m_timeline) {
+            std::sort(m_cells.begin(), m_cells.end(), [this](int a, int b) {
+                return m_timeline->positionOf(a) < m_timeline->positionOf(b);
+            });
+            for (int cell = 0; cell < int(m_cells.size()); ++cell)
+                m_cellOf[size_t(m_cells[size_t(cell)])] = cell;
         }
         for (int i = 0; i < n; ++i)
             if (cardOf(i) >= 0 && cardOf(i) != i)
@@ -1114,9 +1143,15 @@ void PhotoGrid::updateDateLabel() {
         const int first = std::clamp(int(std::floor(contentTop / rowStride)), 0, rows - 1);
         const int last = std::clamp(int(std::floor(contentBottom / rowStride)), 0, rows - 1);
         const QLocale locale;
-        auto dateOf = [this](int cell) { return QDateTime::fromMSecsSinceEpoch(m_library->at(libraryAt(cell)).date).date(); };
+        auto photoOf = [this](int cell) { return libraryAt(cell); };
+        auto dateOf = [this, &photoOf](int cell) {
+            const int photo = photoOf(cell);
+            return QDateTime::fromMSecsSinceEpoch(m_timeline ? m_timeline->dateOf(photo) : m_library->at(photo).date).date();
+        };
+        const int firstCell = std::max(0, first * columns - leadingSlots(columns));
+        const int lastCell = std::min(count() - 1, (last + 1) * columns - 1 - leadingSlots(columns));
         // A row belongs to the date of its first photo.
-        const QDate from = dateOf(std::max(0, first * columns - leadingSlots(columns)));
+        const QDate from = dateOf(firstCell);
 
         if (unit == Year) {
             label = QString::number(from.year());
@@ -1130,7 +1165,7 @@ void PhotoGrid::updateDateLabel() {
         } else {
             label = locale.toString(from, QStringLiteral("d MMMM yyyy"));
             if (unit == DayRange) {
-                const QDate to = dateOf(std::min(count() - 1, (last + 1) * columns - 1 - leadingSlots(columns)));
+                const QDate to = dateOf(lastCell);
                 if (to != from) {
                     if (to.year() != from.year())
                         label = locale.toString(from, QStringLiteral("d MMMM yyyy")) + QStringLiteral(" – ") +
@@ -1143,6 +1178,14 @@ void PhotoGrid::updateDateLabel() {
                                 locale.toString(to, QStringLiteral("d MMMM yyyy"));
                 }
             }
+        }
+        if (m_timeline) {
+            const bool firstRecent = m_timeline->recentlyAdded(photoOf(firstCell));
+            const bool lastRecent = m_timeline->recentlyAdded(photoOf(lastCell));
+            if (firstRecent != lastRecent)
+                label = tr("Earlier photos · Recently added");
+            else if (m_timeline->mode() == "added" || firstRecent)
+                label = tr("Added: %1").arg(label);
         }
     }
     if (label != m_dateLabel) {
@@ -1216,8 +1259,8 @@ QImage PhotoGrid::preludeImage(QSize size, qreal dpr) const {
         p.drawEllipse(centre, r, r);
     }
     const QLocale locale;
-    const auto dateOf = [this](int cell) { return QDateTime::fromMSecsSinceEpoch(m_library->at(libraryAt(cell)).date).date(); };
-    const QDate oldest = dateOf(0), newest = dateOf(count() - 1);
+    const QDate oldest = QDateTime::fromMSecsSinceEpoch(m_library->at(0).date).date();
+    const QDate newest = QDateTime::fromMSecsSinceEpoch(m_library->at(m_library->count() - 1).date).date();
     const bool wide = w > 180 && h > 100;
     const bool words = w > 125 && h > 72;
     auto text = [&](QRectF box, QString value, double px, bool bold, QColor colour) {
@@ -2050,6 +2093,16 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             const int margin = std::max(int(height() / strideFor(drawn[k].columns) * 3) + 2, k == 0 ? lookahead + 2 : 0);
             const int from = std::max(0, std::max(0, ranges[k].firstRow - margin) * drawn[k].columns - leadingSlots(drawn[k].columns));
             const int to = (ranges[k].lastRow + margin) * drawn[k].columns - leadingSlots(drawn[k].columns);
+            if (m_timeline) {
+                // Atlas pages retain capture-order keys, while their tiles
+                // may now be scattered across the presentation timeline.
+                for (int i = std::max(0, lo); i <= std::min(hi, m_library->count() - 1); ++i) {
+                    const int cell = cellOf(i);
+                    if (cell >= from && cell < to && libraryAt(cell) == i)
+                        return true;
+                }
+                continue;
+            }
             const int libraryFrom = libraryAt(std::min(from, count() - 1));
             const int libraryTo = to >= count() ? std::numeric_limits<int>::max() : libraryAt(to);
             if (hi >= libraryFrom && lo < libraryTo)
@@ -2316,11 +2369,29 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 else
                     rs.pages[p].lastUsed = rs.frame;
         };
-        wantPages(pageAt(fromRow), pageAt(toRow + 1));
-        if (down)
-            wantPages(pageAt(r.firstRow) - 1, pageAt(r.firstRow) - 1);
-        else
-            wantPages(pageAt(r.lastRow + 1) + 1, pageAt(r.lastRow + 1) + 1);
+        if (m_timeline) {
+            std::unordered_set<int> pages;
+            auto wantRows = [&](int a, int b) {
+                const int first = std::max(0, a * m_columns - leadingSlots(m_columns));
+                const int last = std::min(count(), (b + 1) * m_columns - leadingSlots(m_columns));
+                for (int cell = first; cell < last; ++cell) {
+                    const int page = libraryAt(cell) / kMosaicCount;
+                    if (pages.insert(page).second)
+                        wantPages(page, page);
+                }
+            };
+            wantRows(fromRow, toRow);
+            if (down)
+                wantRows(r.firstRow - 1, r.firstRow - 1);
+            else
+                wantRows(r.lastRow + 1, r.lastRow + 1);
+        } else {
+            wantPages(pageAt(fromRow), pageAt(toRow + 1));
+            if (down)
+                wantPages(pageAt(r.firstRow) - 1, pageAt(r.firstRow) - 1);
+            else
+                wantPages(pageAt(r.lastRow + 1) + 1, pageAt(r.lastRow + 1) + 1);
+        }
     }
     if (!m_zoom.active && !scrubbing && !restMosaic) {
         const Range &r = ranges.front();

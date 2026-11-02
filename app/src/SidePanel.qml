@@ -944,6 +944,32 @@ Item {
 
             Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
             Heading { text: qsTr("In the grid") }
+            Note { text: qsTr("Photo order") }
+            Flow {
+                x: Math.round(theme.fontSize * 0.714)
+                width: parent.width - 2 * x
+                spacing: 6
+                Repeater {
+                    model: [{ value: "smart", text: qsTr("Smart order") },
+                            { value: "taken", text: qsTr("Date taken") },
+                            { value: "added", text: qsTr("Date added") }]
+                    delegate: ShellButton {
+                        id: orderChoice
+                        required property var modelData
+                        objectName: "order-" + modelData.value
+                        text: modelData.text
+                        active: timeline.mode === modelData.value
+                        lit: root.focusedStop === orderChoice
+                        Component.onCompleted: root.addStop(orderChoice)
+                        Component.onDestruction: root.dropStop(orderChoice)
+                        onTapped: timeline.mode = modelData.value
+                    }
+                }
+            }
+            Note {
+                text: qsTr("Smart order keeps photos added in the last 30 days at the newest end. Older additions follow the date taken. Your choice is remembered.")
+            }
+            Item { width: 1; height: Math.round(theme.fontSize * 0.6) }
             Note { text: qsTr("Marks in the corner of a photo that say what it is.") }
             // Pinhole's own marks and the plugins' (plugins.markKinds), in
             // their order in a cell's corner, each switch kept by its id.

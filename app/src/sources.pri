@@ -50,6 +50,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
 
 HEADERS += \
     $$PWD/library.h \
+    $$PWD/timeline.h \
     $$PWD/libraryreloader.h \
     $$PWD/keymap.h \
     $$PWD/marks.h \
@@ -91,6 +92,7 @@ HEADERS += \
 
 SOURCES += \
     $$PWD/library.cpp \
+    $$PWD/timeline.cpp \
     $$PWD/libraryreloader.cpp \
     $$PWD/keymap.cpp \
     $$PWD/marks.cpp \

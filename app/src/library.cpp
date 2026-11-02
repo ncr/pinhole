@@ -4,6 +4,7 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSqlRecord>
 
 bool Library::open(const QString &dir, QString *error) {
     m_dir = QDir(dir).absolutePath();
@@ -23,11 +24,13 @@ bool Library::open(const QString &dir, QString *error) {
         }
         QSqlQuery q(db);
         q.setForwardOnly(true);
-        // A library the service has not yet given effects to has no
-        // live_effect: none, until it has.
+        // Older/synthetic libraries may lack either optional column.
+        const QSqlRecord schema = db.record("assets");
+        const QString effectColumn = schema.indexOf("live_effect") >= 0 ? "live_effect" : "NULL";
+        const QString addedColumn = schema.indexOf("added_date") >= 0 ? "added_date" : "NULL";
         const QString columns = QStringLiteral("thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, "
-                                               "favorite, id, filename, %1 FROM assets ORDER BY asset_date, id");
-        if (!q.exec(QStringLiteral("SELECT ") + columns.arg("live_effect")) && !q.exec(QStringLiteral("SELECT ") + columns.arg("NULL"))) {
+                                               "favorite, id, filename, %1, %2 FROM assets ORDER BY asset_date, id");
+        if (!q.exec(QStringLiteral("SELECT ") + columns.arg(effectColumn, addedColumn))) {
             *error = q.lastError().text();
             return false;
         }
@@ -49,6 +52,7 @@ bool Library::open(const QString &dir, QString *error) {
             item.favorite = q.value(8).toBool();
             item.id = q.value(9).toString().toUtf8();
             item.filename = q.value(10).toString();
+            item.added = q.value(12).toLongLong();
             const QString effect = q.value(11).toString();
             item.effect = effect == QLatin1String("loop")            ? LiveEffect::Loop
                         : effect == QLatin1String("bounce")          ? LiveEffect::Bounce

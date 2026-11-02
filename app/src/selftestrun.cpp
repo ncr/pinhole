@@ -6,6 +6,7 @@
 
 #include "incoming.h"
 #include "library.h"
+#include "timeline.h"
 #include "outgoing.h"
 #include "photogrid.h"
 #include "viewer.h"
@@ -30,7 +31,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "physics", "examples", "recent"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "physics", "examples", "recent", "timeline"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -47,6 +48,54 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     Incoming &incoming = context.incoming;
     Outgoing &outgoing = context.outgoing;
     Keymap &keymap = context.keymap;
+    // The real grid in every saved order, then a mosaic zoom and its menu.
+    // Use an isolated config/Pictures directory, as every visual self-test.
+    if (name == QLatin1String("timeline")) {
+        auto *timeline = qobject_cast<Timeline *>(qmlEngine(window)->rootContext()->contextProperty("timeline").value<QObject *>());
+        if (!timeline)
+            return false;
+        const QString kept = timeline->mode();
+        auto phase = std::make_shared<int>(0);
+        auto run = std::make_shared<std::function<void()>>();
+        *run = [=] {
+            if (*phase >= 5) {
+                timeline->setMode(kept);
+                std::printf("selftest: timeline: every order, mosaic and menu: PASS\n");
+                QCoreApplication::quit();
+                return;
+            }
+            const QStringList modes{"taken", "added", "smart", "smart", "smart"};
+            timeline->setMode(modes[*phase]);
+            grid->setColumnsNow(*phase == 3 ? 29 : 7);
+            grid->cursorToEnd();
+            if (*phase == 4) {
+                QQuickItem *date = window->findChild<QQuickItem *>("dateLabel");
+                if (date) {
+                    const QPointF at = date->mapToScene(QPointF(date->width() / 2, date->height() / 2));
+                    QMouseEvent press(QEvent::MouseButtonPress, at, at, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                    QMouseEvent release(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                    QCoreApplication::sendEvent(window, &press);
+                    QCoreApplication::sendEvent(window, &release);
+                }
+            }
+            QTimer::singleShot(2200, window, [=] {
+                const QStringList names{"taken", "added", "smart", "mosaic", "menu"};
+                if (*phase == 4) {
+                    QObject *menu = window->findChild<QObject *>("orderMenu");
+                    if (!menu || !menu->property("open").toBool()) {
+                        std::fprintf(stderr, "selftest: timeline: clicking the date did not open the order menu\n");
+                        QCoreApplication::exit(1);
+                        return;
+                    }
+                }
+                window->grabWindow().save(arg + '/' + names[*phase] + ".png");
+                std::printf("selftest: timeline: %s, %d cells, label: %s\n", qPrintable(names[*phase]), grid->count(), qPrintable(grid->dateLabel()));
+                ++*phase;
+                (*run)();
+            });
+        };
+        QTimer::singleShot(1500, window, [run] { (*run)(); });
+    }
     // Exercise the real recent-additions plugin and its asynchronous query,
     // against the library given to this test. No originals are fetched.
     if (name == QLatin1String("recent")) {

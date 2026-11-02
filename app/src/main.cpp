@@ -23,6 +23,7 @@
 #include "framestats.h"
 #include "keymap.h"
 #include "library.h"
+#include "timeline.h"
 #include "libraryreloader.h"
 #include "photogrid.h"
 #include "scroller.h"
@@ -249,6 +250,7 @@ int main(int argc, char *argv[]) {
     plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
+    Timeline timeline;
     // What was done to one source's photos is not undone on another's.
     QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
@@ -275,6 +277,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("plugins", &plugins);
     engine.rootContext()->setContextProperty("display", plugins.display());
     engine.rootContext()->setContextProperty("markChoices", &markChoices);
+    engine.rootContext()->setContextProperty("timeline", &timeline);
     plugins.setEngine(&engine);
     engine.rootContext()->setContextProperty("bench", nullptr);
     // Videos play without sound in test runs (a selftest, the bench, or
@@ -307,6 +310,9 @@ int main(int argc, char *argv[]) {
     window->setProperty("mediaReady", mediaReady);
     auto *grid = window->findChild<PhotoGrid *>("grid");
     window->installEventFilter(&viewer);
+    timeline.setLibrary(&library);
+    grid->setTimeline(&timeline);
+    viewer.setTimeline(&timeline);
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
     // What the display the window is on can show.
@@ -362,6 +368,7 @@ int main(int argc, char *argv[]) {
                      [&, grid](const std::vector<int> &moved, const std::vector<int> &textures, bool toNewest) {
         // First: whatever follows may ask for these photos already.
         service.setShown(library.source());
+        timeline.libraryReloaded();
         grid->libraryReloaded(moved, &textures);
         if (toNewest)
             grid->scrollToEnd();

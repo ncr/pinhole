@@ -439,7 +439,18 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             check(!rectOf("dateLabel").isEmpty(), QStringLiteral("the date shows at the top left (%1)").arg(grid->property("dateLabel").toString()));
         }, 100);
         auto date = [=] { return inside(rectOf("dateLabel")); };
-        probe(QStringLiteral("the date, ") + wide, date, scrolls() + presses(), nullptr);
+        // The date now opens the order menu. Close it after each isolated
+        // pointer probe so the next probe still targets the date itself.
+        auto datePresses = presses();
+        for (auto &kind : datePresses) {
+            const auto press = kind.act;
+            kind.act = [=](QQuickWindow *w, QPointF at) {
+                press(w, at);
+                if (QObject *menu = w->findChild<QObject *>("orderMenu"))
+                    menu->setProperty("open", false);
+            };
+        }
+        probe(QStringLiteral("the date, ") + wide, date, scrolls() + datePresses, nullptr);
         probe(QStringLiteral("the date, ") + wide, date,
               {{"a touch drag down onto the photos", [](QQuickWindow *w, QPointF at) {
                     touch(w, {at, at + QPointF(4, 40), at + QPointF(8, 160), at + QPointF(10, 300)});
@@ -448,7 +459,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 [](QQuickWindow *w, QPointF at) { pressDrag(w, at, at + QPointF(10, 300)); }}},
               nullptr);
         add(QStringLiteral("select mode, %1").arg(wide), [=] { grid->setSelecting(true); }, 300);
-        probe(QStringLiteral("the date in select mode, ") + wide, date, presses(), nullptr);
+        probe(QStringLiteral("the date in select mode, ") + wide, date, datePresses, nullptr);
         add(QStringLiteral("select mode left, %1").arg(wide), [=] { grid->setSelecting(false); }, 300);
 
         // The side panel by its button: it opens, and the photo under the
