@@ -981,7 +981,7 @@ Item {
                 width: parent.width - 2 * x
                 spacing: 6
                 Repeater {
-                    model: [{ value: "smart", text: qsTr("Smart order") },
+                    model: [{ value: "smart", text: qsTr("Automatic") },
                             { value: "taken", text: qsTr("Date taken") },
                             { value: "added", text: qsTr("Date added") }]
                     delegate: ShellButton {
@@ -998,7 +998,7 @@ Item {
                 }
             }
             Note {
-                text: qsTr("Smart order keeps photos added in the last 30 days at the newest end. Older additions follow the date taken. Your choice is remembered.")
+                text: qsTr("Automatic order keeps photos added in the last 30 days at the newest end. Older additions follow the date taken. Your choice is remembered.")
             }
             Item { width: 1; height: Math.round(theme.fontSize * 0.6) }
             Note { text: qsTr("Marks in the corner of a photo that say what it is.") }

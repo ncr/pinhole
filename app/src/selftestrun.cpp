@@ -89,6 +89,128 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     }
                 }
                 window->grabWindow().save(arg + '/' + names[*phase] + ".png");
+                if (*phase == 4) {
+                    auto *menu = window->findChild<QQuickItem *>("orderMenu");
+                    auto *card = window->findChild<QQuickItem *>("orderMenuCard");
+                    auto *date = window->findChild<QQuickItem *>("dateLabel");
+                    const auto check = [](bool okay, const char *what) {
+                        if (!okay) {
+                            std::fprintf(stderr, "selftest: timeline: FAIL %s\n", what);
+                            QCoreApplication::exit(1);
+                        }
+                        return okay;
+                    };
+                    const auto key = [window](int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                            window, QEvent::KeyPress, code, modifiers);
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                            window, QEvent::KeyRelease, code, modifiers);
+                    };
+                    const auto click = [window](const QPointF &at) {
+                        QMouseEvent press(QEvent::MouseButtonPress, at, at, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                        QMouseEvent release(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                        QCoreApplication::sendEvent(window, &press);
+                        QCoreApplication::sendEvent(window, &release);
+                    };
+                    if (!check(card && date && card->mapToScene({}).y() >= date->mapToScene({0, date->height()}).y()
+                               && card->mapToScene({card->width(), card->height()}).x() <= window->width()
+                               && card->mapToScene({card->width(), card->height()}).y() <= window->height(),
+                               "order card is below its button and inside the window")) return;
+                    key(Qt::Key_Down);
+                    key(Qt::Key_Down);
+                    key(Qt::Key_Return);
+                    if (!check(timeline->mode() == "taken" && !menu->property("open").toBool(), "arrows and Enter choose date taken")) return;
+                    key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
+                    if (!check(menu->property("open").toBool() && menu->property("current").toInt() == 1,
+                               "keyboard opens on the saved choice")) return;
+                    key(Qt::Key_Escape);
+                    if (!check(!menu->property("open").toBool() && timeline->mode() == "taken", "Escape leaves the saved choice alone")) return;
+                    key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
+                    // Repeater rows belong to the visual tree, not necessarily
+                    // the window's QObject tree.
+                    std::function<QQuickItem *(QQuickItem *, const QString &)> find = [&](QQuickItem *item, const QString &name) -> QQuickItem * {
+                        if (item->objectName() == name) return item;
+                        for (auto *child : item->childItems())
+                            if (auto *found = find(child, name)) return found;
+                        return nullptr;
+                    };
+                    auto *added = find(window->contentItem(), "orderOption_added");
+                    if (!check(added, "date-added row exists")) return;
+                    click(added->mapToScene({added->width() / 2, added->height() / 2}));
+                    if (!check(timeline->mode() == "added" && !menu->property("open").toBool(), "click chooses date added")) return;
+                    key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
+                    click({window->width() - 24., window->height() / 2.});
+                    if (!check(!menu->property("open").toBool() && !window->property("viewerShown").toBool(),
+                               "outside click dismisses without opening a photo")) return;
+                    std::printf("selftest: timeline: order picker bounds, pointer, keys and dismissal: PASS\n");
+                    auto *smart = find(window->contentItem(), "orderOption_smart");
+                    auto *taken = find(window->contentItem(), "orderOption_taken");
+                    if (!check(smart && taken, "order rows exist")) return;
+                    const auto middle = [](QQuickItem *item) { return item->mapToScene({item->width() / 2, item->height() / 2}); };
+                    const auto mouse = [window](QEvent::Type type, QPointF at, Qt::MouseButtons held = Qt::NoButton) {
+                        const bool press = type == QEvent::MouseButtonPress;
+                        QMouseEvent event(type, at, at, type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton,
+                                          press ? Qt::LeftButton : held, Qt::NoModifier);
+                        QCoreApplication::sendEvent(window, &event);
+                    };
+                    const auto alpha = [check](QQuickItem *item, double expected, const char *what) {
+                        return check(std::abs(item->property("color").value<QColor>().alphaF() - expected) < 0.01, what);
+                    };
+                    const auto grab = [=](const char *name) { window->grabWindow().save(arg + '/' + QString::fromLatin1(name) + ".png"); };
+                    const QPointF footer = card->mapToScene({card->width() / 2, card->height() - 10});
+                    key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
+                    mouse(QEvent::MouseMove, middle(added));
+                    mouse(QEvent::MouseMove, footer);
+                    auto steps = std::make_shared<std::vector<std::function<bool()>>>();
+                    steps->push_back([=] {
+                        if (!alpha(added, 0.18, "saved choice has Omarchy selected fill")) return false;
+                        grab("order-rest");
+                        mouse(QEvent::MouseMove, middle(smart));
+                        return check(smart->property("hot").toBool(), "hover reaches an unselected row");
+                    });
+                    steps->push_back([=] {
+                        if (!alpha(smart, 0.08, "unselected row has Omarchy hover fill")) return false;
+                        grab("order-hover");
+                        mouse(QEvent::MouseMove, middle(added));
+                        return check(added->property("hot").toBool() && added->property("selected").toBool(), "selected row receives hover too");
+                    });
+                    steps->push_back([=] {
+                        if (!alpha(added, 0.08, "hover overrides saved selection fill")) return false;
+                        grab("order-selected-hover");
+                        mouse(QEvent::MouseButtonPress, middle(added));
+                        return check(added->property("pressed").toBool(), "mouse down has its own state");
+                    });
+                    steps->push_back([=] {
+                        if (!alpha(added, 0.22, "pressed fill overrides hover and selection")) return false;
+                        grab("order-pressed");
+                        mouse(QEvent::MouseMove, footer, Qt::LeftButton);
+                        mouse(QEvent::MouseButtonRelease, footer);
+                        if (!check(menu->property("open").toBool() && timeline->mode() == "added", qPrintable(QString("dragging off a row cancels the press: open=%1, mode=%2").arg(menu->property("open").toBool()).arg(timeline->mode())))) return false;
+                        mouse(QEvent::MouseMove, middle(added));
+                        key(Qt::Key_Up);
+                        return check(taken->property("hot").toBool() && !added->property("hot").toBool(), "keyboard takes over from a stationary pointer");
+                    });
+                    steps->push_back([=] {
+                        if (!alpha(taken, 0.08, "keyboard cursor uses the same Omarchy hover fill")) return false;
+                        grab("order-keyboard");
+                        key(Qt::Key_Escape);
+                        return check(timeline->mode() == "added" && !menu->property("open").toBool(), "browsing hover states does not save another choice");
+                    });
+                    auto at = std::make_shared<size_t>(0);
+                    auto next = std::make_shared<std::function<void()>>();
+                    *next = [=] {
+                        if (*at == steps->size()) {
+                            std::printf("selftest: timeline: Omarchy hover, selected hover, press, cancel and keyboard takeover: PASS\n");
+                            ++*phase;
+                            (*run)();
+                            return;
+                        }
+                        if (!(*steps)[(*at)++]()) return;
+                        QTimer::singleShot(160, window, [next] { (*next)(); });
+                    };
+                    QTimer::singleShot(160, window, [next] { (*next)(); });
+                    return;
+                }
                 std::printf("selftest: timeline: %s, %d cells, label: %s\n", qPrintable(names[*phase]), grid->count(), qPrintable(grid->dateLabel()));
                 ++*phase;
                 (*run)();

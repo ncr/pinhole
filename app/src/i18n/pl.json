@@ -387,11 +387,14 @@
   "Your main is ahead of origin/main · push your commits first": "Twój main wyprzedza origin/main · najpierw wyślij swoje commity",
   "Couldn’t restart Pinhole · your current window is still open": "Nie udało się ponownie uruchomić Pinhole · obecne okno nadal działa",
   "The update stopped · check again to retry": "Aktualizacja została przerwana · sprawdź ponownie, aby spróbować jeszcze raz",
-  "Smart order": "Układ inteligentny",
   "Date taken": "Data wykonania",
   "Date added": "Data dodania",
   "Photo order": "Kolejność zdjęć",
   "Added: %1": "Dodano: %1",
   "Earlier photos · Recently added": "Starsze zdjęcia · Ostatnio dodane",
-  "Smart order keeps photos added in the last 30 days at the newest end. Older additions follow the date taken. Your choice is remembered.": "Układ inteligentny pokazuje na końcu zdjęcia dodane w ostatnich 30 dniach. Starsze układa według daty wykonania. Twój wybór jest zapamiętywany."
+  "Automatic": "Automatycznie",
+  "New additions for 30 days, then by date taken.": "Nowe zdjęcia przez 30 dni, potem według daty wykonania.",
+  "Place every photo at the moment it was taken.": "Każde zdjęcie w czasie, w którym powstało.",
+  "Keep photos together by when they arrived.": "Zdjęcia według tego, kiedy trafiły do biblioteki.",
+  "Automatic order keeps photos added in the last 30 days at the newest end. Older additions follow the date taken. Your choice is remembered.": "Układ automatyczny pokazuje na końcu zdjęcia dodane w ostatnich 30 dniach. Starsze układa według daty wykonania. Twój wybór jest zapamiętywany."
 }

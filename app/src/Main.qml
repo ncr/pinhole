@@ -369,48 +369,29 @@ ApplicationWindow {
         opacity: win.chrome
         x: sourcesButton.visible ? sourcesButton.x + sourcesButton.width + 6 : 16
         y: 16
-        text: (win.switchedTo !== "" ? win.switchedTo : grid.dateLabel) + "  ▾"
+        text: (win.switchedTo !== "" ? win.switchedTo : grid.dateLabel) + (win.inGrid ? "  ▾" : "")
         morphing: true
         centred: false
         textColor: theme.brightForeground
+        readonly property bool hot: dateHover.hovered || orderMenu.open
+        color: Qt.tint(Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92),
+                       Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
+                               dateTap.pressed ? 0.22 : hot ? 0.08 : 0))
         border.color: win.switchedTo !== "" ? theme.accent
-                    : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+                    : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, hot ? 0.25 : 0.4)
+        Behavior on color { ColorAnimation { duration: 100 } }
         Shield { anchors.fill: parent; z: -1 }
-        HoverHandler { cursorShape: Qt.PointingHandCursor }
-        TapHandler { enabled: win.inGrid; onTapped: orderMenu.toggle(false) }
+        HoverHandler { id: dateHover; enabled: win.inGrid; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: dateTap; enabled: win.inGrid; onTapped: orderMenu.toggle(false) }
     }
-    PluginAction {
-        id: smartOrder
-        text: qsTr("Smart order")
-        active: timeline.mode === "smart"
-        onTriggered: timeline.mode = "smart"
-    }
-    PluginAction {
-        id: takenOrder
-        text: qsTr("Date taken")
-        active: timeline.mode === "taken"
-        onTriggered: timeline.mode = "taken"
-    }
-    PluginAction {
-        id: addedOrder
-        text: qsTr("Date added")
-        active: timeline.mode === "added"
-        onTriggered: timeline.mode = "added"
-    }
-    MenuGroup {
+    PhotoOrderMenu {
         id: orderMenu
         objectName: "orderMenu"
-        x: dateLabel.x + dateLabel.width
-        y: dateLabel.y
-        z: 10
-        visible: dateLabel.visible && win.inGrid
-        arrowShown: false
-        keyLayer: "grid"
-        menuKey: "Ctrl+Shift+O"
-        menuText: qsTr("Photo order")
-        section: qsTr("Photo order")
-        items: [smartOrder, takenOrder, addedOrder]
-        Item { width: 0; height: dateLabel.height }
+        z: 1001
+        button: dateLabel
+        available: dateLabel.visible && win.inGrid
+        value: timeline.mode
+        onChosen: mode => timeline.mode = mode
     }
 
     // A library being built: how far, at the foot.

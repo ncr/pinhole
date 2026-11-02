@@ -99,10 +99,10 @@ all, or those taken on this day in other years, shuffled or in order,
 videos and Live Photos moving. The screen stays on while it shows. Esc or
 a click stops it, ← → step, and a two-finger tap or Space holds it still.
 
-The main grid defaults to Smart order: photos added in the last 30 days stay
+The main grid defaults to Automatic order: photos added in the last 30 days stay
 at the newest end, ordered by addition date. Older additions sit where their
 capture dates belong. The date chip's menu (or Ctrl Shift O) and the side
-panel offer Smart order, Date taken and Date added; the last choice is kept
+panel offer Automatic, Date taken and Date added; the last choice is kept
 as the default. Capture dates, calendar and series data stay unchanged. The
 viewer follows the grid's order too. A newly extended series shows its latest
 addition on its card; archived series keep their original cover.
