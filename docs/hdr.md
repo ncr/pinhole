@@ -345,7 +345,7 @@ Every shader works in linear light, where 1.0 is SDR white (scRGB).
 The phases go in order. H2 and H3 touch different files and can run side
 by side. Each phase:
 
-1. lands on `main` alone and is installed with `bin/install-local`;
+1. lands on `main` alone and is installed with `bin/install --dev`;
 2. keeps `docs/` true (this file, `plugins.md`, `service.md`);
 3. adds every new string to `pl.json`;
 4. passes `app/bin/test`, `cargo test --release --workspace` when it

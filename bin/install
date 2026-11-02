@@ -2,23 +2,29 @@
 # Guided installation; flags keep the same path usable over SSH and in CI.
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 cd "$ROOT"
 mode=""
 interactive=1
+choose_mode() {
+    if [ -n "$mode" ]; then echo 'Choose only one install mode (or --uninstall).' >&2; exit 2; fi
+    mode="$1"
+}
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --dev | --developer) mode=developer ;;
-        --local) mode=local ;;
-        --package) mode=package ;;
+        --dev | --developer) choose_mode developer ;;
+        --local) choose_mode local ;;
+        --package) choose_mode package ;;
+        --uninstall) choose_mode uninstall ;;
         --non-interactive | --yes) interactive=0 ;;
         --help | -h)
             cat <<'HELP'
-Usage: bin/install [--dev | --local | --package] [--non-interactive]
+Usage: bin/install [--dev | --local | --package | --uninstall] [--non-interactive]
 
   --dev       Run directly from this checkout; no package or root password.
   --local     Copy a build into ~/.local; no root password.
   --package   Build and install a pacman package (sudo may ask for a password).
+  --uninstall Remove this account's installation; keep photos and settings.
 
 Interactive terminals get a guided menu. Without one the default is package.
 PREFIX changes ~/.local for developer/local installs.
@@ -36,12 +42,28 @@ if [ "$ui" = 1 ]; then
         --bold '◉  Pinhole' 'Your photos. Close at hand.'
     if [ -z "$mode" ]; then
         choice="$(gum choose --header 'How should Pinhole live on this computer?' \
-            'Developer · run this checkout' 'Local · install for this account' 'Package · install for everyone')" || exit 130
-        case "$choice" in Developer*) mode=developer ;; Local*) mode=local ;; Package*) mode=package ;; *) exit 130 ;; esac
+            'Developer · run this checkout' 'Local · install for this account' 'Package · install for everyone' 'Uninstall · remove this account’s installation')" || exit 130
+        case "$choice" in Developer*) mode=developer ;; Local*) mode=local ;; Package*) mode=package ;; Uninstall*) mode=uninstall ;; *) exit 130 ;; esac
     fi
 fi
 mode="${mode:-package}"
-if [ "${PINHOLE_RUST_BUILDER:-auto}" != cargo ]; then
+if [ "$mode" != package ] && [ "${PINHOLE_UPDATE_LOCK_HELD:-0}" != 1 ]; then
+    state="${XDG_STATE_HOME:-$HOME/.local/state}/pinhole"
+    mkdir -p "$state"
+    key="$(printf '%s' "$ROOT" | sha256sum | cut -c1-16)"
+    exec 9>"$state/update-$key.lock"
+    if ! flock -n 9; then
+        echo 'Another build or update is already running for this checkout.' >&2
+        exit 1
+    fi
+    export PINHOLE_UPDATE_LOCK_HELD=1
+fi
+if [ "$mode" = uninstall ]; then
+    bin/uninstall-files "${PREFIX:-$HOME/.local}"
+    update-desktop-database "${PREFIX:-$HOME/.local}/share/applications" 2>/dev/null || true
+    exit 0
+fi
+if [ "${PINHOLE_RUST_BUILDER:-blaze}" != cargo ]; then
     if ! PINHOLE_RUST_BUILDER=blaze bin/build-rust --version >/dev/null 2>&1; then
         if [ "$ui" = 1 ]; then
             gum spin --spinner dot --title 'Preparing Blaze, the fast Rust compiler…' --show-error -- bin/setup-blaze
@@ -53,9 +75,42 @@ if [ "${PINHOLE_RUST_BUILDER:-auto}" != cargo ]; then
 fi
 run_install() {
     case "$mode" in
-        developer) bin/install-local --dev ;;
-        local) bin/install-local ;;
         package) (cd pkgbuild && makepkg -fsi) ;;
+        developer | local)
+            PREFIX="${PREFIX:-$HOME/.local}"
+            install -d "$PREFIX"
+            PREFIX="$(CDPATH= cd -- "$PREFIX" && pwd -P)"
+            export PREFIX
+            if [ "$PREFIX" = /usr ] || [ "$PREFIX" = / ]; then
+                echo 'Use --package for system installations.' >&2
+                exit 2
+            fi
+            bin/build
+            if [ -n "${PINHOLE_EXPECTED_COMMIT:-}" ]; then
+                if [ "$(git rev-parse HEAD)" != "$PINHOLE_EXPECTED_COMMIT" ] || [ -n "$(git status --porcelain)" ]; then
+                    echo 'Checkout changed while Pinhole was building; no installation was activated. Your edits were kept.' >&2
+                    exit 1
+                fi
+            fi
+            if [ "$mode" = developer ]; then
+                bin/install-dev "$PREFIX"
+            else
+                PINHOLE_INSTALL_MODE=local bin/install-files "$PREFIX"
+            fi
+            update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
+            if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
+                for pid in $(pgrep -x pinhole || true); do
+                    case "$(readlink "/proc/$pid/exe" || true)" in
+                        "$PREFIX"/bin/pinhole* | "$ROOT"/app/build/pinhole*) kill "$pid" || true ;;
+                    esac
+                done
+                socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pinhole.sock"
+                for pid in $(pgrep -x pinholed || true); do
+                    tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q -- "--socket $socket " && kill "$pid" || true
+                done
+            fi
+            echo "Installed $(git rev-parse --short HEAD) into $PREFIX ($mode)"
+            ;;
     esac
 }
 # sudo keeps its terminal; local installs show a spinner and preserve logs.
@@ -65,10 +120,10 @@ if [ "$ui" = 1 ] && [ "$mode" != package ]; then
     log="$state/install.log"
     if [ "$mode" = developer ]; then
         gum spin --title 'Building Pinhole and linking this checkout…' --show-error -- \
-            sh -c '"$1/bin/install-local" --dev >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
+            sh -c '"$1/bin/install" --dev --non-interactive >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
     else
         gum spin --title 'Building Pinhole and installing for your account…' --show-error -- \
-            sh -c '"$1/bin/install-local" >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
+            sh -c '"$1/bin/install" --local --non-interactive >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
     fi
     gum style --foreground 78 --bold '✓  Pinhole is ready. Open it from your launcher.'
     gum style --faint "Mode: $mode · Build log: $log"

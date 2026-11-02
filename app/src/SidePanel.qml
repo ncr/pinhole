@@ -689,15 +689,12 @@ Item {
             }
 
             Item { width: 1; height: Math.round(theme.fontSize * 1.5) }
-            Heading { text: qsTr("Pinhole updates") }
+            Heading { visible: updater.supported; height: visible ? Math.round(theme.fontSize * 2.333) : 0; text: qsTr("Pinhole updates") }
             UpdateStatus { id: updateStatus }
-            Note { text: updateStatus.text }
-            Note {
-                visible: updater.perUser
-                height: visible ? implicitHeight : 0
-                text: qsTr("Updates install for your user, without a password.")
-            }
+            Note { visible: updater.supported; height: visible ? implicitHeight : 0; text: updateStatus.text }
             Flow {
+                visible: updater.supported
+                height: visible ? implicitHeight : 0
                 x: Math.round(theme.fontSize * 0.714)
                 width: parent.width - 2 * x
                 spacing: 6

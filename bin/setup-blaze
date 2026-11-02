@@ -1,11 +1,21 @@
 #!/bin/sh
-# The upstream stable installer verifies release SHA256 checksums. Keep its
-# programs separate from Cargo's so existing Rust tools are left alone.
+# Install exactly the version tested with Pinhole, side by side with any
+# other Blaze. The upstream installer verifies the release checksums.
 set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+version="$(cat "$ROOT/bin/blaze-version")"
+if [ "$#" -gt 0 ]; then echo 'Usage: bin/setup-blaze (version is pinned in bin/blaze-version)' >&2; exit 2; fi
 data="${XDG_DATA_HOME:-$HOME/.local/share}/pinhole"
+state="${BLAZE_HOME:-$data/blaze}"
+mkdir -p "$state/$version" "$state/toolchains"
+# The immutable Rust distribution can be shared; daemon sockets, compiler
+# caches and Blaze's own library stay isolated by release.
+if [ ! -e "$state/$version/toolchains" ]; then
+    ln -s ../toolchains "$state/$version/toolchains"
+fi
 installer="$(mktemp)"
 trap 'rm -f "$installer"' EXIT HUP INT TERM
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
     https://ix.dev/blaze -o "$installer"
-CARGO_HOME="$data/tools" BLAZE_HOME="${BLAZE_HOME:-$data/blaze}" \
-    sh "$installer" "$@"
+CARGO_HOME="$data/tools/$version" BLAZE_HOME="$state/$version" \
+    sh "$installer" --version "$version"

@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Record exactly which files this installation owns for safe removal."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+prefix = Path(sys.argv[1])
+metadata = json.loads((prefix / "share/pinhole/update.json").read_text())
+entries = []
+for path in sorted(prefix.rglob("*")):
+    relative = path.relative_to(prefix).as_posix()
+    if relative == "share/pinhole/install-manifest.json":
+        continue
+    if path.is_symlink():
+        entries.append({"path": relative, "link": os.readlink(path)})
+    elif path.is_file():
+        entries.append({"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+manifest = {"version": 1, "mode": metadata["mode"], "prefix": metadata["prefix"], "entries": entries}
+(prefix / "share/pinhole/install-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

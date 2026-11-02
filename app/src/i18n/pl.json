@@ -233,7 +233,7 @@
   "Click the notice at the foot": "Kliknij komunikat na dole",
   "Click the video": "Kliknij film",
   "Closed as any window is": "Zamyka się jak każde okno",
-  "Ctrl\u00a0C, then paste there": "Ctrl\u00a0C, a potem wklej tam",
+  "Ctrl C, then paste there": "Ctrl C, a potem wklej tam",
   "Double-click": "Podwójne kliknięcie",
   "Double-tap": "Podwójne stuknięcie",
   "Drag across": "Przeciągnij po nich",
@@ -362,7 +362,6 @@
   "An update is already running": "Aktualizacja już trwa",
   "Check for updates": "Sprawdź aktualizacje",
   "Checking for updates…": "Sprawdzam aktualizacje…",
-  "Close Pinhole and open it again to finish updating": "Zamknij Pinhole i otwórz ponownie, aby dokończyć aktualizację",
   "Couldn’t check for updates · try again when online": "Nie udało się sprawdzić aktualizacji · spróbuj po odzyskaniu połączenia",
   "Couldn’t update Pinhole · try again": "Nie udało się zaktualizować Pinhole · spróbuj ponownie",
   "History begins here": "Tu zaczyna się historia",
@@ -377,12 +376,12 @@
   "The update couldn’t be built · your running version is still open": "Nie udało się zbudować aktualizacji · obecna wersja nadal działa",
   "Update": "Aktualizuj",
   "Update available": "Dostępna aktualizacja",
-  "Update this package with bin/install in the repository": "Zaktualizuj pakiet poleceniem bin/install w repozytorium",
   "Updated · restart when you’re ready": "Zaktualizowano · uruchom ponownie, kiedy zechcesz",
-  "Updates are managed by your installer": "Aktualizacjami zarządza instalator",
   "Updates from main · checked in the background": "Aktualizacje z main · sprawdzane w tle",
-  "Updates install for your user, without a password.": "Aktualizacje instalują się dla Twojego użytkownika, bez hasła.",
   "Updating…": "Aktualizuję…",
   "Updating… You can keep browsing": "Trwa aktualizacja… Możesz dalej oglądać zdjęcia",
-  "Your main has local commits · update it in the repository": "Twój main ma lokalne commity · zaktualizuj go w repozytorium"
+  "Your main has local commits · update it in the repository": "Twój main ma lokalne commity · zaktualizuj go w repozytorium",
+  "Your main is ahead of origin/main · push your commits first": "Twój main wyprzedza origin/main · najpierw wyślij swoje commity",
+  "Couldn’t restart Pinhole · your current window is still open": "Nie udało się ponownie uruchomić Pinhole · obecne okno nadal działa",
+  "The update stopped · check again to retry": "Aktualizacja została przerwana · sprawdź ponownie, aby spróbować jeszcze raz"
 }

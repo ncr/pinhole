@@ -24,6 +24,12 @@ IDLE_XML = $$system(pkg-config --variable=pkgdatadir wayland-protocols)/unstable
 system(wayland-scanner client-header $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-client-protocol.h && \
     wayland-scanner private-code $$IDLE_XML $$GENERATED/idle-inhibit-unstable-v1-protocol.c)
 INCLUDEPATH += $$GENERATED
+# Only the version readers rebuild when Git HEAD moves.
+PINHOLE_BUILD_COMMIT = $$system(git -C $$shell_quote($$PWD/../..) rev-parse HEAD)
+BUILD_VERSION_DATA = "$${LITERAL_HASH}pragma once"
+BUILD_VERSION_DATA += "$${LITERAL_HASH}define PINHOLE_BUILD_COMMIT \"$$PINHOLE_BUILD_COMMIT\""
+write_file($$GENERATED/buildversion.h, BUILD_VERSION_DATA)
+
 # The HDR video shader (videoview.h), baked by Qt's qsb for every graphics
 # API the window may use, the vertex shader batchable as the scene graph
 # asks; into a resource file of its own.

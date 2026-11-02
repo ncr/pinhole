@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Remove verified installer-owned artifacts; keep photos, settings and edits."""
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import sys
+
+
+def uninstall(prefix):
+    prefix = Path(prefix).resolve()
+    if prefix == Path("/usr") or prefix == Path("/"):
+        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole")
+    manifest_path = prefix / "share/pinhole/install-manifest.json"
+    if not manifest_path.exists():
+        raise ValueError("No Pinhole install manifest here; nothing was removed. Use the OS package manager for packages.")
+    if any(parent.is_symlink() for parent in [manifest_path.parent, manifest_path.parent.parent]):
+        raise ValueError("Install manifest is behind a symbolic link; nothing was removed.")
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("mode") == "package":
+        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole")
+    if manifest.get("version") != 1 or manifest.get("prefix") != str(prefix):
+        raise ValueError("Install manifest does not match this installation; nothing was removed.")
+    kept = []
+    directories = {manifest_path.parent}
+    # Validate every path before removing anything, including its parent links.
+    for entry in manifest["entries"]:
+        relative = PurePosixPath(entry["path"])
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ValueError("Invalid path in install manifest; nothing was removed.")
+    for entry in manifest["entries"]:
+        path = prefix / entry["path"]
+        parents = list(path.parents)
+        parents = parents[:parents.index(prefix)]
+        if any(parent.is_symlink() for parent in parents):
+            kept.append(entry)
+            continue
+        if not os.path.lexists(path):
+            continue
+        if "link" in entry:
+            owned = path.is_symlink() and os.readlink(path) == entry["link"]
+        else:
+            owned = (path.is_file() and not path.is_symlink()
+                     and hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"])
+        if owned:
+            path.unlink()
+            directories.update(parents)
+        else:
+            kept.append(entry)
+    if kept:
+        manifest["entries"] = kept
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        print("Preserved changed or replaced files:")
+        for entry in kept:
+            print("  " + entry["path"])
+    else:
+        manifest_path.unlink()
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    print("Pinhole installation removed. Photos, settings and the repository are kept.")
+
+
+if __name__ == "__main__":
+    try:
+        uninstall(sys.argv[1])
+    except (ValueError, OSError, KeyError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

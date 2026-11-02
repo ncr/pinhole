@@ -187,7 +187,9 @@ fn a_round_that_panics_is_one_that_failed_and_the_next_goes_on() {
     assert_eq!(window.ask("sync", json!({}))["ok"], true);
     let changed = window.event(30, |e| e["event"] == "library_changed" && e["added"] == 1);
     assert_eq!(changed["removed"], 0);
-    let fine = window.event(10, |e| e["event"] == "health");
+    // Connecting can enqueue both the health snapshot and a broadcast of
+    // the failed round. Wait for recovery rather than consume a stale copy.
+    let fine = window.event(10, |e| e["event"] == "health" && e["state"] == "fine");
     assert_eq!(fine["state"], "fine");
     assert_eq!(LISTINGS.load(Ordering::SeqCst), 2);
     let sources = window.ask("sources", json!({}));

@@ -273,7 +273,7 @@ private slots:
         qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
         QDir().mkpath(prefix.path() + "/bin");
         QDir().mkpath(prefix.path() + "/share/pinhole");
-        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"local"})");
+        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"developer"})");
         const QString helper = prefix.path() + "/bin/pinhole-update";
         write(helper, R"(#!/bin/sh
 if [ "$1" = --check ]; then
@@ -311,7 +311,7 @@ fi
         qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
         QDir().mkpath(prefix.path() + "/bin");
         QDir().mkpath(prefix.path() + "/share/pinhole");
-        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"package"})");
+        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"developer"})");
         const QString helper = prefix.path() + "/bin/pinhole-update";
         write(helper, R"(#!/bin/sh
 printf '%s\n' '{"error":"network"}'
@@ -319,7 +319,6 @@ exit 1
 )");
         QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         Updater updater;
-        QVERIFY(updater.perUser());
         updater.check();
         QTRY_COMPARE(updater.state(), "error");
         QCOMPARE(updater.error(), "network");
@@ -331,6 +330,59 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         QVERIFY(updater.error().isEmpty());
     }
 
+
+    void updaterIsAbsentForPackagesAndCopiedInstalls() {
+        QTemporaryDir prefix;
+        const auto before = qgetenv("PINHOLE_INSTALL_PREFIX");
+        const auto restored = qScopeGuard([&] {
+            if (before.isNull()) qunsetenv("PINHOLE_INSTALL_PREFIX");
+            else qputenv("PINHOLE_INSTALL_PREFIX", before);
+        });
+        qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
+        QDir().mkpath(prefix.path() + "/bin");
+        QDir().mkpath(prefix.path() + "/share/pinhole");
+        const QString helper = prefix.path() + "/bin/pinhole-update";
+        write(helper, "#!/bin/sh\nexit 99\n");
+        QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        for (const QString &mode : {QStringLiteral("package"), QStringLiteral("local")}) {
+            write(prefix.path() + "/share/pinhole/update.json", ("{\"mode\":\"" + mode + "\"}").toUtf8());
+            Updater updater;
+            QVERIFY(!updater.supported());
+            QCOMPARE(updater.state(), "unavailable");
+            updater.check();
+            updater.apply();
+            QCOMPARE(updater.state(), "unavailable");
+        }
+    }
+
+    void updaterTracksDetachedWorkerAndRejectsMissingRestartBinary() {
+        QTemporaryDir prefix;
+        const auto before = qgetenv("PINHOLE_INSTALL_PREFIX");
+        const auto restored = qScopeGuard([&] {
+            if (before.isNull()) qunsetenv("PINHOLE_INSTALL_PREFIX");
+            else qputenv("PINHOLE_INSTALL_PREFIX", before);
+        });
+        qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
+        QDir().mkpath(prefix.path() + "/bin");
+        QDir().mkpath(prefix.path() + "/share/pinhole");
+        write(prefix.path() + "/share/pinhole/update.json", R"({"mode":"developer"})");
+        const QString helper = prefix.path() + "/bin/pinhole-update";
+        const QString job = prefix.path() + "/job.json";
+        write(job, QJsonDocument(QJsonObject{{"state", "updating"}, {"pid", QCoreApplication::applicationPid()}}).toJson());
+        const QByteArray reply = QJsonDocument(QJsonObject{{"state", "updating"}, {"job", job}}).toJson(QJsonDocument::Compact);
+        write(helper, "#!/bin/sh\nprintf '%s\\n' '" + reply + "'\n");
+        QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        Updater updater;
+        updater.check();
+        QTRY_COMPARE(updater.state(), "updating");
+        updater.check();
+        QCOMPARE(updater.state(), "updating");
+        write(job, R"({"state":"ready","revision":"1234567890"})");
+        QTRY_COMPARE(updater.state(), "ready");
+        updater.restart();
+        QCOMPARE(updater.state(), "error");
+        QCOMPARE(updater.error(), "restart");
+    }
 
     // Undo and redo, as Ctrl+Z and Ctrl+⇧Z take them.
     void historyUndoesAndRedoesInTurn() {

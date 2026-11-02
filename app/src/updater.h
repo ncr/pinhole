@@ -13,7 +13,6 @@ class Updater : public QObject {
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QString logPath READ logPath NOTIFY changed)
     Q_PROPERTY(bool supported READ supported NOTIFY changed)
-    Q_PROPERTY(bool perUser READ perUser CONSTANT)
 public:
     explicit Updater(QObject *parent = nullptr);
     QString state() const { return m_state; }
@@ -21,7 +20,6 @@ public:
     QString error() const { return m_error; }
     QString logPath() const { return m_log; }
     bool supported() const { return !m_helper.isEmpty(); }
-    bool perUser() const { return m_perUser; }
     Q_INVOKABLE void check();
     Q_INVOKABLE void apply();
     Q_INVOKABLE void restart();
@@ -30,11 +28,13 @@ signals:
     void changed();
 private:
     void run(bool apply);
+    void readJob();
     QProcess m_process;
     QTimer m_checks;
     QTimer m_timeout;
+    QTimer m_jobPoll;
     QString m_state = "unavailable", m_revision, m_error, m_log;
-    QString m_helper, m_metadata;
+    QString m_helper, m_metadata, m_job;
     bool m_applying = false;
-    bool m_perUser = false;
+    QString m_runningRevision;
 };

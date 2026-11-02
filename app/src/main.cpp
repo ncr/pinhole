@@ -1,3 +1,4 @@
+#include "buildversion.h"
 // pinhole — a fast photo browser for Omarchy: iCloud Photos on demand, or a
 // folder of photos on this computer.
 
@@ -97,6 +98,12 @@ bool vulkanUsable() {
 } // namespace
 
 int main(int argc, char *argv[]) {
+#ifdef PINHOLE_BUILD_COMMIT
+    if (argc == 2 && QByteArray(argv[1]) == "--build-revision") {
+        std::puts(PINHOLE_BUILD_COMMIT);
+        return 0;
+    }
+#endif
     // pinhole plugin new …: a plugin begun or looked over, no window.
     if (const int code = runPluginCommand(argc, argv); code >= 0)
         return code;

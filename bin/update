@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Check origin/main without changing a checkout; install only on request.
+"""Developer-only updates from origin/main; packages belong to the OS.
 
-stdout is one JSON object for the window. Build and network diagnostics go
-into a private log, never into a popup over someone's photos.
+stdout is one JSON reply. Checks fetch Git objects without changing source
+files. Applying requires a clean main and never discards or rebases work.
 """
 import argparse
+from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,74 +24,156 @@ class UpdateError(Exception):
     pass
 
 
-def git(*args, cwd=None, log=None):
+def git(*args, cwd=None, log=None, okay=(0,)):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
     env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes -oConnectTimeout=15")
     result = subprocess.run(["git", *args], cwd=cwd, env=env, text=True,
-                            stdout=subprocess.PIPE, stderr=log or subprocess.PIPE, timeout=120)
-    if result.returncode:
-        raise UpdateError("network" if args[0] in ("ls-remote", "clone", "fetch") else "failed")
+                            stdout=subprocess.PIPE, stderr=log or subprocess.PIPE, timeout=35)
+    if result.returncode not in okay:
+        raise UpdateError("network" if args[0] == "fetch" else "failed")
     return result.stdout.strip()
 
 
+def developer_checkout(metadata):
+    if metadata.get("mode") != "developer":
+        raise UpdateError("managed")
+    checkout = Path(metadata["source"]).resolve()
+    if not (checkout / ".git").exists() or Path(metadata["prefix"]).resolve() == Path("/usr"):
+        raise UpdateError("managed")
+    return checkout
+
+
 def remote_revision(metadata, log=None):
-    output = git("ls-remote", "--exit-code", metadata["repository"], "refs/heads/main", log=log)
-    revision = output.split()[0] if output else ""
+    checkout = developer_checkout(metadata)
+    # The configured origin, rather than a possibly stale installer URL.
+    # FETCH_HEAD belongs to manual pulls, so do not overwrite it here.
+    git("fetch", "--no-tags", "--no-write-fetch-head", "origin",
+        "+refs/heads/main:refs/remotes/origin/main", cwd=checkout, log=log)
+    revision = git("rev-parse", "refs/remotes/origin/main", cwd=checkout, log=log)
     if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
         raise UpdateError("network")
     return revision
 
 
-def apply(metadata, target, log):
-    prefix = Path(metadata["prefix"]).resolve()
-    mode = metadata.get("mode", "local")
-    if mode == "package" or prefix == Path("/usr"):
-        # The system package stays managed by pacman. The desktop launcher
-        # can select a current per-user build without a root prompt.
-        prefix = Path.home() / ".local"
-        mode = "local"
-    if mode == "developer":
-        checkout = Path(metadata["source"]).resolve()
-        # Never switch branches, discard files, rebase, or reset local work.
-        if git("status", "--porcelain", cwd=checkout, log=log):
-            raise UpdateError("dirty")
-        if git("branch", "--show-current", cwd=checkout, log=log) != "main":
-            raise UpdateError("branch")
-        git("fetch", "--no-tags", metadata["repository"], "refs/heads/main", cwd=checkout, log=log)
-        if git("rev-parse", "FETCH_HEAD", cwd=checkout, log=log) != target:
-            raise UpdateError("changed")
-        if subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", target], cwd=checkout).returncode:
+def ancestry(checkout, older, newer, log=None):
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    code = subprocess.run(["git", "merge-base", "--is-ancestor", older, newer], cwd=checkout,
+                          env=env, stdout=log or subprocess.DEVNULL,
+                          stderr=log or subprocess.DEVNULL, timeout=15).returncode
+    if code not in (0, 1):
+        raise UpdateError("failed")
+    return code == 0
+
+
+def validate_checkout(metadata, target, log=None):
+    checkout = developer_checkout(metadata)
+    if git("branch", "--show-current", cwd=checkout, log=log) != "main":
+        raise UpdateError("branch")
+    if git("status", "--porcelain", cwd=checkout, log=log):
+        raise UpdateError("dirty")
+    head = git("rev-parse", "HEAD", cwd=checkout, log=log)
+    if head != target:
+        if ancestry(checkout, target, head, log):
+            raise UpdateError("ahead")
+        if not ancestry(checkout, head, target, log):
             raise UpdateError("diverged")
+    return checkout, head
+
+
+def check(metadata, running=None, log=None):
+    target = remote_revision(metadata, log)
+    running = running or metadata["commit"]
+    # A developer may be working on a branch or with unsaved changes. No
+    # notification is needed if the running binary already is current.
+    if running == target:
+        return {"state": "current", "revision": target, "available": False}
+    installed = metadata.get("commit")
+    binary = Path(metadata["source"]) / "app/build/pinhole"
+    if os.access(binary, os.X_OK):
+        try:
+            built = subprocess.check_output([str(binary), "--build-revision"], text=True,
+                                            stderr=subprocess.DEVNULL, timeout=5).strip()
+            if re.fullmatch(r"[0-9a-f]{40,64}", built):
+                installed = built
+        except (OSError, subprocess.SubprocessError):
+            pass
+    state = "ready" if installed == target else "available"
+    if state == "available":
+        validate_checkout(metadata, target, log)
+    return {"state": state, "revision": target, "available": state == "available"}
+
+
+def apply(metadata, target, log):
+    checkout, head = validate_checkout(metadata, target, log)
+    # Fetch again on pressing Update; a force-push or a new main requires
+    # a fresh check rather than building an unseen revision.
+    if remote_revision(metadata, log) != target:
+        raise UpdateError("changed")
+    # Recheck after network I/O; never merge edits made while fetching.
+    validate_checkout(metadata, target, log)
+    if head != target:
         git("merge", "--ff-only", target, cwd=checkout, log=log)
-        command = [str(checkout / "bin/install-local"), "--dev"]
-    else:
-        # Keep the build tree between updates: Rust/Qt's caches make later
-        # updates incremental. The working repository is never touched.
-        cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "pinhole/update"
-        checkout = cache / "checkout"
-        cache.mkdir(parents=True, exist_ok=True)
-        if not checkout.exists():
-            git("clone", "--no-checkout", "--single-branch", "--branch", "main",
-                metadata["repository"], str(checkout), log=log)
-        git("fetch", "--no-tags", metadata["repository"], "refs/heads/main", cwd=checkout, log=log)
-        if git("rev-parse", "FETCH_HEAD", cwd=checkout, log=log) != target:
-            raise UpdateError("changed")
-        git("checkout", "--detach", target, cwd=checkout, log=log)
-        command = [str(checkout / "bin/install-local")]
-    env = dict(os.environ, PREFIX=str(prefix), PINHOLE_KEEP_RUNNING="1")
-    result = subprocess.run(command, cwd=checkout, env=env, stdout=log, stderr=log)
-    if result.returncode:
-        raise UpdateError("build")
-    return prefix / "share/pinhole/update.json"
+    outputs = ["app/build/pinhole", "core/target/release/pinholed",
+               "plugins/series/finder/target/release/pinhole-series",
+               "plugins/send/sender/target/release/pinhole-send"]
+    # The linker can remove its old output on a failed link. Preserve the
+    # last working programs until the entire build/install has succeeded.
+    with tempfile.TemporaryDirectory(prefix="pinhole-update-backup-") as backup_dir:
+        backups = []
+        for index, output in enumerate(outputs):
+            path = checkout / output
+            if path.exists():
+                backup = Path(backup_dir) / str(index)
+                shutil.copy2(path, backup)
+                backups.append((path, backup))
+        env = dict(os.environ, PREFIX=str(Path(metadata["prefix"]).resolve()),
+                   PINHOLE_KEEP_RUNNING="1", PINHOLE_UPDATE_LOCK_HELD="1", PINHOLE_EXPECTED_COMMIT=target)
+        try:
+            result = subprocess.run([str(checkout / "bin/install"), "--dev", "--non-interactive"],
+                                    cwd=checkout, env=env, stdout=log, stderr=log)
+            if result.returncode:
+                raise UpdateError("build")
+        except BaseException:
+            for path, backup in backups:
+                temporary = path.with_name(path.name + ".restore")
+                shutil.copy2(backup, temporary)
+                temporary.replace(path)
+            raise
+    return Path(metadata["prefix"]).resolve() / "share/pinhole/update.json"
+
+
+def state_directory():
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "pinhole"
+
+
+@contextmanager
+def update_lock(metadata):
+    checkout = developer_checkout(metadata)
+    state = state_directory()
+    state.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
+    with (state / ("update-" + key + ".lock")).open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise UpdateError("busy")
+        yield lock
 
 
 def restart(metadata, pid, args):
-    # Let the old window close and release its socket before launching the
-    # new one. Only the default library service belongs to this install.
+    developer_checkout(metadata)
+    launcher = Path(metadata["prefix"]) / "bin/pinhole"
+    binary = Path(metadata["source"]) / "app/build/pinhole"
+    if not os.access(launcher, os.X_OK) or not os.access(binary, os.X_OK):
+        raise UpdateError("restart")
+    # A detached relaunch is started only after this helper has validated
+    # its inputs. Wait until the old window has actually closed.
     for _ in range(100):
         if not Path(f"/proc/{pid}").exists():
             break
         time.sleep(.1)
+    else:
+        raise UpdateError("restart")
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
     socket = os.environ.get("PINHOLE_SOCKET", str(runtime / "pinhole.sock"))
     if "--library" not in args:
@@ -103,8 +188,30 @@ def restart(metadata, pid, args):
                         os.kill(int(process.name), signal.SIGTERM)
             except (OSError, IndexError):
                 continue
-    launcher = str(Path(metadata["prefix"]) / "bin/pinhole")
-    os.execv(launcher, [launcher, *args])
+    os.execv(str(launcher), [str(launcher), *args])
+
+
+def job_path(metadata):
+    key = hashlib.sha256(os.fsencode(developer_checkout(metadata))).hexdigest()[:16]
+    return state_directory() / ("update-" + key + ".json")
+
+
+def write_job(path, result):
+    temporary = Path(str(path) + ".new")
+    temporary.write_text(json.dumps(result) + "\n")
+    temporary.replace(path)
+
+
+def launch(metadata, metadata_path, target):
+    with update_lock(metadata) as lock:
+        status = job_path(metadata)
+        write_job(status, {"state": "updating", "revision": target, "started": time.time()})
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--apply",
+                          "--metadata", str(metadata_path), "--revision", target,
+                          "--job", str(status), "--lock-fd", str(lock.fileno())],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True, pass_fds=(lock.fileno(),))
+        return {"state": "updating", "revision": target, "job": str(status)}
 
 
 def main():
@@ -112,37 +219,61 @@ def main():
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--check", action="store_true")
     action.add_argument("--apply", action="store_true")
+    action.add_argument("--launch", action="store_true")
     action.add_argument("--restart", action="store_true")
     parser.add_argument("--metadata", required=True)
+    parser.add_argument("--revision")
+    parser.add_argument("--running-revision")
     parser.add_argument("--pid", type=int, default=0)
+    parser.add_argument("--job")
+    parser.add_argument("--lock-fd", type=int)
     parser.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     log_path = None
+    result = None
+    code = 0
     try:
         metadata = json.loads(Path(args.metadata).read_text())
+        developer_checkout(metadata)  # no network or disk writes for packages
         if args.restart:
             restart(metadata, args.pid, args.args[1:] if args.args[:1] == ["--"] else args.args)
             return
-        if args.check:
-            target = remote_revision(metadata)
-            print(json.dumps({"revision": target, "available": target != metadata["commit"]}))
-            return
-        state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "pinhole"
-        state.mkdir(parents=True, exist_ok=True)
-        with (state / "update.lock").open("w") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise UpdateError("busy")
-            fd, log_path = tempfile.mkstemp(prefix="update-", suffix=".log", dir=state)
-            with os.fdopen(fd, "w") as log:
-                target = remote_revision(metadata, log)
-                installed_metadata = apply(metadata, target, log)
-            print(json.dumps({"revision": target, "log": log_path, "metadata": str(installed_metadata)}))
+        if args.launch:
+            if not args.revision or not re.fullmatch(r"[0-9a-f]{40,64}", args.revision):
+                raise UpdateError("changed")
+            result = launch(metadata, args.metadata, args.revision)
+        else:
+            holder = os.fdopen(args.lock_fd) if args.lock_fd is not None else update_lock(metadata)
+            with holder:
+                if args.check:
+                    result = check(metadata, args.running_revision)
+                else:
+                    if not args.revision or not re.fullmatch(r"[0-9a-f]{40,64}", args.revision):
+                        raise UpdateError("changed")
+                    if args.job:
+                        write_job(args.job, {"state": "updating", "revision": args.revision,
+                                            "pid": os.getpid(), "started": time.time()})
+                    fd, log_path = tempfile.mkstemp(prefix="update-", suffix=".log", dir=state_directory())
+                    with os.fdopen(fd, "w") as log:
+                        installed_metadata = apply(metadata, args.revision, log)
+                    result = {"state": "ready", "revision": args.revision,
+                              "log": log_path, "metadata": str(installed_metadata)}
     except (UpdateError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-        code = str(error) if isinstance(error, UpdateError) else "failed"
-        print(json.dumps({"error": code, "log": log_path or ""}))
-        sys.exit(1)
+        error_code = str(error) if isinstance(error, UpdateError) else "failed"
+        result = {"state": "error", "error": error_code, "log": log_path or ""}
+        code = 1
+        if error_code == "busy" and args.check:
+            try:
+                job = json.loads(job_path(metadata).read_text())
+                if job.get("state") == "updating":
+                    result = {**job, "job": str(job_path(metadata))}
+                    code = 0
+            except (OSError, ValueError):
+                pass
+    if args.job:
+        write_job(args.job, result)
+    print(json.dumps(result))
+    sys.exit(code)
 
 
 if __name__ == "__main__":

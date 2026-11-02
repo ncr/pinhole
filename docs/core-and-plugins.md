@@ -807,7 +807,7 @@ QML). One A phase and one B phase can run at once. That is two builds at a
 time: cargo for A, qmake for B. Within a track, the phases go in order.
 Each phase:
 
-1. lands on `main` alone and is installed with `bin/install-local`;
+1. lands on `main` alone and is installed with `bin/install --dev`;
 2. keeps `docs/` true (`plugins.md`, `sources.md`, `service.md`, README);
 3. adds every new string to `pl.json` (Pinhole's, or the plugin's
    `i18n/pl.json`), and removes the ones it moves out of Pinhole's;
@@ -976,7 +976,7 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   them). In the core, the storage tests' second library is `library/cloud`,
   a read of only the location uses `Kinds::new(vec![])`, and
   `rounds_event`'s test has a stub source. 74 tests before, 74 after.
-- `bin/install-local`: `cargo build --release --locked --workspace
+- `bin/install --dev`: `cargo build --release --locked --workspace
   --manifest-path core/Cargo.toml`. `pkgbuild/PKGBUILD`: the same. README:
   the layout. `docs/sources.md` and `docs/service.md`: where the crates
   are and where pinhole-auth is found.
@@ -989,7 +989,7 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   copy of the checkout builds, as an ordinary user, with no install, and
   its package has `usr/bin/pinholed` and `usr/bin/pinhole-auth`. `cargo
   build --locked --workspace` from a fresh clone of the branch.
-  `bin/install-local`, then the installed pinholed serves the real library
+  `bin/install --dev`, then the installed pinholed serves the real library
   as before (49,079, no listing), and `pinhole sign-in` on a scratch state
   folder reaches pinhole-auth (its "no icloudpd session" answer, no
   password given). `grep -rn "icloud\|Apple" core/src` finds nothing

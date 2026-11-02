@@ -111,6 +111,7 @@ form a history card with the library's years, colours and a jump to the newest.
 bin/install                  # guided terminal UI: developer, local or package install
 bin/install --dev            # launcher runs this checkout directly; no package or password
 bin/install --package        # pacman package for everyone (asks for your password)
+bin/install --uninstall      # remove this account's install; keep photos/settings/repo
 ```
 
 Then open Pinhole from the launcher and add a source in the side panel
@@ -132,32 +133,37 @@ running; only the service writes the library.
 
 Working on Pinhole, `bin/install --dev` builds the checkout and links the
 launcher, service and plugins to it. QML plugins stay live in the repository.
-`bin/install-local --dev` does the same without the terminal UI;
-`bin/install-local` copies the build into `~/.local` instead. Each stops a
+`bin/install --local` copies the build into `~/.local` instead. Each stops a
 running window so the next launch is the new one. `PREFIX` changes the local
 installation folder. `--non-interactive` bypasses the menu, for scripts.
 
-Pinhole quietly checks `main` hourly. A small Update button, also in the
+Developer installations quietly check `main` hourly. A small Update button, also in the
 side panel under Pinhole updates, builds the new version while you browse;
-choose Restart when it is ready. A packaged installation updates just your
-account, without a root password. Developer updates require a clean `main`
+choose Restart when it is ready. Package updates and removal use the OS
+package manager. Developer updates require a clean `main`
 checkout and only fast-forward it, preserving local work.
+
+`--uninstall` removes only files recorded by the local/developer installer;
+changed or replaced files are preserved, as are your photos, preferences,
+custom plugins and source checkout. It never removes a system package.
 
 ## Development
 
-`bin/build` builds the Rust helpers and Qt window. Rust builds prefer
-[Blaze](https://github.com/indexable-inc/blaze), installed by `bin/setup-blaze`
-(the installer prepares it too). One wrapper, `bin/build-rust`, is shared by
-local, developer and package builds. `PINHOLE_RUST_BUILDER=blaze` requires
-Blaze; `PINHOLE_RUST_BUILDER=cargo` selects Cargo explicitly. The default
-`auto` tries Blaze and visibly retries with Cargo if Blaze cannot build a
-target. Cargo remains available for compiler compatibility, without a
-separate build configuration or dependency lockfile.
+`bin/build` builds the Rust helpers and Qt window. Rust builds use
+[Blaze](https://github.com/indexable-inc/blaze) **0.20261030.1**, pinned in
+`bin/blaze-version` and installed by `bin/setup-blaze` (the installer prepares
+it too). `bin/build-rust` is shared by developer, local and package builds.
+Build errors stop the build; there is no automatic Cargo fallback.
+`PINHOLE_RUST_BUILDER=cargo` explicitly selects the reference compiler when
+needed, including CI checks of Blaze's generated code.
 
-Compatibility checked on 2026-11-02: Blaze stable `0.20261027.0` cannot
-compile the Series helper's scoped threads (`writable static MIN`); canary
-`0.20261030.1` exits while loading that helper and the main workspace. These builds currently use
-the visible Cargo fallback; acceleration is not claimed for them.
+The pin matters: stable `0.20261027.0` had a std symbol naming bug that broke
+thread spawning (`writable static MIN`). The pinned release fixes it.
+Each Blaze version has its own tool installation and daemon/cache directory,
+so incompatible protocol versions cannot share a daemon (the source of the
+previous misleading UTF-8 error). Their immutable Rust toolchain is shared.
+On 2026-11-02 all three Rust components — core/pinholed, Series and Send —
+built successfully using the pinned Blaze alone.
 
 Status: two spikes grown into an app. The iCloud API probe is in
 [docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
