@@ -58,7 +58,7 @@ public:
     QMimeData *dragData(const Chosen &items);
     // Put these photos on the clipboard (compatible form), as files, and for
     // a single photo as an image too, so pasting into a chat works.
-    // copied() at once; the clipboard gets the files when they are ready.
+    // copied() confirms that the clipboard has the prepared files and image.
     // `quiet`, from a button that shows its own tick: no status line (a
     // failure still says so).
     Q_INVOKABLE void copy(const QList<int> &indexes, bool quiet = false);
@@ -86,8 +86,7 @@ public:
 signals:
     void statusChanged();
     void draggingChanged();
-    // A copy was asked for: how many photos (the clipboard has them the
-    // moment their files are ready).
+    // The clipboard has these files now; how many could not be prepared.
     void copied(int files, int failed);
     // Those files then did not all come: how many did, how many did not.
     void copyFailed(int files, int failed);

@@ -30,7 +30,7 @@
 
 Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *parent)
     : QObject(parent), m_library(library), m_service(service) {
-    // A copy is promised at once; should the files then not come, say so.
+    // Failed or partial copies are explained even when a button owns feedback.
     connect(this, &Outgoing::copyFailed, this, [this](int files, int) {
         flash(files == 0 ? tr("Could not get the photos from %1").arg(m_service->sourceName())
                          : tr("Copied %n, some could not be fetched", "", files));
@@ -144,22 +144,19 @@ void Outgoing::copy(const QList<int> &indexes, bool quiet) {
     const Chosen items = snapshot(indexes);
     if (items.isEmpty())
         return;
-    // The button answers at once; the clipboard gets the files the moment
-    // they are ready (at once, once a photo's JPEG is made). Not a promise
-    // filled on demand: a clipboard manager (Omarchy's watches every copy)
-    // asks straight away, and waiting for the files inside that request
-    // stopped the window drawing until they came.
-    emit copied(int(items.size()), 0);
+    // Prepare asynchronously: clipboard managers ask for the bytes as soon
+    // as the clipboard changes. Confirm only once those bytes are set.
     prepare(items, true, {}, [this, quiet](const QStringList &files, int failed) {
         if (files.isEmpty()) {
             emit copyFailed(0, failed);
             return;
         }
         toClipboard(files, this, [this, files, failed, quiet] {
+            emit copied(int(files.size()), failed);
             if (failed)
                 emit copyFailed(int(files.size()), failed);
             else if (!quiet)
-                flash(tr("Copied %n photo(s)", "", int(files.size())));
+                flash(QStringLiteral("✓ ") + tr("Copied %n photo(s)", "", int(files.size())));
         });
     }, quiet);
 }

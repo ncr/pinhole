@@ -85,10 +85,16 @@ Rectangle {
 
     Connections {
         target: outgoing
+        function onCopyFailed(files, failed) {
+            if (button.phase === "working") {
+                button.phase = "failed"
+                shake.restart()
+            }
+        }
         function onCopied(files, failed) {
             if (button.phase !== "working")
                 return
-            if (files > 0) {
+            if (files > 0 && failed === 0) {
                 button.phase = "done"
                 pop.restart()
                 shown.restart()

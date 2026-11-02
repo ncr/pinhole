@@ -104,6 +104,10 @@ photo when the preview is missing or too small. Decode size follows the square
 crop in device pixels, including portrait screenshots. Full-photo decodes run
 two at a time once motion settles.
 
+C copies the photo under the grid cursor, or the selected photos in select
+mode. A small confirmation appears once the clipboard is ready; the Copy
+button confirms selected photos in place. Ctrl C remains available too.
+
 The main grid defaults to Automatic order: photos added in the last 30 days stay
 at the newest end, ordered by addition date. Older additions sit where their
 capture dates belong. The date chip's menu (or Ctrl Shift O) and the side

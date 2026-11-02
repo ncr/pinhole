@@ -13,6 +13,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QMimeData>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -31,7 +32,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridsharp"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -63,6 +64,56 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 } else if (clock->elapsed() > 10000) {
                     std::fprintf(stderr, "selftest: gridsharp: tile stayed on thumbnail\n");
                     poll->stop(); QCoreApplication::exit(1);
+                }
+            });
+            poll->start(40);
+        });
+    }
+    if (name == QLatin1String("gridcopy")) {
+        auto *copy = &outgoing;
+        QObject::connect(copy, &Outgoing::copied, window, [window](int, int) {
+            if (!clipboardNow() || clipboardNow()->urls().isEmpty()) {
+                std::fprintf(stderr, "selftest: gridcopy: confirmation came before clipboard contents\n");
+                QCoreApplication::exit(1);
+            }
+        });
+        QTimer::singleShot(1500, window, [=] {
+            grid->setSelecting(false);
+            grid->putCursorOn(0);
+            const auto press = [window] {
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, Qt::Key_C, Qt::NoModifier);
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, Qt::Key_C, Qt::NoModifier);
+            };
+            auto *poll = new QTimer(window);
+            auto stage = std::make_shared<int>(0);
+            auto clock = std::make_shared<QElapsedTimer>();
+            clock->start();
+            setClipboard(new QMimeData);
+            press();
+            QObject::connect(poll, &QTimer::timeout, window, [=] {
+                if (clock->elapsed() > 10000) {
+                    std::fprintf(stderr, "selftest: gridcopy: timeout at stage %d, status=%s, layer=%s\n",
+                                 *stage, qPrintable(copy->status()), qPrintable(window->property("keyLayer").toString()));
+                    poll->stop(); QCoreApplication::exit(1); return;
+                }
+                const QMimeData *mime = clipboardNow();
+                if (!mime || mime->urls().isEmpty()) return;
+                if (*stage == 0) {
+                    if (mime->urls().size() != 1 || !copy->status().startsWith(QStringLiteral("✓ "))) return;
+                    auto *notice = window->findChild<QQuickItem *>("outgoingNotice");
+                    if (!notice || !notice->isVisible()) return;
+                    window->grabWindow().save(arg + "/grid-copy.png");
+                    std::printf("selftest: gridcopy: bare C copies cursor photo and confirms after clipboard is ready: PASS\n");
+                    *stage = 1; clock->restart();
+                    setClipboard(new QMimeData);
+                    grid->selectAll();
+                    press();
+                } else {
+                    auto *button = window->findChild<QObject *>("selectCopyButton");
+                    if (mime->urls().size() != grid->selectionCount() || !button || button->property("phase") != "done") return;
+                    window->grabWindow().save(arg + "/selection-copy.png");
+                    std::printf("selftest: gridcopy: C copies selected photos and the Copy button confirms: PASS\n");
+                    poll->stop(); QCoreApplication::quit();
                 }
             });
             poll->start(40);

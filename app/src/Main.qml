@@ -477,6 +477,7 @@ ApplicationWindow {
 
     // What is on its way out: "Preparing 3 photos…", "Exported 12 photos".
     Chip {
+        objectName: "outgoingNotice"
         visible: outgoing.status !== ""
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -946,6 +947,7 @@ ApplicationWindow {
                   triggered: () => outgoing.exportTo(grid.selection(), false) }
             ]
             CopyButton {
+                objectName: "selectCopyButton"
                 photos: () => grid.selection()
                 enabledHere: grid.selectionCount > 0
                 flat: true
@@ -1742,6 +1744,17 @@ ApplicationWindow {
 
     // Out of the app, from the grid or the viewer: the selection, else the
     // photo open, else the one under the pointer.
+    Command {
+        name: "grid.copy"
+        text: qsTr("Copy")
+        section: "share"
+        keys: ["C"]
+        keyLayer: "grid"
+        when: win.inGrid && !grid.selecting && grid.count > 0
+        mouse: qsTr("Viewer, select mode")
+        touchpad: qsTr("Viewer, select mode")
+        onTriggered: outgoing.copy(win.chosen())
+    }
     Command {
         name: "share.copy"
         mouse: qsTr("Viewer, select mode")
