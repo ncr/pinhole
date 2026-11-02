@@ -470,7 +470,38 @@ const COVER_MAX_BYTES: i64 = 1 << 30;
 /// already on disk (a library rebuilt) is used as it is; and a video
 /// ffmpeg turns down is not fetched again until it changes
 /// (source::unreadable). Returns how many thumbnails were replaced.
+///
+/// Covers made before HDR video was tone mapped (cover::VERSION) are made
+/// again once, where that is cheap: those of an HLG or PQ video still on
+/// this computer, which need no fetching. The rest stay as they are.
 pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
+    if db::meta(conn, "covers").as_deref() != Some(crate::cover::VERSION) {
+        let made: Vec<(String, String, String, Stored)> = conn
+            .prepare(
+                "SELECT a.id, a.thumb_path, t.key, v.name, v.key, coalesce(v.file_type, '') FROM assets a
+                 JOIN renditions t ON t.asset_id = a.id AND t.kind = 'thumb'
+                 JOIN renditions v ON v.asset_id = a.id AND v.kind = 'video'
+                 WHERE a.is_video AND a.thumb_path LIKE '%-cover.jpg'",
+            )?
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, Stored { asset: r.get(0)?, want: Want::Video, name: r.get(3)?, key: r.get(4)?, file_type: r.get(5)? }))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        for (asset, cover, key, video) in made {
+            if stop() {
+                return Err(Stopped.into());
+            }
+            let Some(file) = source.local(&video).filter(|f| f.exists()) else { continue };
+            if !crate::cover::is_hdr(&file)? {
+                continue;
+            }
+            // Its own thumbnail again, dull: its cover is made anew below.
+            let _ = std::fs::remove_file(library.join(medium_cover_path(&cover)));
+            let _ = std::fs::remove_file(library.join(&cover));
+            conn.execute("UPDATE assets SET thumb_path = ?2 WHERE id = ?1", params![asset, thumb_path(&key)])?;
+        }
+        db::set_meta(conn, "covers", crate::cover::VERSION)?;
+    }
     struct Dull {
         asset: String,
         cover: String,

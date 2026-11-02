@@ -266,6 +266,21 @@ pub fn pick(input: Input, edge: u32) -> Result<Vec<u8>> {
     best_from(input, edge).map(|(_, jpeg)| jpeg)
 }
 
+/// A JPEG of a still (a HEIF or AVIF) whose picture is PQ or HLG, tone
+/// mapped as a video's frame is, at most `edge` on the long side; None if
+/// ffprobe finds it is not HDR after all. Background work: the caller holds
+/// a slot.
+pub fn still(input: Input, edge: u32) -> Result<Option<Vec<u8>>> {
+    let Some(curve) = probe(input)?.curve else { return Ok(None) };
+    frame_from(input, 0.0, edge, Some(curve)).map(Some)
+}
+
+/// HLG's grey of code `code` as tone_map makes it, 8 bits (for a test).
+#[cfg(test)]
+pub fn tone_map_hlg_grey(code: f64) -> u8 {
+    tone_map([code; 3], Curve::Hlg)[1]
+}
+
 /// When the video's most telling frame is, in seconds, and a JPEG of it at
 /// most `edge` on the long side.
 pub fn best(video: &Path, edge: u32) -> Result<(f64, Vec<u8>)> {
@@ -391,6 +406,13 @@ fn probe(input: Input) -> Result<Probe> {
         _ => None,
     };
     Ok(probe)
+}
+
+/// Whether a video (a file) is HLG or PQ, by ffprobe; an error only when it
+/// was stopped, hung or spinning.
+pub fn is_hdr(video: &Path) -> Result<bool> {
+    let _slot = crate::background::slot();
+    Ok(probe(Input::Path(video))?.curve.is_some())
 }
 
 /// Whether a program was stopped, hung or spinning (background::output).

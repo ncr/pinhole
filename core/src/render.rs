@@ -1,10 +1,13 @@
 //! Thumbnails and mediums made from a file on this computer: a folder's
 //! (pinhole.folder), and a provider's whose renditions say `"make": true`
 //! (process.rs, docs/source-providers.md). A photo is made smaller with
-//! ImageMagick, a video's from its most telling frame (cover.rs).
+//! ImageMagick, a video's from its most telling frame (cover.rs). A HEIF or
+//! AVIF still whose picture is PQ or HLG (a camera's HDR still) is tone
+//! mapped as a video's frame is (cover.rs, docs/hdr.md): ImageMagick shows
+//! its codes as they are, flat and grey.
 
 use std::fs::File;
-use std::io::{BufReader, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
@@ -62,6 +65,13 @@ pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> 
         let _slot = crate::background::slot();
         return crate::cover::pick(Input::File(file), edge);
     }
+    // PQ or HLG, by ffmpeg and tone mapped; anything it cannot, as any.
+    if hdr_still(file) {
+        let _slot = crate::background::slot();
+        if let Some(jpeg) = crate::cover::still(Input::File(file), edge)? {
+            return Ok(jpeg);
+        }
+    }
     // On stdin, as jpeg.rs reads it: a name is never taken for
     // ImageMagick's own syntax ("50%off.jpg" is "500ff.jpg" to it). From
     // its start, wherever reading its size left it.
@@ -81,6 +91,97 @@ pub fn render(file: &File, size: Option<(u32, u32)>, edge: u32, video: bool) -> 
         return Err(Rejected(said("magick made no image of it", &output.stderr)).into());
     }
     Ok(output.stdout)
+}
+
+/// Whether a HEIF or AVIF file's picture (its primary item) says PQ or HLG
+/// in its colour (nclx): from its first boxes, read through the file
+/// opened. Anything else, or anything it cannot read, is not.
+pub fn hdr_still(file: &File) -> bool {
+    let mut head = Vec::new();
+    let Ok(mut reader) = file.try_clone() else { return false };
+    if reader.seek(SeekFrom::Start(0)).is_err() || reader.by_ref().take(1 << 20).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    matches!(primary_transfer(&head), Some(16 | 18))
+}
+
+/// ISOBMFF boxes in `data`: each one's type and body.
+fn boxes(data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let header = data.get(at..at + 8)?;
+        let mut size = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
+        let kind: [u8; 4] = header[4..8].try_into().ok()?;
+        let mut body = at + 8;
+        if size == 1 {
+            size = u64::from_be_bytes(data.get(at + 8..at + 16)?.try_into().ok()?) as usize;
+            body += 8;
+        } else if size == 0 {
+            size = data.len() - at;
+        }
+        let end = at.checked_add(size)?;
+        if size < body - at || end > data.len() {
+            return None;
+        }
+        let found = (kind, &data[body..end]);
+        at = end;
+        Some(found)
+    })
+}
+
+/// The transfer characteristics of the primary item's nclx colour, if a
+/// HEIF or AVIF says one (ISO/IEC 23008-12: pitm, then its properties by
+/// ipma in ipco).
+fn primary_transfer(data: &[u8]) -> Option<u16> {
+    let (_, ftyp) = boxes(data).find(|(kind, _)| kind == b"ftyp")?;
+    if !ftyp.chunks(4).any(|b| matches!(b, b"heic" | b"heix" | b"heim" | b"heis" | b"mif1" | b"msf1" | b"avif" | b"avis")) {
+        return None;
+    }
+    let (_, meta) = boxes(data).find(|(kind, _)| kind == b"meta")?;
+    let meta = meta.get(4..)?; // version and flags
+    let (_, pitm) = boxes(meta).find(|(kind, _)| kind == b"pitm")?;
+    let primary = if pitm.first()? == &0 { u16::from_be_bytes(pitm.get(4..6)?.try_into().ok()?) as u32 } else {
+        u32::from_be_bytes(pitm.get(4..8)?.try_into().ok()?)
+    };
+    let (_, iprp) = boxes(meta).find(|(kind, _)| kind == b"iprp")?;
+    let properties: Vec<([u8; 4], &[u8])> = boxes(boxes(iprp).find(|(kind, _)| kind == b"ipco")?.1).collect();
+    for (kind, ipma) in boxes(iprp) {
+        if &kind != b"ipma" {
+            continue;
+        }
+        let (version, flags) = (*ipma.first()?, *ipma.get(3)?);
+        let count = u32::from_be_bytes(ipma.get(4..8)?.try_into().ok()?);
+        let mut at = 8usize;
+        for _ in 0..count {
+            let item = if version < 1 {
+                at += 2;
+                u16::from_be_bytes(ipma.get(at - 2..at)?.try_into().ok()?) as u32
+            } else {
+                at += 4;
+                u32::from_be_bytes(ipma.get(at - 4..at)?.try_into().ok()?)
+            };
+            let associations = *ipma.get(at)? as usize;
+            at += 1;
+            for _ in 0..associations {
+                let index = if flags & 1 != 0 {
+                    at += 2;
+                    (u16::from_be_bytes(ipma.get(at - 2..at)?.try_into().ok()?) & 0x7fff) as usize
+                } else {
+                    at += 1;
+                    (ipma.get(at - 1)? & 0x7f) as usize
+                };
+                if item != primary || index == 0 {
+                    continue;
+                }
+                if let Some((b"colr", colr)) = properties.get(index - 1).map(|(k, b)| (k, *b)) {
+                    if colr.get(..4) == Some(b"nclx") {
+                        return Some(u16::from_be_bytes(colr.get(6..8)?.try_into().ok()?));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A file a program turned down: it ran on it and made no image (a file
@@ -201,6 +302,56 @@ mod tests {
                 assert_eq!((made.width(), made.height()), size, "{name}");
             }
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A camera's HDR still (HLG, in an AVIF here; an HEIC's boxes are the
+    /// same) is tone mapped as a video's frame is: a grey of HLG's 0.75,
+    /// SDR white as the window shows it, not its code read as sRGB's. SDR
+    /// ones, and the same picture said to be sRGB's, as before.
+    #[test]
+    fn an_hdr_still_is_tone_mapped_as_a_video_frame_is() {
+        if !has("magick") || !has("ffmpeg") || Command::new("heif-enc").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("pinhole-hdr-still-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("grey.png");
+        let made = Command::new("magick").args(["-size", "640x480", "xc:rgb(75%,75%,75%)", "-depth", "16"]).arg(&png).status().unwrap();
+        assert!(made.success());
+        let encode = |name: &str, transfer: &str| {
+            let to = dir.join(name);
+            let made = Command::new("heif-enc")
+                .args(["-A", "-b", "10", "--colour_primaries", "9", "--matrix_coefficients", "9", "--full_range_flag", "1"])
+                .args(["--transfer_characteristic", transfer, "-o"])
+                .arg(&to)
+                .arg(&png)
+                .output()
+                .unwrap();
+            assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+            to
+        };
+        let middle = |path: &Path| {
+            let file = File::open(path).unwrap();
+            let jpeg = render(&file, size(&file), 480, false).unwrap();
+            let image = image::load_from_memory(&jpeg).unwrap().to_rgb8();
+            assert_eq!((image.width(), image.height()), (480, 360));
+            (hdr_still(&file), image.get_pixel(240, 180).0)
+        };
+        let (hdr, hlg) = middle(&encode("hlg.avif", "18"));
+        // HLG's 0.75: a quarter of its scene light, at 1000 nits by the
+        // OOTF, 203 nits SDR white.
+        let want = crate::cover::tone_map_hlg_grey(0.75);
+        assert!(hdr);
+        for k in 0..3 {
+            assert!((hlg[k] as i32 - want as i32).abs() <= 3, "{hlg:?} against {want}");
+        }
+        let (hdr, sdr) = middle(&encode("srgb.avif", "13"));
+        assert!(!hdr);
+        // Its codes as they are: 75 %, 191 or so.
+        assert!((sdr[1] as i32 - 191).abs() <= 3, "{sdr:?}");
+        assert!((hlg[1] as i32 - sdr[1] as i32).abs() > 10, "tone mapped {hlg:?}, as it is {sdr:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

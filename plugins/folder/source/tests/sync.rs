@@ -103,6 +103,59 @@ fn a_video_with_a_dull_thumbnail_gets_a_cover_once() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Covers made before HDR video was tone mapped (cover::VERSION) are made
+/// again once where the video is here: an HLG one's, not an SDR one's.
+#[test]
+fn an_hdr_videos_cover_from_before_is_made_again_once() {
+    use std::process::{Command, Stdio};
+    if Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_err() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("pinhole-hdr-covers-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (videos, library) = (dir.join("videos"), dir.join("library"));
+    std::fs::create_dir_all(&videos).unwrap();
+    std::fs::create_dir_all(&library).unwrap();
+    for (name, hdr) in [("sdr.mp4", false), ("hlg.mp4", true)] {
+        let mut ffmpeg = Command::new("ffmpeg");
+        ffmpeg.args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=64x36:d=3:r=10"]);
+        if hdr {
+            ffmpeg.args(["-pix_fmt", "yuv420p10le", "-x264-params", "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc"]);
+        } else {
+            ffmpeg.args(["-pix_fmt", "yuv420p"]);
+        }
+        assert!(ffmpeg.arg(videos.join(name)).status().unwrap().success());
+    }
+    let source = FolderSource::new(videos);
+    let mut conn = db::open(&library.join("library.sqlite")).unwrap();
+    list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+    make_thumbs(&source, &mut conn, &library, 1, &|_, _| {}, &|| false).unwrap();
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 2);
+    assert_eq!(db::meta(&conn, "covers").as_deref(), Some(pinhole_core::cover::VERSION));
+    // As made by a Pinhole from before: marked, so that a cover made again
+    // shows.
+    let cover = |conn: &Connection, id: &str| -> String {
+        conn.query_row("SELECT thumb_path FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    };
+    let (sdr, hlg) = (cover(&conn, "sdr.mp4"), cover(&conn, "hlg.mp4"));
+    let mut marker = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut marker)
+        .encode(&[255u8; 64 * 36 * 3], 64, 36, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    std::fs::write(library.join(&sdr), &marker).unwrap();
+    std::fs::write(library.join(&hlg), &marker).unwrap();
+    db::set_meta(&conn, "covers", "2").unwrap();
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 1);
+    assert_eq!(cover(&conn, "hlg.mp4"), hlg);
+    assert_ne!(std::fs::read(library.join(&hlg)).unwrap(), marker);
+    assert!(library.join(medium_cover_path(&hlg)).exists());
+    assert_eq!(std::fs::read(library.join(&sdr)).unwrap(), marker);
+    assert_eq!(db::meta(&conn, "covers").as_deref(), Some(pinhole_core::cover::VERSION));
+    // Once.
+    assert_eq!(make_covers(&source, &mut conn, &library, &|| false).unwrap(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_video_ffmpeg_turns_down_is_not_tried_for_a_cover_again_until_it_changes() {
     use std::process::{Command, Stdio};
