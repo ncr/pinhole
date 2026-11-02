@@ -3,12 +3,15 @@
 #include "colour.h"
 
 #include <QFile>
+#include <QImageReader>
 #include <QRegularExpression>
+#include <QTransform>
 
 #include <cstring>
 
 #include <libheif/heif.h>
 #include <libheif/heif_items.h>
+#include <ultrahdr_api.h>
 
 #include <algorithm>
 #include <cmath>
@@ -301,6 +304,35 @@ void readJpegSegment(uchar marker, const QByteArray &payload, HdrInfo &info, boo
     }
 }
 
+// The second image of an MPF index (an APP2 "MPF\0" payload, read at
+// `at` in the file): where it starts in the file and its size. Its
+// offsets count from the MPF TIFF header.
+void mpfSecond(uchar marker, const QByteArray &payload, qint64 at, qint64 *second, qint64 *length) {
+    if (marker != 0xe2 || !payload.startsWith(QByteArray("MPF\0", 4)) || payload.size() < 12)
+        return;
+    const auto *tiff = reinterpret_cast<const uchar *>(payload.constData()) + 4;
+    const qsizetype size = payload.size() - 4;
+    const bool little = tiff[0] == 'I';
+    Reader r{tiff, size, 4, little};
+    const qsizetype ifd = qsizetype(r.u32());
+    const qsizetype entry = r.failed ? -1 : tiffEntry(tiff, size, little, ifd, 0xb002);
+    if (entry < 0)
+        return;
+    Reader e{tiff, size, entry + 4, little};
+    const quint32 count = e.u32();
+    e.at = qsizetype(e.u32());
+    if (e.failed || count < 32)
+        return;
+    // The second of 16-byte entries: attribute, size, offset.
+    e.at += 16 + 4;
+    const quint32 bytes = e.u32();
+    const quint32 offset = e.u32();
+    if (!e.failed && offset > 0) {
+        *second = at + 4 + qint64(offset);
+        *length = qint64(bytes);
+    }
+}
+
 void readJpeg(const QString &path, HdrInfo &info) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
@@ -310,26 +342,8 @@ void readJpeg(const QString &path, HdrInfo &info) {
     qint64 second = -1;
     const bool jpeg = jpegSegments(file, 0, [&](uchar marker, const QByteArray &payload, qint64 at) {
         readJpegSegment(marker, payload, info, false);
-        if (marker != 0xe2 || !payload.startsWith(QByteArray("MPF\0", 4)) || payload.size() < 12)
-            return;
-        const auto *tiff = reinterpret_cast<const uchar *>(payload.constData()) + 4;
-        const qsizetype size = payload.size() - 4;
-        const bool little = tiff[0] == 'I';
-        Reader r{tiff, size, 4, little};
-        const qsizetype ifd = qsizetype(r.u32());
-        const qsizetype entry = r.failed ? -1 : tiffEntry(tiff, size, little, ifd, 0xb002);
-        if (entry < 0)
-            return;
-        Reader e{tiff, size, entry + 4, little};
-        const quint32 count = e.u32();
-        e.at = qsizetype(e.u32());
-        if (e.failed || count < 32)
-            return;
-        // The second of 16-byte entries: attribute, size, offset.
-        e.at += 16 + 8;
-        const quint32 offset = e.u32();
-        if (!e.failed && offset > 0)
-            second = at + 4 + qint64(offset);
+        qint64 size = 0;
+        mpfSecond(marker, payload, at, &second, &size);
     });
     if (jpeg && second > 0)
         jpegSegments(file, second, [&](uchar marker, const QByteArray &payload, qint64) { readJpegSegment(marker, payload, info, true); });
@@ -404,34 +418,62 @@ bool appleMakerTags(const QByteArray &exifBytes, double *m33, double *m48) {
     return tiffNumber(note, makerSize, noteLittle, 0, e33, m33) && tiffNumber(note, makerSize, noteLittle, 0, e48, m48);
 }
 
-bool isoGainMapStops(const QByteArray &metadata, double *stops) {
+bool isoGainMapMetadata(const QByteArray &metadata, GainMap *map) {
     Reader r{reinterpret_cast<const uchar *>(metadata.constData()), metadata.size()};
     const quint16 minimumVersion = r.u16();
     r.u16(); // the writer's version
     const quint8 flags = r.u8();
     if (r.failed || minimumVersion != 0)
         return false;
-    const bool common = flags & 0x08;
-    double base, alternate;
-    if (common) {
-        const quint32 d = r.u32();
-        const quint32 b = r.u32(), a = r.u32();
-        if (r.failed || d == 0)
-            return false;
-        base = double(b) / d;
-        alternate = double(a) / d;
-    } else {
-        const quint32 bn = r.u32(), bd = r.u32(), an = r.u32(), ad = r.u32();
-        if (r.failed || bd == 0 || ad == 0)
-            return false;
-        base = double(bn) / bd;
-        alternate = double(an) / ad;
-    }
-    // The channels must be there too, for it to be whole.
+    // Multi-channel, the base's colour space, the base the HDR one, one
+    // denominator for all.
     const int channels = (flags & 0x80) ? 3 : 1;
-    if (!r.has(qsizetype(channels) * (common ? 20 : 40)))
+    const bool common = flags & 0x08;
+    GainMap m;
+    m.useBaseColourSpace = flags & 0x40;
+    m.backward = flags & 0x04;
+    // A fraction: its numerator signed or not, over the common denominator
+    // or its own.
+    quint32 denominator = 0;
+    auto fraction = [&](bool isSigned, double *out) {
+        const quint32 n = r.u32();
+        const quint32 d = common ? denominator : r.u32();
+        if (r.failed || d == 0) {
+            r.failed = true;
+            return;
+        }
+        *out = (isSigned ? double(qint32(n)) : double(n)) / d;
+    };
+    if (common)
+        denominator = r.u32();
+    fraction(false, &m.baseHeadroom);
+    fraction(false, &m.alternateHeadroom);
+    for (int c = 0; c < channels; ++c) {
+        fraction(true, &m.gainMin[c]);
+        fraction(true, &m.gainMax[c]);
+        fraction(false, &m.gamma[c]);
+        fraction(true, &m.baseOffset[c]);
+        fraction(true, &m.alternateOffset[c]);
+        if (!r.failed && m.gamma[c] <= 0)
+            r.failed = true;
+    }
+    if (r.failed || !std::isfinite(m.baseHeadroom) || !std::isfinite(m.alternateHeadroom))
         return false;
-    *stops = std::max(base, alternate);
+    for (int c = channels; c < 3; ++c) {
+        m.gainMin[c] = m.gainMin[0], m.gainMax[c] = m.gainMax[0], m.gamma[c] = m.gamma[0];
+        m.baseOffset[c] = m.baseOffset[0], m.alternateOffset[c] = m.alternateOffset[0];
+    }
+    m.kind = QStringLiteral("iso");
+    m.image = map->image;
+    *map = m;
+    return true;
+}
+
+bool isoGainMapStops(const QByteArray &metadata, double *stops) {
+    GainMap map;
+    if (!isoGainMapMetadata(metadata, &map))
+        return false;
+    *stops = std::max(map.baseHeadroom, map.alternateHeadroom);
     return std::isfinite(*stops);
 }
 
@@ -448,4 +490,288 @@ HdrInfo readHdr(const QString &path) {
         readHeif(path, info);
     finish(info);
     return info;
+}
+
+// ---- The map's pixels (H4) ----
+
+double GainMap::weight(double stops) const {
+    if (kind == QLatin1String("apple")) {
+        const double top = std::log2(appleHeadroom);
+        return top > 0 ? std::clamp(stops / top, 0.0, 1.0) : 0;
+    }
+    if (kind != QLatin1String("iso") || alternateHeadroom == baseHeadroom)
+        return 0;
+    const double f = std::clamp((stops - baseHeadroom) / (alternateHeadroom - baseHeadroom), 0.0, 1.0);
+    return alternateHeadroom < baseHeadroom ? -f : f;
+}
+
+double GainMap::gainOf(double code, int c) const {
+    code = std::clamp(code, 0.0, 1.0);
+    if (kind == QLatin1String("apple")) {
+        // Rec. 709's curve undone, then Apple's 1 + (Hi - 1) g.
+        const double g = code <= 0.081 ? code / 4.5 : std::pow((code + 0.099) / 1.099, 1 / 0.45);
+        return std::log2(1 + (appleHeadroom - 1) * g);
+    }
+    return gainMin[c] + (gainMax[c] - gainMin[c]) * std::pow(code, 1 / gamma[c]);
+}
+
+void GainMap::apply(double rgb[3], const double codes[3], double w) const {
+    if (w == 0 || kind.isEmpty())
+        return;
+    const bool apple = kind == QLatin1String("apple");
+    for (int c = 0; c < 3; ++c) {
+        const double gain = std::exp2(gainOf(codes[apple ? 0 : c], c) * w);
+        const double out = apple ? rgb[c] * gain : (rgb[c] + baseOffset[c]) * gain - alternateOffset[c];
+        // Not taken below black by the offsets (as libultrahdr has it); a
+        // colour beyond sRGB's, below 0 already, as it comes.
+        rgb[c] = rgb[c] >= 0 ? std::max(out, 0.0) : out;
+    }
+}
+
+namespace {
+
+// Turned upright as Qt's readers turn a picture (qt_imageTransform).
+QImage upright(QImage image, QImageIOHandler::Transformations t) {
+    if (image.isNull() || t == QImageIOHandler::TransformationNone)
+        return image;
+    if (t == QImageIOHandler::TransformationRotate270)
+        return image.transformed(QTransform().rotate(270));
+    image = image.flipped((t & QImageIOHandler::TransformationMirror ? Qt::Horizontal : Qt::Orientations())
+                          | (t & QImageIOHandler::TransformationFlip ? Qt::Vertical : Qt::Orientations()));
+    if (t & QImageIOHandler::TransformationRotate90)
+        image = image.transformed(QTransform().rotate(90));
+    return image;
+}
+
+// A map's codes as kept: one channel, or three where they differ.
+QImage mapCodes(const QImage &image) {
+    if (image.isNull())
+        return {};
+    if (!image.allGray())
+        return image.convertToFormat(QImage::Format_RGB888);
+    return image.convertToFormat(QImage::Format_Grayscale8);
+}
+
+// A HEIF image item's pixels at 8 bits, one channel or three.
+QImage decodeHeifMap(heif_image_handle *handle, bool colour, const std::atomic<bool> *cancelled) {
+    heif_decoding_options *options = heif_decoding_options_alloc();
+    options->convert_hdr_to_8bit = 1;
+    if (cancelled) {
+        options->progress_user_data = const_cast<std::atomic<bool> *>(cancelled);
+        options->cancel_decoding = [](void *data) { return int(static_cast<std::atomic<bool> *>(data)->load()); };
+    }
+    heif_image *image = nullptr;
+    QImage out;
+    // libheif applies the item's own rotation and mirroring, which an
+    // iPhone gives its map as it gives the photo (the same irot).
+    if (heif_decode_image(handle, &image, colour ? heif_colorspace_RGB : heif_colorspace_monochrome,
+                          colour ? heif_chroma_interleaved_RGB : heif_chroma_monochrome, options)
+            .code == heif_error_Ok) {
+        const heif_channel channel = colour ? heif_channel_interleaved : heif_channel_Y;
+        size_t stride = 0;
+        const uint8_t *data = heif_image_get_plane_readonly2(image, channel, &stride);
+        if (data && heif_image_get_bits_per_pixel_range(image, channel) == 8)
+            out = QImage(data, heif_image_get_width(image, channel), heif_image_get_height(image, channel), qsizetype(stride),
+                         colour ? QImage::Format_RGB888 : QImage::Format_Grayscale8)
+                      .copy();
+        heif_image_release(image);
+    }
+    heif_decoding_options_free(options);
+    return out;
+}
+
+bool sameChannels(const GainMap &m) {
+    for (int c = 1; c < 3; ++c)
+        if (m.gainMin[c] != m.gainMin[0] || m.gainMax[c] != m.gainMax[0] || m.gamma[c] != m.gamma[0])
+            return false;
+    return true;
+}
+
+void readHeifMap(const QString &path, const HdrInfo &info, bool appleFirst, GainMap &map, const std::atomic<bool> *cancelled) {
+    heif_context *context = heif_context_alloc();
+    heif_image_handle *primary = nullptr;
+    if (heif_context_read_from_file(context, QFile::encodeName(path).constData(), nullptr).code != heif_error_Ok ||
+        heif_context_get_primary_image_handle(context, &primary).code != heif_error_Ok) {
+        heif_context_free(context);
+        return;
+    }
+    const heif_item_id primaryId = heif_image_handle_get_item_id(primary);
+    // ISO's: a tmap item whose two inputs (dimg) are the primary and the
+    // map. libheif 1.23 has no API for it: its metadata read here.
+    auto readIso = [&] {
+        if (!info.iso)
+            return false;
+        const int items = heif_context_get_number_of_items(context);
+        std::vector<heif_item_id> ids(size_t(std::max(items, 0)));
+        heif_context_get_list_of_item_IDs(context, ids.data(), items);
+        for (heif_item_id id : ids) {
+            if (heif_item_get_item_type(context, id) != heif_fourcc('t', 'm', 'a', 'p'))
+                continue;
+            heif_item_id inputs[2] = {0, 0};
+            for (int index = 0;; ++index) {
+                uint32_t type = 0;
+                heif_item_id *to = nullptr;
+                const size_t count = heif_context_get_item_references(context, id, index, &type, &to);
+                if (count == 0)
+                    break;
+                if (type == heif_fourcc('d', 'i', 'm', 'g') && count == 2)
+                    inputs[0] = to[0], inputs[1] = to[1];
+                heif_release_item_references(context, &to);
+            }
+            if (inputs[0] != primaryId || inputs[1] == 0)
+                continue;
+            uint8_t *bytes = nullptr;
+            size_t size = 0;
+            GainMap iso;
+            const bool parsed = heif_item_get_item_data(context, id, nullptr, &bytes, &size).code == heif_error_Ok && bytes
+                             && size > 1 && bytes[0] == 0
+                             && isoGainMapMetadata(QByteArray(reinterpret_cast<const char *>(bytes) + 1, qsizetype(size) - 1), &iso);
+            if (bytes)
+                heif_release_item_data(context, &bytes);
+            if (!parsed || iso.backward)
+                continue;
+            // The map: an image item, here (an iPhone's) Apple's own
+            // auxiliary image of the primary too.
+            heif_image_handle *handle = nullptr;
+            if (heif_context_get_image_handle(context, inputs[1], &handle).code != heif_error_Ok)
+                heif_image_handle_get_auxiliary_image_handle(primary, inputs[1], &handle);
+            if (!handle)
+                continue;
+            iso.image = mapCodes(decodeHeifMap(handle, !sameChannels(iso), cancelled));
+            heif_image_handle_release(handle);
+            if (!iso.image.isNull()) {
+                map = iso;
+                return true;
+            }
+        }
+        return false;
+    };
+    // Apple's: the primary's auxiliary image of its kind.
+    auto readApple = [&] {
+        if (!info.apple || info.appleStops <= 0)
+            return false;
+        const int filter = LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA | LIBHEIF_AUX_IMAGE_FILTER_OMIT_DEPTH;
+        const int count = heif_image_handle_get_number_of_auxiliary_images(primary, filter);
+        std::vector<heif_item_id> aux(size_t(std::max(count, 0)));
+        heif_image_handle_get_list_of_auxiliary_image_IDs(primary, filter, aux.data(), count);
+        for (heif_item_id id : aux) {
+            heif_image_handle *handle = nullptr;
+            if (heif_image_handle_get_auxiliary_image_handle(primary, id, &handle).code != heif_error_Ok)
+                continue;
+            const char *type = nullptr;
+            bool apple = false;
+            if (heif_image_handle_get_auxiliary_type(handle, &type).code == heif_error_Ok && type) {
+                apple = qstrcmp(type, kAppleAux) == 0;
+                heif_image_handle_release_auxiliary_type(handle, &type);
+            }
+            GainMap found;
+            if (apple) {
+                found.kind = QStringLiteral("apple");
+                found.appleHeadroom = std::exp2(info.appleStops);
+                found.image = decodeHeifMap(handle, false, cancelled);
+            }
+            heif_image_handle_release(handle);
+            if (!found.image.isNull()) {
+                map = found;
+                return true;
+            }
+        }
+        return false;
+    };
+    if (appleFirst ? !readApple() && !readIso() : !readIso() && !readApple())
+        map = GainMap();
+    heif_image_handle_release(primary);
+    heif_context_free(context);
+}
+
+// A JPEG's: ISO's (or Adobe's XMP) by libultrahdr, whose map is decoded
+// here; else Apple's, the MPF second image.
+void readJpegMap(const QString &path, const HdrInfo &info, bool appleFirst, GainMap &map) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > (256 << 20))
+        return;
+    const QByteArray bytes = file.readAll();
+    // Upright as the photo is (QImageReader, autoTransform).
+    QImageReader reader(path);
+    reader.setDecideFormatFromContent(true);
+    const QImageIOHandler::Transformations turn = reader.transformation();
+    auto readIso = [&] {
+        if (!info.iso)
+            return false;
+        uhdr_codec_private_t *decoder = uhdr_create_decoder();
+        if (!decoder)
+            return false;
+        uhdr_compressed_image_t image{const_cast<char *>(bytes.constData()), size_t(bytes.size()), size_t(bytes.size()),
+                                      UHDR_CG_UNSPECIFIED, UHDR_CT_UNSPECIFIED, UHDR_CR_UNSPECIFIED};
+        GainMap iso;
+        if (uhdr_dec_set_image(decoder, &image).error_code == UHDR_CODEC_OK
+            && uhdr_dec_probe(decoder).error_code == UHDR_CODEC_OK) {
+            const uhdr_gainmap_metadata_t *m = uhdr_dec_get_gainmap_metadata(decoder);
+            const uhdr_mem_block_t *coded = uhdr_dec_get_gainmap_image(decoder);
+            bool sane = m && coded && coded->data && m->hdr_capacity_min > 0 && m->hdr_capacity_max > 0;
+            for (int c = 0; sane && c < 3; ++c) {
+                sane = m->min_content_boost[c] > 0 && m->max_content_boost[c] > 0 && m->gamma[c] > 0;
+                iso.gainMin[c] = std::log2(m->min_content_boost[c]);
+                iso.gainMax[c] = std::log2(m->max_content_boost[c]);
+                iso.gamma[c] = m->gamma[c];
+                iso.baseOffset[c] = m->offset_sdr[c];
+                iso.alternateOffset[c] = m->offset_hdr[c];
+            }
+            if (sane) {
+                iso.kind = QStringLiteral("iso");
+                iso.baseHeadroom = std::log2(m->hdr_capacity_min);
+                iso.alternateHeadroom = std::log2(m->hdr_capacity_max);
+                iso.useBaseColourSpace = m->use_base_cg;
+                const QByteArray coded8(static_cast<const char *>(coded->data), qsizetype(coded->data_sz));
+                iso.image = mapCodes(upright(QImage::fromData(coded8, "JPEG"), turn));
+            }
+        }
+        uhdr_release_decoder(decoder);
+        if (iso.image.isNull())
+            return false;
+        map = iso;
+        return true;
+    };
+    auto readApple = [&] {
+        if (!info.apple || info.appleStops <= 0)
+            return false;
+        qint64 second = -1, size = 0;
+        jpegSegments(file, 0, [&](uchar marker, const QByteArray &payload, qint64 at) {
+            mpfSecond(marker, payload, at, &second, &size);
+        });
+        if (second <= 0 || size <= 0 || second + size > bytes.size())
+            return false;
+        GainMap apple;
+        apple.kind = QStringLiteral("apple");
+        apple.appleHeadroom = std::exp2(info.appleStops);
+        apple.image = upright(QImage::fromData(bytes.mid(second, size), "JPEG"), turn).convertToFormat(QImage::Format_Grayscale8);
+        if (apple.image.isNull())
+            return false;
+        map = apple;
+        return true;
+    };
+    if (appleFirst ? !readApple() && !readIso() : !readIso() && !readApple())
+        map = GainMap();
+}
+
+} // namespace
+
+GainMap readGainMap(const QString &path, const std::atomic<bool> *cancelled) {
+    GainMap map;
+    const HdrInfo info = readHdr(path);
+    if (!info.apple && !info.iso)
+        return map;
+    const bool appleFirst = qEnvironmentVariable("PINHOLE_GAINMAP") == QLatin1String("apple");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return map;
+    const QByteArray head = file.read(12);
+    file.close();
+    if (head.startsWith("\xff\xd8"))
+        readJpegMap(path, info, appleFirst, map);
+    else if (head.size() == 12 && head.mid(4, 4) == "ftyp")
+        readHeifMap(path, info, appleFirst, map, cancelled);
+    if (cancelled && *cancelled)
+        return {};
+    return map;
 }

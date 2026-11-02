@@ -398,6 +398,19 @@ void runHdrPlaySelfTest(QQuickWindow *window, const QStringList &videos);
 // check fails. In a compositor that draws frames: run it in a nested
 // Hyprland on a headless output (docs/hdr.md).
 void runStageSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
+// PINHOLE_SELFTEST=gainmap:<dir> (selfteststage.cpp): every photo of the
+// library (a folder of photos with gain maps), and an iPhone's HEIC again
+// with Apple's legacy map (PINHOLE_GAINMAP=apple), as the stage draws it
+// (docs/hdr.md, H4), read back as Pinhole hands it to the compositor
+// (RGBA16F): at headroom 0 (x1), to the bit the stage's photo with its map
+// off, the SDR base; at 1 stop and at the photo's own, its map applied as
+// the ISO 21496-1 maths say (or Apple's), computed here from that base and
+// the map; and log2 of the gain at 1 stop that at its own times the
+// weights' ratio. Frames in <dir> (.pfm, linear; the gain drawn, grey).
+// PINHOLE_HEADROOM is changed while it runs. On an scRGB stage only: in a
+// nested Hyprland on a headless HDR output, PINHOLE_STAGE=force. Exits 1
+// if any check fails.
+void runGainMapSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
 
 // What a self-test drives.
 struct SelfTestContext {

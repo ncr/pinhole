@@ -1,3 +1,4 @@
+#include <QBuffer>
 #include <QClipboard>
 #include <QColorSpace>
 #include <QDirIterator>
@@ -36,6 +37,7 @@
 #include <lcms2.h>
 #include <libheif/heif.h>
 #include <turbojpeg.h>
+#include <ultrahdr_api.h>
 
 #include <qpa/qwindowsysteminterface.h>
 
@@ -2272,7 +2274,7 @@ Item {
         const QString sample = qEnvironmentVariable("PINHOLE_HDR_SAMPLE");
         if (sample.isEmpty())
             QSKIP("no PINHOLE_HDR_SAMPLE");
-        int heics = 0, heicBoth = 0, jpegs = 0, jpegHdr = 0;
+        int heics = 0, heicBoth = 0, jpegs = 0, jpegHdr = 0, maps = 0, hdr = 0;
         double worst = 0;
         QDirIterator it(sample, {"*.heic", "*.HEIC", "*.jpg", "*.JPG"}, QDir::Files, QDirIterator::Subdirectories);
         while (it.hasNext()) {
@@ -2288,10 +2290,213 @@ Item {
                 worst = std::max(worst, std::abs(info.xmpStops - info.makerStops));
             if (info.iso && info.apple)
                 worst = std::max(worst, std::abs(info.isoStops - info.appleStops));
+            // Its map's pixels (H4), of the kind it says, upright as the
+            // photo: the same shape.
+            if (info.kind() != QLatin1String("iso") && info.kind() != QLatin1String("apple"))
+                continue;
+            const GainMap map = readGainMap(path);
+            QSize size;
+            if (heic) {
+                heif_context *context = heif_context_alloc();
+                heif_image_handle *primary = nullptr;
+                if (heif_context_read_from_file(context, QFile::encodeName(path).constData(), nullptr).code == heif_error_Ok
+                    && heif_context_get_primary_image_handle(context, &primary).code == heif_error_Ok) {
+                    size = QSize(heif_image_handle_get_width(primary), heif_image_handle_get_height(primary));
+                    heif_image_handle_release(primary);
+                }
+                heif_context_free(context);
+            } else {
+                QImageReader reader(path);
+                size = reader.size();
+                if (reader.transformation() & QImageIOHandler::TransformationRotate90)
+                    size.transpose();
+            }
+            const double shape = map.image.isNull() || size.isEmpty() ? 0 :
+                double(map.image.width()) / map.image.height() / (double(size.width()) / size.height());
+            if (map.kind == info.kind() && std::abs(shape - 1) < 0.02)
+                ++maps;
+            else
+                qInfo("%s: %s map %s, %dx%d for %dx%d", qPrintable(path), qPrintable(info.kind()), qPrintable(map.kind),
+                      map.image.width(), map.image.height(), size.width(), size.height());
+            ++hdr;
         }
-        qInfo("%d HEICs, %d with Apple's map and ISO's; %d JPEGs, %d HDR; kinds and MakerNote within %.3f EV", heics, heicBoth,
-              jpegs, jpegHdr, worst);
+        qInfo("%d HEICs, %d with Apple's map and ISO's; %d JPEGs, %d HDR; kinds and MakerNote within %.3f EV; %d of %d maps "
+              "decoded, of their kind and shape", heics, heicBoth, jpegs, jpegHdr, worst, maps, hdr);
         QVERIFY(worst < 0.1);
+        QCOMPARE(maps, hdr);
+    }
+
+    void isoGainMapMetadataIsReadWhole() {
+        // An iPhone's tmap (iOS 18), as it is in the HEIC after its version
+        // byte: one channel, the base's colour space, separate denominators.
+        const QByteArray apple = QByteArray::fromHex(
+            "000000004000000000000f42400024543b000f424000000000000f42400024543b000f4240000cb9c0000f42400000000a000f4240"
+            "0000000a000f4240");
+        GainMap map;
+        QVERIFY(isoGainMapMetadata(apple, &map));
+        QCOMPARE(map.kind, QString("iso"));
+        QVERIFY(map.useBaseColourSpace && !map.backward);
+        QCOMPARE(map.baseHeadroom, 0.0);
+        QVERIFY(std::abs(map.alternateHeadroom - 2.380859) < 1e-6);
+        for (int c = 0; c < 3; ++c) {
+            QCOMPARE(map.gainMin[c], 0.0);
+            QVERIFY(std::abs(map.gainMax[c] - 2.380859) < 1e-6);
+            QVERIFY(std::abs(map.gamma[c] - 0.833984) < 1e-6);
+            QVERIFY(std::abs(map.baseOffset[c] - 1e-5) < 1e-12 && std::abs(map.alternateOffset[c] - 1e-5) < 1e-12);
+        }
+        // Its weight: none at SDR, half at half its headroom, all from it on.
+        QCOMPARE(map.weight(0), 0.0);
+        QVERIFY(std::abs(map.weight(2.380859 / 2) - 0.5) < 1e-9);
+        QCOMPARE(map.weight(5), 1.0);
+        // Three channels over one denominator (flags 0x80 | 0x08).
+        QByteArray multi;
+        auto u32 = [&](quint32 v) { multi += char(v >> 24), multi += char(v >> 16), multi += char(v >> 8), multi += char(v); };
+        multi += QByteArray("\0\0\0\0", 4);
+        multi += char(0x88);
+        u32(1000), u32(500), u32(3000);
+        for (int c = 0; c < 3; ++c)
+            u32(quint32(-250)), u32(1000u * (c + 1)), u32(1000), u32(15), u32(16);
+        QVERIFY(isoGainMapMetadata(multi, &map));
+        QVERIFY(!map.useBaseColourSpace);
+        QCOMPARE(map.baseHeadroom, 0.5);
+        QCOMPARE(map.alternateHeadroom, 3.0);
+        QCOMPARE(map.gainMin[1], -0.25);
+        QCOMPARE(map.gainMax[2], 3.0);
+        QCOMPARE(map.alternateOffset[0], 0.016);
+        QVERIFY(std::abs(map.weight(1.75) - 0.5) < 1e-9);
+        // Cut short anywhere: no.
+        for (qsizetype cut = 0; cut < multi.size(); ++cut)
+            QVERIFY(!isoGainMapMetadata(multi.left(cut), &map));
+        // Apple's legacy: its gain at a code, and its weight, in the log domain.
+        GainMap legacy;
+        legacy.kind = "apple";
+        legacy.appleHeadroom = 8;
+        QCOMPARE(legacy.gainOf(0, 0), 0.0);
+        QVERIFY(std::abs(legacy.gainOf(1, 0) - 3) < 1e-9);
+        QVERIFY(std::abs(std::exp2(legacy.gainOf(0.5, 0)) - (1 + 7 * std::pow((0.5 + 0.099) / 1.099, 1 / 0.45))) < 1e-9);
+        QVERIFY(std::abs(legacy.weight(1) - 1.0 / 3) < 1e-9);
+        double rgb[3] = {0.5, 0.25, 0.125};
+        const double codes[3] = {1, 1, 1};
+        legacy.apply(rgb, codes, 1.0 / 3);
+        QVERIFY(std::abs(rgb[0] - 1) < 1e-9 && std::abs(rgb[2] - 0.25) < 1e-9);
+    }
+
+    // An Ultra HDR JPEG made with libultrahdr (a base, a map at the same
+    // size, metadata), then read as the stage reads it and applied by the
+    // reference maths: libultrahdr's own decode to linear light at the same
+    // boosts agrees.
+    void aGainMapIsAppliedAsLibultrahdrDoes() {
+        QTemporaryDir dir;
+        const int w = 96, h = 64;
+        for (const bool multi : {false, true}) {
+            QImage base(w, h, QImage::Format_RGB888);
+            QImage gain(w, h, multi ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    base.setPixelColor(x, y, QColor(x * 255 / (w - 1), y * 255 / (h - 1), (x + y) * 255 / (w + h - 2)));
+                    const int g = (x / 8 + y / 8) % 2 ? x * 255 / (w - 1) : 255 - y * 255 / (h - 1);
+                    // Three channels smooth: chroma at half the size
+                    // is upsampled differently by Qt and libultrahdr.
+                    gain.setPixelColor(x, y, multi ? QColor(x * 255 / (w - 1), y * 255 / (h - 1), 255 - x * 255 / (w - 1))
+                                                   : QColor(g, g, g));
+                }
+            auto jpeg = [](const QImage &image) {
+                QByteArray bytes;
+                QBuffer buffer(&bytes);
+                buffer.open(QIODevice::WriteOnly);
+                image.save(&buffer, "JPG", 100);
+                return bytes;
+            };
+            QByteArray baseJpeg = jpeg(base), gainJpeg = jpeg(gain);
+            uhdr_gainmap_metadata_t meta{};
+            const float max[3] = {4, 2, 8};
+            for (int c = 0; c < 3; ++c) {
+                meta.max_content_boost[c] = multi ? max[c] : 4;
+                meta.min_content_boost[c] = multi ? 0.75f : 1;
+                meta.gamma[c] = multi ? 1.25f : 0.8f;
+                meta.offset_sdr[c] = meta.offset_hdr[c] = 1.0f / 64;
+            }
+            meta.hdr_capacity_min = 1;
+            meta.hdr_capacity_max = multi ? 8 : 4;
+            meta.use_base_cg = 1;
+            uhdr_codec_private_t *encoder = uhdr_create_encoder();
+            uhdr_compressed_image_t b{baseJpeg.data(), size_t(baseJpeg.size()), size_t(baseJpeg.size()), UHDR_CG_BT_709,
+                                      UHDR_CT_SRGB, UHDR_CR_FULL_RANGE};
+            uhdr_compressed_image_t g{gainJpeg.data(), size_t(gainJpeg.size()), size_t(gainJpeg.size()), UHDR_CG_UNSPECIFIED,
+                                      UHDR_CT_UNSPECIFIED, UHDR_CR_UNSPECIFIED};
+            QCOMPARE(int(uhdr_enc_set_compressed_image(encoder, &b, UHDR_BASE_IMG).error_code), int(UHDR_CODEC_OK));
+            QCOMPARE(int(uhdr_enc_set_gainmap_image(encoder, &g, &meta).error_code), int(UHDR_CODEC_OK));
+            QCOMPARE(int(uhdr_encode(encoder).error_code), int(UHDR_CODEC_OK));
+            const uhdr_compressed_image_t *out = uhdr_get_encoded_stream(encoder);
+            const QByteArray ultra(static_cast<const char *>(out->data), qsizetype(out->data_sz));
+            uhdr_release_encoder(encoder);
+            const QString path = dir.path() + (multi ? "/multi.jpg" : "/single.jpg");
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(ultra);
+            file.close();
+
+            // As the stage reads it.
+            const GainMap map = readGainMap(path);
+            QCOMPARE(map.kind, QString("iso"));
+            QCOMPARE(map.multichannel(), multi);
+            QCOMPARE(map.image.size(), QSize(w, h));
+            QVERIFY(std::abs(map.alternateHeadroom - std::log2(meta.hdr_capacity_max)) < 1e-4);
+            QVERIFY(std::abs(map.gamma[0] - meta.gamma[0]) < 1e-4);
+
+            // libultrahdr's own decode: the base's codes, and linear light
+            // at each boost (1 SDR white).
+            auto decode = [&](uhdr_img_fmt_t format, uhdr_color_transfer_t transfer, float boost) {
+                uhdr_codec_private_t *decoder = uhdr_create_decoder();
+                uhdr_compressed_image_t in{const_cast<char *>(ultra.constData()), size_t(ultra.size()), size_t(ultra.size()),
+                                           UHDR_CG_UNSPECIFIED, UHDR_CT_UNSPECIFIED, UHDR_CR_UNSPECIFIED};
+                uhdr_dec_set_image(decoder, &in);
+                uhdr_dec_set_out_img_format(decoder, format);
+                uhdr_dec_set_out_color_transfer(decoder, transfer);
+                if (boost > 0)
+                    uhdr_dec_set_out_max_display_boost(decoder, boost);
+                QImage decoded;
+                if (uhdr_decode(decoder).error_code == UHDR_CODEC_OK) {
+                    const uhdr_raw_image_t *raw = uhdr_get_decoded_image(decoder);
+                    const bool half = format == UHDR_IMG_FMT_64bppRGBAHalfFloat;
+                    decoded = QImage(static_cast<const uchar *>(raw->planes[0]), int(raw->w), int(raw->h),
+                                     qsizetype(raw->stride[0]) * (half ? 8 : 4),
+                                     half ? QImage::Format_RGBA16FPx4 : QImage::Format_RGBA8888)
+                                  .copy();
+                }
+                uhdr_release_decoder(decoder);
+                return decoded;
+            };
+            // Its base in linear light: at a boost of 1, weight 0.
+            const QImage sdr = decode(UHDR_IMG_FMT_64bppRGBAHalfFloat, UHDR_CT_LINEAR, 1);
+            QCOMPARE(sdr.size(), QSize(w, h));
+            for (const double stops : {1.0, map.alternateHeadroom * 0.75, map.alternateHeadroom}) {
+                const QImage hdr = decode(UHDR_IMG_FMT_64bppRGBAHalfFloat, UHDR_CT_LINEAR, float(std::exp2(stops)));
+                QCOMPARE(hdr.size(), QSize(w, h));
+                double mean = 0, worst = 0;
+                for (int y = 0; y < h; ++y)
+                    for (int x = 0; x < w; ++x) {
+                        const auto *s = reinterpret_cast<const qfloat16 *>(sdr.constScanLine(y)) + 4 * x;
+                        double rgb[3] = {float(s[0]), float(s[1]), float(s[2])};
+                        const QColor m = map.image.pixelColor(x, y);
+                        const double codes[3] = {m.redF(), m.greenF(), m.blueF()};
+                        map.apply(rgb, codes, map.weight(stops));
+                        const auto *p = reinterpret_cast<const qfloat16 *>(hdr.constScanLine(y)) + 4 * x;
+                        for (int c = 0; c < 3; ++c) {
+                            // Relative to the brighter of the two, and to
+                            // 1/64 of SDR white in the darks.
+                            const double e = std::abs(rgb[c] - float(p[c])) / std::max({rgb[c], double(p[c]), 1.0 / 64});
+                            mean += e;
+                            worst = std::max(worst, e);
+                        }
+                    }
+                mean /= 3.0 * w * h;
+                qInfo("%s map at %.2f stops (weight %.3f): against libultrahdr, mean %.4f, worst %.4f", multi ? "three-channel" : "one-channel",
+                      stops, map.weight(stops), mean, worst);
+                QVERIFY(mean < 0.005);
+                QVERIFY(worst < 0.03);
+            }
+        }
     }
 
     void aDisplaysHeadroomIsItsTargetOverSdrWhite() {

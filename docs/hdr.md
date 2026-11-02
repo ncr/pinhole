@@ -845,55 +845,97 @@ photos show their full gamut and HDR video goes above SDR white.
 
 ### H4: gain maps in the stage
 
-**H4a: Apple's maps.**
-- `gainmap.cpp` decodes the map with the photo:
-  - HEIC: `heif_image_handle_get_auxiliary_image_handle` and
-    `heif_decode_image` to 8-bit monochrome;
-  - JPEG: turbojpeg on the MPF second image.
+Landed (H4a and H4b together). What was built, and where it departs from
+the plan:
 
-  Rotation follows the base (libheif applies it to auxiliary images, to
-  be checked; JPEG MPF maps follow the primary's Exif orientation).
-- `StagePhoto` decodes the base and a second texture `R8` (a
-  `QImage::Format_Grayscale8`, outside the atlas). The shader gets the
-  kind, `Hi`, the display headroom, Full HDR, `holdSdr` and the fade, and
-  applies the maths above. Bilinear sampling of the smaller map is the
-  upscale.
-- The medium's map shows at once, and the original's replaces it when it
-  arrives, as the sharp image does today.
+**Reading the map** (`gainmap.cpp`, `readGainMap`): the pixels and how
+they apply, `GainMap`, ISO's when it parses and its image decodes, else
+Apple's (`PINHOLE_GAINMAP=apple` takes Apple's where both are, for tests).
+- **HEIC, ISO:** the `tmap` item's metadata is read here (libheif 1.23 has
+  no API for it), whole: per channel the gain's range (log2), gamma and
+  both offsets, the two headrooms, `useBaseColourSpace`, one denominator
+  or several; a map whose base is the HDR one (backward) is not used. Its
+  two `dimg` inputs are the primary and the map. **On an iPhone the map
+  is Apple's own auxiliary image** (`urn:com:apple:photo:2020:aux:hdrgainmap`):
+  one picture, described twice, Apple's curve in its XMP and MakerNote and
+  ISO's in the `tmap` (min 0, max = alternate headroom, gamma 0.834,
+  offsets 1e-5, the base's colour space). libheif decodes it, as an image
+  item or as the primary's auxiliary image, so risk 8 did not happen.
+- **HEIC, Apple's:** that auxiliary image, `Hi` as H2 reads it.
+- **Rotation:** an iPhone gives the map the primary's own `irot`, which
+  libheif applies; a JPEG's map is turned as Qt turns the primary
+  (its Exif orientation).
+- **JPEG:** libultrahdr's `uhdr_dec_probe` reads ISO's APP2 or Adobe's
+  `hdrgm` XMP (Apple's mediums, Android's and Lightroom's Ultra HDR) and
+  hands over the map still compressed, which Qt decodes; nothing else of
+  the JPEG is decoded twice. Without ISO's, Apple's map is the MPF second
+  image. Some mediums say `useBaseColorSpace` 0; a one-channel map's gain
+  is the same in any primaries that share white, so that matters only for
+  three channels, which are applied in the photo's own primaries (the
+  alternate's are not read).
+- Over 112 cached originals and 400 mediums (`realGainMapsAgreeInEveryKind`,
+  `PINHOLE_HDR_SAMPLE`): all 230 with a map decode it, of the kind the
+  metadata says, the photo's shape once upright.
 
-**H4b: ISO 21496-1.**
-- Parse `tmap`'s binary metadata (version, per-channel fractions for min,
-  max, gamma, base and alternate offsets, the two headrooms, and
-  `useBaseColorSpace`), following libavif's reader.
-- Decode its gain image through `heif_context_get_image_handle` on the
-  `tmap`'s second `dimg` input. Whether libheif 1.23 decodes that hidden
-  item is unverified, and is this phase's first test. If it does not,
-  Apple's map stays in use for those files.
-- Ultra HDR JPEGs (Android, Lightroom) go through libultrahdr:
-  `uhdr_dec_set_out_img_format` SDR, `uhdr_get_decoded_gainmap_image` and
-  `uhdr_dec_get_gainmap_metadata`. The base and map then go to the same
-  shader.
-- When both kinds are present, ISO wins.
+**Drawing it** (`StagePhoto`, `shaders/photo.frag`). On an scRGB stage
+the decode thread reads the map after the photo; it goes to a texture of
+its own (RGBA8, mipmapped with the photo), bilinear filtering being the
+upscale. The shader gets the kind, `Hi`, ISO's parameters, the matrix back
+to the photo's primaries and one weight, applied to the photo in linear
+light after its gamut is mixed:
+`(rgb + base offset) * 2^(G w) - alternate offset`, with `G` from the
+code by the kind (Apple's: `log2(1 + (Hi - 1) g)`). A channel at or above
+0 is not taken below 0 by the offsets (as libultrahdr has it); a colour
+beyond sRGB's, below 0 already, stays. The weight is `hdrWeight` (the
+fade, `holdSdr`, Full HDR) times the map's own at the display's headroom
+(the maths above), so at 0 the shader returns the photo untouched. The
+medium's map shows at once and the original's with the original, as the
+photo does: each decode carries its own.
 
-**Performance.** The gain map is a quarter to a half the size, decoded on
-the provider thread. One more texture fetch per pixel, only in the stage,
-only for the photo shown.
+**Tested.**
+- `aGainMapIsAppliedAsLibultrahdrDoes`: Ultra HDR JPEGs made with
+  libultrahdr (a one-channel map, and a three-channel one with
+  per-channel boosts, a minimum below 1 and offsets of 1/64), read by
+  `readGainMap` and applied by `GainMap::apply`, against libultrahdr's
+  own decode to linear half float at 1, ¾ and all of the alternate
+  headroom: mean 0.03–0.05 %, worst 0.19 %.
+- `isoGainMapMetadataIsReadWhole`: an iPhone's real `tmap`, a
+  three-channel one over one denominator, cut short anywhere; Apple's gain
+  and weight.
+- `PINHOLE_SELFTEST=gainmap:<dir>` (`selfteststage.cpp`) in a nested
+  Hyprland whose headless output is HDR (as H3; the monitor rule needs
+  `supports_hdr = true` and the luminances), on a folder of an iPhone HEIC
+  (ISO's map, then Apple's), two iCloud mediums (ISO's, one of them not in
+  the base's colour space), an Apple-only medium and an Android-style Ultra
+  HDR JPEG (libultrahdr, three channels, Display P3). Each read back from
+  the stage's swapchain, RGBA16F, with `PINHOLE_HEADROOM` changed live:
+  - at 0 stops (×1), the photo with its map is the photo with its map off,
+    to the bit (every pixel of the frame);
+  - at 1 stop and at the photo's own (1.5 to 3 stops), the frame against
+    the maths computed on the CPU from that base and the map: mean
+    relative error 0.03–0.05 %, 99 % within 0.2 %, worst 1.5 % (the
+    three-channel map's sharpest edges); the brightest 9.4× SDR white;
+  - in the log domain, `log2(C/B) / log2(D/B)` over the pixels half a
+    stop or more above their base: the ratio of the weights, 0.4200 for
+    0.4200 (median, 80 % within ±0.0005), for every photo and kind.
+  - The gain drawn (`<photo>-gain.png`) lies on the photo, upright.
+- H3's `stage` self-test still passes on these photos, except the
+  hand-over of the Apple-only medium (1536×2048, mean 1.7 codes, worst 66):
+  H3's own build (f0a506e) gives the very same numbers, so it is not H4's;
+  open below.
 
-**Tests.**
-- A CPU reference (`applyGainMap(base, map, meta, headroom)` in
-  `gainmap.cpp`) against `grabWindow()` of the stage at `PINHOLE_HEADROOM`
-  0, 1, 2 and 3. Mean and maximum error over a 64x64 crop below 1e-2.
-- **ISO.** The reference against libultrahdr's own decode of its test
-  images (`uhdr_dec_set_out_max_display_boost`, half-float output) at the
-  same boosts.
-- **Apple.** The reference on a real iCloud medium at `Hd = Hi` against
-  `sdr * (1 + (Hi - 1) * g)`, computed in the test directly.
-- With `PINHOLE_STAGE=force` on SDR (headroom 0), the stage equals the
-  base. Fading through 400 ms has no step above 1/255 between frames.
+**Performance.** Nothing runs without a stage: no map is read, no texture
+made, and the grid and the window's own photo are untouched. In the stage,
+one more texture fetch per pixel and a map decoded after the photo on the
+stage's own thread (an iPhone HEIC's 2142×2856 map, a medium's 1024×768).
 
-**In the app:** on this panel, nothing until HDR is exposed. Forced on,
-Hyprland tone maps the highlights back into SDR. On an HDR output,
-iPhone HDR photos glow as on the phone.
+**In the app:** on this panel, nothing. On an HDR output, iPhone and
+Android HDR photos go above SDR white, up to the display's headroom, and
+fade in with the stage.
+
+**Open:** the stage's hand-over differs from the main window's photo for
+some photos shown smaller than their pixels (found on an Apple-only
+medium; H3's as well).
 
 ### H5: HDR kept when photos leave
 
@@ -949,7 +991,9 @@ iPhone HDR photos glow as on the phone.
    tables: half a decode for a tagged thumbnail, on the loader's threads,
    and the grid's frames as before (H1).
 8. **libheif cannot decode the hidden `tmap` image.** *Answer:* Apple's
-   legacy map is in every such file here, and H4a covers it.
+   legacy map is in every such file here, and H4a covers it. *Found:* on an
+   iPhone the `tmap`'s map is Apple's auxiliary image, which libheif
+   decodes (H4).
 9. **Hyprland's colour management changes under us** (protocol version 2
    and 3 renamed transfer functions; `experimental:wp_cm_1_2` exists).
    *Answer:* `display.cpp` binds the version it was generated for, and

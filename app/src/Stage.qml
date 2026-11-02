@@ -180,6 +180,9 @@ Window {
             anchors.fill: parent
             gamut: stageWindow.gamutWeight
             linear: stage.scrgb
+            // Its gain map, up to the display's headroom (H4).
+            headroom: display.headroom
+            hdrWeight: stageWindow.hdrWeight
         }
         // The viewer's video, its frames as they come, HDR up to the
         // display's headroom.

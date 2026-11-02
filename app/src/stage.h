@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "colour.h"
+#include "gainmap.h"
 
 class ColourDisplay;
 class QQmlEngine;
@@ -122,6 +123,20 @@ class StagePhoto : public QQuickItem {
     // once decoded (until then, the one before).
     Q_PROPERTY(QUrl shown READ shown NOTIFY shownChanged)
     Q_PROPERTY(QSize shownSize READ shownSize NOTIFY shownChanged)
+    // The size of the pixels it draws, as decoded.
+    Q_PROPERTY(QSize imageSize READ imageSize NOTIFY shownChanged)
+    // Its gain map (docs/hdr.md, H4), decoded with it on an scRGB stage:
+    // "iso", "apple" or "" for none.
+    Q_PROPERTY(QString gainMap READ gainMapKind NOTIFY shownChanged)
+    // The display's headroom in stops, and how much of it the stage uses
+    // now (its fade, holdSdr, Full HDR): the map applies at hdrWeight
+    // times its own weight at that headroom.
+    Q_PROPERTY(qreal headroom READ headroom WRITE setHeadroom NOTIFY weightChanged)
+    Q_PROPERTY(qreal hdrWeight READ hdrWeight WRITE setHdrWeight NOTIFY weightChanged)
+    // Off, the photo is drawn without its map: its SDR base (for tests).
+    Q_PROPERTY(bool gainMapOn READ gainMapOn WRITE setGainMapOn NOTIFY weightChanged)
+    // The weight the map is drawn at now (log domain): 0 is the base.
+    Q_PROPERTY(qreal gainMapWeight READ gainMapWeight NOTIFY weightChanged)
 public:
     explicit StagePhoto(QQuickItem *parent = nullptr);
     ~StagePhoto() override;
@@ -138,11 +153,22 @@ public:
     void setLinear(bool linear);
     QUrl shown() const { return m_shown; }
     QSize shownSize() const { return m_shownSize; }
+    QSize imageSize() const { return m_imageSize; }
+    QString gainMapKind() const { return m_gainMap.kind; }
+    qreal headroom() const { return m_headroom; }
+    void setHeadroom(qreal stops);
+    qreal hdrWeight() const { return m_hdrWeight; }
+    void setHdrWeight(qreal weight);
+    bool gainMapOn() const { return m_gainMapOn; }
+    void setGainMapOn(bool on);
+    qreal gainMapWeight() const;
 
     // The file an image URL of the viewer's is of.
     static QString pathOf(const QUrl &url);
-    // Decodes `path` as the stage draws it (any thread).
-    static QImage decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled);
+    // Decodes `path` as the stage draws it (any thread), and its gain map
+    // if `map` is given.
+    static QImage decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled,
+                         GainMap *map = nullptr);
 
 signals:
     void sourceChanged();
@@ -150,6 +176,7 @@ signals:
     void gamutChanged();
     void linearChanged();
     void shownChanged();
+    void weightChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
@@ -157,7 +184,8 @@ protected:
 
 private:
     void load();
-    void decoded(quint64 serial, const QImage &image, const StageColour &colour, const QUrl &source, QSize size);
+    void decoded(quint64 serial, const QImage &image, const StageColour &colour, const GainMap &map, const QUrl &source,
+                 QSize size);
 
     QUrl m_source;
     QSize m_sourceSize;
@@ -166,8 +194,14 @@ private:
     bool m_linear = false;
     QUrl m_shown;
     QSize m_shownSize;
+    QSize m_imageSize;
     QImage m_image;          // to upload, once
     bool m_imageChanged = false;
+    GainMap m_gainMap;       // its image let go once uploaded
+    bool m_gainMulti = false;
+    qreal m_headroom = 0;
+    qreal m_hdrWeight = 0;
+    bool m_gainMapOn = true;
     std::unique_ptr<StageColour> m_colour;
     quint64 m_serial = 0;
     std::shared_ptr<std::atomic<bool>> m_cancel;

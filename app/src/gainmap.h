@@ -1,8 +1,11 @@
 #pragma once
 
 #include <QByteArray>
+#include <QImage>
 #include <QString>
 #include <QVariantMap>
+
+#include <atomic>
 
 // What makes a photo HDR, read from its metadata alone, no pixels
 // (docs/hdr.md, H2): a gain map beside its SDR picture, Apple's or ISO
@@ -52,3 +55,47 @@ bool appleMakerTags(const QByteArray &exif, double *maker33, double *maker48);
 // item after its version byte): the alternate headroom in stops; false if
 // it does not parse.
 bool isoGainMapStops(const QByteArray &metadata, double *stops);
+
+// A gain map's pixels and how they apply (docs/hdr.md, H4), for the stage,
+// which shows the photo above SDR white by it. ISO 21496-1's when it
+// parses and its image decodes (a HEIC's tmap, a JPEG's by libultrahdr:
+// Apple's mediums, Android's and Adobe's Ultra HDR), else Apple's legacy
+// map (a HEIC's auxiliary image, a JPEG's MPF second image).
+struct GainMap {
+    // "iso", "apple", or "" for none.
+    QString kind;
+    // Its codes, upright as the photo is decoded: Grayscale8 for one
+    // channel, RGB888 for three (ISO's multi-channel maps).
+    QImage image;
+    // ISO's, per channel: the gain's range in log2, the code's gamma, the
+    // offsets; the two headrooms in log2; where the gain applies.
+    double gainMin[3] = {0, 0, 0}, gainMax[3] = {0, 0, 0}, gamma[3] = {1, 1, 1};
+    double baseOffset[3] = {0, 0, 0}, alternateOffset[3] = {0, 0, 0};
+    double baseHeadroom = 0, alternateHeadroom = 0;
+    bool useBaseColourSpace = true;
+    // ISO's map whose base is the HDR one (backward direction): not shown.
+    bool backward = false;
+    // Apple's: its headroom, linear (Hi).
+    double appleHeadroom = 1;
+
+    bool isNull() const { return kind.isEmpty() || image.isNull(); }
+    bool multichannel() const { return image.format() == QImage::Format_RGB888; }
+    // Its weight at a display headroom of `stops` (log2): ISO's
+    // clamp((H - base) / (alternate - base)), negative where the alternate
+    // is below the base; Apple's clamp(H / log2 Hi) (docs/hdr.md, the maths).
+    double weight(double stops) const;
+    // The log2 gain of a code (0 to 1) of channel `c`, at full weight.
+    double gainOf(double code, int c) const;
+    // A pixel in linear light (1 SDR white) at weight `w`, by the codes of
+    // the map there: (rgb + base offset) * 2^(gain w) - alternate offset,
+    // not below 0 where it was not. Unchanged at weight 0.
+    void apply(double rgb[3], const double codes[3], double w) const;
+};
+
+// The gain map of the photo at `path` (HEIC or JPEG), with its pixels;
+// kind "" if it has none or they do not decode. PINHOLE_GAINMAP=apple
+// takes Apple's where both are (for tests).
+GainMap readGainMap(const QString &path, const std::atomic<bool> *cancelled = nullptr);
+// ISO 21496-1's metadata (as isoGainMapStops takes it) into `map`'s ISO
+// fields; false if it does not parse.
+bool isoGainMapMetadata(const QByteArray &metadata, GainMap *map);

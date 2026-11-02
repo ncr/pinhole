@@ -31,7 +31,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "physics", "examples", "recent", "timeline"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -662,6 +662,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runHdrPlaySelfTest(window, qEnvironmentVariable("PINHOLE_SELFTEST_VIDEOS").split(QLatin1Char(':'), Qt::SkipEmptyParts));
     if (name == QLatin1String("stage"))
         runStageSelfTest(window, library, viewer, arg);
+    if (name == QLatin1String("gainmap"))
+        runGainMapSelfTest(window, library, viewer, arg);
     if (name == QLatin1String("colour"))
         runColourSelfTest(window, grid, library, viewer, arg);
     if (name == QLatin1String("stacks"))

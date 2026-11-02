@@ -20,6 +20,8 @@
 #include <QtWaylandClient/private/qwaylandsubsurface_p.h>
 #include <QtWaylandClient/private/qwaylandwindow_p.h>
 
+#include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -48,14 +50,39 @@ struct PhotoUniforms {
     float toSrgb[12]; // by rows
     float more[4];    // opacity, gamut, linear, mipmapped
     float size[4];    // the texture's, and its inverse
+    // The gain map (H4): its kind (0 none, 1 Apple's, 2 ISO's), weight,
+    // Apple's headroom (linear), multi-channel; ISO's per channel: the
+    // gain's range (log2), 1 / gamma, the offsets; linear sRGB to the
+    // photo's primaries, by rows.
+    float gain[4];
+    float gainMin[4];
+    float gainMax[4];
+    float gainGamma[4];
+    float baseOffset[4];
+    float alternateOffset[4];
+    float fromSrgb[12];
     float linear[256][4];
 };
-static_assert(sizeof(PhotoUniforms) == 64 + 48 + 16 + 16 + 4096);
+static_assert(sizeof(PhotoUniforms) == 64 + 48 + 16 + 16 + 6 * 16 + 48 + 4096);
+
+// A 3x3 matrix's inverse, by rows; the identity for one that has none.
+std::array<double, 9> inverse(const float m[9]) {
+    const double a = m[0], b = m[1], c = m[2], d = m[3], e = m[4], f = m[5], g = m[6], h = m[7], i = m[8];
+    const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if (std::abs(det) < 1e-12)
+        return {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    return {(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det,
+            (f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det,
+            (d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det};
+}
 
 class PhotoMaterial : public QSGMaterial {
 public:
     PhotoMaterial() { setFlag(Blending, false); }
-    ~PhotoMaterial() override { delete m_texture; }
+    ~PhotoMaterial() override {
+        delete m_texture;
+        delete m_gainTexture;
+    }
     QSGMaterialType *type() const override {
         static QSGMaterialType type;
         return &type;
@@ -64,6 +91,8 @@ public:
     int compare(const QSGMaterial *other) const override { return this == other ? 0 : (this < other ? -1 : 1); }
 
     QSGTexture *m_texture = nullptr;
+    // The gain map, or a texel of nothing where there is none.
+    QSGTexture *m_gainTexture = nullptr;
     PhotoUniforms m_uniforms{};
 };
 
@@ -84,13 +113,14 @@ public:
     }
     void updateSampledImage(RenderState &state, int binding, QSGTexture **texture, QSGMaterial *newMaterial,
                             QSGMaterial *) override {
-        if (binding != 1)
+        if (binding != 1 && binding != 2)
             return;
         auto *m = static_cast<PhotoMaterial *>(newMaterial);
-        if (!m->m_texture)
+        QSGTexture *t = binding == 1 ? m->m_texture : m->m_gainTexture;
+        if (!t)
             return;
-        m->m_texture->commitTextureOperations(state.rhi(), state.resourceUpdateBatch());
-        *texture = m->m_texture;
+        t->commitTextureOperations(state.rhi(), state.resourceUpdateBatch());
+        *texture = t;
     }
 };
 
@@ -285,8 +315,42 @@ void StagePhoto::setLinear(bool linear) {
     if (linear == m_linear)
         return;
     m_linear = linear;
+    // An scRGB stage draws the gain map, decoded with the photo.
+    if (linear && !m_source.isEmpty())
+        load();
     update();
     emit linearChanged();
+}
+
+void StagePhoto::setHeadroom(qreal stops) {
+    if (qFuzzyCompare(stops, m_headroom))
+        return;
+    m_headroom = stops;
+    update();
+    emit weightChanged();
+}
+
+void StagePhoto::setHdrWeight(qreal weight) {
+    if (qFuzzyCompare(weight, m_hdrWeight))
+        return;
+    m_hdrWeight = weight;
+    update();
+    emit weightChanged();
+}
+
+void StagePhoto::setGainMapOn(bool on) {
+    if (on == m_gainMapOn)
+        return;
+    m_gainMapOn = on;
+    update();
+    emit weightChanged();
+}
+
+qreal StagePhoto::gainMapWeight() const {
+    if (!m_gainMapOn || m_gainMap.kind.isEmpty() || !m_linear)
+        return 0;
+    // The fade multiplies the weight (docs/hdr.md, the maths).
+    return m_hdrWeight * m_gainMap.weight(m_headroom);
 }
 
 QString StagePhoto::pathOf(const QUrl &url) {
@@ -297,7 +361,8 @@ QString StagePhoto::pathOf(const QUrl &url) {
     return url.isLocalFile() ? url.toLocalFile() : QString();
 }
 
-QImage StagePhoto::decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled) {
+QImage StagePhoto::decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled,
+                          GainMap *map) {
     QByteArray profile;
     QImage image = decodePhoto(path, size.isValid() && !size.isEmpty() ? size : QSize(), cancelled, &profile);
     if (image.isNull())
@@ -305,6 +370,9 @@ QImage StagePhoto::decode(const QString &path, QSize size, StageColour &colour, 
     // A profile of tables (rare): made sRGB here, as the window's is.
     if (!stageColourOf(profile, colour))
         toSrgb(image, profile);
+    // Its gain map: a quarter to a half of its size, decoded after it.
+    if (map && !(cancelled && *cancelled))
+        *map = readGainMap(path, cancelled);
     return image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888_Premultiplied : QImage::Format_RGBX8888);
 }
 
@@ -319,9 +387,11 @@ void StagePhoto::load() {
         const bool had = !m_shown.isEmpty() || m_colour;
         m_shown = QUrl();
         m_shownSize = QSize();
+        m_imageSize = QSize();
         m_image = QImage();
         m_imageChanged = false;
         m_colour.reset();
+        m_gainMap = GainMap();
         update();
         if (had)
             emit shownChanged();
@@ -332,26 +402,33 @@ void StagePhoto::load() {
     QPointer<StagePhoto> self(this);
     const QUrl source = m_source;
     const QSize size = m_sourceSize;
-    decoding()->start([self, serial, path, source, size, cancel] {
+    const bool withMap = m_linear;
+    decoding()->start([self, serial, path, source, size, cancel, withMap] {
         if (*cancel)
             return;
         auto colour = std::make_shared<StageColour>();
-        const QImage image = decode(path, size, *colour, cancel.get());
+        auto map = std::make_shared<GainMap>();
+        const QImage image = decode(path, size, *colour, cancel.get(), withMap ? map.get() : nullptr);
         if (*cancel || image.isNull())
             return;
-        QMetaObject::invokeMethod(qApp, [self, serial, image, colour, source, size] {
+        QMetaObject::invokeMethod(qApp, [self, serial, image, colour, map, source, size] {
             if (self)
-                self->decoded(serial, image, *colour, source, size);
+                self->decoded(serial, image, *colour, *map, source, size);
         }, Qt::QueuedConnection);
     });
 }
 
-void StagePhoto::decoded(quint64 serial, const QImage &image, const StageColour &colour, const QUrl &source, QSize size) {
+void StagePhoto::decoded(quint64 serial, const QImage &image, const StageColour &colour, const GainMap &map,
+                         const QUrl &source, QSize size) {
     if (serial != m_serial)
         return;
     m_image = image;
     m_imageChanged = true;
     m_colour = std::make_unique<StageColour>(colour);
+    m_imageSize = image.size();
+    m_gainMap = map;
+    m_gainMulti = map.multichannel();
+    emit weightChanged();
     m_shown = source;
     m_shownSize = size;
     update();
@@ -382,6 +459,20 @@ QSGNode *StagePhoto::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         material.m_texture->setFiltering(QSGTexture::Linear);
         material.m_texture->setMipmapFiltering(m_mipmap ? QSGTexture::Linear : QSGTexture::None);
         material.setFlag(QSGMaterial::Blending, m_image.hasAlphaChannel());
+        // The gain map's codes, filtered by the texture (the upscale), or
+        // a texel of nothing.
+        delete material.m_gainTexture;
+        QImage gain = m_gainMap.image.convertToFormat(QImage::Format_RGBX8888);
+        const bool mapped = !gain.isNull();
+        if (!mapped) {
+            gain = QImage(1, 1, QImage::Format_RGBX8888);
+            gain.fill(Qt::black);
+        }
+        material.m_gainTexture = window()->createTextureFromImage(
+            gain, m_mipmap && mapped ? QQuickWindow::TextureHasMipmaps : QQuickWindow::CreateTextureOptions());
+        material.m_gainTexture->setFiltering(QSGTexture::Linear);
+        material.m_gainTexture->setMipmapFiltering(m_mipmap && mapped ? QSGTexture::Linear : QSGTexture::None);
+        m_gainMap.image = QImage();
         m_image = QImage();
         m_imageChanged = false;
         node->markDirty(QSGNode::DirtyMaterial);
@@ -399,6 +490,28 @@ QSGNode *StagePhoto::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         for (int k = 0; k < 3; ++k)
             u.linear[v][k] = m_colour->linear[k][v];
         u.linear[v][3] = 0;
+    }
+    // The gain map at its weight now (docs/hdr.md, the maths).
+    const GainMap &g = m_gainMap;
+    const bool apple = g.kind == QLatin1String("apple");
+    u.gain[0] = g.kind.isEmpty() ? 0 : apple ? 1 : 2;
+    u.gain[1] = float(gainMapWeight());
+    u.gain[2] = float(g.appleHeadroom);
+    u.gain[3] = m_gainMulti ? 1 : 0;
+    for (int c = 0; c < 3; ++c) {
+        u.gainMin[c] = float(g.gainMin[c]);
+        u.gainMax[c] = float(g.gainMax[c]);
+        u.gainGamma[c] = float(1 / g.gamma[c]);
+        u.baseOffset[c] = apple ? 0 : float(g.baseOffset[c]);
+        u.alternateOffset[c] = apple ? 0 : float(g.alternateOffset[c]);
+    }
+    // A multi-channel map applies in the photo's own primaries: linear
+    // sRGB taken back to them.
+    const std::array<double, 9> fromSrgb = inverse(m_colour->matrix);
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col)
+            u.fromSrgb[row * 4 + col] = float(fromSrgb[size_t(row * 3 + col)]);
+        u.fromSrgb[row * 4 + 3] = 0;
     }
     node->markDirty(QSGNode::DirtyMaterial);
 

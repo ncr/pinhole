@@ -6,7 +6,7 @@ QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent g
 CONFIG += c++20
 INCLUDEPATH += $$PWD
 
-LIBS += -lturbojpeg -lwayland-client -lheif -llcms2
+LIBS += -lturbojpeg -lwayland-client -lheif -llcms2 -luhdr
 
 # The pointer-gestures protocol, for the touchpad hold gesture Qt does not
 # bind (see touchpadhold.h), generated from the system's protocol files.

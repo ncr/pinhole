@@ -4,6 +4,7 @@
 #include "selftest.h"
 
 #include "display.h"
+#include "gainmap.h"
 #include "library.h"
 #include "photoprovider.h"
 #include "stage.h"
@@ -15,6 +16,9 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
+#include <QMatrix4x4>
+#include <QVector3D>
 #include <QMediaPlayer>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -23,11 +27,13 @@
 #include <QTimer>
 #include <QtGui/rhi/qrhi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -652,4 +658,316 @@ void runStageSelfTest(QQuickWindow *window, const Library &library, Viewer &view
 
     // Once the library and the viewer are there.
     waitFor([=, &library] { return library.count() > 0 && photoViewer(); }, 60000, "the library and the viewer", start);
+}
+
+// PINHOLE_SELFTEST=gainmap:<dir> (selftest.h): each photo of the library
+// with a gain map, as the stage draws it at the display's headroom.
+void runGainMapSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir) {
+    auto failures = std::make_shared<int>(0);
+    auto say = [](const QString &line) {
+        std::printf("selftest: %s\n", qPrintable(line));
+        std::fflush(stdout);
+    };
+    auto check = [say, failures](bool ok, const QString &what) {
+        say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
+        *failures += ok ? 0 : 1;
+    };
+    auto waitFor = [window, check](std::function<bool()> ready, int ms, const QString &what, std::function<void()> then) {
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto *poll = new QTimer(window);
+        poll->setInterval(5);
+        QObject::connect(poll, &QTimer::timeout, window, [=] {
+            if (ready()) {
+                poll->deleteLater();
+                then();
+            } else if (clock->elapsed() > ms) {
+                poll->deleteLater();
+                check(false, what + QStringLiteral(" (timed out)"));
+                then();
+            }
+        });
+        poll->start();
+    };
+    QObject *stage = qmlEngine(window)->rootContext()->contextProperty("stage").value<QObject *>();
+    auto *display = qmlEngine(window)->rootContext()->contextProperty("display").value<ColourDisplay *>();
+    auto stageWindow = [window] { return qobject_cast<QQuickWindow *>(window->property("stageWindow").value<QObject *>()); };
+    auto photoViewer = [window] { return window->findChild<QQuickItem *>(QStringLiteral("photoViewer")); };
+    auto stagePhoto = [stageWindow] {
+        return stageWindow() ? stageWindow()->findChild<StagePhoto *>(QStringLiteral("stagePhoto")) : nullptr;
+    };
+    // The display's headroom, as PINHOLE_HEADROOM says it, changed live.
+    auto setHeadroom = [display](double stops) {
+        qputenv("PINHOLE_HEADROOM", QByteArray::number(stops, 'f', 6));
+        emit display->changed();
+    };
+    const qreal dpr = window->devicePixelRatio();
+
+    // Each photo with a map, then an iPhone's HEIC again with Apple's map.
+    struct Run {
+        int index;
+        bool apple;
+    };
+    struct State {
+        QList<Run> runs;
+        int at = -1;
+        QImage a, b, c, d;
+        QRectF frame;
+        QSize imageSize;
+        QUrl shown;
+        QMatrix4x4 toSrgb;
+        int tries = 0;
+        double weightAtOwn = 0;
+        GainMap map;
+        QString path;
+        double own = 0;
+        std::function<void()> next;
+    };
+    auto s = std::make_shared<State>();
+
+    auto finish = [=] {
+        qunsetenv("PINHOLE_GAINMAP");
+        say(QStringLiteral("done, %1 failed").arg(*failures));
+        QCoreApplication::exit(*failures ? 1 : 0);
+    };
+
+    // What the stage drew at headroom 0 (A), 1 (C) and the photo's own
+    // (D), against its SDR base (B, the map off) and the maths on the CPU.
+    auto analyse = [=] {
+        // The viewer took a sharper image meanwhile: the photo again.
+        if ((stagePhoto()->shown() != s->shown || stagePhoto()->imageSize() != s->imageSize) && ++s->tries < 3) {
+            say(QStringLiteral("  (the stage's photo changed while it was read: again)"));
+            --s->at;
+            return s->next();
+        }
+        s->tries = 0;
+        const GainMap &map = s->map;
+        check(std::abs(s->weightAtOwn - 1) < 1e-6, QStringLiteral("at its own headroom, the map's whole weight (%1)").arg(s->weightAtOwn));
+        const QString name = QFileInfo(s->path).completeBaseName() + (s->runs[s->at].apple ? "-apple" : "");
+        savePfm(s->b, dir + "/" + name + "-base.pfm");
+        savePfm(s->c, dir + "/" + name + "-1.pfm");
+        savePfm(s->d, dir + "/" + name + "-own.pfm");
+        const QRect pixels = s->frame.toAlignedRect().adjusted(3, 3, -3, -3).intersected(s->b.rect());
+        // Headroom 0 (x1): the SDR base, to the bit.
+        long differ = 0;
+        for (int y = pixels.top(); y <= pixels.bottom(); ++y)
+            for (int x = pixels.left(); x <= pixels.right(); ++x) {
+                const Rgb p = at(s->a, x, y), q = at(s->b, x, y);
+                differ += p.r != q.r || p.g != q.g || p.b != q.b;
+            }
+        check(differ == 0, QStringLiteral("%1 at headroom 0 (x1): the SDR base to the bit (%2 of %3 pixels differ)")
+                               .arg(name).arg(differ).arg(pixels.width() * pixels.height()));
+        // Where in the map each pixel's middle is: the item filled as
+        // PreserveAspectCrop has it (stage.cpp), by the photo's pixels'
+        // shape, the map over the whole photo.
+        const QSizeF image(map.image.size());
+        const double frameAspect = s->frame.width() / s->frame.height();
+        const double imageAspect = double(s->imageSize.width()) / s->imageSize.height();
+        const double sw = frameAspect > imageAspect ? 1 : frameAspect / imageAspect;
+        const double sh = frameAspect > imageAspect ? imageAspect / frameAspect : 1;
+        auto codesAt = [&](int x, int y, double codes[3]) {
+            const double u = (1 - sw) / 2 + (x + 0.5 - s->frame.left()) / s->frame.width() * sw;
+            const double v = (1 - sh) / 2 + (y + 0.5 - s->frame.top()) / s->frame.height() * sh;
+            const double fx = u * image.width() - 0.5, fy = v * image.height() - 0.5;
+            const int x0 = int(std::floor(fx)), y0 = int(std::floor(fy));
+            const double tx = fx - x0, ty = fy - y0;
+            auto texel = [&](int px, int py, int c) {
+                const int cx = std::clamp(px, 0, map.image.width() - 1), cy = std::clamp(py, 0, map.image.height() - 1);
+                const uchar *line = map.image.constScanLine(cy);
+                return map.multichannel() ? line[3 * cx + c] / 255.0 : line[cx] / 255.0;
+            };
+            for (int c = 0; c < 3; ++c)
+                codes[c] = (1 - ty) * ((1 - tx) * texel(x0, y0, c) + tx * texel(x0 + 1, y0, c))
+                         + ty * ((1 - tx) * texel(x0, y0 + 1, c) + tx * texel(x0 + 1, y0 + 1, c));
+        };
+        const double weight = stageWindow()->property("hdrWeight").toDouble();
+        const QMatrix4x4 fromSrgb = s->toSrgb.inverted();
+        struct Error {
+            double mean = 0, worst = 0, p99 = 0, brightest = 0;
+        };
+        // Relative to the brighter, and to 1/64 of SDR white in the darks.
+        auto against = [&](const QImage &got, double stops) {
+            const double w = weight * map.weight(stops);
+            Error e;
+            std::vector<double> all;
+            for (int y = pixels.top(); y <= pixels.bottom(); y += 2)
+                for (int x = pixels.left(); x <= pixels.right(); x += 2) {
+                    const Rgb base = at(s->b, x, y), g = at(got, x, y);
+                    double rgb[3] = {base.r, base.g, base.b}, codes[3];
+                    codesAt(x, y, codes);
+                    if (map.multichannel()) {
+                        const QVector3D own = fromSrgb.map(QVector3D(float(rgb[0]), float(rgb[1]), float(rgb[2])));
+                        double o[3] = {own.x(), own.y(), own.z()};
+                        map.apply(o, codes, w);
+                        const QVector3D back = s->toSrgb.map(QVector3D(float(o[0]), float(o[1]), float(o[2])));
+                        rgb[0] = back.x(), rgb[1] = back.y(), rgb[2] = back.z();
+                    } else {
+                        map.apply(rgb, codes, w);
+                    }
+                    const double out[3] = {g.r, g.g, g.b};
+                    double most = 0;
+                    for (int c = 0; c < 3; ++c)
+                        most = std::max(most, std::abs(rgb[c] - out[c]) / std::max({std::abs(rgb[c]), std::abs(out[c]), 1.0 / 64}));
+                    e.brightest = std::max({e.brightest, out[0], out[1], out[2]});
+                    e.mean += most;
+                    all.push_back(most);
+                }
+            if (!all.empty()) {
+                e.mean /= double(all.size());
+                std::sort(all.begin(), all.end());
+                e.worst = all.back();
+                e.p99 = all[size_t(double(all.size() - 1) * 0.99)];
+            }
+            return e;
+        };
+        for (const auto &[got, stops] : {std::pair{&s->c, 1.0}, std::pair{&s->d, s->own}}) {
+            const Error e = against(*got, stops);
+            say(QStringLiteral("%1 at %2 stops (weight %3): the brightest %4; against the maths, mean %5, 99 % within %6, worst %7")
+                    .arg(name).arg(stops, 0, 'f', 2).arg(weight * map.weight(stops), 0, 'f', 3).arg(e.brightest, 0, 'f', 3)
+                    .arg(e.mean, 0, 'g', 3).arg(e.p99, 0, 'g', 3).arg(e.worst, 0, 'g', 3));
+            check(e.mean < 2e-3 && e.p99 < 1e-2, QStringLiteral("%1 at %2 stops is the maths").arg(name).arg(stops, 0, 'f', 2));
+        }
+        // In the log domain the weight scales the gain: log2(C/B) is
+        // log2(D/B) times w(1) / w(own).
+        std::vector<double> ratios;
+        auto luminance = [](const Rgb &p) { return 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b; };
+        for (int y = pixels.top(); y <= pixels.bottom(); y += 2)
+            for (int x = pixels.left(); x <= pixels.right(); x += 2) {
+                const double lb = luminance(at(s->b, x, y)), lc = luminance(at(s->c, x, y)), ld = luminance(at(s->d, x, y));
+                if (lb > 0.02 && ld / lb > std::exp2(0.5))
+                    ratios.push_back(std::log2(lc / lb) / std::log2(ld / lb));
+            }
+        const double want = map.weight(1) / map.weight(s->own);
+        if (ratios.size() > 100) {
+            std::sort(ratios.begin(), ratios.end());
+            const double median = ratios[ratios.size() / 2];
+            const double low = ratios[ratios.size() / 10], high = ratios[ratios.size() * 9 / 10];
+            say(QStringLiteral("%1 in the log domain: log2(C/B) / log2(D/B) over %2 pixels half a stop or more above their base: "
+                               "median %3, 80 % within %4 to %5; w(1) / w(own) is %6")
+                    .arg(name).arg(ratios.size()).arg(median, 0, 'f', 4).arg(low, 0, 'f', 4).arg(high, 0, 'f', 4).arg(want, 0, 'f', 4));
+            check(std::abs(median - want) < 0.01 && high - low < 0.05,
+                  QStringLiteral("%1: the weight scales the gain in the log domain").arg(name));
+        } else {
+            check(false, QStringLiteral("%1: too few pixels above their base to see the weight (%2)").arg(name).arg(ratios.size()));
+        }
+        // To look at: the gain the stage drew, log2(D/B) over the photo's
+        // own headroom, in grey; and D at a quarter, two stops above SDR
+        // white then white.
+        QImage gainImage(pixels.size(), QImage::Format_Grayscale8), shown(pixels.size(), QImage::Format_RGB32);
+        for (int y = 0; y < pixels.height(); ++y)
+            for (int x = 0; x < pixels.width(); ++x) {
+                const Rgb b = at(s->b, pixels.left() + x, pixels.top() + y), d = at(s->d, pixels.left() + x, pixels.top() + y);
+                const double lb = luminance(b), ld = luminance(d);
+                const double g = lb > 1e-3 ? std::log2(ld / lb) / std::max(s->own, 0.1) : 0;
+                gainImage.scanLine(y)[x] = uchar(std::clamp(g * 255, 0.0, 255.0));
+                shown.setPixel(x, y, qRgb(int(encode(d.r / 4)), int(encode(d.g / 4)), int(encode(d.b / 4))));
+            }
+        gainImage.save(dir + "/" + name + "-gain.png");
+        shown.save(dir + "/" + name + "-own-quarter.png");
+        s->next();
+    };
+
+    // One photo: opened at headroom 0, settled, faded in, its map decoded;
+    // read back with its map and without, then at 1 stop and its own.
+    auto runOne = [=, &viewer, &library] {
+        const Run run = s->runs[s->at];
+        if (run.apple)
+            qputenv("PINHOLE_GAINMAP", "apple");
+        else
+            qunsetenv("PINHOLE_GAINMAP");
+        setHeadroom(0);
+        viewer.close();
+        waitFor([=] { return !photoViewer()->property("shown").toBool() && !stageWindow()->isVisible(); }, 5000, "the viewer closes",
+                [=, &viewer, &library] {
+            QMetaObject::invokeMethod(&viewer, "openAt", Q_ARG(int, run.index), Q_ARG(QRectF, QRectF(100, 100, 100, 100)));
+            say(QStringLiteral("the photo: %1%2").arg(library.at(run.index).filename).arg(run.apple ? " (Apple's map)" : ""));
+            auto ready = [=, &viewer] {
+                StagePhoto *photo = stagePhoto();
+                const QVariant sharpest = photoViewer()->property("sharpest");
+                return photo && stage->property("scrgb").toBool() && stageWindow()->property("handedOver").toBool() && stageWindow()->property("fade").toDouble() >= 1
+                    && !viewer.loading() && sharpest.isValid()
+                    && photo->shown() == sharpest.toMap().value("source").toUrl() && !photo->gainMapKind().isEmpty();
+            };
+            // And still so for a while: the viewer's sharper image, should
+            // one come, is what the stage draws.
+            auto since = std::make_shared<QElapsedTimer>();
+            auto settled = [=] {
+                if (!ready()) {
+                    since->invalidate();
+                    return false;
+                }
+                if (!since->isValid())
+                    since->start();
+                return since->elapsed() > 600;
+            };
+            waitFor(settled, 30000, "the stage shows the photo with its map", [=] {
+                StagePhoto *photo = stagePhoto();
+                s->path = StagePhoto::pathOf(photo->shown());
+                s->map = readGainMap(s->path);
+                s->imageSize = photo->imageSize();
+                s->shown = photo->shown();
+                // The photo's primaries (its profile's matrix to linear
+                // sRGB), where a three-channel map applies.
+                QByteArray profile;
+                decodePhoto(s->path, QSize(64, 64), nullptr, &profile);
+                StageColour colour;
+                stageColourOf(profile, colour);
+                s->toSrgb = QMatrix4x4(colour.matrix[0], colour.matrix[1], colour.matrix[2], 0, colour.matrix[3], colour.matrix[4],
+                                       colour.matrix[5], 0, colour.matrix[6], colour.matrix[7], colour.matrix[8], 0, 0, 0, 0, 1);
+                s->own = s->map.kind == QLatin1String("apple") ? std::log2(s->map.appleHeadroom) : s->map.alternateHeadroom;
+                const QQuickItem *frame = photoViewer()->property("frameItem").value<QQuickItem *>();
+                const QRectF r = frame->mapRectToScene(QRectF(0, 0, frame->width(), frame->height()));
+                s->frame = QRectF(r.x() * dpr, r.y() * dpr, r.width() * dpr, r.height() * dpr);
+                say(QStringLiteral("  %1: %2's map, %3x%4 for %5x%6, %7 channel(s), headroom %8 stops; drawn at weight %9")
+                        .arg(QFileInfo(s->path).fileName()).arg(photo->gainMapKind()).arg(s->map.image.width())
+                        .arg(s->map.image.height()).arg(photo->shownSize().width()).arg(photo->shownSize().height())
+                        .arg(s->map.multichannel() ? 3 : 1).arg(s->own, 0, 'f', 3).arg(photo->gainMapWeight(), 0, 'f', 3));
+                check(s->map.kind == photo->gainMapKind() && (!run.apple || s->map.kind == QLatin1String("apple")),
+                      QStringLiteral("its map is %1's").arg(photo->gainMapKind()));
+                QTimer::singleShot(200, window, [=] { readBack(stageWindow(), [=](const QImage &a) {
+                    s->a = a;
+                    stagePhoto()->setGainMapOn(false);
+                    QTimer::singleShot(100, window, [=] { readBack(stageWindow(), [=](const QImage &b) {
+                        s->b = b;
+                        stagePhoto()->setGainMapOn(true);
+                        setHeadroom(1);
+                        QTimer::singleShot(100, window, [=] { readBack(stageWindow(), [=](const QImage &c) {
+                            s->c = c;
+                            setHeadroom(s->own);
+                            QTimer::singleShot(100, window, [=] { readBack(stageWindow(), [=](const QImage &d) {
+                                s->d = d;
+                                s->weightAtOwn = stagePhoto()->gainMapWeight();
+                                analyse();
+                            }); });
+                        }); });
+                    }); });
+                }); });
+            });
+        });
+    };
+    s->next = [=] {
+        if (++s->at >= s->runs.size())
+            return finish();
+        runOne();
+    };
+
+    auto start = [=, &library] {
+        say(QStringLiteral("display: headroom %1 stops; stage wanted %2, usable %3, scRGB %4; PINHOLE_STAGE=%5")
+                .arg(display->headroom(), 0, 'f', 2).arg(stage->property("wanted").toBool()).arg(stage->property("usable").toBool())
+                .arg(stage->property("scrgb").toBool()).arg(Stage::mode()));
+        if (!stageWindow()) {
+            check(false, "a stage (run it in an HDR output, or PINHOLE_STAGE=force where it can be scRGB)");
+            return finish();
+        }
+        for (int i = 0; i < library.count(); ++i) {
+            if (library.at(i).video)
+                continue;
+            s->runs.append({i, false});
+            if (library.at(i).filename.endsWith(".HEIC", Qt::CaseInsensitive))
+                s->runs.append({i, true});
+        }
+        s->next();
+    };
+    waitFor([=, &library] { return library.count() > 0 && photoViewer() && stageWindow(); }, 60000,
+            "the library, the viewer and the stage", start);
 }

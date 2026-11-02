@@ -5,7 +5,8 @@
 // main window filters its sRGB photo (between the codes, in sRGB's curve),
 // it is the window's photo (colour.cpp's toSrgb: the same tables and
 // matrix); `gamut` mixes in what lies beyond, which an scRGB stage keeps as
-// values below 0 and above 1. Written as linear light, premultiplied
+// values below 0 and above 1; and its gain map (H4) takes it above SDR
+// white, at the weight the stage gives. Written as linear light, premultiplied
 // (scRGB); or, on a stage without scRGB (forced, for tests), clipped and
 // in sRGB's curve.
 
@@ -24,11 +25,28 @@ layout(std140, binding = 0) uniform buf {
     vec4 more;
     // The texture's size in texels, and its inverse.
     vec4 size;
+    // The gain map (docs/hdr.md H4, the maths): its kind (0 none, 1
+    // Apple's, 2 ISO 21496-1's), its weight now (0: the SDR base), Apple's
+    // headroom (linear), multi-channel (1). ISO's, per channel: the gain's
+    // range in log2, 1 / gamma, the base's and the alternate's offsets.
+    vec4 gain;
+    vec4 gainMin;
+    vec4 gainMax;
+    vec4 gainGamma;
+    vec4 baseOffset;
+    vec4 alternateOffset;
+    // Linear sRGB back to the photo's primaries, by rows.
+    vec4 fromSrgb0;
+    vec4 fromSrgb1;
+    vec4 fromSrgb2;
     // Each code's linear light, red, green and blue.
     vec4 linear[256];
 };
 
 layout(binding = 1) uniform sampler2D photo;
+// Its codes, at a quarter to a half of the photo's size: filtered by the
+// texture, which is the upscale.
+layout(binding = 2) uniform sampler2D gainMap;
 
 // A code from 0 to 1 (filtered, so between two) by the table.
 float lookUp(float code, int channel) {
@@ -64,6 +82,40 @@ vec3 lightOf(vec4 c) {
     return vec3(dot(toSrgb0.xyz, light), dot(toSrgb1.xyz, light), dot(toSrgb2.xyz, light));
 }
 
+// ISO's gain with its offsets: not taken below black by them (as
+// libultrahdr has it); a colour beyond sRGB's, below 0 already, as it comes.
+vec3 offsetGain(vec3 v, vec3 stops) {
+    vec3 out_ = (v + baseOffset.rgb) * exp2(stops) - alternateOffset.rgb;
+    return mix(out_, max(out_, vec3(0.0)), step(vec3(0.0), v));
+}
+
+// The photo in linear sRGB (1 SDR white) above SDR white by its gain map:
+// (rgb + base offset) * 2^(gain * weight) - alternate offset, the gain
+// from the map's code by its kind. A one-channel map's gain is the same
+// in any primaries (they share white); a three-channel one applies in the
+// photo's own.
+vec3 gained(vec3 rgb) {
+    float w = gain.y;
+    if (gain.x < 0.5 || w == 0.0)
+        return rgb;
+    vec3 code = texture(gainMap, texCoord).rgb;
+    vec3 g;
+    if (gain.x < 1.5) {
+        // Apple's: Rec. 709's curve undone, then 1 + (Hi - 1) g.
+        float c = code.r;
+        float l = c <= 0.081 ? c / 4.5 : pow((c + 0.099) / 1.099, 1.0 / 0.45);
+        g = vec3(log2(1.0 + (gain.z - 1.0) * l));
+        return rgb * exp2(g * w);
+    }
+    g = mix(gainMin.rgb, gainMax.rgb, pow(code, gainGamma.rgb));
+    if (gain.w > 0.5) {
+        vec3 own = vec3(dot(fromSrgb0.xyz, rgb), dot(fromSrgb1.xyz, rgb), dot(fromSrgb2.xyz, rgb));
+        own = offsetGain(own, g * w);
+        return vec3(dot(toSrgb0.xyz, own), dot(toSrgb1.xyz, own), dot(toSrgb2.xyz, own));
+    }
+    return offsetGain(rgb, g * w);
+}
+
 void main() {
     vec3 sdr, wide;
     float alpha;
@@ -95,7 +147,7 @@ void main() {
         sdr = vec3(decodeSrgb(unpremultiplied.r), decodeSrgb(unpremultiplied.g), decodeSrgb(unpremultiplied.b));
         wide = decodeExtended(alpha > 0.0 ? w / alpha : vec3(0.0));
     }
-    vec3 rgb = mix(sdr, wide, more.y);
+    vec3 rgb = gained(mix(sdr, wide, more.y));
     if (more.z < 0.5)
         rgb = encodeClipped(rgb);
     fragColor = vec4(rgb * alpha, alpha) * more.x;
