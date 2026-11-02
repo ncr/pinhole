@@ -99,6 +99,11 @@ all, or those taken on this day in other years, shuffled or in order,
 videos and Live Photos moving. The screen stays on while it shows. Esc or
 a click stops it, ← → step, and a two-finger tap or Space holds it still.
 
+Zooming the grid sharpens visible tiles with the medium rendition, or the full
+photo when the preview is missing or too small. Decode size follows the square
+crop in device pixels, including portrait screenshots. Full-photo decodes run
+two at a time once motion settles.
+
 The main grid defaults to Automatic order: photos added in the last 30 days stay
 at the newest end, ordered by addition date. Older additions sit where their
 capture dates belong. The date chip's menu (or Ctrl Shift O) and the side

@@ -182,6 +182,7 @@ struct GridRenderState {
         QSGTexture *medium = nullptr;
         QSize mediumSize;
         int mediumLevel = 4;
+        bool mediumFull = false;
         quint64 lastUsed = 0;
     };
     std::unordered_map<int, Entry> cache;
@@ -2116,7 +2117,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     QElapsedTimer uploadTimer;
     uploadTimer.start();
     while (uploadBytes < kUploadBytesPerFrame && uploadTimer.nsecsElapsed() < kUploadNanos) {
-        auto ready = m_loader->takeReady(16);
+        auto ready = m_loader->takeReady(1);
         if (ready.empty())
             break;
         for (auto &d : ready) {
@@ -2143,7 +2144,11 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             if (!kept(index))
                 continue;
             auto &entry = rs.cache[index];
-            if (isMediumKey(d.key)) {
+            if (isDetailKey(d.key)) {
+                // A late preview must not replace the full photo, nor a
+                // late coarser decode replace a sharper one already here.
+                if (entry.medium && ((entry.mediumFull && !isFullKey(d.key)) ||
+                    (entry.mediumFull == isFullKey(d.key) && entry.mediumLevel <= keyLevel(d.key)))) continue;
                 if (entry.medium) {
                     rs.bytes -= qint64(entry.mediumSize.width()) * entry.mediumSize.height() * 4;
                     delete entry.medium;
@@ -2153,6 +2158,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 entry.medium->setFiltering(QSGTexture::Linear);
                 entry.mediumSize = d.image.size();
                 entry.mediumLevel = keyLevel(d.key);
+                entry.mediumFull = isFullKey(d.key);
                 entry.lastUsed = rs.frame;
                 const qint64 bytes = qint64(d.image.width()) * d.image.height() * 4;
                 rs.bytes += bytes;
@@ -2294,23 +2300,40 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 // medium rendition (2048 px on the long side, same shape),
                 // at the smallest decode level that still covers the cell.
                 const int shortEdge = std::max(1, int(std::min(item.thumbW, item.thumbH)));
-                const double need = cellDevicePx * 0.85;
-                if (need > shortEdge * 1.35) {
+                const double need = cellDevicePx;
+                if (need > shortEdge) {
                     if (k == 0)
                         mediumNeeded += 1;
                     const int longEdge = std::max(1, int(std::max(item.thumbW, item.thumbH)));
-                    const int mediumShort = 2048 * shortEdge / longEdge;
+                    int mediumShort = 2048 * shortEdge / longEdge;
+                    if (found != rs.cache.end() && found->second.medium && !found->second.mediumFull)
+                        mediumShort = std::min(found->second.mediumSize.width(), found->second.mediumSize.height()) << found->second.mediumLevel;
                     int level = 0;
                     while (level < 3 && (mediumShort >> (level + 1)) >= need)
                         level += 1;
                     QSGTexture *medium = found != rs.cache.end() ? found->second.medium : nullptr;
-                    if (settled && k == 0 && (!medium || found->second.mediumLevel > level))
-                        wantedMedium.push_back(mediumKey(i, level));
+                    if (settled && k == 0) {
+                        if (!medium && !item.video && m_loader->mediumUnavailable(i))
+                            wantedMedium.push_back(fullKey(i, fullLevelFor(need)));
+                        if (!medium || (!found->second.mediumFull && found->second.mediumLevel > level))
+                            wantedMedium.push_back(mediumKey(i, level));
+                        if (medium && !item.video) {
+                            const auto &entry = found->second;
+                            const int fullLevel = fullLevelFor(need);
+                            // Inspect actual pixels, not an assumed 2048 px
+                            // rendition. Previews of portrait screenshots
+                            // can be much smaller across the square crop.
+                            if ((!entry.mediumFull && entry.mediumLevel == 0 &&
+                                 std::min(entry.mediumSize.width(), entry.mediumSize.height()) < need) ||
+                                (entry.mediumFull && entry.mediumLevel > fullLevel))
+                                wantedMedium.push_back(fullKey(i, fullLevel));
+                        }
+                    }
                     if (medium) {
                         if (k == 0)
                             mediumShown += 1;
                         found->second.lastUsed = rs.frame;
-                        const QRectF crop = squareCrop(int(item.thumbW), int(item.thumbH));
+                        const QRectF crop = squareCrop(found->second.mediumSize.width(), found->second.mediumSize.height());
                         const QRectF sub = medium->normalizedTextureSubRect();
                         auto &group = built[k].byTexture[medium->comparisonKey()];
                         group.first = medium;

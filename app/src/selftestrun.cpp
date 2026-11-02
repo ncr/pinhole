@@ -31,7 +31,7 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridsharp"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -48,6 +48,26 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     Incoming &incoming = context.incoming;
     Outgoing &outgoing = context.outgoing;
     Keymap &keymap = context.keymap;
+    if (name == QLatin1String("gridsharp")) {
+        QTimer::singleShot(1500, window, [=] {
+            grid->setColumnsNow(1);
+            grid->cursorToStart();
+            QTimer::singleShot(150, window, [=] { window->grabWindow().save(arg + "/before.png"); });
+            auto *poll = new QTimer(window);
+            auto clock = std::make_shared<QElapsedTimer>(); clock->start();
+            QObject::connect(poll, &QTimer::timeout, window, [=] {
+                if (grid->mediumOnScreen().second > 0) {
+                    window->grabWindow().save(arg + "/after.png");
+                    std::printf("selftest: gridsharp: visible tile sharpened without opening viewer: PASS\n");
+                    poll->stop(); QCoreApplication::quit();
+                } else if (clock->elapsed() > 10000) {
+                    std::fprintf(stderr, "selftest: gridsharp: tile stayed on thumbnail\n");
+                    poll->stop(); QCoreApplication::exit(1);
+                }
+            });
+            poll->start(40);
+        });
+    }
     // The real grid in every saved order, then a mosaic zoom and its menu.
     // Use an isolated config/Pictures directory, as every visual self-test.
     if (name == QLatin1String("timeline")) {

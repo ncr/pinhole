@@ -342,26 +342,34 @@ int main(int argc, char *argv[]) {
     // Medium requests arrive from the render thread; the connection queues
     // them onto this one. Positions are those of the generation they were
     // asked in: a reload since, and they are dropped (and asked again).
-    QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service, [&](const QList<int> &indexes, quint64 generation) {
-        if (generation != loader.generation())
-            return;
+    const auto fetchGridDetail = [&](const QList<int> &indexes, quint64 generation, bool full) {
+        if (generation != loader.generation()) return;
         for (int index : indexes) {
-            service.fetch(library.at(index).id, QStringLiteral("medium"),
-                          [&loader, grid, index, generation](bool ok, const QJsonObject &result, const QString &code) {
+            service.fetch(library.at(index).id, full ? QStringLiteral("full") : QStringLiteral("medium"),
+                          [&loader, grid, index, generation, full](bool ok, const QJsonObject &result, const QString &code) {
                               if (ok) {
-                                  loader.setMediumPath(index, QFile::encodeName(result.value("path").toString()), generation);
+                                  const auto path = QFile::encodeName(result.value("path").toString());
+                                  if (full) loader.setFullPath(index, path, generation);
+                                  else loader.setMediumPath(index, path, generation);
                                   grid->update();
                                   return;
                               }
-                              loader.setMediumUnavailable(index, generation);
-                              // Missing for good (none, or a file too damaged
-                              // to make one of), or only for now: try again
-                              // later.
+                              if (full) loader.setFullUnavailable(index, generation);
+                              else loader.setMediumUnavailable(index, generation);
+                              grid->update(); // a missing preview must wake the full-photo fallback
                               if (code != QLatin1String("not_found") && code != QLatin1String("unreadable"))
-                                  QTimer::singleShot(30000, &loader, [&loader, index, generation] { loader.clearMedium(index, generation); });
+                                  QTimer::singleShot(30000, &loader, [&loader, grid, index, generation, full] {
+                                      if (full) loader.clearFull(index, generation);
+                                      else loader.clearMedium(index, generation);
+                                      grid->update();
+                                  });
                           });
         }
-    });
+    };
+    QObject::connect(&loader, &ThumbnailLoader::mediumNeeded, &service,
+                     [fetchGridDetail](const QList<int> &indexes, quint64 generation) { fetchGridDetail(indexes, generation, false); });
+    QObject::connect(&loader, &ThumbnailLoader::fullNeeded, &service,
+                     [fetchGridDetail](const QList<int> &indexes, quint64 generation) { fetchGridDetail(indexes, generation, true); });
     QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
                      Qt::DirectConnection);
     QObject::connect(window, &QQuickWindow::beforeRendering, window, [&stats] { stats.renderBegan(); },

@@ -2922,6 +2922,158 @@ Item {
         QCOMPARE(asked.size(), 2);
     }
 
+    void fullGridKeysDoNotAliasMosaicsAndOldAnswersAreIgnored() {
+        for (int i : {0, 1, 49000}) for (int level = 0; level < 4; ++level) {
+            const auto key = fullKey(i, level);
+            QVERIFY(isFullKey(key));
+            QVERIFY(!isPageKey(key) && !isMediumKey(key));
+            QCOMPARE(keyIndex(key), i);
+            QCOMPARE(keyLevel(key), level);
+            QVERIFY(isPageKey(pageKey(i)) && !isFullKey(pageKey(i)));
+        }
+        QCOMPARE(fullShortEdge(fullLevelFor(1500)), 2048);
+        QCOMPARE(fullShortEdge(fullLevelFor(2500)), 4096);
+        Library library;
+        ThumbnailLoader loader(&library, 1);
+        QSignalSpy asked(&loader, &ThumbnailLoader::fullNeeded);
+        const auto before = loader.generation();
+        loader.setWanted({fullKey(3, 2), fullKey(3, 1)});
+        QCOMPARE(asked.size(), 1);
+        loader.setWanted({fullKey(3, 2)});
+        QCOMPARE(asked.size(), 1);
+        loader.reload([] {});
+        loader.setFullPath(3, "/old/photo.png", before);
+        loader.setFullUnavailable(3, before);
+        loader.setWanted({fullKey(3, 2)});
+        QCOMPARE(asked.size(), 2);
+        loader.setFullUnavailable(3, loader.generation());
+        loader.setWanted({fullKey(3, 2)});
+        QCOMPARE(asked.size(), 2);
+        loader.clearFull(3, loader.generation());
+        loader.setWanted({fullKey(3, 2)});
+        QCOMPARE(asked.size(), 3);
+    }
+
+    void aPortraitPngSharpensItsSquareCropWithoutDecodingAnUnneededOriginalSize() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"screenshot", 1}});
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "sharp");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE assets SET thumb_w=192, thumb_h=480"));
+        }
+        QSqlDatabase::removeDatabase("sharp");
+        QImage png(1200, 3000, QImage::Format_RGB32);
+        png.fill(QColor(12, 40, 80));
+        // Real PNG content, even with a misleading file extension.
+        const QString path = dir.path() + "/screenshot.jpg";
+        QVERIFY(png.save(path, "PNG"));
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        QSignalSpy ready(&loader, &ThumbnailLoader::ready);
+        loader.setFullPath(0, QFile::encodeName(path), loader.generation());
+        loader.setWanted({fullKey(0, 3)});
+        QTRY_VERIFY(!ready.isEmpty());
+        auto decoded = loader.takeReady(1);
+        QCOMPARE(decoded.size(), size_t(1));
+        // 1024 across the crop, rather than 1024 along the whole portrait.
+        QCOMPARE(decoded[0].image.size(), QSize(1024, 2560));
+        QCOMPARE(decoded[0].image.pixelColor(500, 1000), QColor(12, 40, 80));
+        ready.clear();
+        loader.setMediumPath(0, QFile::encodeName(path), loader.generation());
+        loader.setWanted({mediumKey(0, 1)});
+        QTRY_VERIFY(!ready.isEmpty());
+        decoded = loader.takeReady(1);
+        QCOMPARE(decoded.size(), size_t(1));
+        QCOMPARE(decoded[0].image.size(), QSize(600, 1500));
+    }
+
+    void anOversizedGridCellUpgradesAPreviewToTheFullPhoto_data() {
+        QTest::addColumn<int>("previewMode");
+        QTest::newRow("small-jpeg") << 0;
+        QTest::newRow("no-medium-like-icloud-screenshots") << 1;
+        QTest::newRow("png-preview") << 2;
+        QTest::newRow("broken-preview") << 3;
+    }
+
+    void anOversizedGridCellUpgradesAPreviewToTheFullPhoto() {
+        QFETCH(int, previewMode);
+        // A real scene graph on a virtual display: no user photos or service.
+        if (QGuiApplication::platformName() == "offscreen")
+            QSKIP("Run this render regression on Xvfb with QT_QPA_PLATFORM=xcb");
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"screenshot", 1}});
+        QImage full(1200, 3000, QImage::Format_RGB32);
+        for (int y = 0; y < full.height(); ++y) {
+            auto *line = reinterpret_cast<QRgb *>(full.scanLine(y));
+            for (int x = 0; x < full.width(); ++x) line[x] = (x / 3) % 2 ? qRgb(255, 255, 255) : qRgb(0, 0, 0);
+        }
+        const QString original = dir.path() + "/full.png", preview = dir.path() + "/medium.jpg";
+        QVERIFY(full.save(original));
+        if (previewMode == 3) write(preview, "damaged preview");
+        else QVERIFY(full.scaled(300, 750, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).save(preview, previewMode == 2 ? "PNG" : "JPEG"));
+        QVERIFY(full.scaled(192, 480, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).save(dir.path() + "/thumb.jpg"));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "sharp");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE assets SET thumb_path='thumb.jpg', thumb_w=192, thumb_h=480"));
+        }
+        QSqlDatabase::removeDatabase("sharp");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 2);
+        QQuickWindow window;
+        window.resize(900, 700);
+        PhotoGrid grid(window.contentItem());
+        grid.setSize(QSizeF(900, 700));
+        grid.setSources(&library, &loader, nullptr);
+        grid.setColumnsNow(1);
+        int fullRequests = 0;
+        connect(&loader, &ThumbnailLoader::mediumNeeded, this, [&](const QList<int> &indexes, quint64 generation) {
+            for (int index : indexes) {
+                if (previewMode == 1) loader.setMediumUnavailable(index, generation);
+                else loader.setMediumPath(index, QFile::encodeName(preview), generation);
+            }
+            grid.update();
+        });
+        connect(&loader, &ThumbnailLoader::fullNeeded, this, [&](const QList<int> &indexes, quint64 generation) {
+            for (int index : indexes) {
+                ++fullRequests;
+                loader.setFullPath(index, QFile::encodeName(original), generation);
+            }
+            grid.update();
+        });
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTRY_COMPARE_WITH_TIMEOUT(fullRequests, 1, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(loader.decodedCount(1) >= (previewMode == 1 ? 1 : 2), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(grid.mediumOnScreen().second == 1, 10000);
+        // The full square crop contains the high-frequency stripes; the
+        // compressed, upscaled preview has lost most of their contrast.
+        QImage sharp;
+        double contrast = 0;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            sharp = window.grabWindow();
+            if (sharp.isNull()) return false;
+            int low = 255, high = 0;
+            const int y = sharp.height() / 2;
+            for (int x = 100; x < std::min(800, sharp.width()); ++x) {
+                const int value = qGray(sharp.pixel(x, y));
+                low = std::min(low, value); high = std::max(high, value);
+            }
+            contrast = high - low;
+            return contrast > 220;
+        })(), 10000);
+        window.hide();
+    }
+
     void everyGridLevelClosesWithAFullPhotoRow() {
         QTemporaryDir dir;
         QList<std::pair<QByteArray, qint64>> rows;
