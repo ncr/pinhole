@@ -51,14 +51,9 @@ constexpr double kMorphSeconds = 0.35;
 // A pinch released while still moving goes on this long, in seconds, when
 // picking the level it lands on: a quick pinch commits.
 constexpr double kPinchProjection = 0.12;
-// A horizontal wheel's notch zooms by this much, eased over about this
-// long, and lands on a level once it has been still this long (seconds):
-// the next one the way it was turning, unless it turned less than
-// kWheelZoomDead notches, too little to mean anything, and goes back. A
-// turn goes one level at most: an MX Master's thumb wheel sends several
-// notches for the slightest touch, more than a level, so the zoom stops at
-// the next level and lands there at once, and the rest of the turn, until
-// the wheel has been still this long, counts for nothing.
+// A horizontal wheel accumulates every fractional notch across the whole
+// zoom range. Ease towards its target, then snap in the last direction once
+// the wheel rests. Only the range's actual ends clamp further movement.
 constexpr double kWheelZoomStep = 1.25;
 constexpr double kWheelZoomEase = 0.06;
 constexpr double kWheelZoomRest = 0.2;
@@ -1491,29 +1486,19 @@ void PhotoGrid::zoomTo(double stride, QPointF at) {
 }
 
 void PhotoGrid::wheelZoom(double notches, QPointF at) {
-    const double now = m_clock.nsecsElapsed() / 1e9;
-    const bool rested = now - m_wheelZoom.lastAt > kWheelZoomRest;
-    m_wheelZoom.lastAt = now;
-    if (m_wheelZoom.spent && !rested)
+    if (notches == 0)
         return;
-    m_wheelZoom.spent = false;
+    m_wheelZoom.lastAt = m_clock.nsecsElapsed() / 1e9;
     if (!m_wheelZoom.active) {
-        // From the level shown, or the one a settle is on its way to.
-        m_wheelZoom.from = m_zoom.active && m_zoom.settling ? m_zoom.target : m_level;
         beginZoom(at);
         m_wheelZoom.active = true;
         m_wheelZoom.current = m_wheelZoom.target = std::log(m_zoom.stride);
     }
-    // No further than the next level either way (levels go from the
-    // largest cells to the smallest); there, it lands.
-    const int out = std::min(m_wheelZoom.from + 1, levelCount() - 1), in = std::max(m_wheelZoom.from - 1, 0);
-    const double lo = std::log(strideFor(kLevels[size_t(out)])), hi = std::log(strideFor(kLevels[size_t(in)]));
-    m_wheelZoom.target = std::clamp(m_wheelZoom.target + notches * std::log(kWheelZoomStep), lo, hi);
-    if ((m_wheelZoom.target <= lo && out != m_wheelZoom.from) || (m_wheelZoom.target >= hi && in != m_wheelZoom.from)) {
-        m_wheelZoom.spent = true;
-        settleZoom(m_wheelZoom.target <= lo ? out : in);
-        return;
-    }
+    m_wheelZoom.direction = notches > 0 ? 1 : -1;
+    // Clamp the target, rather than the input: turning at an end cannot
+    // build up overshoot that would swallow the first reverse packets.
+    m_wheelZoom.target = std::clamp(m_wheelZoom.target + notches * std::log(kWheelZoomStep),
+                                  std::log(strideFor(kLevels.back())), std::log(strideFor(kLevels.front())));
     updateAnimating();
 }
 
@@ -1596,14 +1581,14 @@ void PhotoGrid::endContinuousZoom() {
 }
 
 void PhotoGrid::endWheelZoom() {
-    const double from = std::log(m_zoom.startStride), now = m_wheelZoom.current;
-    if (std::abs(now - from) < kWheelZoomDead * std::log(kWheelZoomStep)) {
-        settleZoom(m_wheelZoom.from);
-        return;
-    }
-    // On to the next level the way the wheel turned (levels go from the
-    // largest cells to the smallest).
-    settleZoom(m_wheelZoom.from + (now > from ? -1 : 1));
+    int level = nearestLevel(std::exp(m_wheelZoom.target));
+    const double beyond = (m_wheelZoom.target - std::log(strideFor(kLevels[size_t(level)]))) * m_wheelZoom.direction;
+    // Tiny movements return to the nearby level; a deliberate turn lands
+    // on the level ahead. This is relative to where the wheel has reached,
+    // including a reversal, rather than where a long turn started.
+    if (beyond > kWheelZoomDead * std::log(kWheelZoomStep))
+        level -= m_wheelZoom.direction;
+    settleZoom(level);
 }
 
 void PhotoGrid::setColumnsNow(int columns) {

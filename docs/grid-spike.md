@@ -132,8 +132,10 @@ screen recording of Photos on an iPhone.
   freely, the speed levels off at 5,000 px/s, then gathers speed as
   Shift+Up/Down does, up to 16,000 px/s, losing it again as the wheel slows.
   The horizontal (thumb) wheel zooms as a pinch does, about the pointer, and
-  lands on a level once it rests. `PINHOLE_INPUT_LOG` logs each frame's
-  interval and scroll position too.
+  accumulates the whole turn across all levels (1–29 columns), then lands
+  on a level once it rests. Reversing acts on the next packet, including at
+  either end; the ends never accumulate overshoot. `PINHOLE_INPUT_LOG` logs
+  each frame's interval and scroll position too.
 - **Stopping a coast** with a resting finger uses libinput's hold gesture,
   which Hyprland sends through the pointer-gestures protocol but Qt does not
   bind; `app/src/touchpadhold.*` binds it on Qt's Wayland connection, on a

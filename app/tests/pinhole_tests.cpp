@@ -253,6 +253,12 @@ private:
             QMouseEvent e(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
             mouseReleaseEvent(&e);
         }
+        void sideWheel(int angle) {
+            const QPointF at(width() / 2, height() / 2);
+            QWheelEvent event(at, at, QPoint(angle / 8, 0), QPoint(angle, 0), Qt::NoButton,
+                              Qt::NoModifier, Qt::NoScrollPhase, false);
+            wheelEvent(&event);
+        }
         // Moved with the button held.
         void move(QPointF at) {
             QMouseEvent e(QEvent::MouseMove, at, at, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
@@ -3072,6 +3078,77 @@ Item {
             return contrast > 220;
         })(), 10000);
         window.hide();
+    }
+
+    void sustainedSideWheelCrossesTheWholeZoomRange_data() {
+        QTest::addColumn<int>("start"); QTest::addColumn<int>("angle"); QTest::addColumn<int>("end");
+        QTest::newRow("all-the-way-in") << 29 << 30 << 1;
+        QTest::newRow("all-the-way-out") << 1 << -30 << 29;
+        QTest::newRow("default-to-in") << 7 << 30 << 1;
+        QTest::newRow("default-to-out") << 7 << -30 << 29;
+    }
+
+    void sustainedSideWheelCrossesTheWholeZoomRange() {
+        QFETCH(int, start); QFETCH(int, angle); QFETCH(int, end);
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}});
+        Library library; QString error; QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid; grid.setSize({1400, 900}); grid.setSources(&library, &loader, nullptr);
+        grid.setColumnsNow(start);
+        // Continuous high-resolution packets, with no rest that could start
+        // another gesture. One turn must not get stuck at its first level.
+        for (int i = 0; i < 120; ++i) { grid.sideWheel(angle); grid.advance(1.0 / 120); }
+        for (int i = 0; i < 60; ++i) grid.advance(1.0 / 120);
+        QVERIFY2(std::abs(grid.zoomStride() - 1400. / end) < 0.1,
+                 qPrintable(QString("continuous turn stopped at stride %1; wanted %2").arg(grid.zoomStride()).arg(1400. / end)));
+        QTest::qWait(230);
+        for (int i = 0; i < 80; ++i) grid.advance(1.0 / 120);
+        QCOMPARE(grid.columns(), end);
+        QVERIFY(!grid.zooming());
+    }
+
+    void aSideWheelReversesWithoutARestAndDoesNotStoreOvershootAtTheEnds() {
+        QTemporaryDir dir; makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}});
+        Library library; QString error; QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid; grid.setSize({1400, 900}); grid.setSources(&library, &loader, nullptr);
+        grid.setColumnsNow(7);
+        // One large packet, followed by continued turning at the limit.
+        grid.sideWheel(12000);
+        for (int i = 0; i < 60; ++i) { grid.sideWheel(120); grid.advance(1.0 / 120); }
+        QVERIFY(std::abs(grid.zoomStride() - 1400) < 1);
+        grid.sideWheel(-30);
+        for (int i = 0; i < 15; ++i) grid.advance(1.0 / 120);
+        QVERIFY(grid.zoomStride() < 1380); // the first reverse packet already takes effect
+        for (int i = 0; i < 120; ++i) { grid.sideWheel(-30); grid.advance(1.0 / 120); }
+        for (int i = 0; i < 60; ++i) grid.advance(1.0 / 120);
+        QVERIFY(std::abs(grid.zoomStride() - 1400. / 29) < 0.1);
+        QTest::qWait(230);
+        for (int i = 0; i < 80; ++i) grid.advance(1.0 / 120);
+        QCOMPARE(grid.columns(), 29);
+    }
+
+    void shortSideWheelTurnsKeepTheirFractionalTicksAndSettleToALevel() {
+        QTemporaryDir dir; makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}});
+        Library library; QString error; QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        ClickableGrid grid; grid.setSize({1400, 900}); grid.setSources(&library, &loader, nullptr);
+        grid.setColumnsNow(7);
+        for (int i = 0; i < 30; ++i) { grid.sideWheel(15); grid.advance(1.0 / 120); }
+        QTest::qWait(230);
+        for (int i = 0; i < 120; ++i) grid.advance(1.0 / 120);
+        QCOMPARE(grid.columns(), 3);
+        // A short deliberate reverse turn can leave the end on release.
+        grid.setColumnsNow(1);
+        grid.sideWheel(-120);
+        QTest::qWait(230);
+        for (int i = 0; i < 120; ++i) grid.advance(1.0 / 120);
+        QCOMPARE(grid.columns(), 3);
+        grid.sideWheel(3); // an accidental tiny packet settles back
+        QTest::qWait(230);
+        for (int i = 0; i < 120; ++i) grid.advance(1.0 / 120);
+        QCOMPARE(grid.columns(), 3);
     }
 
     void everyGridLevelClosesWithAFullPhotoRow() {

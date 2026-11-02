@@ -712,25 +712,37 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     }
     // PINHOLE_SELFTEST=wheelzoom: a mouse's horizontal wheel turned a little
     // at a time from 7 columns, a second apart, and the level each turn lands
-    // on, on the output: never back where it began unless it hardly turned,
-    // and never more than a level, even for a burst of notches (as an MX
-    // Master's thumb wheel sends for the slightest touch).
+    // on, on the output. Tiny packets return, deliberate short turns step,
+    // and long uninterrupted bursts cross the whole 1–29-column range.
     if (name == QLatin1String("wheelzoom")) {
-        QTimer::singleShot(1200, window, [window, grid] {
+        QTimer::singleShot(1200, window, [window, grid, arg] {
             grid->setColumnsNow(7);
             grid->jumpToFraction(0.5);
             // Frames stepped here too, in case the window is hidden and draws none.
             auto *frames = new QTimer(window);
             QObject::connect(frames, &QTimer::timeout, window, [grid] { grid->advance(1.0 / 60); });
             frames->start(16);
-            const std::vector<std::vector<int>> turns = {{24}, {120}, {-120}, {-120}, {-120}, {120, 120, 120}, {60}, {-24},
-                                                       {-120, -120, -120, -120, -120, -120, -120, -120}, {360, 360}};
+            std::vector<std::vector<int>> turns = {{24}, {120}, {-120}, {-120}, {-120}, {120, 120, 120}, {60}, {-24},
+                                                   {-120, -120, -120, -120, -120, -120, -120, -120}, {360, 360}};
+            turns.push_back(std::vector<int>(20, 120));
+            turns.push_back(std::vector<int>(20, -120));
+            const std::vector<int> expected = {7, 3, 7, 13, 29, 13, 7, 7, 29, 7, 1, 29};
             for (size_t k = 0; k <= turns.size(); ++k) {
-                QTimer::singleShot(int(k) * 1000 + 500, window, [grid, turns, k] {
-                    if (k > 0)
-                        std::printf("turn %zu: lands on %d columns\n", k, grid->columns()), std::fflush(stdout);
-                    if (k == turns.size())
+                QTimer::singleShot(int(k) * 1500 + 500, window, [window, grid, turns, expected, k, arg] {
+                    if (k > 0) {
+                        std::printf("turn %zu: lands on %d columns\n", k, grid->columns());
+                        std::fflush(stdout);
+                        if (grid->columns() != expected[k - 1] || grid->zooming()) {
+                            std::fprintf(stderr, "selftest: wheelzoom: turn %zu expected %d columns, got %d, zooming=%d\n",
+                                         k, expected[k - 1], grid->columns(), grid->zooming());
+                            return QCoreApplication::exit(1);
+                        }
+                        if (!arg.isEmpty()) window->grabWindow().save(QStringLiteral("%1/turn-%2.png").arg(arg).arg(k));
+                    }
+                    if (k == turns.size()) {
+                        std::printf("selftest: wheelzoom: short turns, fractions and full-range bursts: PASS\n");
                         return QCoreApplication::quit();
+                    }
                     for (size_t n = 0; n < turns[k].size(); ++n)
                         QTimer::singleShot(int(n) * 30, grid, [grid, x = turns[k][n]] {
                             const QPointF at(grid->width() / 2, grid->height() / 2);
