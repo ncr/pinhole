@@ -148,3 +148,16 @@ quality, inference-speed or NPU-use result is claimed.
 
 The preparation/scoring contracts are exercised with synthetic data by
 `python3 -m unittest discover -s bin/tests -p test_photo_search_benchmark.py`.
+
+## Delivery checks on this Mac
+
+All **66** Python script tests pass with the system Python (including the
+six new corpus/scoring cases). `bin/install --non-interactive` was attempted
+with `/usr/bin` first on PATH, since the current mise shim tries to write to
+a read-only location inside the sandbox. Installation stopped during the
+upstream Blaze bootstrap: `<jemalloc>: Unsupported system page size`, then
+`memory allocation of 4 bytes failed`. `getconf PAGESIZE` reports **16384**.
+The pinned compiler was not prepared and the application build/activation
+did not run; the existing installation was preserved. This is an observed
+bootstrap failure, not a diagnosis of which allocator build flag caused it.
+Cargo was not substituted for the Pinhole builder.
