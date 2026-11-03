@@ -161,3 +161,43 @@ overlapped More and opened both the photo-order and action menus on one tap.
 The date now fits before the action controls; folding uses its natural text
 width to avoid a layout cycle. The isolated check covers this geometry and
 the two pointer clicks, plus first-use settings/selection construction.
+
+## M2 Pro follow-up: CPU placement
+
+With 49,095 local items, all 16 built-in plugins, warm caches, native
+Wayland on hidden workspace 5 and an 854×1062 window, the first-frame
+milestones were:
+
+| Condition | Measured runs | Median | Range |
+|---|---:|---:|---:|
+| Before the lazy UI changes, inherited CPU affinity | 7 | 395 ms | 353–494 ms |
+| Lazy views, selection and settings, inherited affinity | 10 | 347 ms | 303–426 ms |
+| Same checkout, Qt host on CPUs 4–11 | 10 | 285 ms | 262–347 ms |
+
+These are **host-only diagnostics with no photo service**. The final two
+sets ran without concurrent builds/tests; the earlier exploratory set
+with concurrent UI testing is excluded. Each final set used two warmups.
+The small, unpaired distributions overlap and do not establish production
+p95 or an isolated causal gain from each individual lazy component. They
+are not comparable to the Ryzen warm-service 391-ms result above. Native
+hidden mode's media-ready event is not a resolved-photo measurement.
+
+On this M2 Pro CPUs 0–3 report capacity 561 and CPUs 4–11 capacity 1024.
+Restricting the entire diagnostic launcher to 4–11 first yielded 284 ms
+median (271–317 ms); restricting only the Qt child through the explicit
+tool option reproduced 285 ms. This implicates CPU placement, but does not
+justify pinning the production app without scroll, decode and power checks.
+**The default app has no affinity change; the general under-300-ms goal
+remains open.** Sanitized runs and plugin/milestone timings are in
+[the M2 Pro measurement artifact](reviews/2026-11-03-mac-startup.json).
+
+The diagnostic option is Linux-only, validates currently available CPUs
+and records both requested and effective host affinity. It does not pin
+the private service or change system settings. CPU numbers are specific to
+this machine; inspect the target hardware before choosing them.
+
+```sh
+PATH=/usr/bin:$PATH app/bin/measure-startup \
+  --library /path/to/library --output .tools/startup-pcores \
+  --native-hidden --host-only --warmup 2 --runs 10 --cpu-affinity 4-11
+```

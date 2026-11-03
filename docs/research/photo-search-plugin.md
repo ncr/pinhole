@@ -83,7 +83,10 @@ app/build/pinhole plugin check examples/semantic-search
 existing local benchmark, copying only thumbnails and vectors. It substitutes
 synthetic asset ids, separate profile/cache/Pictures paths and a fixture-local
 quarantine marker, so its **indexing action never submits accelerator work**.
-The real host, plugin, worker, tokenizer and text encoder are used. Test
+The photo service is explicitly unavailable on a fixture-private socket;
+`PINHOLED=false` prevents launching a checkout or installed daemon, including
+when the parent shell has service overrides. The real host, plugin, worker,
+tokenizer and text encoder are used. Test
 artifacts remain local and untracked. QtTest results are written explicitly;
 the process's exit code alone is not accepted as a passing test.
 
@@ -107,5 +110,7 @@ On this M2 Pro, the complete 384-photo interaction test passed both offscreen
 and on native Wayland on hidden workspace 5, including the 420-px panel,
 mouse activation, viewer return, cancelled catalog refreshes and the blocked
 indexing action. The independent Python script suite passed 97 tests with
-the optional model/compiler environment. These checks do not replace human
+the optional model/compiler environment at that stage; the later full suite
+passed 102 checks including the offline review browser and CPU-affinity
+measurement contract. These checks do not replace human
 relevance labels or an Orca screen-reader session.

@@ -116,6 +116,7 @@ def main():
         env = os.environ | {'XDG_CONFIG_HOME': str(profile / 'config'), 'XDG_DATA_HOME': str(profile / 'data'),
             'XDG_CACHE_HOME': str(profile / 'cache'), 'XDG_STATE_HOME': str(profile / 'state'),
             'XDG_PICTURES_DIR': str(profile / 'pictures'), 'PINHOLE_LANGUAGE_FILE': str(task / 'pl.txt'),
+            'PINHOLE_SOCKET': str(task / 'service.sock'), 'PINHOLED': shutil.which('false') or '/usr/bin/false',
             'PINHOLE_BUILTIN_PLUGINS': str(task / 'plugins'), 'PINHOLE_SELFTEST': '',
             'PINHOLE_STARTUP_TRACE': '1', 'QT_QPA_PLATFORMTHEME': 'generic', 'OPENBLAS_NUM_THREADS': '2'}
         if not args.native:

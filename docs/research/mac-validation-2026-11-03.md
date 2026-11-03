@@ -12,7 +12,7 @@ these checks. Model inference and image decoding ran locally.
   with explicit `QT_QPA_PLATFORM=xcb`, real local HDR/decode samples and
   OpenGL. This includes the four render-regression rows that offscreen mode
   deliberately skips. The earlier obsolete Polish translations were removed.
-- The Python script suite passed **101 tests** with the optional model
+- The Python script suite passed **102 tests** with the optional model
   environment, real Chromium and real offline ANE compilation tests enabled. These tests
   do not submit accelerator jobs.
 - Shared controls/accessibility passed **16/16** on Xvfb (the earlier 15/15
@@ -28,6 +28,10 @@ these checks. Model inference and image decoding ran locally.
   interaction test offscreen and on native Wayland on hidden workspace 5.
   See [the plugin notes](photo-search-plugin.md) for tested interactions and
   the explicit limitation to the indexed sample.
+- Final startup checks passed with the isolated host and explicit CPU
+  affinity reporting. With the service unavailable, inherited affinity gave
+  a 347-ms median; CPUs 4–11 gave 285 ms in a separate ten-run set. Production
+  scheduling was not changed. See [the full startup notes](../startup-performance.md).
 
 An initial full Qt invocation inside the restricted command sandbox failed
 its local socket/profile setup, then crashed in `Plugins::setSources` after

@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import shutil
@@ -15,6 +16,24 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def cpu_affinity(value):
+    if not hasattr(os, 'sched_getaffinity') or not shutil.which('taskset'):
+        raise ValueError('--cpu-affinity requires Linux CPU affinity and taskset')
+    allowed = os.sched_getaffinity(0)
+    requested = set()
+    for part in value.split(','):
+        if not re.fullmatch(r'\d+(?:-\d+)?', part):
+            raise ValueError('--cpu-affinity must use CPU numbers or ranges, e.g. 4-11')
+        bounds = list(map(int, part.split('-')))
+        first, last = bounds[0], bounds[-1]
+        if first > last or last > max(allowed):
+            raise ValueError('--cpu-affinity range is outside the available CPUs')
+        requested.update(range(first, last + 1))
+    if not requested or not requested.issubset(allowed):
+        raise ValueError('--cpu-affinity must select currently available CPUs')
+    return sorted(requested)
 
 
 def main():
@@ -30,9 +49,16 @@ def main():
     parser.add_argument('--no-plugins', action='store_true')
     parser.add_argument('--host-only', action='store_true', help='Measure the Qt host with the service unavailable; do not launch pinholed or fetch renditions. Not comparable to warm-service runs.')
     parser.add_argument('--native-hidden', action='store_true', help='Use the current compositor; invoke ONLY on a hidden test workspace.')
+    parser.add_argument('--cpu-affinity', help='Linux diagnostic: run only the Qt host on these CPUs (e.g. 4-11); report the restriction. Does not pin the private service.')
     parser.add_argument('--binary', type=Path, default=ROOT / 'app/build/pinhole')
     parser.add_argument('--builtin-plugins', type=Path, default=ROOT / 'plugins')
     args = parser.parse_args()
+    try:
+        requested_affinity = cpu_affinity(args.cpu_affinity) if args.cpu_affinity is not None else None
+    except ValueError as error:
+        parser.error(str(error))
+    effective_affinity = requested_affinity if requested_affinity is not None else (
+        sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None)
     if not 1 <= args.runs <= 30:
         parser.error('--runs must be between 1 and 30')
     if not 0 <= args.warmup <= 5:
@@ -119,12 +145,16 @@ def main():
                             raise RuntimeError('Private test service did not start; see daemon log')
                         time.sleep(.005)
                 record = {'run': run, 'warmup': run < args.warmup,
+                          'cpu_affinity': effective_affinity, 'cpu_affinity_requested': requested_affinity,
                           'service_mode': 'unavailable' if args.host_only else 'private-warm',
                           'service_boot_ms': None if args.host_only else (time.monotonic() - began) * 1000,
                           'milestones': {}, 'observed_ms': {}, 'plugins_ms': {}}
                 began = time.monotonic()
                 with (args.output / f'{run}.log').open('w') as log:
-                    proc = subprocess.Popen([str(args.binary.resolve()), '--library', str(args.library.resolve())],
+                    command = [str(args.binary.resolve()), '--library', str(args.library.resolve())]
+                    if requested_affinity is not None:
+                        command = [shutil.which('taskset'), '-c', ','.join(map(str, requested_affinity)), *command]
+                    proc = subprocess.Popen(command,
                                             env=env, stdout=log, stderr=subprocess.PIPE, bufsize=0)
                     with selectors.DefaultSelector() as selector:
                         selector.register(proc.stderr, selectors.EVENT_READ)
@@ -175,6 +205,7 @@ def main():
                      'min_ms': min(r['milestones'][key] for r in measured if key in r['milestones']),
                      'max_ms': max(r['milestones'][key] for r in measured if key in r['milestones'])} for key in keys}
     report = {'runs': results, 'summary': summary, 'display': 'native-hidden' if args.native_hidden else 'Xvfb 1600x1000',
+              'cpu_affinity': effective_affinity, 'cpu_affinity_requested': requested_affinity,
               'service_mode': 'unavailable' if args.host_only else 'private-warm',
               'note': 'Warm filesystem is not a cold OS boot. Main-relative ms excludes the dynamic loader; observed_ms includes process launch and pipe delivery.'}
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n')

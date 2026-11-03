@@ -1,0 +1,1670 @@
+{
+  "schema": 1,
+  "machine": "Apple M2 Pro, Asahi/Arch Linux, Qt 6.12.0, 16-KiB pages",
+  "library_items": 49095,
+  "builtin_plugins": 16,
+  "display": "native Wayland, hidden workspace 5, 854x1062",
+  "note": "Warm-cache, unpaired local diagnostic samples; service unavailable. Not comparable to the earlier Ryzen warm-service measurements. No production affinity change. Neither native-hidden media_ready nor first_frame establishes resolved visible photos. Raw private paths and photo IDs omitted.",
+  "conditions": [
+    {
+      "condition": "before lazy UI changes",
+      "service_mode": "unavailable",
+      "cpu_affinity_requested": null,
+      "summary": {
+        "graphics_probe": {
+          "median_ms": 3.631939,
+          "min_ms": 3.096081,
+          "max_ms": 3.82567
+        },
+        "qt_ready": {
+          "median_ms": 14.390011,
+          "min_ms": 12.852964,
+          "max_ms": 16.250384
+        },
+        "hosts_ready": {
+          "median_ms": 55.346199,
+          "min_ms": 51.841813,
+          "max_ms": 56.530679
+        },
+        "index_read": {
+          "median_ms": 129.065856,
+          "min_ms": 116.73537,
+          "max_ms": 149.149103
+        },
+        "qml_ready": {
+          "median_ms": 158.533224,
+          "min_ms": 138.029226,
+          "max_ms": 218.072706
+        },
+        "plugins_ready": {
+          "median_ms": 323.82201,
+          "min_ms": 270.619058,
+          "max_ms": 414.890856
+        },
+        "first_frame": {
+          "median_ms": 394.620749,
+          "min_ms": 353.118114,
+          "max_ms": 493.595567
+        },
+        "media_ready": {
+          "median_ms": 395.04185,
+          "min_ms": 353.910154,
+          "max_ms": 494.172371
+        }
+      },
+      "runs": [
+        {
+          "run": 0,
+          "warmup": true,
+          "milestones": {
+            "graphics_probe": 4.261752,
+            "qt_ready": 15.677546,
+            "hosts_ready": 42.59927,
+            "qml_ready": 310.501223,
+            "index_read": 423.53423,
+            "plugins_ready": 750.515783,
+            "first_frame": 851.990833,
+            "media_ready": 852.414642
+          },
+          "observed_ms": {
+            "graphics_probe": 28.556670993566513,
+            "qt_ready": 39.92367599857971,
+            "hosts_ready": 66.84106698958203,
+            "qml_ready": 334.7737689909991,
+            "index_read": 447.83268999890424,
+            "plugins_ready": 774.7379139764234,
+            "first_frame": 876.3157079811208,
+            "media_ready": 876.6393149853684
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 13,
+            "pinhole.sheet": 17,
+            "pinhole.favourites": 3,
+            "pinhole.folder": 2,
+            "pinhole.icloud": 1,
+            "pinhole.info": 11,
+            "pinhole.live": 6,
+            "pinhole.onthisday": 41,
+            "pinhole.frame": 4,
+            "pinhole.recent": 9,
+            "pinhole.screenshots": 20,
+            "pinhole.send": 17,
+            "pinhole.series": 63,
+            "pinhole.theme": 7,
+            "pinhole.calendar": 17
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 1,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.540841,
+            "qt_ready": 13.995082,
+            "hosts_ready": 51.841813,
+            "index_read": 129.065856,
+            "qml_ready": 138.029226,
+            "plugins_ready": 270.619058,
+            "first_frame": 394.620749,
+            "media_ready": 395.04185
+          },
+          "observed_ms": {
+            "graphics_probe": 32.51065898803063,
+            "qt_ready": 42.90773597313091,
+            "hosts_ready": 80.78909097821452,
+            "index_read": 158.02425699075684,
+            "qml_ready": 166.97296197526157,
+            "plugins_ready": 299.53371299779974,
+            "first_frame": 423.59123297501355,
+            "media_ready": 423.9487969898619
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 2,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 1,
+            "pinhole.live": 2,
+            "pinhole.onthisday": 16,
+            "pinhole.frame": 0,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 3,
+            "pinhole.series": 21,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 2,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.800913,
+            "qt_ready": 16.250384,
+            "hosts_ready": 55.346199,
+            "qml_ready": 144.257666,
+            "index_read": 149.149103,
+            "plugins_ready": 278.996606,
+            "first_frame": 353.722043,
+            "media_ready": 354.271262
+          },
+          "observed_ms": {
+            "graphics_probe": 45.41096297907643,
+            "qt_ready": 57.812019978882745,
+            "hosts_ready": 96.89858599449508,
+            "qml_ready": 185.83067698637024,
+            "index_read": 190.72632197639905,
+            "plugins_ready": 320.5402019957546,
+            "first_frame": 395.31159499892965,
+            "media_ready": 395.83277399651706
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 2,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 1,
+            "pinhole.live": 2,
+            "pinhole.onthisday": 16,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 3,
+            "pinhole.series": 13,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 3,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.096081,
+            "qt_ready": 12.852964,
+            "hosts_ready": 52.807194,
+            "index_read": 130.709264,
+            "qml_ready": 151.60912,
+            "plugins_ready": 288.948476,
+            "first_frame": 353.118114,
+            "media_ready": 353.910154
+          },
+          "observed_ms": {
+            "graphics_probe": 24.68023297842592,
+            "qt_ready": 34.376451978459954,
+            "hosts_ready": 74.32143299956806,
+            "index_read": 152.26629198878072,
+            "qml_ready": 173.1537329906132,
+            "plugins_ready": 310.45696599176154,
+            "first_frame": 374.6691009728238,
+            "media_ready": 375.41664397576824
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 2,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 2,
+            "pinhole.onthisday": 18,
+            "pinhole.frame": 1,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 3,
+            "pinhole.series": 13,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 4,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.82567,
+            "qt_ready": 15.540001,
+            "hosts_ready": 56.530679,
+            "index_read": 116.73537,
+            "qml_ready": 165.805698,
+            "plugins_ready": 327.854348,
+            "first_frame": 433.936982,
+            "media_ready": 434.580198
+          },
+          "observed_ms": {
+            "graphics_probe": 44.86688700853847,
+            "qt_ready": 56.54584401054308,
+            "hosts_ready": 97.49431698583066,
+            "index_read": 157.75192098226398,
+            "qml_ready": 206.80637599434704,
+            "plugins_ready": 368.81148599786684,
+            "first_frame": 474.95011700084433,
+            "media_ready": 475.6372889969498
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 4,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 2,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 3,
+            "pinhole.onthisday": 22,
+            "pinhole.frame": 2,
+            "pinhole.recent": 5,
+            "pinhole.screenshots": 12,
+            "pinhole.send": 3,
+            "pinhole.series": 22,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 5,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.169375,
+            "qt_ready": 13.610244,
+            "hosts_ready": 54.008625,
+            "index_read": 132.084945,
+            "qml_ready": 158.533224,
+            "plugins_ready": 323.82201,
+            "first_frame": 393.023296,
+            "media_ready": 393.492355
+          },
+          "observed_ms": {
+            "graphics_probe": 28.92510697711259,
+            "qt_ready": 39.330478000920266,
+            "hosts_ready": 79.69610998407006,
+            "index_read": 157.7858459786512,
+            "qml_ready": 184.28820598637685,
+            "plugins_ready": 349.53136899275705,
+            "first_frame": 418.74273799476214,
+            "media_ready": 419.2584609845653
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 2,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 4,
+            "pinhole.onthisday": 21,
+            "pinhole.frame": 2,
+            "pinhole.recent": 4,
+            "pinhole.screenshots": 12,
+            "pinhole.send": 4,
+            "pinhole.series": 24,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 5
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 6,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.631939,
+            "qt_ready": 14.390011,
+            "hosts_ready": 55.359699,
+            "index_read": 119.99438,
+            "qml_ready": 210.45965,
+            "plugins_ready": 405.184866,
+            "first_frame": 471.468194,
+            "media_ready": 471.993751
+          },
+          "observed_ms": {
+            "graphics_probe": 49.98068299028091,
+            "qt_ready": 60.685174976242706,
+            "hosts_ready": 101.64203000022098,
+            "index_read": 166.3271249854006,
+            "qml_ready": 256.77806299063377,
+            "plugins_ready": 451.4789049862884,
+            "first_frame": 517.8050639806315,
+            "media_ready": 518.2910389848985
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 5,
+            "pinhole.sheet": 6,
+            "pinhole.favourites": 3,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 4,
+            "pinhole.live": 5,
+            "pinhole.onthisday": 27,
+            "pinhole.frame": 2,
+            "pinhole.recent": 6,
+            "pinhole.screenshots": 14,
+            "pinhole.send": 6,
+            "pinhole.series": 29,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 3
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 7,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.82485,
+            "qt_ready": 15.402685,
+            "hosts_ready": 55.666911,
+            "index_read": 124.622195,
+            "qml_ready": 218.072706,
+            "plugins_ready": 414.890856,
+            "first_frame": 493.595567,
+            "media_ready": 494.172371
+          },
+          "observed_ms": {
+            "graphics_probe": 43.42910900595598,
+            "qt_ready": 54.96661301003769,
+            "hosts_ready": 95.21975601091981,
+            "index_read": 164.19024800416082,
+            "qml_ready": 257.6530500082299,
+            "plugins_ready": 454.4349510106258,
+            "first_frame": 533.1966590019874,
+            "media_ready": 533.7060510064475
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 5,
+            "pinhole.sheet": 6,
+            "pinhole.favourites": 3,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 4,
+            "pinhole.live": 5,
+            "pinhole.onthisday": 27,
+            "pinhole.frame": 2,
+            "pinhole.recent": 5,
+            "pinhole.screenshots": 14,
+            "pinhole.send": 6,
+            "pinhole.series": 29,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 3
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        }
+      ]
+    },
+    {
+      "condition": "lazy UI, inherited CPU affinity",
+      "service_mode": "unavailable",
+      "cpu_affinity_requested": null,
+      "summary": {
+        "graphics_probe": {
+          "median_ms": 3.2379990000000003,
+          "min_ms": 2.671583,
+          "max_ms": 3.806206
+        },
+        "qt_ready": {
+          "median_ms": 13.4729745,
+          "min_ms": 11.160162,
+          "max_ms": 15.970694
+        },
+        "hosts_ready": {
+          "median_ms": 51.236359,
+          "min_ms": 38.52406,
+          "max_ms": 57.021336
+        },
+        "qml_ready": {
+          "median_ms": 125.0871295,
+          "min_ms": 105.423019,
+          "max_ms": 172.871507
+        },
+        "index_read": {
+          "median_ms": 119.780973,
+          "min_ms": 103.634978,
+          "max_ms": 143.234173
+        },
+        "plugins_ready": {
+          "median_ms": 272.286658,
+          "min_ms": 241.975611,
+          "max_ms": 338.61771
+        },
+        "first_frame": {
+          "median_ms": 347.0610755,
+          "min_ms": 302.519421,
+          "max_ms": 426.435958
+        },
+        "media_ready": {
+          "median_ms": 347.675617,
+          "min_ms": 302.957754,
+          "max_ms": 426.824375
+        }
+      },
+      "runs": [
+        {
+          "run": 0,
+          "warmup": true,
+          "milestones": {
+            "graphics_probe": 3.239372,
+            "qt_ready": 13.607361,
+            "hosts_ready": 55.177153,
+            "index_read": 120.434754,
+            "qml_ready": 305.430817,
+            "plugins_ready": 603.507724,
+            "first_frame": 708.552577,
+            "media_ready": 709.130118
+          },
+          "observed_ms": {
+            "graphics_probe": 28.833760996349156,
+            "qt_ready": 39.08729300019331,
+            "hosts_ready": 80.64270901377313,
+            "index_read": 145.95864299917594,
+            "qml_ready": 330.9232479950879,
+            "plugins_ready": 628.9650720136706,
+            "first_frame": 734.0686749957968,
+            "media_ready": 734.5863410155289
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 9,
+            "pinhole.sheet": 14,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 8,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 38,
+            "pinhole.frame": 5,
+            "pinhole.recent": 7,
+            "pinhole.screenshots": 17,
+            "pinhole.send": 18,
+            "pinhole.series": 64,
+            "pinhole.theme": 4,
+            "pinhole.calendar": 15
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 1,
+          "warmup": true,
+          "milestones": {
+            "graphics_probe": 3.776372,
+            "qt_ready": 15.608611,
+            "hosts_ready": 58.897487,
+            "qml_ready": 116.396475,
+            "index_read": 134.799166,
+            "plugins_ready": 267.645128,
+            "first_frame": 336.688525,
+            "media_ready": 337.272857
+          },
+          "observed_ms": {
+            "graphics_probe": 44.69208299997263,
+            "qt_ready": 56.44069699337706,
+            "hosts_ready": 99.7256979753729,
+            "qml_ready": 157.26839398848824,
+            "index_read": 175.63900200184435,
+            "plugins_ready": 308.4602559974883,
+            "first_frame": 377.5863609916996,
+            "media_ready": 378.1061519985087
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 3,
+            "pinhole.live": 0,
+            "pinhole.onthisday": 18,
+            "pinhole.frame": 1,
+            "pinhole.recent": 1,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 2,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 2,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.766205,
+            "qt_ready": 15.970694,
+            "hosts_ready": 54.092328,
+            "qml_ready": 114.137234,
+            "index_read": 141.856127,
+            "plugins_ready": 297.062201,
+            "first_frame": 382.120337,
+            "media_ready": 382.679712
+          },
+          "observed_ms": {
+            "graphics_probe": 45.811877003870904,
+            "qt_ready": 57.97228400479071,
+            "hosts_ready": 96.09254199313,
+            "qml_ready": 156.16653198958375,
+            "index_read": 183.87538299430162,
+            "plugins_ready": 339.05087399762124,
+            "first_frame": 424.16638499707915,
+            "media_ready": 424.70017599407583
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 3,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 20,
+            "pinhole.frame": 2,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 5,
+            "pinhole.series": 23,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 3,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.129955,
+            "qt_ready": 14.050155,
+            "hosts_ready": 51.170126,
+            "qml_ready": 111.24112,
+            "index_read": 138.788431,
+            "plugins_ready": 268.432037,
+            "first_frame": 356.973217,
+            "media_ready": 357.6103
+          },
+          "observed_ms": {
+            "graphics_probe": 28.04276900133118,
+            "qt_ready": 38.91821901197545,
+            "hosts_ready": 76.03818899951875,
+            "qml_ready": 136.15193299483508,
+            "index_read": 163.66103701875545,
+            "plugins_ready": 293.26955901342444,
+            "first_frame": 381.8881560000591,
+            "media_ready": 382.4449050007388
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 17,
+            "pinhole.frame": 0,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 3,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 4,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.797456,
+            "qt_ready": 15.301406,
+            "hosts_ready": 57.021336,
+            "index_read": 118.336127,
+            "qml_ready": 172.871507,
+            "plugins_ready": 336.280603,
+            "first_frame": 426.435958,
+            "media_ready": 426.824375
+          },
+          "observed_ms": {
+            "graphics_probe": 46.38859300757758,
+            "qt_ready": 57.83437698846683,
+            "hosts_ready": 99.54855698742904,
+            "index_read": 160.9007650113199,
+            "qml_ready": 215.4481030011084,
+            "plugins_ready": 378.8046159897931,
+            "first_frame": 469.0188459935598,
+            "media_ready": 469.33997099404223
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 2,
+            "pinhole.icloud": 1,
+            "pinhole.info": 3,
+            "pinhole.live": 3,
+            "pinhole.onthisday": 20,
+            "pinhole.frame": 2,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 11,
+            "pinhole.send": 5,
+            "pinhole.series": 26,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 5,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.276207,
+            "qt_ready": 13.483492,
+            "hosts_ready": 38.52406,
+            "index_read": 103.634978,
+            "qml_ready": 105.423019,
+            "plugins_ready": 245.924516,
+            "first_frame": 311.381934,
+            "media_ready": 312.259684
+          },
+          "observed_ms": {
+            "graphics_probe": 28.918023977894336,
+            "qt_ready": 39.06389299663715,
+            "hosts_ready": 64.12641899078153,
+            "index_read": 129.23287900048308,
+            "qml_ready": 131.03400298859924,
+            "plugins_ready": 271.493375999853,
+            "first_frame": 337.01154397567734,
+            "media_ready": 337.8625429759268
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 1,
+            "pinhole.info": 3,
+            "pinhole.live": 2,
+            "pinhole.onthisday": 17,
+            "pinhole.frame": 1,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 4,
+            "pinhole.series": 23,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 6,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.806206,
+            "qt_ready": 15.4947,
+            "hosts_ready": 54.892762,
+            "qml_ready": 116.607395,
+            "index_read": 143.234173,
+            "plugins_ready": 265.134065,
+            "first_frame": 320.816035,
+            "media_ready": 321.341618
+          },
+          "observed_ms": {
+            "graphics_probe": 46.23339098179713,
+            "qt_ready": 57.86255199927837,
+            "hosts_ready": 97.2331969824154,
+            "qml_ready": 158.96345497458242,
+            "index_read": 185.60531598632224,
+            "plugins_ready": 307.4537079955917,
+            "first_frame": 363.2011779991444,
+            "media_ready": 363.66951098898426
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 16,
+            "pinhole.frame": 0,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 3,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 7,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.671583,
+            "qt_ready": 11.160162,
+            "hosts_ready": 51.154185,
+            "index_read": 116.266362,
+            "qml_ready": 138.343435,
+            "plugins_ready": 305.180399,
+            "first_frame": 392.424233,
+            "media_ready": 392.819274
+          },
+          "observed_ms": {
+            "graphics_probe": 23.075239005265757,
+            "qt_ready": 31.555693014524877,
+            "hosts_ready": 71.53496600221843,
+            "index_read": 136.64643501397222,
+            "qml_ready": 158.71517499908805,
+            "plugins_ready": 325.5310130189173,
+            "first_frame": 412.80884700245224,
+            "media_ready": 413.16342999925837
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 4,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 2,
+            "pinhole.icloud": 0,
+            "pinhole.info": 4,
+            "pinhole.live": 2,
+            "pinhole.onthisday": 22,
+            "pinhole.frame": 2,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 11,
+            "pinhole.send": 4,
+            "pinhole.series": 26,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 4
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 8,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.207624,
+            "qt_ready": 13.418161,
+            "hosts_ready": 51.205813,
+            "index_read": 115.386329,
+            "qml_ready": 121.757285,
+            "plugins_ready": 241.975611,
+            "first_frame": 302.519421,
+            "media_ready": 302.957754
+          },
+          "observed_ms": {
+            "graphics_probe": 27.308406017255038,
+            "qt_ready": 37.48306800844148,
+            "hosts_ready": 75.24201099295169,
+            "index_read": 139.46969399694353,
+            "qml_ready": 145.8221499924548,
+            "plugins_ready": 266.0074770101346,
+            "first_frame": 326.6192029986996,
+            "media_ready": 327.0308689970989
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 14,
+            "pinhole.frame": 0,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 8,
+            "pinhole.send": 3,
+            "pinhole.series": 15,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 9,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.268374,
+            "qt_ready": 12.509788,
+            "hosts_ready": 53.894651,
+            "index_read": 117.190008,
+            "qml_ready": 143.079125,
+            "plugins_ready": 260.561215,
+            "first_frame": 322.428239,
+            "media_ready": 323.119155
+          },
+          "observed_ms": {
+            "graphics_probe": 28.507658978924155,
+            "qt_ready": 37.715280981501564,
+            "hosts_ready": 79.06410199939273,
+            "index_read": 142.38045900128782,
+            "qml_ready": 168.29715899075381,
+            "plugins_ready": 285.7293330016546,
+            "first_frame": 347.6572310028132,
+            "media_ready": 348.3382729755249
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 14,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 8,
+            "pinhole.send": 4,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 10,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.173708,
+            "qt_ready": 12.244748,
+            "hosts_ready": 51.266905,
+            "qml_ready": 128.416974,
+            "index_read": 138.904389,
+            "plugins_ready": 276.141279,
+            "first_frame": 337.148934,
+            "media_ready": 337.740934
+          },
+          "observed_ms": {
+            "graphics_probe": 27.960535982856527,
+            "qt_ready": 36.98849200736731,
+            "hosts_ready": 76.02069200947881,
+            "qml_ready": 153.1756350013893,
+            "index_read": 163.65700800088234,
+            "plugins_ready": 300.867190991994,
+            "first_frame": 361.93609598558396,
+            "media_ready": 362.4849290063139
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 18,
+            "pinhole.frame": 0,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 3,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 11,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.179,
+            "qt_ready": 13.462457,
+            "hosts_ready": 38.720079,
+            "index_read": 121.225819,
+            "qml_ready": 161.995314,
+            "plugins_ready": 338.61771,
+            "first_frame": 396.554036,
+            "media_ready": 397.057494
+          },
+          "observed_ms": {
+            "graphics_probe": 28.7509550107643,
+            "qt_ready": 38.98120400845073,
+            "hosts_ready": 64.22757601831108,
+            "index_read": 146.7768580187112,
+            "qml_ready": 187.53201901563443,
+            "plugins_ready": 364.12054000538774,
+            "first_frame": 422.1751580189448,
+            "media_ready": 422.5944080098998
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 5,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 2,
+            "pinhole.icloud": 0,
+            "pinhole.info": 4,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 22,
+            "pinhole.frame": 2,
+            "pinhole.recent": 3,
+            "pinhole.screenshots": 13,
+            "pinhole.send": 5,
+            "pinhole.series": 29,
+            "pinhole.theme": 2,
+            "pinhole.calendar": 4
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        }
+      ]
+    },
+    {
+      "condition": "lazy UI, explicit Qt-host affinity 4-11",
+      "service_mode": "unavailable",
+      "cpu_affinity_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "summary": {
+        "graphics_probe": {
+          "median_ms": 2.9782275,
+          "min_ms": 2.768934,
+          "max_ms": 3.76594
+        },
+        "qt_ready": {
+          "median_ms": 13.2441035,
+          "min_ms": 11.13007,
+          "max_ms": 16.645813
+        },
+        "hosts_ready": {
+          "median_ms": 36.099425499999995,
+          "min_ms": 30.564484,
+          "max_ms": 70.74813
+        },
+        "qml_ready": {
+          "median_ms": 104.9714,
+          "min_ms": 88.807143,
+          "max_ms": 139.38683
+        },
+        "index_read": {
+          "median_ms": 98.2637395,
+          "min_ms": 90.630488,
+          "max_ms": 151.053441
+        },
+        "plugins_ready": {
+          "median_ms": 222.4062095,
+          "min_ms": 207.088473,
+          "max_ms": 282.311389
+        },
+        "first_frame": {
+          "median_ms": 284.97243000000003,
+          "min_ms": 262.182404,
+          "max_ms": 347.288859
+        },
+        "media_ready": {
+          "median_ms": 285.382495,
+          "min_ms": 262.599865,
+          "max_ms": 347.643444
+        }
+      },
+      "runs": [
+        {
+          "run": 0,
+          "warmup": true,
+          "milestones": {
+            "graphics_probe": 3.046101,
+            "qt_ready": 13.464036,
+            "hosts_ready": 37.02909,
+            "index_read": 105.749198,
+            "qml_ready": 222.488668,
+            "plugins_ready": 477.316861,
+            "first_frame": 537.310545,
+            "media_ready": 537.656005
+          },
+          "observed_ms": {
+            "graphics_probe": 28.91771000577137,
+            "qt_ready": 39.27802000544034,
+            "hosts_ready": 62.84678200609051,
+            "index_read": 131.6034730116371,
+            "qml_ready": 248.33827701513655,
+            "plugins_ready": 503.1337199907284,
+            "first_frame": 563.1842369912192,
+            "media_ready": 563.4813219949137
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 8,
+            "pinhole.sheet": 12,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 7,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 30,
+            "pinhole.frame": 3,
+            "pinhole.recent": 5,
+            "pinhole.screenshots": 14,
+            "pinhole.send": 16,
+            "pinhole.series": 54,
+            "pinhole.theme": 3,
+            "pinhole.calendar": 13
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 1,
+          "warmup": true,
+          "milestones": {
+            "graphics_probe": 3.70173,
+            "qt_ready": 15.377965,
+            "hosts_ready": 39.910443,
+            "index_read": 106.452709,
+            "qml_ready": 114.886592,
+            "plugins_ready": 252.243734,
+            "first_frame": 322.586941,
+            "media_ready": 322.939193
+          },
+          "observed_ms": {
+            "graphics_probe": 29.440465004881844,
+            "qt_ready": 41.05603400967084,
+            "hosts_ready": 65.57176099158823,
+            "index_read": 132.14306900044903,
+            "qml_ready": 140.55832699523307,
+            "plugins_ready": 277.90055199875496,
+            "first_frame": 348.4222190163564,
+            "media_ready": 348.6307199927978
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 4,
+            "pinhole.sheet": 5,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 3,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 18,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 10,
+            "pinhole.send": 3,
+            "pinhole.series": 17,
+            "pinhole.theme": 0,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 2,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.618855,
+            "qt_ready": 15.775011,
+            "hosts_ready": 70.74813,
+            "qml_ready": 139.38683,
+            "index_read": 151.053441,
+            "plugins_ready": 282.311389,
+            "first_frame": 347.288859,
+            "media_ready": 347.643444
+          },
+          "observed_ms": {
+            "graphics_probe": 27.015160012524575,
+            "qt_ready": 39.13002400076948,
+            "hosts_ready": 94.08514300594106,
+            "qml_ready": 162.72896801820025,
+            "index_read": 174.37203699955717,
+            "plugins_ready": 305.6254430266563,
+            "first_frame": 370.6423719995655,
+            "media_ready": 370.95629001851194
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 3,
+            "pinhole.live": 0,
+            "pinhole.onthisday": 18,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 3,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.126935,
+            "qt_ready": 12.980786,
+            "hosts_ready": 35.694005,
+            "index_read": 95.408155,
+            "qml_ready": 102.371447,
+            "plugins_ready": 219.457232,
+            "first_frame": 284.749624,
+            "media_ready": 285.100793
+          },
+          "observed_ms": {
+            "graphics_probe": 28.91317300964147,
+            "qt_ready": 38.71727400110103,
+            "hosts_ready": 61.44211799255572,
+            "index_read": 121.16672599222511,
+            "qml_ready": 128.1066850060597,
+            "plugins_ready": 245.19497001892887,
+            "first_frame": 310.5335290019866,
+            "media_ready": 310.8664469909854
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 14,
+            "pinhole.frame": 1,
+            "pinhole.recent": 1,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 13,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 4,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.800684,
+            "qt_ready": 13.110538,
+            "hosts_ready": 36.504846,
+            "qml_ready": 95.406287,
+            "index_read": 99.29631,
+            "plugins_ready": 219.183788,
+            "first_frame": 278.823274,
+            "media_ready": 279.212277
+          },
+          "observed_ms": {
+            "graphics_probe": 23.750268999719992,
+            "qt_ready": 34.01249801390804,
+            "hosts_ready": 57.40505599533208,
+            "qml_ready": 116.32328800624236,
+            "index_read": 120.1843119924888,
+            "plugins_ready": 240.08041399065405,
+            "first_frame": 299.81598499580286,
+            "media_ready": 300.1419029897079
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 15,
+            "pinhole.frame": 1,
+            "pinhole.recent": 1,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 0,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 5,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.738064,
+            "qt_ready": 16.362225,
+            "hosts_ready": 42.018382,
+            "index_read": 106.88007,
+            "qml_ready": 114.085739,
+            "plugins_ready": 241.223432,
+            "first_frame": 299.638831,
+            "media_ready": 300.090292
+          },
+          "observed_ms": {
+            "graphics_probe": 34.63871101848781,
+            "qt_ready": 47.19678801484406,
+            "hosts_ready": 72.84944501589052,
+            "index_read": 137.74571599788032,
+            "qml_ready": 144.94196901796386,
+            "plugins_ready": 272.0523290045094,
+            "first_frame": 330.58460301253945,
+            "media_ready": 330.9698970115278
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 16,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 6,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.768934,
+            "qt_ready": 13.765043,
+            "hosts_ready": 36.91781,
+            "index_read": 99.158442,
+            "qml_ready": 110.465929,
+            "plugins_ready": 231.680383,
+            "first_frame": 297.081786,
+            "media_ready": 297.485163
+          },
+          "observed_ms": {
+            "graphics_probe": 23.48751900717616,
+            "qt_ready": 34.42871099105105,
+            "hosts_ready": 57.59031101479195,
+            "index_read": 119.85098500736058,
+            "qml_ready": 131.12926299800165,
+            "plugins_ready": 252.33880101586692,
+            "first_frame": 317.86328801536,
+            "media_ready": 318.18287301575765
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 4,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 15,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 8,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 7,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.973894,
+            "qt_ready": 11.49503,
+            "hosts_ready": 30.701233,
+            "qml_ready": 89.336348,
+            "index_read": 91.273985,
+            "plugins_ready": 207.402124,
+            "first_frame": 270.422599,
+            "media_ready": 270.772976
+          },
+          "observed_ms": {
+            "graphics_probe": 24.03260802384466,
+            "qt_ready": 32.480702007887885,
+            "hosts_ready": 51.71998901641928,
+            "qml_ready": 110.3459779988043,
+            "index_read": 112.27532400516793,
+            "plugins_ready": 228.38262902223505,
+            "first_frame": 291.46485502133146,
+            "media_ready": 291.75627400400117
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 3,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 14,
+            "pinhole.frame": 1,
+            "pinhole.recent": 1,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 8,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 3.76594,
+            "qt_ready": 16.645813,
+            "hosts_ready": 40.422295,
+            "index_read": 102.302308,
+            "qml_ready": 116.950816,
+            "plugins_ready": 239.995629,
+            "first_frame": 296.073355,
+            "media_ready": 296.434357
+          },
+          "observed_ms": {
+            "graphics_probe": 33.99762898334302,
+            "qt_ready": 46.84279300272465,
+            "hosts_ready": 70.58548397617415,
+            "index_read": 132.5082049879711,
+            "qml_ready": 147.15596300084144,
+            "plugins_ready": 270.1591509976424,
+            "first_frame": 326.29683599225245,
+            "media_ready": 326.61004600231536
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 15,
+            "pinhole.frame": 1,
+            "pinhole.recent": 1,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 9,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.779225,
+            "qt_ready": 11.13007,
+            "hosts_ready": 30.564484,
+            "qml_ready": 88.807143,
+            "index_read": 90.630488,
+            "plugins_ready": 207.088473,
+            "first_frame": 262.182404,
+            "media_ready": 262.599865
+          },
+          "observed_ms": {
+            "graphics_probe": 33.246876002522185,
+            "qt_ready": 41.55172000173479,
+            "hosts_ready": 60.981134010944515,
+            "qml_ready": 119.25450200214982,
+            "index_read": 121.02884700288996,
+            "plugins_ready": 237.47958202147856,
+            "first_frame": 292.60713802068494,
+            "media_ready": 293.00784901715815
+          },
+          "plugins_ms": {
+            "pinhole.background": 2,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 15,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 8,
+            "pinhole.send": 3,
+            "pinhole.series": 13,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 2
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 10,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.982561,
+            "qt_ready": 12.175411,
+            "hosts_ready": 31.932536,
+            "qml_ready": 90.335114,
+            "index_read": 93.166257,
+            "plugins_ready": 209.779705,
+            "first_frame": 266.777942,
+            "media_ready": 267.159903
+          },
+          "observed_ms": {
+            "graphics_probe": 28.603223006939515,
+            "qt_ready": 37.77153100236319,
+            "hosts_ready": 57.51636400236748,
+            "qml_ready": 115.93585897935554,
+            "index_read": 118.76325198682025,
+            "plugins_ready": 235.34553300123662,
+            "first_frame": 292.38952000741847,
+            "media_ready": 292.73227200610563
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 3,
+            "pinhole.favourites": 1,
+            "pinhole.folder": 0,
+            "pinhole.icloud": 1,
+            "pinhole.info": 2,
+            "pinhole.live": 0,
+            "pinhole.onthisday": 15,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 9,
+            "pinhole.send": 3,
+            "pinhole.series": 15,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        },
+        {
+          "run": 11,
+          "warmup": false,
+          "milestones": {
+            "graphics_probe": 2.809809,
+            "qt_ready": 13.377669,
+            "hosts_ready": 35.663311,
+            "index_read": 97.369037,
+            "qml_ready": 107.571353,
+            "plugins_ready": 225.355187,
+            "first_frame": 285.195236,
+            "media_ready": 285.664197
+          },
+          "observed_ms": {
+            "graphics_probe": 30.450360995018855,
+            "qt_ready": 40.96201100037433,
+            "hosts_ready": 63.252944994019344,
+            "index_read": 124.96146297780797,
+            "qml_ready": 135.14340299298055,
+            "plugins_ready": 252.91227898560464,
+            "first_frame": 312.81524599762633,
+            "media_ready": 313.27174897887744
+          },
+          "plugins_ms": {
+            "pinhole.background": 1,
+            "pinhole.colour": 2,
+            "pinhole.sheet": 4,
+            "pinhole.favourites": 0,
+            "pinhole.folder": 1,
+            "pinhole.icloud": 0,
+            "pinhole.info": 2,
+            "pinhole.live": 1,
+            "pinhole.onthisday": 14,
+            "pinhole.frame": 1,
+            "pinhole.recent": 2,
+            "pinhole.screenshots": 8,
+            "pinhole.send": 2,
+            "pinhole.series": 14,
+            "pinhole.theme": 1,
+            "pinhole.calendar": 1
+          },
+          "window": {
+            "width": 854,
+            "height": 1062,
+            "platform": "wayland"
+          }
+        }
+      ]
+    }
+  ]
+}
