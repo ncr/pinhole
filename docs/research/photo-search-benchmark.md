@@ -5,6 +5,11 @@ or model is loaded by the Pinhole window. Run the commands below from the
 checkout root. The preparation and scoring commands need only Python's
 standard library.
 
+**Follow-up:** [the ANE is now running, and a local patch-projection
+decomposition passes on the M2 Pro](photo-search-ane.md). The feasibility
+and installation failures below describe the earlier investigation stage;
+complete-model inference and retrieval evaluation are still outstanding.
+
 ## Prepare a private corpus
 
 ```sh

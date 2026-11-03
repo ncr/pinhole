@@ -6,10 +6,11 @@ analizy prywatnych zdjęć.
 
 Kontynuacja: [narzędzie do przygotowania próbek i oceny wyników](photo-search-benchmark.md).
 Na drugim komputerze (M2 Pro, Arch/Asahi) przygotowano 384 lokalne miniatury
-za zgodą właściciela. Sprawdzono też konkretny stos ANE: brak firmware'u
-blokuje urządzenie, a pakiet kompilatora odrzuca bezpośrednie odwzorowanie
-warstw wejściowych CLIP i SigLIP 2. Porównanie modeli nie zostało jeszcze
-wykonane; dalszy dokument zawiera odtwarzalny test i ograniczenia tej próby.
+za zgodą właściciela. W kolejnym kroku [uruchomiono ANE i przygotowano
+obejście dla warstw wejściowych CLIP i SigLIP 2](photo-search-ane.md):
+obie projekcje przechodzą testy na sprzęcie. Całe encodery i porównanie
+wyszukiwania po polsku pozostają do wdrożenia; dokument opisuje zakres
+poprawki, aktualne źródła i odtwarzalne testy.
 
 **Rekomendacja:** zacząć od wyszukiwania obraz–tekst i proponowanych tagów,
 z lokalnym workerem CPU/CUDA. Porównać SigLIP 2 z wielojęzycznym CLIP na

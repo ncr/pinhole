@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""Experimental CLIP/SigLIP patch projection lowering to existing H14 matmuls.
+
+These commands download public projection weights, compile ANEC programs and
+validate their constants. Only verify --backend ane submits work to the ANE.
+"""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+MODELS = {
+    "siglip2": {"repo": "google/siglip2-base-patch16-224", "revision": "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+                "file": "model.safetensors", "patch": 16},
+    "clip": {"repo": "sentence-transformers/clip-ViT-B-32", "revision": "327ab6726d33c0e22f920c83f2ff9e4bd38ca37f",
+             "file": "0_CLIPModel/model.safetensors", "patch": 32},
+}
+TILE = 1024
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+
+
+def range_read(url, start, end):
+    """Do not accidentally download a full checkpoint when Range is ignored."""
+    if not 0 <= start <= end or end - start + 1 > 16 << 20:
+        raise ValueError("invalid or oversized weight range")
+    request = urllib.request.Request(url + f"?download=true&range={start}-{end}",
+                                     headers={"Range": f"bytes={start}-{end}"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
+        if response.status != 206 or not match or tuple(map(int, match.groups()[:2])) != (start, end):
+            raise ValueError("server did not honor the exact bounded weight range")
+        data = response.read(end - start + 2)
+        if len(data) != end - start + 1:
+            raise ValueError("truncated or oversized weight range")
+        return data
+
+
+def fetch(model, output):
+    import numpy as np
+    if output.exists():
+        raise ValueError("output already exists")
+    pin = MODELS[model]
+    url = f"https://huggingface.co/{pin['repo']}/resolve/{pin['revision']}/{pin['file']}"
+    length = struct.unpack("<Q", range_read(url, 0, 7))[0]
+    if not 0 < length <= 1 << 20:
+        raise ValueError("unexpected safetensors header size")
+    header_bytes = range_read(url, 8, 7 + length)
+    header = json.loads(header_bytes)
+    prefix = "vision_model.embeddings.patch_embedding."
+    tensors, downloaded = {}, 8 + length
+    for suffix in ["weight", "bias"]:
+        entry = header.get(prefix + suffix)
+        if entry is None:
+            if suffix == "weight" or model == "siglip2":
+                raise ValueError("expected projection tensor is missing")
+            tensors[suffix] = np.zeros(768, dtype=np.float32)
+            continue
+        dtype = {"F32": "<f4", "F16": "<f2"}.get(entry["dtype"])
+        expected_shape = [768, 3, pin["patch"], pin["patch"]] if suffix == "weight" else [768]
+        if not dtype or entry["shape"] != expected_shape:
+            raise ValueError("unexpected projection dtype or shape")
+        start, stop = entry["data_offsets"]
+        expected_bytes = int(np.prod(expected_shape)) * np.dtype(dtype).itemsize
+        if stop - start != expected_bytes:
+            raise ValueError("tensor range does not match its shape")
+        raw = range_read(url, 8 + length + start, 7 + length + stop)
+        downloaded += len(raw)
+        tensors[suffix] = np.frombuffer(raw, dtype=dtype).reshape(expected_shape).astype(np.float32)
+        if not np.isfinite(tensors[suffix]).all():
+            raise ValueError("nonfinite projection weights")
+    output.mkdir(parents=True)
+    np.savez(output / "projection.npz", **tensors)
+    metadata = pin | {"schema": 1, "model": model, "bytes_downloaded": downloaded,
+                      "safetensors_header_sha256": sha(header_bytes),
+                      "weights_sha256": sha((output / "projection.npz").read_bytes())}
+    write_json(output / "source.json", metadata)
+    return metadata
+
+
+def load_weights(directory):
+    import numpy as np
+    metadata = json.loads((directory / "source.json").read_text())
+    pin = MODELS[metadata["model"]]
+    if any(metadata[k] != pin[k] for k in pin) or sha((directory / "projection.npz").read_bytes()) != metadata["weights_sha256"]:
+        raise ValueError("projection weights differ from their recorded source")
+    with np.load(directory / "projection.npz", allow_pickle=False) as data:
+        weight, bias = data["weight"], data["bias"]
+    if weight.shape != (768, 3, pin["patch"], pin["patch"]) or bias.shape != (768,):
+        raise ValueError("invalid projection shape")
+    if not np.isfinite(weight).all() or not np.isfinite(bias).all():
+        raise ValueError("nonfinite projection weights")
+    return metadata, weight, bias
+
+
+def row_blocks(rows):
+    blocks = []
+    offset = 0
+    for size in (64, 8, 2, 1):
+        while rows - offset >= size:
+            blocks.append((offset, size))
+            offset += size
+    return blocks
+
+
+def patch_rows(image, patch):
+    import numpy as np
+    if image.shape != (3, 224, 224) or image.dtype != np.float32 or not np.isfinite(image).all():
+        raise ValueError("expected finite float32 RGB CHW input [3,224,224]")
+    return np.stack([image[:, y:y + patch, x:x + patch].reshape(-1)
+                     for y in range(0, 224, patch) for x in range(0, 224, patch)])
+
+
+def lower(weights_dir, compiler, output, reduction_tile=1024):
+    import numpy as np
+    executable = shutil.which(compiler)
+    if executable is None or output.exists() or reduction_tile not in (256, 512, 1024):
+        raise ValueError("compiler unavailable or output already exists")
+    metadata, weight, bias = load_weights(weights_dir)
+    patch = metadata["patch"]
+    rows, reduction = (224 // patch)**2, 3 * patch**2
+    matrix = weight.reshape(768, reduction)
+    # Move small filters out of the low-magnitude arithmetic regime.
+    # Normalize by an exact power of two, then undo it on the host.
+    # This changes the arithmetic, not the acceptance threshold; the exact
+    # hardware cause of the unscaled per-lane errors is not established.
+    maxima = np.max(np.abs(matrix), axis=1)
+    exponents = np.zeros(768, dtype=np.float32)
+    np.log2(maxima, out=exponents, where=maxima > 0)
+    scales = np.exp2(np.clip(np.floor(-exponents), -16, 24)).astype(np.float32)
+    scales[maxima == 0] = 1
+    matrix = matrix * scales[:, None]
+    output.mkdir(parents=True)
+    blocks = row_blocks(rows)
+    programs = []
+    for size in sorted({size for _, size in blocks}, reverse=True):
+        for start in range(0, reduction, reduction_tile):
+            end = min(start + reduction_tile, reduction)
+            directory = output / f"m{size}-k{start}"
+            directory.mkdir()
+            padded = np.zeros((TILE, reduction_tile), dtype="<f2")
+            padded[:768, :end - start] = matrix[:, start:end]
+            if not np.isfinite(padded).all():
+                raise ValueError("projection weights overflow fp16")
+            payload = padded.tobytes()
+            blob = bytearray(128) + payload
+            struct.pack_into("<IIQQ", blob, 64, 0xDEADBEEF, 1, len(payload), 128)
+            (directory / "weights.bin").write_bytes(blob)
+            mil = f'''program(1.3)
+[buildInfo = dict<string, string>({{}})]
+{{
+  func main<ios18>(tensor<fp16, [{size},{reduction_tile}]> x) {{
+    tensor<fp16, [{TILE},{reduction_tile}]> W = const()[name = string("W"), val = tensor<fp16, [{TILE},{reduction_tile}]>(BLOBFILE(path = string("@model_path/weights.bin"), offset = uint64(64)))];
+    tensor<fp16, [{size},{TILE}]> y = linear(x = x, weight = W)[name = string("projection")];
+  }} -> (y);
+}}
+'''
+            (directory / "model.mil").write_text(mil)
+            result = subprocess.run([executable, "--target", "H14", "--mil", str(directory / "model.mil"),
+                                     "--model-root", str(directory), "--output", str(directory / "compiled")],
+                                    capture_output=True, text=True, timeout=30)
+            (directory / "compiler.log").write_text(result.stdout + result.stderr)
+            if result.returncode:
+                raise ValueError(f"matmul compilation failed: {result.stderr.strip()}")
+            manifest = json.loads((directory / "compiled/manifest.json").read_text())
+            if manifest["target"] != "H14" or len(manifest["programs"]) != 1:
+                raise ValueError("unexpected compiled program manifest")
+            record = manifest["programs"][0]
+            binary = directory / "compiled" / record["file"]
+            programs.append({"path": str(directory.relative_to(output)), "rows": size, "start": start, "end": end,
+                             "reduction_tile": reduction_tile,
+                             "anec_sha256": sha(binary.read_bytes()), "weight_sha256": sha(payload)})
+    plan = {"schema": 1, "stage": "patch-projection-only", "target": "H14", "source": metadata,
+            "compiler_sha256": sha(Path(executable).read_bytes()), "rows": rows, "reduction": reduction,
+            "columns": 768, "tile": TILE, "reduction_tile": reduction_tile, "row_blocks": blocks, "programs": programs,
+            "weight_scales": scales.tolist(),
+            "ane_dispatches_per_image": len(blocks) * math_ceil_div(reduction, reduction_tile),
+            "host_operations": ["extract patches", "zero pad", "sum K partials in fp32", "undo dyadic filter scaling", "add bias", "trim padding"],
+            "device_execution": False}
+    write_json(output / "plan.json", plan)
+    return plan
+
+
+def math_ceil_div(a, b):
+    return (a + b - 1) // b
+
+
+def compiled_matrix(directory, program):
+    """Read and invert the compiler's actual packed ANEC constant section."""
+    import numpy as np
+    root = directory / program["path"] / "compiled"
+    manifest = json.loads((root / "manifest.json").read_text())
+    record = manifest["programs"][0]
+    data = (root / record["file"]).read_bytes()
+    if sha(data) != program["anec_sha256"]:
+        raise ValueError("compiled ANEC was changed")
+    start = 0x1000 + record["constantOffset"]
+    raw = data[start:start + record["constantBytes"]]
+    reduction = program["reduction_tile"]
+    if len(raw) != TILE * reduction * 2:
+        raise ValueError("unexpected ANEC constant section")
+    packed = np.frombuffer(raw, dtype="<f2").reshape(TILE // 16, reduction, 16)
+    columns = np.arange(TILE)
+    planes = columns // 16
+    mapped = (planes % 16) * ((TILE // 16) // 16) + planes // 16
+    matrix = packed[mapped, :, columns % 16]
+    if sha(matrix.astype("<f2").tobytes()) != program["weight_sha256"]:
+        raise ValueError("compiled weight permutation does not match the projection")
+    return matrix
+
+
+def device_matmul(plan_dir, program, x, matrix, runner, timings):
+    import numpy as np
+    directory = plan_dir / program["path"] / "compiled"
+    record = json.loads((directory / "manifest.json").read_text())["programs"][0]
+    rows = program["rows"]
+    for port, index, width in [(record["inputs"][0], 5, program["reduction_tile"]), (record["outputs"][0], 4, TILE)]:
+        if (port["index"] != index or port["shape"] != [rows, width] or
+                port["dtype"] != "float16" or port["nchw"] != [1, 1, rows, width, rows * width * 2, width * 2] or
+                port["allocationBytes"] < rows * width * 2):
+            raise ValueError("unsupported compiled H14 port layout")
+    with tempfile.TemporaryDirectory(prefix="pinhole-ane-projection-") as temporary:
+        scratch = Path(temporary)
+        payload = x.astype("<f2").tobytes()
+        (scratch / "input.fp16").write_bytes(payload + bytes(record["inputs"][0]["allocationBytes"] - len(payload)))
+        (scratch / "weights.fp16").write_bytes(matrix.astype("<f2").tobytes())
+        command = [runner, "--anec", str(directory / record["file"]), "--in", f"0={scratch / 'input.fp16'}",
+                   "--out", f"0={scratch / 'output.fp16'}", "--weights", str(scratch / "weights.fp16"),
+                   "--check", "matvec", "--time-raw", str(scratch / "timing.ns")]
+        started = time.perf_counter()
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        if result.returncode:
+            failure = Path(tempfile.mkdtemp(prefix="failed-dispatch-", dir=plan_dir))
+            for name in ["input.fp16", "weights.fp16", "output.fp16", "timing.ns"]:
+                if (scratch / name).exists():
+                    shutil.copyfile(scratch / name, failure / name)
+            (failure / "runner.log").write_text(result.stdout + result.stderr)
+            raise ValueError(f"ANE dispatch/check failed; stop without fallback; evidence: {failure}: {result.stdout} {result.stderr}")
+        raw = (scratch / "output.fp16").read_bytes()
+        if len(raw) != record["outputs"][0]["allocationBytes"]:
+            raise ValueError("ANE output allocation differs from the manifest")
+        value = np.frombuffer(raw, dtype="<f2")[:rows * TILE].reshape(rows, TILE).copy()
+        if not np.isfinite(value).all() or np.any(value[:, 768:] != 0):
+            raise ValueError("ANE output is nonfinite or padded output columns are nonzero")
+        timing = int((scratch / "timing.ns").read_text().strip())
+        timings.append({"program": program["path"], "exec_ns": timing,
+                        "runner_seconds": time.perf_counter() - started,
+                        "check": result.stdout.strip(), "stderr": result.stderr.strip()})
+        return value
+
+
+def project(image, weight, bias, plan_dir, runner=None, timings=None):
+    """CPU simulation is explicitly separate from actual libane execution."""
+    import numpy as np
+    plan = json.loads((plan_dir / "plan.json").read_text())
+    patches = patch_rows(image, weight.shape[2])
+    result = np.zeros((len(patches), 768), dtype=np.float32)
+    programs = {(p["rows"], p["start"]): p for p in plan["programs"]}
+    cache = {key: compiled_matrix(plan_dir, p) for key, p in programs.items()}
+    for offset, rows in plan["row_blocks"]:
+        for start in range(0, patches.shape[1], plan["reduction_tile"]):
+            end = min(start + plan["reduction_tile"], patches.shape[1])
+            x = np.zeros((rows, plan["reduction_tile"]), dtype=np.float16)
+            x[:, :end - start] = patches[offset:offset + rows, start:end]
+            if not np.isfinite(x).all():
+                raise ValueError("projection input overflows fp16")
+            if runner:
+                partial = device_matmul(plan_dir, programs[rows, start], x, cache[rows, start], runner, timings)
+            else:
+                # Once-rounded fp32 sums emulate precision loss, not the
+                # ANE's internal accumulation order or its rounding mode.
+                partial = (x.astype(np.float32) @ cache[rows, start].astype(np.float32).T).astype(np.float16)
+            if not np.isfinite(partial).all():
+                raise ValueError("projection partial overflows fp16")
+            result[offset:offset + rows] += partial[:, :768].astype(np.float32)
+    return result / np.asarray(plan["weight_scales"], dtype=np.float32) + bias
+
+
+def verify(weights_dir, plan_dir, output, corpus_path=None, samples=4, runner=None, smoke_receipt=None):
+    import numpy as np
+    if output.exists() or samples < 1:
+        raise ValueError("output exists or sample count is not positive")
+    if runner:
+        runner = shutil.which(runner)
+        if not runner or not smoke_receipt:
+            raise ValueError("ANE verification requires a runner and a current-boot smoke receipt")
+        smoke = json.loads(smoke_receipt.read_text())
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        driver = Path("/sys/bus/platform/devices/284000000.ane/driver")
+        if (smoke.get("boot_id") != boot_id or smoke.get("chip") != "t6020" or smoke.get("errors") != 0 or
+                not smoke.get("available") or len(smoke.get("sha256", [])) != 20 or
+                set(smoke["sha256"]) != {smoke.get("golden_sha256")} or
+                not Path("/dev/accel/accel0").exists() or driver.resolve().name != "ane_t6021"):
+            raise ValueError("a passing M2 Pro smoke test from this boot and its bound driver are required")
+    metadata, weight, bias = load_weights(weights_dir)
+    plan = json.loads((plan_dir / "plan.json").read_text())
+    if plan["source"] != metadata:
+        raise ValueError("plan and reference weights have different identities")
+    images = [("deterministic-noise", np.random.default_rng(20261103).normal(0, .7, (3, 224, 224)).astype(np.float32))]
+    if corpus_path:
+        from PIL import Image, ImageOps
+        corpus = json.loads(corpus_path.read_text())
+        for item in corpus["items"][:samples]:
+            path = (corpus_path.parent / item["path"]).resolve()
+            if not path.is_relative_to(corpus_path.parent.resolve()) or sha(path.read_bytes()) != item["sha256"]:
+                raise ValueError("corpus image changed or path escapes the corpus")
+            with Image.open(path) as source:
+                # Diagnostic input only, not checkpoint preprocessing or a
+                # retrieval-quality benchmark. Both paths see identical pixels.
+                image = ImageOps.exif_transpose(source).convert("RGB").resize((224, 224), Image.Resampling.BICUBIC)
+            pixels = np.asarray(image, dtype=np.float32).transpose(2, 0, 1) / 127.5 - 1
+            images.append((item["id"], pixels))
+    results, timings = [], []
+    patch = metadata["patch"]
+    for name, image in images:
+        windows = np.lib.stride_tricks.sliding_window_view(image, (patch, patch), axis=(1, 2))[:, ::patch, ::patch]
+        reference = np.einsum("cyxij,ocij->yxo", windows, weight, optimize=True).reshape(-1, 768) + bias
+        actual = project(image, weight, bias, plan_dir, runner, timings)
+        a, b = actual.astype(np.float64).ravel(), reference.astype(np.float64).ravel()
+        relative_l2 = float(np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30))
+        cosine = float(a @ b / max(np.linalg.norm(a) * np.linalg.norm(b), 1e-30))
+        results.append({"id": name, "relative_l2": relative_l2, "cosine": cosine,
+                        "max_absolute_error": float(np.max(np.abs(a - b))),
+                        "pass": relative_l2 <= .002 and cosine >= .99999})
+    report = {"schema": 1, "stage": "patch-projection-only", "backend": "ane-h14" if runner else "cpu-emulated-fp16-partials",
+              "device_execution": bool(runner), "source": metadata, "thresholds": {"relative_l2_max": .002, "cosine_min": .99999},
+              "plan_sha256": sha((plan_dir / "plan.json").read_bytes()), "results": results,
+              "dispatches": timings, "pass": all(x["pass"] for x in results)}
+    if runner:
+        report.update(boot_id=boot_id, runner_sha256=sha(Path(runner).read_bytes()),
+                      smoke_receipt_sha256=sha(smoke_receipt.read_bytes()))
+    write_json(output, report)
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    fetcher = commands.add_parser("fetch-projection")
+    fetcher.add_argument("--model", choices=MODELS, required=True)
+    fetcher.add_argument("--output", type=Path, required=True)
+    lowering = commands.add_parser("lower")
+    lowering.add_argument("--weights", type=Path, required=True)
+    lowering.add_argument("--compiler", default="mil-hwxc")
+    lowering.add_argument("--reduction-tile", type=int, choices=[256, 512, 1024], default=1024)
+    lowering.add_argument("--output", type=Path, required=True)
+    verifier = commands.add_parser("verify")
+    verifier.add_argument("--weights", type=Path, required=True)
+    verifier.add_argument("--plan", type=Path, required=True)
+    verifier.add_argument("--corpus", type=Path)
+    verifier.add_argument("--samples", type=int, default=4)
+    verifier.add_argument("--backend", choices=["cpu-simulation", "ane"], default="cpu-simulation")
+    verifier.add_argument("--runner", help="path to the existing libane ane-run tool")
+    verifier.add_argument("--smoke-receipt", type=Path, help="passing M2 Pro add-fixture receipt with the current boot_id")
+    verifier.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        if args.command == "fetch-projection":
+            result = fetch(args.model, args.output)
+        elif args.command == "lower":
+            result = lower(args.weights, args.compiler, args.output, args.reduction_tile)
+        else:
+            if args.backend == "ane" and not args.runner:
+                raise ValueError("--backend ane requires --runner; no CPU fallback is performed")
+            result = verify(args.weights, args.plan, args.output, args.corpus, args.samples,
+                            args.runner if args.backend == "ane" else None, args.smoke_receipt)
+        print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        return 1 if result.get("pass") is False else 0
+    except (OSError, ValueError, KeyError, TypeError, ImportError, subprocess.TimeoutExpired) as error:
+        print(f"photo-search-ane: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

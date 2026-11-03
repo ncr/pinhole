@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "date": "2026-11-03",
+  "stage": "patch-projection-only",
+  "device": "Apple M2 Pro / t6020",
+  "kernel": "7.2.11-13-1-ARCH",
+  "ane_source_revision": "91ceff571e48aa1ad724ae0965be6edc96686d14",
+  "compiler_executable_sha256": "741dce3200be2805f3be27da16c5d13d6b68c0426b62dd40fa0d5360dab39083",
+  "firmware_sha256": "a9c4b771294a6b115624d9480a6248d0899a1681a575e865070b87a3248427bc",
+  "models": {
+    "siglip2": {
+      "source": {
+        "repo": "google/siglip2-base-patch16-224",
+        "revision": "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+        "file": "model.safetensors",
+        "patch": 16,
+        "schema": 1,
+        "model": "siglip2",
+        "bytes_downloaded": 2411392,
+        "safetensors_header_sha256": "c131f2c0f44415b5469e9c9415c7d47cff3d45ee1330ed4f1eb650983ac13eb8",
+        "weights_sha256": "ee3d22d153214397b1a04c15ca29bc60c4539a9f929805317e118575259c2d29"
+      },
+      "backend": "ane-h14",
+      "device_execution": true,
+      "pass": true,
+      "cases": 5,
+      "local_thumbnails": 4,
+      "control_noise_cases": 1,
+      "unique_programs": 2,
+      "dispatches": 25,
+      "all_per_dispatch_checks_passed": true,
+      "max_relative_l2": 0.0002256904796972505,
+      "min_cosine": 0.9999999745324939,
+      "max_absolute_error": 0.0010876655578613281,
+      "thresholds": {
+        "relative_l2_max": 0.002,
+        "cosine_min": 0.99999
+      },
+      "exec_ms_sum": 11.366942,
+      "raw_report_sha256": "32f76dfd5de66cdb4af6b7364a5e5d570f68f888d4f2c2bd05ffc862d75bd073",
+      "runner_sha256": "b1aab14a5e8e84438ce430a82def9a5caba1df74dc3b35860dbeccec0f2ee47a",
+      "plan_sha256": "ad9a45b826a6f62f05ed6fe07657864bd9735f20fea09a0fd87e22773f50aad1"
+    },
+    "clip": {
+      "source": {
+        "repo": "sentence-transformers/clip-ViT-B-32",
+        "revision": "327ab6726d33c0e22f920c83f2ff9e4bd38ca37f",
+        "file": "0_CLIPModel/model.safetensors",
+        "patch": 32,
+        "schema": 1,
+        "model": "clip",
+        "bytes_downloaded": 9484800,
+        "safetensors_header_sha256": "61f5efebca7eca0d106a8f40543d6a22af19803d2bec736b5dea1e31fc64acf7",
+        "weights_sha256": "1391eedd20142413fc005fc8efce6de857bb0a55f0f9ff429a7a68668dc1915c"
+      },
+      "backend": "ane-h14",
+      "device_execution": true,
+      "pass": true,
+      "cases": 5,
+      "local_thumbnails": 4,
+      "control_noise_cases": 1,
+      "unique_programs": 6,
+      "dispatches": 105,
+      "all_per_dispatch_checks_passed": true,
+      "max_relative_l2": 0.0004739593724812431,
+      "min_cosine": 0.9999998886353276,
+      "max_absolute_error": 0.0030994415283203125,
+      "thresholds": {
+        "relative_l2_max": 0.002,
+        "cosine_min": 0.99999
+      },
+      "exec_ms_sum": 48.12114,
+      "raw_report_sha256": "1b85ed8e6801ec5ec57b29a0fb471c9187a1541ecd706709875507215ce57fc5",
+      "runner_sha256": "b1aab14a5e8e84438ce430a82def9a5caba1df74dc3b35860dbeccec0f2ee47a",
+      "plan_sha256": "6db17a2894487c56b7d54d35a4a42e5b2a055921f44bc7861e537ea94d146539"
+    }
+  },
+  "smoke": {
+    "chip": "t6020",
+    "available": true,
+    "errors": 0,
+    "min_ms": 0.328,
+    "median_ms": 0.344,
+    "bit_exact_calls": 20
+  },
+  "limits": [
+    "Only patch projection, not complete encoders or text towers",
+    "Four local thumbnails plus noise per model; no retrieval accuracy or throughput result",
+    "No private photo ids, images or boot ids in this public aggregate",
+    "Unscaled K1024 and K256 attempts failed their per-lane checks; the dyadically scaled version passed without changing limits",
+    "Compilation used the available 0.1.0-1 binary; current 0.3.2 source still restricts direct patch convolutions"
+  ]
+}
