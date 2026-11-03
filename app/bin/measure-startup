@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Repeatable startup measurements, with an isolated profile and read-only library."""
+import argparse
+import json
+import os
+from pathlib import Path
+import selectors
+import shutil
+import socket
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--library', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--runs', type=int, default=5)
+    parser.add_argument('--warmup', type=int, default=1, help='Unreported warmup launches before measured runs (default 1).')
+    parser.add_argument('--app-cache', type=Path, help='Seed QML and graphics caches from an existing app cache.')
+    parser.add_argument('--plugin-cache', type=Path, help='Copy an existing plugin cache into the temporary profile.')
+    parser.add_argument('--plugin-state', type=Path, help='Copy existing plugin state into the temporary profile.')
+    parser.add_argument('--plugin-settings', type=Path, help='Copy a plugins.json into the temporary profile.')
+    parser.add_argument('--no-plugins', action='store_true')
+    parser.add_argument('--native-hidden', action='store_true', help='Use the current compositor; invoke ONLY on a hidden test workspace.')
+    parser.add_argument('--binary', type=Path, default=ROOT / 'app/build/pinhole')
+    parser.add_argument('--builtin-plugins', type=Path, default=ROOT / 'plugins')
+    args = parser.parse_args()
+    if not 1 <= args.runs <= 30:
+        parser.error('--runs must be between 1 and 30')
+    if not 0 <= args.warmup <= 5:
+        parser.error('--warmup must be between 0 and 5')
+    if not (args.library / 'library.sqlite').is_file():
+        parser.error('--library must contain library.sqlite')
+    # Choose xcb explicitly: an inherited "wayland;xcb" otherwise puts
+    # an xvfb-run test on the person's actual desktop.
+    if not args.native_hidden and os.environ.get('PINHOLE_STARTUP_VIRTUAL') != '1':
+        return subprocess.call(['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24',
+                                sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+                               env=os.environ | {'PINHOLE_STARTUP_VIRTUAL': '1', 'QT_QPA_PLATFORM': 'xcb'})
+
+    args.output = args.output.resolve()
+    args.output.mkdir(parents=True, exist_ok=True)
+    qt_cache = args.output / 'qt-cache'
+    qt_cache.mkdir(exist_ok=True)
+    def copy_qt_cache(source, target):
+        for entry in source.iterdir():
+            if entry.name == 'qmlcache' or entry.name.startswith('qtpipelinecache-'):
+                if entry.is_dir(): shutil.copytree(entry, target / entry.name, dirs_exist_ok=True)
+                else: shutil.copyfile(entry, target / entry.name)
+    if args.app_cache:
+        copy_qt_cache(args.app_cache, qt_cache)
+    results = []
+    for run in range(args.runs + args.warmup):
+        with tempfile.TemporaryDirectory(prefix='pinhole-startup-') as scratch:
+            profile = Path(scratch)
+            for part in ('config/pinhole', 'cache/pinhole', 'state/pinhole', 'data', 'Pictures'):
+                (profile / part).mkdir(parents=True)
+            for source, target in ((args.plugin_cache, 'cache/pinhole/plugins'),
+                                   (args.plugin_state, 'state/pinhole/plugins')):
+                if source:
+                    shutil.copytree(source, profile / target)
+            copy_qt_cache(qt_cache, profile / 'cache/pinhole')
+            if args.plugin_settings:
+                shutil.copyfile(args.plugin_settings, profile / 'config/pinhole/plugins.json')
+            if args.no_plugins:
+                ids = [json.loads(p.read_text())['id'] for p in args.builtin_plugins.glob('*/manifest.json')]
+                (profile / 'config/pinhole/plugins.json').write_text(json.dumps({'enabled': dict.fromkeys(ids, False)}))
+            env = os.environ | {
+                'XDG_CONFIG_HOME': str(profile / 'config'), 'XDG_CACHE_HOME': str(profile / 'cache'),
+                'XDG_DATA_HOME': str(profile / 'data'), 'XDG_STATE_HOME': str(profile / 'state'),
+                'XDG_PICTURES_DIR': str(profile / 'Pictures'), 'PINHOLE_SOCKET': str(profile / 'service.sock'),
+                'PINHOLE_SELFTEST': 'startup', 'PINHOLE_STARTUP_TRACE': '1', 'PINHOLE_SILENT': '1',
+                'PINHOLE_BUILTIN_PLUGINS': str(args.builtin_plugins.resolve()), 'QT_QPA_PLATFORMTHEME': '',
+                'QT_STYLE_OVERRIDE': 'Fusion', 'PINHOLED': str(ROOT / 'core/target/release/pinholed'),
+            }
+            if not args.native_hidden:
+                env['QT_QPA_PLATFORM'] = 'xcb'
+            else:
+                # Hidden Wayland surfaces get an initial frame but the
+                # compositor may suspend subsequent thumbnail uploads.
+                # Measure native first frame, not fabricated "ready photos".
+                env['PINHOLE_STARTUP_FRAME_ONLY'] = '1'
+            daemon = None
+            proc = None
+            try:
+                # Own service, --given: no source sync, library writes or
+                # eviction. The UI gets a warm service; boot is timed apart.
+                began = time.monotonic()
+                with (args.output / f'{run}-daemon.log').open('w') as daemon_log:
+                    daemon = subprocess.Popen([env['PINHOLED'], '--given', '--library', str(args.library.resolve()),
+                                               '--cache', str(profile / 'renditions'), '--socket', env['PINHOLE_SOCKET']],
+                                              env=env, stdout=daemon_log, stderr=daemon_log)
+                while True:
+                    try:
+                        with socket.socket(socket.AF_UNIX) as peer:
+                            peer.settimeout(.5)
+                            peer.connect(env['PINHOLE_SOCKET'])
+                            greeting = json.loads(peer.makefile('r').readline())
+                            if greeting.get('event') != 'hello' or greeting.get('protocol') != 1:
+                                raise RuntimeError('Unexpected service greeting')
+                        break
+                    except (FileNotFoundError, ConnectionRefusedError, TimeoutError):
+                        if daemon.poll() is not None or time.monotonic() - began > 10:
+                            raise RuntimeError('Private test service did not start; see daemon log')
+                        time.sleep(.005)
+                record = {'run': run, 'warmup': run < args.warmup, 'service_boot_ms': (time.monotonic() - began) * 1000,
+                          'milestones': {}, 'observed_ms': {}, 'plugins_ms': {}}
+                began = time.monotonic()
+                with (args.output / f'{run}.log').open('w') as log:
+                    proc = subprocess.Popen([str(args.binary.resolve()), '--library', str(args.library.resolve())],
+                                            env=env, stdout=log, stderr=subprocess.PIPE, bufsize=0)
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(proc.stderr, selectors.EVENT_READ)
+                        pending = b''
+                        while True:
+                            if not selector.select(timeout=25):
+                                raise RuntimeError('Startup timed out (25 s); see run log')
+                            chunk = os.read(proc.stderr.fileno(), 65536)
+                            if not chunk:
+                                break
+                            pending += chunk
+                            while b'\n' in pending:
+                                raw, pending = pending.split(b'\n', 1)
+                                line = raw.decode('utf-8', errors='replace') + '\n'
+                                log.write(line)
+                                for marker, target in (('pinhole startup: ', 'milestones'),
+                                                       ('pinhole plugin startup: ', 'plugins_ms')):
+                                    if marker not in line:
+                                        continue
+                                    event = json.loads(line.split(marker, 1)[1])
+                                    key = event.get('event', event.get('id'))
+                                    record[target][key] = event['ms']
+                                    if key == 'first_frame':
+                                        record['window'] = {k: event[k] for k in ('width', 'height', 'platform') if k in event}
+                                    if target == 'milestones':
+                                        record['observed_ms'][key] = (time.monotonic() - began) * 1000
+                        if pending: log.write(pending.decode('utf-8', errors='replace'))
+                    if proc.wait(timeout=5):
+                        raise RuntimeError(f'Run {run} failed; see its log')
+                for milestone in ('first_frame', 'plugins_ready', 'media_ready'):
+                    if milestone not in record['milestones']:
+                        raise RuntimeError(f'Missing {milestone}; rebuild Pinhole with startup tracing')
+                results.append(record)
+                copy_qt_cache(profile / 'cache/pinhole', qt_cache)
+                print(json.dumps(record), flush=True)
+            finally:
+                for process in (proc, daemon):
+                    if process and process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+    measured = [r for r in results if not r['warmup']]
+    keys = measured[0]['milestones']
+    summary = {key: {'median_ms': statistics.median(r['milestones'][key] for r in measured if key in r['milestones']),
+                     'min_ms': min(r['milestones'][key] for r in measured if key in r['milestones']),
+                     'max_ms': max(r['milestones'][key] for r in measured if key in r['milestones'])} for key in keys}
+    report = {'runs': results, 'summary': summary, 'display': 'native-hidden' if args.native_hidden else 'Xvfb 1600x1000',
+              'note': 'Warm filesystem is not a cold OS boot. Main-relative ms excludes the dynamic loader; observed_ms includes process launch and pipe delivery.'}
+    (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

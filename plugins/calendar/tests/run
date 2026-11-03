@@ -2,4 +2,4 @@
 # The calendar's own tests (tst_days.qml): CalendarDays.js, without Pinhole.
 set -eu
 cd "$(dirname -- "$0")"
-QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 exec /usr/lib/qt6/bin/qmltestrunner -input tst_days.qml "$@"
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_FORCE_STDERR_LOGGING=1 exec /usr/lib/qt6/bin/qmltestrunner -input tst_days.qml "$@"

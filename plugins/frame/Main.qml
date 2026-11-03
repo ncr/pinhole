@@ -12,7 +12,13 @@ import Pinhole.Plugin
 // it shows, the screen stays on.
 PinholePlugin {
     id: plugin
-    covering: frame.shown
+    objectName: "photoFramePlugin"
+    readonly property var frame: view.item
+    covering: frame !== null && frame.shown
+    function ensureFrame() {
+        if (!view.item) view.setSource("Frame.qml", { plugin: plugin, objectName: "photoFrame" })
+        return view.item
+    }
 
     // Its settings, kept as they change.
     readonly property string photos: pinhole.settings.photos ?? "favourites"
@@ -88,7 +94,7 @@ PinholePlugin {
             return
         }
         ticked = false
-        frame.start(shuffle ? "" : from(list, pinhole.currentIndex()), list, false, () => choose(kind))
+        ensureFrame().start(shuffle ? "" : from(list, pinhole.currentIndex()), list, false, () => choose(kind))
     }
 
     // A word on the photos when nothing could be shown.
@@ -119,7 +125,7 @@ PinholePlugin {
                     return
                 }
                 plugin.ticked = false
-                frame.start(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
+                plugin.ensureFrame().start(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
             }
         },
         PluginAction {
@@ -132,7 +138,7 @@ PinholePlugin {
                 const ticked = Array.from(pinhole.selection()).map(i => library.item(i).id)
                 plugin.ticked = true
                 // Those still there and not hidden since.
-                frame.start(plugin.shuffle ? "" : ticked[0], ticked, false, () => ticked.filter(id => {
+                plugin.ensureFrame().start(plugin.shuffle ? "" : ticked[0], ticked, false, () => ticked.filter(id => {
                     const i = library.indexOf(id)
                     return i >= 0 && !pinhole.isHidden(i)
                 }))
@@ -248,14 +254,17 @@ PinholePlugin {
         }
     }
 
-    Frame {
-        id: frame
-        objectName: "photoFrame"
+    // Creating slides also creates media players and waits for the GPU's
+    // multimedia probe. Keep that work off the app's first-frame path.
+    Loader {
+        id: view
         anchors.fill: parent
-        plugin: plugin
+    }
+    Connections {
+        target: plugin.frame
         // The library read again without any of them; what was ticked
         // gone needs no word.
-        onEmptied: if (!plugin.ticked) plugin.nothing()
+        function onEmptied() { if (!plugin.ticked) plugin.nothing() }
     }
 
     Chip {

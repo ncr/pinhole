@@ -1,5 +1,11 @@
 # Plugins
 
+Open the offline handbook in **Settings (Tab) → Plugins → Build a plugin**.
+Start with [the quick start](plugin-quickstart.md), or copy the
+[implementation contract for an agent](plugin-agents.md). The installed
+version's complete references are also available with
+`pinhole plugin docs --json`. The app and CLI bundle these exact source files.
+
 What Pinhole does beyond showing photos comes as plugins, and anyone can
 write one for themselves: a one-off that does exactly what you want with
 your photos, and nobody else needs to see. Series (`plugins/series`) is
@@ -613,8 +619,10 @@ to the photos at the next key, never typed into.
 ### `pinhole`
 
 `pinhole` is the plugin's way into Pinhole. A photo is named by its
-position in the library (oldest first, as the grid has them) or by its id;
+position in the library (capture-date order, oldest first) or by its id;
 positions move when the library is read again, ids do not, so keep ids.
+The main grid can use Automatic or addition-date order independently of
+this API. A library position is not a visual grid position.
 
 | | |
 |---|---|

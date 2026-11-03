@@ -4,6 +4,7 @@
 #include <QString>
 
 #include <mutex>
+#include <deque>
 #include <vector>
 
 // Frame timing as the render thread sees it: the interval between buffer
@@ -71,5 +72,7 @@ private:
     qint64 m_syncAt = 0, m_renderAt = 0, m_renderEndAt = 0;
     qint64 m_startedAt = 0;
     Sample m_pending{};
-    std::vector<Sample> m_samples;
+    // Bounded even with the overlay closed: about nine minutes at 120 Hz,
+    // far more than a benchmark phase. No periodic large vector compaction.
+    std::deque<Sample> m_samples;
 };

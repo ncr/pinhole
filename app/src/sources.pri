@@ -86,6 +86,7 @@ HEADERS += \
     $$PWD/commands.h \
     $$PWD/encoder.h \
     $$PWD/plugins.h \
+    $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
     $$PWD/incoming.h \
     $$PWD/portal.h \
@@ -97,6 +98,7 @@ HEADERS += \
 
 SOURCES += \
     $$PWD/library.cpp \
+    $$PWD/pluginguide.cpp \
     $$PWD/timeline.cpp \
     $$PWD/libraryreloader.cpp \
     $$PWD/keymap.cpp \

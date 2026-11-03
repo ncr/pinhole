@@ -1,0 +1,7 @@
+[package]
+name = "pinhole-jpeg-parity-repro"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+zune-core = "=0.5.1"
+zune-jpeg = "=0.5.15"

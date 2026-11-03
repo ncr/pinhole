@@ -1003,7 +1003,11 @@ ApplicationWindow {
                 z: win.coveringPlugin === modelData ? 1 : 0
                 visible: win.coveringPlugin === "" || win.coveringPlugin === modelData
                 property bool completed: false
-                function load() { main !== "" ? setSource(main, { pinhole: info.host }) : source = "" }
+                function load() {
+                    const began = Date.now()
+                    main !== "" ? setSource(main, { pinhole: info.host }) : source = ""
+                    if (main !== "") plugins.startupLoaded(modelData, Date.now() - began)
+                }
                 onMainChanged: if (completed) load()
                 Component.onCompleted: { completed = true; load() }
                 onLoaded: {
@@ -1256,6 +1260,7 @@ ApplicationWindow {
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
         onTourRequested: id => win.startTour(id)
+        onGuideRequested: win.guideShown = true
         pluginSources: win.pluginSources
         onAddRequested: {
             side.shown = false
@@ -1286,6 +1291,19 @@ ApplicationWindow {
         ready: id => win.pluginItem(id)?.tourReady ?? false
         onTourRequested: id => win.startTour(id)
     }
+    property bool guideShown: false
+    Loader {
+        id: guideView
+        objectName: "pluginGuideLoader"
+        anchors.fill: parent
+        active: win.guideShown
+        source: active ? "qrc:/PluginGuide.qml" : ""
+        onLoaded: item.forceActiveFocus()
+        Connections {
+            target: guideView.item
+            function onClosed() { win.guideShown = false; grid.forceActiveFocus() }
+        }
+    }
     HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
     Tour { id: tour; objectName: "tour"; grid: grid; photoViewer: win.photoViewer; side: side }
 
@@ -1296,13 +1314,14 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: help.shown || side.shown || addPicker.shown || newPlugins.shown || pluginCovering
+    readonly property bool panelUp: help.shown || guideShown || side.shown || addPicker.shown || newPlugins.shown || pluginCovering
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
     // Whose the keys are (keymap.h): the one on top, so two never share one.
     readonly property string keyLayer: tour.shown ? "tour"
         : help.shown ? "help"
+        : guideShown ? "guide"
         : newPlugins.shown ? "newPlugins"
         : addPicker.shown ? "addSource"
         : firstRun && !pluginCovering ? "firstRun"

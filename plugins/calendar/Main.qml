@@ -23,6 +23,7 @@ PinholePlugin {
     readonly property var calendar: view.item
     covering: calendar !== null && calendar.shown
     function open() {
+        fresh()
         view.active = true
         view.item.open()
     }
@@ -58,7 +59,7 @@ PinholePlugin {
     // Read again, or photos hidden from the grid or shown again: counted
     // again while it shows, once for both when the library's reading moves
     // what is hidden; else when it is next needed.
-    property bool stale: false
+    property bool stale: true
     function recount() {
         if (calendar && calendar.shown) {
             Qt.callLater(plugin.count)
@@ -78,7 +79,7 @@ PinholePlugin {
         target: pinhole
         function onHiddenChanged() { plugin.recount() }
     }
-    Component.onCompleted: count()
+    // The histogram is needed on opening the calendar or its settings.
 
     actions: [
         PluginAction {

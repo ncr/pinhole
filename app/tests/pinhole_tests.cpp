@@ -59,6 +59,8 @@
 #include "marks.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "pluginguide.h"
+#include "framestats.h"
 #include "plugins.h"
 #include "photoprovider.h"
 #include "thumbnailloader.h"
@@ -71,11 +73,73 @@
 #include "translator.h"
 #include "viewer.h"
 #include "viewermotion.h"
+#include "zoomer.h"
 
 class PinholeTests : public QObject {
     Q_OBJECT
 
 private:
+    Q_SLOT void bundledPluginDocumentsAreReadableAndTheirLinksResolve() {
+        PluginGuide guide;
+        QCOMPARE(guide.api(), Plugins::api);
+        for (const QString &name : PluginGuide::documents()) {
+            QVERIFY2(!PluginGuide::document(name).isEmpty(), qPrintable(name));
+            const auto parts = guide.sections(name);
+            QVERIFY(!parts.isEmpty());
+            QSet<QString> ids;
+            for (const QVariant &part : parts) {
+                const auto section = part.toMap();
+                const auto id = section.value("id").toString();
+                QVERIFY(!ids.contains(id));
+                ids.insert(id);
+                QVERIFY(!guide.markdown(name, id).isEmpty());
+            }
+        }
+        QCOMPARE(guide.destination("plugins.md#the-kit", "plugin-quickstart").value("document").toString(), QString("plugins"));
+        QCOMPARE(guide.destination("plugins.md#pinhole", "plugin-quickstart").value("document").toString(), QString("plugins"));
+        QCOMPARE(guide.destination("#promises", "plugins").value("document").toString(), QString("plugins"));
+        QVERIFY(guide.destination("../plugins.md", "plugins").isEmpty());
+        QVERIFY(guide.destination("file:///etc/passwd", "plugins").isEmpty());
+        QVERIFY(guide.destination("https://example.org", "plugins").isEmpty());
+        QVERIFY(guide.destination("plugins.md#no-such-section", "plugins").isEmpty());
+        QVERIFY(guide.markdown("not-a-document").isEmpty());
+        QVERIFY(guide.markdown("plugin-agents").contains("pinhole plugin docs --json"));
+    }
+
+    Q_SLOT void frameDiagnosticsStayBoundedWithTheirOverlayClosed() {
+        FrameStats stats;
+        for (int i = 0; i < 70000; ++i) {
+            stats.syncBegan(); stats.renderBegan(); stats.renderEnded(); stats.frameSwapped();
+        }
+        QCOMPARE(stats.summary().frames, 1 << 16);
+        QVERIFY(!stats.aroundWorst(1, 1).isEmpty());
+        stats.reset();
+        QCOMPARE(stats.summary().frames, 0);
+    }
+
+    Q_SLOT void thePluginKitSideWheelTraversesItsWholeRangeAndReversesAtTheEnds() {
+        Zoomer zoom;
+        zoom.setLevels({24, 48, 96, 192, 384});
+        const auto turn = [&](int angle, int packets) {
+            for (int i = 0; i < packets; ++i) {
+                QWheelEvent event({30, 30}, {30, 30}, {}, {angle, 0}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                zoom.takeWheel(&event);
+                zoom.advance(.01);
+            }
+            for (int i = 0; i < 100; ++i) zoom.advance(.01);
+        };
+        zoom.setLevel(0);
+        turn(30, 80);
+        QCOMPARE(zoom.level(), 4);
+        QVERIFY(std::abs(zoom.shown() - 384) < 1);
+        // Still the same turn: no rest and lots of redundant input at the
+        // endpoint, then a reversal must move immediately.
+        turn(120, 80);
+        turn(-30, 80);
+        QCOMPARE(zoom.level(), 0);
+        QVERIFY(std::abs(zoom.shown() - 24) < 1);
+    }
+
     // A flick: fingers moving `perEvent` px every 8 ms for `events` reports,
     // then lifted at once.
     static ScrollPhysics flicked(double perEvent, int events) {

@@ -39,11 +39,13 @@
 #include "marks.h"
 #include "photoprovider.h"
 #include "plugins.h"
+#include "pluginguide.h"
 #include "selftest.h"
 #include "serviceclient.h"
 #include "sources.h"
 #include "stage.h"
 #include "storage.h"
+#include "startup.h"
 #include "updater.h"
 #include "viewer.h"
 #include "theme.h"
@@ -100,6 +102,7 @@ bool vulkanUsable() {
 } // namespace
 
 int main(int argc, char *argv[]) {
+    StartupTrace startup;
 #ifdef PINHOLE_BUILD_COMMIT
     if (argc == 2 && QByteArray(argv[1]) == "--build-revision") {
         std::puts(PINHOLE_BUILD_COMMIT);
@@ -123,6 +126,7 @@ int main(int argc, char *argv[]) {
     // draws. QSG_RHI_BACKEND still picks one by hand.
     if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND") && vulkanUsable())
         qputenv("QSG_RHI_BACKEND", "vulkan");
+    startup.mark(QStringLiteral("graphics_probe"));
     // Thumbnails share atlas pages; at the default size (half the screen,
     // rounded) a page holds only a dozen of them and a full screen would
     // need dozens of draw calls. 4096 pages hold ~70 full-size thumbnails.
@@ -145,6 +149,7 @@ int main(int argc, char *argv[]) {
     if (platformTheme.startsWith("gtk"))
         qunsetenv("QT_QPA_PLATFORMTHEME");
     QGuiApplication app(argc, argv);
+    startup.mark(QStringLiteral("qt_ready"));
     if (platformTheme.startsWith("gtk"))
         qputenv("QT_QPA_PLATFORMTHEME", platformTheme);
     // A self-test never touches the person's own Pictures or clipboard
@@ -158,12 +163,13 @@ int main(int argc, char *argv[]) {
     // plays video, is made once it is ready (mediaReady in Main.qml).
     bool mediaReady = false;
     QQuickWindow *mainWindow = nullptr;
-    std::jthread media([&app, &mediaReady, &mainWindow] {
+    std::jthread media([&app, &mediaReady, &mainWindow, &startup] {
         QPlatformMediaIntegration *integration = QPlatformMediaIntegration::instance();
         // Its later children (the devices) are made on the window's thread.
         integration->moveToThread(app.thread());
-        QMetaObject::invokeMethod(&app, [&mediaReady, &mainWindow] {
+        QMetaObject::invokeMethod(&app, [&mediaReady, &mainWindow, &startup] {
             mediaReady = true;
+            startup.mark(QStringLiteral("media_ready"));
             if (mainWindow)
                 mainWindow->setProperty("mediaReady", true);
         }, Qt::QueuedConnection);
@@ -214,7 +220,10 @@ int main(int argc, char *argv[]) {
     // the window opens and says how to make one, and picks it up once it is
     // there.
     bool haveLibrary = false;
-    std::thread opening([&] { haveLibrary = library.open(libraryDir, &error); });
+    std::thread opening([&] {
+        haveLibrary = library.open(libraryDir, &error);
+        startup.mark(QStringLiteral("index_read"));
+    });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
     qmlRegisterType<SdrVideo>("Pinhole", 1, 0, "SdrVideo");
@@ -248,6 +257,8 @@ int main(int argc, char *argv[]) {
     Sources sources(&service);
     Updater updater;
     Plugins plugins(&library, &service, &viewer, &translator, &history);
+    PluginGuide pluginGuide;
+    startup.mark(QStringLiteral("hosts_ready"));
     plugins.setFavourites(&favourites);
     plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
@@ -281,6 +292,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("sources", &sources);
     engine.rootContext()->setContextProperty("updater", &updater);
     engine.rootContext()->setContextProperty("plugins", &plugins);
+    engine.rootContext()->setContextProperty("pluginGuide", &pluginGuide);
     engine.rootContext()->setContextProperty("display", plugins.display());
     engine.rootContext()->setContextProperty("stage", &stage);
     engine.rootContext()->setContextProperty("markChoices", &markChoices);
@@ -303,6 +315,7 @@ int main(int argc, char *argv[]) {
     // picker over it, even where no source is set up yet.
     engine.rootContext()->setContextProperty("libraryGiven", libraryGiven);
     engine.load(QUrl("qrc:/Main.qml"));
+    startup.mark(QStringLiteral("qml_ready"));
     opening.join();
     service.setShown(library.source());
     if (!haveLibrary)
@@ -332,6 +345,17 @@ int main(int argc, char *argv[]) {
     grid->setTouchpadHold(&hold);
     // Plugins load now, with the library whole, before the first frame.
     plugins.libraryOpened();
+    startup.mark(QStringLiteral("plugins_ready"));
+    if (qEnvironmentVariableIsSet("PINHOLE_STARTUP_TRACE")) {
+        QObject::connect(window, &QQuickWindow::frameSwapped, window, [window, &startup] {
+            startup.mark(QStringLiteral("first_frame"), {{"width", window->width()}, {"height", window->height()},
+                         {"platform", QGuiApplication::platformName()}});
+        }, Qt::DirectConnection);
+        QObject::connect(window, &QQuickWindow::frameSwapped, window, [grid, &startup] {
+            if (grid->count() > 0 && grid->unresolvedVisible() == 0)
+                startup.mark(QStringLiteral("first_photos"));
+        });
+    }
     // A favourite's mark, the moment it is set.
     QObject::connect(&favourites, &Favourites::changed, grid, [grid] { grid->update(); });
     // A resting finger stops a zoomed photo coasting as well.

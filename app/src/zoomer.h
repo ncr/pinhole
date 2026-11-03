@@ -20,7 +20,7 @@ class QWheelEvent;
 // that size is the one laid out; let go, it lands on the size nearest where
 // the pinch was heading (its speed carried on for 0.12 s, one size past
 // those shown at most), eased in 0.3 s. Ctrl and a notch go a size at once;
-// the sideways wheel glides, a turn one size at most.
+// the sideways wheel glides across the whole range in one turn.
 //
 // The plugin's PinchZoom (PinchZoom.qml) is one with its content inside,
 // drawn at `factor` about `origin` while it zooms: laid out at `size`, a
@@ -101,12 +101,11 @@ private:
     std::vector<std::pair<double, double>> m_samples; // (seconds, log size)
     bool m_settling = false;
     double m_fromShown = 0, m_toShown = 0, m_t = 0;
-    // The sideways wheel: where it is and is going (log size), from which
-    // level, when last turned, and a turn spent at the next level.
+    // The sideways wheel: current and target log size, last packet's
+    // direction and time. Clamp only at global ends, as the grid does.
     bool m_wheeling = false;
     double m_wheelCurrent = 0, m_wheelTarget = 0, m_wheelLastAt = -1e9;
-    int m_wheelFrom = 0;
-    bool m_wheelSpent = false;
+    int m_wheelDirection = 0;
     double m_notches = 0;
     QPointer<QQuickWindow> m_window;
     QMetaObject::Connection m_frames;

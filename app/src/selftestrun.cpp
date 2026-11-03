@@ -9,6 +9,7 @@
 #include "timeline.h"
 #include "outgoing.h"
 #include "photogrid.h"
+#include "pluginguide.h"
 #include "viewer.h"
 
 #include <QCoreApplication>
@@ -32,7 +33,160 @@
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp"};
+    // Applies to the fast startup/handbook checks too, before they return.
+    if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
+        context.window->resize(size[0].toInt(), size[1].toInt());
+    if (name == QLatin1String("lazyplugins")) {
+        auto *window = context.window;
+        auto *steps = new QTimer(window);
+        auto phase = std::make_shared<int>(0);
+        const auto item = [window](const QString &id) {
+            QVariant result;
+            QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, id));
+            return result.value<QObject *>();
+        };
+        const auto fail = [steps](const char *what) {
+            std::fprintf(stderr, "selftest: lazyplugins: %s\n", what);
+            steps->stop(); QCoreApplication::exit(1);
+        };
+        QObject::connect(steps, &QTimer::timeout, window, [=] {
+            QObject *calendar = item("pinhole.calendar"), *frame = item("pinhole.frame");
+            if (!calendar || !frame) return fail("missing built-in plugins");
+            const auto press = [window](int key) {
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, key, Qt::NoModifier);
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, key, Qt::NoModifier);
+            };
+            switch ((*phase)++) {
+            case 0:
+                if (frame->property("frame").value<QObject *>()) return fail("media players created at startup");
+                if (calendar->property("counted").toBool()) return fail("calendar counted at startup");
+                press(Qt::Key_Y);
+                return;
+            case 1: {
+                QObject *view = calendar->property("calendar").value<QObject *>();
+                if (!calendar->property("counted").toBool() || !view || !view->property("shown").toBool())
+                    return fail("calendar did not count and open on Y");
+                if (!arg.isEmpty()) window->grabWindow().save(arg + "/calendar.png");
+                press(Qt::Key_Escape);
+                return;
+            }
+            case 2:
+                QMetaObject::invokeMethod(frame, "begin", Q_ARG(QVariant, QStringLiteral("all")));
+                return;
+            case 3: {
+                QObject *view = frame->property("frame").value<QObject *>();
+                if (!view || !view->property("shown").toBool()) return fail("Photo frame did not open on demand");
+                if (!arg.isEmpty()) window->grabWindow().save(arg + "/frame.png");
+                press(Qt::Key_Escape);
+                return;
+            }
+            default: {
+                QObject *view = frame->property("frame").value<QObject *>();
+                if (!view || view->property("shown").toBool()) return fail("Photo frame did not close on Escape");
+                std::puts("selftest: lazyplugins: no media or calendar work at startup; Y, count, Frame, Escape: PASS");
+                steps->stop(); QCoreApplication::quit();
+            }
+            }
+        });
+        steps->start(1000);
+        return true;
+    }
+    if (name == QLatin1String("guide")) {
+        auto *window = context.window;
+        auto *grid = context.grid;
+        auto *tick = new QTimer(window);
+        auto phase = std::make_shared<int>(0);
+        const auto fail = [tick](const char *why) {
+            std::fprintf(stderr, "selftest: guide: %s\n", why);
+            tick->stop(); QCoreApplication::exit(1);
+        };
+        QObject::connect(tick, &QTimer::timeout, window, [=] {
+            auto *guide = window->findChild<QQuickItem *>("pluginGuide");
+            const auto open = [guide](const QString &document, int section = 0) {
+                QMetaObject::invokeMethod(guide, "open", Q_ARG(QVariant, document), Q_ARG(QVariant, section));
+            };
+            const auto save = [window, arg](const QString &name) {
+                if (!arg.isEmpty()) window->grabWindow().save(arg + '/' + name + ".png");
+            };
+            switch ((*phase)++) {
+            case 0:
+                if (guide) return fail("the guide was eagerly constructed at startup");
+                window->setProperty("guideShown", true);
+                return;
+            case 1:
+                if (!guide) return fail("the handbook did not load");
+                save("overview");
+                if (auto *button = guide->findChild<QObject *>("guideCopyAgent"))
+                    QMetaObject::invokeMethod(button, "press");
+                else return fail("missing agent brief button");
+                if (!clipboardNow() || !clipboardNow()->text().contains("pinhole plugin docs --json"))
+                    return fail("agent instructions were not copied");
+                open("plugins", 2);
+                return;
+            case 2:
+                if (!guide) return fail("guide disappeared");
+                save("api");
+                QMetaObject::invokeMethod(guide, "follow", Q_ARG(QVariant, QStringLiteral("source-providers.md")));
+                return;
+            case 3:
+                if (!guide || guide->property("document").toString() != "source-providers")
+                    return fail("a reference link did not open its bundled document");
+                save("provider");
+                guide->forceActiveFocus();
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, Qt::Key_1, Qt::NoModifier);
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, Qt::Key_1, Qt::NoModifier);
+                return;
+            case 4:
+                if (!guide || guide->property("document").toString() != "plugin-quickstart")
+                    return fail("document navigation keys did not work");
+                window->resize(720, 740);
+                return;
+            case 5:
+                save("narrow");
+                open("plugins");
+                if (auto *search = guide->findChild<QObject *>("guideSearch")) search->setProperty("text", "Promises");
+                else return fail("missing search");
+                return;
+            case 6:
+                if (!guide || guide->property("section").toInt() == 0) return fail("search did not select a matching section");
+                save("search");
+                guide->forceActiveFocus();
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+                QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier);
+                return;
+            default:
+                if (window->property("guideShown").toBool()) return fail("Escape did not close the handbook");
+                if (grid->selecting()) return fail("a handbook key reached the grid");
+                std::puts("selftest: guide: lazy load, offline links, agent brief, keys, narrow layout, search and Escape: PASS");
+                tick->stop(); QCoreApplication::quit();
+            }
+        });
+        tick->start(700);
+        return true;
+    }
+    if (name == QLatin1String("startup")) {
+        auto *window = context.window;
+        auto *grid = context.grid;
+        auto drew = std::make_shared<bool>(false);
+        QObject::connect(window, &QQuickWindow::frameSwapped, window, [drew] { *drew = true; });
+        auto *poll = new QTimer(window);
+        QObject::connect(poll, &QTimer::timeout, window, [=] {
+            if (*drew && (qEnvironmentVariableIsSet("PINHOLE_STARTUP_FRAME_ONLY")
+                         || grid->count() == 0 || grid->unresolvedVisible() == 0)
+                    && window->property("mediaReady").toBool()) {
+                if (!arg.isEmpty()) window->grabWindow().save(arg + "/startup.png");
+                poll->stop();
+                QCoreApplication::quit();
+            }
+        });
+        poll->start(10);
+        QTimer::singleShot(15000, window, [] {
+            std::fprintf(stderr, "selftest: startup: timed out waiting for photos and media\n");
+            QCoreApplication::exit(1);
+        });
+        return true;
+    }
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -41,8 +195,6 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // PINHOLE_SELFTEST_SIZE: the window's, as 1400x900, for any of them
     // (offscreen, or a window the compositor lets float): how it looks and
     // works that wide, the bars folding and the help in its columns.
-    if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
-        window->resize(size[0].toInt(), size[1].toInt());
     PhotoGrid *grid = context.grid;
     Library &library = context.library;
     Viewer &viewer = context.viewer;

@@ -36,7 +36,7 @@ class Translator;
 class Viewer;
 
 // What a plugin sees of the library: every photo by its position, oldest
-// first, as the grid has them.
+// first by capture date, independent of the grid's timeline order.
 class PluginLibrary : public QObject {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY changed)
@@ -651,6 +651,8 @@ public:
     Q_INVOKABLE void showPersonalDir() const;
     // Look for plugins again.
     Q_INVOKABLE void rescan();
+    // Opt-in diagnostics for Main.qml's synchronous loader, not plugin API.
+    Q_INVOKABLE void startupLoaded(const QString &id, double ms) const;
     // Whose file a URL is: a plugin's id, "" for none (Pinhole's own). The
     // help lists a plugin's commands under its name by it.
     Q_INVOKABLE QString idOf(const QString &url) const;

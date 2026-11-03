@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "pluginguide.h"
 #include "sdrvideo.h"
 #include "videoview.h"
 #include "selftest.h"
@@ -435,6 +436,12 @@ void PluginHost::endPrograms(const std::vector<QProcess *> &programs) {
 }
 
 int PluginHost::api() const { return Plugins::api; }
+
+void Plugins::startupLoaded(const QString &id, double ms) const {
+    if (!qEnvironmentVariableIsSet("PINHOLE_STARTUP_TRACE")) return;
+    const auto json = QJsonDocument(QJsonObject{{"id", id}, {"ms", ms}}).toJson(QJsonDocument::Compact);
+    std::fprintf(stderr, "pinhole plugin startup: %s\n", json.constData());
+}
 
 QString PluginHost::coveredBy() const { return m_plugins->coveredBy(); }
 
@@ -2928,6 +2935,8 @@ const char *kPluginUsage = R"(Usage: pinhole plugin <command>
   check [folder | id]    look a plugin over as Pinhole would load it: its
                          manifest, its QML, its translations (the folder
                          here, if none is named)
+  docs [name | --json]   read the bundled handbook; --json includes the
+                         installed API version and every document
 
 docs/plugins.md has the whole of what a plugin is given.
 )";
@@ -3139,6 +3148,25 @@ int runPluginCommand(int argc, char *argv[]) {
     if (argc < 2 || qstrcmp(argv[1], "plugin") != 0)
         return -1;
     const QString command = argc > 2 ? QString::fromLocal8Bit(argv[2]) : QString();
+    if (command == QLatin1String("docs") && argc <= 4) {
+        QCoreApplication app(argc, argv);
+        const QString name = argc == 4 ? QString::fromLocal8Bit(argv[3]) : QStringLiteral("plugin-quickstart");
+        if (name == QLatin1String("--json")) {
+            QJsonArray documents;
+            for (const QString &id : PluginGuide::documents())
+                documents.append(QJsonObject{{"id", id}, {"markdown", PluginGuide::document(id)}});
+            const auto json = QJsonDocument(QJsonObject{{"api", Plugins::api}, {"documents", documents}}).toJson();
+            std::fwrite(json.constData(), 1, size_t(json.size()), stdout);
+            return 0;
+        }
+        if (!PluginGuide::documents().contains(name)) {
+            std::fprintf(stderr, "Unknown document. Choose: %s, or --json\n", qPrintable(PluginGuide::documents().join(", ")));
+            return 2;
+        }
+        const auto text = PluginGuide::document(name).toUtf8();
+        std::fwrite(text.constData(), 1, size_t(text.size()), stdout);
+        return text.isEmpty() ? 1 : 0;
+    }
     if (command == QLatin1String("new") && argc == 4) {
         QCoreApplication app(argc, argv);
         return newPlugin(QString::fromLocal8Bit(argv[3]));
@@ -3146,6 +3174,7 @@ int runPluginCommand(int argc, char *argv[]) {
     if (command == QLatin1String("check") && argc <= 4) {
         // A window system is not needed to compile QML.
         qputenv("QT_QPA_PLATFORM", "offscreen");
+        qputenv("QT_QPA_PLATFORMTHEME", "generic");
         QGuiApplication app(argc, argv);
         app.setApplicationName("pinhole");
         Plugins::registerTypes();

@@ -1,6 +1,14 @@
 <RCC>
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
+        <file alias="PluginGuide.qml">PluginGuide.qml</file>
+        <file alias="docs/plugin-quickstart.md">../../docs/plugin-quickstart.md</file>
+        <file alias="docs/plugin-agents.md">../../docs/plugin-agents.md</file>
+        <file alias="docs/plugins.md">../../docs/plugins.md</file>
+        <file alias="docs/source-providers.md">../../docs/source-providers.md</file>
+        <file alias="docs/service.md">../../docs/service.md</file>
+        <file alias="docs/sources.md">../../docs/sources.md</file>
+        <file alias="docs/hdr.md">../../docs/hdr.md</file>
         <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
         <file alias="Stage.qml">Stage.qml</file>
         <file alias="CopyButton.qml">CopyButton.qml</file>

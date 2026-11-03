@@ -74,6 +74,12 @@ bring a source of photos of its own (Immich, a NAS, a phone) through a
 provider, a program in any language that pinholed talks to in JSON lines:
 [docs/source-providers.md](docs/source-providers.md).
 
+Settings (Tab) → Plugins → Build a plugin opens the offline plugin workshop:
+a quick start, searchable API/reference sections, working examples and
+instructions to copy for an agent. `pinhole plugin docs --json` gives the
+installed API version and the same bundled documents to tools. Start with
+[the quick start](docs/plugin-quickstart.md) or [the agent contract](docs/plugin-agents.md).
+
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
 as its Loop, and ⇧ V its Bounce (both also under ▾, ⇧ B). In Series' studio,
@@ -194,6 +200,12 @@ built successfully using the pinned Blaze alone.
 Status: two spikes grown into an app. The iCloud API probe is in
 [docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
 synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
+
+The [2026-11-03 project review](docs/reviews/2026-11-03.md) records the
+architecture, UI/UX and compiler correctness findings; see also the
+[repeatable startup measurements](docs/startup-performance.md). The current
+native warm first frame is about 416 ms median on the review machine;
+older frame-rate results describe their original hardware and revision.
 
 ## Layout
 

@@ -115,6 +115,7 @@ Item {
     property int pluginsLoaded: 0
     // A plugin's tour asked for again.
     signal tourRequested(string id)
+    signal guideRequested()
     // A plugin's part of the panel, scrolled into view, for a tour to light;
     // kept there by `keptInView` as the parts above it fill in.
     property string keptInView
@@ -1056,6 +1057,18 @@ Item {
                 text: qsTr("Plugins")
                 key: plugins.ids.length > 0 ? qsTr("%1 of %2 on").arg(root.pluginsOn).arg(plugins.ids.length) : ""
             }
+            Note { text: qsTr("Make Pinhole your own: new views, photo tools and sources. The workshop has examples, the complete API and instructions for an agent.") }
+            ShellButton {
+                id: guideButton
+                objectName: "pluginGuideButton"
+                x: Math.round(theme.fontSize * 0.714)
+                text: qsTr("Build a plugin")
+                lit: root.focusedStop === guideButton
+                Component.onCompleted: root.addStop(guideButton)
+                Component.onDestruction: root.dropStop(guideButton)
+                onTapped: root.guideRequested()
+            }
+            Item { width: 1; height: theme.fontSize }
 
             // Each: its name and switch, what it does under them; on, and
             // with settings or a tour, a tap on it (or ⏎ or Space) unfolds

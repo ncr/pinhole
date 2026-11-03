@@ -49,6 +49,12 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
     };
 
     QTimer::singleShot(2500, window, [=, &library] {
+        // The full Frame is created on first use, through the plugin's
+        // action entry, before examining its slides here.
+        QVariant instance;
+        QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, instance),
+                                  Q_ARG(QVariant, QStringLiteral("pinhole.frame")));
+        if (auto *plugin = instance.value<QObject *>()) QMetaObject::invokeMethod(plugin, "ensureFrame");
         // A plugin's items are the window's items' children.
         std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
             if (item->objectName() == QLatin1String("photoFrame"))
@@ -284,8 +290,9 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
                       "started from the viewer, the frame shows and the viewer closes");
                 QTimer::singleShot(100, window, [=] {
                     // The frame goes with its plugin.
-                    plugins->setEnabled(QStringLiteral("frame"), false);
-                    (*waitFor)([=] { return !photoViewer()->property("shown").toBool()
+                    const QPointer<QQuickItem> removed(frame);
+                    plugins->setEnabled(QStringLiteral("pinhole.frame"), false);
+                    (*waitFor)([=] { return !removed && !photoViewer()->property("shown").toBool()
                                             && photoViewer()->property("progress").toReal() == 0; },
                                3000, "the plugin turned off, no photo is left full window over the grid", [=] {
                         check(true, "the plugin turned off, no photo is left full window over the grid");

@@ -4,7 +4,6 @@
 
 FrameStats::FrameStats() {
     m_clock.start();
-    m_samples.reserve(1 << 16);
 }
 
 void FrameStats::frameBuilt(qint64 syncNanos, int cells, int placeholders, int uploads, int batches, int evicted,
@@ -46,6 +45,8 @@ void FrameStats::frameSwapped() {
         s.render = (m_renderEndAt - m_renderAt) / 1e6;
         s.swap = (now - m_renderEndAt) / 1e6;
         m_samples.push_back(s);
+        if (m_samples.size() > (1u << 16))
+            m_samples.pop_front();
     }
     m_lastSwap = now;
     m_pending = {};
@@ -107,7 +108,7 @@ FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples) {
 
 FrameStats::Summary FrameStats::summary() {
     std::lock_guard lock(m_mutex);
-    return summarize(m_samples);
+    return summarize(std::vector<Sample>(m_samples.begin(), m_samples.end()));
 }
 
 QString FrameStats::overlayText() {
@@ -118,10 +119,6 @@ QString FrameStats::overlayText() {
         auto it = std::lower_bound(m_samples.begin(), m_samples.end(), since,
                                    [](const Sample &s, qint64 t) { return s.at < t; });
         recent.assign(it, m_samples.end());
-        // The overlay only needs the last second; keep the buffer from
-        // growing while nobody resets it.
-        if (m_samples.size() > 100000)
-            m_samples.erase(m_samples.begin(), it);
     }
     const Summary s = summarize(recent);
     return QStringLiteral("%1 fps  frame p50 %2 / p99 %3 / max %4 ms  missed %5\n"

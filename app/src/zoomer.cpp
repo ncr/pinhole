@@ -171,37 +171,24 @@ void Zoomer::zoomBy(int steps) {
 
 void Zoomer::wheelZoom(double notches, QPointF at) {
     const double now = seconds();
-    const bool rested = now - m_wheelLastAt > kWheelZoomRest;
     m_wheelLastAt = now;
-    if (m_wheelSpent && !rested)
-        return;
-    m_wheelSpent = false;
     if (!m_wheeling) {
-        m_wheelFrom = m_level;
         begin(at);
         m_pinching = false;
         m_wheeling = true;
         m_wheelCurrent = m_wheelTarget = std::log(m_shown > 0 ? m_shown : size());
     }
-    // No further than the next size either way; there, it lands.
-    const int smaller = std::max(m_wheelFrom - 1, 0), larger = std::min(m_wheelFrom + 1, int(m_levels.size()) - 1);
-    const double lo = std::log(m_levels[smaller]), hi = std::log(m_levels[larger]);
+    if (notches != 0) m_wheelDirection = notches > 0 ? 1 : -1;
+    const double lo = std::log(m_levels.front()), hi = std::log(m_levels.back());
     m_wheelTarget = std::clamp(m_wheelTarget + notches * std::log(kWheelZoomStep), lo, hi);
-    if ((m_wheelTarget <= lo && smaller != m_wheelFrom) || (m_wheelTarget >= hi && larger != m_wheelFrom)) {
-        m_wheelSpent = true;
-        settle(m_wheelTarget <= lo ? smaller : larger);
-        return;
-    }
     startTicking();
 }
 
 void Zoomer::endWheelZoom() {
-    const double from = std::log(m_startShown);
-    if (std::abs(m_wheelCurrent - from) < kWheelZoomDead * std::log(kWheelZoomStep)) {
-        settle(m_wheelFrom);
-        return;
-    }
-    settle(m_wheelFrom + (m_wheelCurrent > from ? 1 : -1));
+    int level = nearest(std::exp(m_wheelTarget));
+    const double beyond = (m_wheelTarget - std::log(m_levels[level])) * m_wheelDirection;
+    if (beyond > kWheelZoomDead * std::log(kWheelZoomStep)) level += m_wheelDirection;
+    settle(level);
 }
 
 bool Zoomer::advance(double dt) {
