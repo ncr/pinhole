@@ -5,10 +5,12 @@ or model is loaded by the Pinhole window. Run the commands below from the
 checkout root. The preparation and scoring commands need only Python's
 standard library.
 
-**Follow-up:** [the ANE is now running, and a local patch-projection
-decomposition passes on the M2 Pro](photo-search-ane.md). The feasibility
-and installation failures below describe the earlier investigation stage;
-complete-model inference and retrieval evaluation are still outstanding.
+**Follow-up:** [patch projection on the M2 Pro](photo-search-ane.md) led to
+[complete hybrid encoders and measured agreement](photo-search-full-encoder.md),
+then a [resumable worker](photo-search-worker.md) and an
+[experimental personal search plugin](photo-search-plugin.md). The feasibility
+and installation failures below describe the earlier investigation stage.
+Retrieval quality still requires human relevance judgments.
 
 ## Prepare a private corpus
 

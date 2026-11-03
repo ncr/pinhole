@@ -1,0 +1,15 @@
+#!/bin/sh
+# Developer plugin: keep this folder in the checkout, symlink it as a
+# personal plugin. Models and Python dependencies stay in ignored .tools.
+set -eu
+script=$(readlink -f -- "$0")
+checkout=$(CDPATH= cd -- "$(dirname -- "$script")/../.." && pwd)
+python="$checkout/.tools/photo-search/venv/bin/python"
+if [ ! -x "$python" ]; then
+    echo 'Photo-search environment is missing; see docs/research/photo-search-plugin.md.' >&2
+    exit 1
+fi
+if [ "${1:-}" = config ]; then
+    exec "$python" -c 'import json,sys; print(json.dumps({"checkout":sys.argv[1]}))' "$checkout"
+fi
+exec "$python" "$checkout/bin/photo-search-worker" "$@"

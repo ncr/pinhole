@@ -1,0 +1,116 @@
+    TestCase {
+        name: "SemanticSearchIntegration"
+        when: true
+        property string stage: "initial"
+        property var details: ({})
+        SignalSpy { id: taps; signalName: "tapped" }
+        SignalSpy { id: opens; target: pinhole.viewer; signalName: "openChanged" }
+        function test_pipeline() {
+            compare(view.item, null, "view is lazy")
+            keyClick(Qt.Key_F, Qt.ControlModifier)
+            tryVerify(() => view.item !== null, 5000)
+            const panel = view.item
+            stage = "catalog"
+            tryCompare(panel, "catalogReady", true, 30000)
+            compare(panel.status.total, @PHOTO_COUNT@)
+            stage = "import"
+            panel.importBenchmark()
+            tryVerify(() => panel.status.indexed === @PHOTO_COUNT@, 30000)
+            const field = findChild(panel, "semanticSearchInput")
+            verify(field !== null)
+            compare(field.placeholder, "Opisz zdjęcie po polsku…")
+            stage = "query"
+            field.text = @QUERY@
+            panel.lookup()
+            tryVerify(() => panel.results.length === Math.min(100, @PHOTO_COUNT@), 60000)
+            compare(panel.results[0].id, @EXPECTED@)
+            verify(panel.failure === "", panel.failure)
+            stage = "keyboard"
+            keyClick(Qt.Key_Down)
+            compare(panel.selected, 0)
+            keyClick(Qt.Key_Right)
+            compare(panel.selected, 1)
+            stage = "open-photo"
+            keyClick(Qt.Key_Return)
+            tryCompare(pinhole.viewer, "open", true, 5000)
+            compare(panel.shown, false)
+            keyClick(Qt.Key_Escape)
+            tryCompare(panel, "shown", true, 5000)
+            stage = "latest-query"
+            field.text = @QUERY@
+            panel.lookup()
+            field.text = @SECOND@
+            panel.lookup()
+            tryVerify(() => panel.queryJob === null && panel.results.length > 0, 30000)
+            compare(panel.results[0].id, @EXPECTED_SECOND@)
+            stage = "catalog-cancellation"
+            panel.catalog()
+            panel.catalog()
+            tryCompare(panel, "catalogReady", true, 30000)
+            tryVerify(() => panel.results.length > 0, 30000)
+            stage = "narrow-window"
+            const window = panel.Window.window
+            verify(window !== null)
+            const oldWidth = window.width
+            window.width = 420
+            wait(500)
+            verify(field.width > 0)
+            verify(field.x + field.width <= panel.width)
+            stage = "mouse"
+            const grid = findChild(panel, "semanticSearchResults")
+            verify(grid !== null)
+            grid.positionViewAtIndex(0, GridView.Beginning)
+            grid.forceLayout()
+            stage = "mouse-cell"
+            tryVerify(() => grid.itemAtIndex(0) !== null, 5000)
+            const cell = grid.itemAtIndex(0)
+            details = {gridHeight: grid.height, gridWidth: grid.width, cellHeight: cell.height,
+                       cellWidth: cell.width, position: cell.mapToItem(null, 0, 0),
+                       shown: panel.shown, panelVisible: panel.visible, cellVisible: cell.visible,
+                       viewerOpen: pinhole.viewer.open, windowHeight: window.height}
+            stage = "mouse-move"
+            mouseMove(cell, cell.width / 2, cell.height / 2)
+            stage = "mouse-click"
+            const tap = findChild(cell, "semanticResultTap")
+            taps.target = tap
+            opens.clear()
+            mousePress(cell, cell.width / 2, cell.height / 2, Qt.LeftButton, Qt.NoModifier, 50)
+            details = Object.assign({}, details, {pressed: tap.pressed})
+            mouseRelease(cell, cell.width / 2, cell.height / 2, Qt.LeftButton, Qt.NoModifier, 50)
+            details = Object.assign({}, details, {taps: taps.count, index: cell.index,
+                validId: pinhole.library.indexOf(cell.modelData.id), afterPressed: tap.pressed,
+                changes: opens.count, returning: panel.returning})
+            stage = "mouse-viewer"
+            tryCompare(pinhole.viewer, "open", true, 5000)
+            details = Object.assign({}, details, {layerBeforeEscape: keymap.layer})
+            tryCompare(keymap, "layer", "viewer", 5000)
+            stage = "mouse-return"
+            keyClick(Qt.Key_Escape)
+            details = Object.assign({}, details, {layerAfterEscape: keymap.layer,
+                shownAfterEscape: panel.shown, openAfterEscape: pinhole.viewer.open})
+            tryCompare(panel, "shown", true, 5000)
+            stage = "mouse-close-search"
+            window.width = oldWidth
+            keyClick(Qt.Key_Escape)
+            tryCompare(panel, "shown", false, 5000)
+            compare(panel.server, null)
+            stage = "reopen"
+            panel.show()
+            tryCompare(panel, "catalogReady", true, 30000)
+            compare(panel.status.indexed, @PHOTO_COUNT@)
+            stage = "quarantine"
+            panel.indexing()
+            tryVerify(() => panel.failure !== "", 10000)
+            verify(panel.failure.includes("NPU"), panel.failure)
+            panel.close()
+            stage = "complete"
+        }
+        function cleanupTestCase() {
+            let written = false
+            const data = {failed: qtest_results.failCount, passed: qtest_results.passCount,
+                          stage: stage, photos: @PHOTO_COUNT@, details: details, problem: plugins.at("me.semantic-search").problem}
+            pinhole.run("/usr/bin/tee", [@RESULT_FILE@], {input: JSON.stringify(data)}).then(() => written = true)
+            tryVerify(() => written, 5000)
+            Qt.quit()
+        }
+    }

@@ -132,7 +132,15 @@ class Worker:
             active = {x['id'] for x in assets}
             self.stamps = {key: value for key, value in self.stamps.items() if key in active}
             self.refresh()
-            self.pending, self.running = [], False
+            if self.running:
+                catalog = {x['id']: x['path'] for x in assets}
+                retained = [(asset, catalog[asset]) for asset, _ in self.pending if asset in catalog]
+                queued = {asset for asset, _ in retained}
+                missing = self.store.db.execute('''SELECT c.asset_id,c.path FROM catalog c LEFT JOIN embeddings e
+                    USING(asset_id) WHERE c.fingerprint IS NULL OR e.asset_id IS NULL OR c.fingerprint<>e.fingerprint
+                    ORDER BY c.asset_id''').fetchall()
+                self.pending = deque(retained + [(asset, path) for asset, path in missing if asset not in queued])
+                self.running = bool(self.pending)
             return self.status()
         if op == 'start':
             if self.running:
@@ -214,10 +222,16 @@ class Worker:
             if self.store.fresh(asset, digest):
                 self.store.fingerprint(asset, digest)
                 self.skipped += 1
+                if not self.pending:
+                    self.running = False
                 return
+            from .models import load_image
+            image = load_image(path)
         except (OSError, ValueError) as error:
             self.store.fail(asset, str(error))
             self.processed += 1
+            if not self.pending:
+                self.running = False
             return
         try:
             if self.image_model is None:
@@ -227,8 +241,7 @@ class Worker:
                     from .ane import NativeRuntime
                     self.runtime = NativeRuntime(self.args.ane_library, self.args.cache, self.args.smoke_receipt)
                     self.image_model.hybrid(self.runtime, self.args.cache, self.args.compiler)
-            from .models import load_image
-            vector = self.image_model.encode(self.image_model.pixels(load_image(path)))[0]
+            vector = self.image_model.encode(self.image_model.pixels(image))[0]
             if hash_file(path) != digest:
                 raise ValueError('thumbnail changed during inference')
             self.store.put(asset, digest, vector)

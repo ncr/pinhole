@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Exercise the real plugin, private benchmark copies and Qt keyboard/mouse.
+
+Requires an existing completed CLIP hybrid run and its saved rankings. No
+accelerator submission is allowed: a fixture-local quarantine blocks start.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def write(path, value):
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+
+
+def prepare(task, corpus_path, images, rankings):
+    corpus = json.loads(corpus_path.read_text())
+    report = json.loads((images / 'run.json').read_text())
+    order = json.loads((images / 'image-ids.json').read_text())
+    if report['model'] != 'clip' or report['backend'] != 'hybrid-ane' or report.get('patch_backend') != 'cpu':
+        raise ValueError('test needs the corrected CLIP hybrid run')
+    if report['corpus_id'] != corpus['corpus_id'] or rankings['corpus_id'] != corpus['corpus_id']:
+        raise ValueError('fixture inputs have different corpora')
+    library = task / 'library'
+    (library / 'thumbs').mkdir(parents=True)
+    db = sqlite3.connect(library / 'library.sqlite')
+    db.execute('''CREATE TABLE assets (id TEXT PRIMARY KEY, thumb_path TEXT, avg_color INTEGER,
+        thumb_w INTEGER, thumb_h INTEGER, duration REAL, asset_date INTEGER, is_video INTEGER,
+        is_live INTEGER, favorite INTEGER, filename TEXT)''')
+    db.execute('CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)')
+    db.execute("INSERT INTO meta VALUES ('source','test:semantic-search')")
+    source = {item['id']: item for item in corpus['items']}
+    items, mapping = [], {}
+    # The fixture has synthetic stable asset ids; image bytes/vectors remain
+    # local and unchanged. Original library ids are neither needed nor read.
+    for i, original in enumerate(order):
+        item = source[original]
+        asset = f'test-photo-{i:04d}'
+        relative = f'thumbs/{asset}.jpg'
+        path = (corpus_path.parent / item['path']).resolve()
+        if not path.is_relative_to(corpus_path.parent.resolve()) or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('corpus thumbnail changed or escaped')
+        shutil.copyfile(path, library / relative)
+        db.execute('INSERT INTO assets VALUES (?,?,0,256,256,0,?,0,0,0,?)',
+                   (asset, relative, 1700000000000 + i, asset + '.jpg'))
+        opaque = hashlib.sha256(f'test-corpus\0{asset}'.encode()).hexdigest()
+        mapping[original] = asset
+        items.append(item | {'id': opaque, 'path': relative})
+    db.commit()
+    db.close()
+    frozen = {k: v for k, v in corpus.items() if k != 'corpus_id'} | {'library_key': 'test-corpus', 'items': items}
+    frozen['corpus_id'] = hashlib.sha256(json.dumps(frozen, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    benchmark = task / 'benchmark'
+    benchmark.mkdir()
+    write(benchmark / 'run.json', report | {'corpus_id': frozen['corpus_id']})
+    shutil.copyfile(images / 'images.npy', benchmark / 'images.npy')
+    write(benchmark / 'image-ids.json', [x['id'] for x in items])
+    write(task / 'corpus.json', frozen)
+    profile = task / 'profile'
+    for sub in ['config', 'cache', 'data', 'state', 'pictures']:
+        (profile / sub).mkdir(parents=True)
+    (task / 'pl.txt').write_text('pl')
+    write(task / 'ane-device-health.json', {'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                                         'quarantined': True, 'reason': 'test fixture: never submit NPU work'})
+    plugin = task / 'plugins/semantic-search'
+    plugin.mkdir(parents=True)
+    original = ROOT / 'examples/semantic-search'
+    for name in ['manifest.json', 'i18n', 'pinhole-semantic']:
+        (plugin / name).symlink_to(original / name)
+    text = (original / 'SemanticPanel.qml').read_text()
+    text = text.replace('run: base + "full-v2/clip-hybrid-ane", corpus: base + "icloud-pl-v1/corpus.json"',
+                        f'run: {json.dumps(str(benchmark))}, corpus: {json.dumps(str(task / "corpus.json"))}')
+    text = text.replace('base + "resident-tiles"', json.dumps(str(task / 'resident-tiles')))
+    (plugin / 'SemanticPanel.qml').write_text(text)
+    queries = list(rankings['queries'])
+    if len(queries) < 2:
+        raise ValueError('test requires at least two query rankings')
+    query, second = queries[:2]
+    values = {'QUERY': rankings['queries'][query], 'EXPECTED': mapping[rankings['rankings'][query][0]],
+              'SECOND': rankings['queries'][second], 'EXPECTED_SECOND': mapping[rankings['rankings'][second][0]],
+              'RESULT_FILE': str(task / 'result.json'), 'PHOTO_COUNT': len(items)}
+    checks = (Path(__file__).with_name('SemanticChecks.qmlpart')).read_text()
+    # Replace longer tokens first; JSON quoting keeps queries literal QML.
+    for key in sorted(values, key=len, reverse=True):
+        checks = checks.replace('@' + key + '@', json.dumps(values[key], ensure_ascii=False))
+    text = (original / 'SemanticSearch.qml').read_text().replace('import QtQuick', 'import QtQuick\nimport QtQuick.Window\nimport QtTest', 1)
+    text = text.rsplit('}', 1)[0] + checks + '}\n'
+    (plugin / 'SemanticSearch.qml').write_text(text)
+    return profile, library
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--corpus', type=Path, required=True)
+    parser.add_argument('--images', type=Path, required=True)
+    parser.add_argument('--rankings', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--native', action='store_true', help='caller must place native test on hidden workspace 5')
+    args = parser.parse_args()
+    os.umask(0o077)
+    task = args.output.resolve()
+    if task.exists():
+        parser.error('output already exists; retain earlier test evidence')
+    task.mkdir(parents=True, mode=0o700)
+    try:
+        profile, library = prepare(task, args.corpus.resolve(), args.images.resolve(), json.loads(args.rankings.read_text()))
+        env = os.environ | {'XDG_CONFIG_HOME': str(profile / 'config'), 'XDG_DATA_HOME': str(profile / 'data'),
+            'XDG_CACHE_HOME': str(profile / 'cache'), 'XDG_STATE_HOME': str(profile / 'state'),
+            'XDG_PICTURES_DIR': str(profile / 'pictures'), 'PINHOLE_LANGUAGE_FILE': str(task / 'pl.txt'),
+            'PINHOLE_BUILTIN_PLUGINS': str(task / 'plugins'), 'PINHOLE_SELFTEST': '',
+            'PINHOLE_STARTUP_TRACE': '1', 'QT_QPA_PLATFORMTHEME': 'generic', 'OPENBLAS_NUM_THREADS': '2'}
+        if not args.native:
+            env.update(QT_QPA_PLATFORM='offscreen', QSG_RHI_BACKEND='software', QT_QUICK_BACKEND='software')
+        with (task / 'run.log').open('w') as log:
+            process = subprocess.Popen([str(ROOT / 'app/build/pinhole'), '--library', str(library)], env=env,
+                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                code = process.wait(timeout=180)
+            except subprocess.TimeoutExpired:
+                import signal
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                raise RuntimeError('UI test timed out')
+        result = json.loads((task / 'result.json').read_text())
+        if code != 0 or result['failed'] != 0 or result['passed'] < 2 or result['stage'] != 'complete':
+            raise RuntimeError(f'UI test failed: {result}; exit={code}')
+        print(json.dumps({'pass': True, 'photos': result['photos'], 'stage': result['stage'], 'evidence': str(task)}, ensure_ascii=False))
+        return 0
+    except (OSError, ValueError, RuntimeError, KeyError) as error:
+        print(f'semantic-search test: {error}; evidence: {task}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

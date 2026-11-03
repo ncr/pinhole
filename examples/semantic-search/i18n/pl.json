@@ -1,0 +1,20 @@
+{
+  "Photo content search": "Wyszukiwanie po treści zdjęć",
+  "Local Polish text search over photo thumbnails. Experimental offline models.": "Lokalne wyszukiwanie zdjęć polskim opisem. Eksperymentalne modele działające bez sieci.",
+  "Search photos": "Szukaj zdjęć",
+  "Search photo content": "Szukaj po treści zdjęć",
+  "Describe a photo in Polish…": "Opisz zdjęcie po polsku…",
+  "Pause indexing": "Wstrzymaj indeksowanie",
+  "Index thumbnails on NPU": "Indeksuj miniatury na NPU",
+  "Use the 384-photo benchmark": "Użyj próby 384 zdjęć",
+  "Starting local search…": "Uruchamianie lokalnej wyszukiwarki…",
+  "Reading the photo catalog…": "Odczytywanie katalogu zdjęć…",
+  "Indexed: %1 of %2. Results cover indexed photos only.": "Zindeksowano: %1 z %2. Wyniki obejmują tylko zindeksowane zdjęcia.",
+  "Experimental CLIP. Search stays on this computer. Similarity scores are not probabilities.": "Eksperymentalny CLIP. Wyszukiwanie działa na tym komputerze. Podobieństwo nie oznacza prawdopodobieństwa.",
+  "Search result %1": "Wynik wyszukiwania %1",
+  "Searching…": "Wyszukiwanie…",
+  "Import the benchmark or index local thumbnails to begin.": "Aby zacząć, zaimportuj próbę albo zindeksuj lokalne miniatury.",
+  "No visible results.": "Brak widocznych wyników.",
+  "Type a description to search.": "Wpisz opis, aby wyszukać zdjęcia.",
+  "The NPU stopped responding. Restart the computer and repeat its smoke test before indexing again. Existing results still work.": "NPU przestało odpowiadać. Przed dalszym indeksowaniem uruchom komputer ponownie i powtórz test NPU. Dotychczasowe wyniki nadal działają."
+}

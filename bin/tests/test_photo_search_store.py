@@ -136,6 +136,30 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.worker.status()['errors'], 1)
         self.assertIsNone(self.worker.image_model)
 
+    def test_catalog_refresh_preserves_running_job_and_adds_new_photos_once(self):
+        from photo_search.ane import hash_file
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        self.worker.request({'op': 'start'})
+        self.worker.step()
+        assets = self.assets + [{'id': 'c', 'path': 'new.jpg'}]
+        for _ in range(2):
+            self.worker.request({'op': 'catalog', 'assets': assets})
+            self.assertTrue(self.worker.running)
+            self.assertEqual(list(self.worker.pending), [('b', 'b.jpg'), ('c', 'new.jpg')])
+        self.worker.request({'op': 'stop'})
+        self.worker.request({'op': 'catalog', 'assets': assets})
+        self.assertFalse(self.worker.running)
+
+    def test_bad_thumbnail_is_per_photo_error_before_model_loading(self):
+        with patch('photo_search.models.load_image', side_effect=ValueError('damaged image')):
+            self.worker.request({'op': 'start'})
+            self.worker.step()
+            self.assertTrue(self.worker.running)
+            self.worker.step()
+        self.assertFalse(self.worker.running)
+        self.assertEqual(self.worker.status()['errors'], 2)
+        self.assertIsNone(self.worker.image_model)
+
     def test_device_failure_is_terminal_and_never_falls_back(self):
         from unittest.mock import Mock
         self.worker.image_model = Mock()
