@@ -16,7 +16,7 @@ while [ "$#" -gt 0 ]; do
 Usage: bin/install [--uninstall] [--non-interactive]
 
 Build this checkout and link Pinhole into ~/.local. No package or root password.
-If Pinhole is open, restart it after a successful installation.
+Running Pinhole windows reopen automatically after a successful installation.
 
   --uninstall Remove this account's installation; keep photos and settings.
   --non-interactive Skip the terminal menu and progress display.
@@ -58,13 +58,13 @@ if [ "$mode" = uninstall ]; then
     exit 0
 fi
 if [ "${PINHOLE_RUST_BUILDER:-blaze}" != cargo ]; then
-    if ! PINHOLE_RUST_BUILDER=blaze bin/build-rust --version >/dev/null 2>&1; then
-        if [ "$ui" = 1 ]; then
-            gum spin --spinner dot --title 'Preparing Blaze…' --show-error -- bin/setup-blaze
-        else
-            echo 'Preparing Blaze…'
-            bin/setup-blaze
-        fi
+    # A matching version alone cannot certify the patched engine or its
+    # portable standard library. Setup verifies/reuses both before building.
+    if [ "$ui" = 1 ]; then
+        gum spin --spinner dot --title 'Checking Blaze…' --show-error -- bin/setup-blaze
+    else
+        echo 'Checking Blaze…'
+        bin/setup-blaze
     fi
 fi
 run_install() {

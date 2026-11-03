@@ -43,7 +43,9 @@ Compare desktop launches separately using
 
 `PINHOLE_CI_CACHE`, `PINHOLE_CI_OUTPUT`, `PINHOLE_CI_CPUS` (default 2) and
 `PINHOLE_CI_MEMORY` (default 7g) customize the local run. The container runs with the invoking user's uid/gid and a private temporary
-home. Dedicated cache and output directories remain owned by that user and
+home. The image's account records are mapped to that UID with this private
+home; host account files are never mounted. Dedicated cache and output
+directories remain owned by that user and
 are not writable by other users (Blaze rejects unsafe daemon ancestors).
 Do not point these variables at personal data. Compilation uses
 `PINHOLE_BUILD_JOBS` to stay within the job's memory budget.

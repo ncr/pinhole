@@ -10,9 +10,27 @@ mkdir -p "$cache" "$output"
 # Match the owner of local/Actions cache files. Blaze refuses world-writable
 # state ancestors; sharing a UID avoids weakening their permissions.
 chmod u+rwx,go-w "$cache" "$output"
+uid="$(id -u)"
+gid="$(id -g)"
+if [ "$uid" -eq 0 ]; then
+    echo 'Run ci/run as a regular user, not root.' >&2
+    exit 2
+fi
+identity="$(mktemp -d "${TMPDIR:-/tmp}/pinhole-ci-identity.XXXXXX")"
+trap 'rm -rf "$identity"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 docker build --tag pinhole-ci --file "$root/ci/Dockerfile" "$root/ci"
-exec docker run --rm --init --user "$(id -u):$(id -g)" --cpus="${PINHOLE_CI_CPUS:-2}" --memory="${PINHOLE_CI_MEMORY:-7g}" \
+# Copy only the image's account database, never host users or group membership.
+docker run --rm --network none --user "$uid:$gid" pinhole-ci python -c \
+    'import json,pathlib; print(json.dumps({name:pathlib.Path("/etc",name).read_text() for name in ("passwd","group")}))' \
+    > "$identity/image-accounts.json"
+python3 "$root/ci/identity.py" "$identity/image-accounts.json" "$identity" "$uid" "$gid"
+docker run --rm --init --user "$uid:$gid" --cpus="${PINHOLE_CI_CPUS:-2}" --memory="${PINHOLE_CI_MEMORY:-7g}" \
     --pids-limit=2048 \
+    --mount "type=bind,source=$identity/passwd,target=/etc/passwd,readonly" \
+    --mount "type=bind,source=$identity/group,target=/etc/group,readonly" \
     --mount "type=bind,source=$root,target=/source,readonly" \
     --mount "type=bind,source=$cache,target=/cache" \
     --mount "type=bind,source=$output,target=/artifacts" \
