@@ -22,6 +22,19 @@ The generated manifest asks for the installed API. Check its version with
 requires, not the plugin's release number. The plugin runs as your user and
 can start programs. Enable code you trust.
 
+## Choose a plugin type
+
+The [Examples](plugin-examples.md) tab has three complete, runnable starting
+points. Each includes its manifest, QML, translations, dependencies and run
+instructions:
+
+- [Custom view: Years](plugin-examples.md#view-years) lists photo counts by year.
+- [Photo tool: Swatch](plugin-examples.md#tool-swatch) creates and copies a PNG.
+- [Photo source: JPEG folder](plugin-examples.md#source-jpeg-folder) adds a
+  folder through a Python provider and the normal source picker.
+
+These are patterns of the same plugin API; a plugin can combine them.
+
 ## A view or a workflow
 
 Try a birthday wall, a print preparation tool, a client selection board, or
@@ -29,8 +42,8 @@ a view that finds photos for your next project. Start from the generated
 plugin; use `PinholePlugin`, `PluginAction`, `Panel`, `ScrollGrid` and
 `PinchZoom` so input, theme and navigation match the app.
 
-The [kit and working examples](plugins.md#the-kit) include a year list, a
-zoomable colour wall, a colour swatch maker and an asynchronous SQL query.
+The [kit and working examples](plugins.md#the-kit) include the complete workflows above plus a zoomable colour wall and an
+asynchronous SQL query.
 Examples live in `app/tests/examples/` in the source checkout.
 
 ## A tool that makes something
@@ -76,7 +89,7 @@ pinhole plugin docs --json
 their Markdown. It is suitable for tooling and works with packaged builds.
 The CLI and the app read the same embedded plugin handbook, so documentation
 follows the version of Pinhole you are using. It contains the quick start,
-API reference, source-provider protocol and agent contract.
+API reference, complete examples, source-provider protocol and agent contract.
 
 ## Keep it quick
 

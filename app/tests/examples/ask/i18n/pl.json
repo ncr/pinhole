@@ -1,11 +1,11 @@
 {
   "Example ask": "Przykład: próbka koloru",
-  "An example from docs/plugins.md.": "Przykład z docs/plugins.md.",
   "Swatch": "Próbka koloru",
   "Could not make it": "Nie udało się utworzyć próbki",
   "Copied, and kept in Pictures": "Skopiowano i zapisano w Pictures",
   "Small": "Mały",
   "Medium": "Średni",
   "Large": "Duży",
-  "Size": "Rozmiar"
+  "Size": "Rozmiar",
+  "A complete example from the plugin workshop.": "Kompletny przykład z pracowni wtyczek."
 }

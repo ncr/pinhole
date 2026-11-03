@@ -107,47 +107,13 @@ A plugin covers the photos only while its `covering` is true, under
 Pinhole's own panels and over the other plugins, with the `"plugin"` keys
 its own: the template's `covering: open` is all it takes.
 
-The following four examples are complete `Main.qml` files, each requiring
-a manifest with `"api": 5` or newer. Executable copies are also in
-`app/tests/examples` in the source repository:
+The [workshop examples](plugin-examples.md) give three complete starting
+points: a custom view, a file-making tool and a photo-source provider, with
+all files, dependencies and run instructions. Executable copies live in
+`app/tests/examples/` in the source checkout.
 
-A screen of its own with a `ScrollList`, a count in its words (`%n`):
-
-```qml
-import QtQuick
-import Pinhole.Plugin
-
-// F5: how many photos each year has, on a screen of its own.
-PinholePlugin {
-    id: plugin
-    property bool open: false
-    property var years: []
-    covering: open
-    function count() {
-        const counts = {}
-        for (const day of pinhole.library.field("day"))
-            if (day > 0)
-                counts[Math.floor(day / 10000)] = (counts[Math.floor(day / 10000)] ?? 0) + 1
-        years = Object.keys(counts).reverse().map(year => ({ year: year, count: counts[year] }))
-    }
-    actions: [PluginAction { place: "grid"; text: qsTr("Years"); key: "F5"; onTriggered: { plugin.count(); plugin.open = true } }]
-    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
-
-    Panel {
-        visible: plugin.open
-        ScrollList {
-            anchors.fill: parent
-            anchors.margins: 32
-            model: plugin.years
-            delegate: UiText {
-                required property var modelData
-                height: 40
-                text: modelData.year + " · " + qsTr("%n photo(s)", "", modelData.count)
-            }
-        }
-    }
-}
-```
+The following smaller examples show additional kit features. Each needs a
+manifest with `"api": 5` or newer.
 
 A `PinchZoom` over tiles laid out at its `size`:
 
@@ -190,66 +156,8 @@ PinholePlugin {
 }
 ```
 
-A `Card` on a dimmed `Panel`, with `Choices`, making a file with
-`picturePath` and putting it on the clipboard:
-
-```qml
-import QtQuick
-import Pinhole.Plugin
-
-// F7: a card over the photos asking how big a swatch of the colour of the
-// photo under the pointer to make: 1, 2, 3 or a click; Esc, or a click
-// beside it, puts it away. The swatch is kept in Pictures/Pinhole and put
-// on the clipboard.
-PinholePlugin {
-    id: plugin
-    property bool open: false
-    covering: open
-    property var photo: ({})
-    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; usable: pinhole.library.count > 0; onTriggered: plugin.begin() }]
-    Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
-
-    function begin() {
-        const picked = pinhole.library.item(pinhole.currentIndex())
-        if (picked.index === undefined || !picked.avgColor) {
-            action.complain(qsTr("Could not make it"))
-            return
-        }
-        photo = picked
-        open = true
-    }
-
-    function make(size) {
-        open = false
-        const photo = plugin.photo
-        if (photo.index === undefined || !photo.avgColor)
-            return
-        const path = pinhole.picturePath((photo.filename || "Swatch").replace(/\.[^.]*$/, "") + " " + size, "png")
-        pinhole.run("magick", ["-size", size + "x" + size, "xc:" + photo.avgColor, path])
-            .then(() => pinhole.copyFile(path))
-            .then(() => pinhole.notify(qsTr("Copied, and kept in Pictures")), error => {
-                action.complain(qsTr("Could not make it"))
-                pinhole.warn(error)
-            })
-    }
-
-    Panel { visible: plugin.open; color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.open = false }
-    Card {
-        visible: plugin.open
-        anchors.centerIn: parent
-        width: sizes.width + 48
-        height: sizes.height + 48
-        Choices {
-            id: sizes
-            anchors.centerIn: parent
-            options: [{ value: 64, text: qsTr("Small") }, { value: 256, text: qsTr("Medium") }, { value: 1024, text: qsTr("Large") }]
-            when: plugin.open
-            helpText: qsTr("Size")
-            onChosen: size => plugin.make(size)
-        }
-    }
-}
-```
+For `Card`, `Choices`, `picturePath` and `copyFile`, use the complete
+[Swatch tool example](plugin-examples.md#tool-swatch).
 
 The index asked with `pinhole.query`, the answer in a `ScrollArea`:
 

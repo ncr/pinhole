@@ -33,6 +33,15 @@
 void runQuerySelfTest(QQuickWindow *window);
 void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder);
 
+static QQuickItem *guideControl(QQuickItem *root, const QString &name) {
+    if (!root) return nullptr;
+    if (root->objectName() == name) return root;
+    // Repeater delegates follow the visual tree, not QObject ownership.
+    for (auto *child : root->childItems())
+        if (auto *found = guideControl(child, name)) return found;
+    return nullptr;
+}
+
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
@@ -132,14 +141,40 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 else return fail("missing agent brief button");
                 if (!clipboardNow() || !clipboardNow()->text().contains("pinhole plugin docs --json"))
                     return fail("agent instructions were not copied");
-                open("plugins", 2);
+                if (auto *button = guideControl(guide, "guideExample-view"))
+                    QMetaObject::invokeMethod(button, "press");
+                else return fail("missing custom-view example entry");
                 return;
             case 2:
+                if (!guide || guide->property("document").toString() != "plugin-examples" || guide->property("section").toInt() != 1)
+                    return fail("view example did not open its complete recipe");
+                save("example-view");
+                open("plugin-quickstart");
+                if (auto *button = guideControl(guide, "guideExample-tool"))
+                    QMetaObject::invokeMethod(button, "press");
+                else return fail("missing tool example entry");
+                return;
+            case 3:
+                if (!guide || guide->property("document").toString() != "plugin-examples" || guide->property("section").toInt() != 2)
+                    return fail("tool example did not open its complete recipe");
+                save("example-tool");
+                open("plugin-quickstart");
+                if (auto *button = guideControl(guide, "guideExample-source"))
+                    QMetaObject::invokeMethod(button, "press");
+                else return fail("missing source example entry");
+                return;
+            case 4:
+                if (!guide || guide->property("document").toString() != "plugin-examples" || guide->property("section").toInt() != 3)
+                    return fail("source example did not open its complete recipe");
+                save("example-source");
+                open("plugins", 2);
+                return;
+            case 5:
                 if (!guide) return fail("guide disappeared");
                 save("api");
                 QMetaObject::invokeMethod(guide, "follow", Q_ARG(QVariant, QStringLiteral("source-providers.md")));
                 return;
-            case 3:
+            case 6:
                 if (!guide || guide->property("document").toString() != "source-providers")
                     return fail("a reference link did not open its bundled document");
                 save("provider");
@@ -147,18 +182,18 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, Qt::Key_1, Qt::NoModifier);
                 QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, Qt::Key_1, Qt::NoModifier);
                 return;
-            case 4:
+            case 7:
                 if (!guide || guide->property("document").toString() != "plugin-quickstart")
                     return fail("document navigation keys did not work");
                 window->resize(720, 740);
                 return;
-            case 5:
+            case 8:
                 save("narrow");
                 open("plugins");
                 if (auto *search = guide->findChild<QObject *>("guideSearch")) search->setProperty("text", "Promises");
                 else return fail("missing search");
                 return;
-            case 6:
+            case 9:
                 if (!guide || guide->property("section").toInt() == 0) return fail("search did not select a matching section");
                 save("search");
                 guide->forceActiveFocus();
@@ -168,7 +203,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
             default:
                 if (window->property("guideShown").toBool()) return fail("Escape did not close the handbook");
                 if (grid->selecting()) return fail("a handbook key reached the grid");
-                std::puts("selftest: guide: lazy load, offline links, agent brief, keys, narrow layout, search and Escape: PASS");
+                std::puts("selftest: guide: lazy load, three example entries, offline links, agent brief, keys, narrow layout, search and Escape: PASS");
                 tick->stop(); QCoreApplication::quit();
             }
         });

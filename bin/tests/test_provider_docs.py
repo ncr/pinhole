@@ -8,8 +8,8 @@ import unittest
 
 class ProviderDocumentationTests(unittest.TestCase):
     def test_published_provider_protocol_and_filesystem_cases(self):
-        doc = (Path(__file__).resolve().parents[2] / 'docs/source-providers.md').read_text()
-        example = doc.split('### Python: a folder of JPEGs',1)[1].split('### Rust',1)[0]
+        doc = (Path(__file__).resolve().parents[2] / 'docs/plugin-examples.md').read_text()
+        example = doc.split('## Source: JPEG folder',1)[1]
         manifest = json.loads(re.search(r'```json\n(.*?)\n```', example, re.S).group(1))
         code = re.search(r'```python\n(.*?)\n```', example, re.S).group(1)
         assert manifest['api'] == 3 and manifest['id'] == 'me.jpegs'

@@ -13,8 +13,10 @@ pinhole plugin docs source-providers
 
 The JSON includes the installed `api` and complete Markdown documents.
 Use that version's contract. In a source checkout the same references are
-`docs/plugin-quickstart.md`, `docs/plugins.md`, `docs/source-providers.md`
-and this contract. The runnable examples are in `app/tests/examples/`.
+`docs/plugin-quickstart.md`, `docs/plugins.md`, `docs/plugin-examples.md`,
+`docs/source-providers.md`
+and this contract. Start with the closest complete workshop example (view, tool or source).
+Runnable copies are in `app/tests/examples/`.
 The API reference includes the SQL schema available to plugins; internal
 service and rendering notes are not required to build a plugin.
 

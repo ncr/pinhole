@@ -44,6 +44,7 @@ Panel {
     readonly property var documents: [
         { id: "plugin-quickstart", title: qsTr("Start here") },
         { id: "plugins", title: qsTr("Plugin API") },
+        { id: "plugin-examples", title: qsTr("Examples") },
         { id: "source-providers", title: qsTr("Photo sources") },
         { id: "plugin-agents", title: qsTr("For agents") }
     ].filter(entry => pluginGuide.documentIds.includes(entry.id))
@@ -358,8 +359,17 @@ Panel {
                                 width: parent.width
                                 spacing: 8
                                 Repeater {
-                                    model: [qsTr("Views and workflows"), qsTr("Tools and automation"), qsTr("New photo sources")]
-                                    delegate: Chip { required property string modelData; text: modelData; textColor: theme.accent }
+                                    model: [
+                                        { id: "view", title: qsTr("Custom view"), link: "plugin-examples.md#view-years" },
+                                        { id: "tool", title: qsTr("Photo tool"), link: "plugin-examples.md#tool-swatch" },
+                                        { id: "source", title: qsTr("Photo source"), link: "plugin-examples.md#source-jpeg-folder" }
+                                    ]
+                                    delegate: ShellButton {
+                                        required property var modelData
+                                        objectName: "guideExample-" + modelData.id
+                                        text: modelData.title
+                                        onTapped: root.follow(modelData.link)
+                                    }
                                 }
                             }
                             Rectangle { width: parent.width; height: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12) }

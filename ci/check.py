@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def validate_handbook(api):
-    required = {'plugin-quickstart', 'plugins', 'source-providers', 'plugin-agents'}
+    required = {'plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents'}
     documents = api.get('documents', [])
     found = {d.get('id') for d in documents if d.get('markdown', '').strip()}
     if api.get('api', 0) < 7 or found != required or len(documents) != len(required):

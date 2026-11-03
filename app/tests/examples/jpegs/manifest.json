@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "api": 3,
+  "id": "me.jpegs",
+  "name": "JPEG folder",
+  "entryPoints": {
+    "main": "Main.qml"
+  },
+  "sources": [
+    {
+      "kind": "me.jpegs",
+      "provider": "pinhole-jpegs"
+    }
+  ],
+  "version": "1.0.0",
+  "description": "A read-only JPEG source example from the plugin workshop."
+}

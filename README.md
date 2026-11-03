@@ -75,8 +75,8 @@ provider, a program in any language that pinholed talks to in JSON lines:
 [docs/source-providers.md](docs/source-providers.md).
 
 Settings (Tab) → Plugins → Build a plugin opens the offline plugin workshop:
-a quick start, searchable API/reference sections, working examples and
-instructions to copy for an agent. Tab/Shift Tab move through settings,
+a quick start, searchable API/reference sections, an Examples tab with
+complete view/tool/source plugins, and instructions to copy for an agent. Tab/Shift Tab move through settings,
 Escape closes them, and left/right change a focused section tab. In the
 workshop, Ctrl Tab / Ctrl Shift Tab change documents and Ctrl F searches.
 `pinhole plugin docs --json` gives the

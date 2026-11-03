@@ -4,6 +4,8 @@
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",
-  "description": "An example from docs/plugins.md.",
-  "entryPoints": { "main": "Main.qml" }
+  "description": "A complete example from the plugin workshop.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
 }

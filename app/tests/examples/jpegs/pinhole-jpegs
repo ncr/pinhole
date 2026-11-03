@@ -1,0 +1,74 @@
+#!/usr/bin/env -S python3 -I
+"""A folder of JPEGs as a Pinhole source; timestamps use file modification time."""
+import base64, hashlib, json, os, sys
+
+
+class ProviderError(Exception):
+    pass
+
+
+def say(line):
+    sys.stdout.write(json.dumps(line) + "\n")
+    sys.stdout.flush()
+
+
+def assets(folder):
+    with os.scandir(folder) as directory:
+        entries = sorted(directory, key=lambda item: os.fsencode(item.name))
+    for item in entries:
+        if not item.name.lower().endswith((".jpg", ".jpeg")) or not item.is_file(follow_symlinks=False):
+            continue
+        raw = os.fsencode(item.name)
+        name = base64.urlsafe_b64encode(raw).decode("ascii")
+        aid = hashlib.sha256(raw).hexdigest()
+        st = item.stat(follow_symlinks=False)
+        key = hashlib.sha256(raw + f"\0{st.st_size}\0{st.st_mtime_ns}".encode()).hexdigest()
+        # Display strings may not contain protocol control characters.
+        display = "".join(c if ord(c) >= 32 and not 127 <= ord(c) <= 159 and not 0xD800 <= ord(c) <= 0xDFFF
+                          else "\ufffd" for c in item.name)
+        yield {"id": aid, "kind": "photo", "filename": display, "taken": st.st_mtime_ns // 1_000_000,
+               "renditions": [{"kind": k, "name": name, "key": key, "make": True} for k in ("thumb", "medium")]
+               + [{"kind": k, "name": name, "key": key, "file_type": "public.jpeg"} for k in ("full", "original")]}
+
+
+def ticket(folder, name):
+    raw = base64.b64decode(name.encode("ascii"), altchars=b"-_", validate=True)
+    filename = os.fsdecode(raw)
+    if not filename or "\0" in filename or filename in (".", "..") or os.path.basename(filename) != filename:
+        raise ProviderError("bad_request", "The rendition name is not a filename")
+    return {"path": os.path.join(folder, filename)}
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    rid, method, params = request["id"], request["method"], request.get("params") or {}
+    entry = params.get("entry") or {}
+    try:
+        if method == "add_entry":
+            folder = os.path.abspath(params.get("folder", ""))
+            if not os.path.isdir(folder):
+                raise ProviderError("offline", f"{folder} is not a folder")
+            key = hashlib.sha256(os.fsencode(folder)).hexdigest()
+            result = {"entry": {"key": key, "name": os.path.basename(folder), "folder": folder}}
+        elif method == "start":
+            if not os.path.isdir(entry["folder"]):
+                raise ProviderError("offline", f"{entry['folder']} is not there")
+            result = {}
+        elif method == "list":
+            # Finish scanning before sending any put: a failed mount must
+            # never become a successful empty listing that removes photos.
+            found = list(assets(entry["folder"]))
+            for i in range(0, len(found), 500):
+                say({"id": rid, "note": "put", "assets": found[i:i + 500]})
+            result = {"token": None, "summary": f"{len(found)} photos"}
+        elif method == "prepare":
+            result = {"tickets": [ticket(entry["folder"], w["name"]) for w in params["wanted"]]}
+        else:
+            raise ProviderError("unsupported", f"no {method}")
+        say({"id": rid, "ok": True, "result": result})
+    except ProviderError as error:
+        say({"id": rid, "ok": False, "error": {"code": error.args[0], "message": error.args[1]}})
+    except OSError as error:
+        say({"id": rid, "ok": False, "error": {"code": "offline", "message": str(error)}})
+    except (KeyError, ValueError, TypeError) as error:
+        say({"id": rid, "ok": False, "error": {"code": "bad_request", "message": str(error)}})

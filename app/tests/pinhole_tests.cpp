@@ -84,7 +84,7 @@ private:
     Q_SLOT void bundledPluginDocumentsAreReadableAndTheirLinksResolve() {
         PluginGuide guide;
         QCOMPARE(guide.api(), Plugins::api);
-        QCOMPARE(PluginGuide::documents(), (QStringList{"plugin-quickstart", "plugins", "source-providers", "plugin-agents"}));
+        QCOMPARE(PluginGuide::documents(), (QStringList{"plugin-quickstart", "plugins", "plugin-examples", "source-providers", "plugin-agents"}));
         QCOMPARE(guide.property("documentIds").toStringList(), PluginGuide::documents());
         for (const QString &internal : {QStringLiteral("hdr"), QStringLiteral("service"), QStringLiteral("sources")}) {
             QVERIFY(PluginGuide::document(internal).isEmpty());
@@ -123,6 +123,18 @@ private:
         QCOMPARE(guide.destination("plugins.md#the-kit", "plugin-quickstart").value("document").toString(), QString("plugins"));
         QCOMPARE(guide.destination("plugins.md#pinhole", "plugin-quickstart").value("document").toString(), QString("plugins"));
         QCOMPARE(guide.destination("#promises", "plugins").value("document").toString(), QString("plugins"));
+        const auto exampleParts = guide.sections("plugin-examples");
+        QVERIFY(exampleParts.size() >= 4); // Overview and at least three complete recipes.
+        for (const QString &id : {QStringLiteral("view-years"), QStringLiteral("tool-swatch"), QStringLiteral("source-jpeg-folder")}) {
+            const auto destination = guide.destination("plugin-examples.md#" + id, "plugin-quickstart");
+            QCOMPARE(destination.value("document").toString(), QString("plugin-examples"));
+            QVERIFY(destination.value("section").toInt() > 0);
+            const auto recipe = guide.markdown("plugin-examples", id);
+            QVERIFY(recipe.contains("**Dependencies:**"));
+            QVERIFY(recipe.contains("manifest.json"));
+            QVERIFY(recipe.contains("Main.qml"));
+            QVERIFY(recipe.contains("pinhole plugin check"));
+        }
         QVERIFY(guide.destination("../plugins.md", "plugins").isEmpty());
         QVERIFY(guide.destination("file:///etc/passwd", "plugins").isEmpty());
         QVERIFY(guide.destination("https://example.org", "plugins").isEmpty());

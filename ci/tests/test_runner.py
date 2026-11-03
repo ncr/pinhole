@@ -102,7 +102,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
     def test_empty_handbook_is_not_a_success(self):
         with self.assertRaises(RuntimeError):
             ci.validate_handbook({'api': 7, 'documents': []})
-        ids = ['plugin-quickstart', 'plugins', 'source-providers', 'plugin-agents']
+        ids = ['plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents']
         valid = {'api': 7, 'documents': [{'id': name, 'markdown': '# text'} for name in ids]}
         ci.validate_handbook(valid)
         with self.assertRaises(RuntimeError):
