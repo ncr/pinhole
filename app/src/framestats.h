@@ -3,17 +3,23 @@
 #include <QElapsedTimer>
 #include <QString>
 
+#include <functional>
 #include <mutex>
 #include <deque>
 #include <vector>
 
 // Frame timing as the render thread sees it: the interval between buffer
-// swaps, and how long the grid's scene graph update took. At 120 Hz a
-// frame has 8.33 ms; an interval over 12.5 ms means at least one vsync was
-// missed.
+// swaps and the grid's scene graph work. Each sample carries the screen's
+// target period: an interval over 1.5 periods is a late frame. Screen
+// changes and exposure discontinuities never turn a pause into a late frame.
 class FrameStats {
 public:
-    FrameStats();
+    explicit FrameStats(std::function<qint64()> now = {});
+
+    void setRefreshRate(double hz);
+    // Keep the history but discard the interval spanning an exposure or
+    // refresh-rate change. Thread safe, like the render callbacks below.
+    void discontinuity();
 
     // Render thread, in frame order: sync begins (the GUI thread has handed
     // over the frame), rendering begins and ends, the buffer is swapped.
@@ -29,6 +35,8 @@ public:
         double seconds = 0;
         double intervalP50 = 0, intervalP95 = 0, intervalP99 = 0, intervalMax = 0;
         int missed = 0;
+        double targetHz = 60;
+        bool mixedRefreshRates = false;
         double syncP50 = 0, syncP99 = 0, syncMax = 0;
         double placeholderShare = 0; // of all cells drawn
         double uploadsPerFrame = 0;
@@ -50,6 +58,7 @@ private:
     struct Sample {
         qint64 at;
         double interval;
+        double period;
         double sync;
         int cells;
         int placeholders;
@@ -64,10 +73,13 @@ private:
         double render;
         double swap;
     };
-    Summary summarize(const std::vector<Sample> &samples);
+    static Summary summarize(const std::vector<Sample> &samples, double currentPeriod);
+    qint64 now() const;
 
     std::mutex m_mutex;
     QElapsedTimer m_clock;
+    std::function<qint64()> m_now;
+    double m_period = 1000.0 / 60;
     qint64 m_lastSwap = -1;
     qint64 m_syncAt = 0, m_renderAt = 0, m_renderEndAt = 0;
     qint64 m_startedAt = 0;

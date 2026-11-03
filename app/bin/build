@@ -6,6 +6,6 @@ mkdir -p "$ROOT/build"
 cd "$ROOT/build"
 
 qmake6 "$ROOT/pinhole.pro"
-make -j"$(nproc)"
+make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}"
 
 echo "Built $ROOT/build/pinhole"

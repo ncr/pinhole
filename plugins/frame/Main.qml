@@ -199,6 +199,7 @@ PinholePlugin {
                 Toggle {
                     id: toggle
                     anchors.right: parent.right
+                    Accessible.name: row.text
                     checked: row.checked
                     onToggled: row.toggled()
                 }

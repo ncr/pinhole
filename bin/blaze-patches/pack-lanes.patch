@@ -1,0 +1,27 @@
+diff --git a/crates/blaze-engine/build.rs b/crates/blaze-engine/build.rs
+index 9828b49e..31842f06 100644
+--- a/crates/blaze-engine/build.rs
++++ b/crates/blaze-engine/build.rs
+@@ -104,6 +104,8 @@ fn version() {
+         None if package == "0.0.0" => "0.0.0-dev".to_owned(),
+         None => package,
+     };
++    // Pinhole local patch; never confused with the unmodified upstream tool.
++    let version = format!("{version}+pinhole.1");
+     // TZ: the date is UTC's, as release.yaml's `BLAZE_GIT_DATE`.
+     let git = |args: &[&str]| {
+         let out = std::process::Command::new("git")
+diff --git a/crates/hir-ty-codegen/mod.rs b/crates/hir-ty-codegen/mod.rs
+index d786d843..4853d6d7 100644
+--- a/crates/hir-ty-codegen/mod.rs
++++ b/crates/hir-ty-codegen/mod.rs
+@@ -16482,7 +16482,8 @@ impl<'cx, 'db> FunctionCx<'cx, 'db> {
+             (0, (1i64 << bits) - 1)
+         };
+         let (wide_bytes, narrow_bytes) = (wide.bytes() as i32, narrow.bytes() as i32);
+-        let per_half = 8 / wide_bytes;
++        // Each input contributes all 16 bytes of one 128-bit lane.
++        let per_half = 16 / wide_bytes;
+         for half in (0..self.layout(ty)?.size.bytes() as i32).step_by(16) {
+             for (from, src) in [a, b].into_iter().enumerate() {
+                 for lane in 0..per_half {

@@ -6,7 +6,7 @@ QT += core gui qml quick quickcontrols2 sql network multimedia dbus concurrent g
 CONFIG += c++20
 INCLUDEPATH += $$PWD
 
-LIBS += -lturbojpeg -lwayland-client -lheif -llcms2 -luhdr
+LIBS += -lturbojpeg -lwayland-client -lheif -llcms2 -luhdr -lsqlite3
 
 # The pointer-gestures protocol, for the touchpad hold gesture Qt does not
 # bind (see touchpadhold.h), generated from the system's protocol files.
@@ -86,6 +86,7 @@ HEADERS += \
     $$PWD/commands.h \
     $$PWD/encoder.h \
     $$PWD/plugins.h \
+    $$PWD/pluginquery.h \
     $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
     $$PWD/incoming.h \
@@ -94,6 +95,7 @@ HEADERS += \
     $$PWD/theme.h \
     $$PWD/translator.h \
     $$PWD/framestats.h \
+    $$PWD/framemonitor.h \
     $$PWD/bench.h
 
 SOURCES += \
@@ -131,10 +133,16 @@ SOURCES += \
     $$PWD/commands.cpp \
     $$PWD/encoder.cpp \
     $$PWD/plugins.cpp \
+    $$PWD/pluginlibrary.cpp \
+    $$PWD/pluginjobs.cpp \
+    $$PWD/plugincheck.cpp \
+    $$PWD/pluginquery.cpp \
     $$PWD/pluginstore.cpp \
     $$PWD/incoming.cpp \
     $$PWD/portal.cpp \
     $$PWD/selftest.cpp \
+    $$PWD/selftestquery.cpp \
+    $$PWD/selftestaccessibility.cpp \
     $$PWD/selftestrun.cpp \
     $$PWD/selftestcovering.cpp \
     $$PWD/selftestlayers.cpp \
@@ -152,5 +160,10 @@ SOURCES += \
     $$PWD/theme.cpp \
     $$PWD/translator.cpp \
     $$PWD/framestats.cpp \
+    $$PWD/framemonitor.cpp \
     $$PWD/bench.cpp
+
+# Shared control keyboard and accessibility semantics; their QML keeps the style.
+HEADERS += $$PWD/control.h
+SOURCES += $$PWD/control.cpp
 

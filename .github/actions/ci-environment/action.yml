@@ -1,0 +1,13 @@
+name: Pinned Pinhole toolchain cache
+description: Restore only tools keyed by the complete reviewed compiler pin and environment.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ~/.cache/pinhole-ci/data
+          ~/.cache/pinhole-ci/cache
+          ~/.cache/pinhole-ci/blaze
+          ~/.cache/pinhole-ci/cargo
+        key: pinhole-ci-${{ runner.os }}-${{ hashFiles('ci/Dockerfile', 'bin/blaze-version', 'bin/blaze-source.json', 'bin/blaze-patches/**', 'bin/bootstrap-blaze', 'bin/setup-blaze') }}

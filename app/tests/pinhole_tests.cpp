@@ -22,10 +22,12 @@
 #include <QQmlPropertyMap>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
@@ -82,8 +84,31 @@ private:
     Q_SLOT void bundledPluginDocumentsAreReadableAndTheirLinksResolve() {
         PluginGuide guide;
         QCOMPARE(guide.api(), Plugins::api);
+        QCOMPARE(PluginGuide::documents(), (QStringList{"plugin-quickstart", "plugins", "source-providers", "plugin-agents"}));
+        QCOMPARE(guide.property("documentIds").toStringList(), PluginGuide::documents());
+        for (const QString &internal : {QStringLiteral("hdr"), QStringLiteral("service"), QStringLiteral("sources")}) {
+            QVERIFY(PluginGuide::document(internal).isEmpty());
+            QVERIFY(guide.destination(internal + ".md", "plugins").isEmpty());
+            QVERIFY(!QFile::exists(":/docs/" + internal + ".md"));
+        }
         for (const QString &name : PluginGuide::documents()) {
             QVERIFY2(!PluginGuide::document(name).isEmpty(), qPrintable(name));
+            // Every relative Markdown link shown in the offline reader must
+            // resolve there, rather than silently pointing outside its scope.
+            bool fenced = false;
+            const QRegularExpression links(QStringLiteral("\\[[^\\]]+\\]\\(([^)]+)\\)"));
+            for (const QString &line : PluginGuide::document(name).split('\n')) {
+                if (line.trimmed().startsWith("```") || line.trimmed().startsWith("~~~")) {
+                    fenced = !fenced;
+                    continue;
+                }
+                if (fenced) continue;
+                for (auto matches = links.globalMatch(line); matches.hasNext();) {
+                    const QString link = matches.next().captured(1);
+                    if (QUrl(link).isRelative())
+                        QVERIFY2(!guide.destination(link, name).isEmpty(), qPrintable(name + ": " + link));
+                }
+            }
             const auto parts = guide.sections(name);
             QVERIFY(!parts.isEmpty());
             QSet<QString> ids;
@@ -1129,6 +1154,35 @@ QtObject {
         PluginBench bench({{"t", {}}},
                           {{"none", 0}, {"scan", at(1965, 6, 15)}, {"leap", at(1960, 3, 1, 0) - 500}, {"now", at(2025, 1, 8)}});
         QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
+    }
+
+    void checkableBuiltinShellButtonsRequireApi7WithoutClaimingCustomComponents() {
+        QTemporaryDir dir;
+        const QString main = dir.path() + "/Main.qml";
+        const auto check = [&](const QByteArray &code, bool found) {
+            write(main, code);
+            QCOMPARE(Plugins::apiUses(dir.path()).value(7).contains("ShellButton.checkable"), found);
+        };
+        check("import Pinhole.Plugin\nShellButton { checkable: true; active: true }\n", true);
+        check("import Pinhole.Plugin 1.0 as P\nP.ShellButton { checkable: selected }\n", true);
+        check("import Pinhole.Plugin\nShellButton { QtObject { property bool checkable: true } }\n", false);
+        check("import Pinhole.Plugin\nOther.ShellButton { checkable: true }\n", false);
+        check("import Pinhole.Plugin\nOther . ShellButton { checkable: true }\n", false);
+        check("import Pinhole.Plugin\nShellButton { property bool checkable: true }\n", false);
+        check("import Other.Controls\nShellButton { checkable: true }\n", false);
+        check("import Pinhole.Plugin\nItem { property string words: 'ShellButton { checkable: true }' }\n"
+              "// ShellButton { checkable: true }\n", false);
+        check("import Pinhole.Plugin\nItem { component ShellButton: Item { property bool checkable: false }; "
+              "ShellButton { checkable: true } }\n", false);
+        write(dir.path() + "/ShellButton.qml", "import QtQuick\nItem { property bool checkable: false }\n");
+        check("import Pinhole.Plugin\nShellButton { checkable: true }\n", false);
+        // A qualified builtin stays unambiguous even alongside a local type.
+        check("import Pinhole.Plugin as P\nP.ShellButton { checkable: true }\n", true);
+        QFile::remove(dir.path() + "/ShellButton.qml");
+        QDir().mkpath(dir.path() + "/controls");
+        write(dir.path() + "/controls/ShellButton.qml", "import QtQuick\nItem { property bool checkable: false }\n");
+        check("import Pinhole.Plugin\nimport \"controls\"\nShellButton { checkable: true }\n", false);
+        check("import Pinhole.Plugin\nimport \"controls\" as C\nShellButton { checkable: true }\n", true);
     }
 
     // What came with API 2, by a plugin's code, comments and strings

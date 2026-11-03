@@ -28,7 +28,9 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 
 /// Bumped when finding changes, so every library is looked through again.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+/// Derived pixels/features made with the corrected JPEG SIMD decoder.
+const FEATURE_VERSION: i64 = 1;
 const MIN_SHOTS: usize = 3;
 /// Milliseconds between neighbours, and how alike they must look then.
 // A burst: a little likeness is enough. Not none, as photos scanned or
@@ -246,7 +248,11 @@ fn library_db(library: &Path) -> Result<Connection> {
 /// The likenesses made so far, and the series last found.
 fn cache_db(cache: &Path) -> Result<Connection> {
     std::fs::create_dir_all(cache)?;
-    let db = Connection::open(cache.join("series.sqlite"))?;
+    let mut db = Connection::open(cache.join("series.sqlite"))?;
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version > FEATURE_VERSION {
+        bail!("series cache was made by a newer feature decoder ({version})");
+    }
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS likeness (
@@ -261,6 +267,14 @@ fn cache_db(cache: &Path) -> Result<Connection> {
             series TEXT NOT NULL
         );",
     )?;
+    if version < FEATURE_VERSION {
+        // Both tables contain replaceable analysis only. Manual grouping
+        // belongs to the plugin's separate state and is never changed here.
+        let tx = db.transaction()?;
+        tx.execute_batch("DELETE FROM likeness; DELETE FROM found;")?;
+        tx.pragma_update(None, "user_version", FEATURE_VERSION)?;
+        tx.commit()?;
+    }
     Ok(db)
 }
 
@@ -462,6 +476,33 @@ fn difference(a: &image::GrayImage, b: &image::GrayImage, dx: i32, dy: i32) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_jpeg_features_are_forgotten_once_without_touching_other_state() {
+        let directory = std::env::temp_dir().join(format!("pinhole-series-decoder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        {
+            let db = cache_db(&directory).unwrap();
+            db.execute_batch("INSERT INTO likeness VALUES ('old', 'thumb.jpg', x'00');
+                INSERT INTO found VALUES ('old-state', 'a b c');
+                CREATE TABLE manual_example (value TEXT);
+                INSERT INTO manual_example VALUES ('unchanged'); PRAGMA user_version = 0;").unwrap();
+        }
+        {
+            let db = cache_db(&directory).unwrap();
+            let count: i64 = db.query_row("SELECT count(*) FROM likeness", [], |r| r.get(0)).unwrap();
+            assert_eq!(count, 0);
+            let count: i64 = db.query_row("SELECT count(*) FROM found", [], |r| r.get(0)).unwrap();
+            assert_eq!(count, 0);
+            let manual: String = db.query_row("SELECT value FROM manual_example", [], |r| r.get(0)).unwrap();
+            assert_eq!(manual, "unchanged");
+            db.execute("INSERT INTO likeness VALUES ('corrected', 'thumb.jpg', x'01')", []).unwrap();
+        }
+        let db = cache_db(&directory).unwrap();
+        let id: String = db.query_row("SELECT asset_id FROM likeness", [], |r| r.get(0)).unwrap();
+        assert_eq!(id, "corrected");
+        let _ = std::fs::remove_dir_all(directory);
+    }
 
     fn plain(r: u8, g: u8, b: u8, w: u32, h: u32) -> Feature {
         Feature::of(&image::RgbImage::from_pixel(w, h, image::Rgb([r, g, b])))

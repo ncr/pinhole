@@ -19,10 +19,11 @@ fi
 # Different releases can speak incompatible daemon protocols. BLAZE_HOME
 # selects the state root; each pinned release always has a separate child.
 BLAZE_HOME="${BLAZE_HOME:-$data/blaze}/$version"
-export BLAZE_HOME
+BLAZE_CACHE="${BLAZE_CACHE:-$BLAZE_HOME/store}"
+export BLAZE_HOME BLAZE_CACHE
 actual="$("$program" --version)"
 case "$actual" in
     "blaze $version "* | "blaze $version") ;;
     *) echo "Pinhole needs Blaze $version; found: $actual. Run bin/setup-blaze." >&2; exit 2 ;;
 esac
-exec "$program" "$@"
+exec python3 "$ROOT/bin/run-blaze" "$ROOT" "$version" "$program" "$@"

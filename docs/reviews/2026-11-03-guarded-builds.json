@@ -1,0 +1,82 @@
+{
+  "source": "/tmp/pinhole-current-edit-bench-src",
+  "targets": {
+    "blaze": "/tmp/pinhole-current-edit-bench-blaze",
+    "cargo": "/tmp/pinhole-current-edit-bench-cargo"
+  },
+  "samples": [
+    {
+      "builder": "blaze",
+      "seconds": 6.6302,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-1-blaze.log",
+      "round": 1,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-1]",
+      "marker_verified": true
+    },
+    {
+      "builder": "cargo",
+      "seconds": 22.207192,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-1-cargo.log",
+      "round": 1,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-1]",
+      "marker_verified": true
+    },
+    {
+      "builder": "cargo",
+      "seconds": 20.755083,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-2-cargo.log",
+      "round": 2,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-2]",
+      "marker_verified": true
+    },
+    {
+      "builder": "blaze",
+      "seconds": 6.786532,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-2-blaze.log",
+      "round": 2,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-2]",
+      "marker_verified": true
+    },
+    {
+      "builder": "blaze",
+      "seconds": 6.995719,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-3-blaze.log",
+      "round": 3,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-3]",
+      "marker_verified": true
+    },
+    {
+      "builder": "cargo",
+      "seconds": 23.276479,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-round-3-cargo.log",
+      "round": 3,
+      "marker": "JPEGs are made into the cache now [guarded-edit-sample-3]",
+      "marker_verified": true
+    }
+  ],
+  "warmups": [
+    {
+      "builder": "cargo",
+      "seconds": 21.432588,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-warmup-cargo.log"
+    },
+    {
+      "builder": "blaze",
+      "seconds": 6.092686,
+      "exit": 0,
+      "log": "/tmp/pinhole-current-edit-warmup-blaze.log"
+    }
+  ],
+  "environment": {
+    "CARGO_BUILD_JOBS": 2,
+    "cargo_j": 2,
+    "blaze_affinity": "host default"
+  }
+}

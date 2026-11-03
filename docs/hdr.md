@@ -1,5 +1,11 @@
 # Colour and HDR
 
+> **Internal design and implementation history.** This document preserves the
+> HDR plan, experiments and measurements from the revisions and hardware
+> described below. Words such as "today" refer to that investigation, not
+> the current machine or a present-day support guarantee. It is not the
+> public plugin contract; plugin authors should use [the API reference](plugins.md).
+
 This is a design to carry out one phase at a time. It is meant to land as
 `docs/hdr.md` and to be kept true as the phases land.
 

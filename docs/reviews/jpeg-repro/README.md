@@ -1,28 +1,41 @@
-# Standalone JPEG parity reproduction
+# Standalone JPEG and SIMD parity regression
 
-No Pinhole code, no private photos, no libultrahdr. `gray-ramp.jpg` is a
-synthetic 96×64 greyscale JPEG made with image 0.25.10's JPEG encoder at
-quality 90. Each row is the integer ramp `x * 255 / 95`.
-
-From the repository root:
+No Pinhole code, private photos or libultrahdr. Run from the repository root:
 
 ```sh
-CARGO_TARGET_DIR=/tmp/pinhole-jpeg-blaze bin/build-rust run --release --locked --offline \
-  --manifest-path docs/reviews/jpeg-repro/Cargo.toml
-
-PINHOLE_RUST_BUILDER=cargo bin/build-rust run --release --locked --offline \
-  --manifest-path docs/reviews/jpeg-repro/Cargo.toml \
-  --target-dir /tmp/pinhole-jpeg-cargo
+bin/check-rust-parity
+# The setup gate, without Cargo or output files:
+bin/build-rust run --release --locked --manifest-path docs/reviews/jpeg-repro/Cargo.toml
 ```
 
-On 2026-11-03, Blaze 0.20261030.1 on x86-64 produced repeated pairs of
-pixels: `0, 2, 0, 2, 10, 13, 10, 13, …` instead of
-`0, 2, 5, 8, 10, 13, 16, 18, …`. Cargo 1.99.1 decoded the ramp correctly,
-as did Pillow's independent JPEG decoder. Both default SIMD and
-`set_use_unsafe(false)` showed the difference under Blaze. This is not
-evidence that disabling SIMD solves it.
+The parity command explicitly compiles the same decoder with Blaze and Cargo,
+with default SIMD features and again with `--no-default-features`. It compares
+the seven decoded images byte for byte. Targets and output files live in a
+temporary directory. These are reference checks, never an application fallback.
 
-The process exits nonzero when any channel differs by more than 2 from
-the ramp. A healthy decode has at most 1 code of error. Keep the compiler
-and the dependencies pinned when investigating; the exact responsible
-compiler function is not yet isolated.
+`gray-ramp.jpg` is the original 96×64 grayscale ramp encoded by image 0.25.10
+at JPEG quality 90. Each row is `x * 255 / 95`; the decoder must stay within
+2 levels of that ramp (both healthy compilers currently have max error 1).
+
+The six fixtures in `fixtures/` were generated with Pillow at JPEG quality 91.
+Their names record mode, dimensions, chroma subsampling (`s0` 4:4:4, `s1`
+4:2:2, `s2` 4:2:0), and progressive flag. For coordinate `(x,y)`, RGB values
+are `((23*x+11*y)%256, (7*x+37*y)%256, (51*x+3*y)%256)`; grayscale is
+`(23*x+11*y)%256`. They cover color, grayscale, progressive coding, odd sizes
+and width one. Pillow is needed only to regenerate fixtures, not run tests.
+
+The same executable independently verifies saturating x86 packing of
+signed/unsigned i32→i16 and i16→i8 values, preserving each 128-bit lane.
+SSE2 is baseline on x86-64; SSE4.1, AVX2 and AVX512BW tests run when the CPU
+supports them. ARM hosts run only JPEG checks.
+
+On 2026-11-03 upstream Blaze `0.20261030.1` failed the first SSE packing
+assertion and decoded the ramp as repeated pairs (`0,2,0,2,10,13,10,13,…`),
+with max error 255. Cargo produced `0,2,5,8,10,13,16,18,…` with max error 1.
+Pillow independently confirmed the correct ramp. The cause was the compiler's
+`pack_lanes` loop taking half of each 128-bit input lane. Pinhole's reviewed
+compiler patch repairs that loop; see [compiler setup](../../blaze.md).
+
+`set_use_unsafe(false)` still enables some SIMD in zune-core 0.5.1 because
+its per-architecture feature flags are ORed with the unsafe flag. The scalar
+check therefore disables the zune-jpeg SIMD Cargo features at compile time.

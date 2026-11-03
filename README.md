@@ -76,7 +76,10 @@ provider, a program in any language that pinholed talks to in JSON lines:
 
 Settings (Tab) → Plugins → Build a plugin opens the offline plugin workshop:
 a quick start, searchable API/reference sections, working examples and
-instructions to copy for an agent. `pinhole plugin docs --json` gives the
+instructions to copy for an agent. Tab/Shift Tab move through settings,
+Escape closes them, and left/right change a focused section tab. In the
+workshop, Ctrl Tab / Ctrl Shift Tab change documents and Ctrl F searches.
+`pinhole plugin docs --json` gives the
 installed API version and the same bundled documents to tools. Start with
 [the quick start](docs/plugin-quickstart.md) or [the agent contract](docs/plugin-agents.md).
 
@@ -181,7 +184,7 @@ custom plugins and source checkout. It never removes a system package.
 ## Development
 
 `bin/build` builds the Rust helpers and Qt window. Rust builds use
-[Blaze](https://github.com/indexable-inc/blaze) **0.20261030.1**, pinned in
+[Blaze](https://github.com/indexable-inc/blaze) **0.20261030.1+pinhole.1**, pinned in
 `bin/blaze-version` and installed by `bin/setup-blaze` (the installer prepares
 it too). `bin/build-rust` is shared by developer, local and package builds.
 Build errors stop the build; there is no automatic Cargo fallback.
@@ -191,9 +194,11 @@ needed, including CI checks of Blaze's generated code.
 
 The pin matters: stable `0.20261027.0` had a std symbol naming bug that broke
 thread spawning (`writable static MIN`). The pinned release fixes it.
-Each Blaze version has its own tool installation and daemon/cache directory,
-so incompatible protocol versions cannot share a daemon (the source of the
-previous misleading UTF-8 error). Their immutable Rust toolchain is shared.
+Each checkout has its own worker under the pinned compiler version;
+immutable toolchains and compiled artifacts are shared. Rust input changes
+restart that worker to avoid an observed incremental type-cache defect.
+[The compiler notes](docs/blaze.md) explain the patch, portable standard
+library and correctness gates.
 On 2026-11-02 all three Rust components — core/pinholed, Series and Send —
 built successfully using the pinned Blaze alone.
 
@@ -204,7 +209,7 @@ synthetic 100k library, is in [docs/grid-spike.md](docs/grid-spike.md).
 The [2026-11-03 project review](docs/reviews/2026-11-03.md) records the
 architecture, UI/UX and compiler correctness findings; see also the
 [repeatable startup measurements](docs/startup-performance.md). The current
-native warm first frame is about 416 ms median on the review machine;
+native warm first frame is about 391 ms median on the review machine;
 older frame-rate results describe their original hardware and revision.
 
 ## Layout
@@ -247,7 +252,7 @@ it is built):
 
 ```bash
 app/bin/build
-app/build/pinhole            # ? lists every key and gesture; S toggles the frame stats
+app/build/pinhole            # ? lists keys and gestures; Ctrl Shift F toggles frame stats
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
 app/bin/test                 # unit tests: scroll physics, viewer motion, translations, theme, library
 ```
@@ -370,3 +375,11 @@ core/target/release/pinhole-probe stream
 
 The index lands in `~/.local/share/pinhole/probe.sqlite`; the provider keeps
 its session in `~/.local/state/pinhole/auth`, readable only by you.
+
+## Project checks
+
+The [project review](docs/reviews/2026-11-03.md) records the architecture and
+measured findings. [ci/README.md](ci/README.md) documents reproducible checks
+for the compiler, Rust, Qt/plugin API, installer, accessibility, rendering and
+native Wayland startup. The application uses the reviewed
+[patched Blaze compiler](docs/blaze.md); Cargo runs separately as a reference.

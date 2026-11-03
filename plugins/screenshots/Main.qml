@@ -237,6 +237,7 @@ PinholePlugin {
                 }
                 Toggle {
                     id: hideSwitch
+                    Accessible.name: hideText.text
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     hint: "⇧ S"

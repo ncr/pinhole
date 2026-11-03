@@ -357,6 +357,7 @@ PinholePlugin {
                     }
                     Toggle {
                         id: toggle
+                        Accessible.name: row.modelData[1]
                         anchors.right: parent.right
                         enabled: !row.held
                         opacity: row.held ? 0.4 : 1

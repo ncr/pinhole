@@ -5,6 +5,9 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 version="$(cat "$ROOT/bin/blaze-version")"
 if [ "$#" -gt 0 ]; then echo 'Usage: bin/setup-blaze (version is pinned in bin/blaze-version)' >&2; exit 2; fi
+case "$version" in
+    *+pinhole.*) exec python3 "$ROOT/bin/bootstrap-blaze" ;;
+esac
 data="${XDG_DATA_HOME:-$HOME/.local/share}/pinhole"
 state="${BLAZE_HOME:-$data/blaze}"
 mkdir -p "$state/$version" "$state/toolchains"

@@ -1,7 +1,6 @@
 # Sources of your own: providers
 
-Pinhole shows photos from a *source*. iCloud and folders are built in
-(their Rust is linked into pinholed). Any other source (Immich, a NAS, a
+Pinhole shows photos from a *source*. iCloud and folders are built in. Any other source (Immich, a NAS, a
 phone, a web gallery) is a plugin of your own with a *provider*: a program
 in the plugin's folder, written in whatever you like, that pinholed starts
 and talks to in JSON lines on its stdin and stdout.
@@ -10,16 +9,17 @@ The provider only says what there is. pinholed checks every line it sends,
 writes the library itself (`library.sqlite` and the thumbnails), fetches
 the files from where the provider says they are, makes the thumbnails a
 provider has none of, and keeps everything in step. A provider never
-writes the library, and no photo's bytes pass through it.
+writes the library. Its JSON protocol carries metadata and file tickets,
+not image bytes; an `add` request may ask it to read a supplied file for
+copying or upload.
 
-This page is all you need to write one. The test source,
-`core/daemon/tests/provider/pinhole-test-source` (Python), is a complete
-example: it signs in, follows changes, pushes them, serves thumbnails by
-URL, takes files added and keeps favourites.
+This reference covers the provider protocol. For the plugin UI and its
+manifest, see [the plugin API](plugins.md). A complete Python example is
+included below.
 
 ## The plugin
 
-A provider is part of a plugin (`docs/plugins.md`): a folder in
+A provider is part of a plugin ([the plugin API](plugins.md)): a folder in
 `~/.config/pinhole/plugins/` with a `manifest.json`, a `Main.qml` (which
 may be empty) and the program.
 
@@ -59,7 +59,7 @@ PinholePlugin {
 | `accepts` | `[]` | The extensions of files it takes when they are dropped on the window (`add`), in lower case. None: nothing can be added. |
 | `rounds_every_secs` | 60 | How often a source of it is looked at for changes, 5 to 86400. |
 
-The manifest needs `"api": 3`. A source that breaks a rule is left out,
+The manifest needs `"api": 3` or newer. A source that breaks a rule is left out,
 and pinholed's log (`~/.local/state/pinhole/pinholed.log`) says why:
 
 ```
@@ -80,7 +80,7 @@ switch turns.
 
 What the window shows of your sources is your plugin's QML, as iCloud's
 and Folders' is theirs: a `PluginSource` in its root's `sources`
-(docs/plugins.md) gives a source's row its words and buttons, offers what
+([the plugin API](plugins.md)) gives a source's row its words and buttons, offers what
 your `discover` found and the ways in (a button and key of Add a source),
 and signs in. Its `pinhole.sources` adds a source (`add(kind, entry)`,
 which reaches your `add_entry`), signs in (`signIn`, `submitCode`) and out,
@@ -106,8 +106,9 @@ pinholed starts it as
 <plugin folder>/<provider> --state-dir ~/.local/state/pinhole/sources/<plugin id>
 ```
 
-in that folder (mode 0700), which is the provider's own: keep sessions,
-tokens and caches there. Nothing else of Pinhole's is its to write.
+The working directory is the `--state-dir` folder (mode 0700), not the
+plugin code folder. Keep sessions, tokens and caches there. Do not write
+Pinhole's library or another provider's state.
 
 - One process serves each source in use (the one shown). It is started by
   the first request and stopped when the source is no longer shown, is
@@ -300,7 +301,7 @@ A `put` note's `assets`, at most 1,000 in one note:
 | `id` | required | Unique in the source and stable while the asset is there. 1 to 512 bytes, no control characters. |
 | `kind` | required | `photo`, `video` or `live` (a photo with motion). |
 | `filename`, `item_type` | | The original's name and UTI (`public.jpeg`, `public.heic`, `com.apple.quicktime-movie`…). |
-| `taken`, `added` | | Milliseconds since 1970. The grid is ordered by `taken`. |
+| `taken`, `added` | | Milliseconds since 1970: capture time and addition time. The library API keeps capture-date order; the visual grid independently uses Automatic, Date taken or Date added. |
 | `favorite`, `has_location` | `false` | |
 | `duration` | | A video's, in seconds. |
 | `orientation` | | EXIF's, 1 to 8. |
@@ -368,8 +369,8 @@ until its key changes.
 
 ## Limits
 
-What pinholed does when a provider misbehaves, so that it never harms the
-library or pinholed:
+The protocol applies these resource and validation limits. They are not a
+sandbox: an enabled provider runs with the user's filesystem rights.
 
 | | |
 |---|---|
@@ -390,27 +391,41 @@ starts again at once.) A
 request that fails in a listing writes nothing more: what was put before
 stays, and nothing is removed.
 
-## How fast
-
-50,000 assets of three renditions each, put by the test source
-(`fake`), checked and written by pinholed: **0.6 s**, about 85,000 a
-second, of which the Python itself is 0.33 s (27 MB of JSON). 200,000
-took 1.8 s. Listing iCloud's 49,079 photos from Apple takes about five
-minutes, so the protocol costs nothing that shows.
-(`fifty_thousand_assets_through_the_protocol` in
-`core/daemon/tests/provider.rs`; `PINHOLE_PROVIDER_ASSETS` for another
-number.)
-
 ## Examples
 
 ### Python: a folder of JPEGs
 
-The smallest useful provider. No token: each round lists the folder again.
+No token: each round lists the folder again. Save the program as
+`pinhole-jpegs`, make it executable, and use this `manifest.json` plus the
+empty `PinholePlugin` root shown above:
+
+```json
+{
+  "schemaVersion": 1,
+  "api": 3,
+  "id": "me.jpegs",
+  "name": "JPEG folder",
+  "entryPoints": { "main": "Main.qml" },
+  "sources": [{ "kind": "me.jpegs", "provider": "pinhole-jpegs" }]
+}
+```
+
+Asset ids and cache keys include the filename, so equal sizes/timestamps
+cannot collide. Rendition names are base64-encoded filenames, preserving
+tabs and newlines without putting control characters in protocol fields.
+The example reads regular files only; a directory failure returns an error
+before any listing is published. `taken` uses file modification time as a
+simple fallback; a production provider should use capture metadata when
+available.
 
 ```python
 #!/usr/bin/env -S python3 -I
-"""A folder of JPEGs as a source of Pinhole's."""
-import hashlib, json, os, sys
+"""A folder of JPEGs as a Pinhole source; timestamps use file modification time."""
+import base64, hashlib, json, os, sys
+
+
+class ProviderError(Exception):
+    pass
 
 
 def say(line):
@@ -419,14 +434,30 @@ def say(line):
 
 
 def assets(folder):
-    for name in sorted(os.listdir(folder)):
-        if not name.lower().endswith((".jpg", ".jpeg")):
+    with os.scandir(folder) as directory:
+        entries = sorted(directory, key=lambda item: os.fsencode(item.name))
+    for item in entries:
+        if not item.name.lower().endswith((".jpg", ".jpeg")) or not item.is_file(follow_symlinks=False):
             continue
-        st = os.stat(os.path.join(folder, name))
-        key = hashlib.sha1(f"{name}\0{st.st_size}\0{st.st_mtime_ns}".encode()).hexdigest()
-        yield {"id": name, "kind": "photo", "filename": name, "taken": st.st_mtime_ns // 1_000_000,
+        raw = os.fsencode(item.name)
+        name = base64.urlsafe_b64encode(raw).decode("ascii")
+        aid = hashlib.sha256(raw).hexdigest()
+        st = item.stat(follow_symlinks=False)
+        key = hashlib.sha256(raw + f"\0{st.st_size}\0{st.st_mtime_ns}".encode()).hexdigest()
+        # Display strings may not contain protocol control characters.
+        display = "".join(c if ord(c) >= 32 and not 127 <= ord(c) <= 159 and not 0xD800 <= ord(c) <= 0xDFFF
+                          else "\ufffd" for c in item.name)
+        yield {"id": aid, "kind": "photo", "filename": display, "taken": st.st_mtime_ns // 1_000_000,
                "renditions": [{"kind": k, "name": name, "key": key, "make": True} for k in ("thumb", "medium")]
                + [{"kind": k, "name": name, "key": key, "file_type": "public.jpeg"} for k in ("full", "original")]}
+
+
+def ticket(folder, name):
+    raw = base64.b64decode(name.encode("ascii"), altchars=b"-_", validate=True)
+    filename = os.fsdecode(raw)
+    if not filename or "\0" in filename or filename in (".", "..") or os.path.basename(filename) != filename:
+        raise ProviderError("bad_request", "The rendition name is not a filename")
+    return {"path": os.path.join(folder, filename)}
 
 
 for line in sys.stdin:
@@ -437,56 +468,36 @@ for line in sys.stdin:
         if method == "add_entry":
             folder = os.path.abspath(params.get("folder", ""))
             if not os.path.isdir(folder):
-                raise LookupError("bad_request", f"{folder} is not a folder")
-            result = {"entry": {"key": folder, "name": os.path.basename(folder), "folder": folder}}
+                raise ProviderError("offline", f"{folder} is not a folder")
+            key = hashlib.sha256(os.fsencode(folder)).hexdigest()
+            result = {"entry": {"key": key, "name": os.path.basename(folder), "folder": folder}}
         elif method == "start":
             if not os.path.isdir(entry["folder"]):
-                raise LookupError("offline", f"{entry['folder']} is not there")
+                raise ProviderError("offline", f"{entry['folder']} is not there")
             result = {}
         elif method == "list":
+            # Finish scanning before sending any put: a failed mount must
+            # never become a successful empty listing that removes photos.
             found = list(assets(entry["folder"]))
             for i in range(0, len(found), 500):
                 say({"id": rid, "note": "put", "assets": found[i:i + 500]})
             result = {"token": None, "summary": f"{len(found)} photos"}
         elif method == "prepare":
-            result = {"tickets": [{"path": os.path.join(entry["folder"], w["name"])} for w in params["wanted"]]}
+            result = {"tickets": [ticket(entry["folder"], w["name"]) for w in params["wanted"]]}
         else:
-            raise LookupError("unsupported", f"no {method}")
+            raise ProviderError("unsupported", f"no {method}")
         say({"id": rid, "ok": True, "result": result})
-    except LookupError as e:
-        say({"id": rid, "ok": False, "error": {"code": e.args[0], "message": e.args[1]}})
+    except ProviderError as error:
+        say({"id": rid, "ok": False, "error": {"code": error.args[0], "message": error.args[1]}})
+    except OSError as error:
+        say({"id": rid, "ok": False, "error": {"code": "offline", "message": str(error)}})
+    except (KeyError, ValueError, TypeError) as error:
+        say({"id": rid, "ok": False, "error": {"code": "bad_request", "message": str(error)}})
 ```
 
 A window adds one with `pinhole.sources.add("me.jpegs", {folder: "/mnt/photos"})`,
 or `set_source` with `{"kind": "me.jpegs", "folder": "/mnt/photos"}` on
 pinholed's socket.
-
-### Shell: the same with jq
-
-```sh
-#!/bin/sh
-# A folder of JPEGs as a source of Pinhole's; jq reads and writes the JSON.
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | jq '.id')
-  case $(printf '%s' "$line" | jq -r '.method') in
-    add_entry)
-      printf '%s' "$line" | jq -c '{id, ok: true, result: {entry: {key: .params.folder, folder: .params.folder}}}' ;;
-    list)
-      folder=$(printf '%s' "$line" | jq -r '.params.entry.folder')
-      find "$folder" -maxdepth 1 -type f -iname '*.jpg' -printf '%f\t%s\t%T@\n' | jq -Rsc --argjson id "$id" '
-        [split("\n")[] | select(length > 0) | split("\t") as [$name, $size, $time]
-         | {id: $name, kind: "photo", taken: ($time | tonumber * 1000 | floor),
-            renditions: [({kind: "thumb", make: true}, {kind: "medium", make: true}, {kind: "full"}, {kind: "original"})
-                         + {name: $name, key: "\($size)-\($time)"}]}]
-        | range(0; length; 1000) as $i | {id: $id, note: "put", assets: .[$i:$i + 1000]}'
-      printf '{"id":%s,"ok":true,"result":{"token":null,"summary":"listed"}}\n' "$id" ;;
-    prepare)
-      printf '%s' "$line" | jq -c '.params.entry.folder as $f | {id, ok: true, result: {tickets: [.params.wanted[] | {path: "\($f)/\(.name)"}]}}' ;;
-    *)
-      printf '{"id":%s,"ok":false,"error":{"code":"unsupported","message":"no such method"}}\n' "$id" ;;
-  esac
-done
-```
 
 ### Rust
 
@@ -511,13 +522,3 @@ the side panel, and watch pinholed's log
 (`~/.local/state/pinhole/pinholed.log`): it says when the provider starts,
 what it refused and why, and everything the provider writes on stderr.
 `pinhole status` shows the source and its health.
-
-The tests in `core/daemon/tests/provider.rs` run a pinholed of their own
-(its socket, its folders) with the test source, and go through all of the
-above: listing 300 photos with thumbnails by `url` and `path` tickets,
-mediums made, originals fetched, changes pushed and followed, files added,
-favourites, sign-in and its codes, a second source added and removed, the
-provider hanging, crashing, flooding and lying (a 200 MB line of stderr
-among it), a kind outside its plugin's name refused, the plugin turned off
-and on, a video's thumbnail made from its URL by ranges, a medium made from
-a URL in the cache, and FIFOs for originals.

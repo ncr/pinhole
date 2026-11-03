@@ -1,5 +1,11 @@
 # Sources
 
+> **Internal architecture reference.** This page describes the core's source
+> implementation and its development history, not the public plugin contract.
+> Measurements apply to the revisions and machines recorded here. Plugin
+> authors should use [the public API](plugins.md) and, for a new source,
+> [the provider protocol](source-providers.md).
+
 Pinhole began as an iCloud Photos browser, but almost nothing in it needs to
 know that. The window reads `library.sqlite` and the thumbnails from disk and
 asks the service for a photo's `medium`, `full`, `original`, `video` or
@@ -85,12 +91,13 @@ signing in, how often to look for changes (a minute; a folder ten seconds),
 and what an error means for the connection: `needs_sign_in`, `offline` or
 `failing`, the health the window has always been told.
 
-A source's `id` ("icloud", or "folder:" and the path) is written into the
+A source's `id` (`icloud:<account>`, or `folder:<absolute path>`) is written into the
 library it fills, and the core never lets another source write there
 (`sync::claim`): a folder pointed at iCloud's library by mistake must not
-list 50,000 photos away. A library of another folder is emptied and made
-again; one from another source, or one that says nothing of where it came
-from (pinhole-fake's), is left alone.
+list 50,000 photos away. An index owned by another source, including a
+different folder, is refused and left alone. An ownerless, nonempty index
+(such as a test fixture) is also left alone; an ownerless empty index can be
+claimed by the source that fills it.
 
 ## The index
 
@@ -219,9 +226,10 @@ ImageMagick reads the file on stdin, so no name is taken for its own
 syntax (`50%off.jpg` would be `500ff.jpg` to it).
 
 Following changes is a fresh look at the folder each round, compared with
-the index by path, size and modification time. A folder is not on a
-network, so this is quick (a stat of every file) and needs no change token
-beyond the time of the last look. A folder that is not there (a disk not
+the index by path, size and modification time. This requires a stat of every
+file and needs no change token beyond the time of the last look. Its cost
+depends on the filesystem; a folder can be on a local disk, removable drive
+or network mount. A folder that is not there (a disk not
 mounted) is an error, `offline`, never an empty library. In the same way,
 what a look cannot read (a folder without permission, a failing disk) is
 unseen, not gone: the photos the library has there stay, favourites and

@@ -13,8 +13,10 @@ pinhole plugin docs source-providers
 
 The JSON includes the installed `api` and complete Markdown documents.
 Use that version's contract. In a source checkout the same references are
-`docs/plugins.md`, `docs/source-providers.md`, `docs/service.md` and
-`docs/sources.md`. The runnable examples are in `app/tests/examples/`.
+`docs/plugin-quickstart.md`, `docs/plugins.md`, `docs/source-providers.md`
+and this contract. The runnable examples are in `app/tests/examples/`.
+The API reference includes the SQL schema available to plugins; internal
+service and rendering notes are not required to build a plugin.
 
 ## Create and validate
 
@@ -25,8 +27,10 @@ pinhole plugin check me.descriptive-name
 
 Edit the generated folder under `~/.config/pinhole/plugins/`. Personal
 plugins start disabled; the user enables them in Settings (Tab) → Plugins.
-Saving reloads an enabled plugin. Use the installed scaffold's manifest API;
-API 6 is the current source version. Run `plugin check` after changes.
+Saving reloads an enabled plugin. Use the installed scaffold's manifest API
+and check `pinhole plugin docs --json` for the installed version. A manifest's
+`api` is the minimum host API required, separate from the plugin's `version`.
+Run `plugin check` after changes.
 It checks the manifest, QML and JS, translations and known API footguns;
 it is not a substitute for running the interaction in the app.
 
@@ -35,12 +39,21 @@ it is not a substitute for running the interaction in the app.
 - Import `Pinhole.Plugin`. Use its components and the `theme` properties.
   Use `Panel` or `Card` to contain input, and `ScrollList`, `ScrollGrid`,
   `ScrollArea`, `PinchZoom`, `Choices` and `ShellButton` for app behaviour.
+  `ShellButton.checkable` requires manifest API 7; bind `active` to its
+  selected state.
 - Use `PluginAction` for discoverable actions. Set `covering` while a view
   covers the photos. Scope its `Command`s to `keyLayer: "plugin"` and its
   open state. Escape closes it. Do not leave global `Shortcut`s active.
 - Keep the root cheap: it loads before the first frame. Load large views
   on demand and do expensive work asynchronously. Do not fetch a whole
   library's originals. Use `field()` for columns and `query()` for SQL.
+  Queries are limited to two seconds total, 100,000 rows/32 MiB, 1 MiB per
+  cell, two per plugin and eight globally; aggregate or page larger results.
+  `LIKE`/`GLOB` patterns have a 1,024-byte limit (an oversized pattern is `sql`).
+  Handle `query_timeout`, `query_limit` and `query_busy`. Cancel a pending
+  query when closing its view; a library reload rejects it with `cancelled`.
+  Ignore cancellation in the error UI. SQL `NULL` returns as an empty string;
+  use `IS NULL` in SQL when missing and empty values must be distinguished.
 - Persist photo ids. Library positions are capture-date order, independent
   of the main grid's Automatic/Date taken/Date added timeline. Reloads move
   positions. Use `openPhoto` and `reveal` to navigate.
@@ -55,6 +68,9 @@ it is not a substitute for running the interaction in the app.
   for the clipboard, `notify` for quiet success, `complain` and `warn` for
   failures. Handle cancellation and missing/offline files. Record reversible
   edits with `did`, and drop a refused step with `dropStep`.
+  Declare external executable dependencies and show a useful error if one
+  is missing. A QML reload or disabling the plugin stops its jobs and drops
+  callbacks; save work needed by the next instance in `state`.
 - Wrap visible words in `qsTr()` and supply `i18n/pl.json`; counted strings
   need plural forms. Give files distinctive names to avoid context clashes.
 - A new source uses a namespaced provider in any language speaking the

@@ -21,6 +21,7 @@
 
 #include "bench.h"
 #include "framestats.h"
+#include "framemonitor.h"
 #include "keymap.h"
 #include "library.h"
 #include "timeline.h"
@@ -394,14 +395,7 @@ int main(int argc, char *argv[]) {
                      [fetchGridDetail](const QList<int> &indexes, quint64 generation) { fetchGridDetail(indexes, generation, false); });
     QObject::connect(&loader, &ThumbnailLoader::fullNeeded, &service,
                      [fetchGridDetail](const QList<int> &indexes, quint64 generation) { fetchGridDetail(indexes, generation, true); });
-    QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [&stats] { stats.syncBegan(); },
-                     Qt::DirectConnection);
-    QObject::connect(window, &QQuickWindow::beforeRendering, window, [&stats] { stats.renderBegan(); },
-                     Qt::DirectConnection);
-    QObject::connect(window, &QQuickWindow::afterRendering, window, [&stats] { stats.renderEnded(); },
-                     Qt::DirectConnection);
-    QObject::connect(window, &QQuickWindow::frameSwapped, window, [&stats] { stats.frameSwapped(); },
-                     Qt::DirectConnection);
+    new FrameMonitor(window, &stats);
 
     // The service found changes in the source: read the library again and
     // let everything that holds positions follow its photos.

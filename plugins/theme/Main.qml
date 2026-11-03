@@ -171,6 +171,7 @@ PinholePlugin {
                 }
                 Toggle {
                     id: strongSwitch
+                    Accessible.name: qsTr("The photo's colours strong")
                     anchors.right: parent.right
                     checked: plugin.strong
                     onToggled: pinhole.settings.strong = !plugin.strong

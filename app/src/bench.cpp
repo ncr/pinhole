@@ -142,7 +142,7 @@ void Bench::start() {
     std::printf("pinhole bench: %d items, window %.0fx%.0f logical\n", m_grid->count(), m_grid->width(),
                 m_grid->height());
     std::printf("%-40s %6s %6s %6s %6s %6s %7s %7s %7s %6s %6s %6s %7s\n", "phase", "fps", "p50", "p95", "p99", "max",
-                "missed", "sync50", "sync99", "ph%", "upl/f", "batch", "dec/s");
+                "late", "sync50", "sync99", "ph%", "upl/f", "batch", "dec/s");
     std::fflush(stdout);
     beginPhase();
 }
@@ -189,6 +189,8 @@ void Bench::tick(qreal dt) {
 void Bench::endPhase() {
     const Phase &p = m_phases[m_current];
     const FrameStats::Summary s = m_stats->summary();
+    std::printf("target: %.2f Hz%s; late = interval > 1.5 times its target period\n", s.targetHz,
+                s.mixedRefreshRates ? " (screen rates changed during this phase)" : "");
     const double measured = std::max(1e-3, p.seconds - kWarmup);
     std::printf("%-40s %6.0f %6.1f %6.1f %6.1f %6.1f %4d/%-3.0f%% %6.2f %6.2f %6.0f %6.1f %6.0f %7.0f\n",
                 p.name.toUtf8().constData(), s.frames / std::max(1e-3, s.seconds), s.intervalP50, s.intervalP95,

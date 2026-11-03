@@ -1,12 +1,14 @@
 import QtQuick
+import Pinhole
 import "keys.js" as KeyNames
+import "focus.js" as Focus
 
 // A Copy button that answers on itself, as touch apps do, rather than in a
 // line of text somewhere else: dimmed while the photos are fetched, then a
 // tick for a moment, or a shake if nothing could be copied. Drawn as an
 // Omarchy control (see ShellButton.qml); `flat` for a row in a bar, `hint` for
 // its keys beside it.
-Rectangle {
+ControlSurface {
     id: button
 
     // The photos to copy, asked for when pressed.
@@ -25,17 +27,41 @@ Rectangle {
 
     // idle, working, done, failed
     property string phase: "idle"
+    usable: enabledHere && phase !== "working"
+    activeFocusOnTab: usable
+    Accessible.role: Accessible.Button
+    Accessible.name: qsTr("Copy")
+    Accessible.description: phase === "working" ? qsTr("Copying…") : phase === "done" ? qsTr("Copied") : ""
+    Accessible.focusable: usable
+    Accessible.focused: activeFocus
+    Accessible.pressed: usable && (tap.pressed || keyboardPressed)
+    Accessible.onPressAction: copy()
+    onActivated: copy()
+    onActiveFocusChanged: if (activeFocus) Focus.reveal(button)
+    property alias color: surface.color
+    property alias radius: surface.radius
+    property alias border: surface.border
 
     readonly property color ink: theme.foreground
     width: Math.max(label.implicitWidth, tick.implicitWidth) + 2 * Math.round(theme.fontSize * 0.833)
     height: Math.round(theme.fontSize * 2.333)
-    radius: Math.min(4, theme.radius)
-    color: Qt.rgba(ink.r, ink.g, ink.b, tap.pressed ? 0.22 : hover.hovered && enabledHere ? 0.08 : flat ? 0 : 0.04)
-    border.width: 1
-    border.color: Qt.rgba(ink.r, ink.g, ink.b, hover.hovered && enabledHere ? 0.25 : flat ? 0 : 0.4)
+    Rectangle {
+        id: surface
+        anchors.fill: parent
+        radius: Math.min(4, theme.radius)
+        color: Qt.rgba(button.ink.r, button.ink.g, button.ink.b, button.usable && (tap.pressed || button.keyboardPressed) ? 0.22 : (hover.containsMouse || button.activeFocus) && button.usable ? 0.08 : button.flat ? 0 : 0.04)
+        border.width: 1
+        border.color: Qt.rgba(button.ink.r, button.ink.g, button.ink.b, (hover.containsMouse || button.activeFocus) && button.usable ? 0.25 : button.flat ? 0 : 0.4)
+    }
+    Rectangle {
+        anchors.fill: parent; anchors.margins: -3
+        radius: surface.radius + 2
+        color: "transparent"; border.width: 2; border.color: theme.accent
+        visible: button.activeFocus
+    }
     opacity: !enabledHere ? 0.4 : phase === "working" ? 0.6 : 1
     // Every press shows: the button gives a little under the finger.
-    scale: tap.pressed ? 0.94 : 1
+    scale: usable && (tap.pressed || keyboardPressed) ? 0.94 : 1
     Behavior on scale { NumberAnimation { duration: 80 } }
 
     UiText {
@@ -45,6 +71,7 @@ Rectangle {
         text: qsTr("Copy") + (button.hint ? "  <font color=\"" + theme.darkForeground + "\">" + button.hint + "</font>" : "")
         opacity: button.phase === "done" ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 90 } }
+        Accessible.ignored: true
     }
     // The tick, in the label's place.
     UiText {
@@ -54,6 +81,7 @@ Rectangle {
         text: "✓ " + qsTr("Copied")
         color: theme.accent
         opacity: button.phase === "done" ? 1 : 0
+        Accessible.ignored: true
     }
 
     // The tick pops in; how long it stays is the timer's (an animation's
@@ -112,8 +140,13 @@ Rectangle {
         radius: parent.radius
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
     }
-    HoverHandler { id: hover; cursorShape: button.enabledHere ? Qt.PointingHandCursor : Qt.ArrowCursor }
-    TapHandler { id: tap; onTapped: button.copy() }
+    Shield { anchors.fill: parent; z: -1; enabled: button.floating }
+    MouseArea {
+        id: hover; anchors.fill: parent
+        acceptedButtons: Qt.NoButton; hoverEnabled: true
+        cursorShape: button.usable ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+    TapHandler { id: tap; onTapped: { if (button.usable) button.forceActiveFocus(Qt.MouseFocusReason); button.copy() } }
     // Its key, on `keyLayer`'s keys (Command.qml), in the help's `section`.
     Loader {
         active: button.key !== ""

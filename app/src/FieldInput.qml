@@ -1,4 +1,5 @@
 import QtQuick
+import "focus.js" as Focus
 
 // A line to type into, as the rest of the shell draws its controls: a
 // hairline that lights in the accent while typing, the hint in the muted
@@ -10,6 +11,8 @@ Rectangle {
     property string placeholder
     property bool password: false
     property bool done: false
+    Accessible.role: Accessible.Grouping
+    Accessible.name: placeholder
     signal accepted()
 
     width: parent ? parent.width : 300
@@ -35,15 +38,28 @@ Rectangle {
         echoMode: field.password ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"
         readOnly: field.done
+        activeFocusOnTab: !field.done
+        Accessible.name: field.placeholder
+        Accessible.description: field.password ? qsTr("Password field") : ""
+        Accessible.labelledBy: field
+        onActiveFocusChanged: if (activeFocus) Focus.reveal(field)
         clip: true
+        Keys.onShortcutOverride: event => {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || ((event.modifiers & Qt.ControlModifier) && [Qt.Key_Z, Qt.Key_Y, Qt.Key_C, Qt.Key_X, Qt.Key_V, Qt.Key_A].includes(event.key)))
+                event.accepted = true
+        }
         onAccepted: field.accepted()
     }
     UiText {
         anchors.left: input.left
         anchors.verticalCenter: parent.verticalCenter
         visible: input.text === "" && !input.preeditText
+        anchors.right: input.right
+        elide: Text.ElideRight
         text: field.placeholder
-        color: theme.muted
+        color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.7)
+        Accessible.ignored: true
     }
     UiText {
         id: tick
@@ -52,6 +68,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         text: field.done ? "✓" : ""
         color: theme.accent
+        Accessible.ignored: true
     }
     MouseArea {
         anchors.fill: parent

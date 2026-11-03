@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+mkdir -p "$ROOT/build/query-tests"
+cd "$ROOT/build/query-tests"
+qmake6 "$ROOT/tests/query/query_tests.pro"
+make -j2
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic exec ./pluginquery_tests "$@"

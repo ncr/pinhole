@@ -90,3 +90,29 @@ without changing the initial photo grouping or hiding. Profile the
 remaining ~100 ms of plugin work, eager settings construction and the
 first-render interval. Keep media readiness a separate metric. A five-run
 sample is useful for regressions; it does not establish a production p95.
+
+## Follow-up verification
+
+After the compiler/query/frame/accessibility and module-boundary fixes, the
+same real 49,092-item library and 16 plugins were measured again on native
+Wayland, with a warmup and five launches on hidden workspace 5:
+
+| Milestone | Median | Range |
+|---|---:|---:|
+| First frame | 391 ms | 387–409 ms |
+| Visible thumbnail tier resolved, when reported | 473 ms | 461–503 ms |
+| Media integration ready | 874 ms | 852–878 ms |
+
+The first-frame improvement is preserved. This small sample does not prove
+that the 26 ms difference from the prior 416 ms median is a durable gain.
+As above, a hidden compositor surface can suspend uploads; the photo-ready
+numbers were observed in this set, not guaranteed by native-hidden mode.
+The window remained 1055×1300. The private read-only daemon boot is timed
+separately in [the raw follow-up runs](reviews/2026-11-03-followup-startup.json).
+
+The CI compositor check also ran successfully with a 10,000-item synthetic
+library, private headless Weston and two CPU cores: first frame 369 ms
+median, 60 Hz scroll at 5,000 px/s with p99 17.2 ms and no late frames in
+that smoke phase. These software-renderer figures do not replace desktop
+GPU measurements. Routine CI uses 2,048 synthetic photos to keep fixture
+creation from dominating the job; its artifacts retain actual timings.

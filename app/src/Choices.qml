@@ -14,6 +14,8 @@ Row {
     property string helpText
     property bool flat: true
     signal chosen(var value)
+    Accessible.role: Accessible.Grouping
+    Accessible.name: helpText
 
     Repeater {
         model: choices.options
@@ -24,6 +26,8 @@ Row {
             text: modelData.text
             hint: index < 9 ? String(index + 1) : ""
             active: choices.value === modelData.value
+            checkable: true
+            Accessible.role: Accessible.RadioButton
             onTapped: if (!active) choices.chosen(modelData.value)
         }
     }

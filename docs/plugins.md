@@ -64,7 +64,7 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
   and a `contentHeight`), each scrolled by the wheel and the touchpad
   exactly as the grid is: the same physics, its inertia, its springs at
   the ends and its wheel's glide, measured against the grid's own by a
-  self-test (`PINHOLE_SELFTEST=physics`). Up and down, and across where the
+  controls. Up and down, and across where the
   content is wider (a strip: `orientation: ListView.Horizontal`, which the
   wheel then moves across too). They take every wheel turn, swipe and pinch
   over them, at their ends too, so the photos beneath never scroll; one in
@@ -97,8 +97,8 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
   person's Pictures or clipboard.
 - `pinhole.query(sql, values)`: the library's index asked, read only, away
   from the window, waiting while the service writes it: a promise of its
-  rows. Never `sqlite3` on the file, which opens it while the service
-  writes ("database is locked"). `pinhole.library.field(name)` has a field
+  rows, with the bounds and cancellation described below. Use it instead
+  of opening the database with an external `sqlite3` process. `pinhole.library.field(name)` has a field
   of every photo at once, `"day"` among them.
 - `settings`, `state` and `cache` (below): the user's choices, what they
   made, what can be worked out again.
@@ -107,9 +107,9 @@ A plugin covers the photos only while its `covering` is true, under
 Pinhole's own panels and over the other plugins, with the `"plugin"` keys
 its own: the template's `covering: open` is all it takes.
 
-Four examples, each a whole `Main.qml` (beside a manifest asking for
-`"api": 5`), are in `app/tests/examples` and run by a self-test
-(`PINHOLE_SELFTEST=examples`):
+The following four examples are complete `Main.qml` files, each requiring
+a manifest with `"api": 5` or newer. Executable copies are also in
+`app/tests/examples` in the source repository:
 
 A screen of its own with a `ScrollList`, a count in its words (`%n`):
 
@@ -176,7 +176,7 @@ PinholePlugin {
             Flow {
                 anchors.fill: parent
                 Repeater {
-                    model: Math.floor(parent.width / zoom.size) * Math.floor(parent.height / zoom.size)
+                    model: plugin.open ? Math.min(pinhole.library.count, Math.floor(parent.width / zoom.size) * Math.floor(parent.height / zoom.size)) : 0
                     delegate: Rectangle {
                         required property int index
                         width: zoom.size
@@ -205,13 +205,26 @@ PinholePlugin {
     id: plugin
     property bool open: false
     covering: open
-    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; onTriggered: plugin.open = true }]
+    property var photo: ({})
+    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; usable: pinhole.library.count > 0; onTriggered: plugin.begin() }]
     Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    function begin() {
+        const picked = pinhole.library.item(pinhole.currentIndex())
+        if (picked.index === undefined || !picked.avgColor) {
+            action.complain(qsTr("Could not make it"))
+            return
+        }
+        photo = picked
+        open = true
+    }
 
     function make(size) {
         open = false
-        const photo = pinhole.library.item(pinhole.currentIndex())
-        const path = pinhole.picturePath(photo.filename.replace(/\.[^.]*$/, "") + " " + size, "png")
+        const photo = plugin.photo
+        if (photo.index === undefined || !photo.avgColor)
+            return
+        const path = pinhole.picturePath((photo.filename || "Swatch").replace(/\.[^.]*$/, "") + " " + size, "png")
         pinhole.run("magick", ["-size", size + "x" + size, "xc:" + photo.avgColor, path])
             .then(() => pinhole.copyFile(path))
             .then(() => pinhole.notify(qsTr("Copied, and kept in Pictures")), error => {
@@ -245,21 +258,38 @@ import QtQuick
 import Pinhole.Plugin
 
 // F8: the library's files, by how many are videos and how many know where
-// they were taken, asked of its index (docs/sources.md), in a ScrollArea
+// they were taken, asked of its index with SQL, in a ScrollArea
 // wider and taller than the window.
 PinholePlugin {
     id: plugin
     property bool open: false
     property string report: ""
+    property var pending: null
     covering: open
-    actions: [PluginAction { place: "grid"; text: qsTr("Places"); key: "F8"; onTriggered: plugin.ask() }]
+    actions: [PluginAction { place: "grid"; text: qsTr("Places"); key: "F8"; busy: plugin.pending !== null; onTriggered: plugin.ask() }]
     Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
 
+    onOpenChanged: if (!open) cancelQuery()
+    function cancelQuery() {
+        const job = pending
+        pending = null
+        if (job) job.cancel()
+    }
     function ask() {
+        cancelQuery()
         open = true
-        pinhole.query("SELECT is_video, has_location, count(*) AS n FROM assets GROUP BY is_video, has_location")
-            .then(rows => report = rows.map(r => (r.is_video ? "video" : "photo") + (r.has_location ? ", placed: " : ": ") + r.n).join("\n"))
-            .catch(pinhole.warn)
+        report = ""
+        const job = pinhole.query("SELECT is_video, has_location, count(*) AS n FROM assets GROUP BY is_video, has_location")
+        pending = job
+        job.then(rows => {
+            if (pending !== job || !open) return
+            pending = null
+            report = rows.map(r => (r.is_video ? "video" : "photo") + (r.has_location ? ", placed: " : ": ") + r.n).join("\n")
+        }).catch(error => {
+            if (pending !== job) return
+            pending = null
+            if (error.code !== "cancelled") pinhole.warn(error)
+        })
     }
 
     Panel {
@@ -330,7 +360,7 @@ And warns of:
 ```json
 {
   "schemaVersion": 1,
-  "api": 2,
+  "api": 3,
   "id": "me.favourites",
   "name": "Favourites count",
   "version": "1.0.0",
@@ -353,7 +383,7 @@ the plugin's own, whose provider pinholed runs
 ([source-providers.md](source-providers.md)), and what the window shows of
 one: the root's `sources` (`PluginSource`), `pinhole.sources`,
 `chooseFolder` and `sizeText`'s decimals. API 4 brought photos in their
-right colours and HDR shown right in SDR ([hdr.md](hdr.md)): `image://file`,
+colour-correct image URLs: `image://file`,
 a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
 file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
 `SdrVideo`; and `Scroller`. API 5 brought the kit: `ScrollList`,
@@ -361,7 +391,8 @@ file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
 `ShellButton`'s `complain`, `pinhole.query`, `pinhole.picturePath` and
 `VideoView`; and
 `Scroller` scrolling as the grid does, across too. API 6 brought the
-root's `holdSdr` ([hdr.md](hdr.md), H3).
+root's `holdSdr`. API 7 adds `ShellButton.checkable` for selected buttons
+that report their state to accessibility tools.
 
 `Main.qml` beside it:
 
@@ -372,25 +403,42 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
     property int count: 0
+    property bool counted: false
+    // No scan at startup, and no per-photo item() calls.
     function recount() {
-        let n = 0
-        for (let i = 0; i < pinhole.library.count; ++i)
-            if (pinhole.library.item(i).favorite)
-                ++n
-        count = n
+        count = pinhole.library.field("favorite").filter(favorite => favorite).length
+        counted = true
     }
-    Component.onCompleted: recount()
-    Connections { target: pinhole.library; function onChanged() { plugin.recount() } }
+    Connections { target: pinhole.library; function onRevisionChanged() { plugin.counted = false } }
 
     actions: [
         PluginAction {
             place: "grid"
-            text: "♥ " + plugin.count
+            text: qsTr("Count favourites")
             key: "F2"
-            onTriggered: pinhole.notify(qsTr("%1 favourites").arg(plugin.count))
+            onTriggered: {
+                if (!plugin.counted) plugin.recount()
+                pinhole.notify(qsTr("%n favourite(s)", "", plugin.count))
+            }
         }
     ]
     help: [["F2", qsTr("Count favourites")]]
+}
+```
+
+`i18n/pl.json` beside it:
+
+```json
+{
+  "Favourites count": "Licznik ulubionych",
+  "How many favourites, on F2.": "Liczba ulubionych po F2.",
+  "Count favourites": "Policz ulubione",
+  "%n favourite(s)": {
+    "one": "%n ulubione zdjęcie",
+    "few": "%n ulubione zdjęcia",
+    "many": "%n ulubionych zdjęć",
+    "other": "%n ulubionych zdjęć"
+  }
 }
 ```
 
@@ -577,13 +625,10 @@ its settings, is there as the window first shows. It sets:
   all do) and Later (none does, and the card comes back next launch). A
   plugin turned on in the side panel shows its own once the panel
   closes.
-- `holdSdr` (API 6): while true, a photo shown full window is kept at SDR.
-  On a display that shows more (a wider gamut, HDR), the viewer's photo is
-  drawn beneath the window by Pinhole's stage ([hdr.md](hdr.md), H3);
-  while any plugin holds it, what lies beyond sRGB and SDR white fades out
-  in 400 ms, and back in once none does. For something SDR drawn over the
-  photo, so that it starts and ends on the same picture: Live Photos holds
-  it while its motion plays. Elsewhere it does nothing.
+- `holdSdr` (API 6): set true while drawing an SDR overlay over the
+  viewer's photo, so it uses the same brightness range as the overlay.
+  Pinhole restores the photo's wider range when no plugin holds it.
+  Use this only while the overlay is visible.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
@@ -592,18 +637,20 @@ with what it does in the help), the kit (above), and `Scroller`, what
 `ScrollList`, `ScrollGrid` and `ScrollArea` are made of (API 4), and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
-A plugin that plays video shows it with a `VideoView` (API 5), the
-viewer's own, as a `MediaPlayer`'s `videoOutput`: an HDR video (an
-iPhone's HLG or Dolby Vision, PQ) is tone mapped on the GPU as it is
-drawn, so it shows right in SDR, where Qt Multimedia's `VideoOutput` (and
-its `Video`) shows one flat and grey or, decoded by the hardware, with its
-brightest colours broken ([hdr.md](hdr.md), H2). Any other video is drawn
-as a `VideoOutput` draws it. It has a `VideoOutput`'s `fillMode`,
-`contentRect` and `endOfStreamPolicy`; `hdr` says whether the frames are
-HDR, and `framesDrawn` counts the frames it has drawn. `plugin check`
-refuses a `VideoOutput` and a `Video`. (API 4's `SdrVideo` between a
-player and a `VideoOutput` made HDR SDR on the CPU, seven cores for a 4K
-clip; it still works, and hands a `VideoView` its frames untouched.)
+These controls support Tab/Shift+Tab focus and Space/Enter activation.
+For a button representing a selected option, set `ShellButton.checkable: true` (API 7)
+and bind `active` to its selected state; `Choices` does this for its options.
+Give an unlabelled `Toggle` an explicit `Accessible.name` (for example,
+`Accessible.name: qsTr("Show captions")`) so its purpose is available to
+screen readers. `FieldInput` keeps normal text-editing keys inside the field.
+
+A plugin that plays video uses `VideoView` (API 5) as its `MediaPlayer`'s
+`videoOutput`. It handles the video's colour and brightness automatically.
+Use its `fillMode`, `contentRect` and `endOfStreamPolicy` as with Qt's
+`VideoOutput`. `hdr` reports whether the current video is HDR, and
+`framesDrawn` counts displayed frames. `plugin check` refuses `VideoOutput`
+and `Video`; use `VideoView` instead. Older plugins using `SdrVideo`
+remain supported, but new code should use `VideoView`.
 
 ```qml
 MediaPlayer { source: url; videoOutput: video }
@@ -626,9 +673,7 @@ this API. A library position is not a visual grid position.
 
 | | |
 |---|---|
-| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a
-Live Photo's effect as set on the iPhone: `loop`, `bounce`,
-`long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
+| `library` | `count`; `item(photo)`: `index`, `id`, `date` (ms), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a Live Photo's effect as set on the iPhone: `loop`, `bounce`, `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `[]` for `index`, `thumbnail` or a name it has not; `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
 | `viewer` | the photo shown full window: `open`, `index`; `hdr` (API 4), what makes it HDR, read from its file once it shows: `{ kind, headroom }`, `kind` `"apple"` or `"iso"` (a gain map: Apple's own, or ISO 21496-1's, which Android's and Adobe's Ultra HDR are too, ISO's when it has both), `"pq"` or `"hlg"` (its picture's own curve), and `headroom` how many stops its highlights go above SDR white; `{}` for SDR, a video, or until it is read |
 | `display` | the display the window is on, as the compositor says (API 4): `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
 | `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole (API 4): for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |
@@ -653,13 +698,82 @@ Live Photo's effect as set on the iPhone: `loop`, `bounce`,
 | `showFile(path)` | its folder in the file manager |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
-| `query(sql, values)` | the library's index (`library.sqlite`, [sources.md](sources.md)) asked, read only, away from the window, waiting up to five seconds while the service writes it: a promise of its rows, each an object by column name, `values` bound to its `?`s; rejected `sql` (its message) or `no_library` (API 5) |
+| `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy` or `cancelled`; see Bounded library queries below |
 | `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
 | `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |
 | `coveredBy` | the plugin over the photos now, its id, `""` for none (see `covering`) |
 | `dismissed()` | the plugin over this one, covering, handed a photo over (`openPhoto`, `reveal`): close, and do not come back when that photo closes |
 | `id`, `api` | its id; the version of all this |
+
+### Read-only SQL schema
+
+Use `query()` for aggregates or bounded pages, and `library.field()` when
+one in-memory column is enough. The public catalog tables are:
+
+| Table | Columns |
+|---|---|
+| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color` |
+| `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
+
+Dates are milliseconds since 1970, sizes are bytes, and flags are integers
+0/1. Optional metadata can be SQL `NULL`; `asset_date` is capture time and
+`added_date` is addition time. `live_effect` is `loop`, `bounce`,
+`long_exposure` or `NULL`. Thumbnail paths are relative to `library.dir`.
+A rendition describes a file; fetch it through `pinhole.fetch`, rather than
+constructing paths into Pinhole's cache. SQL row order is unspecified until
+you use `ORDER BY`; the grid's visual ordering is independent of this API.
+
+Inspect the installed schema with `query("PRAGMA table_info(assets)")` or
+`query("PRAGMA table_info(renditions)")` before using an optional column.
+`query("PRAGMA user_version")` reads its schema version. Source-specific
+tables are private to their provider. Never write the database or change
+its connection settings from a UI plugin.
+
+### Bounded library queries
+
+`query(sql, values)` has the same signature from API 5 onward. SQL `NULL`
+keeps the historical Qt SQL mapping: an empty JavaScript string, rather
+than `null` or `undefined`. Use SQL `IS NULL` to test missing values before
+returning them when this distinction matters. Empty text and empty blobs
+retain their respective string/byte-array types.
+
+Bound values accept null, booleans, numbers, strings and byte arrays.
+Serialize structured values explicitly, for example with `JSON.stringify`.
+Its safety limits apply to every plugin, including those with older manifests:
+
+- **Two seconds total**, including worker queue time, SQLite lock waits,
+  preparation and execution. The timeout interrupts SQLite computation,
+  not just its wait for a database lock.
+- At most **100,000 rows** and **32 MiB** of accounted result memory, including
+  conservative per-row/column overhead. A cell is at most **1 MiB**. A
+  failure returns no partial rows. Select the columns you need, and use
+  SQL aggregation or paginated queries for larger collections.
+- At most **two outstanding queries per plugin**, eight across Pinhole,
+  with two dedicated workers. Queries cannot occupy photo decoding's worker
+  pool. `query_busy` asks the caller to wait for an existing request.
+- SQL is at most **64 KiB**, 64 result columns and 256 bound values.
+  `LIKE`/`GLOB` patterns are at most **1,024 bytes**: these functions can do
+  expensive work inside one SQLite opcode, beyond the progress callback.
+  Oversized patterns fail with `sql` and SQLite's diagnostic. Only
+  one read-only statement is accepted; trailing comments are fine. Writes,
+  `ATTACH`, extension loading and configuration-changing pragmas are refused.
+  Read-only schema introspection, such as `PRAGMA table_info(assets)`, works.
+
+An error has a stable `code`: `sql` carries SQLite's diagnostic,
+`no_library` means there is no current index, `query_timeout` exceeded the
+time budget, and `query_limit` exceeded the row/data budget. Structural SQL
+limits can also produce `sql`. `cancelled` means the caller cancelled the
+promise or the library reloaded while it ran. Turning a plugin off or
+reloading its code stops computation and discards its old callbacks.
+Cancellation is checked inside SQLite and while waiting for locks, even
+for an aggregate that has not produced its first row.
+
+Keep the promise when opening a view, cancel it when closing, and ignore
+`cancelled` in a catch handler. For paging, use a stable id and a bounded
+`LIMIT` (for example, `WHERE id > ? ORDER BY id LIMIT 1000`) rather than
+fetching the entire library into JavaScript. The working Places example
+aggregates in SQL, so it returns at most four rows regardless of library size.
 
 ### Settings, state and cache
 
@@ -696,7 +810,7 @@ once: Screenshots' `found:` lists to its cache, Series' `edits`, Info's
 
 ### Promises
 
-What takes a while (`fetch`, `run`, `record`, `copyFile`) gives a
+What takes a while (`fetch`, `query`, `run`, `record`, `copyFile`) gives a
 promise, which also has `cancel()` (`copyFile`'s does nothing):
 
 ```js
@@ -714,7 +828,7 @@ A promise is rejected with an `Error` whose `code` says why:
 | | |
 |---|---|
 | `fetch` | the service's: `not_found` (no such photo in this library), `offline`, … |
-| `copyFile` | `not_found` (no such file), `cancelled` (another copy asked for after it has the clipboard) |
+| `copyFile` | `not_found` (no such file), `cancelled` (another copy supersedes it while its image is being prepared) |
 | `run` | `exit` (it ran and did not exit 0: `exitCode`, `stdout`, `stderr` too, and the message is what it wrote to stderr), `start` (it could not be started), `timeout`, `cancelled` |
 | `record` | `failed` (ffmpeg, or the item gone), `cancelled` |
 

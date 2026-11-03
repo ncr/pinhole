@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Keep a live Blaze worker only while this checkout's Rust inputs match."""
+import fcntl
+import hashlib
+import json
+import os
+import signal
+import threading
+from pathlib import Path
+import subprocess
+import sys
+
+
+def snapshot(root):
+    inputs = []
+    excluded = {'.git', 'target', 'build', 'node_modules', '__pycache__', '.venv',
+                '.tools', '.agents', '.codex', '.aws', '.claude', '.ci-results'}
+    for directory, folders, files in os.walk(root):
+        relative = Path(directory).relative_to(root)
+        folders[:] = [name for name in folders if name not in excluded and
+                      not (relative == Path('pkgbuild') and name in ('src', 'pkg')) and
+                      not (relative == Path('app') and name.startswith('build'))]
+        for name in files:
+            path = Path(directory) / name
+            if (name.endswith('.rs') or name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml') or
+                (relative.name == '.cargo' and name in ('config', 'config.toml')) or
+                (relative == Path('bin') and name in ('build-rust', 'run-blaze', 'blaze-version', 'blaze-source.json')) or
+                relative == Path('bin/blaze-patches') or
+                path.relative_to(root) == Path('docs/reviews/jpeg-repro/gray-ramp.jpg')):
+                inputs.append(path)
+    result, mutations = hashlib.sha256(), hashlib.sha256()
+    for path in sorted(inputs):
+        name = str(path.relative_to(root)).encode() + b'\0'
+        before = path.stat()
+        contents = path.read_bytes()
+        after = path.stat()
+        epoch = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if epoch(before) != epoch(after):
+            raise RuntimeError('Rust input changed while being inspected; retry the build')
+        result.update(name + contents + b'\0')
+        mutations.update(name + repr(epoch(after)).encode() + b'\0')
+    return result.hexdigest(), mutations.hexdigest()
+
+
+def fingerprint(root):
+    return snapshot(root)[0]
+
+
+def checkout_home(base, root, version):
+    identity = hashlib.sha256((str(root) + '\0' + version).encode()).hexdigest()[:12]
+    # Short sibling of version dirs: a full version/checkouts/hash nesting
+    # can exceed Linux's 108-byte Unix socket path limit.
+    home = base.parent / 'd' / identity
+    home.mkdir(parents=True, exist_ok=True)
+    shared = base / 'toolchains'
+    if not shared.exists():
+        fallback = base.parent / 'toolchains'
+        fallback.mkdir(parents=True, exist_ok=True)
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            shared.symlink_to(fallback.resolve(), target_is_directory=True)
+        except FileExistsError:
+            pass  # Another command can initialize the shared link first.
+    if not shared.is_dir():
+        raise RuntimeError('The pinned Rust toolchain directory is unavailable; run bin/setup-blaze')
+    link = home / 'toolchains'
+    if not link.exists():
+        try:
+            link.symlink_to(shared.resolve(), target_is_directory=True)
+        except FileExistsError:
+            pass
+    if link.resolve() != shared.resolve():
+        raise RuntimeError('Unexpected toolchain directory in the Blaze checkout namespace')
+    return home
+
+
+class Cancelled(Exception):
+    pass
+
+
+class Commands:
+    """Reap the foreground process group before releasing the checkout lock."""
+    def __init__(self):
+        self.interrupted = None
+        self.active = None
+        self.cleaning = False
+        self.handlers = {}
+
+    def __enter__(self):
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                self.handlers[signum] = signal.signal(signum, self._signal)
+        return self
+
+    def __exit__(self, *_):
+        for signum, handler in self.handlers.items():
+            signal.signal(signum, handler)
+
+    def _signal(self, signum, _frame):
+        self.interrupted = self.interrupted or signum
+        # During Popen construction simply remember the signal; its child
+        # must be assigned before an exception can unwind our cleanup.
+        if self.active is not None and not self.cleaning:
+            self.cleaning = True
+            raise Cancelled()
+
+    def check(self):
+        if self.interrupted is not None:
+            raise Cancelled()
+
+    def run(self, arguments, *, env, capture=False, cleanup=False):
+        if not cleanup:
+            self.check()
+        self.cleaning = cleanup
+        child = subprocess.Popen(arguments, env=env, text=True, start_new_session=True,
+                                 stdout=subprocess.PIPE if capture else None,
+                                 stderr=subprocess.STDOUT if capture else None)
+        try:
+            self.active = child
+            if not cleanup:
+                self.check()
+            output, _ = child.communicate()
+            return subprocess.CompletedProcess(arguments, child.returncode, stdout=output)
+        except BaseException:
+            self.cleaning = True
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.communicate()
+            raise
+        finally:
+            self.active = None
+            self.cleaning = False
+
+
+def stop(program, env, commands, *, cleanup=False):
+    result = commands.run([program, 'stop'], env=env, capture=True, cleanup=cleanup)
+    if result.returncode:
+        raise RuntimeError('Cannot restart the Blaze workspace worker: ' + result.stdout.strip())
+
+
+def guarded_run(root, version, program, arguments, env):
+    root = root.resolve()
+    env = dict(env)
+    home = checkout_home(Path(env['BLAZE_HOME']), root, version)
+    env['BLAZE_HOME'] = str(home)
+    record = home / 'pinhole-inputs.json'
+    with home.with_suffix('.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Pinhole: waiting for the other Rust command in this checkout.', file=sys.stderr, flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        with Commands() as commands:
+            try:
+                before, before_epoch = snapshot(root)
+                try:
+                    previous = json.loads(record.read_text())
+                except (OSError, ValueError):
+                    previous = None
+                if previous is not None and (previous.get('root'), previous.get('version')) != (str(root), version):
+                    raise RuntimeError('Blaze checkout namespace collision; refusing to share a worker')
+                if previous is None or previous.get('fingerprint') != before:
+                    stop(program, env, commands)
+                    if previous is not None:
+                        print('Pinhole: Rust inputs changed; restarting Blaze (compiled artifacts retained).', file=sys.stderr, flush=True)
+                    record.write_text(json.dumps({'root': str(root), 'version': version, 'fingerprint': before}) + '\n')
+                result = commands.run([program, *arguments], env=env)
+                try:
+                    after, after_epoch = snapshot(root)
+                except (RuntimeError, OSError):
+                    # A racing edit/read failure makes this worker uncertain
+                    # even when the next snapshot returns to the old contents.
+                    try:
+                        stop(program, env, commands, cleanup=True)
+                    except RuntimeError as cleanup_error:
+                        print(str(cleanup_error), file=sys.stderr)
+                    finally:
+                        record.unlink(missing_ok=True)
+                    raise
+                commands.check()
+                if after != before or after_epoch != before_epoch:
+                    try:
+                        stop(program, env, commands)
+                    finally:
+                        record.unlink(missing_ok=True)
+                    print('Pinhole: Rust inputs changed during the command; retry the build.', file=sys.stderr)
+                    return result.returncode or 75
+                return result.returncode if result.returncode >= 0 else 128 - result.returncode
+            except Cancelled:
+                try:
+                    stop(program, env, commands, cleanup=True)
+                finally:
+                    record.unlink(missing_ok=True)
+                return 128 + commands.interrupted
+
+
+def main():
+    if len(sys.argv) < 4:
+        raise RuntimeError('run-blaze is called by bin/build-rust')
+    return guarded_run(Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4:], os.environ)
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except (RuntimeError, OSError, ValueError) as error:
+        print('Pinhole Rust build failed: ' + str(error), file=sys.stderr)
+        raise SystemExit(1)

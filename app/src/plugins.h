@@ -34,6 +34,7 @@ class ServiceClient;
 class Sources;
 class Translator;
 class Viewer;
+namespace PluginQuery { class Control; }
 
 // What a plugin sees of the library: every photo by its position, oldest
 // first by capture date, independent of the grid's timeline order.
@@ -329,9 +330,10 @@ public:
     // folder made. In a self-test, the scratch Pictures (API 5).
     Q_INVOKABLE QString picturePath(const QString &name, const QString &extension) const;
     // The library's index (library.sqlite, docs/sources.md) asked, read
-    // only, away from the window, waiting while the service writes it:
+    // only, away from the window, with bounded time, rows and bytes:
     // a promise of its rows, each an object by column name; rejected
-    // "sql" (and its message) or "no_library". `values` bind its ?s
+    // "sql", "no_library", "query_timeout", "query_limit", "query_busy"
+    // or "cancelled". `values` bind its ?s
     // (API 5). Never sqlite3 on the file: that one opens it while the
     // service writes, and fails "database is locked".
     Q_INVOKABLE QJSValue query(const QString &sql, const QVariantList &values = {});
@@ -426,6 +428,7 @@ private:
     // Programs and recordings under way, each with how to stop it, stopped
     // with the plugin.
     std::vector<std::pair<QPointer<QObject>, std::function<void()>>> m_running;
+    std::vector<std::weak_ptr<PluginQuery::Control>> m_queries;
     void track(QObject *job, std::function<void()> stop);
     // Going with the window: the programs asked to end are waited for here,
     // as no event loop is left to kill them a second later.
@@ -536,8 +539,9 @@ public:
     // marks, pinhole.state and pinhole.cache. 4: photos in sRGB
     // (image://file, a photo's thumbPath; docs/hdr.md). 5: the kit
     // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
-    // Choices), pinhole.query and pinhole.picturePath.
-    static constexpr int api = 6;
+    // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
+    // 7: ShellButton.checkable for accessible selected buttons.
+    static constexpr int api = 7;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

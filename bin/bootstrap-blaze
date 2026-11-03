@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Build Pinhole's pinned, locally patched Blaze. Cargo bootstraps the compiler only."""
+import hashlib
+import fcntl
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+# library/DIGEST at the exact upstream source revision in blaze-source.json.
+LIBRARY_DIGEST = 'f1524885a07419549a4f11439af96f991e69629cefb51269b971571227b3aa77'
+
+
+def digest(path):
+    result = hashlib.sha256()
+    with Path(path).open('rb') as source:
+        for chunk in iter(lambda: source.read(1 << 20), b''):
+            result.update(chunk)
+    return result.hexdigest()
+
+
+def load_pin(root=ROOT, check_active=True):
+    path = root / 'bin/blaze-source.json'
+    pin = json.loads(path.read_text())
+    if pin.get('schema') != 1 or not pin['version'].startswith(pin['upstream_version'] + '+pinhole.'):
+        raise RuntimeError('Invalid Pinhole Blaze source pin')
+    if check_active and (root / 'bin/blaze-version').read_text().strip() != pin['version']:
+        raise RuntimeError('bin/blaze-version does not match bin/blaze-source.json')
+    if digest(root / pin['patch']) != pin['patch_sha256']:
+        raise RuntimeError('The Blaze compiler patch does not match its pinned SHA256')
+    pin['fingerprint'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return pin
+
+
+def run(arguments, *, env, cwd=None, capture=False):
+    print('Blaze setup: ' + ' '.join(map(str, arguments)), flush=True)
+    result = subprocess.run(list(map(str, arguments)), env=env, cwd=cwd, check=True,
+                            text=True, stdout=subprocess.PIPE if capture else None)
+    return result.stdout.strip() if capture else None
+
+
+def library_digest(root):
+    """Match upstream harness/library.py, including links and ignoring DIGEST."""
+    entries = []
+    for directory, folders, files in os.walk(root):
+        for name in files + [d for d in folders if (Path(directory) / d).is_symlink()]:
+            path = Path(directory) / name
+            relative = path.relative_to(root).as_posix()
+            if relative == 'DIGEST':
+                continue
+            kind = 'link' if path.is_symlink() else 'file'
+            content = hashlib.sha256(os.readlink(path).encode()).hexdigest() if kind == 'link' else digest(path)
+            entries.append((relative, f'{kind} {content} {relative}\n'))
+    lines = ''.join(line for _, line in sorted(entries, key=lambda entry: entry[0].encode()))
+    return hashlib.sha256(lines.encode()).hexdigest()
+
+
+def valid_library(path, expected=LIBRARY_DIGEST):
+    try:
+        return (path / 'DIGEST').read_text().strip() == expected and library_digest(path) == expected
+    except OSError:
+        return False
+
+
+def ensure_library(directory, pin, env, candidates=(), expected=None):
+    """Bundle verified std sources beside the engine, independent of daemon HOME."""
+    expected = expected or LIBRARY_DIGEST
+    target = directory / 'share/blaze/library'
+    if valid_library(target, expected):
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.library-', dir=target.parent) as temporary:
+        scratch = Path(temporary)
+        source = next((p for p in candidates if valid_library(p, expected)), None)
+        if source is None:
+            archive = scratch / 'library.tar.xz'
+            url = f'https://github.com/indexable-inc/blaze/releases/download/v{pin["upstream_version"]}/library-{expected}.tar.xz'
+            run(['curl', '--fail', '--silent', '--show-error', '--location', '--proto', '=https',
+                 '--tlsv1.2', url, '-o', archive], env=env)
+            with tarfile.open(archive, 'r:xz') as package:
+                package.extractall(scratch / 'download', filter='data')
+            source = scratch / 'download/library'
+            if not valid_library(source, expected):
+                raise RuntimeError('The Blaze standard library does not match its pinned digest')
+        prepared = scratch / 'prepared'
+        shutil.copytree(source, prepared, symlinks=True)
+        if not valid_library(prepared, expected):
+            raise RuntimeError('The Blaze standard library changed while being copied')
+        previous = scratch / 'previous'
+        if target.exists() or target.is_symlink():
+            target.rename(previous)
+        try:
+            prepared.rename(target)
+        except OSError:
+            if previous.exists() and not target.exists():
+                previous.rename(target)
+            raise
+
+
+def valid_engine(directory, pin, env):
+    try:
+        record = json.loads((directory / 'pinhole-compiler.json').read_text())
+        if record.get('pin') != pin['fingerprint'] or record.get('version') != pin['version']:
+            return False
+        if digest(directory / 'bin/blaze-engine') != record['engine_sha256']:
+            return False
+        version = subprocess.check_output([str(directory / 'bin/blaze'), '--version'], env=env,
+                                          text=True, stderr=subprocess.DEVNULL, timeout=10)
+        return version.startswith('blaze ' + pin['version'] + ' ')
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return False
+
+
+def valid_install(directory, pin, env):
+    if not valid_engine(directory, pin, env):
+        return False
+    try:
+        record = json.loads((directory / 'pinhole-compiler.json').read_text())
+        return record.get('library_digest') == LIBRARY_DIGEST and valid_library(directory / 'share/blaze/library', LIBRARY_DIGEST)
+    except (OSError, ValueError):
+        return False
+
+
+def prepare_state(state, version):
+    home = state / version
+    home.mkdir(parents=True, exist_ok=True)
+    shared = state / 'toolchains'
+    shared.mkdir(parents=True, exist_ok=True)
+    link = home / 'toolchains'
+    if not link.exists():
+        link.symlink_to(shared.resolve(), target_is_directory=True)
+    return home
+
+
+def main():
+    if len(sys.argv) != 1:
+        raise RuntimeError('Usage: bin/bootstrap-blaze (called by bin/setup-blaze)')
+    pin = load_pin()
+    env = os.environ.copy()
+    data = Path(env.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'pinhole'
+    state = Path(env.get('BLAZE_HOME', str(data / 'blaze')))
+    state.mkdir(parents=True, exist_ok=True)
+    lock = (state / 'setup.lock').open('a')
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    final = data / 'tools' / pin['version']
+    env['BLAZE_HOME'] = str(prepare_state(state, pin['version']))
+    env['BLAZE_CACHE'] = str(Path(env['BLAZE_HOME']) / 'store')
+    if valid_engine(final, pin, env):
+        # Upgrade previously verified binaries with the portable source bundle;
+        # the compiler itself need not be rebuilt when only packaging was missing.
+        candidates = [state / v / 'library' / LIBRARY_DIGEST / 'library'
+                      for v in (pin['version'], pin['upstream_version'])]
+        ensure_library(final, pin, env, candidates)
+        marker = final / 'pinhole-compiler.json'
+        record = json.loads(marker.read_text())
+        if record.get('library_digest') != LIBRARY_DIGEST:
+            record['library_digest'] = LIBRARY_DIGEST
+            temporary = marker.with_suffix('.tmp')
+            temporary.write_text(json.dumps(record, indent=2) + '\n')
+            temporary.replace(marker)
+        if not valid_install(final, pin, env):
+            raise RuntimeError('The verified compiler bundle is incomplete')
+        print('Blaze ' + pin['version'] + ' is ready (verified local patch).')
+        return 0
+
+    cache = Path(env.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'pinhole/blaze-bootstrap'
+    work = cache / pin['version']
+    work.mkdir(parents=True, exist_ok=True)
+    base = data / 'tools' / pin['upstream_version']
+    base_env = env | {'BLAZE_HOME': str(prepare_state(state, pin['upstream_version'])), 'CARGO_HOME': str(base)}
+    base_program = base / 'bin/blaze'
+    if not base_program.is_file():
+        installer = work / 'upstream-installer.sh'
+        run(['curl', '--fail', '--silent', '--show-error', '--location', '--proto', '=https',
+             '--tlsv1.2', 'https://ix.dev/blaze', '-o', installer], env=base_env)
+        run(['sh', installer, '--version', pin['upstream_version']], env=base_env)
+    base_version = run([base_program, '--version'], env=base_env, capture=True)
+    if not base_version.startswith('blaze ' + pin['upstream_version'] + ' '):
+        raise RuntimeError('Unexpected upstream compiler version; refusing the bootstrap')
+    toolchain = Path(run([base_program, 'toolchain', '--path'], env=base_env, capture=True).splitlines()[-1])
+    source = work / 'source'
+    source.mkdir(exist_ok=True)
+    marker = source / '.pinhole-patch'
+    if not marker.is_file() or marker.read_text().strip() != pin['fingerprint']:
+        if (source / '.git').exists():
+            # Only the owned bootstrap checkout, never the user's project.
+            shutil.rmtree(source)
+            source.mkdir()
+        run(['git', 'init', '-q', source], env=env)
+        run(['git', 'fetch', '--depth=1', pin['source'], pin['revision']], env=env, cwd=source)
+        run(['git', '-c', 'core.autocrlf=false', 'checkout', '-q', '--detach', 'FETCH_HEAD'], env=env, cwd=source)
+        if run(['git', 'rev-parse', 'HEAD'], env=env, cwd=source, capture=True) != pin['revision']:
+            raise RuntimeError('Unexpected Blaze source revision')
+        run(['git', 'apply', '--check', ROOT / pin['patch']], env=env, cwd=source)
+        run(['git', 'apply', ROOT / pin['patch']], env=env, cwd=source)
+        marker.write_text(pin['fingerprint'] + '\n')
+    # The upstream script verifies both the LLVM pin and archive SHA256.
+    target = run([toolchain / 'bin/rustc', '-vV'], env=env, capture=True)
+    host = next(line.removeprefix('host: ') for line in target.splitlines() if line.startswith('host: '))
+    llvm = work / 'llvm'
+    run([sys.executable, source / '.github/scripts/llvm.py', 'fetch', '--target', host, '--dir', llvm], env=env)
+    jobs = int(env.get('PINHOLE_BLAZE_BOOTSTRAP_JOBS', '1'))
+    if not 1 <= jobs <= 16:
+        raise RuntimeError('PINHOLE_BLAZE_BOOTSTRAP_JOBS must be between 1 and 16')
+    build_env = env | {
+        'PATH': str(toolchain / 'bin') + os.pathsep + env.get('PATH', ''),
+        'RUSTC': str(toolchain / 'bin/rustc'), 'RUSTDOC': str(toolchain / 'bin/rustdoc'),
+        'LLVM_SYS_231_PREFIX': str(llvm), 'CARGO_TARGET_DIR': str(work / 'target'),
+        'CARGO_INCREMENTAL': '0', 'BLAZE_RELEASE': 'v' + pin['upstream_version'],
+        'BLAZE_GIT_SHA': pin['revision'], 'BLAZE_GIT_DATE': pin['date'],
+    }
+    print('Bootstrapping the patched compiler with Cargo once; Pinhole itself still uses Blaze.', flush=True)
+    run([toolchain / 'bin/cargo', 'build', '--locked', '--release', '-p', 'blaze-engine',
+         '--features', 'llvm', '-j' + str(jobs)], env=build_env, cwd=source)
+    stage = final.with_name('.' + final.name + '-staging')
+    if stage.exists():
+        shutil.rmtree(stage)
+    (stage / 'bin').mkdir(parents=True)
+    for name in ('blaze', 'blaze-rustc', 'blaze-proc-macro-srv'):
+        shutil.copy2(base / 'bin' / name, stage / 'bin' / name)
+    shutil.copy2(work / 'target/release/blaze-engine', stage / 'bin/blaze-engine')
+    ensure_library(stage, pin, env, [source / 'library'])
+    version = run([stage / 'bin/blaze', '--version'], env=env, capture=True)
+    if not version.startswith('blaze ' + pin['version'] + ' '):
+        raise RuntimeError('The patched compiler did not identify itself correctly')
+    verify_env = {key: value for key, value in env.items() if key not in ('BLAZE_BACKEND', 'BLAZE_OPT', 'BLAZE_INLINE')}
+    verify_env.pop('BLAZE_LIBRARY', None)
+    verify_env.pop('BLAZE_LIBRARY_FROM', None)
+    verify_env |= {'CARGO_TARGET_DIR': str(work / 'verify-target'), 'BLAZE_TESTS': 'all'}
+    try:
+        run([stage / 'bin/blaze', 'run', '--release', '--locked', '--manifest-path',
+             ROOT / 'docs/reviews/jpeg-repro/Cargo.toml'], env=verify_env, cwd=ROOT)
+    finally:
+        subprocess.run([str(stage / 'bin/blaze'), 'stop'], env=env, check=False)
+    record = {'schema': 1, 'version': pin['version'], 'pin': pin['fingerprint'],
+              'revision': pin['revision'], 'patch_sha256': pin['patch_sha256'], 'target': host,
+              'engine_sha256': digest(stage / 'bin/blaze-engine'), 'bootstrap_rust': target}
+    record['library_digest'] = LIBRARY_DIGEST
+    (stage / 'pinhole-compiler.json').write_text(json.dumps(record, indent=2) + '\n')
+    old = final.with_name('.' + final.name + '-previous')
+    if old.exists():
+        shutil.rmtree(old)
+    if final.exists():
+        final.rename(old)
+    try:
+        stage.rename(final)
+    except OSError:
+        if old.exists() and not final.exists():
+            old.rename(final)
+        raise
+    if old.exists():
+        shutil.rmtree(old)
+    if env.get('PINHOLE_KEEP_BLAZE_BOOTSTRAP') != '1':
+        shutil.rmtree(work)
+    print('Blaze ' + pin['version'] + ' is ready; SIMD packing and JPEG regression passed.')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, subprocess.CalledProcessError, OSError, ValueError, tarfile.TarError) as error:
+        print('Blaze setup failed: ' + str(error), file=sys.stderr)
+        raise SystemExit(1)

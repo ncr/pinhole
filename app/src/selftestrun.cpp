@@ -30,12 +30,23 @@
 #include <limits>
 #include <vector>
 
+void runQuerySelfTest(QQuickWindow *window);
+void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder);
+
 bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // `name`, or `name:argument` (a folder or a file, mostly).
     const QString name = test.section(':', 0, 0), arg = test.section(':', 1);
+    if (name == QLatin1String("querylimits")) {
+        runQuerySelfTest(context.window);
+        return true;
+    }
     // Applies to the fast startup/handbook checks too, before they return.
     if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
         context.window->resize(size[0].toInt(), size[1].toInt());
+    if (name == QLatin1String("accessibility")) {
+        runAccessibilitySelfTest(context.window, arg);
+        return true;
+    }
     if (name == QLatin1String("lazyplugins")) {
         auto *window = context.window;
         auto *steps = new QTimer(window);
@@ -879,31 +890,53 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
             turns.push_back(std::vector<int>(20, 120));
             turns.push_back(std::vector<int>(20, -120));
             const std::vector<int> expected = {7, 3, 7, 13, 29, 13, 7, 7, 29, 7, 1, 29};
-            for (size_t k = 0; k <= turns.size(); ++k) {
-                QTimer::singleShot(int(k) * 1500 + 500, window, [window, grid, turns, expected, k, arg] {
-                    if (k > 0) {
-                        std::printf("turn %zu: lands on %d columns\n", k, grid->columns());
-                        std::fflush(stdout);
-                        if (grid->columns() != expected[k - 1] || grid->zooming()) {
-                            std::fprintf(stderr, "selftest: wheelzoom: turn %zu expected %d columns, got %d, zooming=%d\n",
-                                         k, expected[k - 1], grid->columns(), grid->zooming());
-                            return QCoreApplication::exit(1);
-                        }
-                        if (!arg.isEmpty()) window->grabWindow().save(QStringLiteral("%1/turn-%2.png").arg(arg).arg(k));
-                    }
-                    if (k == turns.size()) {
-                        std::printf("selftest: wheelzoom: short turns, fractions and full-range bursts: PASS\n");
-                        return QCoreApplication::quit();
-                    }
+            // Each burst starts only once the preceding one has landed.
+            // A fixed wall-clock schedule can overlap turns on software GL:
+            // rendering a large tile may delay both packets and checkpoints.
+            struct Progress {
+                size_t turn = 0;
+                int delivered = 0;
+                bool sending = false;
+                QElapsedTimer clock;
+            };
+            const auto progress = std::make_shared<Progress>();
+            auto *poll = new QTimer(window);
+            QObject::connect(poll, &QTimer::timeout, window, [=] {
+                const size_t k = progress->turn;
+                if (!progress->sending) {
+                    progress->sending = true;
+                    progress->delivered = 0;
+                    progress->clock.start();
                     for (size_t n = 0; n < turns[k].size(); ++n)
-                        QTimer::singleShot(int(n) * 30, grid, [grid, x = turns[k][n]] {
+                        QTimer::singleShot(int(n) * 30, grid, [grid, progress, x = turns[k][n]] {
                             const QPointF at(grid->width() / 2, grid->height() / 2);
                             QWheelEvent event(at, grid->mapToGlobal(at), QPoint(), QPoint(x, 0), Qt::NoButton, Qt::NoModifier,
                                               Qt::NoScrollPhase, false);
                             QCoreApplication::sendEvent(grid, &event);
+                            ++progress->delivered;
                         });
-                });
-            }
+                    return;
+                }
+                if (progress->clock.elapsed() > 6000) {
+                    std::fprintf(stderr, "selftest: wheelzoom: turn %zu did not land in 6s (%d/%zu packets, columns=%d, zooming=%d)\n",
+                                 k + 1, progress->delivered, turns[k].size(), grid->columns(), grid->zooming());
+                    poll->stop(); QCoreApplication::exit(1); return;
+                }
+                if (progress->delivered != int(turns[k].size()) || grid->zooming()) return;
+                std::printf("turn %zu: lands on %d columns\n", k + 1, grid->columns());
+                std::fflush(stdout);
+                if (grid->columns() != expected[k]) {
+                    std::fprintf(stderr, "selftest: wheelzoom: turn %zu expected %d columns, got %d\n", k + 1, expected[k], grid->columns());
+                    poll->stop(); QCoreApplication::exit(1); return;
+                }
+                if (!arg.isEmpty()) window->grabWindow().save(QStringLiteral("%1/turn-%2.png").arg(arg).arg(k + 1));
+                if (++progress->turn == turns.size()) {
+                    std::printf("selftest: wheelzoom: short turns, fractions and full-range bursts: PASS\n");
+                    poll->stop(); frames->stop(); QCoreApplication::quit(); return;
+                }
+                progress->sending = false;
+            });
+            poll->start(20);
         });
     }
     // PINHOLE_SELFTEST=zoomdates:<dir>: the date label through a pinch from

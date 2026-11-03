@@ -9,13 +9,26 @@ PinholePlugin {
     id: plugin
     property bool open: false
     covering: open
-    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; onTriggered: plugin.open = true }]
+    property var photo: ({})
+    actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; usable: pinhole.library.count > 0; onTriggered: plugin.begin() }]
     Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+
+    function begin() {
+        const picked = pinhole.library.item(pinhole.currentIndex())
+        if (picked.index === undefined || !picked.avgColor) {
+            action.complain(qsTr("Could not make it"))
+            return
+        }
+        photo = picked
+        open = true
+    }
 
     function make(size) {
         open = false
-        const photo = pinhole.library.item(pinhole.currentIndex())
-        const path = pinhole.picturePath(photo.filename.replace(/\.[^.]*$/, "") + " " + size, "png")
+        const photo = plugin.photo
+        if (photo.index === undefined || !photo.avgColor)
+            return
+        const path = pinhole.picturePath((photo.filename || "Swatch").replace(/\.[^.]*$/, "") + " " + size, "png")
         pinhole.run("magick", ["-size", size + "x" + size, "xc:" + photo.avgColor, path])
             .then(() => pinhole.copyFile(path))
             .then(() => pinhole.notify(qsTr("Copied, and kept in Pictures")), error => {

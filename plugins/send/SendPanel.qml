@@ -589,6 +589,7 @@ Item {
                 }
                 Toggle {
                     id: jpegSwitch
+                    Accessible.name: qsTr("HEIC as JPEG")
                     anchors.right: parent.right
                     hint: jpegCommand.keyName
                     checked: plugin.compatible

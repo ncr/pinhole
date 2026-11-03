@@ -1,0 +1,19 @@
+#!/bin/sh
+# Same image and commands locally and in GitHub Actions. No system installs.
+set -eu
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+mode="${1:-all}"
+builder="${2:-blaze}"
+cache="${PINHOLE_CI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/pinhole-ci}"
+output="${PINHOLE_CI_OUTPUT:-$root/.ci-results/$mode-$builder}"
+mkdir -p "$cache" "$output"
+# Match the owner of local/Actions cache files. Blaze refuses world-writable
+# state ancestors; sharing a UID avoids weakening their permissions.
+chmod u+rwx,go-w "$cache" "$output"
+docker build --tag pinhole-ci --file "$root/ci/Dockerfile" "$root/ci"
+exec docker run --rm --init --user "$(id -u):$(id -g)" --cpus="${PINHOLE_CI_CPUS:-2}" --memory="${PINHOLE_CI_MEMORY:-7g}" \
+    --pids-limit=2048 \
+    --mount "type=bind,source=$root,target=/source,readonly" \
+    --mount "type=bind,source=$cache,target=/cache" \
+    --mount "type=bind,source=$output,target=/artifacts" \
+    pinhole-ci sh /source/ci/in-container "$mode" --builder "$builder"

@@ -9,6 +9,7 @@
 class PluginGuide : public QObject {
     Q_OBJECT
     Q_PROPERTY(int api READ api CONSTANT)
+    Q_PROPERTY(QStringList documentIds READ documents CONSTANT)
 public:
     using QObject::QObject;
     int api() const;

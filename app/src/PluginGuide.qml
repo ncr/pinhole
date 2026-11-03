@@ -1,4 +1,6 @@
 import QtQuick
+import Pinhole
+import "focus.js" as Focus
 
 // Instantiated only when requested: neither this view nor the Markdown
 // documents are parsed on the startup path.
@@ -9,24 +11,51 @@ Panel {
     property string document: "plugin-quickstart"
     property int section: 0
     property string copied: ""
-    readonly property bool wide: width >= 900
+    readonly property bool compact: height < 640 || width < 700 || (theme.fontSize >= 18 && width < 1000)
+    readonly property bool wide: !compact && width >= Math.max(900, theme.fontSize * 56)
+    Accessible.role: Accessible.Dialog
+    Accessible.name: qsTr("Plugin workshop")
+    FocusFence.enabled: true
+    function currentFocus() { return root.Window.window ? root.Window.window.activeFocusItem : null }
+    function restoreFocus() {
+        let item = currentFocus()
+        if (item?.visible && item.enabled)
+            for (let ancestor = item; ancestor; ancestor = ancestor.parent)
+                if (ancestor === root) return
+        search.input.forceActiveFocus()
+    }
+    onCompactChanged: Qt.callLater(restoreFocus)
+    onWideChanged: Qt.callLater(restoreFocus)
+    function turnDocument(direction) {
+        const at = documents.findIndex(d => d.id === document)
+        open(documents[(at + direction + documents.length) % documents.length].id)
+    }
+    Keys.onShortcutOverride: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) event.accepted = true
+    }
+    Keys.onPressed: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            Focus.move(root, event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1, currentFocus())
+            event.accepted = true
+        }
+    }
     readonly property var documents: [
         { id: "plugin-quickstart", title: qsTr("Start here") },
         { id: "plugins", title: qsTr("Plugin API") },
         { id: "source-providers", title: qsTr("Photo sources") },
-        { id: "plugin-agents", title: qsTr("For agents") },
-        { id: "service", title: qsTr("Service protocol") },
-        { id: "sources", title: qsTr("Library schema") },
-        { id: "hdr", title: qsTr("Colour and HDR") }
-    ]
+        { id: "plugin-agents", title: qsTr("For agents") }
+    ].filter(entry => pluginGuide.documentIds.includes(entry.id))
     readonly property var sections: pluginGuide.sections(document)
     readonly property var filtered: sections.map((s, i) => ({ title: s.title, id: s.id, index: i, markdown: s.markdown }))
         .filter(s => search.text === "" || s.markdown.toLocaleLowerCase().includes(search.text.toLocaleLowerCase()))
-    readonly property var entry: filtered.length > 0 ? sections[section] : null
+    readonly property var entry: filtered.length > 0 ? sections[section] ?? null : null
     function open(name, at) {
+        if (!pluginGuide.documentIds.includes(name)) return
         search.text = ""
         document = name
-        section = at ?? 0
+        section = Math.max(0, Math.min(sections.length - 1, at ?? 0))
         body.contentY = 0
     }
     function choose(at) { section = at; body.contentY = 0 }
@@ -57,7 +86,11 @@ Panel {
     }
     Command {
         name: "guide.nextDocument"; keyLayer: "guide"; keys: ["Ctrl+Tab"]
-        onTriggered: root.open(root.documents[(root.documents.findIndex(d => d.id === root.document) + 1) % root.documents.length].id)
+        onTriggered: root.turnDocument(1)
+    }
+    Command {
+        name: "guide.previousDocument"; keyLayer: "guide"; keys: ["Ctrl+Shift+Tab", "Ctrl+Backtab"]
+        onTriggered: root.turnDocument(-1)
     }
     Command {
         name: "guide.pageDown"; keyLayer: "guide"; keys: ["PgDown"]
@@ -68,12 +101,13 @@ Panel {
         autoRepeat: true; onTriggered: body.contentY = Math.max(0, body.contentY - body.height * 0.85)
     }
 
-    readonly property int pad: Math.round(theme.fontSize * 1.5)
+    readonly property int pad: Math.round(theme.fontSize * (compact ? 0.75 : 1.5))
+    readonly property int gap: compact ? Math.max(6, Math.round(theme.fontSize * 0.4)) : theme.fontSize
     Rectangle {
         id: frame
         anchors.centerIn: parent
-        width: Math.min(1320, parent.width - 2 * Math.min(24, root.pad))
-        height: Math.min(960, parent.height - 2 * Math.min(24, root.pad))
+        width: Math.min(1320, parent.width - 2 * (root.compact ? 8 : Math.min(24, root.pad)))
+        height: Math.min(960, parent.height - 2 * (root.compact ? 8 : Math.min(24, root.pad)))
         color: theme.background
         border.width: 1
         border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.2)
@@ -83,19 +117,21 @@ Panel {
             id: head
             x: root.pad; y: root.pad
             width: parent.width - 2 * x
-            spacing: theme.fontSize
+            spacing: root.gap
             Item {
                 width: parent.width
                 height: Math.max(title.implicitHeight, close.height)
                 Column {
                     id: title
+                    width: parent.width - close.width - root.gap
                     spacing: 4
-                    UiText { text: qsTr("Plugin workshop"); font.pixelSize: Math.round(theme.fontSize * 1.5); font.weight: Font.DemiBold }
-                    UiText { text: qsTr("API %1 · Built in · Available offline").arg(pluginGuide.api); color: theme.darkForeground; font.pixelSize: Math.round(theme.fontSize * 0.85) }
+                    UiText { width: parent.width; wrapMode: Text.WordWrap; text: qsTr("Plugin workshop"); font.pixelSize: Math.round(theme.fontSize * 1.5); font.weight: Font.DemiBold; Accessible.role: Accessible.Heading }
+                    UiText { visible: !root.compact; width: parent.width; wrapMode: Text.WordWrap; text: qsTr("API %1 · Built in · Available offline").arg(pluginGuide.api); color: theme.darkForeground; font.pixelSize: Math.round(theme.fontSize * 0.85) }
                 }
                 ShellButton { id: close; objectName: "guideClose"; anchors.right: parent.right; text: qsTr("Close"); hint: "Esc"; onTapped: root.closed() }
             }
             Flow {
+                visible: !root.compact
                 width: parent.width
                 spacing: 6
                 Repeater {
@@ -107,6 +143,8 @@ Panel {
                         text: modelData.title
                         flat: true
                         active: root.document === modelData.id
+                        Accessible.role: Accessible.PageTab
+                        Accessible.selected: active
                         key: String(index + 1)
                         keyLayer: "guide"
                         hint: ""
@@ -114,45 +152,77 @@ Panel {
                     }
                 }
             }
+            Item {
+                visible: root.compact
+                width: parent.width
+                height: previousDocument.height
+                ShellButton { id: previousDocument; objectName: "guidePreviousDocument"; text: "←"; Accessible.name: qsTr("Previous document"); onTapped: root.turnDocument(-1) }
+                UiText {
+                    anchors.left: previousDocument.right
+                    anchors.right: nextDocument.left
+                    anchors.margins: root.gap
+                    y: centredIn(parent.height)
+                    text: root.documents.find(d => d.id === root.document)?.title ?? ""
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                    color: theme.accent
+                }
+                ShellButton { id: nextDocument; objectName: "guideNextDocument"; anchors.right: parent.right; text: "→"; Accessible.name: qsTr("Next document"); onTapped: root.turnDocument(1) }
+            }
             Rectangle { width: parent.width; height: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12) }
         }
 
         Item {
             id: contents
             x: root.pad
-            y: head.y + head.height + theme.fontSize
+            y: head.y + head.height + root.gap
             width: parent.width - 2 * x
-            height: parent.height - y - root.pad
+            height: Math.max(0, parent.height - y - root.pad)
             Column {
                 id: navigation
                 width: root.wide ? Math.round(theme.fontSize * 18) : parent.width
-                spacing: theme.fontSize
-                FieldInput {
-                    id: search
-                    objectName: "guideSearch"
+                spacing: root.gap
+                Item {
                     width: parent.width
-                    placeholder: qsTr("Find in this guide…")
-                    onAccepted: {
-                        search.input.focus = false
-                        root.forceActiveFocus()
+                    height: search.height
+                    FieldInput {
+                        id: search
+                        objectName: "guideSearch"
+                        width: root.compact ? parent.width - copyAgent.width - root.gap : parent.width
+                        placeholder: qsTr("Search this document…")
+                        onAccepted: {
+                            search.input.focus = false
+                            root.forceActiveFocus()
+                        }
+                    }
+                    ShellButton {
+                        id: copyAgent
+                        objectName: root.compact ? "guideCopyAgent" : "guideCopyAgentCompact"
+                        visible: root.compact
+                        anchors.right: parent.right
+                        y: Math.round((parent.height - height) / 2)
+                        text: root.copied === "agent" ? "✓" : qsTr("Instructions")
+                        Accessible.name: qsTr("Copy agent instructions")
+                        onTapped: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
                     }
                 }
                 Flow {
                     id: tools
                     width: parent.width
+                    visible: !root.compact
                     spacing: 6
                     ShellButton {
-                        objectName: "guideCopyAgent"
-                        text: root.copied === "agent" ? qsTr("✓ Instructions copied") : qsTr("Copy agent brief")
+                        objectName: !root.compact ? "guideCopyAgent" : "guideCopyAgentWide"
+                        text: root.copied === "agent" ? qsTr("✓ Instructions copied") : qsTr("Copy agent instructions")
                         onTapped: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
                     }
                     ShellButton {
                         visible: !root.wide
-                        text: "↑"; onTapped: root.step(-1)
+                        text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTapped: root.step(-1)
                     }
                     ShellButton {
                         visible: !root.wide
-                        text: "↓"; onTapped: root.step(1)
+                        text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTapped: root.step(1)
                     }
                 }
             }
@@ -168,16 +238,22 @@ Panel {
                 spacing: 4
                 currentIndex: root.filtered.findIndex(s => s.index === root.section)
                 onCurrentIndexChanged: positionViewAtIndex(Math.max(0, currentIndex), ListView.Contain)
-                delegate: Rectangle {
+                delegate: ControlSurface {
                     id: row
                     required property var modelData
                     width: toc.width
                     height: label.implicitHeight + theme.fontSize * 1.2
-                    radius: Math.min(4, theme.radius)
-                    color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
-                                  press.pressed ? 0.22 : hover.hovered ? 0.08 : root.section === modelData.index ? 0.12 : 0)
-                    border.width: 1
-                    border.color: root.section === modelData.index ? Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.25) : "transparent"
+                    activeFocusOnTab: true
+                    onActivated: root.choose(modelData.index)
+                    onActiveFocusChanged: if (activeFocus) Focus.reveal(row)
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Math.min(4, theme.radius)
+                        color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
+                                      press.pressed || row.keyboardPressed ? 0.22 : hover.hovered ? 0.08 : root.section === row.modelData.index ? 0.12 : 0)
+                        border.width: row.activeFocus ? 2 : 1
+                        border.color: row.activeFocus ? theme.accent : root.section === row.modelData.index ? Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.25) : "transparent"
+                    }
                     UiText {
                         id: label
                         x: theme.fontSize * 0.7
@@ -186,11 +262,23 @@ Panel {
                         wrapMode: Text.WordWrap
                         text: row.modelData.title
                         color: root.section === row.modelData.index ? theme.foreground : theme.darkForeground
+                        Accessible.ignored: true
                     }
-                    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { id: press; onTapped: root.choose(row.modelData.index) }
+                    MouseArea {
+                        id: hover
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        readonly property bool hovered: containsMouse
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler { id: press; onTapped: { row.forceActiveFocus(Qt.MouseFocusReason); root.choose(row.modelData.index) } }
                     Accessible.role: Accessible.Button
                     Accessible.name: modelData.title
+                    Accessible.focusable: true
+                    Accessible.focused: activeFocus
+                    Accessible.selected: root.section === modelData.index
+                    Accessible.pressed: press.pressed || keyboardPressed
                     Accessible.onPressAction: root.choose(modelData.index)
                 }
             }
@@ -198,9 +286,9 @@ Panel {
             Rectangle {
                 id: reading
                 x: root.wide ? navigation.width + root.pad : 0
-                y: root.wide ? 0 : navigation.height + theme.fontSize
+                y: root.wide ? 0 : navigation.height + root.gap
                 width: parent.width - x
-                height: parent.height - y
+                height: Math.max(0, parent.height - y)
                 color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.025)
                 border.width: 1
                 border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.1)
@@ -211,30 +299,37 @@ Panel {
                     width: parent.width - 2 * x
                     height: sectionCopy.height
                     UiText {
-                        width: parent.width - sectionCopy.width - theme.fontSize
+                        width: Math.max(0, parent.width - sectionTools.width - root.gap)
                         y: centredIn(parent.height)
                         text: root.entry ? (root.section + 1) + " / " + root.sections.length + " · " + root.entry.title : qsTr("No matching section")
                         elide: Text.ElideRight
                         color: theme.darkForeground
                         font.pixelSize: Math.round(theme.fontSize * 0.85)
                     }
-                    ShellButton {
+                    Row {
+                        id: sectionTools
+                        anchors.right: parent.right
+                        spacing: 4
+                        ShellButton { visible: root.compact; text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTapped: root.step(-1) }
+                        ShellButton { visible: root.compact; text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTapped: root.step(1) }
+                        ShellButton {
                         id: sectionCopy
                         objectName: "guideCopySection"
-                        anchors.right: parent.right
-                        text: root.copied === "section" ? qsTr("✓ Copied") : qsTr("Copy section")
+                        text: root.copied === "section" ? qsTr("✓ Copied") : root.compact ? qsTr("Copy") : qsTr("Copy section")
+                        Accessible.name: qsTr("Copy section")
                         usable: root.entry !== null
                         flat: true
                         onTapped: root.copy(root.entry.markdown, "section")
+                        }
                     }
                 }
                 ScrollArea {
                     id: body
                     objectName: "guideBody"
                     x: root.pad
-                    y: readingHead.y + readingHead.height + theme.fontSize
+                    y: readingHead.y + readingHead.height + root.gap
                     width: parent.width - 2 * x
-                    height: parent.height - y - root.pad
+                    height: Math.max(0, parent.height - y - root.pad)
                     contentWidth: width
                     contentHeight: article.height
                     Column {
@@ -276,6 +371,12 @@ Panel {
                             text: root.entry ? root.entry.markdown : qsTr("Try another word, or clear the search to show every section.")
                             textFormat: TextEdit.MarkdownText
                             readOnly: true
+                            activeFocusOnTab: true
+                            Accessible.role: Accessible.EditableText
+                            Accessible.name: qsTr("Documentation")
+                            Accessible.description: root.entry?.title ?? ""
+                            Accessible.readOnly: true
+                            Accessible.multiLine: true
                             selectByMouse: true
                             wrapMode: TextEdit.Wrap
                             color: theme.foreground
@@ -284,6 +385,9 @@ Panel {
                             font.family: theme.font
                             font.pixelSize: theme.fontSize
                             onLinkActivated: link => root.follow(link)
+                            Keys.onShortcutOverride: event => {
+                                if ((event.modifiers & Qt.ControlModifier) && [Qt.Key_Z, Qt.Key_Y, Qt.Key_C, Qt.Key_X, Qt.Key_V, Qt.Key_A].includes(event.key)) event.accepted = true
+                            }
                             onCursorRectangleChanged: {
                                 if (!activeFocus) return
                                 const y = mapToItem(article, 0, cursorRectangle.y).y

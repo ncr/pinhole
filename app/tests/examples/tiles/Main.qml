@@ -22,7 +22,7 @@ PinholePlugin {
             Flow {
                 anchors.fill: parent
                 Repeater {
-                    model: Math.floor(parent.width / zoom.size) * Math.floor(parent.height / zoom.size)
+                    model: plugin.open ? Math.min(pinhole.library.count, Math.floor(parent.width / zoom.size) * Math.floor(parent.height / zoom.size)) : 0
                     delegate: Rectangle {
                         required property int index
                         width: zoom.size

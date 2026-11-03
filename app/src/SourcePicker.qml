@@ -1,5 +1,6 @@
 import QtQuick
 import Pinhole
+import "focus.js" as Focus
 
 // Where the photos come from, chosen: on the first run the whole window
 // (nothing else to show yet), later a card from the sources bar's Add. What
@@ -20,8 +21,39 @@ Item {
     // The kinds of source the plugins on bring (PluginSource), in the
     // service's order: iCloud's first.
     property var kinds: []
-
-    onShownChanged: if (shown) sources.discover()
+    property var returnFocus: null
+    Accessible.role: Accessible.Dialog
+    Accessible.name: firstRun ? qsTr("Where are your photos?") : qsTr("Add a source")
+    Accessible.ignored: !shown
+    FocusFence.enabled: shown
+    function currentFocus() { return root.Window.window ? root.Window.window.activeFocusItem : null }
+    function restoreFocus() {
+        const all = Focus.items(root)
+        const first = all.find(item => item !== close) ?? all[0]
+        if (first) first.forceActiveFocus(Qt.TabFocusReason)
+        else root.forceActiveFocus()
+    }
+    onShownChanged: {
+        if (shown) {
+            returnFocus = currentFocus()
+            sources.discover()
+            Qt.callLater(restoreFocus)
+        } else Qt.callLater(() => {
+            if (["grid", "side"].includes(keymap.layer) && returnFocus?.visible && returnFocus.enabled)
+                returnFocus.forceActiveFocus()
+        })
+    }
+    Keys.onShortcutOverride: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) event.accepted = true
+    }
+    Keys.onPressed: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            Focus.move(root, event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1, currentFocus())
+            event.accepted = true
+        }
+    }
 
     // What is here already, best first, at most five: each plugin's offers
     // in turn ({ title, detail, icon, triggered }).
@@ -169,6 +201,9 @@ Item {
                             required property var modelData
                             required property int index
                             readonly property bool first: index === 0
+                            Accessible.role: Accessible.Grouping
+                            Accessible.name: modelData.title
+                            Accessible.description: modelData.detail
                             width: parent.width
                             height: rowContent.implicitHeight + 2 * Math.round(theme.fontSize)
                             radius: Math.min(4, theme.radius)
@@ -196,6 +231,7 @@ Item {
                                     text: row.modelData.icon
                                     font.pixelSize: Math.round(theme.fontSize * 1.571)
                                     color: row.first ? theme.accent : theme.foreground
+                                    Accessible.ignored: true
                                 }
                                 Column {
                                     anchors.verticalCenter: parent.verticalCenter
@@ -215,6 +251,8 @@ Item {
                                 }
                                 ShellButton {
                                     id: use
+                                    objectName: "sourceUse-" + row.index
+                                    Accessible.name: qsTr("Use %1").arg(row.modelData.title)
                                     anchors.verticalCenter: parent.verticalCenter
                                     active: row.first
                                     text: qsTr("Use")
@@ -227,30 +265,26 @@ Item {
                 }
 
                 // Anything else.
-                Item {
+                Flow {
                     width: parent.width
-                    height: others.height
-                    Row {
-                        id: others
-                        anchors.horizontalCenter: root.firstRun ? parent.horizontalCenter : undefined
-                        spacing: 8
-                        UiText {
-                            visible: root.suggestions.length > 0
-                            anchors.verticalCenter: parent.verticalCenter
-                            rightPadding: 8
-                            text: qsTr("Or")
-                            color: theme.darkForeground
-                        }
-                        Repeater {
-                            model: root.ways
-                            delegate: ShellButton {
-                                required property var modelData
-                                text: modelData.title
-                                key: modelData.key ?? ""
-                                keyLayer: root.keyLayer
-                                usable: root.shown
-                                onTapped: modelData.triggered()
-                            }
+                    spacing: 8
+                    UiText {
+                        visible: root.suggestions.length > 0
+                        height: Math.round(theme.fontSize * 2.333)
+                        verticalAlignment: Text.AlignVCenter
+                        rightPadding: 8
+                        text: qsTr("Or")
+                        color: theme.darkForeground
+                    }
+                    Repeater {
+                        model: root.ways
+                        delegate: ShellButton {
+                            required property var modelData
+                            text: modelData.title
+                            key: modelData.key ?? ""
+                            keyLayer: root.keyLayer
+                            usable: root.shown
+                            onTapped: modelData.triggered()
                         }
                     }
                 }

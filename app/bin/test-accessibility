@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+mkdir -p "$ROOT/build/accessibility-tests"
+cd "$ROOT/build/accessibility-tests"
+qmake6 "$ROOT/tests/accessibility_tests.pro"
+make -j"${PINHOLE_TEST_JOBS:-2}"
+QT_QPA_PLATFORM=xcb QT_QPA_PLATFORMTHEME=generic xvfb-run -a ./pinhole_accessibility_tests "$@"

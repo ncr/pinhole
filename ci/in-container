@@ -1,0 +1,20 @@
+#!/bin/sh
+# Source is a read-only bind mount. Compilation and tests run as a normal
+# user on a private copy, so local checks cannot rewrite the working install.
+set -eu
+# The host UID may differ from the image's build user. Give it a private
+# writable home rather than depending on /home/build ownership.
+export HOME=/tmp/pinhole-ci-home
+mkdir -p "$HOME"
+chmod 700 "$HOME"
+project="$(mktemp -d /tmp/pinhole-ci-project.XXXXXX)"
+trap 'rm -rf "$project"' EXIT HUP INT TERM
+git -c safe.directory=/source clone --quiet --depth 1 --no-hardlinks file:///source "$project"
+/usr/bin/python3 /source/ci/export-source.py /source "$project"
+cd "$project"
+export XDG_DATA_HOME=/cache/data
+export XDG_CACHE_HOME=/cache/cache
+export BLAZE_HOME=/cache/blaze
+export CARGO_HOME=/cache/cargo
+mkdir -p "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$BLAZE_HOME" "$CARGO_HOME"
+exec /usr/bin/python3 ci/check.py "$@" --output /artifacts

@@ -17,8 +17,13 @@ Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run` and
 `python3 -m unittest discover -s bin/tests`. Core tests run with
 `bin/build-rust test --release --workspace --no-fail-fast --manifest-path core/Cargo.toml`;
 use `BLAZE_TESTS=all` when auditing correctness, so cached results do not
-hide a failure. Record failures honestly; the review includes a known JPEG
-decoder parity failure and its standalone reproduction.
+hide a failure. Record failures honestly. The original review reproduced a JPEG decoder
+miscompilation; the pinned compiler patch and independent regression gate
+are documented in [docs/blaze.md](docs/blaze.md).
+Run `app/bin/test-framestats`, `app/bin/test-queries` and
+`app/bin/test-accessibility` for the dedicated contracts.
+[ci/README.md](ci/README.md) describes the pinned container checks, including
+separate Rust reference, visual and native Wayland jobs.
 
 Use `app/bin/measure-startup --help` for repeatable launch measurements.
 Separate fresh QML caches from warm launches and report distributions,

@@ -373,48 +373,73 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     ThumbResult::Done { id: job.stored.asset, path: rel, width: w, height: h, colour, bytes }
 }
 
-/// Average colours from before they were sRGB (docs/hdr.md, H1), made so
-/// once: each thumbnail's profile read again (its markers only) and its
-/// average put through it, as a thumbnail's is now when it is made. A few
-/// seconds for 50,000. How many changed; the library's version moves on if
-/// any did. Asked to stop, it leaves them all for the next round.
+/// Refresh derived colours after the JPEG SIMD decoder correction. Runs in
+/// the sync worker, never on the UI/startup path. Only cached thumbnails are
+/// read. Short transactions and a durable per-thumbnail checkpoint let a
+/// cancelled repair resume; missing or damaged thumbnails remain pending.
 pub fn srgb_averages(conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
     use rayon::prelude::*;
-    if db::meta(conn, "average_colour").as_deref() == Some("srgb") {
+    const DECODER: &str = "srgb-pack-lanes-1";
+    if db::meta(conn, "average_colour_decoder").as_deref() == Some(DECODER) {
         return Ok(0);
     }
-    let rows: Vec<(String, String, u32)> = conn
-        .prepare("SELECT id, thumb_path, avg_color FROM assets WHERE thumb_path IS NOT NULL AND avg_color IS NOT NULL")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS jpeg_average_repair (
+        asset_id TEXT PRIMARY KEY, thumb_path TEXT NOT NULL, decoder TEXT NOT NULL
+    ) WITHOUT ROWID")?;
+    let pending = "SELECT a.id, a.thumb_path, a.avg_color FROM assets a
+        WHERE a.thumb_path IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM jpeg_average_repair r
+          WHERE r.asset_id = a.id AND r.thumb_path = a.thumb_path AND r.decoder = ?1)
+        ORDER BY a.id";
+    let rows: Vec<(String, String, Option<u32>)> = conn.prepare(pending)?
+        .query_map([DECODER], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
-    let changed: Vec<(&str, u32)> = rows
-        .par_iter()
-        .filter_map(|(id, path, colour)| {
-            if stop() {
-                return None;
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(2)
+        .thread_name(|i| format!("jpeg-average-{i}"))
+        .start_handler(|_| {
+            // Linux setpriority with pid 0 applies to the calling thread.
+            unsafe extern "C" { fn setpriority(which: i32, who: u32, priority: i32) -> i32; }
+            unsafe { setpriority(0, 0, 19); }
+        }).build()?;
+    let mut changed = 0;
+    for batch in rows.chunks(256) {
+        let made: Vec<_> = pool.install(|| batch.par_iter().filter_map(|(id, path, was)| {
+            if stop() { return None; }
+            let bytes = std::fs::read(library.join(path)).ok()?;
+            let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).ok()?.to_rgb8();
+            let colour = crate::colour::average_in_srgb(average_colour(&image), crate::colour::jpeg_icc(&bytes).as_deref());
+            Some((id, path, *was, colour))
+        }).collect());
+        if stop() { return Err(Stopped.into()); }
+        let tx = conn.transaction()?;
+        let mut batch_changed = 0;
+        {
+            let mut update = tx.prepare_cached("UPDATE assets SET avg_color = ?2 WHERE id = ?1")?;
+            let mut checkpoint = tx.prepare_cached("INSERT OR REPLACE INTO jpeg_average_repair (asset_id, thumb_path, decoder) VALUES (?1, ?2, ?3)")?;
+            for (id, path, was, colour) in made {
+                if was != Some(colour) {
+                    update.execute(params![id, colour])?;
+                    batch_changed += 1;
+                }
+                checkpoint.execute(params![id, path, DECODER])?;
             }
-            let icc = crate::colour::jpeg_icc_of_file(&library.join(path)).ok().flatten()?;
-            let now = crate::colour::average_in_srgb(*colour, Some(&icc));
-            (now != *colour).then_some((id.as_str(), now))
-        })
-        .collect();
-    if stop() {
-        return Err(Stopped.into());
-    }
-    let tx = conn.transaction()?;
-    {
-        let mut update = tx.prepare_cached("UPDATE assets SET avg_color = ?2 WHERE id = ?1")?;
-        for (id, colour) in &changed {
-            update.execute(params![id, colour])?;
         }
+        if batch_changed > 0 {
+            let version = db::meta(&tx, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0i64) + 1;
+            db::set_meta(&tx, "library_version", &version.to_string())?;
+        }
+        tx.commit()?;
+        changed += batch_changed;
     }
-    if !changed.is_empty() {
-        let version = db::meta(&tx, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0i64) + 1;
-        db::set_meta(&tx, "library_version", &version.to_string())?;
+    let remaining = conn.prepare(pending)?.query([DECODER])?.next()?.is_some();
+    if !remaining {
+        let tx = conn.transaction()?;
+        db::set_meta(&tx, "average_colour", "srgb")?;
+        db::set_meta(&tx, "average_colour_decoder", DECODER)?;
+        tx.execute_batch("DROP TABLE jpeg_average_repair")?;
+        tx.commit()?;
     }
-    db::set_meta(&tx, "average_colour", "srgb")?;
-    tx.commit()?;
-    Ok(changed.len())
+    Ok(changed)
 }
 
 /// What the grid draws until it has decoded the thumbnail.
@@ -616,17 +641,14 @@ mod tests {
     }
 
     #[test]
-    fn average_colours_from_before_are_made_srgb_once() {
+    fn jpeg_averages_are_repaired_once_and_missing_thumbnails_retry() {
         let dir = std::env::temp_dir().join(format!("pinhole-averages-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("thumbs")).unwrap();
         let p3 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../app/tests/data/display-p3.icc")).unwrap();
-        // A deep red thumbnail as an iPhone's, its profile in APP2 after
-        // SOI, and the same with none.
         let mut plain = Vec::new();
         image::codecs::jpeg::JpegEncoder::new(&mut plain)
-            .encode(&[200, 30, 40].repeat(64), 8, 8, image::ExtendedColorType::Rgb8)
-            .unwrap();
+            .encode(&[200, 30, 40].repeat(64), 8, 8, image::ExtendedColorType::Rgb8).unwrap();
         let mut tagged = plain[..2].to_vec();
         tagged.extend([0xff, 0xe2]);
         tagged.extend(((2 + 14 + p3.len()) as u16).to_be_bytes());
@@ -636,31 +658,62 @@ mod tests {
         tagged.extend(&plain[2..]);
         std::fs::write(dir.join("thumbs/p3.jpg"), &tagged).unwrap();
         std::fs::write(dir.join("thumbs/plain.jpg"), &plain).unwrap();
+        std::fs::write(dir.join("thumbs/ramp.jpg"), include_bytes!("../../docs/reviews/jpeg-repro/gray-ramp.jpg")).unwrap();
+        std::fs::write(dir.join("thumbs/bad.jpg"), b"broken JPEG").unwrap();
         let mut conn = db::open(&dir.join("library.sqlite")).unwrap();
-        let red = 0xc81e28u32;
-        for id in ["p3", "plain", "gone"] {
-            conn.execute("INSERT INTO assets (id, thumb_path, avg_color) VALUES (?1, ?2, ?3)", params![id, format!("thumbs/{id}.jpg"), red])
-                .unwrap();
+        let wrong = 0x123456u32;
+        for id in ["p3", "plain", "ramp", "gone", "bad"] {
+            conn.execute("INSERT INTO assets (id, thumb_path, avg_color, asset_date, added_date, favorite, filename)
+                VALUES (?1, ?2, ?3, 123, 456, 1, 'unchanged.jpg')", params![id, format!("thumbs/{id}.jpg"), wrong]).unwrap();
         }
+        db::set_meta(&conn, "average_colour", "srgb").unwrap(); // Already migrated, but decoded by old Blaze.
         let colour = |conn: &Connection, id: &str| -> u32 {
             conn.query_row("SELECT avg_color FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
         };
-        // Stopped: none of them, and asked again next round.
         assert!(srgb_averages(&mut conn, &dir, &|| true).is_err());
-        assert_eq!(colour(&conn, "p3"), red);
-        assert_eq!(db::meta(&conn, "average_colour"), None);
-        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 1);
-        // Redder in sRGB's codes, as the window shows the thumbnail.
-        let p3 = colour(&conn, "p3");
-        assert!(p3 >> 16 > 0xc8 && (p3 >> 8 & 0xff) < 0x1e, "{p3:06x}");
-        assert_eq!(p3, crate::colour::average_in_srgb(red, crate::colour::jpeg_icc(&tagged).as_deref()));
-        // Untagged, or its thumbnail gone: as it was.
+        assert_eq!(colour(&conn, "p3"), wrong);
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 3);
+        let decoded = image::load_from_memory(&plain).unwrap().to_rgb8();
+        let red = average_colour(&decoded);
         assert_eq!(colour(&conn, "plain"), red);
-        assert_eq!(colour(&conn, "gone"), red);
+        assert_eq!(colour(&conn, "p3"), crate::colour::average_in_srgb(red, crate::colour::jpeg_icc(&tagged).as_deref()));
+        // Independent Pillow decode, sampling every seventh pixel, averages to 126.
+        assert_eq!(colour(&conn, "ramp"), 0x7e7e7e);
+        assert_eq!(colour(&conn, "gone"), wrong);
+        assert_eq!(db::meta(&conn, "average_colour_decoder"), None);
         assert_eq!(db::meta(&conn, "library_version").as_deref(), Some("1"));
-        // Once only.
+        // Successful rows are checkpointed even when other thumbnails are offline.
+        std::fs::remove_file(dir.join("thumbs/plain.jpg")).unwrap();
         assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 0);
-        assert_eq!(colour(&conn, "p3"), p3);
+        std::fs::write(dir.join("thumbs/gone.jpg"), &plain).unwrap();
+        conn.execute("DELETE FROM assets WHERE id = 'bad'", []).unwrap();
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 1);
+        assert_eq!(colour(&conn, "gone"), red);
+        assert_eq!(db::meta(&conn, "average_colour_decoder").as_deref(), Some("srgb-pack-lanes-1"));
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 0);
+        let unchanged: i64 = conn.query_row("SELECT count(*) FROM assets WHERE asset_date=123 AND added_date=456 AND favorite=1 AND filename='unchanged.jpg'", [], |r| r.get(0)).unwrap();
+        assert_eq!(unchanged, 4);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancelled_jpeg_repair_resumes_after_its_committed_batch() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = std::env::temp_dir().join(format!("pinhole-averages-batches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ramp.jpg"), include_bytes!("../../docs/reviews/jpeg-repro/gray-ramp.jpg")).unwrap();
+        let mut conn = db::open(&dir.join("library.sqlite")).unwrap();
+        for id in 0..270 {
+            conn.execute("INSERT INTO assets (id, thumb_path, avg_color) VALUES (?1, 'ramp.jpg', 0)", [format!("{id:04}")]).unwrap();
+        }
+        let calls = AtomicUsize::new(0);
+        assert!(srgb_averages(&mut conn, &dir, &|| calls.fetch_add(1, Ordering::SeqCst) >= 257).is_err());
+        let repaired: i64 = conn.query_row("SELECT count(*) FROM assets WHERE avg_color = 8289918", [], |r| r.get(0)).unwrap();
+        assert_eq!(repaired, 256);
+        assert_eq!(db::meta(&conn, "average_colour_decoder"), None);
+        assert_eq!(srgb_averages(&mut conn, &dir, &|| false).unwrap(), 14);
+        assert_eq!(db::meta(&conn, "average_colour_decoder").as_deref(), Some("srgb-pack-lanes-1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

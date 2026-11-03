@@ -1,5 +1,11 @@
 # pinholed: the background service
 
+> **Internal architecture reference.** This page is for maintaining Pinhole,
+> not the public plugin contract. Implementation history and measurements
+> describe the revisions and machines recorded here, not current guarantees.
+> Plugin authors should start with [the plugin handbook](plugin-quickstart.md)
+> and [the public API](plugins.md).
+
 The window never talks to the source of the photos (iCloud, or a folder;
 see [sources.md](sources.md)). It reads the library index and the
 thumbnails straight from disk, and asks `pinholed` for everything else: the
@@ -75,7 +81,7 @@ service tripped over (a panic, a bug): the rest go on.
 
 | Method | Params | Result |
 |---|---|---|
-| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source` (the id of the source whose photo it is: else `other_source`, as for `""`, no one's). A library read that is not the source shown's (one given with `--library`) has nothing fetched: `other_source` | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
+| `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source`. If supplied, `source` must be nonempty and match the index's `meta.source`. The index must also belong to the source served; otherwise `other_source`. A library given with `--library` can fetch when it is a copy of that source's library; another source's library or one with no owner cannot. | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |

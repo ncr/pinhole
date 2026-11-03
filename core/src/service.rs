@@ -1847,8 +1847,8 @@ fn sync_round(shared: &Shared) -> Result<()> {
     if source.kind() == "none" {
         return Ok(());
     }
-    // Once, for a library from before average colours were sRGB: of its
-    // own thumbnails, so whether or not the source is ready.
+    // Repair old JPEG-derived average colours from cached thumbnails, in
+    // resumable batches, whether or not the source is online.
     {
         let _writing = shared.storage.library_lock.lock().unwrap();
         let library = shared.storage.library();
@@ -1857,7 +1857,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
             let averages = crate::sync::srgb_averages(&mut db, &library, &stop)?;
             if averages > 0 {
                 let version: i64 = crate::db::meta(&db, "library_version").and_then(|v| v.parse().ok()).unwrap_or(0);
-                eprintln!("pinholed: library version {version}: {averages} average colours made sRGB");
+                eprintln!("pinholed: library version {version}: {averages} average colours refreshed");
                 shared.broadcast(json!({"event": "library_changed", "version": version, "added": 0, "removed": 0}));
             }
         }

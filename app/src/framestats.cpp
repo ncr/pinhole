@@ -1,9 +1,30 @@
 #include "framestats.h"
 
 #include <algorithm>
+#include <cmath>
 
-FrameStats::FrameStats() {
+FrameStats::FrameStats(std::function<qint64()> now) : m_now(std::move(now)) {
     m_clock.start();
+}
+
+qint64 FrameStats::now() const { return m_now ? m_now() : m_clock.nsecsElapsed(); }
+
+void FrameStats::setRefreshRate(double hz) {
+    // Qt reports 60 when the platform cannot supply a rate. Defend against
+    // zero/NaN from a disconnected or synthetic screen as well.
+    if (!std::isfinite(hz) || hz < 1 || hz > 1000) hz = 60;
+    std::lock_guard lock(m_mutex);
+    const double period = 1000.0 / hz;
+    if (std::abs(period - m_period) < 1e-6) return;
+    m_period = period;
+    m_lastSwap = -1;
+    m_pending = {};
+}
+
+void FrameStats::discontinuity() {
+    std::lock_guard lock(m_mutex);
+    m_lastSwap = -1;
+    m_pending = {};
 }
 
 void FrameStats::frameBuilt(qint64 syncNanos, int cells, int placeholders, int uploads, int batches, int evicted,
@@ -21,41 +42,42 @@ void FrameStats::frameBuilt(qint64 syncNanos, int cells, int placeholders, int u
 
 void FrameStats::syncBegan() {
     std::lock_guard lock(m_mutex);
-    m_syncAt = m_clock.nsecsElapsed();
+    m_syncAt = now();
 }
 
 void FrameStats::renderBegan() {
     std::lock_guard lock(m_mutex);
-    m_renderAt = m_clock.nsecsElapsed();
+    m_renderAt = now();
 }
 
 void FrameStats::renderEnded() {
     std::lock_guard lock(m_mutex);
-    m_renderEndAt = m_clock.nsecsElapsed();
+    m_renderEndAt = now();
 }
 
 void FrameStats::frameSwapped() {
     std::lock_guard lock(m_mutex);
-    const qint64 now = m_clock.nsecsElapsed();
+    const qint64 at = now();
     if (m_lastSwap >= 0) {
         Sample s = m_pending;
-        s.at = now;
-        s.interval = (now - m_lastSwap) / 1e6;
+        s.at = at;
+        s.period = m_period;
+        s.interval = (at - m_lastSwap) / 1e6;
         s.wait = (m_syncAt - m_lastSwap) / 1e6;
         s.render = (m_renderEndAt - m_renderAt) / 1e6;
-        s.swap = (now - m_renderEndAt) / 1e6;
+        s.swap = (at - m_renderEndAt) / 1e6;
         m_samples.push_back(s);
         if (m_samples.size() > (1u << 16))
             m_samples.pop_front();
     }
-    m_lastSwap = now;
+    m_lastSwap = at;
     m_pending = {};
 }
 
 void FrameStats::reset() {
     std::lock_guard lock(m_mutex);
     m_samples.clear();
-    m_startedAt = m_clock.nsecsElapsed();
+    m_startedAt = now();
     // The first interval after a reset would span the reset itself.
     m_lastSwap = -1;
 }
@@ -67,8 +89,9 @@ static double percentile(std::vector<double> v, double p) {
     return v[size_t((v.size() - 1) * p)];
 }
 
-FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples) {
+FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples, double currentPeriod) {
     Summary s;
+    s.targetHz = 1000.0 / currentPeriod;
     s.frames = int(samples.size());
     if (samples.empty())
         return s;
@@ -81,7 +104,8 @@ FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples) {
         placeholders += x.placeholders;
         uploads += x.uploads;
         s.batchesMax = std::max(s.batchesMax, double(x.batches));
-        if (x.interval > 12.5)
+        s.mixedRefreshRates |= std::abs(x.period - currentPeriod) > 1e-6;
+        if (x.interval > x.period * 1.5)
             s.missed += 1;
     }
     s.seconds = (samples.back().at - samples.front().at) / 1e9;
@@ -96,7 +120,7 @@ FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples) {
     s.uploadsPerFrame = uploads / samples.size();
     std::vector<const Sample *> worst;
     for (const auto &x : samples)
-        if (x.interval > 12.5)
+        if (x.interval > x.period * 1.5)
             worst.push_back(&x);
     std::sort(worst.begin(), worst.end(), [](auto *a, auto *b) { return a->interval > b->interval; });
     for (size_t i = 0; i < std::min<size_t>(3, worst.size()); ++i)
@@ -107,21 +131,30 @@ FrameStats::Summary FrameStats::summarize(const std::vector<Sample> &samples) {
 }
 
 FrameStats::Summary FrameStats::summary() {
-    std::lock_guard lock(m_mutex);
-    return summarize(std::vector<Sample>(m_samples.begin(), m_samples.end()));
+    std::vector<Sample> samples;
+    double period;
+    {
+        std::lock_guard lock(m_mutex);
+        samples.assign(m_samples.begin(), m_samples.end());
+        period = m_period;
+    }
+    // Percentiles sort copies; never hold the render-thread mutex for it.
+    return summarize(samples, period);
 }
 
 QString FrameStats::overlayText() {
     std::vector<Sample> recent;
+    double period;
     {
         std::lock_guard lock(m_mutex);
-        const qint64 since = m_clock.nsecsElapsed() - 1'000'000'000;
+        const qint64 since = now() - 1'000'000'000;
         auto it = std::lower_bound(m_samples.begin(), m_samples.end(), since,
                                    [](const Sample &s, qint64 t) { return s.at < t; });
         recent.assign(it, m_samples.end());
+        period = m_period;
     }
-    const Summary s = summarize(recent);
-    return QStringLiteral("%1 fps  frame p50 %2 / p99 %3 / max %4 ms  missed %5\n"
+    const Summary s = summarize(recent, period);
+    return QStringLiteral("%1 fps  frame p50 %2 / p99 %3 / max %4 ms  late %5  target %11 Hz%12\n"
                           "sync p50 %6 / max %7 ms  placeholders %8%  uploads %9/frame  batches %10")
         .arg(s.frames)
         .arg(s.intervalP50, 0, 'f', 1)
@@ -132,7 +165,9 @@ QString FrameStats::overlayText() {
         .arg(s.syncMax, 0, 'f', 2)
         .arg(int(s.placeholderShare * 100))
         .arg(s.uploadsPerFrame, 0, 'f', 1)
-        .arg(int(s.batchesMax));
+        .arg(int(s.batchesMax))
+        .arg(s.targetHz, 0, 'f', 2)
+        .arg(s.mixedRefreshRates ? QStringLiteral(" (mixed)") : QString());
 }
 
 QString FrameStats::aroundWorst(int before, int after) {

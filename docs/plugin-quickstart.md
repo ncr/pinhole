@@ -17,9 +17,10 @@ the generated example already shows recent photos, with scrolling and zoom.
 Edit `~/.config/pinhole/plugins/me.photo-ideas/Main.qml` and save it. Your
 changes appear immediately; errors appear under its row in Settings.
 
-The generated manifest asks for the installed API. Pinhole currently has
-**plugin API 6**; a manifest's `api` is the minimum version it requires.
-The plugin runs as your user and can start programs. Enable code you trust.
+The generated manifest asks for the installed API. Check its version with
+`pinhole plugin docs --json`; a manifest's `api` is the minimum version it
+requires, not the plugin's release number. The plugin runs as your user and
+can start programs. Enable code you trust.
 
 ## A view or a workflow
 
@@ -44,6 +45,8 @@ file rather than editing one in place.
 The [API reference](plugins.md#pinhole) describes promises, cancellation,
 undo, settings, state and cache. Contact sheet (`plugins/sheet`) and Send
 to phone (`plugins/send`) are complete examples in the checkout.
+If a tool is not bundled with your plugin or Pinhole, say that it needs to
+be installed separately and handle a missing executable in the UI.
 
 ## A new source of photos
 
@@ -58,7 +61,7 @@ An out-of-process provider is a protocol boundary, not an OS sandbox.
 
 ## Build with an agent
 
-Use **Copy instructions for an agent** in the handbook. It copies a short
+Use **Copy agent instructions** (**Instructions** in a compact window). It copies a short
 implementation contract, commands and where to find the full reference.
 Describe your idea after it. The same instructions are available without a
 window:
@@ -71,8 +74,9 @@ pinhole plugin docs --json
 
 `--json` returns the installed API version and all bundled documents with
 their Markdown. It is suitable for tooling and works with packaged builds.
-The CLI and the app read the same embedded files, so documentation follows
-the version of Pinhole you are using.
+The CLI and the app read the same embedded plugin handbook, so documentation
+follows the version of Pinhole you are using. It contains the quick start,
+API reference, source-provider protocol and agent contract.
 
 ## Keep it quick
 

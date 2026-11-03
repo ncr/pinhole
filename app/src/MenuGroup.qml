@@ -3,6 +3,7 @@ import Pinhole
 import QtQml
 import QtQuick.Window
 import "keys.js" as KeyNames
+import "focus.js" as Focus
 
 // A group of actions in an ActionBar: its button, and beside it ▾ with the
 // rest of the group in a menu as Omarchy's, a card of the theme's background
@@ -36,6 +37,22 @@ Item {
     property string keyLayer: "chrome"
     property string section
     property bool open: false
+    property var returnFocus: null
+    onOpenChanged: {
+        if (open) {
+            returnFocus = group.Window.window?.activeFocusItem
+            Qt.callLater(focusCurrent)
+        } else Qt.callLater(() => {
+            if (["grid", "viewer"].includes(keymap.layer) && returnFocus?.visible && returnFocus.enabled)
+                returnFocus.forceActiveFocus()
+        })
+    }
+    onCurrentChanged: if (open) Qt.callLater(focusCurrent)
+    function focusCurrent() {
+        const row = rows.itemAt(Math.max(0, current))
+        if (row?.usable) row.forceActiveFocus(Qt.TabFocusReason)
+        else menu.forceActiveFocus()
+    }
     default property alias button: slot.data
 
     readonly property bool isGroup: true
@@ -120,6 +137,9 @@ Item {
             flat: true
             inset: Math.round(theme.fontSize * 0.5)
             text: "▾"
+            Accessible.name: group.menuText || qsTr("More options")
+            Accessible.expandable: true
+            Accessible.expanded: group.open
             hint: ""
             active: group.open
             onTapped: group.toggle(false)
@@ -140,6 +160,21 @@ Item {
         id: menu
         objectName: group.objectName !== "" ? group.objectName + "Card" : ""
         visible: group.open
+        FocusFence.enabled: group.open
+        Accessible.role: Accessible.PopupMenu
+        Accessible.name: group.menuText || qsTr("More options")
+        Accessible.ignored: !group.open
+        Keys.onShortcutOverride: event => {
+            if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                    && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) event.accepted = true
+        }
+        Keys.onPressed: event => {
+            if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                    && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+                Focus.move(menu, event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1, group.Window.window?.activeFocusItem)
+                event.accepted = true
+            }
+        }
         anchors.right: row.right
         y: group.upward ? -height - 7 : group.height + 7
         width: column.width + 2
@@ -181,6 +216,9 @@ Item {
                     hint: group.hintOf(modelData)
                     usable: modelData.usable !== false
                     active: modelData.active === true
+                    Accessible.role: Accessible.MenuItem
+                    Accessible.selected: active
+                    onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") group.current = index
                     busy: modelData.busy === true
                     onTapped: group.press(modelData)
                     onHoveredChanged: {

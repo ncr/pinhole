@@ -4,4 +4,7 @@ version = "0.0.0"
 edition = "2021"
 [dependencies]
 zune-core = "=0.5.1"
-zune-jpeg = "=0.5.15"
+zune-jpeg = { version = "=0.5.15", default-features = false, features = ["std"] }
+[features]
+default = ["simd"]
+simd = ["zune-jpeg/x86", "zune-jpeg/neon"]

@@ -1,5 +1,6 @@
 """A pinned compiler must never accidentally reuse an older daemon or Cargo."""
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -16,9 +17,10 @@ class CompilerTests(unittest.TestCase):
         self.env = dict(os.environ, XDG_DATA_HOME=str(self.root / 'data'),
                         BLAZE_HOME=str(self.root / 'state'), PINHOLE_RUST_BUILDER='blaze')
         self.env.pop('PINHOLE_BLAZE', None)
+        self.env.pop('BLAZE_CACHE', None)
         self.compiler = self.root / 'data/pinhole/tools' / VERSION / 'bin/blaze'
         self.compiler.parent.mkdir(parents=True)
-        self.compiler.write_text('#!/bin/sh\nif [ "$1" = --version ]; then echo "blaze ' + VERSION + ' (tested)"; exit; fi\nprintf "%s\\n" "$BLAZE_HOME" "$@"\nexit 101\n')
+        self.compiler.write_text('#!/bin/sh\nif [ "$1" = --version ]; then echo "blaze ' + VERSION + ' (tested)"; exit; fi\nif [ "$1" = stop ]; then exit 0; fi\nprintf "%s\\n" "$BLAZE_HOME" "$BLAZE_CACHE" "$@"\nexit 101\n')
         self.compiler.chmod(0o755)
 
     def run_build(self, *args):
@@ -27,7 +29,7 @@ class CompilerTests(unittest.TestCase):
     def test_pinned_compiler_uses_its_own_daemon_and_preserves_failure(self):
         result = self.run_build('build', '--release')
         self.assertEqual(result.returncode, 101)
-        self.assertEqual(result.stdout.splitlines(), [str(self.root / 'state' / VERSION), 'build', '--release'])
+        self.assertEqual(result.stdout.splitlines(), [str(self.root / 'state' / 'd' / hashlib.sha256((str(ROOT) + '\0' + VERSION).encode()).hexdigest()[:12]), str(self.root / 'state' / VERSION / 'store'), 'build', '--release'])
         self.assertNotIn('retry', result.stderr.lower())
 
     def test_missing_pinned_compiler_does_not_use_system_cargo(self):

@@ -1,5 +1,6 @@
 import QtQuick
 import Pinhole
+import "focus.js" as Focus
 
 // A saved preference, rather than a list of actions: the selected radio
 // stays distinct from the row under the pointer or chosen with the keys.
@@ -11,6 +12,33 @@ Item {
     property string value: "smart"
     property int current: -1
     property bool pointerInput: false
+    property var returnFocus: null
+    Accessible.role: Accessible.PopupMenu
+    Accessible.name: qsTr("Photo order")
+    Accessible.ignored: !visible
+    FocusFence.enabled: visible
+    function focusCurrent() {
+        const at = current >= 0 ? current : Math.max(0, options.findIndex(option => option.value === value))
+        optionRows.itemAt(at)?.forceActiveFocus(Qt.TabFocusReason)
+    }
+    onOpenChanged: {
+        if (open) {
+            returnFocus = root.Window.window?.activeFocusItem
+            Qt.callLater(focusCurrent)
+        } else Qt.callLater(() => { if (returnFocus?.visible && returnFocus.enabled) returnFocus.forceActiveFocus() })
+    }
+    onCurrentChanged: if (open && !pointerInput) Qt.callLater(focusCurrent)
+    Keys.onShortcutOverride: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) event.accepted = true
+    }
+    Keys.onPressed: event => {
+        if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            Focus.move(root, event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1, root.Window.window?.activeFocusItem)
+            event.accepted = true
+        }
+    }
     readonly property var options: [
         { value: "smart", title: qsTr("Automatic"),
           detail: qsTr("New additions for 30 days, then by date taken.") },
@@ -78,32 +106,50 @@ Item {
                 }
             }
             Repeater {
+                id: optionRows
                 model: root.options
-                delegate: Rectangle {
+                delegate: ControlSurface {
                     id: option
                     required property var modelData
                     required property int index
                     readonly property bool selected: root.value === modelData.value
-                    readonly property bool hot: root.current === index
-                    readonly property bool pressed: mouse.pressed
+                    readonly property bool hot: root.current === index || activeFocus
+                    readonly property bool pressed: mouse.pressed || keyboardPressed
                     readonly property int inset: Math.round(theme.fontSize * 0.833)
                     objectName: "orderOption_" + modelData.value
                     width: content.width
                     height: Math.round(theme.fontSize * 2.333)
-                    radius: Math.min(4, theme.radius)
-                    // Omarchy controls: pressed > hover/keyboard cursor >
-                    // saved selection. The saved choice still has its check.
-                    color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
-                                   pressed ? 0.22 : hot ? 0.08 : selected ? 0.18 : 0)
-                    border.width: 1
-                    border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
-                                          hot ? 0.25 : 0)
-                    Behavior on color { ColorAnimation { duration: 100 } }
-                    Behavior on border.color { ColorAnimation { duration: 100 } }
+                    activeFocusOnTab: true
+                    onActivated: root.choose(index)
+                    onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") {
+                        root.pointerInput = false
+                        root.current = index
+                    }
+                    property alias color: surface.color
+                    property alias border: surface.border
+                    property alias radius: surface.radius
+                    Rectangle {
+                        id: surface
+                        anchors.fill: parent
+                        radius: Math.min(4, theme.radius)
+                        // Omarchy controls: pressed > hover/keyboard cursor >
+                        // saved selection. The saved choice still has its check.
+                        color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
+                                       option.pressed ? 0.22 : option.hot ? 0.08 : option.selected ? 0.18 : 0)
+                        border.width: 1
+                        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
+                                              option.hot ? 0.25 : 0)
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                        Behavior on border.color { ColorAnimation { duration: 100 } }
+                    }
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: modelData.title
                     Accessible.description: modelData.detail
                     Accessible.checked: selected
+                    Accessible.checkable: true
+                    Accessible.focusable: true
+                    Accessible.focused: activeFocus
+                    Accessible.pressed: pressed
                     Accessible.onPressAction: root.choose(index)
                     UiText {
                         anchors.left: parent.left
@@ -114,6 +160,7 @@ Item {
                         text: modelData.title
                         color: option.hot ? theme.accent : theme.foreground
                         elide: Text.ElideRight
+                        Accessible.ignored: true
                     }
                     UiText {
                         id: check
@@ -124,6 +171,7 @@ Item {
                         text: "✓"
                         opacity: option.selected ? 1 : 0
                         color: theme.accent
+                        Accessible.ignored: true
                     }
                     MouseArea {
                         id: mouse
@@ -138,7 +186,7 @@ Item {
                         onPositionChanged: point()
                         onPressed: point()
                         onExited: if (root.pointerInput && root.current === option.index) root.current = -1
-                        onClicked: root.choose(option.index)
+                        onClicked: { option.forceActiveFocus(Qt.MouseFocusReason); root.choose(option.index) }
                     }
                 }
             }

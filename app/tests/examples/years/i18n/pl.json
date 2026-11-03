@@ -1,0 +1,11 @@
+{
+  "Example years": "Przykład: lata",
+  "An example from docs/plugins.md.": "Przykład z docs/plugins.md.",
+  "Years": "Lata",
+  "%n photo(s)": {
+    "one": "%n zdjęcie",
+    "few": "%n zdjęcia",
+    "many": "%n zdjęć",
+    "other": "%n zdjęcia"
+  }
+}

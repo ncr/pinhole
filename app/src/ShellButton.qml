@@ -1,6 +1,7 @@
 import QtQuick
 import Pinhole
 import "keys.js" as KeyNames
+import "focus.js" as Focus
 
 // A button as Omarchy's shell draws one (shell.toml's controls): a faint fill
 // and a hairline in the text colour, both stronger under the pointer and
@@ -19,10 +20,11 @@ import "keys.js" as KeyNames
 // `justified`, for a row of a menu: the label at the left, the key at the
 // right, as wide as the menu makes it; `lit`, chosen there with the keys,
 // lit as under the pointer.
-Rectangle {
+ControlSurface {
     id: control
     property string text
     property var action: null
+    usable: !action || action.when !== false
     property string key
     property string keyLayer: "chrome"
     property string section
@@ -36,11 +38,29 @@ Rectangle {
     // Over the photos rather than on a surface of the app: backed with the
     // theme's background, as the chips are, so it reads on any photo.
     property bool floating: false
-    property bool usable: true
     property bool busy: false
     property int busyDelay: 1000
     property bool justified: false
     property bool lit: false
+    property bool checkable: false
+    property alias color: surface.color
+    property alias radius: surface.radius
+    property alias border: surface.border
+    activeFocusOnTab: usable
+    Accessible.role: Accessible.Button
+    Accessible.name: {
+        const label = action && action.text ? action.text : helpText !== "" ? helpText : text
+        return ["✕", "×"].includes(label) ? qsTr("Close") : label === "▾" ? qsTr("More options") : label
+    }
+    Accessible.description: hint !== "" ? qsTr("Shortcut: %1").arg(hint) : ""
+    Accessible.focusable: usable
+    Accessible.focused: activeFocus
+    Accessible.checkable: checkable
+    Accessible.checked: checkable && active
+    Accessible.pressed: usable && (tap.pressed || keyboardPressed)
+    Accessible.onPressAction: press()
+    onActivated: press()
+    onActiveFocusChanged: if (activeFocus) Focus.reveal(control)
     // Its space at each side of what it says.
     property int inset: Math.round(theme.fontSize * 0.833)
     // The pointer over it, while it shows.
@@ -48,7 +68,7 @@ Rectangle {
     signal tapped()
     // As a tap does: from the keys of a panel it is a stop in.
     function press() {
-        if (!usable)
+        if (!usable || !enabled)
             return
         if (action)
             action.trigger()
@@ -62,13 +82,26 @@ Rectangle {
         : label.implicitWidth + (justified ? 2 * theme.fontSize : spaceMetrics.advanceWidth) + keyLabel.implicitWidth) + 2 * inset
     width: naturalWidth
     height: Math.round(theme.fontSize * 2.333)
-    radius: Math.min(4, theme.radius)
     opacity: usable ? 1 : 0.4
-    readonly property bool lighter: (hover.hovered || lit) && usable
-    color: active ? theme.accent
-         : Qt.rgba(ink.r, ink.g, ink.b, tap.pressed ? 0.22 : lighter ? 0.08 : flat ? 0 : 0.04)
-    border.width: active ? 0 : 1
-    border.color: Qt.rgba(ink.r, ink.g, ink.b, lighter ? 0.25 : flat ? 0 : 0.4)
+    readonly property bool lighter: (hover.hovered || lit || activeFocus) && usable
+    Rectangle {
+        id: surface
+        anchors.fill: parent
+        radius: Math.min(4, theme.radius)
+        color: control.active ? Qt.tint(theme.accent, Qt.rgba(ink.r, ink.g, ink.b, control.usable && (tap.pressed || control.keyboardPressed) ? 0.18 : control.lighter ? 0.08 : 0))
+             : Qt.rgba(ink.r, ink.g, ink.b, control.usable && (tap.pressed || control.keyboardPressed) ? 0.22 : control.lighter ? 0.08 : control.flat ? 0 : 0.04)
+        border.width: control.active ? 0 : 1
+        border.color: Qt.rgba(ink.r, ink.g, ink.b, control.lighter ? 0.25 : control.flat ? 0 : 0.4)
+    }
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: -3
+        radius: surface.radius + 2
+        color: "transparent"
+        border.width: 2
+        border.color: theme.accent
+        visible: control.activeFocus
+    }
 
     // The arc in the key's place: the key stays, unseen, so the button
     // keeps its width.
@@ -85,6 +118,7 @@ Rectangle {
             color: control.active ? theme.background : control.labelColor
             opacity: control.turning && control.hint === "" ? 0 : 1
             text: control.text
+            Accessible.ignored: true
         }
         // A space after the label's ink: a Nerd Font icon is drawn wider
         // than its cell, which the label's width takes in but a space in
@@ -103,6 +137,7 @@ Rectangle {
                  : control.active ? Qt.tint(theme.accent, Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.6))
                  : theme.darkForeground
             text: control.hint
+            Accessible.ignored: true
         }
     }
     Loader {
@@ -161,15 +196,19 @@ Rectangle {
         z: -1
         enabled: control.floating
     }
-    HoverHandler { id: hover; cursorShape: control.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
+    MouseArea {
+        id: hover
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        readonly property bool hovered: containsMouse
+        cursorShape: control.usable ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
     TapHandler {
         id: tap
         onTapped: {
-            if (!control.usable)
-                return
-            if (control.action)
-                control.action.trigger()
-            control.tapped()
+            if (control.usable) control.forceActiveFocus(Qt.MouseFocusReason)
+            control.press()
         }
     }
 
