@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--plugin-state', type=Path, help='Copy existing plugin state into the temporary profile.')
     parser.add_argument('--plugin-settings', type=Path, help='Copy a plugins.json into the temporary profile.')
     parser.add_argument('--no-plugins', action='store_true')
+    parser.add_argument('--host-only', action='store_true', help='Measure the Qt host with the service unavailable; do not launch pinholed or fetch renditions. Not comparable to warm-service runs.')
     parser.add_argument('--native-hidden', action='store_true', help='Use the current compositor; invoke ONLY on a hidden test workspace.')
     parser.add_argument('--binary', type=Path, default=ROOT / 'app/build/pinhole')
     parser.add_argument('--builtin-plugins', type=Path, default=ROOT / 'plugins')
@@ -93,11 +94,18 @@ def main():
                 # Own service, --given: no source sync, library writes or
                 # eviction. The UI gets a warm service; boot is timed apart.
                 began = time.monotonic()
-                with (args.output / f'{run}-daemon.log').open('w') as daemon_log:
-                    daemon = subprocess.Popen([env['PINHOLED'], '--given', '--library', str(args.library.resolve()),
-                                               '--cache', str(profile / 'renditions'), '--socket', env['PINHOLE_SOCKET']],
-                                              env=env, stdout=daemon_log, stderr=daemon_log)
-                while True:
+                if args.host_only:
+                    # A checkout with an older/unbuildable service can still
+                    # profile the Qt host. Never fall back to this implicitly.
+                    # The private socket stays absent and retries invoke only
+                    # `false`, never the installed or checkout daemon.
+                    env['PINHOLED'] = shutil.which('false') or '/usr/bin/false'
+                else:
+                    with (args.output / f'{run}-daemon.log').open('w') as daemon_log:
+                        daemon = subprocess.Popen([env['PINHOLED'], '--given', '--library', str(args.library.resolve()),
+                                                   '--cache', str(profile / 'renditions'), '--socket', env['PINHOLE_SOCKET']],
+                                                  env=env, stdout=daemon_log, stderr=daemon_log)
+                while not args.host_only:
                     try:
                         with socket.socket(socket.AF_UNIX) as peer:
                             peer.settimeout(.5)
@@ -110,7 +118,9 @@ def main():
                         if daemon.poll() is not None or time.monotonic() - began > 10:
                             raise RuntimeError('Private test service did not start; see daemon log')
                         time.sleep(.005)
-                record = {'run': run, 'warmup': run < args.warmup, 'service_boot_ms': (time.monotonic() - began) * 1000,
+                record = {'run': run, 'warmup': run < args.warmup,
+                          'service_mode': 'unavailable' if args.host_only else 'private-warm',
+                          'service_boot_ms': None if args.host_only else (time.monotonic() - began) * 1000,
                           'milestones': {}, 'observed_ms': {}, 'plugins_ms': {}}
                 began = time.monotonic()
                 with (args.output / f'{run}.log').open('w') as log:
@@ -165,6 +175,7 @@ def main():
                      'min_ms': min(r['milestones'][key] for r in measured if key in r['milestones']),
                      'max_ms': max(r['milestones'][key] for r in measured if key in r['milestones'])} for key in keys}
     report = {'runs': results, 'summary': summary, 'display': 'native-hidden' if args.native_hidden else 'Xvfb 1600x1000',
+              'service_mode': 'unavailable' if args.host_only else 'private-warm',
               'note': 'Warm filesystem is not a cold OS boot. Main-relative ms excludes the dynamic loader; observed_ms includes process launch and pipe delivery.'}
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(summary, indent=2))

@@ -116,3 +116,28 @@ median, 60 Hz scroll at 5,000 px/s with p99 17.2 ms and no late frames in
 that smoke phase. These software-renderer figures do not replace desktop
 GPU measurements. Routine CI uses 2,048 synthetic photos to keep fixture
 creation from dominating the job; its artifacts retain actual timings.
+
+## Measuring the Qt host when the service cannot run
+
+`--host-only` is an explicit diagnostic mode for a checkout whose service
+cannot be rebuilt or does not speak the current command line. It leaves the
+private socket unavailable and sets `PINHOLED` to `false`, so retries cannot
+start either the checkout or installed daemon. It does not sync, fetch
+renditions or write the library. Reports label `service_mode: unavailable`
+and `service_boot_ms: null`. This mode is **not comparable to the warm-service
+measurements above**, and never activates automatically after a failure.
+
+For example, on a hidden native test workspace:
+
+```sh
+PATH=/usr/bin:$PATH app/bin/measure-startup \
+  --library /path/to/library --output .tools/startup-host-only \
+  --native-hidden --host-only --warmup 1 --runs 7
+```
+
+The M2 Pro checkout currently needs this mode: the old available pinholed
+rejects `--given`, and rebuilding the pinned Blaze tool first fails on
+16-KiB system pages. The same code can still build and exercise Qt directly.
+Use the normal private warm-service mode again once a compatible daemon is
+available. A synthetic-process regression verifies that host-only mode
+launches no daemon and retains its explicit report label.
