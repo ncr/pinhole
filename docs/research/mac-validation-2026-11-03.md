@@ -32,6 +32,8 @@ these checks. Model inference and image decoding ran locally.
   affinity reporting. With the service unavailable, inherited affinity gave
   a 347-ms median; CPUs 4–11 gave 285 ms in a separate ten-run set. Production
   scheduling was not changed. See [the full startup notes](../startup-performance.md).
+- Dedicated contracts also passed: frame statistics **11/11**, plugin
+  queries **13/13** and the calendar's QML days tests **9/9**.
 
 An initial full Qt invocation inside the restricted command sandbox failed
 its local socket/profile setup, then crashed in `Plugins::setSources` after
@@ -75,6 +77,9 @@ ANE firmware timed out during the corrected SigLIP run and remains
 quarantined for this boot. Existing CLIP embeddings can be searched, but
 new device work requires a reboot plus a fresh smoke receipt. See
 [the full encoder results](photo-search-full-encoder.md).
+After the final native search test the driver still reported 127,531 jobs
+and 122,572,146,936 busy nanoseconds, unchanged from quarantine. Later model,
+compiler, browser and UI checks did not submit new accelerator work.
 
 The required `bin/install --non-interactive` was attempted after the feature
 commits. It stops before application activation because the pinned upstream
