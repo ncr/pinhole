@@ -14,6 +14,9 @@
         <file alias="UiText.qml">UiText.qml</file>
         <file alias="Chip.qml">Chip.qml</file>
         <file alias="ShellButton.qml">ShellButton.qml</file>
+        <file alias="ControlBackground.qml">ControlBackground.qml</file>
+        <file alias="MenuCard.qml">MenuCard.qml</file>
+        <file alias="MenuRow.qml">MenuRow.qml</file>
         <file alias="Command.qml">Command.qml</file>
         <file alias="ActionBar.qml">ActionBar.qml</file>
         <file alias="MenuGroup.qml">MenuGroup.qml</file>

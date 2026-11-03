@@ -60,7 +60,10 @@ ControlSurface {
     Accessible.pressed: usable && (tap.pressed || keyboardPressed)
     Accessible.onPressAction: press()
     onActivated: press()
-    onActiveFocusChanged: if (activeFocus) Focus.reveal(control)
+    Connections {
+        target: control
+        function onActiveFocusChanged() { if (control.activeFocus) Focus.reveal(control) }
+    }
     // Its space at each side of what it says.
     property int inset: Math.round(theme.fontSize * 0.833)
     // The pointer over it, while it shows.
@@ -83,24 +86,16 @@ ControlSurface {
     width: naturalWidth
     height: Math.round(theme.fontSize * 2.333)
     opacity: usable ? 1 : 0.4
-    readonly property bool lighter: (hover.hovered || lit || activeFocus) && usable
-    Rectangle {
+    readonly property bool lighter: (hover.hovered || lit || (activeFocus && keymap.input === "keyboard")) && usable
+    ControlBackground {
         id: surface
         anchors.fill: parent
-        radius: Math.min(4, theme.radius)
-        color: control.active ? Qt.tint(theme.accent, Qt.rgba(ink.r, ink.g, ink.b, control.usable && (tap.pressed || control.keyboardPressed) ? 0.18 : control.lighter ? 0.08 : 0))
-             : Qt.rgba(ink.r, ink.g, ink.b, control.usable && (tap.pressed || control.keyboardPressed) ? 0.22 : control.lighter ? 0.08 : control.flat ? 0 : 0.04)
-        border.width: control.active ? 0 : 1
-        border.color: Qt.rgba(ink.r, ink.g, ink.b, control.lighter ? 0.25 : control.flat ? 0 : 0.4)
-    }
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: -3
-        radius: surface.radius + 2
-        color: "transparent"
-        border.width: 2
-        border.color: theme.accent
-        visible: control.activeFocus
+        chosen: control.active
+        strongSelection: true
+        flat: control.flat
+        hot: control.lighter
+        down: control.usable && (tap.pressed || control.keyboardPressed)
+        keyboardFocus: control.activeFocus && keymap.input === "keyboard"
     }
 
     // The arc in the key's place: the key stays, unseen, so the button

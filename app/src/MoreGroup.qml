@@ -21,6 +21,7 @@ MenuGroup {
     }
     arrowShown: false
     keyedMenu: true
+    menuText: qsTr("More")
 
     // The button stands for each of them while it shows, for a tour to
     // light (as PluginGroup's does unfolded).
@@ -59,8 +60,11 @@ MenuGroup {
         // the word stays.
         text: qsTr("More")
         hint: "▾"
+        Accessible.expandable: true
+        Accessible.expanded: more.open
         // What one of them is doing shows on it folded: lit, or turning.
-        active: more.open || more.items.some(a => a.shown && a.active)
+        lit: more.open
+        active: more.items.some(a => a.shown && a.active)
         busy: more.items.some(a => a.shown && a.busy)
         onTapped: more.toggle(false)
     }

@@ -598,6 +598,7 @@ Item {
             // JPEG or MP4, what opens anywhere, or the original.
             MenuGroup {
                 menuKey: "Shift+C"
+                menuText: qsTr("Copy")
                 keyLayer: "viewer"
                 section: "share"
                 items: [

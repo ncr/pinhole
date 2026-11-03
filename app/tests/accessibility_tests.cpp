@@ -60,11 +60,17 @@ Window {
     property int globalUndo: 0
     property int underneath: 0
     property int wheels: 0
+    property bool menus: false
+    property bool longMenu: false
+    property var extraActions: []
+    property string activeLayer: more.open || split.open || order.open ? "menu" : "grid"
+    onActiveLayerChanged: keymap.layer = activeLayer
     Shortcut { sequence: "Space"; onActivated: window.globalSpace++ }
     Shortcut { sequence: "Ctrl+Z"; onActivated: window.globalUndo++ }
     MouseArea { anchors.fill: parent; onClicked: window.underneath++; onWheel: window.wheels++ }
     Item {
         id: modal
+        visible: !window.menus
         objectName: "modal"
         FocusFence.enabled: true
         width: 720; height: parent.height
@@ -86,14 +92,50 @@ Window {
         FieldInput { objectName: "password"; x: 24; y: 500; width: 500; placeholder: "Password"; password: true; text: "private-value" }
         CopyButton { objectName: "copy"; x: 24; y: 600; floating: true; photos: () => ["one"] }
     }
-    ShellButton { objectName: "outside"; x: 760; y: 24; text: "Behind the dialog" }
+    ShellButton { objectName: "outside"; visible: !window.menus; x: 760; y: 24; text: "Behind the dialog" }
+    MoreGroup {
+        id: more
+        objectName: "more"
+        x: window.width - width - 24; y: 24
+        visible: window.menus
+        floating: true
+        keyLayer: "grid"
+        groups: window.longMenu ? window.extraActions.map(a => [a]) : [[first], [unavailable], [last]]
+    }
+    Instantiator {
+        model: 24
+        delegate: PluginAction { required property int index; text: "A very long translated menu action " + index; onTriggered: window.fires++ }
+        onObjectAdded: (_, object) => window.extraActions = window.extraActions.concat([object])
+    }
+    PluginAction { id: first; text: "Colours"; key: "H"; onTriggered: window.fires++ }
+    PluginAction { id: unavailable; text: "Unavailable"; usable: false }
+    PluginAction { id: last; text: "Calendar"; key: "Y"; active: true; onTriggered: window.fires += 10 }
+    MenuGroup {
+        id: split
+        objectName: "split"
+        x: window.width - width - 24; y: window.height - height - 24
+        visible: window.menus
+        upward: true
+        menuText: "Copy"
+        keyLayer: "grid"
+        items: [first, unavailable, last]
+        ShellButton { text: "Copy"; flat: true; onTapped: window.fires += 100 }
+    }
+    ShellButton { id: date; objectName: "date"; visible: window.menus; x: 24; y: 24; text: "Photo order"; onTapped: order.toggle(false) }
+    PhotoOrderMenu { id: order; objectName: "order"; z: 1001; available: window.menus; button: date; onChosen: mode => value = mode }
 })", QUrl("qrc:/AccessibilityFixture.qml"));
             root.reset(component.create());
             if (!root) warnings << component.errorString();
             if (auto *window = qobject_cast<QQuickWindow *>(root.get())) window->requestActivate();
         }
         QQuickWindow *window() const { return qobject_cast<QQuickWindow *>(root.get()); }
-        QQuickItem *item(const char *name) const { return root ? root->findChild<QQuickItem *>(QLatin1String(name)) : nullptr; }
+        static QQuickItem *find(QQuickItem *root, const QString &name) {
+            if (!root) return nullptr;
+            if (root->objectName() == name) return root;
+            for (auto *child : root->childItems()) if (auto *found = find(child, name)) return found;
+            return nullptr;
+        }
+        QQuickItem *item(const char *name) const { return window() ? find(window()->contentItem(), QLatin1String(name)) : nullptr; }
         QPoint centre(QQuickItem *item) const { return item->mapToScene({item->width()/2, item->height()/2}).toPoint(); }
         QAccessibleInterface *accessible(const char *name) const { return QAccessible::queryAccessibleInterface(item(name)); }
     };
@@ -227,13 +269,18 @@ private slots:
         QTest::qWait(20);
         QTest::mouseMove(f.window(), f.centre(button));
         QTRY_VERIFY(button->property("hovered").toBool());
-        const QColor hover = button->property("color").value<QColor>(); QVERIFY(hover != rest);
+        QTRY_VERIFY(button->property("color").value<QColor>() != rest);
+        QTest::qWait(120);
+        const QColor hover = button->property("color").value<QColor>();
         QTest::mousePress(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(button));
-        const QColor pressed = button->property("color").value<QColor>(); QVERIFY(pressed != hover);
+        QTRY_VERIFY(button->property("color").value<QColor>() != hover);
         QVERIFY(f.accessible("button")->state().pressed);
         QTest::mouseRelease(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(button));
         QCOMPARE(f.root->property("fires").toInt(), 1);
         QCOMPARE(f.root->property("underneath").toInt(), 0);
+        QTest::mouseMove(f.window(), QPoint(700, 700));
+        QTRY_VERIFY(!button->property("lighter").toBool());
+        QVERIFY(button->hasActiveFocus()); // A mouse click keeps focus without painting a keyboard ring.
         const QPoint at = f.centre(f.item("disabled"));
         const QColor disabledColor = f.item("disabled")->property("color").value<QColor>();
         QTest::mousePress(f.window(), Qt::LeftButton, Qt::NoModifier, at);
@@ -245,6 +292,129 @@ private slots:
         QCOMPARE(f.root->property("fires").toInt(), 1);
         QCOMPARE(f.root->property("underneath").toInt(), 0);
         QCOMPARE(f.root->property("wheels").toInt(), 0);
+        QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void menuPointerOpeningDoesNotSelectAnActionAndOpenerClosesIt_data() {
+        controlsExposeNamesStatesAndActions_data();
+    }
+    void menuPointerOpeningDoesNotSelectAnActionAndOpenerClosesIt() {
+        QFETCH(bool, light); QFETCH(int, fontSize);
+        Fixture f(light, fontSize); QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        f.root->setProperty("menus", true);
+        QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *more = f.item("more"); auto *button = f.item("moreButton"); QVERIFY(more && button);
+        const auto click = [&](QQuickItem *item) { QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(item)); };
+        click(button);
+        QTRY_VERIFY(more->property("open").toBool());
+        auto *card = f.item("moreCard"); auto *first = f.item("menuOption_0"); auto *selected = f.item("menuOption_2");
+        QVERIFY(card && first && selected);
+        QTRY_COMPARE(f.window()->activeFocusItem(), card);
+        QCOMPARE(more->property("current").toInt(), -1);
+        QVERIFY(!first->property("hot").toBool()); QVERIFY(!selected->property("hot").toBool());
+        QVERIFY(selected->property("selected").toBool());
+        auto *accessible = QAccessible::queryAccessibleInterface(button); QVERIFY(accessible);
+        QVERIFY(accessible->state().expanded);
+        click(button);
+        QTRY_VERIFY(!more->property("open").toBool());
+        QTest::qWait(30); QVERIFY(!more->property("open").toBool());
+        QCOMPARE(f.root->property("fires").toInt(), 0); QCOMPARE(f.root->property("underneath").toInt(), 0);
+        QVERIFY(!accessible->state().expanded);
+        click(button);
+        QTRY_VERIFY(more->property("open").toBool());
+        first = f.item("menuOption_0"); selected = f.item("menuOption_2");
+        QTest::mouseMove(f.window(), f.centre(first));
+        QTRY_VERIFY(first->property("hot").toBool());
+        QVERIFY(!selected->property("hot").toBool()); QVERIFY(selected->property("selected").toBool());
+        QTest::mouseMove(f.window(), card->mapToScene({card->width()/2, 4}).toPoint());
+        QTRY_VERIFY(!first->property("hot").toBool());
+        QCOMPARE(more->property("current").toInt(), -1);
+        QTest::keyClick(f.window(), Qt::Key_Down);
+        QTRY_COMPARE(f.window()->activeFocusItem(), first);
+        QTest::keyClick(f.window(), Qt::Key_Down);
+        QTRY_COMPARE(f.window()->activeFocusItem(), selected);
+        QTest::mouseMove(f.window(), f.centre(first));
+        QTRY_VERIFY(first->property("hovered").toBool());
+        QTest::keyClick(f.window(), Qt::Key_Return);
+        QTRY_VERIFY(!more->property("open").toBool()); QCOMPARE(f.root->property("fires").toInt(), 1);
+        click(button);
+        QTRY_VERIFY(more->property("open").toBool());
+        QWheelEvent wheel({8, 500}, f.window()->mapToGlobal(QPoint(8, 500)), {}, {0, 120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(f.window(), &wheel);
+        QCOMPARE(f.root->property("wheels").toInt(), 0);
+        QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, {8, 500});
+        QTRY_VERIFY(!more->property("open").toBool());
+        QCOMPARE(f.root->property("underneath").toInt(), 0);
+        click(button); QTRY_VERIFY(more->property("open").toBool());
+        more->setVisible(false);
+        QTRY_VERIFY(!more->property("open").toBool());
+        QCOMPARE(f.keymap.layer(), QString("grid"));
+        QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void menuKeysSkipUnavailableActionsAndKeepNativeFocus() {
+        Fixture f; QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        f.root->setProperty("menus", true); QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *more = f.item("more"); auto *button = f.item("moreButton");
+        button->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(QMetaObject::invokeMethod(more, "toggle", Q_ARG(QVariant, true)));
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_2"));
+        QTest::keyClick(f.window(), Qt::Key_Up);
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_0"));
+        QTest::keyClick(f.window(), Qt::Key_Down);
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_2"));
+        QTest::keyClick(f.window(), Qt::Key_Tab);
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_0"));
+        QCOMPARE(more->property("current").toInt(), 0);
+        QTest::keyClick(f.window(), Qt::Key_Escape);
+        QTRY_VERIFY(!more->property("open").toBool()); QTRY_COMPARE(f.window()->activeFocusItem(), button);
+        QVERIFY(QMetaObject::invokeMethod(more, "toggle", Q_ARG(QVariant, true)));
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_2"));
+        QTest::keyClick(f.window(), Qt::Key_Return);
+        QTRY_VERIFY(!more->property("open").toBool()); QCOMPARE(f.root->property("fires").toInt(), 10);
+        QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void splitAndOrderMenusShareRowsAndDismissal() {
+        Fixture f; QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        f.root->setProperty("menus", true); QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *split = f.item("split"); auto *arrow = f.item("splitArrow");
+        const auto click = [&](QQuickItem *item) { QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(item)); };
+        click(arrow); QTRY_VERIFY(split->property("open").toBool());
+        auto *card = f.item("splitCard"); QVERIFY(card);
+        QVERIFY(card->mapToScene({0, card->height()}).y() < split->y());
+        const int padding = card->property("padding").toInt();
+        auto *row = f.item("menuOption_2"); QVERIFY(row);
+        QTest::qWait(120); const QColor selectedFill = row->property("color").value<QColor>();
+        click(arrow); QTRY_VERIFY(!split->property("open").toBool());
+        click(f.item("date")); QTRY_VERIFY(f.item("order")->property("open").toBool());
+        auto *orderCard = f.item("orderMenuCard"); auto *radio = f.item("orderOption_smart"); QVERIFY(orderCard && radio);
+        QCOMPARE(orderCard->property("padding").toInt(), padding);
+        QTest::qWait(120); QCOMPARE(radio->property("color").value<QColor>(), selectedFill);
+        QVERIFY(QAccessible::queryAccessibleInterface(radio)->state().checked);
+        click(f.item("date")); QTRY_VERIFY(!f.item("order")->property("open").toBool());
+        QCOMPARE(f.root->property("fires").toInt(), 0); QCOMPARE(f.root->property("underneath").toInt(), 0);
+        QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void longMenusStayInsideSmallWindowsAndScrollToKeyboardFocus() {
+        Fixture f(false, 24); QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        f.root->setProperty("menus", true); f.root->setProperty("longMenu", true);
+        f.window()->resize(400, 300); QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *more = f.item("more");
+        QVERIFY(QMetaObject::invokeMethod(more, "toggle", Q_ARG(QVariant, true)));
+        auto *card = f.item("moreCard"); QVERIFY(card);
+        QTRY_VERIFY(f.item("menuOption_0") && f.window()->activeFocusItem() == f.item("menuOption_0"));
+        const auto bounds = [&] { return card->mapRectToScene(card->boundingRect()); };
+        QVERIFY(bounds().left() >= 11); QVERIFY(bounds().top() >= 11);
+        QVERIFY(bounds().right() <= 389); QVERIFY(bounds().bottom() <= 289);
+        for (int i = 0; i < 18; ++i) { QTest::keyClick(f.window(), Qt::Key_Down); QCoreApplication::processEvents(); }
+        QTRY_COMPARE(f.window()->activeFocusItem(), f.item("menuOption_18"));
+        auto *focused = f.window()->activeFocusItem();
+        QTRY_VERIFY(focused->mapRectToScene(focused->boundingRect()).top() >= bounds().top());
+        QTRY_VERIFY(focused->mapRectToScene(focused->boundingRect()).bottom() <= bounds().bottom());
+        QTest::keyClick(f.window(), Qt::Key_Return); QTRY_VERIFY(!more->property("open").toBool());
+        QCOMPARE(f.root->property("fires").toInt(), 1);
         QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
     }
 };

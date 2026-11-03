@@ -1,6 +1,7 @@
 #include <QAccessible>
 #include <QCoreApplication>
 #include <QDir>
+#include <QMouseEvent>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
@@ -31,6 +32,13 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
     const auto inside = [](QQuickItem *item, QQuickItem *root) {
         for (; item; item = item->parentItem()) if (item == root) return true;
         return false;
+    };
+    const auto click = [window](QQuickItem *item) {
+        const auto at = item->mapToScene({item->width()/2, item->height()/2});
+        QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &release);
     };
     const auto fail = [timer](const char *message) {
         std::fprintf(stderr, "selftest: accessibility: %s\n", message);
@@ -179,6 +187,7 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             auto *accessible = QAccessible::queryAccessibleInterface(option);
             if (!accessible || accessible->role() != QAccessible::RadioButton || !accessible->state().focused || window->activeFocusItem() != option)
                 return fail("photo order arrows did not update native radio focus");
+            save("photo-order-menu");
             key(Qt::Key_Return);
             return;
         }
@@ -201,6 +210,7 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             auto *accessible = QAccessible::queryAccessibleInterface(menu);
             if (!accessible || accessible->role() != QAccessible::PopupMenu || accessible->text(QAccessible::Name).isEmpty())
                 return fail("copy group has no named accessible popup");
+            save("export-menu");
             for (int i = 0; i < 6; ++i) {
                 key(Qt::Key_Tab);
                 if (!inside(window->activeFocusItem(), menu)) return fail("copy menu Tab focus escaped");
@@ -209,9 +219,29 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             key(Qt::Key_Escape);
             return;
         }
-        default:
+        case 17:
             if (window->findChild<QQuickItem *>("selectCopyGroup")->property("open").toBool()) return fail("Escape did not close Copy menu");
-            std::puts("selftest: accessibility: settings/workshop/source dialogs, menu/radio/Copy semantics, Tab containment, document/search keys, compact layout and focus restoration: PASS");
+            window->findChild<QQuickItem *>("grid")->setProperty("selecting", false);
+            window->resize(560, 640);
+            return;
+        case 18: {
+            auto *more = window->findChild<QQuickItem *>("gridMore");
+            auto *button = more ? namedItem(more, "moreButton") : nullptr;
+            if (!more || !more->isVisible() || !button) return fail("narrow grid did not expose More");
+            click(button);
+            return;
+        }
+        case 19: {
+            auto *more = window->findChild<QQuickItem *>("gridMore");
+            if (!more->property("open").toBool() || more->property("current").toInt() != -1)
+                return fail("pointer-opened More focused an arbitrary action");
+            save("more-menu");
+            click(namedItem(more, "moreButton"));
+            return;
+        }
+        default:
+            if (window->findChild<QQuickItem *>("gridMore")->property("open").toBool()) return fail("second More click did not close it");
+            std::puts("selftest: accessibility: settings/workshop/source dialogs, consistent action/radio menus, More pointer toggle, Tab containment, document/search keys, compact layout and focus restoration: PASS");
             timer->stop(); QCoreApplication::quit();
         }
     });

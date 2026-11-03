@@ -361,8 +361,8 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `shown`, `usable`, `active` (lit, filled with the
-  accent), `textColour` (its words in a colour while not lit: a theme
+  `text`, `key`, `shown`, `usable`, `active` (a button filled with the
+  accent; in a menu, a subtle fill and a check), `textColour` (its words in a colour while not lit: a theme
   colour's name, as a mark's `colour`, or `"#rrggbb"`; the theme's text
   if left out), `busy` (its arc turning once it has been for `busyDelay`
   ms, 1000 unless said), and `onTriggered`.
@@ -388,6 +388,10 @@ its settings, is there as the window first shows. It sets:
   into one, More ▾, whose menu lists them with their keys; the keys work
   either way, and a group's ⇧ key opens that menu on its row. More ▾ is
   lit while one of them is `active`, and turns while one is `busy`.
+  Menus share the photo-order menu's layout and interaction: a pointer
+  opening does not focus the first action; hover and keyboard focus are
+  distinct from the saved active state. Press the opener again, click
+  outside or press Escape to close. Arrow keys skip unavailable actions.
 - `covering`: true while it is over the photos: the grid's controls fade
   and its keys rest, as for Pinhole's panels. Its own `Shortcut`s and
   `Command`s should be enabled only then. One plugin covers at a time, the

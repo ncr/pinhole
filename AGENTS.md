@@ -31,3 +31,10 @@ first frame and photo readiness. Xvfb runs must explicitly use
 `QT_QPA_PLATFORM=xcb`; inherited `wayland;xcb` can open a test on the real
 desktop. Native tests belong on hidden workspace 5 (CLAUDE.md). Never use
 the user's clipboard or Pictures for a self-test.
+
+Use the shared `ShellButton`, `Toggle`, `FieldInput` and `Choices` controls.
+Internal menus share `MenuCard`, `MenuRow` and `ControlBackground`; improve
+these components rather than drawing another menu style. Pointer opening
+must not focus an arbitrary action. Keep saved selection separate from
+hover/keyboard position, and support opener toggle, outside click and Escape.
+`app/bin/test-accessibility` covers these interactions, bounds and scrolling.

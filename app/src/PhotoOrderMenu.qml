@@ -18,8 +18,9 @@ Item {
     Accessible.ignored: !visible
     FocusFence.enabled: visible
     function focusCurrent() {
-        const at = current >= 0 ? current : Math.max(0, options.findIndex(option => option.value === value))
-        optionRows.itemAt(at)?.forceActiveFocus(Qt.TabFocusReason)
+        if (!open) return
+        if (pointerInput) card.forceActiveFocus(Qt.MouseFocusReason)
+        else optionRows.itemAt(current >= 0 ? current : Math.max(0, options.findIndex(option => option.value === value)))?.forceActiveFocus(Qt.TabFocusReason)
     }
     onOpenChanged: {
         if (open) {
@@ -28,6 +29,7 @@ Item {
         } else Qt.callLater(() => { if (returnFocus?.visible && returnFocus.enabled) returnFocus.forceActiveFocus() })
     }
     onCurrentChanged: if (open && !pointerInput) Qt.callLater(focusCurrent)
+    onPointerInputChanged: if (open && !pointerInput) Qt.callLater(focusCurrent)
     Keys.onShortcutOverride: event => {
         if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
                 && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) event.accepted = true
@@ -67,156 +69,82 @@ Item {
         color: "transparent"
         onClicked: root.open = false
     }
-    Card {
+    MenuCard {
         id: card
         objectName: "orderMenuCard"
-        width: Math.min(root.width - 24, Math.round(theme.fontSize * 25))
-        height: content.height + 2 * padding
-        readonly property int padding: Math.round(theme.fontSize * 0.6)
-        border.color: Qt.tint(theme.background, Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.55))
+        title: qsTr("Photo order")
         // Open below the date, keeping it and the card inside the window.
         x: Math.max(12, Math.min(root.button ? root.button.x : 16, root.width - width - 12))
         y: Math.max(12, Math.min(root.button ? root.button.y + root.button.height + 8 : 16,
                                 root.height - height - 12))
-        Column {
-            id: content
-            x: card.padding
-            y: card.padding
-            width: card.width - 2 * x
-            spacing: Math.round(theme.fontSize * 0.3)
-            Item {
-                width: parent.width
-                height: Math.round(theme.fontSize * 1.8)
-                UiText {
-                    x: Math.round(theme.fontSize * 0.833)
-                    y: centredIn(parent.height)
-                    text: qsTr("Photo order")
-                    font.pixelSize: Math.round(theme.fontSize * 0.8)
-                    color: theme.foreground
-                    opacity: 0.7
+        Repeater {
+            id: optionRows
+            model: root.options
+            delegate: MenuRow {
+                required property var modelData
+                required property int index
+                objectName: "orderOption_" + modelData.value
+                text: modelData.title
+                selected: root.value === modelData.value
+                checkable: true
+                lit: !root.pointerInput && root.current === index
+                Accessible.role: Accessible.RadioButton
+                Accessible.description: modelData.detail
+                onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") {
+                    root.pointerInput = false
+                    root.current = index
                 }
-                UiText {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Math.round(theme.fontSize * 0.833)
-                    y: centredIn(parent.height)
-                    text: "Esc"
-                    font.pixelSize: Math.round(theme.fontSize * 0.75)
-                    color: theme.foreground
-                    opacity: 0.45
-                }
+                onPointed: { root.pointerInput = true; root.current = index; card.forceActiveFocus(Qt.MouseFocusReason) }
+                onHoveredChanged: if (!hovered && root.pointerInput && root.current === index) root.current = -1
+                onTapped: root.choose(index)
             }
+        }
+        // One explanation, for the row being considered (otherwise the
+        // saved choice). Fixed height keeps the card still while browsing.
+        Item {
+            id: details
+            width: parent.width
+            readonly property real textHeight: {
+                let most = 0
+                for (let i = 0; i < detailMeasures.count; ++i)
+                    most = Math.max(most, detailMeasures.itemAt(i)?.implicitHeight ?? 0)
+                return most
+            }
+            height: Math.max(Math.round(theme.fontSize * 3.1), explanation.y + textHeight + card.gap)
             Repeater {
-                id: optionRows
+                id: detailMeasures
                 model: root.options
-                delegate: ControlSurface {
-                    id: option
+                delegate: UiText {
                     required property var modelData
-                    required property int index
-                    readonly property bool selected: root.value === modelData.value
-                    readonly property bool hot: root.current === index || activeFocus
-                    readonly property bool pressed: mouse.pressed || keyboardPressed
-                    readonly property int inset: Math.round(theme.fontSize * 0.833)
-                    objectName: "orderOption_" + modelData.value
-                    width: content.width
-                    height: Math.round(theme.fontSize * 2.333)
-                    activeFocusOnTab: true
-                    onActivated: root.choose(index)
-                    onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") {
-                        root.pointerInput = false
-                        root.current = index
-                    }
-                    property alias color: surface.color
-                    property alias border: surface.border
-                    property alias radius: surface.radius
-                    Rectangle {
-                        id: surface
-                        anchors.fill: parent
-                        radius: Math.min(4, theme.radius)
-                        // Omarchy controls: pressed > hover/keyboard cursor >
-                        // saved selection. The saved choice still has its check.
-                        color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
-                                       option.pressed ? 0.22 : option.hot ? 0.08 : option.selected ? 0.18 : 0)
-                        border.width: 1
-                        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b,
-                                              option.hot ? 0.25 : 0)
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                        Behavior on border.color { ColorAnimation { duration: 100 } }
-                    }
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.name: modelData.title
-                    Accessible.description: modelData.detail
-                    Accessible.checked: selected
-                    Accessible.checkable: true
-                    Accessible.focusable: true
-                    Accessible.focused: activeFocus
-                    Accessible.pressed: pressed
-                    Accessible.onPressAction: root.choose(index)
-                    UiText {
-                        anchors.left: parent.left
-                        anchors.leftMargin: option.inset
-                        anchors.right: check.left
-                        anchors.rightMargin: option.inset
-                        y: centredIn(parent.height)
-                        text: modelData.title
-                        color: option.hot ? theme.accent : theme.foreground
-                        elide: Text.ElideRight
-                        Accessible.ignored: true
-                    }
-                    UiText {
-                        id: check
-                        objectName: "orderCheck_" + modelData.value
-                        anchors.right: parent.right
-                        anchors.rightMargin: option.inset
-                        y: centredIn(parent.height)
-                        text: "✓"
-                        opacity: option.selected ? 1 : 0
-                        color: theme.accent
-                        Accessible.ignored: true
-                    }
-                    MouseArea {
-                        id: mouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        function point() {
-                            root.pointerInput = true
-                            root.current = option.index
-                        }
-                        onEntered: point()
-                        onPositionChanged: point()
-                        onPressed: point()
-                        onExited: if (root.pointerInput && root.current === option.index) root.current = -1
-                        onClicked: { option.forceActiveFocus(Qt.MouseFocusReason); root.choose(option.index) }
-                    }
+                    visible: false
+                    width: explanation.width
+                    text: modelData.detail
+                    font.pixelSize: explanation.font.pixelSize
+                    wrapMode: Text.WordWrap
+                    lineHeight: explanation.lineHeight
                 }
             }
-            // One explanation, for the row being considered (otherwise the
-            // saved choice). Fixed height keeps the card still while browsing.
-            Item {
-                width: parent.width
-                height: Math.round(theme.fontSize * 3.1)
-                Rectangle {
-                    width: parent.width - 2 * explanation.x
-                    x: explanation.x
-                    height: 1
-                    y: Math.round(theme.fontSize * 0.3)
-                    color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.15)
-                }
-                UiText {
-                    id: explanation
-                    objectName: "orderExplanation"
-                    x: Math.round(theme.fontSize * 0.833)
-                    y: Math.round(theme.fontSize * 0.8)
-                    width: parent.width - 2 * x
-                    readonly property int at: root.current >= 0 ? root.current
-                                               : Math.max(0, root.options.findIndex(option => option.value === root.value))
-                    text: root.options[at].detail
-                    font.pixelSize: Math.round(theme.fontSize * 0.85)
-                    wrapMode: Text.WordWrap
-                    lineHeight: 1.15
-                    color: theme.foreground
-                    opacity: 0.7
-                }
+            Rectangle {
+                width: parent.width - 2 * explanation.x
+                x: explanation.x
+                height: 1
+                y: Math.round(theme.fontSize * 0.3)
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.15)
+            }
+            UiText {
+                id: explanation
+                objectName: "orderExplanation"
+                x: Math.round(theme.fontSize * 0.833)
+                y: Math.round(theme.fontSize * 0.8)
+                width: parent.width - 2 * x
+                readonly property int at: root.current >= 0 ? root.current
+                                           : Math.max(0, root.options.findIndex(option => option.value === root.value))
+                text: root.options[at].detail
+                font.pixelSize: Math.round(theme.fontSize * 0.85)
+                wrapMode: Text.WordWrap
+                lineHeight: 1.15
+                color: theme.foreground
+                opacity: 0.7
             }
         }
     }

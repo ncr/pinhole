@@ -23,7 +23,7 @@ Item {
     property int primary: -1
     // Opens the menu; and what the help calls that.
     property string menuKey
-    property string menuText
+    property string menuText: primary >= 0 ? items[primary].text : qsTr("More options")
     // Its menu is opened by keys, the menuKey's or others' (More's, by
     // each folded group's): items without a key of their own are done
     // through it.
@@ -37,6 +37,7 @@ Item {
     property string keyLayer: "chrome"
     property string section
     property bool open: false
+    property bool pointerInput: false
     property var returnFocus: null
     onOpenChanged: {
         if (open) {
@@ -47,11 +48,13 @@ Item {
                 returnFocus.forceActiveFocus()
         })
     }
-    onCurrentChanged: if (open) Qt.callLater(focusCurrent)
+    onCurrentChanged: if (open && !pointerInput) Qt.callLater(focusCurrent)
+    onPointerInputChanged: if (open && !pointerInput) Qt.callLater(focusCurrent)
     function focusCurrent() {
-        const row = rows.itemAt(Math.max(0, current))
-        if (row?.usable) row.forceActiveFocus(Qt.TabFocusReason)
-        else menu.forceActiveFocus()
+        if (!open) return
+        const row = current >= 0 ? rows.itemAt(current) : null
+        if (!pointerInput && row?.usable) row.forceActiveFocus(Qt.TabFocusReason)
+        else menu.forceActiveFocus(Qt.MouseFocusReason)
     }
     default property alias button: slot.data
 
@@ -75,29 +78,49 @@ Item {
 
     width: row.width
     height: row.height
-    onVisibleChanged: if (!visible) open = false
-    onMenuItemsChanged: if (menuItems.length === 0) open = false
+    Connections {
+        target: group
+        // MoreGroup and PluginGroup also react to visibility. Keep closing
+        // independent of their handlers when a resize folds a group away.
+        function onVisibleChanged() { if (!group.visible) group.open = false }
+    }
+    onMenuItemsChanged: {
+        if (menuItems.length === 0) open = false
+        else if (open && !pointerInput) {
+            if (current >= menuItems.length) current = menuItems.findIndex(a => a.usable !== false)
+            Qt.callLater(focusCurrent)
+        }
+    }
 
     // A word of its own at the right of its row ("iPhone"), else its key.
     function hintOf(action) { return (action.hint ?? "") !== "" ? action.hint : KeyNames.nameOf(action.key ?? "") }
     function press(action) {
+        if (!action || action.usable === false) return
         open = false
-        if (action.usable !== false)
-            action.triggered()
+        action.triggered()
     }
     function toggle(byKey) {
         if (open) {
             open = false
             return
         }
-        const lit = menuItems.findIndex(a => a.active)
-        current = byKey ? Math.max(0, lit) : -1
+        pointerInput = !byKey
+        const lit = menuItems.findIndex(a => a.active && a.usable !== false)
+        current = byKey ? (lit >= 0 ? lit : menuItems.findIndex(a => a.usable !== false)) : -1
         open = true
     }
     // Open, by the keys, on `item`'s row (or the first).
     function openAt(item) {
+        pointerInput = false
         current = Math.max(0, menuItems.indexOf(item))
         open = true
+    }
+    function step(direction) {
+        pointerInput = false
+        let at = current < 0 ? (direction > 0 ? -1 : menuItems.length) : current
+        for (at += direction; at >= 0 && at < menuItems.length; at += direction) {
+            if (menuItems[at].usable !== false) { current = at; return }
+        }
     }
     // What its button could not do, said under it for a few seconds, the
     // button shaking (Complaint.qml); and gone again at once.
@@ -133,6 +156,7 @@ Item {
         }
         ShellButton {
             id: arrow
+            objectName: group.objectName + "Arrow"
             visible: group.arrowShown && group.menuItems.length > 0
             flat: true
             inset: Math.round(theme.fontSize * 0.5)
@@ -141,7 +165,7 @@ Item {
             Accessible.expandable: true
             Accessible.expanded: group.open
             hint: ""
-            active: group.open
+            lit: group.open
             onTapped: group.toggle(false)
         }
     }
@@ -156,8 +180,9 @@ Item {
         }
     }
 
-    Rectangle {
+    MenuCard {
         id: menu
+        title: group.menuText
         objectName: group.objectName !== "" ? group.objectName + "Card" : ""
         visible: group.open
         FocusFence.enabled: group.open
@@ -175,15 +200,21 @@ Item {
                 event.accepted = true
             }
         }
-        anchors.right: row.right
-        y: group.upward ? -height - 7 : group.height + 7
-        width: column.width + 2
-        height: column.height + 2
-        radius: Math.min(4, theme.radius)
-        color: theme.background
-        border.color: theme.foreground
-        border.width: 1
-        Shield { anchors.fill: parent; z: -1 }
+        // Clamp even a long plugin label or an upward menu to the window.
+        readonly property point origin: {
+            let x = 0, y = 0
+            for (let item = group; item; item = item.parent) { x += item.x; y += item.y }
+            return Qt.point(x, y)
+        }
+        x: Math.max(12 - origin.x, Math.min(row.width - width,
+                (group.Window.window?.width ?? width + 24) - width - 12 - origin.x))
+        readonly property real above: Math.max(0, origin.y - 20)
+        readonly property real below: Math.max(0, (group.Window.window?.height ?? implicitHeight + 24) - origin.y - group.height - 20)
+        readonly property bool opensUp: group.upward ? above >= Math.min(implicitHeight, below)
+                                                               : below < implicitHeight && above > below
+        maximumHeight: Math.max(1, opensUp ? above : below)
+        y: opensUp ? -height - 8 : group.height + 8
+        preferredWidth: Math.max(theme.fontSize * 18, rowWidth + 2 * padding)
         // The widest row's, from the words (as ShellButton.qml lays a
         // justified row out), so every row is as wide as the menu.
         readonly property real rowWidth: {
@@ -194,60 +225,63 @@ Item {
                     + (hint !== "" ? 2 * theme.fontSize + metrics.of(hint) : 0)))
             }
             return most + 2 * Math.round(theme.fontSize * 0.833)
+                + (group.menuItems.some(a => a.active) ? 2 * theme.fontSize : 0)
         }
         LabelMetrics { id: metrics }
-        Column {
-            id: column
-            x: 1
-            y: 1
-            Repeater {
-                id: rows
-                // Made as it opens: a group whose actions show and go with
-                // the photo (Live Photos') makes no rows for a menu closed.
-                model: group.open ? group.menuItems : []
-                delegate: ShellButton {
-                    required property var modelData
-                    required property int index
-                    width: Math.max(naturalWidth, menu.rowWidth)
-                    flat: true
-                    justified: true
-                    lit: group.current === index
-                    text: modelData.text
-                    hint: group.hintOf(modelData)
-                    usable: modelData.usable !== false
-                    active: modelData.active === true
-                    Accessible.role: Accessible.MenuItem
-                    Accessible.selected: active
-                    onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") group.current = index
-                    busy: modelData.busy === true
-                    onTapped: group.press(modelData)
-                    onHoveredChanged: {
-                        modelData.hovered = hovered
-                        if (hovered)
-                            group.current = -1
-                    }
-                    Component.onDestruction: if (hovered) modelData.hovered = false
+        Repeater {
+            id: rows
+            // Closed groups do not instantiate any menu rows.
+            model: group.open ? group.menuItems : []
+            delegate: MenuRow {
+                required property var modelData
+                required property int index
+                objectName: "menuOption_" + index
+                lit: !group.pointerInput && group.current === index
+                text: modelData.text
+                hint: group.hintOf(modelData)
+                usable: modelData.usable !== false
+                selected: modelData.active === true
+                reserveCheck: group.menuItems.some(a => a.active)
+                onActiveFocusChanged: if (activeFocus && keymap.input === "keyboard") {
+                    group.pointerInput = false
+                    group.current = index
                 }
+                busy: modelData.busy === true
+                busyDelay: modelData.busyDelay ?? 1000
+                onTapped: group.press(modelData)
+                onPointed: {
+                    group.pointerInput = true
+                    group.current = index
+                    // Retire an old keyboard row; Enter now uses the row
+                    // under the pointer rather than that stale native focus.
+                    menu.forceActiveFocus(Qt.MouseFocusReason)
+                }
+                onHoveredChanged: {
+                    modelData.hovered = hovered
+                    if (!hovered && group.pointerInput && group.current === index) group.current = -1
+                }
+                Component.onDestruction: if (hovered) modelData.hovered = false
             }
         }
     }
 
     // A press outside the menu closes it, and goes no further.
-    MouseArea {
+    Shield {
+        id: dismiss
         parent: group.Window.window ? group.Window.window.contentItem : group
         anchors.fill: parent
         z: 1000
         visible: group.open && group.visible
-        onPressed: mouse => {
-            for (const item of [menu, arrow]) {
-                const p = mapToItem(item, mouse.x, mouse.y)
-                if (p.x >= 0 && p.y >= 0 && p.x < item.width && p.y < item.height) {
-                    mouse.accepted = false
-                    return
+        containmentMask: QtObject {
+            function contains(point: point): bool {
+                for (const item of [menu, arrow, ...(group.arrowShown ? [] : [slot])]) {
+                    const p = dismiss.mapToItem(item, point.x, point.y)
+                    if (item.visible && p.x >= 0 && p.y >= 0 && p.x < item.width && p.y < item.height) return false
                 }
+                return true
             }
-            group.open = false
         }
+        onClicked: group.open = false
     }
 
     // Each item's key, with the menu closed or open (while it is, the
@@ -299,7 +333,7 @@ Item {
         when: group.open
         autoRepeat: true
         buttons: 1
-        onTriggered: group.current = Math.max(0, group.current - 1)
+        onTriggered: group.step(-1)
     }
     Command {
         name: "menu.down"
@@ -308,7 +342,7 @@ Item {
         when: group.open
         autoRepeat: true
         buttons: 1
-        onTriggered: group.current = Math.min(group.menuItems.length - 1, group.current + 1)
+        onTriggered: group.step(1)
     }
     Command {
         name: "menu.press"
@@ -317,6 +351,6 @@ Item {
         when: group.open
         buttons: 1
         // Opened with a click, nothing is chosen yet: ⏎ takes the first row.
-        onTriggered: group.press(group.menuItems[Math.max(0, group.current)])
+        onTriggered: group.press(group.menuItems[group.current >= 0 ? group.current : group.menuItems.findIndex(a => a.usable !== false)])
     }
 }

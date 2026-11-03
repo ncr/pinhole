@@ -28,7 +28,10 @@ ControlSurface {
     Accessible.onToggleAction: press()
     Accessible.onPressAction: press()
     onActivated: press()
-    onActiveFocusChanged: if (activeFocus) Focus.reveal(toggle)
+    Connections {
+        target: toggle
+        function onActiveFocusChanged() { if (toggle.activeFocus) Focus.reveal(toggle) }
+    }
     signal toggled()
     function press() {
         if (usable && enabled)
@@ -70,7 +73,7 @@ ControlSurface {
         }
     }
     Rectangle {
-        visible: toggle.lit || toggle.activeFocus
+        visible: toggle.lit || (toggle.activeFocus && keymap.input === "keyboard")
         anchors.centerIn: track
         width: track.width + 6
         height: track.height + 6

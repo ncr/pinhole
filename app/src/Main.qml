@@ -932,6 +932,7 @@ ApplicationWindow {
         // As JPEG and MP4, what opens anywhere; the originals on Shift.
         MenuGroup {
             objectName: "selectCopyGroup"
+            menuText: qsTr("Copy")
             upward: true
             menuKey: "Shift+C"
             keyLayer: "grid"
