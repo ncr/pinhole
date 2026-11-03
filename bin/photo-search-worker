@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Offline semantic index worker, controlled by a Pinhole personal plugin."""
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import hashlib
+import stat
+import tempfile
+
+
+def endpoint(index):
+    directory = Path(tempfile.gettempdir()) / ('pinhole-semantic-' + str(os.getuid()))
+    directory.mkdir(mode=0o700, exist_ok=True)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError('worker runtime directory must be private and owned by this user')
+    return directory / (hashlib.sha256(str(index.resolve()).encode()).hexdigest()[:24] + '.sock')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    server = commands.add_parser('serve')
+    for option in ('index', 'models', 'library'):
+        server.add_argument('--' + option, type=Path, required=True)
+    server.add_argument('--socket', type=Path)
+    server.add_argument('--library-key', required=True)
+    server.add_argument('--model', choices=['clip', 'siglip2'], required=True)
+    server.add_argument('--backend', choices=['cpu', 'hybrid-ane'], required=True)
+    server.add_argument('--cache', type=Path, default=Path('.tools/photo-search/resident-tiles'))
+    server.add_argument('--ane-library', type=Path)
+    server.add_argument('--compiler', type=Path)
+    server.add_argument('--smoke-receipt', type=Path)
+    server.add_argument('--threads', type=int, default=2)
+    request = commands.add_parser('request')
+    address = request.add_mutually_exclusive_group(required=True)
+    address.add_argument('--socket', type=Path)
+    address.add_argument('--index', type=Path)
+    args = parser.parse_args()
+    os.umask(0o077)
+    os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1',
+                      OPENBLAS_NUM_THREADS='2', TOKENIZERS_PARALLELISM='false')
+    try:
+        if args.socket is None:
+            args.socket = endpoint(args.index)
+        if args.command == 'request':
+            # This path imports no NumPy/Torch: UI polling is inexpensive.
+            import socket
+            data = sys.stdin.buffer.read((24 << 20) + 1)
+            if len(data) > 24 << 20:
+                raise ValueError('request too large')
+            value = json.loads(data)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(120)
+                connection.connect(str(args.socket))
+                connection.sendall((json.dumps(value, ensure_ascii=False) + '\n').encode())
+                response = bytearray()
+                while b'\n' not in response:
+                    block = connection.recv(65536)
+                    if not block:
+                        raise ValueError('worker disconnected')
+                    response.extend(block)
+                    if len(response) > 1 << 20:
+                        raise ValueError('worker response too large')
+                result = json.loads(response.partition(b'\n')[0])
+                print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+                return 0 if result.get('ok') else 1
+        if not 1 <= args.threads <= 4:
+            raise ValueError('threads must be 1–4')
+        if args.backend == 'hybrid-ane' and not all([args.ane_library, args.compiler, args.smoke_receipt]):
+            raise ValueError('hybrid-ane requires library, compiler and current-boot smoke receipt')
+        from photo_search.worker import serve
+        serve(args)
+        return 0
+    except (OSError, ValueError, RuntimeError, KeyError, ImportError) as error:
+        print(f'photo-search-worker: {error}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
