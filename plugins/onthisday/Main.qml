@@ -15,7 +15,12 @@ import "../screenshots/Find.js" as Find
 // hides is left out, as it is there.
 PinholePlugin {
     id: plugin
-    covering: days.shown
+    readonly property var days: daysView.item
+    covering: days !== null && days.shown
+    function openDays() {
+        daysView.active = true
+        days.open()
+    }
 
     // How many days either side of the date count, each year: 0 is the
     // day itself, more for the years with few photos.
@@ -218,7 +223,7 @@ PinholePlugin {
     Connections {
         target: pinhole.library
         function onChanged() {
-            if (days.shown) {
+            if (plugin.days !== null && plugin.days.shown) {
                 plugin.index()
             } else {
                 plugin.stale = true
@@ -271,7 +276,7 @@ PinholePlugin {
             text: qsTr("%n years", "", plugin.years.length)
             key: "D"
             shown: plugin.years.length > 0
-            onTriggered: days.open()
+            onTriggered: plugin.openDays()
         }
     ]
 
@@ -377,9 +382,12 @@ PinholePlugin {
         }
     }
 
-    Days {
-        id: days
+    // The count belongs to the first frame; the large view is only needed
+    // after D. Retain it after closing so returning from a photo is instant.
+    Loader {
+        id: daysView
         anchors.fill: parent
-        plugin: plugin
+        active: false
+        sourceComponent: Days { plugin: daysView.parent }
     }
 }

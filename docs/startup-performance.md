@@ -141,3 +141,10 @@ rejects `--given`, and rebuilding the pinned Blaze tool first fails on
 Use the normal private warm-service mode again once a compatible daemon is
 available. A synthetic-process regression verifies that host-only mode
 launches no daemon and retains its explicit report label.
+
+The On this day plugin now keeps its date index and button count available
+at startup, while creating the larger `Days` view only on the first D.
+That view is retained after closing, including the return from a photo.
+The existing covering/return self-test and lazy-plugin scenario pass on an
+isolated library; initial grouping, hidden photos and the day count stay
+on the original first-frame path.
