@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "date": "2026-11-03",
+  "device": "Apple M2 Pro / t6020, Asahi Linux",
+  "stage": "full-encoder-hybrid-prototype",
+  "quality": "unjudged: zero completed relevance judgments",
+  "policy": {
+    "ane": "attention q/k/v/out projections and final CLIP visual projection",
+    "cpu": [
+      "patch convolution",
+      "MLP",
+      "layer normalization",
+      "dynamic attention products",
+      "softmax",
+      "SigLIP pooling",
+      "text encoders"
+    ]
+  },
+  "completed": {
+    "clip": {
+      "photos": 384,
+      "dimension": 512,
+      "embedding_cosine": {
+        "count": 384,
+        "median": 0.999999863350049,
+        "p95": 0.9999999142829465,
+        "min": 0.9999978914323528,
+        "max": 0.9999999459283108,
+        "sum": 383.9999399798712
+      },
+      "cosine_below_0_99999": 0,
+      "top10_cpu_vs_hybrid": {
+        "k": 10,
+        "mean_shared": 9.975,
+        "same_set_queries": 39,
+        "same_order_queries": 38
+      },
+      "cpu_seconds_per_image": {
+        "count": 384,
+        "median": 0.09926255900063552,
+        "p95": 0.11124353466875618,
+        "min": 0.07916041801217943,
+        "max": 0.14349582901922986,
+        "sum": 38.15117027328233
+      },
+      "hybrid_seconds_per_image": {
+        "count": 384,
+        "median": 0.1490519270009827,
+        "p95": 0.17391136933583767,
+        "min": 0.12087936600437388,
+        "max": 0.5559391599963419,
+        "sum": 58.40309211757267
+      },
+      "ane": {
+        "calls": 18816,
+        "checked_calls": 49,
+        "loads": 49,
+        "exec_seconds": 13.817190731177106,
+        "max_resident": 49,
+        "check_mode": "first"
+      },
+      "source": {
+        "repo": "sentence-transformers/clip-ViT-B-32",
+        "revision": "327ab6726d33c0e22f920c83f2ff9e4bd38ca37f",
+        "directory": "clip/0_CLIPModel",
+        "checkpoint_sha256": "99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d",
+        "processor_sha256": "910e70b3956ac9879ebc90b22fb3bc8a75b6a0677814500101a4c072bd7857bd",
+        "processor": {
+          "_processor_class": null,
+          "do_resize": true,
+          "size": {
+            "shortest_edge": 224
+          },
+          "resample": 3,
+          "do_center_crop": true,
+          "crop_size": {
+            "height": 224,
+            "width": 224
+          },
+          "do_rescale": true,
+          "rescale_factor": 0.00392156862745098,
+          "do_normalize": true,
+          "image_mean": [
+            0.48145466,
+            0.4578275,
+            0.40821073
+          ],
+          "image_std": [
+            0.26862954,
+            0.26130258,
+            0.27577711
+          ],
+          "do_convert_rgb": true,
+          "image_processor_type": "CLIPImageProcessor"
+        }
+      }
+    }
+  },
+  "interrupted": {
+    "model": "siglip2",
+    "photos_checkpointed": 32,
+    "photos_logged": 56,
+    "reason": "firmware EXCH op=0x204 timeout -110; device quarantined until reboot",
+    "device_jobs_at_timeout": 127531,
+    "driver_bo_bytes_at_timeout": 271450112,
+    "no_cpu_fallback": true,
+    "checkpoint_embedding_cosine": {
+      "count": 32,
+      "median": 0.9999997626162438,
+      "p95": 0.9999998834996779,
+      "min": 0.9999990014273903,
+      "max": 0.9999999198886758,
+      "sum": 31.99998941762697
+    }
+  },
+  "experimental_patch_ane_full_v1": {
+    "clip": {
+      "photos": 384,
+      "embedding_cosine": {
+        "count": 384,
+        "median": 0.9999988582211301,
+        "p95": 0.99999970662496,
+        "min": 0.998751586469577,
+        "max": 0.9999998694336815,
+        "sum": 383.9925472689797
+      },
+      "cosine_below_0_99999": 50
+    },
+    "siglip2": {
+      "photos": 384,
+      "embedding_cosine": {
+        "count": 384,
+        "median": 0.9999991282951924,
+        "p95": 0.9999997142544432,
+        "min": 0.9999698512552286,
+        "max": 0.9999999305355467,
+        "sum": 383.999406797728
+      },
+      "cosine_below_0_99999": 6
+    }
+  }
+}

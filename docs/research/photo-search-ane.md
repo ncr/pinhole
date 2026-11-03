@@ -173,10 +173,10 @@ The [aggregate receipt](photo-search-ane-results.json) contains source/compiler/
 firmware identities and report hashes without photo ids or boot identifiers.
 Private diagnostics remain under `.tools/photo-search/` and were not uploaded.
 
-The complete vision transformer, text encoder, checkpoint preprocessing,
-embedding/ranking agreement and Polish retrieval evaluation remain to be
-implemented. This fixes the **first** demonstrated model-shape blocker and
-proves real ANE execution; it is not a search feature or a complete model port.
+This projection experiment was followed by the
+[full-encoder hybrid benchmark](photo-search-full-encoder.md). Its corrected
+CLIP run completes the vision encoder and Polish query rankings, with an
+explicit CPU/ANE operation boundary. Retrieval quality remains unjudged.
 
 Offline regression tests:
 

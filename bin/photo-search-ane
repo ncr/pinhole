@@ -300,6 +300,8 @@ def verify(weights_dir, plan_dir, output, corpus_path=None, samples=4, runner=No
             raise ValueError("ANE verification requires a runner and a current-boot smoke receipt")
         smoke = json.loads(smoke_receipt.read_text())
         boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        from photo_search.ane import assert_device_healthy
+        assert_device_healthy(smoke_receipt.parent / 'ane-device-health.json', boot_id)
         driver = Path("/sys/bus/platform/devices/284000000.ane/driver")
         if (smoke.get("boot_id") != boot_id or smoke.get("chip") != "t6020" or smoke.get("errors") != 0 or
                 not smoke.get("available") or len(smoke.get("sha256", [])) != 20 or

@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Offline full-encoder benchmark. Hybrid mode explicitly offloads projections."""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import resource
+import subprocess
+import sys
+import time
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+
+
+def corpus(path):
+    # Share the already-tested frozen-corpus identity and byte checks.
+    loader = importlib.machinery.SourceFileLoader("photo_corpus", str(Path(__file__).with_name("photo-search-benchmark")))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module.validate_corpus(path)[0]
+
+
+def encode(args):
+    import numpy as np
+    import torch
+    import transformers
+    from photo_search.ane import NativeRuntime
+    from photo_search.models import ImageModel, load_image
+    if args.output.exists():
+        raise ValueError("output already exists")
+    if args.backend == "hybrid-ane" and (not args.library or not args.compiler or not args.smoke_receipt):
+        raise ValueError("hybrid mode requires --library, --compiler and --smoke-receipt")
+    frozen = corpus(args.corpus)
+    items = frozen["items"][:args.limit] if args.limit else frozen["items"]
+    if args.indices:
+        wanted = [int(x) for x in args.indices.split(",")]
+        if len(wanted) != len(set(wanted)) or min(wanted) < 0 or max(wanted) >= len(frozen["items"]):
+            raise ValueError("invalid corpus indices")
+        items = [frozen["items"][i] for i in wanted]
+    if not items:
+        raise ValueError("empty corpus selection")
+    args.output.mkdir(parents=True, mode=0o700)
+    torch.set_num_threads(args.threads)
+    torch.set_num_interop_threads(1)
+    started = time.perf_counter()
+    model = ImageModel(args.model, args.models)
+    load_seconds = time.perf_counter() - started
+    runtime, prepared = None, []
+    diagnostics = [] if args.diagnose else None
+    try:
+        if args.diagnose:
+            if len(items) > 8:
+                raise ValueError("diagnostic runs are limited to eight images")
+            references = [model.encode(model.pixels(load_image(args.corpus.parent / item["path"])))[0] for item in items]
+            np.save(args.output / "reference-images.npy", np.stack(references))
+        started = time.perf_counter()
+        if args.backend == "hybrid-ane":
+            runtime = NativeRuntime(args.library, args.cache, args.smoke_receipt, max_programs=64, check=args.check)
+            prepared = model.hybrid(runtime, args.cache, args.compiler.resolve(), patch_backend=args.patch_backend,
+                                    diagnostics=diagnostics)
+        prepare_seconds = time.perf_counter() - started
+        vectors, timings = [], []
+        for i, item in enumerate(items):
+            started = time.perf_counter()
+            image = load_image(args.corpus.parent / item["path"])
+            pixels = model.pixels(image)
+            pixels_ready = time.perf_counter()
+            vector = model.encode(pixels)[0]
+            done = time.perf_counter()
+            vectors.append(vector)
+            timings.append({"id": item["id"], "preprocess_seconds": pixels_ready - started,
+                            "inference_seconds": done - pixels_ready, "total_seconds": done - started})
+            if (i + 1) % 8 == 0 or i == 0 or i + 1 == len(items):
+                print(f"{args.model}/{args.backend}: {i + 1}/{len(items)}; last {done - started:.3f}s", flush=True)
+            # Keep completed vectors if a later layer/device fails. No
+            # successful run manifest is written before the whole run ends.
+            if (i + 1) % 32 == 0:
+                np.save(args.output / "partial-images.npy", np.stack(vectors))
+        np.save(args.output / "images.npy", np.stack(vectors))
+        write_json(args.output / "image-ids.json", [item["id"] for item in items])
+        report = {"schema": 1, "model": args.model, "backend": args.backend,
+                  "corpus_id": frozen["corpus_id"], "photos": len(items), "source": model.identity,
+                  "torch": torch.__version__, "transformers": transformers.__version__, "numpy": np.__version__,
+                  "threads": args.threads, "load_seconds": load_seconds, "prepare_seconds": prepare_seconds,
+                  "patch_backend": args.patch_backend if runtime else "cpu", "diagnostic": args.diagnose,
+                  "timings": timings, "ane": runtime.metrics if runtime else None,
+                  "offloaded_modules": prepared, "rss_peak_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                  "host_operations": (["patch projection"] if args.patch_backend == "cpu" else []) +
+                  ["MLP", "layer normalization", "dynamic attention products", "softmax", "SigLIP pooling"]
+                  if runtime else ["all operations"]}
+        write_json(args.output / "run.json", report)
+        if diagnostics is not None:
+            write_json(args.output / "projection-diagnostics.json", diagnostics)
+        (args.output / "partial-images.npy").unlink(missing_ok=True)
+        print(json.dumps({k: report[k] for k in ["model", "backend", "photos", "load_seconds", "prepare_seconds", "ane"]}, indent=2))
+    finally:
+        model.restore()
+        if runtime:
+            runtime.close()
+
+
+def rank(args):
+    import numpy as np
+    import torch
+    from photo_search.models import text_embeddings
+    torch.set_num_threads(args.threads)
+    torch.set_num_interop_threads(1)
+    if args.output.exists():
+        raise ValueError("output already exists")
+    run = json.loads((args.images / "run.json").read_text())
+    judgments = json.loads(args.judgments.read_text())
+    if judgments["corpus_id"] != run["corpus_id"]:
+        raise ValueError("query corpus differs from image corpus")
+    queries = judgments["queries"]
+    ids = json.loads((args.images / "image-ids.json").read_text())
+    images = np.load(args.images / "images.npy", allow_pickle=False)
+    texts, timing = text_embeddings(run["model"], args.models, [x["text"] for x in queries])
+    if images.shape != (len(ids), texts.shape[1]) or not np.isfinite(images).all():
+        raise ValueError("invalid image embeddings")
+    started = time.perf_counter()
+    scores = texts @ images.T
+    order = np.argsort(-scores, axis=1, kind="stable")
+    timing["ranking_seconds"] = time.perf_counter() - started
+    rankings = {query["id"]: [ids[i] for i in order[n]] for n, query in enumerate(queries)}
+    result = {"schema": 1, "corpus_id": run["corpus_id"], "queries": {x["id"]: x["text"] for x in queries},
+              "model": run["model"], "image_backend": run["backend"], "text": timing, "rankings": rankings}
+    write_json(args.output, result)
+    print(json.dumps({"queries": len(queries), "photos": len(ids), "model": run["model"], "text": timing}, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    encoder = commands.add_parser("encode")
+    encoder.add_argument("--model", choices=["clip", "siglip2"], required=True)
+    encoder.add_argument("--backend", choices=["cpu", "hybrid-ane"], required=True)
+    encoder.add_argument("--corpus", type=Path, required=True)
+    encoder.add_argument("--models", type=Path, required=True)
+    encoder.add_argument("--cache", type=Path, default=Path(".tools/photo-search/resident-tiles"))
+    encoder.add_argument("--compiler", type=Path)
+    encoder.add_argument("--library", type=Path)
+    encoder.add_argument("--smoke-receipt", type=Path)
+    encoder.add_argument("--check", choices=["first", "all"], default="first")
+    encoder.add_argument("--limit", type=int)
+    encoder.add_argument("--indices", help="comma-separated corpus indices for scoped diagnostics")
+    encoder.add_argument("--diagnose", action="store_true")
+    encoder.add_argument("--patch-backend", choices=["cpu", "ane"], default="cpu")
+    encoder.add_argument("--threads", type=int, default=2)
+    encoder.add_argument("--output", type=Path, required=True)
+    ranking = commands.add_parser("rank")
+    ranking.add_argument("--images", type=Path, required=True)
+    ranking.add_argument("--judgments", type=Path, required=True)
+    ranking.add_argument("--models", type=Path, required=True)
+    ranking.add_argument("--threads", type=int, default=2)
+    ranking.add_argument("--output", type=Path, required=True)
+    comparison = commands.add_parser("compare")
+    comparison.add_argument("--runs", type=Path, required=True)
+    comparison.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if not 1 <= getattr(args, "threads", 2) <= 4 or getattr(args, "limit", None) is not None and args.limit < 1:
+        parser.error("threads must be 1–4 and limit must be positive")
+    if getattr(args, "indices", None) and args.limit:
+        parser.error("choose either --indices or --limit")
+    # Downloads are a separate explicit step. No network is used by inference.
+    os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
+    try:
+        if args.command == "encode":
+            encode(args)
+        elif args.command == "rank":
+            rank(args)
+        else:
+            from photo_search.compare import compare
+            if args.output.exists():
+                raise ValueError("output already exists")
+            result = compare(args.runs)
+            write_json(args.output, result)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    except (OSError, ValueError, RuntimeError, KeyError, ImportError, subprocess.TimeoutExpired) as error:
+        print(f"photo-search-models: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
