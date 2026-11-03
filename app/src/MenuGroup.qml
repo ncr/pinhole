@@ -218,6 +218,7 @@ Item {
         // The widest row's, from the words (as ShellButton.qml lays a
         // justified row out), so every row is as wide as the menu.
         readonly property real rowWidth: {
+            if (!group.open) return 0
             let most = 0
             for (const a of group.menuItems) {
                 const hint = group.hintOf(a)

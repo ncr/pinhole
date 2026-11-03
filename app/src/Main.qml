@@ -375,6 +375,12 @@ ApplicationWindow {
         x: sourcesButton.visible ? sourcesButton.x + sourcesButton.width + 6 : 16
         y: 16
         text: (win.switchedTo !== "" ? win.switchedTo : grid.dateLabel) + (win.inGrid ? "  ▾" : "")
+        // A long date must not share its tap area with More or Select.
+        // Folding still uses naturalWidth below, so this clamp cannot
+        // alternate the row between unfolded and folded layouts.
+        width: Math.max(0, Math.min(naturalWidth,
+            (gridActions.visible && gridActions.width > 0 ? gridActions.x
+             : selectButton.visible ? selectButton.x : win.width - 16) - x - 8))
         morphing: true
         centred: false
         textColor: theme.brightForeground
@@ -623,7 +629,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.margins: 16
         // Above select mode's bar when the window is too narrow for both.
-        anchors.bottomMargin: selectBar.visible && selectBar.x < 16 + width + 8 ? 20 + selectBar.height + 8 : 16
+        anchors.bottomMargin: (selectBar?.visible ?? false) && selectBar.x < 16 + width + 8 ? 20 + selectBar.height + 8 : 16
         readonly property bool wanted: win.inGrid && grid.count > 0 && !grid.atNewest
         // Its own fade (it comes and goes with the scroll), and the grid's.
         property real shown: wanted ? 1 : 0
@@ -679,7 +685,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.margins: 16
         // Above select mode's bar when the window is too narrow for both.
-        anchors.bottomMargin: selectBar.visible && selectBar.x + selectBar.width > win.width - win.cornerWidth
+        anchors.bottomMargin: (selectBar?.visible ?? false) && selectBar.x + selectBar.width > win.width - win.cornerWidth
                               ? 20 + selectBar.height + 8 : 16
         text: "?"
         width: height
@@ -743,6 +749,17 @@ ApplicationWindow {
         when: grid.count > 0
         onTriggered: grid.selecting = !grid.selecting
     }
+    Command {
+        name: "select.all"
+        text: qsTr("Select all")
+        section: "select"
+        keys: ["Ctrl+A"]
+        keyLayer: "grid"
+        when: grid.count > 0 && !trouble.visible
+        mouse: qsTr("Range")
+        touchpad: qsTr("Range")
+        onTriggered: grid.selectAll()
+    }
 
     // Plugins' buttons for the grid, before Select (not in select mode,
     // which has its own), right of the date: their keys go when they do
@@ -765,7 +782,7 @@ ApplicationWindow {
             // The date's width a step at a time, so that scrolling through
             // months of longer and shorter names does not refold them.
             const step = 3 * theme.fontSize
-            const date = dateLabel.visible ? Math.ceil(dateLabel.width / step) * step : 0
+            const date = dateLabel.visible ? Math.ceil(dateLabel.naturalWidth / step) * step : 0
             const right = selectButton.visible ? win.width - selectButton.x + 6 : 16
             const room = win.width - right - (dateLabel.visible ? dateLabel.x + date + 8 : 16)
             for (let level = 0; level < 2; ++level)
@@ -843,127 +860,148 @@ ApplicationWindow {
     // the accent, Range, Copy with Export in its menu, and the plugins'
     // groups.
     // Fewer words when the window is narrow (`fit`).
-    ActionBar {
-        id: selectBar
-        objectName: "selectBar"
-        visible: win.chromeUp && !win.firstRun && grid.selecting
-        opacity: win.chrome
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 20
+    property var selectBar: null
+    // Reserve the original stacking position below plugin/modal overlays;
+    // the controls themselves are made only on the first selection.
+    Item { id: selectionControlsLayer; anchors.fill: parent }
+    Connections {
+        target: grid
+        function onSelectingChanged() {
+            if (grid.selecting && win.selectBar === null)
+                win.selectBar = selectionBarComponent.createObject(win, { parent: selectionControlsLayer })
+        }
+    }
+    Component {
+        id: selectionBarComponent
+        ActionBar {
+            id: selectBar
+            objectName: "selectBar"
+            visible: win.chromeUp && !win.firstRun && grid.selecting
+            opacity: win.chrome
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 20
 
-        // How much it says, from 0, everything, to 3: the keys go, then the
-        // count is only the number, then not there (the ticks show it). The
-        // first that fits.
-        readonly property int fit: {
-            // Clear of the corner buttons, on both sides as it is centred.
-            const room = win.width - 2 * win.cornerWidth
-            for (let level = 0; level < 3; ++level)
-                if (widthAt(level) <= room)
-                    return level
-            return 3
-        }
-        readonly property bool hints: fit < 1
-        function countText(level) {
-            const n = grid.selectionCount
-            if (level >= 3)
-                return ""
-            if (level === 2)
-                return n === 0 ? "" : String(n)
-            return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
-        }
-        // Plugins' groups for what is ticked: those of `order` below 0
-        // before Copy, the rest after it.
-        readonly property var pluginGroups: groupsOf(win.pluginActions.filter(a => a.place === "selection"))
-        readonly property var groupsBefore: pluginGroups.filter(group => group[0].order < 0)
-        readonly property var groupsAfter: pluginGroups.filter(group => group[0].order >= 0)
-        // What the row is wide at a level, from its words: the count's
-        // padding, then each group's button, ▾ and hairline (see
-        // ShellButton.qml and MenuGroup.qml).
-        function widthAt(level) {
-            const pad = 2 * Math.round(theme.fontSize * 0.833)
-            const arrow = barMetrics.of("▾") + 2 * Math.round(theme.fontSize * 0.5)
-            const key = name => level < 1 ? barMetrics.of("  " + name) : 0
-            const count = countText(level)
-            let width = 2 + (count === "" ? 0 : barMetrics.of(count) + 2 * theme.fontSize + 5)
-                + barMetrics.of(qsTr("Range")) + key("R") + pad + 5
-                + Math.max(barMetrics.of(qsTr("Copy")) + key("C"), barMetrics.of("✓ " + qsTr("Copied"))) + pad + arrow
-            for (const group of pluginGroups) {
-                const shown = group.filter(a => a.shown)
-                if (shown.length > 0)
-                    width += 5 + barMetrics.of(shown[0].text) + key(KeyNames.nameOf(shown[0].key)) + pad
-                        + (shown.length > 1 ? arrow : 0)
+            // How much it says, from 0, everything, to 3: the keys go, then the
+            // count is only the number, then not there (the ticks show it). The
+            // first that fits.
+            readonly property int fit: {
+                // Clear of the corner buttons, on both sides as it is centred.
+                const room = win.width - 2 * win.cornerWidth
+                for (let level = 0; level < 3; ++level)
+                    if (widthAt(level) <= room)
+                        return level
+                return 3
             }
-            return width
-        }
-        LabelMetrics { id: barMetrics }
+            readonly property bool hints: fit < 1
+            function countText(level) {
+                const n = grid.selectionCount
+                if (level >= 3)
+                    return ""
+                if (level === 2)
+                    return n === 0 ? "" : String(n)
+                return n === 0 ? qsTr("Select photos") : qsTr("%1 selected").arg(n)
+            }
+            // Plugins' groups for what is ticked: those of `order` below 0
+            // before Copy, the rest after it.
+            readonly property var pluginGroups: groupsOf(win.pluginActions.filter(a => a.place === "selection"))
+            readonly property var groupsBefore: pluginGroups.filter(group => group[0].order < 0)
+            readonly property var groupsAfter: pluginGroups.filter(group => group[0].order >= 0)
+            // What the row is wide at a level, from its words: the count's
+            // padding, then each group's button, ▾ and hairline (see
+            // ShellButton.qml and MenuGroup.qml).
+            function widthAt(level) {
+                const pad = 2 * Math.round(theme.fontSize * 0.833)
+                const arrow = barMetrics.of("▾") + 2 * Math.round(theme.fontSize * 0.5)
+                const key = name => level < 1 ? barMetrics.of("  " + name) : 0
+                const count = countText(level)
+                let width = 2 + (count === "" ? 0 : barMetrics.of(count) + 2 * theme.fontSize + 5)
+                    + barMetrics.of(qsTr("Range")) + key("R") + pad + 5
+                    + Math.max(barMetrics.of(qsTr("Copy")) + key("C"), barMetrics.of("✓ " + qsTr("Copied"))) + pad + arrow
+                for (const group of pluginGroups) {
+                    const shown = group.filter(a => a.shown)
+                    if (shown.length > 0)
+                        width += 5 + barMetrics.of(shown[0].text) + key(KeyNames.nameOf(shown[0].key)) + pad
+                            + (shown.length > 1 ? arrow : 0)
+                }
+                return width
+            }
+            LabelMetrics { id: barMetrics }
 
-        UiText {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: text !== ""
-            leftPadding: theme.fontSize
-            rightPadding: theme.fontSize
-            text: selectBar.countText(selectBar.fit)
-            color: theme.accent
-        }
-        // Range: the next photo tapped ticks all from the last ticked to it.
-        MenuGroup {
-            ShellButton {
-                objectName: "selectRange"
-                flat: true
-                text: qsTr("Range")
-                active: grid.rangeNext
-                hint: selectBar.hints ? "R" : ""
-                action: selectRange
+            UiText {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: text !== ""
+                leftPadding: theme.fontSize
+                rightPadding: theme.fontSize
+                text: selectBar.countText(selectBar.fit)
+                color: theme.accent
             }
-        }
-        Repeater {
-            model: selectBar.groupsBefore
-            delegate: PluginGroup {
-                required property var modelData
-                items: modelData
-                upward: true
+            // Range: the next photo tapped ticks all from the last ticked to it.
+            MenuGroup {
+                objectName: "selectRangeGroup"
+                menuText: qsTr("Range")
+                menuKey: "Shift+R"
                 keyLayer: "grid"
-                hints: selectBar.hints
-                // Said over the bar, where the foot's notice would cover it.
-                onComplained: historyNotice.giveWay()
+                upward: true
+                items: [{ text: qsTr("Select all"), usable: grid.count > 0,
+                          triggered: () => grid.selectAll() }]
+                ShellButton {
+                    objectName: "selectRange"
+                    flat: true
+                    text: qsTr("Range")
+                    active: grid.rangeNext
+                    hint: selectBar.hints ? "R" : ""
+                    action: selectRange
+                }
             }
-        }
-        // As JPEG and MP4, what opens anywhere; the originals on Shift.
-        MenuGroup {
-            objectName: "selectCopyGroup"
-            menuText: qsTr("Copy")
-            upward: true
-            menuKey: "Shift+C"
-            keyLayer: "grid"
-            section: "share"
-            items: [
-                { text: qsTr("Export"), helpText: qsTr("Export JPEG"), key: "E", usable: grid.selectionCount > 0,
-                  triggered: () => outgoing.exportTo(grid.selection(), true) },
-                { text: qsTr("Export originals"), helpText: qsTr("Export original"), key: "Shift+E", usable: grid.selectionCount > 0,
-                  triggered: () => outgoing.exportTo(grid.selection(), false) }
-            ]
-            CopyButton {
-                objectName: "selectCopyButton"
-                photos: () => grid.selection()
-                enabledHere: grid.selectionCount > 0
-                flat: true
-                key: "C"
+            Repeater {
+                model: selectBar.groupsBefore
+                delegate: PluginGroup {
+                    required property var modelData
+                    items: modelData
+                    upward: true
+                    keyLayer: "grid"
+                    hints: selectBar.hints
+                    // Said over the bar, where the foot's notice would cover it.
+                    onComplained: historyNotice.giveWay()
+                }
+            }
+            // As JPEG and MP4, what opens anywhere; the originals on Shift.
+            MenuGroup {
+                objectName: "selectCopyGroup"
+                menuText: qsTr("Copy")
+                upward: true
+                menuKey: "Shift+C"
                 keyLayer: "grid"
                 section: "share"
-                hint: selectBar.hints ? "C" : ""
+                items: [
+                    { text: qsTr("Export"), helpText: qsTr("Export JPEG"), key: "E", usable: grid.selectionCount > 0,
+                      triggered: () => outgoing.exportTo(grid.selection(), true) },
+                    { text: qsTr("Export originals"), helpText: qsTr("Export original"), key: "Shift+E", usable: grid.selectionCount > 0,
+                      triggered: () => outgoing.exportTo(grid.selection(), false) }
+                ]
+                CopyButton {
+                    objectName: "selectCopyButton"
+                    photos: () => grid.selection()
+                    enabledHere: grid.selectionCount > 0
+                    flat: true
+                    key: "C"
+                    keyLayer: "grid"
+                    section: "share"
+                    hint: selectBar.hints ? "C" : ""
+                }
             }
-        }
-        Repeater {
-            model: selectBar.groupsAfter
-            delegate: PluginGroup {
-                required property var modelData
-                items: modelData
-                upward: true
-                keyLayer: "grid"
-                hints: selectBar.hints
-                // Said over the bar, where the foot's notice would cover it.
-                onComplained: historyNotice.giveWay()
+            Repeater {
+                model: selectBar.groupsAfter
+                delegate: PluginGroup {
+                    required property var modelData
+                    items: modelData
+                    upward: true
+                    keyLayer: "grid"
+                    hints: selectBar.hints
+                    // Said over the bar, where the foot's notice would cover it.
+                    onComplained: historyNotice.giveWay()
+                }
             }
         }
     }
@@ -1117,7 +1155,7 @@ ApplicationWindow {
         : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"
         : pluginCovering ? "plugin"
-        : orderMenu.open || selectBar.menuOpen || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
+        : orderMenu.open || (selectBar?.menuOpen ?? false) || gridMore.open || (photoViewer?.menuOpen ?? false) ? "menu"
         : viewerShown ? "viewer"
         : "grid"
     Binding { target: keymap; property: "layer"; value: win.keyLayer }

@@ -23,7 +23,8 @@ Rectangle {
 
     // Omarchy's control metrics (shell.toml: control-height 28 and
     // control-padding-x 10 at a base size of 12), with the type scale.
-    width: label.implicitWidth + 2 * padding
+    readonly property real naturalWidth: label.implicitWidth + 2 * padding
+    width: naturalWidth
     height: label.lineCount > 1 ? label.implicitHeight + theme.fontSize : Math.round(theme.fontSize * 2.333)
     radius: Math.min(4, theme.radius)
     color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)

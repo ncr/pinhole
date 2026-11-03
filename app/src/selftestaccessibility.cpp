@@ -54,12 +54,15 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
         switch ((*phase)++) {
         case 0:
             if (guide) return fail("workshop was constructed during startup");
+            if (window->findChild<QQuickItem *>("selectBar")) return fail("selection bar was constructed during startup");
+            if (side->property("prepared").toBool()) return fail("settings rows were constructed during startup");
             if (auto *grid = window->findChild<QQuickItem *>("grid")) grid->forceActiveFocus();
             std::fprintf(stderr, "selftest: accessibility: initial layer=%s active=%d\n", qPrintable(window->property("keyLayer").toString()), window->isActive());
             key(Qt::Key_Tab);
             return;
         case 1: {
             if (!side->property("shown").toBool()) return fail("Tab did not open settings");
+            if (!side->property("prepared").toBool()) return fail("settings rows did not load on Tab");
             auto *accessible = QAccessible::queryAccessibleInterface(side);
             if (!accessible || accessible->role() != QAccessible::Dialog || accessible->text(QAccessible::Name).isEmpty())
                 return fail("settings has no named accessible dialog");
@@ -195,8 +198,9 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             auto *order = window->findChild<QQuickItem *>("orderMenu");
             if (order->property("open").toBool() || order->property("value").toString() != "taken") return fail("photo order Return chose the wrong option");
             auto *grid = window->findChild<QQuickItem *>("grid");
-            grid->setProperty("selecting", true);
-            QMetaObject::invokeMethod(grid, "selectAll");
+            key(Qt::Key_A, Qt::ControlModifier);
+            if (!grid->property("selecting").toBool() || grid->property("selectionCount").toInt() == 0)
+                return fail("Ctrl+A did not enter select mode and select photos");
             auto *copy = window->findChild<QQuickItem *>("selectCopyButton");
             auto *accessible = QAccessible::queryAccessibleInterface(copy);
             if (!accessible || accessible->role() != QAccessible::Button || accessible->state().disabled) return fail("selection Copy has no usable accessible button");
@@ -228,6 +232,9 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             auto *more = window->findChild<QQuickItem *>("gridMore");
             auto *button = more ? namedItem(more, "moreButton") : nullptr;
             if (!more || !more->isVisible() || !button) return fail("narrow grid did not expose More");
+            auto *date = window->findChild<QQuickItem *>("dateLabel");
+            if (date->mapToScene({date->width(), 0}).x() > button->mapToScene({0, 0}).x())
+                return fail("long date overlaps More's pointer area");
             click(button);
             return;
         }

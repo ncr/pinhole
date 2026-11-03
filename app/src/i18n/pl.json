@@ -9,6 +9,7 @@
   "%1 of %2 used · %3 free on this disk": "Zajęte %1 z %2 · %3 wolne na tym dysku",
   "%1 s": "%1 s",
   "%1 selected": "Zaznaczono %1",
+  "Select all": "Zaznacz wszystkie",
   "About %n minute(s) left.": {
     "one": "Jeszcze około %n minuty.",
     "few": "Jeszcze około %n minut.",

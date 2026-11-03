@@ -148,3 +148,16 @@ That view is retained after closing, including the return from a photo.
 The existing covering/return self-test and lazy-plugin scenario pass on an
 isolated library; initial grouping, hidden photos and the day count stay
 on the original first-frame path.
+
+The selection bar is now constructed on the first selection and kept for
+later use. Its original visual stacking position stays below plugin and
+modal overlays. Settings keep their focus/dialog shell, but source, mark
+and plugin rows and their sorting wait for the first opening. Closed action
+menus no longer measure labels. Ctrl+A selects the grid through a registered
+command, and Select all is also available through Range's menu.
+
+A full-window accessibility check caught a narrow-layout bug: a long date
+overlapped More and opened both the photo-order and action menus on one tap.
+The date now fits before the action controls; folding uses its natural text
+width to avoid a layout cycle. The isolated check covers this geometry and
+the two pointer clicks, plus first-use settings/selection construction.

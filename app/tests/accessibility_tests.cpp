@@ -32,7 +32,7 @@ class AccessibilityTests : public QObject {
         QQmlEngine engine;
         std::unique_ptr<QObject> root;
         QStringList warnings;
-        explicit Fixture(bool light = false, int fontSize = 14) {
+        explicit Fixture(bool light = false, int fontSize = 14, bool applicationWindow = false) {
             for (const auto &[key, color] : std::initializer_list<std::pair<const char *, const char *>>{
                      {"background", light ? "#fffcf0" : "#090e18"}, {"foreground", light ? "#100f0f" : "#cdd9ed"},
                      {"darkForeground", light ? "#66645e" : "#8da2c0"}, {"brightForeground", light ? "#100f0f" : "#e5efff"},
@@ -48,7 +48,7 @@ class AccessibilityTests : public QObject {
                 for (const auto &error : errors) warnings << error.toString();
             });
             QQmlComponent component(&engine);
-            component.setData(R"(import QtQuick
+            QByteArray source = R"(import QtQuick
 import Pinhole
 import "focus.js" as Focus
 Window {
@@ -123,7 +123,12 @@ Window {
     }
     ShellButton { id: date; objectName: "date"; visible: window.menus; x: 24; y: 24; text: "Photo order"; onTapped: order.toggle(false) }
     PhotoOrderMenu { id: order; objectName: "order"; z: 1001; available: window.menus; button: date; onChosen: mode => value = mode }
-})", QUrl("qrc:/AccessibilityFixture.qml"));
+})";
+            if (applicationWindow) {
+                source.replace("import QtQuick\n", "import QtQuick\nimport QtQuick.Controls\n");
+                source.replace("Window {", "ApplicationWindow {");
+            }
+            component.setData(source, QUrl("qrc:/AccessibilityFixture.qml"));
             root.reset(component.create());
             if (!root) warnings << component.errorString();
             if (auto *window = qobject_cast<QQuickWindow *>(root.get())) window->requestActivate();
@@ -349,6 +354,22 @@ private slots:
         more->setVisible(false);
         QTRY_VERIFY(!more->property("open").toBool());
         QCOMPARE(f.keymap.layer(), QString("grid"));
+        QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void quickSecondPointerClickClosesTheMenu() {
+        Fixture f(false, 14, true); QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        f.root->setProperty("menus", true);
+        QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *more = f.item("more"); auto *button = f.item("moreButton"); QVERIFY(more && button);
+        // Explicit delays retain realistic double-click timestamps; QTest's
+        // default mouseClick deliberately advances past that interval.
+        QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(button), 10);
+        QTRY_VERIFY(more->property("open").toBool());
+        QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(button), 10);
+        QTRY_VERIFY(!more->property("open").toBool());
+        QCOMPARE(f.root->property("fires").toInt(), 0);
+        QCOMPARE(f.root->property("underneath").toInt(), 0);
         QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
     }
 

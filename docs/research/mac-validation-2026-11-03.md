@@ -15,9 +15,15 @@ these checks. Model inference and image decoding ran locally.
 - The Python script suite passed **98 tests** with the optional model
   environment and real offline ANE compilation tests enabled. These tests
   do not submit accelerator jobs.
-- Shared controls/accessibility passed **15/15** both offscreen and on Xvfb,
+- Shared controls/accessibility passed **16/16** on Xvfb (the earlier 15/15
+  also passed offscreen),
   including menu pointer opening, keyboard focus, large type, narrow bounds,
   dismissal and scrolling. This is not an Orca session; Orca is not installed.
+- The isolated full-window accessibility self-test passed with a local
+  protocol stand-in, private settings/Pictures and 384 copied thumbnails.
+  It exercises settings/workshop/source dialogs, Tab containment, compact
+  layout, Ctrl+A, export menus and two clicks of More. It caught and verified
+  the fix for a long date overlapping More; no screen reader was started.
 - The personal semantic search plugin passed its complete 384-photo real-host
   interaction test offscreen and on native Wayland on hidden workspace 5.
   See [the plugin notes](photo-search-plugin.md) for tested interactions and

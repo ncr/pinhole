@@ -80,6 +80,9 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
             case 0:
                 if (frame->property("frame").value<QObject *>()) return fail("media players created at startup");
                 if (calendar->property("counted").toBool()) return fail("calendar counted at startup");
+                if (QObject *days = item("pinhole.onthisday"); days && days->property("days").value<QObject *>())
+                    return fail("On this day view created at startup");
+                if (window->findChild<QQuickItem *>("selectBar")) return fail("selection bar created at startup");
                 press(Qt::Key_Y);
                 return;
             case 1: {

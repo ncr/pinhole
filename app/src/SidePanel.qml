@@ -28,6 +28,10 @@ Item {
     visible: panel.x > -panel.width
 
     property bool shown: false
+    // Keep the cheap panel/focus shell available, but do not instantiate
+    // every source, mark and plugin control before the first frame.
+    property bool prepared: false
+    onPreparedChanged: if (prepared) orderPlugins()
     property string section: "sources"
     property var returnFocus: null
     readonly property var sections: [
@@ -193,12 +197,13 @@ Item {
         now[id] = open
         unfolded = now
     }
-    readonly property int pluginsOn: (plugins.revision, plugins.ids.filter(id => plugins.at(id).enabled).length)
+    readonly property int pluginsOn: prepared ? (plugins.revision, plugins.ids.filter(id => plugins.at(id).enabled).length) : 0
     // The plugins in the order listed: Pinhole's own, then one's own, each
     // by its name in the language. Set only when it changes, so the rows
     // stay as they are otherwise.
     property var pluginOrder: []
     function orderPlugins() {
+        if (!prepared) return
         const order = plugins.ids.slice().sort((a, b) => {
             const x = plugins.at(a), y = plugins.at(b)
             return x.personal !== y.personal ? (x.personal ? 1 : -1) : x.name.localeCompare(y.name)
@@ -213,6 +218,7 @@ Item {
     }
     Component.onCompleted: orderPlugins()
     function showPlugin(id) {
+        prepared = true
         section = "plugins"
         unfold(id, true)
         pluginsSection.forceLayout()
@@ -240,6 +246,7 @@ Item {
     }
 
     onShownChanged: {
+        if (shown) prepared = true
         confirming = -1
         focusIndex = Math.max(0, sources.currentIndex)
         storage.watching = shown
@@ -639,7 +646,7 @@ Item {
 
                 Repeater {
                     id: sourceRows
-                    model: sources.list
+                    model: root.prepared ? sources.list : []
                     delegate: Rectangle {
                         id: row
                         required property var modelData
@@ -1177,7 +1184,7 @@ Item {
                 // Pinhole's own marks and the plugins' (plugins.markKinds), in
                 // their order in a cell's corner, each switch kept by its id.
                 Repeater {
-                    model: plugins.markKinds
+                    model: root.prepared ? plugins.markKinds : []
                     delegate: Item {
                         id: markRow
                         required property var modelData
@@ -1252,7 +1259,8 @@ Item {
                 // them, a line down from its chevron tying them to it.
                 Repeater {
                     id: pluginRows
-                    model: root.pluginOrder
+                    objectName: "settingsPluginRows"
+                    model: root.prepared ? root.pluginOrder : []
                     delegate: Item {
                         id: pluginRow
                         required property string modelData
