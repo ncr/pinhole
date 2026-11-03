@@ -901,4 +901,3 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
     }
     return {};
 }
-

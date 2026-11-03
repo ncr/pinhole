@@ -206,4 +206,3 @@ QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
     watcher->setFuture(PluginQuery::start(path, sql, values, control));
     return deferred->promise;
 }
-
