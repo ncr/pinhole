@@ -4,6 +4,13 @@ Research: **3 listopada 2026**. Stan dokumentacji sprawdzony tego dnia.
 To propozycja kolejnego etapu Pinhole, bez instalowania modeli ani wykonywania
 analizy prywatnych zdjęć.
 
+Kontynuacja: [narzędzie do przygotowania próbek i oceny wyników](photo-search-benchmark.md).
+Na drugim komputerze (M2 Pro, Arch/Asahi) przygotowano 384 lokalne miniatury
+za zgodą właściciela. Sprawdzono też konkretny stos ANE: brak firmware'u
+blokuje urządzenie, a pakiet kompilatora odrzuca bezpośrednie odwzorowanie
+warstw wejściowych CLIP i SigLIP 2. Porównanie modeli nie zostało jeszcze
+wykonane; dalszy dokument zawiera odtwarzalny test i ograniczenia tej próby.
+
 **Rekomendacja:** zacząć od wyszukiwania obraz–tekst i proponowanych tagów,
 z lokalnym workerem CPU/CUDA. Porównać SigLIP 2 z wielojęzycznym CLIP na
 polskich zapytaniach. Następnie dodać osoby jako osobny indeks twarzy.

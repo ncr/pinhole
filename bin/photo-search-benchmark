@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Prepare a private photo-search corpus and score independently judged rankings."""
+import argparse
+from collections import Counter, defaultdict, deque
+from datetime import datetime, timezone
+import hashlib
+import json
+import math
+from pathlib import Path
+import shutil
+import sqlite3
+import struct
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def write_json(path, value):
+    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def identity(value):
+    return digest(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode())
+
+
+def prepare(library, output, count, seed):
+    library, output = library.resolve(strict=True), output.resolve()
+    if count < 1:
+        raise ValueError("count must be positive")
+    if output == library or output.is_relative_to(library):
+        raise ValueError("output must be outside the source library")
+    if output.exists():
+        raise ValueError("output already exists; choose a new directory to preserve labels")
+    # Respect the live WAL; immutable=1 would silently miss committed WAL rows.
+    db = sqlite3.connect((library / "library.sqlite").as_uri() + "?mode=ro", uri=True)
+    try:
+        db.execute("PRAGMA query_only=ON")
+        rows = db.execute("SELECT id, thumb_path, asset_date, item_type, thumb_w, thumb_h "
+                          "FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL").fetchall()
+    finally:
+        db.close()
+    groups = defaultdict(list)
+    missing = 0
+    for asset, relative, date, kind, width, height in rows:
+        path = (library / relative).resolve()
+        if not path.is_relative_to(library) or not path.is_file():
+            missing += 1
+            continue
+        year = datetime.fromtimestamp((date or 0) / 1000, timezone.utc).year
+        shape = "portrait" if (height or 0) > (width or 0) else "landscape"
+        groups[(year, kind or "unknown", shape)].append((asset, path))
+    if not groups:
+        raise ValueError("no local still-photo thumbnails available")
+    # Balance year, original format and orientation; this is a benchmark
+    # stress sample, not a prevalence estimate of the user's whole library.
+    queues = deque((key, deque(sorted(items, key=lambda x: digest(f"{seed}\0{x[0]}".encode()))))
+                   for key, items in sorted(groups.items()))
+    chosen = []
+    while queues and len(chosen) < count:
+        key, items = queues.popleft()
+        chosen.append((key, items.popleft()))
+        if items:
+            queues.append((key, items))
+    output.mkdir(parents=True, mode=0o700)
+    (output / "images").mkdir(mode=0o700)
+    items = []
+    library_key = digest(str(library).encode())
+    for (year, kind, shape), (asset, source) in chosen:
+        photo_id = digest(f"{library_key}\0{asset}".encode())
+        data = source.read_bytes()
+        relative = f"images/{photo_id}.jpg"
+        (output / relative).write_bytes(data)
+        items.append({"id": photo_id, "path": relative, "sha256": digest(data),
+                      "year": year, "original_type": kind, "shape": shape})
+    manifest = {"schema": 1, "seed": seed, "sampling": "round-robin-year-format-shape",
+                "library_key": library_key, "eligible": sum(map(len, groups.values())),
+                "missing_or_unsafe_thumbnails": missing, "items": items}
+    manifest["corpus_id"] = identity(manifest)
+    write_json(output / "corpus.json", manifest)
+    queries = read_json(ROOT / "docs/research/photo-search-queries-pl.json")
+    queries["corpus_id"] = manifest["corpus_id"]
+    write_json(output / "judgments.json", queries)
+    return {"corpus_id": manifest["corpus_id"], "photos": len(items),
+            "eligible": manifest["eligible"], "missing": missing,
+            "strata": len(Counter((x["year"], x["original_type"], x["shape"]) for x in items))}
+
+
+def validate_corpus(path):
+    corpus = read_json(path)
+    expected = corpus.get("corpus_id")
+    if corpus.get("schema") != 1 or identity({k: v for k, v in corpus.items() if k != "corpus_id"}) != expected:
+        raise ValueError("invalid corpus identity or schema")
+    ids = set()
+    root = Path(path).resolve().parent
+    for item in corpus["items"]:
+        if item["id"] in ids:
+            raise ValueError("duplicate photo id")
+        ids.add(item["id"])
+        image = (root / item["path"]).resolve()
+        if not image.is_relative_to(root) or digest(image.read_bytes()) != item["sha256"]:
+            raise ValueError(f"photo changed or outside corpus: {item['id']}")
+    if not ids:
+        raise ValueError("empty corpus")
+    return corpus, ids
+
+
+def evaluate(corpus_path, judgments_path, rankings_path, k=10):
+    corpus, ids = validate_corpus(corpus_path)
+    judgments, run = read_json(judgments_path), read_json(rankings_path)
+    if k < 1 or k > len(ids):
+        raise ValueError("k must be between 1 and the corpus size")
+    if any(x.get("schema") != 1 or x.get("corpus_id") != corpus["corpus_id"] for x in [judgments, run]):
+        raise ValueError("rankings/judgments must match this exact corpus and schema")
+    # An exact query identity prevents scoring old rankings after editing text.
+    query_text = {x["id"]: x["text"] for x in judgments["queries"]}
+    if len(query_text) != len(judgments["queries"]) or not query_text:
+        raise ValueError("empty or duplicate queries")
+    if run.get("queries") != query_text:
+        raise ValueError("rankings were produced for different query texts")
+    if set(run["rankings"]) != set(query_text):
+        raise ValueError("rankings must cover every query exactly once")
+    for query_id, ranking in run["rankings"].items():
+        if len(ranking) != len(ids) or set(ranking) != ids:
+            raise ValueError(f"{query_id}: expected a complete unique corpus ranking")
+    scored, incomplete, no_positives = [], [], []
+    for query in judgments["queries"]:
+        relevant = query["relevance"]
+        if not set(relevant).issubset(ids) or any(type(x) is not int or x not in (0, 1, 2) for x in relevant.values()):
+            raise ValueError(f"{query['id']}: relevance must map corpus ids to 0, 1 or 2")
+        if query.get("complete") is not True:
+            incomplete.append(query["id"])
+            continue
+        # complete=True explicitly declares omitted items irrelevant. Do not
+        # turn an empty, unjudged template into a perfect or zero quality score.
+        positives = sum(x > 0 for x in relevant.values())
+        if not positives:
+            no_positives.append(query["id"])
+            continue
+        ranked = run["rankings"][query["id"]][:k]
+        grades = [relevant.get(x, 0) for x in ranked]
+        hits = sum(x > 0 for x in grades)
+        ideal = sorted(relevant.values(), reverse=True)[:k]
+        dcg = lambda values: sum((2**value - 1) / math.log2(i + 2) for i, value in enumerate(values))
+        scored.append({"id": query["id"], "precision": hits / k, "recall": hits / positives,
+                       "ndcg": dcg(grades) / dcg(ideal),
+                       "reciprocal_rank": next((1 / (i + 1) for i, grade in enumerate(grades) if grade), 0)})
+    macro = {key: sum(x[key] for x in scored) / len(scored)
+             for key in ["precision", "recall", "ndcg", "reciprocal_rank"]} if scored else None
+    return {"schema": 1, "corpus_id": corpus["corpus_id"], "k": k,
+            "run_sha256": digest(Path(rankings_path).read_bytes()),
+            "judgments_sha256": digest(Path(judgments_path).read_bytes()),
+            "scored_queries": len(scored), "total_queries": len(query_text),
+            "incomplete_queries": incomplete, "no_positive_queries": no_positives,
+            "macro": macro, "per_query": scored}
+
+
+def probe_ane(compiler, output):
+    """Compile synthetic geometries only. Never open an accelerator device."""
+    executable = shutil.which(compiler)
+    if executable is None:
+        raise ValueError("mil-hwxc is unavailable; provide --compiler PATH")
+    if output.exists():
+        raise ValueError("output already exists")
+    output.mkdir(parents=True, mode=0o700)
+    header = 'program(1.3)\n[buildInfo = dict<string, string>({})]\n{\n'
+    control = header + '''  func main<ios18>(tensor<fp16, [1,512,1,1]> a, tensor<fp16, [1,512,1,1]> b) {
+    tensor<fp16, [1,512,1,1]> y = add(x = a, y = b)[name = string("sum")];
+  } -> (y);
+}
+'''
+    results = []
+    for name, patch in [("control-add", None), ("siglip2-base-patch16-224", 16), ("clip-vit-b32", 32)]:
+        model_root = output / name
+        model_root.mkdir()
+        if patch:
+            grid = 224 // patch
+            payload_size = 768 * 3 * patch * patch * 2
+            # A valid MIL blob container with synthetic zero fp16 weights.
+            blob = bytearray(128 + payload_size)
+            struct.pack_into("<IIQQ", blob, 64, 0xDEADBEEF, 1, payload_size, 128)
+            (model_root / "weights.bin").write_bytes(blob)
+            mil = header + f'''  func main<ios18>(tensor<fp16, [1,3,224,224]> x) {{
+    string pt = const()[name = string("pt"), val = string("valid")];
+    tensor<int32, [2]> st = const()[name = string("st"), val = tensor<int32, [2]>([{patch},{patch}])];
+    tensor<int32, [4]> pd = const()[name = string("pd"), val = tensor<int32, [4]>([0,0,0,0])];
+    tensor<int32, [2]> dl = const()[name = string("dl"), val = tensor<int32, [2]>([1,1])];
+    int32 gp = const()[name = string("gp"), val = int32(1)];
+    tensor<fp16, [768,3,{patch},{patch}]> W = const()[name = string("W"), val = tensor<fp16, [768,3,{patch},{patch}]>(BLOBFILE(path = string("@model_path/weights.bin"), offset = uint64(64)))];
+    tensor<fp16, [1,768,{grid},{grid}]> y = conv(dilations = dl, groups = gp, pad = pd, pad_type = pt, strides = st, weight = W, x = x)[name = string("projection")];
+  }} -> (y);
+}}
+'''
+        else:
+            mil = control
+        source = model_root / "projection.mil"
+        source.write_text(mil)
+        process = subprocess.run([executable, "--target", "H14", "--mil", str(source), "--model-root", str(model_root),
+                                  "--output", str(model_root / "compiled")], capture_output=True, text=True, timeout=30)
+        (model_root / "compiler.log").write_text(process.stdout + process.stderr)
+        results.append({"name": name, "exit_code": process.returncode, "diagnostic": process.stderr.strip()})
+    report = {"schema": 1, "test": "synthetic projection geometry; no model export or inference; no device access",
+              "compiler_sha256": digest(Path(executable).read_bytes()), "target": "H14", "results": results}
+    write_json(output / "results.json", report)
+    if results[0]["exit_code"]:
+        raise ValueError(f"control compilation failed; inspect {output / 'results.json'}")
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    prep = commands.add_parser("prepare", help="copy only local thumbnails; never start a service or fetch iCloud originals")
+    prep.add_argument("--library", type=Path, required=True)
+    prep.add_argument("--output", type=Path, required=True)
+    prep.add_argument("--count", type=int, default=384)
+    prep.add_argument("--seed", default="pinhole-pl-v1")
+    score = commands.add_parser("evaluate", help="score full rankings against manually completed judgments")
+    score.add_argument("--corpus", type=Path, required=True)
+    score.add_argument("--judgments", type=Path, required=True)
+    score.add_argument("--rankings", type=Path, required=True)
+    score.add_argument("--k", type=int, default=10)
+    score.add_argument("--output", type=Path, required=True)
+    probe = commands.add_parser("probe-ane", help="compile synthetic image-projection geometries; no model download or device access")
+    probe.add_argument("--compiler", default="mil-hwxc")
+    probe.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        if args.command == "prepare":
+            result = prepare(args.library, args.output, args.count, args.seed)
+        elif args.command == "evaluate":
+            if args.output.exists():
+                raise ValueError("output already exists")
+            result = evaluate(args.corpus, args.judgments, args.rankings, args.k)
+            write_json(args.output, result)
+        else:
+            result = probe_ane(args.compiler, args.output)
+        print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        return 0
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.TimeoutExpired) as error:
+        print(f"photo-search-benchmark: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
