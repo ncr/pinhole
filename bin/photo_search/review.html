@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pl">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'sha256-__SCRIPT_HASH__'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Ocena wyszukiwania zdjęć · Pinhole</title>
+<style>
+:root{color-scheme:dark light;font:16px system-ui;background:#111820;color:#e7edf5}
+body{max-width:1200px;margin:auto;padding:24px}h1{font-size:1.5rem}p{line-height:1.5;color:#c0cbda}
+button,select,input{font:inherit}button,select,.file{background:#243243;color:inherit;border:1px solid #657689;border-radius:6px;padding:9px;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,.photo:focus-visible{outline:3px solid #91d9ff;outline-offset:3px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0}select{max-width:100%;flex:1;min-width:200px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:16px;margin:18px 0}
+.photo{border:2px solid #455467;border-radius:8px;padding:9px;scroll-margin:16px}.photo.current{border-color:#91d9ff}
+.photo img{width:100%;height:190px;object-fit:contain;background:#090e14}.grades{display:flex;gap:6px;margin-top:8px}
+.grades button{flex:1;padding:8px 2px}.grades button[aria-pressed=true]{background:#365a45;border-color:#b1e5bc}
+small{display:block;margin:6px 0;color:#bac7d5}#status{min-height:1.5em}#status.error{color:#ffb9b9}.file input{max-width:230px}
+@media(max-width:500px){body{padding:12px}#grid{grid-template-columns:1fr}.photo img{height:240px}}
+</style>
+<h1>Ocena trafności polskich zapytań</h1>
+<p>Oceń każde zdjęcie dla wybranego zapytania: <b>0 — nietrafne, 1 — częściowo, 2 — trafne</b>.
+Kolejność jest losowana niezależnie od modeli. Przeglądaj całą próbkę, także gdy nic nie pasuje.</p>
+<p>Ta strona działa lokalnie i zawiera prywatne miniatury. Zapisuj postęp przyciskiem „Pobierz oceny”.
+Po zamknięciu strony przywrócisz go z pobranego pliku JSON. Zmiany nie zapisują się automatycznie.</p>
+<div class="toolbar"><label for="query">Zapytanie</label><select id="query"></select></div>
+<div class="toolbar"><button id="previousQuery">Poprzednie zapytanie</button><button id="nextQuery">Następne zapytanie</button>
+<button id="complete">Zatwierdź pełną ocenę zapytania</button></div>
+<p id="progress" role="status" aria-live="polite"></p>
+<div class="toolbar"><button id="download">Pobierz oceny JSON</button><label class="file">Wczytaj oceny <input id="import" type="file" accept="application/json,.json"></label></div>
+<p id="status" role="status" aria-live="polite"></p>
+<small>Skróty po wskazaniu zdjęcia: 0 / 1 / 2 — ocena, Delete — wyczyść, ← / → — kolejne zdjęcie.
+Zdjęcie bez oceny pozostaje nieocenione. Samo obejrzenie go nie oznacza oceny 0.</small>
+<div id="grid" aria-label="Zdjęcia do oceny"></div>
+<div class="toolbar"><button id="previousPage">Poprzednia strona</button><span id="page"></span><button id="nextPage">Następna strona</button></div>
+<script type="application/json" id="payload">__PAYLOAD__</script>
+<script>__SCRIPT__</script>
+</html>

@@ -1,5 +1,6 @@
 """Derived-index, resumption and source-boundary tests; no accelerator."""
 import importlib.util
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -43,8 +44,9 @@ class StoreTests(unittest.TestCase):
     def test_foreign_library_is_not_changed_even_by_pragmas(self):
         from photo_search.store import Store
         path = self.root / 'library.sqlite'
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db:
             db.execute('CREATE TABLE assets(id TEXT)')
+            db.commit()
         before = path.read_bytes()
         with self.assertRaises(ValueError):
             Store(path, 'source-a', {'model': 'test'}, 2)

@@ -50,6 +50,33 @@ After reviewing the **entire corpus for that query**, set `complete` to
 `true`; omitted photos then mean irrelevant. Keep incomplete queries false.
 Ground truth must be judged independently of a model's ranking.
 
+An offline review page avoids editing opaque photo ids by hand:
+
+```sh
+python3 bin/photo-search-benchmark review \
+  --corpus .tools/photo-search/icloud-pl-v1/corpus.json \
+  --judgments .tools/photo-search/icloud-pl-v1/judgments.json \
+  --output .tools/photo-search/icloud-pl-v1/review.html
+```
+
+Open that local HTML file in a browser. It embeds the private thumbnails;
+keep it with the private corpus. No web server, external script, model or
+network connection is needed. A content security policy blocks connections.
+Photos use a deterministic order per query, independent of model rankings;
+the page never shows model scores or names. Grade with buttons or 0/1/2,
+move between photos with the arrows and use Delete to clear a grade.
+Only 24 photos are mounted per page, including in narrow windows.
+
+Every photo must receive an explicit grade before the query can be
+confirmed complete. Viewing an image does not imply grade 0. Editing a
+grade invalidates its prior completion. Download the JSON to save progress;
+the page does not silently write the source file or save labels in browser
+storage. Import the downloaded JSON to resume; a different corpus or query
+text is rejected without replacing the current state. Legacy completed
+judgments retain their declared omitted-as-irrelevant meaning. Use the
+downloaded file as `--judgments` when scoring. Export never overwrites an
+existing review page and creates its HTML with mode 0600.
+
 A model runner must produce this format, with the exact corpus identity,
 query text and **all** photo ids in descending similarity order per query:
 
@@ -64,8 +91,8 @@ query text and **all** photo ids in descending similarity order per query:
 
 The example is shortened; actual files must contain all queries and photos.
 Record model/processor revisions, runtime versions, preprocessing, precision,
-backend and timing separately alongside the rankings. This tool does not yet
-provide a model inference runner.
+backend and timing separately alongside the rankings. The local inference
+runner is documented in [the full-encoder notes](photo-search-full-encoder.md).
 
 ```sh
 python3 bin/photo-search-benchmark evaluate \
@@ -155,6 +182,15 @@ quality, inference-speed or NPU-use result is claimed.
 
 The preparation/scoring contracts are exercised with synthetic data by
 `python3 -m unittest discover -s bin/tests -p test_photo_search_benchmark.py`.
+An optional real-browser check covers grading, page boundaries, completion,
+keyboard navigation, JSON export/import and rejection without state loss:
+
+```sh
+PINHOLE_TEST_CHROMIUM=/usr/bin/chromium python3 -m unittest discover \
+  -s bin/tests -p test_photo_search_review_browser.py
+```
+
+It uses synthetic thumbnails and an isolated temporary browser profile.
 
 ## Delivery checks on this Mac
 

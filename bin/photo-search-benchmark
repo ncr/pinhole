@@ -229,6 +229,10 @@ def main():
     score.add_argument("--rankings", type=Path, required=True)
     score.add_argument("--k", type=int, default=10)
     score.add_argument("--output", type=Path, required=True)
+    review = commands.add_parser("review", help="export a private offline HTML relevance review, without model rankings")
+    review.add_argument("--corpus", type=Path, required=True)
+    review.add_argument("--judgments", type=Path, required=True)
+    review.add_argument("--output", type=Path, required=True)
     probe = commands.add_parser("probe-ane", help="compile synthetic image-projection geometries; no model download or device access")
     probe.add_argument("--compiler", default="mil-hwxc")
     probe.add_argument("--output", type=Path, required=True)
@@ -236,6 +240,9 @@ def main():
     try:
         if args.command == "prepare":
             result = prepare(args.library, args.output, args.count, args.seed)
+        elif args.command == "review":
+            from photo_search.review import export_review
+            result = export_review(args.corpus, args.judgments, args.output, validate_corpus)
         elif args.command == "evaluate":
             if args.output.exists():
                 raise ValueError("output already exists")

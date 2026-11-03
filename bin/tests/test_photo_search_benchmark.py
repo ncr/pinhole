@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 import unittest
 
@@ -11,6 +12,7 @@ loader = importlib.machinery.SourceFileLoader("photo_search_benchmark", str(Path
 spec = importlib.util.spec_from_loader(loader.name, loader)
 benchmark = importlib.util.module_from_spec(spec)
 loader.exec_module(benchmark)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 class PhotoSearchBenchmarkTests(unittest.TestCase):
@@ -86,6 +88,44 @@ class PhotoSearchBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["macro"]["reciprocal_rank"], 1)
         import math
         self.assertAlmostEqual(result["macro"]["ndcg"], 3 / (3 + 1 / math.log2(3)))
+
+    def test_review_keeps_unjudged_photos_and_escapes_query_html(self):
+        from photo_search.review import export_review
+        import re
+        judgments, _, ids = self.ranking_fixture()
+        judgments["queries"][0].update(text='</script><script>bad()</script> __SCRIPT__',
+                                      complete=False, relevance={ids[0]: 0, ids[1]: 2})
+        benchmark.write_json(self.output / "judgments.json", judgments)
+        output = self.root / "review.html"
+        export_review(self.output / "corpus.json", self.output / "judgments.json", output, benchmark.validate_corpus)
+        html = output.read_text()
+        payload = json.loads(re.search(r'<script type="application/json" id="payload">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(payload["judgments"], judgments)
+        self.assertEqual(set(payload["orders"]["q"]), set(ids))
+        self.assertEqual(len(payload["images"]), len(ids))
+        self.assertNotIn("<script>bad()", html)
+        self.assertNotIn(str(self.library), html)
+        self.assertIn("connect-src 'none'", html)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("rankings", payload)
+        before = output.read_bytes()
+        with self.assertRaises(FileExistsError):
+            export_review(self.output / "corpus.json", self.output / "judgments.json", output, benchmark.validate_corpus)
+        self.assertEqual(output.read_bytes(), before)
+
+    def test_review_rejects_foreign_or_invalid_judgments_before_writing(self):
+        from photo_search.review import export_review
+        judgments, _, _ = self.ranking_fixture()
+        for change in [lambda x: x.update(corpus_id="foreign"),
+                       lambda x: x["queries"][0].update(relevance={"other": 2}),
+                       lambda x: x["queries"][0].update(complete=1),
+                       lambda x: x["queries"].append(x["queries"][0])]:
+            value = json.loads(json.dumps(judgments)); change(value)
+            benchmark.write_json(self.output / "judgments.json", value)
+            output = self.root / "rejected.html"
+            with self.assertRaises(ValueError):
+                export_review(self.output / "corpus.json", self.output / "judgments.json", output, benchmark.validate_corpus)
+            self.assertFalse(output.exists())
 
     def test_unjudged_and_no_positive_queries_do_not_invent_quality(self):
         judgments, _, _ = self.ranking_fixture()
