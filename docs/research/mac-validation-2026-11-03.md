@@ -93,3 +93,27 @@ installation. Package `xorg-server-xvfb 21.1.25-2`, SHA-256
 `9ff2d843b83dd61bf82746f3c675ca64f0d7ffa8c6e9b23281c005c83aedba7d`,
 matched the trusted local pacman sync database. The temporary displays used
 private Xauthority files and disabled TCP listening.
+
+## Orca follow-up, 4 November 2026
+
+Orca 51.1 and its dependencies were extracted under `.tools` after their
+SHA-256 hashes matched the local pacman sync database. The final test used
+Xvfb with XCB, private Pinhole and Orca profiles, and an isolated D-Bus
+session with a manually started AT-SPI bus. The app opened a fixture
+library and used a local stand-in for the photo service.
+
+Native X11 key events opened Settings with Tab, moved from Sources to
+Photos, returned with Shift+Tab and selected section tabs with Right.
+The workshop opened through its AT-SPI button action. Ctrl+F focused the
+document search and Escape returned to Settings. The Photo order shortcut
+focused the Date taken radio button, Down moved to Date added, and Escape
+closed the menu. The Orca debug trace showed generated names and roles
+for the section tabs, workshop dialog and radio buttons.
+
+This covers focus and the screen reader's generated announcements on
+X11. The test used silent output. Speech playback, braille hardware and
+Orca on native Wayland remain untested. Qt's direct key injection failed
+its immediate second-Tab assertion with Orca present. The native X11
+input passed that step with Orca and the full Qt self-test passed on the
+same private AT-SPI setup with the reader absent. The evidence for this
+Orca check comes from native input and the reader's debug trace.
