@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use pinhole_core::add::{Added, Addition};
 use pinhole_core::db::Index;
 use pinhole_core::render::{MEDIUM_EDGE, THUMB_EDGE};
-use pinhole_core::source::{Asset, Body, FetchError, Health, Kind, Listing, Rendition, Source, Stored, Ticket, Want};
+use pinhole_core::source::{Asset, Body, FetchError, Health, Kind, Listing, Location, Rendition, Source, Stored, Ticket, Want};
 
 /// Assets put into the index at a time while listing: few enough that
 /// describing them (EXIF, ffprobe) takes well under a second, so a listing
@@ -335,14 +335,14 @@ impl FolderSource {
         let f = &entry.file;
         let path = self.root.join(&f.rel);
         let modified_ms = (f.modified_ns / 1_000_000) as i64;
-        let (taken, duration, orientation, has_location) = match f.media {
+        let (taken, duration, orientation, location) = match f.media {
             Media::Photo => {
                 let exif = read_exif(&path);
-                (exif.taken, None, exif.orientation, exif.has_location)
+                (exif.taken, None, exif.orientation, exif.location)
             }
             Media::Video => {
                 let probe = probe_video(&path)?;
-                (probe.taken, probe.duration, None, false)
+                (probe.taken, probe.duration, None, probe.location)
             }
         };
         let key = f.key();
@@ -394,7 +394,8 @@ impl FolderSource {
             favorite: false,
             duration,
             orientation,
-            has_location,
+            has_location: location.is_some(),
+            location,
             size: Some(f.size as i64),
             effect: None,
             renditions,
@@ -703,7 +704,7 @@ impl Source for FolderSource {
 struct Exif {
     taken: Option<i64>,
     orientation: Option<i64>,
-    has_location: bool,
+    location: Option<Location>,
 }
 
 /// When a photo was taken (the camera's local time, with its offset when
@@ -722,8 +723,22 @@ fn read_exif(path: &Path) -> Exif {
         .or_else(|| text(exif::Tag::DateTime))
         .and_then(|t| exif_time(&t, text(exif::Tag::OffsetTimeOriginal).as_deref()));
     let orientation = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY).and_then(|f| f.value.get_uint(0)).map(i64::from);
-    let has_location = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY).is_some();
-    Exif { taken, orientation, has_location }
+    let axis = |tag, direction, positive, negative| {
+        let exif::Value::Rational(dms) = &exif.get_field(tag, exif::In::PRIMARY)?.value else {
+            return None;
+        };
+        let [degrees, minutes, seconds] = dms.as_slice() else { return None };
+        let sign = match text(direction)?.as_str() {
+            value if value == positive => 1.0,
+            value if value == negative => -1.0,
+            _ => return None,
+        };
+        Some(sign * (degrees.to_f64() + minutes.to_f64() / 60.0 + seconds.to_f64() / 3600.0))
+    };
+    let location = axis(exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef, "N", "S")
+        .zip(axis(exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef, "E", "W"))
+        .and_then(|(lat, lon)| Location::new(lat, lon));
+    Exif { taken, orientation, location }
 }
 
 /// "2024-05-01 12:34:56" (as kamadak-exif shows EXIF's 2024:05:01
@@ -745,6 +760,7 @@ fn exif_time(text: &str, offset: Option<&str>) -> Option<i64> {
 struct Probe {
     taken: Option<i64>,
     duration: Option<f64>,
+    location: Option<Location>,
 }
 
 /// A video's length and when it was recorded, from ffprobe: Apple's own
@@ -777,12 +793,37 @@ fn probe_video(path: &Path) -> Result<Probe> {
             chrono::DateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%z").ok()
         }))
         .map(|t| t.timestamp_millis());
-    Ok(Probe { taken, duration })
+    let location = ["com.apple.quicktime.location.ISO6709", "location"]
+        .iter().filter_map(|k| tags[*k].as_str()).find_map(video_location);
+    Ok(Probe { taken, duration, location })
+}
+
+// The QuickTime/MP4 tags produced by ffprobe, e.g. "+52.2319+021.0067+100/".
+fn video_location(tag: &str) -> Option<Location> {
+    let signed = |s: &str| matches!(s.as_bytes().first(), Some(b'+' | b'-'));
+    if !signed(tag) {
+        return None;
+    }
+    let end = |s: &str| s.char_indices().skip(1)
+        .find(|&(_, c)| matches!(c, '+' | '-' | '/')).map_or(s.len(), |(i, _)| i);
+    let (lat, rest) = tag.split_at(end(tag));
+    if !signed(rest) {
+        return None;
+    }
+    Location::new(lat.parse().ok()?, rest[..end(rest)].parse().ok()?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_video_coordinates_with_signs_and_optional_altitude() {
+        assert_eq!(video_location("-33.86+151.21+32/").map(Location::degrees), Some((-33.86, 151.21)));
+        assert_eq!(video_location("+52.23-021.00/").map(Location::degrees), Some((52.23, -21.0)));
+        assert!(video_location("+92.0+23.0/").is_none());
+        assert!(video_location("+52.23/").is_none());
+    }
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("pinhole-folder-{name}-{}", std::process::id()));

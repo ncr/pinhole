@@ -106,7 +106,7 @@ among them. What only iCloud means is in iCloud's own tables:
 
 ```text
 assets          id, filename, item_type, asset_date, added_date, favorite,
-                duration, orientation, has_location, is_video, is_live,
+                duration, orientation, has_location, latitude, longitude, is_video, is_live,
                 live_effect, size, thumb_path, thumb_w, thumb_h, avg_color
 renditions      asset_id, kind (thumb|medium|full|original|video|live|
                 loop|bounce|long_exposure),

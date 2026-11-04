@@ -151,6 +151,9 @@ class Checks:
                                            'QSG_RHI_BACKEND': 'opengl'}
             self.run('grid-render', ['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24',
                                     'app/build/tests/pinhole_tests', 'anOversizedGridCellUpgradesAPreviewToTheFullPhoto'], env=env)
+            places = self.output / 'places'
+            places.mkdir(exist_ok=True)
+            self.run('visual-places', ['app/bin/test-places', str(places)], env=env, timeout=45)
             for mode in ('guide', 'accessibility', 'lazyplugins', 'querylimits', 'wheelzoom'):
                 out = self.output / mode
                 out.mkdir(exist_ok=True)

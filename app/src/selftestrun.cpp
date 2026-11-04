@@ -30,6 +30,7 @@
 #include <limits>
 #include <vector>
 
+void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &folder);
 void runQuerySelfTest(QQuickWindow *window);
 void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder);
 
@@ -52,6 +53,10 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
     // Applies to the fast startup/handbook checks too, before they return.
     if (const QStringList size = qEnvironmentVariable("PINHOLE_SELFTEST_SIZE").split('x'); size.size() == 2)
         context.window->resize(size[0].toInt(), size[1].toInt());
+    if (name == QLatin1String("places")) {
+        runPlacesSelfTest(context.window, &context.viewer, arg);
+        return true;
+    }
     if (name == QLatin1String("accessibility")) {
         runAccessibilitySelfTest(context.window, arg);
         return true;

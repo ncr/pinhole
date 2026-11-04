@@ -27,7 +27,7 @@ quoted() { printf "'%s'" "$(printf %s "$1" | sed "s/'/''/g")"; }
 case "${1:-}" in
 index)
   db="$2" id="$3" cache="$4"
-  row=$(sqlite3 -readonly -json "$db" "SELECT a.size, a.has_location AS location, a.duration, a.orientation,
+  row=$(sqlite3 -readonly -json "$db" "SELECT a.*, a.has_location AS location,
       a.item_type AS type, r.width, r.height, r.file_type AS fileType, r.key
     FROM assets a LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'original'
     WHERE a.id = $(quoted "$id")" | tr -d '\n')

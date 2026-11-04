@@ -1,5 +1,6 @@
 import QtQml
 import "../Details.js" as Details
+import "../Places.js" as Places
 
 // What check runs: each file's facts as the panel has them, against what
 // it should be.
@@ -28,7 +29,7 @@ QtObject {
         expect("2 s", Details.shutterText(2), "2 s")
         expect("59.94 fps", Details.fpsText(60000 / 1001), "60 fps")
         expect("clock", Details.clock(65.4), "1:05")
-        // In the language's way; a link's as links have them.
+        // In the language's way.
         const polish = Qt.locale("pl_PL"), english = Qt.locale("en_GB")
         expect("0.8 s in Polish", Details.shutterText(0.8, polish), "0,8 s")
         expect("24.5 MP in Polish", Details.decimal(24.48, 1, polish), "24,5")
@@ -37,7 +38,13 @@ QtObject {
         const place = { latitude: 49.964712, longitude: -18.5 }
         expect("where, in Polish", Details.coordinates(place, polish), "49,96471° N; 18,5° W")
         expect("where, in English", Details.coordinates(place, english), "49.96471° N, 18.5° W")
-        expect("the map's link", Details.mapUrl(place).indexOf("mlat=49.964712&mlon=-18.5") >= 0, true)
+        const west = Places.point("west", 0, -179.99, 100)
+        const east = Places.point("east", 0, 179.99, 200)
+        const view = Places.fit([west, east], 500, 400)
+        expect("near the date line", Math.abs(Places.delta(view.x, 0)) < 0.00001, true)
+        expect("merged on the overview", Places.clusters([west, east], view.x, view.y, 8, 500, 400).length, 1)
+        expect("separate on zoom", Places.clusters([west, east], view.x, view.y, 14, 500, 400).length, 2)
+        expect("invalid coordinates", Places.point("bad", 91, 0, 0), null)
 
         for (let n = 1; n <= count; ++n) {
             const want = text(work + "/" + n + ".want").split("\n")

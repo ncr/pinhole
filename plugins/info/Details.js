@@ -19,6 +19,10 @@ function fromIndex(row) {
     }
     facts.format = formatOf(row.fileType || row.type || "")
     facts.hasLocation = row.location === 1
+    if (typeof row.latitude === "number" && typeof row.longitude === "number") {
+        facts.latitude = row.latitude
+        facts.longitude = row.longitude
+    }
     if (row.duration > 0)
         facts.duration = row.duration
     return facts
@@ -227,6 +231,15 @@ function merged(first, later) {
     for (const key in later)
         if (later[key] !== undefined && later[key] !== "")
             all[key] = later[key]
+    // The catalog reflects location edits made in Photos; the original
+    // can still contain the coordinates from the camera.
+    if (first.latitude !== undefined) {
+        all.latitude = first.latitude
+        all.longitude = first.longitude
+        if (Math.abs(first.latitude - later.latitude) > 0.0001
+                || Math.abs(first.longitude - later.longitude) > 0.0001)
+            delete all.altitude
+    }
     return all
 }
 
@@ -262,9 +275,4 @@ function coordinates(facts, locale) {
     // 18,12345° E.
     const apart = decimal(0.5, 1, locale).indexOf(",") >= 0 ? "; " : ", "
     return one(facts.latitude, "N", "S") + apart + one(facts.longitude, "E", "W")
-}
-// OpenStreetMap at the place, a pin on it.
-function mapUrl(facts) {
-    const lat = decimal(facts.latitude, 6), lon = decimal(facts.longitude, 6)
-    return "https://www.openstreetmap.org/?mlat=" + lat + "&mlon=" + lon + "#map=16/" + lat + "/" + lon
 }

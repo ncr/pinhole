@@ -1,0 +1,38 @@
+#!/bin/sh
+# An isolated, geotagged library; no account, clipboard, or external map requests.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+export HOME="$scratch/home"
+export XDG_CONFIG_HOME="$scratch/config" XDG_DATA_HOME="$scratch/data" XDG_STATE_HOME="$scratch/state"
+export XDG_CACHE_HOME="$scratch/cache" XDG_RUNTIME_DIR="$scratch/run" XDG_PICTURES_DIR="$scratch/pictures"
+export PINHOLE_BUILTIN_PLUGINS="$ROOT/../plugins"
+export PINHOLE_SOCKET="$scratch/run/pinhole.sock"
+export QT_QPA_PLATFORM=xcb QT_QPA_PLATFORMTHEME=generic QT_FORCE_STDERR_LOGGING=1
+# Loopback without a tile server exercises the offline map. To check
+# background loading too, point PINHOLE_MAP_TILES at a local XYZ server.
+export PINHOLE_MAP_TILES="${PINHOLE_MAP_TILES:-http://127.0.0.1:1/}"
+export PINHOLE_SELFTEST="places${1:+:$1}"
+export PINHOLE_SELFTEST_SIZE="${PINHOLE_SELFTEST_SIZE:-850x620}"
+mkdir -p "$HOME" "$XDG_PICTURES_DIR" "$scratch/library/thumbs"
+install -d -m 700 "$XDG_RUNTIME_DIR"
+magick -size 480x320 gradient:'#407785-#afcc99' "$scratch/library/thumbs/sample.jpg"
+sqlite3 "$scratch/library/library.sqlite" <<'SQL'
+CREATE TABLE assets (id TEXT PRIMARY KEY, item_type TEXT, filename TEXT, asset_date INTEGER,
+    added_date INTEGER, favorite INTEGER, duration REAL, orientation INTEGER, has_location INTEGER,
+    is_video INTEGER, is_live INTEGER, live_effect TEXT, size INTEGER, thumb_path TEXT,
+    thumb_w INTEGER, thumb_h INTEGER, avg_color INTEGER, latitude REAL, longitude REAL);
+CREATE TABLE renditions (asset_id TEXT, kind TEXT, name TEXT, key TEXT, width INTEGER,
+    height INTEGER, size INTEGER, file_type TEXT, PRIMARY KEY (asset_id, kind));
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+INSERT INTO meta VALUES ('source', 'fake');
+INSERT INTO assets VALUES
+    ('a', 'public.jpeg', 'Warsaw I.jpg', 1695700000000, 1695700000000, 0, NULL, 1, 1,
+        0, 0, NULL, 100, 'thumbs/sample.jpg', 480, 320, 0, 52.23, 21.01),
+    ('b', 'public.jpeg', 'Warsaw II.jpg', 1695800000000, 1695800000000, 0, NULL, 1, 1,
+        0, 0, NULL, 100, 'thumbs/sample.jpg', 480, 320, 0, 52.25, 21.02),
+    ('c', 'public.jpeg', 'Lisbon.jpg', 1695900000000, 1695900000000, 0, NULL, 1, 1,
+        0, 0, NULL, 100, 'thumbs/sample.jpg', 480, 320, 0, 38.72, -9.14);
+SQL
+xvfb-run -a "$ROOT/build/pinhole" --library "$scratch/library"

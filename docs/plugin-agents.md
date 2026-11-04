@@ -56,6 +56,8 @@ it is not a substitute for running the interaction in the app.
   query when closing its view; a library reload rejects it with `cancelled`.
   Ignore cancellation in the error UI. SQL `NULL` returns as an empty string;
   use `IS NULL` in SQL when missing and empty values must be distinguished.
+  For a map, use the nullable catalog coordinates (schema 2) and page by
+  photo id. `has_location` alone does not guarantee coordinates.
 - Persist photo ids. Library positions are capture-date order, independent
   of the main grid's Automatic/Date taken/Date added timeline. Reloads move
   positions. Use `openPhoto` and `reveal` to navigate. From a covering search

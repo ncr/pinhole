@@ -131,6 +131,24 @@ pub struct Rendition {
     pub file_type: Option<String>,
 }
 
+/// A validated pair of WGS 84 coordinates in signed decimal degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Location {
+    latitude: f64,
+    longitude: f64,
+}
+
+impl Location {
+    pub fn new(latitude: f64, longitude: f64) -> Option<Self> {
+        ((-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude))
+            .then_some(Self { latitude, longitude })
+    }
+
+    pub fn degrees(self) -> (f64, f64) {
+        (self.latitude, self.longitude)
+    }
+}
+
 /// One photo or video in the library, as every source describes it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Asset {
@@ -151,6 +169,7 @@ pub struct Asset {
     /// EXIF's, 1 to 8.
     pub orientation: Option<i64>,
     pub has_location: bool,
+    pub location: Option<Location>,
     /// The original's, in bytes.
     pub size: Option<i64>,
     /// A Live Photo's, as set on the iPhone.

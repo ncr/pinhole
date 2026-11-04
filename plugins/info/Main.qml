@@ -1,6 +1,7 @@
 import QtQuick
 import Pinhole.Plugin
 import "Details.js" as Details
+import "Places.js" as Geo
 
 // Info: a photo's details in a small panel over it, on I in the viewer,
 // staying as one goes from photo to photo. What the index knows shows at
@@ -303,7 +304,7 @@ PinholePlugin {
     }
     // The photo shown's HDR (API 4): {kind, headroom}, {} for SDR.
     readonly property var hdr: pinhole.viewer.hdr || ({})
-    readonly property bool hasPlace: facts.latitude !== undefined
+    readonly property bool hasPlace: Geo.point("", facts.latitude, facts.longitude, 0) !== null
     function placeText() {
         if (hasPlace)
             return Details.coordinates(facts, Qt.locale()) + (facts.altitude !== undefined ? " · " + Math.round(facts.altitude) + " m" : "")
@@ -321,12 +322,61 @@ PinholePlugin {
         [qsTr("Format"), formatText()],
         [qsTr("Location"), placeText()]
     ].filter(row => row[1] !== ""))
-    function openMap() {
-        if (hasPlace)
-            Qt.openUrlExternally(Details.mapUrl(facts))
+    property bool mapOpen: false
+    property bool mapReturning: false
+    property var mapFocus: null
+    covering: mapOpen && !mapReturning
+    holdSdr: covering
+
+    function openMap(photo) {
+        mapFocus = photo || null
+        mapReturning = false
+        mapOpen = true
+    }
+    function closeMap() {
+        mapOpen = false
+        mapReturning = false
+    }
+    function viewMapPhoto(id) {
+        if (pinhole.library.indexOf(id) < 0)
+            return
+        mapReturning = true
+        pinhole.openPhoto(id)
+    }
+    Loader {
+        id: mapLoader
+        anchors.fill: parent
+        active: plugin.mapOpen
+        visible: plugin.covering
+        sourceComponent: PhotoPlaces { owner: plugin }
+        onLoaded: item.start(plugin.mapFocus)
+    }
+    Connections {
+        target: plugin.pinhole.viewer
+        function onOpenChanged() {
+            if (!plugin.pinhole.viewer.open && plugin.mapReturning) {
+                if (plugin.pinhole.coveredBy === "" || plugin.pinhole.coveredBy === plugin.pinhole.id)
+                    plugin.mapReturning = false
+                else
+                    plugin.closeMap()
+            }
+        }
+    }
+    readonly property string mapSource: pinhole.library.key
+    onMapSourceChanged: closeMap()
+    Connections {
+        target: plugin.pinhole
+        function onDismissed() { plugin.closeMap() }
     }
 
     actions: [
+        PluginAction {
+            place: "grid"
+            text: qsTr("Map")
+            key: "M"
+            shown: pinhole.library.count > 0
+            onTriggered: plugin.openMap(null)
+        },
         PluginAction {
             id: infoAction
             place: "viewer"
@@ -337,6 +387,7 @@ PinholePlugin {
         }
     ]
     help: [
+        ["M", qsTr("Browse photos on the map")],
         ["I", qsTr("A photo's details")],
         ["W", qsTr("Where, on the map")],
         ["⇧ I", qsTr("A big video's details")]
@@ -423,7 +474,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Where"),
-            text: qsTr("A photo that knows where it was taken shows the place, and W opens it on OpenStreetMap."),
+            text: qsTr("W shows this photo and nearby photos on the map."),
             open: () => plugin.placeStep(),
             action: mapLight
         }
@@ -447,7 +498,7 @@ PinholePlugin {
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.92)
         border.width: 1
         border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
-        visible: opacity > 0
+        visible: opacity > 0 && !plugin.covering
         opacity: plugin.showing ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
 
@@ -509,7 +560,7 @@ PinholePlugin {
                     text: qsTr("Open map")
                     key: "W"
                     keyLayer: "viewer"
-                    onTapped: plugin.openMap()
+                    onTapped: plugin.openMap(Geo.point(plugin.photoId, plugin.facts.latitude, plugin.facts.longitude, plugin.item.date))
                 }
                 // A long video's original is a big download for a few
                 // lines: only when asked.

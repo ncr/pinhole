@@ -81,7 +81,7 @@ fn create(db: &Connection) -> Result<()> {
 /// plugins' helpers) may read a library of a later schema as long as the
 /// columns they read mean what they did; a writer never writes one later
 /// than its own. Each step up is a step in `migrate`.
-pub const SCHEMA: i64 = 1;
+pub const SCHEMA: i64 = 2;
 
 /// Bring a library up to `SCHEMA`, one step at a time, each in a
 /// transaction with the version it reaches.
@@ -100,6 +100,17 @@ fn migrate(db: &Connection) -> Result<()> {
             )?;
         }
         tx.execute_batch("PRAGMA user_version = 1")?;
+        tx.commit()?;
+    }
+    if version < 2 {
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE assets ADD COLUMN latitude REAL;
+             ALTER TABLE assets ADD COLUMN longitude REAL;
+             CREATE INDEX assets_with_location ON assets(id) WHERE latitude IS NOT NULL;
+             DELETE FROM meta WHERE key = 'change_token';
+             PRAGMA user_version = 2;",
+        )?;
         tx.commit()?;
     }
     Ok(())
@@ -174,7 +185,7 @@ impl<'a> Index<'a> {
         let tx = self.conn.transaction()?;
         {
             let mut before = tx.prepare_cached(
-                "SELECT a.favorite, a.asset_date, r.key, a.live_effect FROM assets a
+                "SELECT a.favorite, a.asset_date, r.key, a.live_effect, a.latitude, a.longitude, a.has_location FROM assets a
                  LEFT JOIN renditions r ON r.asset_id = a.id AND r.kind = 'thumb' WHERE a.id = ?1",
             )?;
             // An update in place, not a replace: the thumbnail columns
@@ -182,14 +193,15 @@ impl<'a> Index<'a> {
             let mut asset_stmt = tx.prepare_cached(
                 "INSERT INTO assets
                  (id, item_type, filename, asset_date, added_date, favorite, duration, orientation,
-                  has_location, is_video, is_live, size, live_effect)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                  has_location, is_video, is_live, size, live_effect, latitude, longitude)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT(id) DO UPDATE SET
                    item_type = excluded.item_type, filename = excluded.filename,
                    asset_date = excluded.asset_date, added_date = excluded.added_date, favorite = excluded.favorite,
                    duration = excluded.duration, orientation = excluded.orientation,
                    has_location = excluded.has_location, is_video = excluded.is_video, is_live = excluded.is_live,
-                   size = excluded.size, live_effect = excluded.live_effect",
+                   size = excluded.size, live_effect = excluded.live_effect,
+                   latitude = excluded.latitude, longitude = excluded.longitude",
             )?;
             let mut stale_thumb = tx.prepare_cached("UPDATE assets SET thumb_path = NULL WHERE id = ?1")?;
             let mut clear = tx.prepare_cached("DELETE FROM renditions WHERE asset_id = ?1")?;
@@ -198,19 +210,27 @@ impl<'a> Index<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for a in assets {
-                let old: Option<(bool, Option<i64>, Option<String>, Option<String>)> =
-                    before.query_row([&a.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?;
+                let old = before.query_row([&a.id], |r| {
+                    Ok((r.get::<_, bool>(0)?, r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?,
+                        (r.get::<_, Option<f64>>(4)?, r.get::<_, Option<f64>>(5)?), r.get::<_, bool>(6)?))
+                }).optional()?;
+                let (latitude, longitude) = a.location.map(|p| p.degrees())
+                    .map_or((None, None), |(lat, lon)| (Some(lat), Some(lon)));
+                let has_location = a.has_location || a.location.is_some();
                 let effect = a.effect.map(|e| e.name());
                 let thumb = a.rendition(crate::source::Want::Thumb).map(|r| r.key.clone());
                 match &old {
                     None => self.changes.added.push(a.id.clone()),
-                    Some((favorite, date, old_thumb, old_effect)) => {
+                    Some((favorite, date, old_thumb, old_effect, old_location, old_has_location)) => {
                         let reason = if *favorite != a.favorite {
                             "favourite"
                         } else if *old_thumb != thumb || old_effect.as_deref() != effect {
                             "edited"
                         } else if *date != a.taken {
                             "date"
+                        } else if *old_location != (latitude, longitude) || *old_has_location != has_location {
+                            "location"
                         } else {
                             "other"
                         };
@@ -221,7 +241,7 @@ impl<'a> Index<'a> {
                 self.seen.insert(a.id.clone());
                 asset_stmt.execute(params![
                     a.id, a.item_type, a.filename, a.taken, a.added, a.favorite, a.duration, a.orientation,
-                    a.has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect,
+                    has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect, latitude, longitude,
                 ])?;
                 // An edit gives the photo a new thumbnail: forget the old one.
                 if old.as_ref().is_some_and(|o| o.2.is_some() && o.2 != thumb) {
@@ -293,6 +313,7 @@ mod tests {
             duration: None,
             orientation: Some(1),
             has_location: false,
+            location: None,
             size: Some(10),
             effect: None,
             renditions: vec![Rendition {
@@ -368,6 +389,30 @@ mod tests {
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, SCHEMA);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn location_only_changes_notify_readers_and_can_be_removed() {
+        use crate::source::Location;
+        let mut conn = Connection::open_in_memory().unwrap();
+        create(&conn).unwrap();
+        let mut photo = asset("a", false, "k1");
+        Index::new(&mut conn).put(&[photo.clone()]).unwrap();
+        for point in [Location::new(0.0, -22.5), None] {
+            photo.location = point;
+            let mut index = Index::new(&mut conn);
+            index.put(&[photo.clone()]).unwrap();
+            assert!(index.changes.visible());
+            assert_eq!(index.changes.reasons.get("location"), Some(&1));
+            let stored = conn.query_row("SELECT latitude, longitude, has_location FROM assets", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get::<_, bool>(2)?))
+            }).unwrap();
+            let expected = point.map_or((None, None, false), |p| {
+                let (lat, lon) = p.degrees();
+                (Some(lat), Some(lon), true)
+            });
+            assert_eq!(stored, expected);
+        }
     }
 
     #[test]

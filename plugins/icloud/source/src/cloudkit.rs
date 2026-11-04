@@ -40,7 +40,7 @@ pub const DESIRED_KEYS: &[&str] = &[
     "recordName", "recordType", "recordChangeTag", "masterRef",
     "assetDate", "addedDate", "duration", "timeZoneOffset",
     "assetSubtype", "assetSubtypeV2", "assetHDRType", "burstId", "burstFlags",
-    "locationEnc", "locationLatitude", "locationLongitude",
+    "locationEnc", "locationV2Enc", "locationLatitude", "locationLongitude",
     "vidComplDurValue", "vidComplDurScale",
 ];
 

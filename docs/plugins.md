@@ -627,7 +627,7 @@ one in-memory column is enough. The public catalog tables are:
 
 | Table | Columns |
 |---|---|
-| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color` |
+| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color` |
 | `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
 
 Dates are milliseconds since 1970, sizes are bytes, and flags are integers
@@ -640,6 +640,12 @@ you use `ORDER BY`; the grid's visual ordering is independent of this API.
 
 Inspect the installed schema with `query("PRAGMA table_info(assets)")` or
 `query("PRAGMA table_info(renditions)")` before using an optional column.
+Catalog schema 2 adds nullable `latitude` and `longitude`: a pair of signed
+WGS 84 decimal degrees. `has_location` can be true without a readable pair.
+For a map, page `SELECT id, latitude, longitude FROM assets WHERE latitude IS NOT NULL AND id > ? ORDER BY id LIMIT ?`
+using the last id from the previous page (omit the cursor condition on the
+first page). Keep locations and thumbnails local; loading a base map only
+needs tiles for its visible area.
 `query("PRAGMA user_version")` reads its schema version. Source-specific
 tables are private to their provider. Never write the database or change
 its connection settings from a UI plugin.

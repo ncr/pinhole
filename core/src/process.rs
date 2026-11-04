@@ -1552,6 +1552,12 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
     if made.iter().any(|r| r.key.starts_with(&format!("{prefix}m~"))) && !seen.contains(&Want::Original) {
         return Err(wrong("one made needs an original to be made from".into()));
     }
+    let location = match (&v["latitude"], &v["longitude"]) {
+        (Value::Null, Value::Null) => None,
+        (lat, lon) => Some(lat.as_f64().zip(lon.as_f64())
+            .and_then(|(lat, lon)| crate::source::Location::new(lat, lon))
+            .ok_or_else(|| wrong("latitude and longitude must be a pair in decimal degrees".into()))?),
+    };
     Ok(Asset {
         id: id.to_owned(),
         filename: text(v, "filename", 1024).map_err(wrong)?,
@@ -1563,6 +1569,7 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
         duration,
         orientation: whole(v, "orientation", 1..=8).map_err(wrong)?,
         has_location: flag(v, "has_location").map_err(wrong)?,
+        location,
         size: whole(v, "size", 0..=i64::MAX).map_err(wrong)?,
         effect,
         renditions: made,
