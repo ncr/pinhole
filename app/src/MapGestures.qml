@@ -4,29 +4,39 @@ import QtQuick
 // in viewport pixels and zoom around the pointer or touchpad centroid.
 Item {
     id: gestures
+    default property alias markers: markerLayer.data
     signal pan(real dx, real dy)
+    signal backgroundTapped()
+    signal dragStarted()
     signal zoomAt(real x, real y, real amount)
 
-    DragHandler {
-        target: null
-        acceptedButtons: Qt.LeftButton
-        maximumPointCount: 1
-        onTranslationChanged: delta => gestures.pan(delta.x, delta.y)
+    Item {
+        id: markerLayer
+        anchors.fill: parent
     }
-    WheelHandler {
-        target: null
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-        onWheel: event => {
-            if (!(event.modifiers & Qt.ControlModifier)
-                    && (event.pixelDelta.x !== 0 || event.pixelDelta.y !== 0)) {
-                gestures.pan(event.pixelDelta.x, event.pixelDelta.y)
-            } else {
-                const dy = event.angleDelta.y || event.pixelDelta.y
-                if (dy)
-                    gestures.zoomAt(event.x, event.y, dy / 120 * 0.65)
-            }
-            event.accepted = true
+
+    HoverHandler { cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
+
+    TapHandler {
+        onTapped: point => {
+            const at = point.position
+            if (!markerLayer.childAt(at.x, at.y))
+                gestures.backgroundTapped()
         }
+        onDoubleTapped: point => {
+            const at = point.position
+            if (!markerLayer.childAt(at.x, at.y))
+                gestures.zoomAt(at.x, at.y, 1)
+        }
+    }
+
+    DragHandler {
+        id: drag
+        target: null
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        maximumPointCount: 1
+        onActiveChanged: if (active) gestures.dragStarted()
+        onTranslationChanged: delta => gestures.pan(delta.x, delta.y)
     }
     PinchHandler {
         target: null

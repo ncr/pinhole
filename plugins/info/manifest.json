@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 6,
+  "api": 8,
   "id": "pinhole.info",
   "name": "Info",
   "version": "1.0.0",

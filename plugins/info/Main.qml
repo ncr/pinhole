@@ -341,7 +341,7 @@ PinholePlugin {
         if (pinhole.library.indexOf(id) < 0)
             return
         mapReturning = true
-        pinhole.openPhoto(id)
+        pinhole.openPhotoDirect(id)
     }
     Loader {
         id: mapLoader

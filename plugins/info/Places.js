@@ -78,3 +78,14 @@ function clusters(points, cx, cy, zoom, width, height) {
     }
     return groups
 }
+
+// Reuse the delegates while panning through the same set of places.
+function sameGroups(before, after) {
+    return before.length === after.length && before.every((g, i) => {
+        const other = after[i]
+        return g.x === other.x && g.y === other.y && g.cover.id === other.cover.id
+            && g.points.length === other.points.length
+            && g.points.every((p, j) => p.id === other.points[j].id
+                && p.x === other.points[j].x && p.y === other.points[j].y && p.date === other.points[j].date)
+    })
+}

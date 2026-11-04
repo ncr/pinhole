@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QImage>
 #include <QNetworkAccessManager>
+#include <QPointer>
 #include <QQuickPaintedItem>
 #include <QTimer>
 #include <QUrl>
@@ -41,4 +42,22 @@ private:
     QCache<QString, QImage> m_images{192};
     qreal m_x = 0.5, m_y = 0.5, m_zoom = 1;
     bool m_unavailable = false;
+};
+
+// A map has two scroll axes. Read the window's wheel events before Qt Quick
+// discards updates whose angle delta is empty but whose pixel delta is not.
+class MapWheel : public QQuickItem {
+    Q_OBJECT
+public:
+    explicit MapWheel(QQuickItem *parent = nullptr);
+
+signals:
+    void pan(qreal dx, qreal dy);
+    void zoomAt(qreal x, qreal y, qreal amount);
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
+private:
+    QPointer<QQuickWindow> m_window;
 };

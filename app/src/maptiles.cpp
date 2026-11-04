@@ -7,8 +7,10 @@
 #include <QNetworkDiskCache>
 #include <QNetworkReply>
 #include <QPainter>
+#include <QQuickWindow>
 #include <QSet>
 #include <QStandardPaths>
+#include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
 
@@ -36,7 +38,7 @@ MapTiles::MapTiles(QQuickItem *parent) : QQuickPaintedItem(parent) {
         delete disk;
     }
     m_delay.setSingleShot(true);
-    m_delay.setInterval(90);
+    m_delay.setInterval(120);
     connect(&m_delay, &QTimer::timeout, this, &MapTiles::loadVisible);
     connect(this, &MapTiles::viewChanged, this, &MapTiles::schedule);
     connect(this, &QQuickItem::widthChanged, this, &MapTiles::schedule);
@@ -84,14 +86,48 @@ void MapTiles::paint(QPainter *painter) {
 
 void MapTiles::schedule() {
     update();
-    // During a gesture paint immediately, but wait for the viewport to
-    // settle before requesting the next tiles.
-    m_delay.start();
+    // Repaint immediately and throttle requests to the latest viewport.
+    // A long drag can still fill in the map before the gesture ends.
+    if (!m_delay.isActive())
+        m_delay.start();
 }
 
 void MapTiles::retry() {
     m_failed.clear();
     loadVisible();
+}
+
+MapWheel::MapWheel(QQuickItem *parent) : QQuickItem(parent) {
+    connect(this, &QQuickItem::windowChanged, this, [this](QQuickWindow *window) {
+        if (m_window)
+            m_window->removeEventFilter(this);
+        m_window = window;
+        if (m_window)
+            m_window->installEventFilter(this);
+    });
+}
+
+bool MapWheel::eventFilter(QObject *watched, QEvent *event) {
+    if (watched != m_window || event->type() != QEvent::Wheel || !isVisible() || !isEnabled())
+        return false;
+    const auto *wheel = static_cast<QWheelEvent *>(event);
+    const auto at = mapFromScene(wheel->position());
+    if (!contains(at))
+        return false;
+    const QPoint pixels = wheel->pixelDelta(), angle = wheel->angleDelta();
+    const bool touchpad = wheel->phase() != Qt::NoScrollPhase
+        || wheel->pointingDevice()->type() == QInputDevice::DeviceType::TouchPad;
+    if (touchpad && !(wheel->modifiers() & Qt::ControlModifier)) {
+        const QPointF delta = pixels.isNull() ? QPointF(angle) / 8 : QPointF(pixels);
+        if (!delta.isNull())
+            emit pan(delta.x(), delta.y());
+    } else if (const int dy = angle.y() ? angle.y() : pixels.y()) {
+        emit zoomAt(at.x(), at.y(), dy / 120.0 * 0.65);
+    } else if (angle.x()) {
+        emit pan(angle.x() / 2.0, 0);
+    }
+    event->accept();
+    return true;
 }
 
 void MapTiles::loadVisible() {

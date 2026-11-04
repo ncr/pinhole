@@ -646,6 +646,7 @@ QJsonObject Plugins::unmoved(QJsonObject config) const {
 void Plugins::registerTypes() {
     // Used only by the bundled Info plugin.
     qmlRegisterType<MapTiles>("Pinhole.Internal", 1, 0, "MapTiles");
+    qmlRegisterType<MapWheel>("Pinhole.Internal", 1, 0, "MapWheel");
     qmlRegisterType(QUrl(QStringLiteral("qrc:/MapGestures.qml")), "Pinhole.Internal", 1, 0, "MapGestures");
     for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner",
                              "Toggle", "FieldInput", "ScrollList", "ScrollGrid", "ScrollArea", "PinchZoom", "Panel", "Card",

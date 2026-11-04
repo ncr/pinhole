@@ -10,140 +10,286 @@
 #include <qpa/qwindowsysteminterface.h>
 
 #include <cstdio>
+#include <functional>
 #include <memory>
 
 namespace {
-void press(QQuickWindow *window, int key) {
-    using QWS = QWindowSystemInterface;
-    QWS::handleKeyEvent<QWS::SynchronousDelivery>(window, QEvent::KeyPress, key, Qt::NoModifier);
-    QWS::handleKeyEvent<QWS::SynchronousDelivery>(window, QEvent::KeyRelease, key, Qt::NoModifier);
+using QWS = QWindowSystemInterface;
+using Delivery = QWS::SynchronousDelivery;
+
+void press(QQuickWindow *window, int key, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+    QWS::handleKeyEvent<Delivery>(window, QEvent::KeyPress, key, mods);
+    QWS::handleKeyEvent<Delivery>(window, QEvent::KeyRelease, key, mods);
 }
 
-void click(QQuickWindow *window, QQuickItem *item) {
-    using QWS = QWindowSystemInterface;
-    const auto at = item->mapToScene(QPointF(item->width(), item->height()) / 2);
-    const auto global = window->mapToGlobal(at.toPoint());
-    QWS::handleMouseEvent<QWS::SynchronousDelivery>(window, at, global,
-        Qt::LeftButton, Qt::LeftButton, QEvent::MouseButtonPress);
-    QWS::handleMouseEvent<QWS::SynchronousDelivery>(window, at, global,
-        Qt::NoButton, Qt::LeftButton, QEvent::MouseButtonRelease);
+QPointF center(QQuickItem *item) {
+    return item->mapToScene(QPointF(item->width(), item->height()) / 2);
+}
+
+void pointer(QQuickWindow *window, const QPointingDevice *device, QPointF at,
+             Qt::MouseButtons state, Qt::MouseButton button, QEvent::Type type) {
+    QWS::handleMouseEvent<Delivery>(window, device, at, window->mapToGlobal(at.toPoint()), state, button, type);
+}
+
+void click(QQuickWindow *window, const QPointingDevice *device, QQuickItem *item,
+           Qt::MouseButton button = Qt::LeftButton) {
+    const auto at = center(item);
+    pointer(window, device, at, button, button, QEvent::MouseButtonPress);
+    pointer(window, device, at, Qt::NoButton, button, QEvent::MouseButtonRelease);
+}
+
+QQuickItem *findItem(QQuickItem *root, const std::function<bool(QQuickItem *)> &matches) {
+    if (!root || !root->isVisible())
+        return nullptr;
+    if (matches(root))
+        return root;
+    for (auto *child : root->childItems())
+        if (auto *found = findItem(child, matches))
+            return found;
+    return nullptr;
 }
 
 QQuickItem *named(QQuickItem *root, const QString &name) {
-    if (!root) return nullptr;
-    if (root->objectName() == name) return root;
-    for (auto *child : root->childItems())
-        if (auto *found = named(child, name)) return found;
-    return nullptr;
+    return findItem(root, [&](QQuickItem *item) { return item->objectName() == name; });
 }
 
 QQuickItem *groupMarker(QQuickItem *root) {
-    if (root->objectName() == QStringLiteral("placesMarker") && root->isVisible() && root->property("count").toInt() == 2)
-        return root;
-    for (auto *child : root->childItems())
-        if (auto *found = groupMarker(child))
-            return found;
-    return nullptr;
+    return findItem(root, [](QQuickItem *item) {
+        return item->objectName() == "placesMarker" && item->property("count").toInt() == 2;
+    });
+}
+
+QQuickItem *mapAction(QQuickItem *root) {
+    return findItem(root, [](QQuickItem *item) {
+        if (item->property("key").toString() == "N" && item->metaObject()->indexOfSignal("tapped()") >= 0)
+            return true;
+        const auto text = item->property("text").toString();
+        return item->objectName().startsWith("menuOption_") && (text == "Map" || text == "Mapa");
+    });
+}
+
+QQuickItem *viewerClose(QQuickItem *root) {
+    return findItem(named(root, "photoViewer"), [](QQuickItem *item) {
+        return item->property("key").toString() == "Escape" && item->metaObject()->indexOfSignal("tapped()") >= 0;
+    });
+}
+
+void wheel(QQuickWindow *window, const QPointingDevice *device, QPointF at,
+           QPoint pixels, QPoint angle, Qt::ScrollPhase phase) {
+    QWheelEvent event(at, window->mapToGlobal(at.toPoint()), pixels, angle, Qt::NoButton,
+                      Qt::NoModifier, phase, false, Qt::MouseEventNotSynthesized, device);
+    QCoreApplication::sendEvent(window, &event);
+}
+
+void pinch(QQuickWindow *window, const QPointingDevice *device, QPointF at) {
+    const auto send = [&](Qt::NativeGestureType type, double amount) {
+        QNativeGestureEvent event(type, device, 2, at, at, window->mapToGlobal(at.toPoint()), amount, {}, 1);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    send(Qt::BeginNativeGesture, 0);
+    send(Qt::ZoomNativeGesture, 0.25);
+    send(Qt::EndNativeGesture, 0);
 }
 }
 
 void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &folder) {
+    struct Run {
+        int input = 0;
+        int phase = 0;
+        double previous = 0;
+        QElapsedTimer clock;
+    };
+    const auto run = std::make_shared<Run>();
+    run->clock.start();
     auto *timer = new QTimer(window);
-    auto phase = std::make_shared<int>(0);
-    auto clock = std::make_shared<QElapsedTimer>();
-    clock->start();
+    auto *touchpad = new QPointingDevice("Test touchpad", 451, QInputDevice::DeviceType::TouchPad,
+        QPointingDevice::PointerType::Finger, QInputDevice::Capability::Position | QInputDevice::Capability::Scroll,
+        2, 3, QString(), {}, window);
+    QWS::registerInputDevice(touchpad);
     QObject::connect(timer, &QTimer::timeout, window, [=] {
-        if (clock->elapsed() > 18000) {
-            std::fprintf(stderr, "selftest: places: timed out at step %d\n", *phase);
+        const char *input = run->input == 0 ? "keyboard" : run->input == 1 ? "mouse" : "touchpad";
+        const auto fail = [&](const char *why) {
+            std::fprintf(stderr, "selftest: places (%s), step %d: %s\n", input, run->phase, why);
             if (!folder.isEmpty()) window->grabWindow().save(folder + "/places-timeout.png");
             timer->stop();
-            return QCoreApplication::exit(1);
-        }
-        auto *map = named(window->contentItem(), "photoPlaces");
-        auto *viewport = map ? named(map, "placesViewport") : nullptr;
-        auto *gallery = map ? named(map, "placesGallery") : nullptr;
-        switch (*phase) {
+            QCoreApplication::exit(1);
+        };
+        if (run->clock.elapsed() > 14000)
+            return fail("timed out");
+        const bool keys = run->input == 0;
+        const auto *device = run->input == 2 ? touchpad : QPointingDevice::primaryPointingDevice();
+        auto *root = window->contentItem();
+        auto *map = named(root, "photoPlaces");
+        auto *viewport = named(map, "placesViewport");
+        auto *drawer = named(map, "placesDrawer");
+        auto *gallery = named(drawer, "placesGallery");
+        auto *group = groupMarker(viewport);
+        const auto zoom = [&] { return map->property("zoom").toDouble(); };
+        const auto longitude = [&] { return map->property("cx").toDouble(); };
+        switch (run->phase) {
         case 0:
-            if (clock->elapsed() < 1200) return;
-            press(window, Qt::Key_N);
+            if (run->clock.elapsed() < 950) return;
+            if (keys) {
+                press(window, Qt::Key_N);
+            } else if (auto *button = mapAction(root)) {
+                click(window, device, button);
+            } else {
+                auto *more = named(root, "gridMore");
+                auto *opener = named(more, "moreButton");
+                if (opener && !more->property("open").toBool())
+                    click(window, device, opener);
+                return;
+            }
             break;
         case 1: {
-            if (!map || !viewport || !map->isVisible() || !groupMarker(viewport) || clock->elapsed() < 2300) return;
-            if (!folder.isEmpty()) window->grabWindow().save(folder + "/places.png");
-            // Centered zoom is different from zoom at the pointer. Verify
-            // both the zoom and that the longitude under this pointer stays put.
-            const double zoom = map->property("zoom").toDouble(), x = map->property("cx").toDouble();
-            const auto at = viewport->mapToScene(QPointF(viewport->width() * 0.7, viewport->height() / 2));
-            QWheelEvent wheel(at, window->mapToGlobal(at.toPoint()), {}, QPoint(0, 120),
-                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-            QCoreApplication::sendEvent(window, &wheel);
-            if (map->property("zoom").toDouble() <= zoom || map->property("cx").toDouble() == x) {
-                std::fputs("selftest: places: wheel did not zoom at the pointer\n", stderr);
-                return QCoreApplication::exit(1);
+            if (!viewport || !group) return;
+            const auto at = viewport->mapToScene(QPointF(viewport->width() * 0.65, viewport->height() / 2));
+            const double before = longitude(), beforeZoom = zoom();
+            if (keys) {
+                press(window, Qt::Key_Right, Qt::ShiftModifier);
+            } else if (run->input == 1) {
+                pointer(window, device, at, Qt::LeftButton, Qt::LeftButton, QEvent::MouseButtonPress);
+                pointer(window, device, at + QPointF(28, 0), Qt::LeftButton, Qt::NoButton, QEvent::MouseMove);
+                pointer(window, device, at + QPointF(58, 0), Qt::LeftButton, Qt::NoButton, QEvent::MouseMove);
+                pointer(window, device, at + QPointF(58, 0), Qt::NoButton, Qt::LeftButton, QEvent::MouseButtonRelease);
+            } else {
+                wheel(window, device, at, {}, {}, Qt::ScrollBegin);
+                wheel(window, device, at, QPoint(46, 12), {}, Qt::ScrollUpdate);
+                wheel(window, device, at, {}, {}, Qt::ScrollEnd);
             }
-            const auto native = [&](Qt::NativeGestureType type, double amount) {
-                QNativeGestureEvent gesture(type, QPointingDevice::primaryPointingDevice(), 2,
-                    at, at, window->mapToGlobal(at.toPoint()), amount, {}, 1);
-                QCoreApplication::sendEvent(window, &gesture);
-            };
-            const double beforePinch = map->property("zoom").toDouble();
-            native(Qt::BeginNativeGesture, 0);
-            native(Qt::ZoomNativeGesture, 0.25);
-            native(Qt::EndNativeGesture, 0);
-            if (map->property("zoom").toDouble() <= beforePinch) {
-                std::fputs("selftest: places: touchpad pinch did not zoom\n", stderr);
-                return QCoreApplication::exit(1);
-            }
-            // Restore the overview before clicking the two-photo group.
-            QMetaObject::invokeMethod(map, "fitAll");
+            if (longitude() == before || zoom() != beforeZoom)
+                return fail("pan did not move the map at the same zoom");
+            if (keys)
+                press(window, Qt::Key_Plus);
+            else if (run->input == 1)
+                wheel(window, device, at, {}, QPoint(0, 120), Qt::NoScrollPhase);
+            else
+                pinch(window, device, at);
+            if (zoom() <= beforeZoom)
+                return fail("zoom did not move in");
+            if (keys)
+                press(window, Qt::Key_Home);
+            else
+                click(window, device, named(map, "placesFit"));
             break;
         }
         case 2:
-            if (!viewport || !groupMarker(viewport)) return;
-            click(window, groupMarker(viewport));
+            if (!group) return;
+            if (!folder.isEmpty() && run->input == 0)
+                window->grabWindow().save(folder + "/places.png");
+            if (keys) {
+                // Move from Warsaw to Lisbon and back, or straight to Warsaw
+                // if it was the other marker that initially had the focus.
+                if (map->property("keyboardPlace").toString() == "b") {
+                    press(window, Qt::Key_Left);
+                    if (map->property("keyboardPlace").toString() != "c")
+                        return fail("Left did not select the marker to the west");
+                }
+                press(window, Qt::Key_Right);
+                if (map->property("keyboardPlace").toString() != "b")
+                    return fail("Right did not select the marker to the east");
+                press(window, Qt::Key_Return);
+            } else {
+                click(window, device, group);
+                if (!named(map, "placesDrawer"))
+                    return fail("click did not open the group immediately");
+            }
             break;
         case 3:
             if (!gallery || gallery->property("count").toInt() != 2) return;
-            if (!folder.isEmpty()) window->grabWindow().save(folder + "/places-gallery.png");
-            press(window, Qt::Key_Return);
+            if (!folder.isEmpty() && run->input == 0)
+                window->grabWindow().save(folder + "/places-gallery.png");
+            if (keys) {
+                press(window, Qt::Key_Right);
+                if (map->property("cursor").toInt() != 1)
+                    return fail("Right did not advance in the gallery");
+                press(window, Qt::Key_Space);
+            } else if (auto *photo = named(gallery, "placesPhoto_1")) {
+                click(window, device, photo);
+            } else {
+                return;
+            }
             break;
         case 4:
-            if (!viewer->isOpen() || !map || map->isVisible()) return;
-            press(window, Qt::Key_Escape);
+            if (!viewer->isOpen() || map) return;
+            if (keys)
+                press(window, Qt::Key_Escape);
+            else if (auto *button = viewerClose(root))
+                click(window, device, button);
+            else
+                return;
             break;
         case 5:
-            if (viewer->isOpen() || !map || !map->isVisible() || gallery->property("count").toInt() != 2) return;
-            press(window, Qt::Key_Escape);
+            if (viewer->isOpen() || !gallery || map->property("cursor").toInt() != 1) return;
+            run->previous = zoom();
+            if (keys)
+                press(window, Qt::Key_Z);
+            else
+                click(window, device, named(drawer, "placesZoomGroup"));
             break;
         case 6:
-            if (!gallery || gallery->property("count").toInt() != 0) return;
-            press(window, Qt::Key_Escape);
+            if (!drawer || zoom() <= run->previous)
+                return fail("the group did not zoom in after returning from a photo");
+            if (keys)
+                press(window, Qt::Key_Escape);
+            else if (run->input == 1)
+                click(window, device, viewport, Qt::BackButton);
+            else
+                click(window, device, named(drawer, "placesHideGallery"));
             break;
         case 7:
-            if (map) return;
-            viewer->openAt(0, {});
+            if (!map || drawer) return;
+            if (keys) {
+                press(window, Qt::Key_Home);
+                press(window, Qt::Key_G);
+            } else {
+                click(window, device, named(map, "placesFit"));
+                click(window, device, named(map, "placesArea"));
+            }
             break;
         case 8:
-            if (!viewer->isOpen() || !named(window->contentItem(), "photoViewer")) return;
+            if (!drawer || !map->property("areaOpen").toBool()) return;
+            if (keys) {
+                press(window, Qt::Key_G);
+                if (named(map, "placesDrawer"))
+                    return fail("G did not close Photos in view");
+                press(window, Qt::Key_N);
+            } else {
+                click(window, device, named(map, "placesArea"));
+                if (named(map, "placesDrawer"))
+                    return fail("Photos in view did not toggle");
+                click(window, device, named(map, "placesClose"));
+            }
+            break;
+        case 9:
+            if (map || viewer->isOpen()) return;
+            std::printf("selftest: places (%s): open, pan, zoom, browse a group, return, area photos and close: PASS\n", input);
+            if (++run->input < 3) {
+                run->phase = 0;
+                run->clock.restart();
+                return;
+            }
+            viewer->openAt(0, {});
+            break;
+        case 10:
+            if (!viewer->isOpen() || !named(root, "photoViewer")) return;
             press(window, Qt::Key_I);
             break;
-        case 9: {
-            auto *button = named(window->contentItem(), "infoMap");
-            if (!button || !button->isVisible()) return;
+        case 11:
+            if (!named(root, "infoMap")) return;
             press(window, Qt::Key_W);
             break;
-        }
-        case 10:
-            if (!map || !map->isVisible() || !viewer->isOpen() || map->property("zoom").toDouble() != 14) return;
+        case 12:
+            if (!map || !viewer->isOpen() || zoom() != 14) return;
             press(window, Qt::Key_Escape);
             break;
         default:
             if (map || !viewer->isOpen()) return;
-            std::puts("selftest: places: N, grouped photos, wheel and pinch zoom, viewer return, Escape and Info W: PASS");
+            std::puts("selftest: places: Info W and return to the photo: PASS");
             timer->stop();
             return QCoreApplication::quit();
         }
-        ++*phase;
+        ++run->phase;
     });
     timer->start(180);
 }
