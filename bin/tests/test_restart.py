@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
         service = self.start(self.daemon, '--socket', self.socket)
         window = self.start(self.binary)
         result = subprocess.run([str(installer), '--non-interactive'], capture_output=True,
-                                env=dict(self.env, PREFIX=str(self.prefix), PINHOLE_RUST_BUILDER='cargo'))
+                                env=dict(self.env, PREFIX=str(self.prefix)))
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(window.poll())
         self.assertIsNone(service.poll())
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
     def test_default_installs_source_and_restarts_but_updater_keeps_running(self):
         installer = self.installer('exit 0')
         window = self.start(self.binary)
-        env = dict(self.env, PREFIX=str(self.prefix), PINHOLE_RUST_BUILDER='cargo')
+        env = dict(self.env, PREFIX=str(self.prefix))
         held = subprocess.run([str(installer), '--non-interactive'], capture_output=True, text=True,
                               env=dict(env, PINHOLE_KEEP_RUNNING='1'))
         self.assertEqual(held.returncode, 0, held.stderr)
@@ -186,7 +186,7 @@ p = subprocess.Popen(['sleep', '60'], stdin=subprocess.DEVNULL, stdout=subproces
 Path('worker.pid').write_text(str(p.pid))
 WORKER""")
         result = subprocess.run([str(installer), '--non-interactive'], capture_output=True, text=True,
-                                env=dict(self.env, PREFIX=str(self.prefix), PINHOLE_RUST_BUILDER='cargo',
+                                env=dict(self.env, PREFIX=str(self.prefix),
                                          PINHOLE_KEEP_RUNNING='1'), timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         pid = int((self.checkout / 'worker.pid').read_text())

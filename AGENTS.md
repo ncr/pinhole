@@ -1,8 +1,7 @@
 # Working on Pinhole
 
 Read [CLAUDE.md](CLAUDE.md) for the delivery and hidden-workspace workflow.
-Build Rust through `bin/build-rust` (pinned Blaze); Cargo is an explicit
-reference check, never a silent retry after failure.
+Build Rust with Cargo and the checked-in lockfiles.
 
 Start with [README.md](README.md). The current architecture and measured
 risks are in [the project review](docs/reviews/2026-11-03.md); the older
@@ -15,15 +14,13 @@ capabilities must update the contract, checker, examples and Polish strings.
 
 Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run` and
 `python3 -m unittest discover -s bin/tests`. Core tests run with
-`bin/build-rust test --release --workspace --no-fail-fast --manifest-path core/Cargo.toml`;
-use `BLAZE_TESTS=all` when auditing correctness, so cached results do not
-hide a failure. Record failures honestly. The original review reproduced a JPEG decoder
-miscompilation; the pinned compiler patch and independent regression gate
-are documented in [docs/blaze.md](docs/blaze.md).
+`cargo test --release --locked --workspace --no-fail-fast --manifest-path core/Cargo.toml`.
+Record failures honestly. The independent JPEG regression is documented in
+[the JPEG fixture notes](docs/reviews/jpeg-repro/README.md).
 Run `app/bin/test-framestats`, `app/bin/test-queries` and
 `app/bin/test-accessibility` for the dedicated contracts.
 [ci/README.md](ci/README.md) describes the pinned container checks, including
-separate Rust reference, visual and native Wayland jobs.
+separate Rust, visual and native Wayland jobs.
 
 Use `app/bin/measure-startup --help` for repeatable launch measurements.
 Separate fresh QML caches from warm launches and report distributions,

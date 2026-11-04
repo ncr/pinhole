@@ -189,24 +189,9 @@ custom plugins and source checkout. It never removes a system package.
 
 ## Development
 
-`bin/build` builds the Rust helpers and Qt window. Rust builds use
-[Blaze](https://github.com/indexable-inc/blaze) **0.20261030.1+pinhole.1**, pinned in
-`bin/blaze-version` and installed by `bin/setup-blaze` (the installer prepares
-it too). `bin/build-rust` is shared by developer, local and package builds.
-Build errors stop the build; there is no automatic Cargo fallback.
-See [measured Rust rebuild times](docs/build-performance.md) for a local comparison.
-`PINHOLE_RUST_BUILDER=cargo` explicitly selects the reference compiler when
-needed, including CI checks of Blaze's generated code.
-
-The pin matters: stable `0.20261027.0` had a std symbol naming bug that broke
-thread spawning (`writable static MIN`). The pinned release fixes it.
-Each checkout has its own worker under the pinned compiler version;
-immutable toolchains and compiled artifacts are shared. Rust input changes
-restart that worker to avoid an observed incremental type-cache defect.
-[The compiler notes](docs/blaze.md) explain the patch, portable standard
-library and correctness gates.
-On 2026-11-02 all three Rust components — core/pinholed, Series and Send —
-built successfully using the pinned Blaze alone.
+`bin/build` builds the Rust helpers with Cargo and the window with Qt.
+Source installations and package builds use this same entry point.
+Cargo builds core/pinholed, Series and Send with their checked-in lockfiles.
 
 Status: two spikes grown into an app. The iCloud API probe is in
 [docs/api-findings.md](docs/api-findings.md); the photo grid, at 120 Hz on a
@@ -370,7 +355,7 @@ echo '{"id":1,"method":"import_icloudpd","params":{"apple_id":"you@example.com"}
 Then, from the repository root:
 
 ```bash
-bin/build-rust build --release --workspace --manifest-path core/Cargo.toml
+cargo build --release --locked --workspace --manifest-path core/Cargo.toml
 core/target/release/pinhole-probe count
 core/target/release/pinhole-probe walk --parallel 4
 core/target/release/pinhole-probe stats
@@ -387,5 +372,5 @@ its session in `~/.local/state/pinhole/auth`, readable only by you.
 The [project review](docs/reviews/2026-11-03.md) records the architecture and
 measured findings. [ci/README.md](ci/README.md) documents reproducible checks
 for the compiler, Rust, Qt/plugin API, installer, accessibility, rendering and
-native Wayland startup. The application uses the reviewed
-[patched Blaze compiler](docs/blaze.md); Cargo runs separately as a reference.
+native Wayland startup. The Rust checks also run the independent JPEG
+fixtures with SIMD and scalar decoding.

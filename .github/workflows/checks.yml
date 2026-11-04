@@ -10,120 +10,79 @@ concurrency:
   group: pinhole-checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  compiler:
-    name: Reviewed Blaze bootstrap
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/ci-environment
-      - name: Run pinned container checks
-        run: ci/run compiler blaze
-      - name: Keep evidence even on failure
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: compiler-evidence
-          path: .ci-results/compiler-blaze/
-          if-no-files-found: warn
-          retention-days: 14
-  rust-blaze:
-    name: Rust — Blaze + JPEG parity
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    needs: compiler
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/ci-environment
-      - name: Run pinned container checks
-        run: ci/run rust blaze
-      - name: Keep evidence even on failure
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rust-blaze-evidence
-          path: .ci-results/rust-blaze/
-          if-no-files-found: warn
-          retention-days: 14
-  rust-reference:
-    name: Rust — isolated Cargo reference
+  rust:
+    name: Rust and JPEG regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - uses: ./.github/actions/ci-environment
       - name: Run pinned container checks
-        run: ci/run rust cargo
+        run: ci/run rust
       - name: Keep evidence even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rust-reference-evidence
-          path: .ci-results/rust-cargo/
+          name: rust-evidence
+          path: .ci-results/rust/
           if-no-files-found: warn
           retention-days: 14
   ui-contract:
     name: Qt, plugin API and installer
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    needs: compiler
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/ci-environment
       - name: Run pinned container checks
-        run: ci/run ui blaze
+        run: ci/run ui
       - name: Keep evidence even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ui-contract-evidence
-          path: .ci-results/ui-blaze/
+          path: .ci-results/ui/
           if-no-files-found: warn
           retention-days: 14
   visual:
     name: Xvfb rendering and interactions
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    needs: compiler
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/ci-environment
       - name: Run pinned container checks
-        run: ci/run visual blaze
+        run: ci/run visual
       - name: Keep evidence even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: visual-evidence
-          path: .ci-results/visual-blaze/
+          path: .ci-results/visual/
           if-no-files-found: warn
           retention-days: 14
   wayland:
     name: Wayland startup and frame pacing
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    needs: compiler
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/ci-environment
       - name: Run pinned container checks
-        run: ci/run native blaze
+        run: ci/run native
       - name: Keep evidence even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wayland-evidence
-          path: .ci-results/native-blaze/
+          path: .ci-results/native/
           if-no-files-found: warn
           retention-days: 14

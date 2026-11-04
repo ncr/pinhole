@@ -3,12 +3,14 @@
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mode="${1:-all}"
-builder="${2:-blaze}"
+if [ "$#" -gt 1 ]; then
+    echo 'Usage: ci/run [rust|ui|visual|native|all]' >&2
+    exit 2
+fi
 cache="${PINHOLE_CI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/pinhole-ci}"
-output="${PINHOLE_CI_OUTPUT:-$root/.ci-results/$mode-$builder}"
+output="${PINHOLE_CI_OUTPUT:-$root/.ci-results/$mode}"
 mkdir -p "$cache" "$output"
-# Match the owner of local/Actions cache files. Blaze refuses world-writable
-# state ancestors; sharing a UID avoids weakening their permissions.
+# Match the owner of local and GitHub Actions cache files.
 chmod u+rwx,go-w "$cache" "$output"
 uid="$(id -u)"
 gid="$(id -g)"
@@ -34,4 +36,4 @@ docker run --rm --init --user "$uid:$gid" --cpus="${PINHOLE_CI_CPUS:-2}" --memor
     --mount "type=bind,source=$root,target=/source,readonly" \
     --mount "type=bind,source=$cache,target=/cache" \
     --mount "type=bind,source=$output,target=/artifacts" \
-    pinhole-ci sh /source/ci/in-container "$mode" --builder "$builder"
+    pinhole-ci sh /source/ci/in-container "$mode"

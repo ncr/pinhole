@@ -66,7 +66,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
                                         'PINHOLE_CI_OUTPUT': str(base / 'output'),
                                         'PINHOLE_IDENTITY_PROOF': str(proof),
                                         'PINHOLE_IDENTITY_EXIT': str(exit_code)}
-                    result = subprocess.run([str(ROOT / 'ci/run'), 'compiler', 'cargo'], env=env,
+                    result = subprocess.run([str(ROOT / 'ci/run'), 'rust'], env=env,
                                             text=True, capture_output=True, timeout=10)
                     self.assertEqual(result.returncode, exit_code, result.stderr)
                     record = json.loads(proof.read_text())
@@ -78,7 +78,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
 
     def test_failure_stops_and_records_the_actual_command_status(self):
         with tempfile.TemporaryDirectory() as scratch:
-            checks = ci.Checks(Path(scratch), 'blaze')
+            checks = ci.Checks(Path(scratch))
             with self.assertRaisesRegex(RuntimeError, r'failed \(7\)'):
                 checks.run('failure', [sys.executable, '-c', 'raise SystemExit(7)'])
             results = json.loads((Path(scratch) / 'checks.json').read_text())
@@ -86,7 +86,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
 
     def test_timeout_is_a_failure_with_a_log(self):
         with tempfile.TemporaryDirectory() as scratch:
-            checks = ci.Checks(Path(scratch), 'blaze')
+            checks = ci.Checks(Path(scratch))
             with self.assertRaisesRegex(RuntimeError, r'failed \(124\)'):
                 checks.run('timeout', [sys.executable, '-c', 'import time; time.sleep(5)'], timeout=.05)
             self.assertEqual(checks.results[0]['exit_code'], 124)
@@ -94,7 +94,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
 
     def test_missing_executable_is_a_recorded_failure(self):
         with tempfile.TemporaryDirectory() as scratch:
-            checks = ci.Checks(Path(scratch), 'blaze')
+            checks = ci.Checks(Path(scratch))
             with self.assertRaisesRegex(RuntimeError, r'failed \(127\)'):
                 checks.run('missing', [str(Path(scratch) / 'no-such-program')])
             self.assertEqual(checks.results[0]['exit_code'], 127)

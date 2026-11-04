@@ -42,13 +42,11 @@ def validate_scroll(log):
 
 
 class Checks:
-    def __init__(self, output, builder):
+    def __init__(self, output):
         self.output = output.resolve()
         self.output.mkdir(parents=True, exist_ok=True)
-        self.builder = builder
         self.results = []
-        self.env = os.environ | {'PINHOLE_RUST_BUILDER': builder, 'BLAZE_TESTS': 'all',
-                                 'QT_QPA_PLATFORMTHEME': 'generic', 'QT_FORCE_STDERR_LOGGING': '1',
+        self.env = os.environ | {'QT_QPA_PLATFORMTHEME': 'generic', 'QT_FORCE_STDERR_LOGGING': '1',
                                  'PINHOLE_SILENT': '1'}
 
     def run(self, name, command, *, env=None, timeout=1800):
@@ -75,7 +73,7 @@ class Checks:
         print(f'[{name}] passed', flush=True)
 
     def save(self):
-        (self.output / 'checks.json').write_text(json.dumps({'builder': self.builder, 'checks': self.results}, indent=2) + '\n')
+        (self.output / 'checks.json').write_text(json.dumps({'builder': 'cargo', 'checks': self.results}, indent=2) + '\n')
 
     def snapshot(self, filename='source-initial.json'):
         listed = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT)
@@ -95,26 +93,20 @@ class Checks:
 
     def prepare(self):
         self.run('ci-runner', [sys.executable, '-m', 'unittest', 'discover', '-s', 'ci/tests', '-v'])
-        if self.builder == 'blaze':
-            self.run('compiler-setup', ['bin/setup-blaze'], timeout=5400)
-        self.run('compiler-version', ['bin/build-rust', '--version'])
+        self.run('compiler-version', ['cargo', '--version', '--verbose'])
         if Path('/opt/pinhole-ci-packages.txt').exists():
             shutil.copyfile('/opt/pinhole-ci-packages.txt', self.output / 'environment-packages.txt')
 
     def rust(self):
-        with tempfile.TemporaryDirectory(prefix='pinhole-ci-rust-') as scratch:
-            env = self.env.copy()
-            if self.builder == 'cargo':
-                # Reference compiler's output never replaces Blaze binaries.
-                env['CARGO_TARGET_DIR'] = str(Path(scratch) / 'reference-target')
-            for name, manifest in [('core', 'core/Cargo.toml'), ('series', 'plugins/series/finder/Cargo.toml'),
-                                   ('send', 'plugins/send/sender/Cargo.toml')]:
-                self.run(f'rust-{name}', ['bin/build-rust', 'test', '--release', '--locked', '--workspace', '--no-fail-fast',
-                                         '--manifest-path', manifest], env=env)
-            self.run('jpeg-compiler-parity', ['bin/build-rust', 'run', '--release', '--locked',
-                                            '--manifest-path', 'docs/reviews/jpeg-repro/Cargo.toml'], env=env)
-            if self.builder == 'blaze':
-                self.run('jpeg-byte-parity', ['bin/check-rust-parity'], env=env)
+        for name, manifest in [('core', 'core/Cargo.toml'), ('series', 'plugins/series/finder/Cargo.toml'),
+                               ('send', 'plugins/send/sender/Cargo.toml')]:
+            self.run(f'rust-{name}', ['cargo', 'test', '--release', '--locked', '--workspace', '--no-fail-fast',
+                                     '--manifest-path', manifest])
+        with tempfile.TemporaryDirectory(prefix='pinhole-ci-jpeg-') as scratch:
+            for mode, flags in [('simd', []), ('scalar', ['--no-default-features'])]:
+                self.run(f'jpeg-{mode}', ['cargo', 'run', '--release', '--locked',
+                                         '--manifest-path', 'docs/reviews/jpeg-repro/Cargo.toml',
+                                         *flags, '--', str(Path(scratch) / mode)])
 
     def build(self):
         self.run('build', ['bin/build'])
@@ -205,11 +197,10 @@ class Checks:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['compiler', 'rust', 'ui', 'visual', 'native', 'all'])
-    parser.add_argument('--builder', choices=['blaze', 'cargo'], default='blaze')
+    parser.add_argument('mode', choices=['rust', 'ui', 'visual', 'native', 'all'])
     parser.add_argument('--output', type=Path, default=ROOT / '.ci-results/local')
     args = parser.parse_args()
-    check = Checks(args.output, args.builder)
+    check = Checks(args.output)
     try:
         check.snapshot()
         check.prepare()

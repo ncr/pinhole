@@ -33,13 +33,10 @@ ln -s /absolute/path/to/pinhole/examples/semantic-search \
 pinhole plugin check me.semantic-search
 ```
 
-The system's previously installed host predates this API. The current Qt
-host builds and runs the plugin, but `bin/install --non-interactive` is
-blocked by the upstream Blaze executable's `jemalloc: Unsupported system
-page size` on this machine's 16-KiB kernel pages. The installer stops before
-activation and preserves the previous installation. The plugin is therefore
-**not automatically installed or enabled in the user's real profile**.
-No Cargo application build was substituted for Blaze.
+Update the host with `bin/install --non-interactive` if its plugin API
+predates API 5. The source installer builds the application with Cargo
+and Qt. The personal plugin is linked and enabled separately as described
+above.
 
 ## Using the prototype
 

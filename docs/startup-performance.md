@@ -135,11 +135,9 @@ PATH=/usr/bin:$PATH app/bin/measure-startup \
   --native-hidden --host-only --warmup 1 --runs 7
 ```
 
-The M2 Pro checkout currently needs this mode: the old available pinholed
-rejects `--given`, and rebuilding the pinned Blaze tool first fails on
-16-KiB system pages. The same code can still build and exercise Qt directly.
-Use the normal private warm-service mode again once a compatible daemon is
-available. A synthetic-process regression verifies that host-only mode
+The M2 Pro measurements below used this mode because the available daemon
+at the time rejected `--given`. Use normal private warm-service mode with
+the current daemon built by `bin/build`. A synthetic-process regression verifies that host-only mode
 launches no daemon and retains its explicit report label.
 
 The On this day plugin now keeps its date index and button count available

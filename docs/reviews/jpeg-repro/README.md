@@ -3,15 +3,13 @@
 No Pinhole code, private photos or libultrahdr. Run from the repository root:
 
 ```sh
-bin/check-rust-parity
-# The setup gate, without Cargo or output files:
-bin/build-rust run --release --locked --manifest-path docs/reviews/jpeg-repro/Cargo.toml
+cargo run --release --locked --manifest-path docs/reviews/jpeg-repro/Cargo.toml -- /tmp/pinhole-jpeg-simd
+cargo run --release --locked --manifest-path docs/reviews/jpeg-repro/Cargo.toml --no-default-features -- /tmp/pinhole-jpeg-scalar
 ```
 
-The parity command explicitly compiles the same decoder with Blaze and Cargo,
-with default SIMD features and again with `--no-default-features`. It compares
-the seven decoded images byte for byte. Targets and output files live in a
-temporary directory. These are reference checks, never an application fallback.
+The Cargo checks exercise the decoder with its default SIMD features and
+again with those features disabled. With an output directory each run also
+decodes and writes all seven fixtures. CI uses temporary output directories.
 
 `gray-ramp.jpg` is the original 96×64 grayscale ramp encoded by image 0.25.10
 at JPEG quality 90. Each row is `x * 255 / 95`; the decoder must stay within
@@ -34,7 +32,8 @@ assertion and decoded the ramp as repeated pairs (`0,2,0,2,10,13,10,13,…`),
 with max error 255. Cargo produced `0,2,5,8,10,13,16,18,…` with max error 1.
 Pillow independently confirmed the correct ramp. The cause was the compiler's
 `pack_lanes` loop taking half of each 128-bit input lane. Pinhole's reviewed
-compiler patch repairs that loop; see [compiler setup](../../blaze.md).
+compiler patch repaired that loop. The comparison is historical.
+See [the original setup notes](https://github.com/ncr/pinhole/blob/3bfdc6f/docs/blaze.md).
 
 `set_use_unsafe(false)` still enables some SIMD in zune-core 0.5.1 because
 its per-architecture feature flags are ORed with the unsafe flag. The scalar

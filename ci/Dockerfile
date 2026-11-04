@@ -14,4 +14,4 @@ RUN printf 'Server = https://archive.archlinux.org/repos/2026/11/02/$repo/os/$ar
  && useradd --create-home --uid 1000 --shell /bin/bash build
 USER build
 WORKDIR /home/build
-ENV LANG=en_US.UTF-8 PINHOLE_BUILD_JOBS=2
+ENV LANG=en_US.UTF-8 PINHOLE_BUILD_JOBS=2 CARGO_BUILD_JOBS=2

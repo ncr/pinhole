@@ -22,7 +22,6 @@ Running Pinhole windows reopen automatically after a successful installation.
   --non-interactive Skip the terminal menu and progress display.
 
 PREFIX changes ~/.local. --dev is accepted for older update helpers.
-PINHOLE_RUST_BUILDER=cargo explicitly selects Cargo instead of Blaze.
 Install and update binary packages with your OS package manager instead.
 HELP
             exit 0 ;;
@@ -57,16 +56,6 @@ if [ "$mode" = uninstall ]; then
     update-desktop-database "${PREFIX:-$HOME/.local}/share/applications" 2>/dev/null || true
     exit 0
 fi
-if [ "${PINHOLE_RUST_BUILDER:-blaze}" != cargo ]; then
-    # A matching version alone cannot certify the patched engine or its
-    # portable standard library. Setup verifies/reuses both before building.
-    if [ "$ui" = 1 ]; then
-        gum spin --spinner dot --title 'Checking Blaze…' --show-error -- bin/setup-blaze
-    else
-        echo 'Checking Blaze…'
-        bin/setup-blaze
-    fi
-fi
 run_install() {
     PREFIX="${PREFIX:-$HOME/.local}"
     install -d "$PREFIX"
@@ -76,7 +65,7 @@ run_install() {
         echo 'Use your OS package manager for system installations.' >&2
         exit 2
     fi
-    # The installer keeps the lock; background compiler daemons must not inherit it.
+    # Keep the update lock in the installer and close it for build subprocesses.
     python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
     if [ -n "${PINHOLE_EXPECTED_COMMIT:-}" ]; then
         if [ "$(git rev-parse HEAD)" != "$PINHOLE_EXPECTED_COMMIT" ] || [ -n "$(git status --porcelain)" ]; then

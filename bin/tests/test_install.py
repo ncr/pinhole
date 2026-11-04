@@ -59,8 +59,8 @@ class ActivationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             destination, stage = self.prepare(Path(temporary))
             photos = [destination / "share/pinhole/library.sqlite", destination / "share/pinhole/thumbs/photo.jpg",
-                      destination / "share/pinhole/originals/family.heic", destination / "share/pinhole/tools/bin/blaze",
-                      destination / "share/pinhole/blaze/daemon.state"]
+                      destination / "share/pinhole/originals/family.heic", destination / "share/pinhole/tools/custom-tool",
+                      destination / "share/pinhole/tools/custom.state"]
             for photo in photos:
                 photo.parent.mkdir(parents=True, exist_ok=True)
                 photo.write_bytes(b"personal photo data")
@@ -152,30 +152,23 @@ class UninstallTests(unittest.TestCase):
 
 
 class BuildGuardTests(unittest.TestCase):
-    def test_existing_compiler_version_cannot_bypass_integrity_verification(self):
+    def test_failed_build_leaves_the_previous_installation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             scripts = root / "bin"
             scripts.mkdir()
             shutil.copy2(ACTIVATE.with_name("install"), scripts / "install")
-            for name, contents in {
-                "build-rust": "#!/bin/sh\nexit 0\n",  # Version would look valid.
-                "setup-blaze": "#!/bin/sh\necho 'invalid compiler bundle' >&2\nexit 19\n",
-                "build": "#!/bin/sh\ntouch build-started\nexit 66\n",
-            }.items():
-                path = scripts / name
-                path.write_text(contents)
-                path.chmod(0o755)
+            build = scripts / "build"
+            build.write_text("#!/bin/sh\necho 'build failed' >&2\nexit 66\n")
+            build.chmod(0o755)
             program = root / "prefix/bin/pinhole"
             program.parent.mkdir(parents=True)
             program.write_text("previous installed program")
             result = subprocess.run([str(scripts / "install"), "--non-interactive"], cwd=root,
                                     env={**os.environ, "PREFIX": str(root / "prefix"),
-                                         "XDG_STATE_HOME": str(root / "state"),
-                                         "PINHOLE_RUST_BUILDER": "blaze"}, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 19)
-            self.assertIn("invalid compiler bundle", result.stderr)
-            self.assertFalse((root / "build-started").exists())
+                                         "XDG_STATE_HOME": str(root / "state")}, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 66)
+            self.assertIn("build failed", result.stderr)
             self.assertEqual(program.read_text(), "previous installed program")
 
     def prepare(self, root, during_build):
@@ -201,7 +194,7 @@ class BuildGuardTests(unittest.TestCase):
         program.write_text("previous installed program")
         result = subprocess.run([str(scripts / "install"), "--dev", "--non-interactive"], cwd=checkout,
                                 env={**os.environ, "PREFIX": str(prefix), "XDG_STATE_HOME": str(root / "state"),
-                                     "PINHOLE_RUST_BUILDER": "cargo", "PINHOLE_KEEP_RUNNING": "1",
+                                     "PINHOLE_KEEP_RUNNING": "1",
                                      "PINHOLE_EXPECTED_COMMIT": revision}, capture_output=True, text=True)
         return result, checkout, program
 

@@ -1,9 +1,7 @@
 # Rust rebuild comparison
 
-These are historical speed measurements, before the JPEG compiler fix and
-the input-change worker guard. They do not certify runtime correctness or
-the speed of the current guarded rebuild path. The current pin and
-regression gates are documented in [blaze.md](blaze.md).
+These historical measurements compare the two Rust build paths available
+in November 2026. Pinhole now uses Cargo for builds and CI.
 
 Measured on 2026-11-02 on this development machine, at Pinhole revision
 `42f68ffbeeb6d458d4cfbdd04525c21f63829c51`.
@@ -34,22 +32,16 @@ library edit; Cargo rebuilt the affected crate and its dependents. Both
 final binaries contain the changed library string, and `--help` confirms
 the restored daemon default.
 
-To reproduce, copy the tracked source tree outside the working installation.
-First run each command once to prepare its outputs, then measure both after
-identical edits:
-
-```sh
-bin/build-rust build --release --locked --offline --workspace --manifest-path core/Cargo.toml
-PINHOLE_RUST_BUILDER=cargo bin/build-rust build --release --locked --offline --workspace \
-  --manifest-path core/Cargo.toml --target-dir /tmp/pinhole-cargo-comparison
-```
+The comparison can be reproduced from the revisions named above. The
+[historical compiler notes](https://github.com/ncr/pinhole/blob/3bfdc6f/docs/blaze.md)
+record that setup.
 
 The large library-edit gain is specific to a one-function change and warm
 caches. It does not imply that a whole installation is 123× faster. Qt/C++
 building is separate and unaffected by the Rust builder. Runtime performance
 and binary-size comparisons are outside this measurement.
 
-## Current guarded compiler — 2026-11-03
+## Guarded compiler follow-up — 2026-11-03
 
 The patched compiler and input-change worker guard were measured again on
 one isolated current source copy. Both builders were warmed before sampling;
@@ -73,4 +65,4 @@ restart prevents the observed stale-type defect and costs time; the earlier
 no-op. These are narrow developer rebuild comparisons, not clean-install,
 whole-project or runtime speed claims. The two no-op observations are not a
 three-run alternating experiment. See the [raw edit samples](reviews/2026-11-03-guarded-builds.json)
-and [compiler correctness/guard notes](blaze.md).
+and [historical compiler notes](https://github.com/ncr/pinhole/blob/3bfdc6f/docs/blaze.md).

@@ -81,12 +81,11 @@ After the final native search test the driver still reported 127,531 jobs
 and 122,572,146,936 busy nanoseconds, unchanged from quarantine. Later model,
 compiler, browser and UI checks did not submit new accelerator work.
 
-The required `bin/install --non-interactive` was attempted after the feature
-commits. It stops before application activation because the pinned upstream
-Blaze executable reports `jemalloc: Unsupported system page size`. No Cargo
-application build was substituted, and the previous installation remains.
-The already installed host predates the plugin API needed by the new personal
-search prototype; the newly built Qt host was used for its validation.
+At the time of these tests the source installer stopped before activation.
+The upstream Blaze executable reported `jemalloc: Unsupported system page
+size`, and the previously installed host predated the prototype's plugin
+API. The tests used the newly built Qt host. The source installer has since
+switched to Cargo.
 
 Xvfb was downloaded and extracted inside `.tools`, without a system package
 installation. Package `xorg-server-xvfb 21.1.25-2`, SHA-256
