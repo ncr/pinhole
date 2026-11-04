@@ -167,6 +167,7 @@ class Worker:
         if pending:
             self.engine.check_indexing()
         self.pending = deque(pending)
+        self.waiting = False
         self.processed = self.skipped = 0
         self.running, self.last_error = bool(self.pending), ''
 
@@ -207,6 +208,8 @@ class Worker:
                 queued = {asset for asset, _ in retained}
                 self.pending = deque(retained + [(asset, path) for asset, path in self.missing() if asset not in queued])
                 self.running = bool(self.pending)
+                if not self.running:
+                    self.waiting = False
             elif auto and not self.last_error:
                 try:
                     self.start(self.missing())
@@ -278,6 +281,7 @@ class Worker:
         return self.status() | {"imported": len(staged)}
 
     def step(self):
+        self.waiting = False
         if not self.running or not self.pending:
             self.running = False
             return
@@ -304,7 +308,6 @@ class Worker:
                 self.pending.appendleft((asset, relative))
                 self.waiting = True
                 return
-            self.waiting = False
             vector = self.engine.encode_image(image)
             self.last_inference = time.monotonic()
             if hash_file(path) != digest:

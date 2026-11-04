@@ -105,11 +105,16 @@ class CudaEngine:
             raise RuntimeError("WeMM requires a CUDA GPU with native BF16 support")
 
     def can_index(self):
-        if self.model is not None or not getattr(self.args, "background", False):
+        if not getattr(self.args, "background", False):
             return True
         import torch
 
         free, _ = torch.cuda.mem_get_info()
+        if self.model is not None:
+            if free >= 768 * 1024 ** 2:
+                return True
+            self.close()
+            return False
         return free >= 11 * 1024 ** 3
 
     def encoder(self):

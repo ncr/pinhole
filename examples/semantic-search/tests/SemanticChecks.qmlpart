@@ -164,7 +164,9 @@
             tryCompare(panel, "catalogReady", true, 30000)
             compare(panel.status.indexed, @PHOTO_COUNT@)
             stage = "quarantine"
-            panel.indexer.toggleIndexing()
+            // The UI resumes only missing photos. Exercise the worker's
+            // manual start check even though the fixture is fully imported.
+            panel.indexer.request({ op: "start" }).catch(error => panel.indexer.report(error))
             tryVerify(() => panel.failure !== "", 10000)
             verify(panel.failure.includes("NPU"), panel.failure)
             stage = "offline-tags"

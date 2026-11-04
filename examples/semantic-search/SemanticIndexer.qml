@@ -158,6 +158,7 @@ Item {
         }).catch(error => {
             if (current !== generation || indexingJob !== job) return
             indexingJob = null
+            if (resume) pinhole.settings.indexingPaused = true
             report(error)
         })
     }
