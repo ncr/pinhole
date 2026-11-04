@@ -231,6 +231,34 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.worker.status()['errors'], 1)
         self.assertIsNone(self.worker.text_model)
 
+    def test_tag_suggestions_rank_cached_vectors_and_recheck_the_photo(self):
+        import numpy as np
+        from unittest.mock import Mock
+        from photo_search.ane import hash_file
+        from photo_search.worker import TAGS
+
+        request = {'op': 'suggest_tags', 'id': 'a'}
+        self.assertEqual(self.worker.request(request), [])
+        self.assertIsNone(self.worker.text_model)
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        self.args.backend = 'hybrid-ane'
+        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        (self.root / 'ane-device-health.json').write_text(json.dumps({'boot_id': boot, 'quarantined': True}))
+        vectors = np.tile(-self.vector(), (len(TAGS), 1))
+        vectors[-1] = self.vector()
+        self.worker.text_model = Mock()
+        self.worker.text_model.encode.return_value = vectors, {}
+        for _ in range(2):
+            tags = self.worker.request(request)
+            self.assertEqual(tags[0], {'id': TAGS[-1][0], 'label': TAGS[-1][1]})
+            self.assertEqual(len(tags), 5)
+        self.worker.text_model.encode.assert_called_once_with([prompt for _, _, prompt in TAGS])
+        self.assertIsNone(self.worker.image_model)
+        self.assertIsNone(self.worker.runtime)
+        (self.root / 'a.jpg').write_bytes(b'replaced in place')
+        self.assertEqual(self.worker.request(request), [])
+        self.assertEqual(self.worker.status()['errors'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

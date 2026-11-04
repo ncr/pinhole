@@ -113,6 +113,17 @@ class Store:
                 "errors": self.db.execute("SELECT count(*) FROM failures").fetchone()[0],
                 "dimension": self.dimension}
 
+    def vector_for(self, asset_id):
+        row = self.db.execute('''SELECT e.vector FROM embeddings e JOIN catalog c USING(asset_id)
+            WHERE e.asset_id=? AND e.fingerprint=c.fingerprint AND c.active=1''', (asset_id,)).fetchone()
+        if row is None:
+            return None
+        vector = np.frombuffer(row[0], dtype="<f4")
+        if (vector.shape != (self.dimension,) or not np.isfinite(vector).all() or
+                abs(float(np.linalg.norm(vector)) - 1) > 1e-5):
+            raise ValueError("invalid stored embedding")
+        return vector
+
     def search(self, vector, limit=100):
         if not 1 <= limit <= 500:
             raise ValueError("invalid result limit")

@@ -61,6 +61,11 @@ Operations:
 - `query`: `{text:"pies na plaży",limit:100}`, at most 2048 characters and
   500 results. Normalized image/text vectors use exact dot-product ranking,
   with stable photo-id ordering on ties. Similarity is not a probability.
+- `suggest_tags`: `{id:"photo-id"}` returns up to five `{id,label}` pairs
+  from a fixed Polish vocabulary. It checks only the selected thumbnail and
+  reuses its saved image vector. The resident text encoder embeds the
+  vocabulary once per worker. Missing or stale vectors return an empty
+  list. No image inference is required for suggestions.
 - `import`: `{run:"/path/to/completed-run",corpus:"/path/to/corpus.json"}`.
   The worker requires a completed encoder run, matching model/processor/
   backend policy and dimensions, and maps opaque benchmark ids through

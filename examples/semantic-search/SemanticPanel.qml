@@ -12,6 +12,11 @@ Panel {
     property var queryJob: null
     property var catalogJob: null
     property var statusJob: null
+    property var tagJob: null
+    property string tagAsset: ""
+    property var tagSuggestions: []
+    property var savedTags: []
+    property string tagError: ""
     property bool ready: false
     property bool catalogReady: false
     property var status: ({ indexed: 0, total: 0, running: false, errors: 0 })
@@ -39,6 +44,7 @@ Panel {
         cancel(queryJob); queryJob = null
         cancel(catalogJob); catalogJob = null
         cancel(statusJob); statusJob = null
+        closeTags(false)
         cancel(server); server = null
         ready = false; catalogReady = false
         results = []; allResults = []; selected = -1
@@ -117,6 +123,7 @@ Panel {
         const revision = ++catalogGeneration
         cancel(catalogJob)
         cancel(queryJob); queryJob = null
+        closeTags(false)
         results = []; allResults = []; selected = -1
         catalogReady = false
         const current = generation
@@ -166,6 +173,10 @@ Panel {
             return position >= 0 && !pinhole.isHidden(position)
         }).slice(0, 100)
         selected = results.length ? 0 : -1
+        if (tagAsset) {
+            const taggedPosition = pinhole.library.indexOf(tagAsset)
+            if (taggedPosition < 0 || pinhole.isHidden(taggedPosition)) closeTags(true)
+        }
     }
     function poll() {
         if (!ready || !catalogReady || statusJob) return
@@ -205,15 +216,72 @@ Panel {
         if (index < 0 || index >= results.length) return
         const id = results[index].id
         if (pinhole.library.indexOf(id) < 0) return
+        selected = index
         shown = false; returning = true
         pinhole.openPhoto(id)
     }
-    Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.close() }
-    Command { name: "semantic.open"; keys: ["Return"]; keyLayer: "plugin"; when: panel.shown && !search.input.activeFocus; onTriggered: panel.openResult(panel.selected) }
-    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.move(search.input.activeFocus ? 0 : Math.max(1, Math.round(grid.width / grid.cellWidth))) }
-    Command { name: "semantic.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.shown && !search.input.activeFocus; onTriggered: panel.move(-Math.max(1, Math.round(grid.width / grid.cellWidth))) }
-    Command { name: "semantic.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.shown && !search.input.activeFocus; onTriggered: panel.move(1) }
-    Command { name: "semantic.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.shown && !search.input.activeFocus; onTriggered: panel.move(-1) }
+
+    function openTags() {
+        if (!sourceKey || !catalogReady || selected < 0 || selected >= results.length) return
+        const asset = results[selected].id
+        savedTags = (pinhole.state["tags:" + sourceKey] || {})["photo:" + asset] || []
+        tagAsset = asset
+        tagError = ""
+        const job = request({ op: "suggest_tags", id: asset })
+        tagJob = job
+        job.then(result => {
+            if (tagJob !== job) return
+            tagSuggestions = unpack(result)
+            tagJob = null
+        }).catch(error => {
+            if (tagJob !== job) return
+            tagJob = null
+            if (error.code !== "cancelled") {
+                tagError = qsTr("Tag suggestions could not be loaded.")
+                pinhole.warn(error)
+            }
+        })
+    }
+    function closeTags(restoreFocus) {
+        const wasOpen = tagAsset !== ""
+        cancel(tagJob); tagJob = null
+        tagAsset = ""; tagSuggestions = []; savedTags = []; tagError = ""
+        if (wasOpen && restoreFocus) Qt.callLater(() => {
+            if (!shown || tagAsset) return
+            if (tagButton.visible && tagButton.usable) tagButton.forceActiveFocus()
+            else search.input.forceActiveFocus()
+        })
+    }
+    function writeTags(key, asset, value) {
+        const entries = Object.assign({}, pinhole.state[key] || {})
+        const photo = "photo:" + asset
+        if (value.length) entries[photo] = value
+        else delete entries[photo]
+        pinhole.state[key] = Object.keys(entries).length ? entries : null
+        if (key === "tags:" + sourceKey && asset === tagAsset) savedTags = value
+    }
+    function toggleTag(tag) {
+        if (!tagAsset || !sourceKey || sourceKey !== pinhole.library.key) return
+        const key = "tags:" + sourceKey
+        const asset = tagAsset
+        const before = savedTags
+        const removing = before.some(item => item.id === tag.id)
+        if (!removing && !before.length && Object.keys(pinhole.state[key] || {}).length >= 2000) {
+            tagError = qsTr("This source has reached the limit of 2,000 tagged photos.")
+            return
+        }
+        const after = removing ? before.filter(item => item.id !== tag.id) : before.concat([tag])
+        writeTags(key, asset, after)
+        pinhole.did(removing ? qsTr("removing a photo tag") : qsTr("adding a photo tag"),
+            () => writeTags(key, asset, before), () => writeTags(key, asset, after))
+    }
+    readonly property bool browsing: shown && tagAsset === ""
+    Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.tagAsset ? panel.closeTags(true) : panel.close() }
+    Command { name: "semantic.open"; keys: ["Return"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.openResult(panel.selected) }
+    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && (search.input.activeFocus || grid.activeFocus); onTriggered: panel.move(search.input.activeFocus ? 0 : Math.max(1, Math.round(grid.width / grid.cellWidth))) }
+    Command { name: "semantic.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-Math.max(1, Math.round(grid.width / grid.cellWidth))) }
+    Command { name: "semantic.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(1) }
+    Command { name: "semantic.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-1) }
     function move(delta) {
         if (!results.length) return
         selected = Math.max(0, Math.min(results.length - 1, selected + delta))
@@ -253,6 +321,7 @@ Panel {
     }
     Column {
         id: header
+        visible: panel.browsing
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -284,6 +353,14 @@ Panel {
                 usable: panel.catalogReady && !panel.status.running
                 onTapped: panel.importBenchmark()
             }
+            ShellButton {
+                id: tagButton
+                objectName: "semanticTagButton"
+                text: qsTr("Tag selected photo")
+                visible: panel.selected >= 0 && panel.sourceKey !== ""
+                usable: panel.catalogReady
+                onTapped: panel.openTags()
+            }
         }
         UiText {
             width: parent.width
@@ -309,6 +386,7 @@ Panel {
     ScrollGrid {
         id: grid
         objectName: "semanticSearchResults"
+        visible: panel.browsing
         anchors.top: header.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -346,12 +424,25 @@ Panel {
     }
     UiText {
         anchors.centerIn: grid
-        visible: panel.catalogReady && panel.results.length === 0
+        visible: panel.browsing && panel.catalogReady && panel.results.length === 0
         text: panel.queryJob ? qsTr("Searching…") : panel.status.indexed === 0
             ? qsTr("Import the benchmark or index local thumbnails to begin.")
             : search.text.trim() ? qsTr("No visible results.") : qsTr("Type a description to search.")
         width: Math.min(grid.width, 500)
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
+    }
+    Loader {
+        anchors.fill: parent
+        active: panel.tagAsset !== ""
+        sourceComponent: SemanticTags {
+            photo: pinhole.library.item(panel.tagAsset).thumbnail || ""
+            pending: panel.tagJob !== null
+            suggestions: panel.tagSuggestions
+            saved: panel.savedTags
+            errorText: panel.tagError
+            onClosed: panel.closeTags(true)
+            onToggled: tag => panel.toggleTag(tag)
+        }
     }
 }

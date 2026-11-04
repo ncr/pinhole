@@ -56,6 +56,20 @@ ids through a catalog obtained with `pinhole.query` and verifies current
 thumbnail bytes before admission. Results explicitly cover indexed photos
 only; importing this sample does not index the full library.
 
+Choose **Tag selected photo** after selecting a search result with the
+arrow keys or returning from its viewer. The editor shows the saved tags
+and up to five suggestions from a fixed Polish vocabulary. Choose a
+suggestion to save it. Choose it again or press its remove button to
+remove it. Ctrl+Z and Ctrl+Shift+Z undo and redo edits. Escape returns
+to search. Suggestions use the indexed image and the existing text tower,
+so they also work with the imported sample during an ANE quarantine.
+
+Approved tags are kept in the plugin's state by source and stable photo
+ID, with a limit of 2,000 tagged photos per source in this prototype.
+They survive index rebuilds. The editor works on the selected search
+result. Tags are separate from text retrieval and photo file metadata.
+The suggestions are ranked within the vocabulary and need human review.
+
 **Index thumbnails on NPU** incrementally indexes the current source's local
 still thumbnails. It does not fetch originals. **Pause indexing** stops
 between photos; completed vectors survive closing, reload and restart.
@@ -105,6 +119,9 @@ Polish rankings, keyboard navigation, viewer return, latest-query wins,
 repeated catalog cancellation, narrow geometry, pointer activation,
 reopening and the translated quarantine error. It never touches real
 settings, originals or clipboard contents.
+The tagging check opens the editor with the keyboard, saves and removes a
+suggestion, exercises undo and redo, and verifies the stored source/photo
+entry after the window closes.
 
 On this M2 Pro, the complete 384-photo interaction test passed both offscreen
 and on native Wayland on hidden workspace 5, including the 420-px panel,

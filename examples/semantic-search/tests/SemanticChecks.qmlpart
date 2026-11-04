@@ -3,6 +3,7 @@
         when: true
         property string stage: "initial"
         property var details: ({})
+        property var savedTag: null
         SignalSpy { id: taps; signalName: "tapped" }
         SignalSpy { id: opens; target: pinhole.viewer; signalName: "openChanged" }
         function test_pipeline() {
@@ -56,6 +57,44 @@
             wait(500)
             verify(field.width > 0)
             verify(field.x + field.width <= panel.width)
+            stage = "tag-suggestions"
+            const tagButton = findChild(panel, "semanticTagButton")
+            verify(tagButton && tagButton.visible)
+            compare(tagButton.text, "Otaguj wybrane zdjęcie")
+            const tagged = panel.results[panel.selected].id
+            tagButton.forceActiveFocus()
+            keyClick(Qt.Key_Return)
+            tryCompare(panel, "tagAsset", tagged, 5000)
+            tryVerify(() => panel.tagSuggestions.length === 5, 30000, panel.tagError)
+            compare(panel.savedTags.length, 0)
+            const suggestion = findChild(panel, "semanticTagSuggestion")
+            verify(suggestion !== null)
+            suggestion.forceActiveFocus()
+            keyClick(Qt.Key_Return)
+            tryCompare(suggestion, "active", true, 5000)
+            const saved = panel.savedTags[0].id
+            keyClick(Qt.Key_Escape)
+            tryCompare(panel, "tagAsset", "")
+            tryCompare(tagButton, "activeFocus", true)
+            keyClick(Qt.Key_Return)
+            tryCompare(panel, "tagAsset", tagged)
+            tryVerify(() => panel.tagSuggestions.length === 5, 30000)
+            compare(panel.savedTags[0].id, saved)
+            const same = findChild(panel, "semanticTagSuggestion")
+            verify(same.active)
+            same.forceActiveFocus()
+            keyClick(Qt.Key_Return)
+            tryCompare(same, "active", false)
+            compare(panel.savedTags.length, 0)
+            keyClick(Qt.Key_Z, Qt.ControlModifier)
+            tryCompare(same, "active", true)
+            keyClick(Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
+            tryCompare(same, "active", false)
+            keyClick(Qt.Key_Return)
+            tryCompare(same, "active", true)
+            savedTag = {key: "tags:" + panel.sourceKey, photo: "photo:" + tagged, tag: panel.savedTags[0]}
+            keyClick(Qt.Key_Escape)
+            tryCompare(panel, "tagAsset", "")
             stage = "mouse"
             const grid = findChild(panel, "semanticSearchResults")
             verify(grid !== null)
@@ -108,7 +147,8 @@
         function cleanupTestCase() {
             let written = false
             const data = {failed: qtest_results.failCount, passed: qtest_results.passCount,
-                          stage: stage, photos: @PHOTO_COUNT@, details: details, problem: plugins.at("me.semantic-search").problem}
+                          stage: stage, photos: @PHOTO_COUNT@, details: details, savedTag: savedTag,
+                          problem: plugins.at("me.semantic-search").problem}
             pinhole.run("/usr/bin/tee", [@RESULT_FILE@], {input: JSON.stringify(data)}).then(() => written = true)
             tryVerify(() => written, 5000)
             Qt.quit()

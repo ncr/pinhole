@@ -74,7 +74,7 @@ def prepare(task, corpus_path, images, rankings):
     plugin = task / 'plugins/semantic-search'
     plugin.mkdir(parents=True)
     original = ROOT / 'examples/semantic-search'
-    for name in ['manifest.json', 'i18n', 'pinhole-semantic']:
+    for name in ['manifest.json', 'i18n', 'pinhole-semantic', 'SemanticTags.qml']:
         (plugin / name).symlink_to(original / name)
     text = (original / 'SemanticPanel.qml').read_text()
     text = text.replace('run: base + "full-v2/clip-hybrid-ane", corpus: base + "icloud-pl-v1/corpus.json"',
@@ -138,6 +138,10 @@ def main():
         result = json.loads((task / 'result.json').read_text())
         if code != 0 or result['failed'] != 0 or result['passed'] < 2 or result['stage'] != 'complete':
             raise RuntimeError(f'UI test failed: {result}; exit={code}')
+        saved = result['savedTag']
+        state = json.loads((profile / 'state/pinhole/plugins/me.semantic-search/state.json').read_text())
+        if state.get(saved['key'], {}).get(saved['photo']) != [saved['tag']]:
+            raise RuntimeError('approved tag was not persisted for the correct source and photo')
         print(json.dumps({'pass': True, 'photos': result['photos'], 'stage': result['stage'], 'evidence': str(task)}, ensure_ascii=False))
         return 0
     except (OSError, ValueError, RuntimeError, KeyError) as error:

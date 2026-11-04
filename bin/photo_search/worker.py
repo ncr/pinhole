@@ -17,6 +17,29 @@ from .store import Store
 
 MAX_MESSAGE = 24 << 20
 
+# Stable ids and Polish prompts for the prototype's fixed vocabulary.
+TAGS = (
+    ('animals', 'zwierzęta', 'zdjęcie zwierzęcia'),
+    ('beach', 'plaża', 'plaża z piaskiem nad morzem'),
+    ('bicycle', 'rower', 'zdjęcie z rowerem'),
+    ('buildings', 'budynki', 'zdjęcie architektury i budynków'),
+    ('celebration', 'uroczystość', 'uroczystość, przyjęcie lub świętowanie'),
+    ('document', 'dokument', 'zdjęcie papierowego dokumentu z tekstem'),
+    ('flowers', 'kwiaty', 'kwiaty lub bukiet'),
+    ('food', 'jedzenie', 'zdjęcie potrawy lub jedzenia'),
+    ('forest', 'las', 'drzewa i ścieżka w lesie'),
+    ('group', 'zdjęcie grupowe', 'kilka osób na wspólnym zdjęciu'),
+    ('interior', 'wnętrze', 'wnętrze mieszkania lub pokoju'),
+    ('mountains', 'góry', 'górski krajobraz'),
+    ('night', 'noc', 'zdjęcie na dworze nocą'),
+    ('portrait', 'portret', 'portret osoby z bliska'),
+    ('screenshot', 'zrzut ekranu', 'zrzut ekranu telefonu lub komputera'),
+    ('snow', 'śnieg', 'śnieg w zimowym krajobrazie'),
+    ('street', 'ulica', 'miejska ulica z chodnikiem lub samochodami'),
+    ('sunset', 'zachód słońca', 'zachód słońca na horyzoncie'),
+    ('water', 'woda', 'krajobraz z jeziorem, rzeką lub morzem'),
+)
+
 
 def identity(name, models, backend):
     """Version the derived index separately for every inference recipe."""
@@ -73,6 +96,7 @@ class Worker:
         self.identity = identity(args.model, args.models, args.backend)
         self.store = Store(args.index, args.library_key, self.identity, 512 if args.model == 'clip' else 768)
         self.image_model = self.text_model = self.runtime = None
+        self.tag_vectors = None
         self.pending = []
         self.running = False
         self.last_error = ''
@@ -91,14 +115,18 @@ class Worker:
                                       "processed": self.processed, "skipped": self.skipped,
                                       "error": self.last_error, "backend": self.args.backend}
 
-    def refresh(self):
+    def refresh(self, asset_id=None):
         """Check indexed local files; same-path replacements must not rank.
 
         Hash once after a worker restart, then only after stat changes. The
         stat cache is ephemeral; vectors remain bound to content SHA-256.
         """
-        rows = self.store.db.execute('''SELECT c.asset_id,c.path,e.fingerprint FROM catalog c
-            JOIN embeddings e USING(asset_id) WHERE c.fingerprint=e.fingerprint''').fetchall()
+        sql = '''SELECT c.asset_id,c.path,e.fingerprint FROM catalog c
+            JOIN embeddings e USING(asset_id) WHERE c.fingerprint=e.fingerprint AND c.active=1'''
+        if asset_id is None:
+            rows = self.store.db.execute(sql).fetchall()
+        else:
+            rows = self.store.db.execute(sql + ' AND c.asset_id=?', (asset_id,)).fetchall()
         for asset, relative, fingerprint in rows:
             try:
                 path = thumbnail(self.args.library, relative)
@@ -111,6 +139,24 @@ class Worker:
             except (OSError, ValueError) as error:
                 self.store.fail(asset, str(error))
                 self.stamps.pop(asset, None)
+
+    def text_encoder(self):
+        if self.text_model is None:
+            from .models import TextModel
+            self.text_model = TextModel(self.args.model, self.args.models)
+        return self.text_model
+
+    def suggest_tags(self, asset):
+        if not isinstance(asset, str) or not 0 < len(asset) <= 1024:
+            raise ValueError('invalid photo id')
+        self.refresh(asset)
+        image = self.store.vector_for(asset)
+        if image is None:
+            return []
+        if self.tag_vectors is None:
+            self.tag_vectors, _ = self.text_encoder().encode([prompt for _, _, prompt in TAGS])
+        order = np.argsort(-(self.tag_vectors @ image), kind='stable')[:5]
+        return [{'id': TAGS[i][0], 'label': TAGS[i][1]} for i in order]
 
     def request(self, message):
         op = message.get('op')
@@ -168,13 +214,13 @@ class Worker:
             self.refresh()
             if not self.store.status()['indexed']:
                 return {"results": [], "seconds": 0, "status": self.status()}
-            if self.text_model is None:
-                from .models import TextModel
-                self.text_model = TextModel(self.args.model, self.args.models)
+            model = self.text_encoder()
             started = time.perf_counter()
-            vector, _ = self.text_model.encode([text])
+            vector, _ = model.encode([text])
             return {"results": self.store.search(vector[0], limit), "seconds": time.perf_counter() - started,
                     "status": self.status()}
+        if op == 'suggest_tags':
+            return self.suggest_tags(message.get('id'))
         if op == 'import':
             return self.import_run(Path(message['run']), Path(message['corpus']))
         raise ValueError('unknown worker operation')
