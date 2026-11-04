@@ -26,7 +26,9 @@ Panel {
     property var allResults: []
     property bool tagQuery: false
     property string tagName: ""
-    readonly property string indexPath: pinhole.cacheDir + "/clip-hybrid-v1.sqlite"
+    property string backend: "hybrid-ane"
+    readonly property bool cuda: backend === "cuda"
+    readonly property string indexPath: pinhole.cacheDir + (cuda ? "/wemm-4b-cuda-v1.sqlite" : "/clip-hybrid-v1.sqlite")
     readonly property string helper: pinhole.dir + "/pinhole-semantic"
     property string checkout: ""
     visible: shown
@@ -74,7 +76,9 @@ Panel {
         server = job
         job.then(result => {
             if (server !== job || current !== generation) return
-            checkout = JSON.parse(result.stdout).checkout
+            const config = JSON.parse(result.stdout)
+            checkout = config.checkout
+            backend = config.backend
             launchWorker()
         }).catch(error => {
             if (server !== job || current !== generation) return
@@ -84,12 +88,14 @@ Panel {
     function launchWorker() {
         const current = generation
         const base = checkout + "/.tools/photo-search/"
-        const job = pinhole.run(helper, ["serve", "--index", indexPath,
-            "--library", pinhole.library.dir, "--library-key", pinhole.library.key,
-            "--models", base + "models", "--model", "clip", "--backend", "hybrid-ane",
+        const args = ["serve", "--index", indexPath,
+            "--library", pinhole.library.dir, "--library-key", pinhole.library.key, "--backend", backend]
+        const recipe = cuda ? ["--models", base + "wemm-cuda/weights", "--model", "wemm", "--threads", "4"] : [
+            "--models", base + "models", "--model", "clip",
             "--cache", base + "resident-tiles", "--compiler", checkout + "/.tools/ane-compiler-package/usr/bin/mil-hwxc",
             "--ane-library", checkout + "/.tools/omarchy-ane/libane/libane.so",
-            "--smoke-receipt", base + "ane-smoke.json"], {
+            "--smoke-receipt", base + "ane-smoke.json"]
+        const job = pinhole.run(helper, args.concat(recipe), {
             timeout: 0,
             output: line => {
                 if (current !== generation) return
@@ -377,12 +383,14 @@ Panel {
             width: parent.width
             spacing: 12
             ShellButton {
-                text: panel.status.running ? qsTr("Pause indexing") : qsTr("Index thumbnails on NPU")
+                text: panel.status.running ? qsTr("Pause indexing")
+                    : panel.cuda ? qsTr("Index thumbnails on GPU") : qsTr("Index thumbnails on NPU")
                 usable: panel.catalogReady && !panel.catalogJob
                 onTapped: panel.indexing()
             }
             ShellButton {
                 text: qsTr("Use the 384-photo benchmark")
+                visible: !panel.cuda
                 usable: panel.catalogReady && !panel.status.running
                 onTapped: panel.importBenchmark()
             }
@@ -407,6 +415,7 @@ Panel {
             width: parent.width
             wrapMode: Text.WordWrap
             text: panel.tagQuery ? qsTr("Enter # and the full tag name. Enter # alone to see all tagged photos.")
+                : panel.cuda ? qsTr("WeMM 4B on GPU. Describe a photo in English or Polish. Search stays on this computer.")
                 : qsTr("Experimental CLIP. Search stays on this computer. Similarity scores are not probabilities.")
             color: theme.darkForeground
         }
@@ -462,7 +471,7 @@ Panel {
         visible: panel.browsing && (panel.tagQuery || panel.catalogReady) && panel.results.length === 0
         text: panel.tagQuery ? qsTr("No visible photos with this tag.")
             : panel.queryJob ? qsTr("Searching…") : panel.status.indexed === 0
-            ? qsTr("Import the benchmark or index local thumbnails to begin.")
+            ? (panel.cuda ? qsTr("Index local thumbnails to begin.") : qsTr("Import the benchmark or index local thumbnails to begin."))
             : search.text.trim() ? qsTr("No visible results.") : qsTr("Type a description to search.")
         width: Math.min(grid.width, 500)
         wrapMode: Text.WordWrap

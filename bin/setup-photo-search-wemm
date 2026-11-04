@@ -1,0 +1,59 @@
+#!/bin/sh
+# Prepare the optional CUDA environment. The plugin never downloads at runtime.
+set -eu
+umask 077
+cd "$(dirname -- "$0")/.."
+snapshot=
+case "${1:-}" in
+    --help|-h)
+        echo "Usage: bin/setup-photo-search-wemm [--snapshot LOCAL_MODEL_DIRECTORY]"
+        exit 0 ;;
+    --snapshot)
+        [ "$#" = 2 ] || { echo 'Expected a local model directory.' >&2; exit 2; }
+        snapshot=$(realpath -e -- "$2") ;;
+    '')
+        [ "$#" = 0 ] || exit 2 ;;
+    *) echo 'Run bin/setup-photo-search-wemm --help.' >&2; exit 2 ;;
+esac
+base="$PWD/.tools/photo-search"
+target="$base/wemm-cuda"
+mkdir -p "$base"
+exec 9>"$base/wemm-setup.lock"
+flock -n 9 || { echo 'WeMM setup is already running.' >&2; exit 1; }
+if [ -e "$target" ] || [ -L "$target" ]; then
+    echo "WeMM environment already exists at $target." >&2
+    exit 1
+fi
+stage=$(mktemp -d "$base/.wemm-setup.XXXXXXXX")
+trap 'rm -rf -- "$stage"' EXIT
+trap 'exit 1' HUP INT TERM
+uv venv --relocatable --python 3.12 "$stage/.venv"
+python="$stage/.venv/bin/python"
+uv pip install --python "$python" --index-url https://pypi.org/simple \
+    torch==2.9.1 torchvision==0.24.1 transformers==5.2.0 qwen-vl-utils==0.0.14 accelerate==1.15.0
+PYTHONPATH="$PWD/bin" HF_HUB_DISABLE_TELEMETRY=1 "$python" - "$stage/weights" "$snapshot" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+import torch
+
+from photo_search.wemm import FILES, REPO, REVISION, verify_snapshot
+
+if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(including_emulation=False):
+    raise SystemExit("WeMM requires a CUDA GPU with native BF16 support")
+
+target = Path(sys.argv[1])
+if sys.argv[2]:
+    source = Path(sys.argv[2])
+    target.mkdir()
+    for name in FILES:
+        shutil.copyfile(source / name, target / name)
+else:
+    from huggingface_hub import snapshot_download
+    snapshot_download(REPO, revision=REVISION, allow_patterns=list(FILES), local_dir=target)
+verify_snapshot(target)
+print(f"Verified {REPO} at {REVISION}")
+PY
+mv -T -- "$stage" "$target"
+echo "WeMM is ready at $target. Reopen Pinhole's photo search to use it."

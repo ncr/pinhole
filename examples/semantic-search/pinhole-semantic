@@ -5,11 +5,16 @@ set -eu
 script=$(readlink -f -- "$0")
 checkout=$(CDPATH= cd -- "$(dirname -- "$script")/../.." && pwd)
 python="$checkout/.tools/photo-search/venv/bin/python"
+backend=hybrid-ane
+if [ -d "$checkout/.tools/photo-search/wemm-cuda" ]; then
+    python="$checkout/.tools/photo-search/wemm-cuda/.venv/bin/python"
+    backend=cuda
+fi
 if [ ! -x "$python" ]; then
     echo 'Photo-search environment is missing; see docs/research/photo-search-plugin.md.' >&2
     exit 1
 fi
 if [ "${1:-}" = config ]; then
-    exec "$python" -c 'import json,sys; print(json.dumps({"checkout":sys.argv[1]}))' "$checkout"
+    exec "$python" -c 'import json,sys; print(json.dumps({"checkout":sys.argv[1],"backend":sys.argv[2]}))' "$checkout" "$backend"
 fi
 exec "$python" "$checkout/bin/photo-search-worker" "$@"

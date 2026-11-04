@@ -43,6 +43,9 @@ TAGS = (
 
 def identity(name, models, backend):
     """Version the derived index separately for every inference recipe."""
+    if name == 'wemm':
+        from .wemm import identity as wemm_identity
+        return wemm_identity()
     path = models / PINS[name]['directory']
     return {"recipe": 1, "image": PINS[name], "text": PINS['multilingual' if name == 'clip' else name],
             "processor_sha256": hash_file(path / 'preprocessor_config.json'),
@@ -94,8 +97,10 @@ class Worker:
     def __init__(self, args):
         self.args = args
         self.identity = identity(args.model, args.models, args.backend)
-        self.store = Store(args.index, args.library_key, self.identity, 512 if args.model == 'clip' else 768)
-        self.image_model = self.text_model = self.runtime = None
+        from .wemm import DIMENSION
+        self.store = Store(args.index, args.library_key, self.identity,
+                           {'clip': 512, 'siglip2': 768, 'wemm': DIMENSION}[args.model])
+        self.image_model = self.text_model = self.wemm_model = self.runtime = None
         self.tag_vectors = None
         self.pending = []
         self.running = False
@@ -140,11 +145,19 @@ class Worker:
                 self.store.fail(asset, str(error))
                 self.stamps.pop(asset, None)
 
-    def text_encoder(self):
+    def wemm_encoder(self):
+        if self.wemm_model is None:
+            from .wemm import WeMM
+            self.wemm_model = WeMM(self.args.models)
+        return self.wemm_model
+
+    def encode_text(self, texts):
+        if self.args.model == 'wemm':
+            return self.wemm_encoder().texts(texts)
         if self.text_model is None:
             from .models import TextModel
             self.text_model = TextModel(self.args.model, self.args.models)
-        return self.text_model
+        return self.text_model.encode(texts)[0]
 
     def suggest_tags(self, asset):
         if not isinstance(asset, str) or not 0 < len(asset) <= 1024:
@@ -154,7 +167,7 @@ class Worker:
         if image is None:
             return []
         if self.tag_vectors is None:
-            self.tag_vectors, _ = self.text_encoder().encode([prompt for _, _, prompt in TAGS])
+            self.tag_vectors = self.encode_text([prompt for _, _, prompt in TAGS])
         order = np.argsort(-(self.tag_vectors @ image), kind='stable')[:5]
         return [{'id': TAGS[i][0], 'label': TAGS[i][1]} for i in order]
 
@@ -214,10 +227,9 @@ class Worker:
             self.refresh()
             if not self.store.status()['indexed']:
                 return {"results": [], "seconds": 0, "status": self.status()}
-            model = self.text_encoder()
             started = time.perf_counter()
-            vector, _ = model.encode([text])
-            return {"results": self.store.search(vector[0], limit), "seconds": time.perf_counter() - started,
+            vector = self.encode_text([text])[0]
+            return {"results": self.store.search(vector, limit), "seconds": time.perf_counter() - started,
                     "status": self.status()}
         if op == 'suggest_tags':
             return self.suggest_tags(message.get('id'))
@@ -227,6 +239,8 @@ class Worker:
 
     def import_run(self, directory, corpus_path):
         """Map hashed benchmark ids back through the plugin's public catalog."""
+        if self.args.model == 'wemm':
+            raise ValueError('benchmark import is available only for CLIP and SigLIP 2')
         from .compare import read_run
         report, ids, vectors = read_run(directory)
         corpus = json.loads(corpus_path.read_text())
@@ -257,6 +271,18 @@ class Worker:
             self.store.put(asset, digest, vector)
         return self.status() | {"imported": len(staged)}
 
+    def encode_image(self, image):
+        if self.args.model == 'wemm':
+            return self.wemm_encoder().images([image])[0]
+        if self.image_model is None:
+            from .models import ImageModel
+            self.image_model = ImageModel(self.args.model, self.args.models)
+            if self.args.backend == 'hybrid-ane':
+                from .ane import NativeRuntime
+                self.runtime = NativeRuntime(self.args.ane_library, self.args.cache, self.args.smoke_receipt)
+                self.image_model.hybrid(self.runtime, self.args.cache, self.args.compiler)
+        return self.image_model.encode(self.image_model.pixels(image))[0]
+
     def step(self):
         if not self.running or not self.pending:
             self.running = False
@@ -280,14 +306,7 @@ class Worker:
                 self.running = False
             return
         try:
-            if self.image_model is None:
-                from .models import ImageModel
-                self.image_model = ImageModel(self.args.model, self.args.models)
-                if self.args.backend == 'hybrid-ane':
-                    from .ane import NativeRuntime
-                    self.runtime = NativeRuntime(self.args.ane_library, self.args.cache, self.args.smoke_receipt)
-                    self.image_model.hybrid(self.runtime, self.args.cache, self.args.compiler)
-            vector = self.image_model.encode(self.image_model.pixels(image))[0]
+            vector = self.encode_image(image)
             if hash_file(path) != digest:
                 raise ValueError('thumbnail changed during inference')
             self.store.put(asset, digest, vector)

@@ -27,8 +27,8 @@ def main():
         server.add_argument('--' + option, type=Path, required=True)
     server.add_argument('--socket', type=Path)
     server.add_argument('--library-key', required=True)
-    server.add_argument('--model', choices=['clip', 'siglip2'], required=True)
-    server.add_argument('--backend', choices=['cpu', 'hybrid-ane'], required=True)
+    server.add_argument('--model', choices=['clip', 'siglip2', 'wemm'], required=True)
+    server.add_argument('--backend', choices=['cpu', 'hybrid-ane', 'cuda'], required=True)
     server.add_argument('--cache', type=Path, default=Path('.tools/photo-search/resident-tiles'))
     server.add_argument('--ane-library', type=Path)
     server.add_argument('--compiler', type=Path)
@@ -69,6 +69,8 @@ def main():
                 return 0 if result.get('ok') else 1
         if not 1 <= args.threads <= 4:
             raise ValueError('threads must be 1–4')
+        if (args.model == 'wemm') != (args.backend == 'cuda'):
+            raise ValueError('WeMM and the CUDA backend must be selected together')
         if args.backend == 'hybrid-ane' and not all([args.ane_library, args.compiler, args.smoke_receipt]):
             raise ValueError('hybrid-ane requires library, compiler and current-boot smoke receipt')
         from photo_search.worker import serve

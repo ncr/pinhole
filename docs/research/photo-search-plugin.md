@@ -1,11 +1,14 @@
 # Photo content search personal plugin
 
-`examples/semantic-search` is a developer personal plugin for local Polish
-text search over indexed thumbnails. It is a prototype, separate from the
-built-in plugin set. It does not scan the library or start a model process
-on the first-frame path. Ctrl F creates its view and starts its owned worker.
+`examples/semantic-search` is a personal plugin for local English and Polish
+text search over indexed thumbnails. Ctrl F creates its view and starts its
+owned worker. No model or library scan runs on the first-frame path.
 
-The current recipe is the corrected CLIP hybrid backend: attention
+On a CUDA host the optional WeMM 4B environment selects the WeMM recipe.
+Both image and text embeddings use the same resident BF16 model and the
+original query language. A separate per-source index keeps WeMM vectors
+apart from previous CLIP results. On the Mac the corrected CLIP hybrid
+backend uses attention
 projections on ANE, the first convolution and remaining operations on CPU,
 and a resident multilingual CPU text tower. It is explicitly an experiment,
 not the retrieval-quality winner or a measured speed improvement. See
@@ -14,12 +17,23 @@ not the retrieval-quality winner or a measured speed improvement. See
 
 ## Dependencies and local setup
 
-The host must support plugin API 5. The optional environment and pinned
-models described in the full-encoder notes must already exist in the
-checkout's ignored `.tools/photo-search` directory. The helper uses Python,
-NumPy, Pillow, torch, transformers and sentence-transformers; it never
-installs packages or downloads models when opened. Missing dependencies
-produce an error under the plugin.
+On Linux x86-64 with an NVIDIA GPU that supports native BF16 and about
+11 GiB free VRAM, install `uv` and run from the checkout:
+
+```sh
+bin/setup-photo-search-wemm
+```
+
+Use `--snapshot /path/to/weights` to reuse an existing copy of the pinned
+Tencent weights and tokenizer. Setup verifies their SHA-256 hashes.
+The worker loads the local checkpoint only when indexing or answering
+a query against an existing index. The first such operation includes
+loading the model. It releases GPU memory when search closes.
+
+The host must support plugin API 5. On the Mac, use the optional
+environment and pinned models described in the full-encoder notes.
+Both environments live under the checkout's ignored `.tools/photo-search`
+directory. The plugin does not install packages or download models.
 
 Keep this developer plugin in the checkout: its executable resolves its own
 symlink with `readlink -f`, then finds the environment and worker relative to
@@ -40,14 +54,14 @@ above.
 
 ## Using the prototype
 
-Ctrl F opens a Polish description field and a grid of up to 100 visible
+Ctrl F opens a description field and a grid of up to 100 visible
 results. Enter submits the description; Down moves focus to the results,
 arrow keys move through the grid, and Enter opens the selected photo.
 Closing that photo returns to the same results; Escape then closes search
 and ends its processes. The plugin uses stable ids and filters other
 plugins' hidden photos. Scrolling stays inside the shared `ScrollGrid`.
 
-**Use the 384-photo benchmark** imports the existing corrected CLIP run
+For the CLIP recipe, **Use the 384-photo benchmark** imports the existing corrected CLIP run
 from `.tools/photo-search/full-v2/clip-hybrid-ane`. The worker maps its opaque
 ids through a catalog obtained with `pinhole.query` and verifies current
 thumbnail bytes before admission. Results explicitly cover indexed photos
@@ -72,7 +86,8 @@ They survive index rebuilds. The editor works on the selected search
 result. Tags are stored separately from photo file metadata. Suggestions
 are ranked within the vocabulary and need human review.
 
-**Index thumbnails on NPU** incrementally indexes the current source's local
+**Index thumbnails on GPU** with WeMM or **Index thumbnails on NPU** with
+CLIP incrementally indexes the current source's local
 still thumbnails. It does not fetch originals. **Pause indexing** stops
 between photos; completed vectors survive closing, reload and restart.
 Each source has its own derivative cache and model identity. Library
@@ -86,7 +101,7 @@ The existing imported index still accepts Polish queries entirely locally.
 During quarantine the plugin explains how to restore device access in Polish.
 The November 4 reboot and successful smoke test restored access on the
 M2 Pro. The completed SigLIP 2 comparison used the same 384-thumbnail sample.
-The plugin still uses the CLIP recipe, and its import covers only the sample.
+The CLIP import covers only the sample.
 
 ## Verification
 

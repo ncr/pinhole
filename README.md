@@ -83,11 +83,9 @@ workshop, Ctrl Tab / Ctrl Shift Tab change documents and Ctrl F searches.
 installed API version and the same bundled documents to tools. Start with
 [the quick start](docs/plugin-quickstart.md) or [the agent contract](docs/plugin-agents.md).
 
-An [experimental personal plugin for local photo-content search](docs/research/photo-search-plugin.md)
-uses a separate model environment and a resumable thumbnail index. Its
-current Mac validation covers the 384-photo benchmark. The
-[offline relevance review](docs/research/photo-search-benchmark.md#judge-and-score)
-lets you judge Polish queries before choosing a model for the full library.
+The [local photo-content search plugin](docs/research/photo-search-plugin.md)
+uses a resumable thumbnail index. On an NVIDIA CUDA host with the optional
+WeMM 4B environment, Ctrl F accepts photo descriptions in English or Polish.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or

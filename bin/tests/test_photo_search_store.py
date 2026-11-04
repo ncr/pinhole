@@ -221,6 +221,38 @@ class WorkerTests(unittest.TestCase):
         load.assert_called_once()
         self.assertEqual(model.encode.call_count, 2)
 
+    def test_wemm_reuses_one_encoder_for_images_and_both_query_languages(self):
+        import numpy as np
+        from unittest.mock import Mock, call
+        from photo_search.worker import Worker
+        from photo_search.wemm import DIMENSION
+
+        args = SimpleNamespace(**(vars(self.args) | {
+            'model': 'wemm', 'backend': 'cuda', 'index': self.root / 'wemm.sqlite',
+        }))
+        encoder = Mock()
+        vector = np.zeros((1, DIMENSION), dtype=np.float32)
+        vector[0, 0] = 1
+        encoder.images.return_value = encoder.texts.return_value = vector
+        image = object()
+        with closing(Worker(args)) as worker, \
+                patch('photo_search.wemm.WeMM', return_value=encoder) as load, \
+                patch('photo_search.models.load_image', return_value=image):
+            worker.request({'op': 'catalog', 'assets': self.assets[:1]})
+            self.assertEqual(worker.request({'op': 'query', 'text': 'pies'})['results'], [])
+            load.assert_not_called()
+            worker.request({'op': 'start'})
+            worker.step()
+            self.assertEqual(worker.status()['dimension'], DIMENSION)
+            for query in ('pies na trawie', 'dog on the grass'):
+                self.assertEqual(worker.request({'op': 'query', 'text': query})['results'][0]['id'], 'a')
+            load.assert_called_once_with(args.models)
+            encoder.images.assert_called_once_with([image])
+            self.assertEqual(encoder.texts.call_args_list, [call(['pies na trawie']), call(['dog on the grass'])])
+        args.index = self.args.index
+        with self.assertRaisesRegex(ValueError, 'another index'):
+            Worker(args)
+
     def test_same_path_thumbnail_replacement_is_excluded_before_query(self):
         from photo_search.ane import hash_file
         self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
