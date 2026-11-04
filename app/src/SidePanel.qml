@@ -157,7 +157,9 @@ Item {
     }
     readonly property int sourceCount: sources.list.length
     readonly property var focusedStop: focusIndex >= visibleSources ? stopsShown[focusIndex - visibleSources] ?? null : null
-    onFocusIndexChanged: showFocus()
+    // Plugin controls are revealed by keyboard navigation. A pointer may
+    // focus a switch already under it without moving the list.
+    onFocusIndexChanged: if (section !== "plugins") showFocus()
     function showFocus() {
         const item = focusedStop ?? sourceRows.itemAt(focusIndex)
         if (!item)
@@ -1435,6 +1437,8 @@ Item {
                                 }
                                 Toggle {
                                     id: pluginSwitch
+                                    objectName: "pluginSwitch:" + pluginRow.modelData
+                                    revealOnPointerFocus: false
                                     lit: root.focusedStop === pluginSwitch
                                     Component.onCompleted: root.addStop(pluginSwitch)
                                     Component.onDestruction: root.dropStop(pluginSwitch)

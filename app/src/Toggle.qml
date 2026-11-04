@@ -9,6 +9,7 @@ ControlSurface {
     id: toggle
     property bool checked: false
     property string hint
+    property bool revealOnPointerFocus: true
     // Chosen with the keys: a ring around it, in the accent.
     property bool lit: false
     // Not now: dimmed, as a ShellButton is, and taps do nothing.
@@ -30,7 +31,10 @@ ControlSurface {
     onActivated: press()
     Connections {
         target: toggle
-        function onActiveFocusChanged() { if (toggle.activeFocus) Focus.reveal(toggle) }
+        function onActiveFocusChanged() {
+            if (toggle.activeFocus && (toggle.revealOnPointerFocus || !tap.focusing))
+                Focus.reveal(toggle)
+        }
     }
     signal toggled()
     function press() {
@@ -90,5 +94,16 @@ ControlSurface {
         readonly property bool hovered: containsMouse
         cursorShape: toggle.usable ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
-    TapHandler { id: tap; onTapped: { if (toggle.usable) toggle.forceActiveFocus(Qt.MouseFocusReason); toggle.press() } }
+    TapHandler {
+        id: tap
+        property bool focusing: false
+        onTapped: {
+            if (toggle.usable) {
+                focusing = true
+                toggle.forceActiveFocus(Qt.MouseFocusReason)
+                focusing = false
+            }
+            toggle.press()
+        }
+    }
 }

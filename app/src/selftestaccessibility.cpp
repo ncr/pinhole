@@ -33,11 +33,11 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
         for (; item; item = item->parentItem()) if (item == root) return true;
         return false;
     };
-    const auto click = [window](QQuickItem *item) {
+    const auto click = [window](QQuickItem *item, const QPointingDevice *device = QPointingDevice::primaryPointingDevice()) {
         const auto at = item->mapToScene({item->width()/2, item->height()/2});
-        QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier, device);
         QCoreApplication::sendEvent(window, &press);
-        QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier, device);
         QCoreApplication::sendEvent(window, &release);
     };
     const auto fail = [timer](const char *message) {
@@ -85,11 +85,50 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             key(Qt::Key_Right);
             return;
         }
-        case 3:
+        case 3: {
             if (side->property("section").toString() != "plugins") return fail("Right did not navigate section tabs");
             save("settings-plugins");
+            auto *tab = namedItem(side, "sideSection-plugins");
+            auto *scroller = namedItem(side, "sidePanelScroller");
+            const QString plugin = qEnvironmentVariable("PINHOLE_SELFTEST_PLUGIN", QStringLiteral("pinhole.frame"));
+            auto *toggle = namedItem(side, "pluginSwitch:" + plugin);
+            if (!tab || !scroller || !toggle) return fail("missing plugin settings controls");
+            auto *content = scroller->property("contentItem").value<QQuickItem *>();
+            auto *touchpad = new QPointingDevice("selftest settings touchpad", 4713, QInputDevice::DeviceType::TouchPad,
+                                                QPointingDevice::PointerType::Finger, QInputDevice::Capability::Position,
+                                                2, 1, {}, {}, window);
+            const auto toggleAtEdge = [&](const QPointingDevice *device) {
+                tab->forceActiveFocus();
+                // Leave the switch visible within the focus reveal margin.
+                const auto top = toggle->mapToItem(content, {0, 0}).y();
+                const auto end = scroller->property("contentHeight").toDouble() - scroller->height();
+                const auto offset = top - 2 <= end ? top - 2 : top + toggle->height() + 2 - scroller->height();
+                scroller->setProperty("contentY", offset);
+                const bool checked = toggle->property("checked").toBool();
+                click(toggle, device);
+                return toggle->property("checked").toBool() != checked
+                    && qFuzzyCompare(scroller->property("contentY").toDouble(), offset);
+            };
+            if (!toggleAtEdge(QPointingDevice::primaryPointingDevice())) return fail("mouse click did not toggle the plugin in place");
+            if (!toggleAtEdge(touchpad)) return fail("touchpad tap did not toggle the plugin in place");
+            tab->forceActiveFocus(Qt::TabFocusReason);
+            for (int i = 0; i < 80 && window->activeFocusItem() != toggle; ++i)
+                key(Qt::Key_Tab);
+            const auto toggleY = toggle->mapToItem(content, {0, 0}).y();
+            const auto contentY = scroller->property("contentY").toDouble();
+            if (window->activeFocusItem() != toggle || contentY > toggleY
+                || toggleY + toggle->height() > contentY + scroller->height()) {
+                std::fprintf(stderr, "selftest: accessibility: plugin switch y=%.1f, visible y=%.1f..%.1f, focused=%d\n",
+                             toggleY, contentY, contentY + scroller->height(), window->activeFocusItem() == toggle);
+                return fail("Tab did not bring the plugin switch into view");
+            }
+            const bool checked = toggle->property("checked").toBool();
+            key(Qt::Key_Space);
+            if (toggle->property("checked").toBool() == checked) return fail("Space did not toggle the focused plugin switch");
+            key(Qt::Key_Space);
             window->setProperty("guideShown", true);
             return;
+        }
         case 4: {
             if (!guide) return fail("workshop did not load on demand");
             auto *accessible = QAccessible::queryAccessibleInterface(guide);
@@ -247,7 +286,7 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
         }
         default:
             if (window->findChild<QQuickItem *>("gridMore")->property("open").toBool()) return fail("second More click did not close it");
-            std::puts("selftest: accessibility: settings/workshop/source dialogs, consistent action/radio menus, More pointer toggle, Tab containment, document/search keys, compact layout and focus restoration: PASS");
+            std::puts("selftest: accessibility: settings/workshop/source dialogs, plugin switch scroll and focus, consistent action/radio menus, More pointer toggle, Tab containment, document/search keys, compact layout and focus restoration: PASS");
             timer->stop(); QCoreApplication::quit();
         }
     });
