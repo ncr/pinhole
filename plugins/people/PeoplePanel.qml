@@ -10,6 +10,20 @@ Panel {
     property string stateKey: ""
     property var edits: ({})
     property var anchor: null
+    property string tab: "groups"
+    property int listPage: 0
+    property string picking: ""
+    property var pickerOpener: null
+    property var assignmentJob: null
+    readonly property var names: {
+        const found = new Set()
+        for (const key of Object.keys(edits)) {
+            if (edits[key].name) found.add(edits[key].name)
+            if (edits[key].person) found.add(edits[key].person)
+        }
+        return Array.from(found).sort((a, b) => a.localeCompare(b))
+    }
+    readonly property bool personView: !!anchor?.name
     property var rows: []
     property int page: 0
     property bool nextPage: false
@@ -17,9 +31,7 @@ Panel {
     property var status: ({ phase: "waiting" })
     property string failure: ""
     property var readJob: null
-    readonly property var rejected: anchor ? edits[anchor.key]?.rejected || [] : []
-    readonly property var visibleRows: rows.filter(row => !rejected.includes(row.key))
-    readonly property var selection: visibleRows[selected]
+    readonly property var selection: rows[selected]
     visible: shown
     color: Qt.rgba(0, 0, 0, 0.36)
     onClicked: close()
@@ -30,6 +42,7 @@ Panel {
         stateKey = "people:" + source
         edits = pinhole.state[stateKey] || {}
         shown = true
+        tab = names.length ? "people" : "groups"
         page = 0
         status = { phase: "waiting" }
         forceActiveFocus()
@@ -38,6 +51,7 @@ Panel {
     function close() {
         readJob?.cancel()
         readJob = null
+        closePicker(false)
         shown = false
         returning = false
         anchor = null
@@ -46,18 +60,21 @@ Panel {
     }
     function load(focusResults = true) {
         readJob?.cancel()
-        const job = pinhole.run("pinhole-faces", [anchor ? "members" : "groups", "--cache", pinhole.cacheDir], {
-            input: JSON.stringify({ source: source, anchor: anchor?.key, offset: page * 48 }),
-            timeout: 10000
-        })
+        const operation = anchor ? (personView ? "person" : "members") : tab
+        const job = request(operation, { anchor: anchor?.anchor, person: anchor?.name, offset: page * 48 })
         readJob = job
         job.then(result => {
             if (readJob !== job) return
             const response = JSON.parse(result.stdout)
-            readJob = null
             failure = ""
             status = response.status
             nextPage = response.rows.length > 48
+            if (!response.rows.length && page > 0) {
+                readJob = null
+                --page
+                load(focusResults)
+                return
+            }
             const current = selection?.key
             const incoming = response.rows.slice(0, 48).filter(row => {
                 const photo = pinhole.library.item(row.id)
@@ -65,11 +82,12 @@ Panel {
             })
             if (JSON.stringify(incoming) !== JSON.stringify(rows)) {
                 rows = incoming
-                selected = Math.max(0, visibleRows.findIndex(row => row.key === current))
-                if (grid.activeFocus && visibleRows.length)
+                selected = Math.max(0, rows.findIndex(row => row.key === current))
+                if (grid.activeFocus && rows.length)
                     grid.positionViewAtIndex(selected, GridView.Contain)
             }
-            if (shown && focusResults && visibleRows.length) grid.forceActiveFocus()
+            readJob = null
+            if (shown && !picking && focusResults && rows.length) grid.forceActiveFocus()
         }).catch(error => {
             if (readJob !== job) return
             readJob = null
@@ -88,15 +106,17 @@ Panel {
         case "error": return qsTr("Face indexing encountered an error and will retry.")
         case "ready":
             if (status.errors) return qsTr("Skipped unreadable or missing thumbnails: %1.").arg(status.errors)
-            return anchor ? qsTr("Review the suggested matches before naming the group.")
-                          : qsTr("Face groups are suggestions. New photos are checked in the background.")
+            if (personView) return qsTr("Photos assigned to this person.")
+            if (anchor) return qsTr("Review the faces, then assign the group or the selected photo.")
+            if (tab === "people") return qsTr("Choose a person to see their photos.")
+            return qsTr("Face groups are suggestions. New photos are checked in the background.")
         default: return qsTr("Waiting for background face indexing…")
         }
     }
     Timer {
         interval: 3000
         repeat: true
-        running: panel.shown
+        running: panel.shown && !panel.picking
         onTriggered: { if (!panel.readJob) panel.load(false) }
     }
     function enter(row) {
@@ -107,45 +127,119 @@ Panel {
             pinhole.openPhotoDirect(row.id)
         } else {
             anchor = row
-            nameInput.text = edits[row.key]?.name || ""
+            listPage = page
             page = 0
             rows = []
             nextPage = false
             load()
         }
     }
-    function back() {
-        if (!anchor) {
+    function back(reload = true) {
+        if (picking) {
+            closePicker()
+        } else if (!anchor) {
             close()
-            return
+        } else {
+            anchor = null
+            page = listPage
+            rows = []
+            nextPage = false
+            if (reload) load()
         }
-        anchor = null
-        page = 0
-        rows = []
-        nextPage = false
-        load()
     }
-    function writeEdit(key, face, value) {
+    function request(operation, options) {
+        return pinhole.run("pinhole-faces", [operation, "--cache", pinhole.cacheDir], {
+            input: JSON.stringify(Object.assign({ source: source, edits: edits }, options)),
+            timeout: 10000
+        })
+    }
+    function openPicker(mode, opener) {
+        readJob?.cancel()
+        readJob = null
+        picking = mode
+        pickerOpener = opener
+        failure = ""
+        picker.reset()
+    }
+    function closePicker(restoreFocus = true) {
+        assignmentJob?.cancel()
+        assignmentJob = null
+        picking = ""
+        if (restoreFocus && pickerOpener) pickerOpener.forceActiveFocus()
+        pickerOpener = null
+    }
+    function writeEdits(key, patch, focusResults = false) {
         const saved = Object.assign({}, pinhole.state[key] || {})
-        if (value.name || value.rejected?.length) saved[face] = value
-        else delete saved[face]
+        for (const face of Object.keys(patch)) {
+            const edit = patch[face]
+            if (edit.name || edit.person || edit.rejected?.length) saved[face] = edit
+            else delete saved[face]
+        }
         pinhole.state[key] = saved
         if (stateKey === key) {
             edits = saved
-            if (anchor?.key === face) nameInput.text = value.name || ""
-            selected = Math.max(0, Math.min(selected, visibleRows.length - 1))
+            if (shown) load(focusResults)
         }
     }
-    function edit(value, label) {
+    function edit(patch, label, focusResults = false) {
         const key = stateKey
-        const face = anchor.key
-        const before = edits[face] || {}
-        writeEdit(key, face, value)
-        pinhole.did(label, () => writeEdit(key, face, before), () => writeEdit(key, face, value))
+        const before = {}
+        for (const face of Object.keys(patch))
+            before[face] = Object.assign({}, edits[face])
+        writeEdits(key, patch, focusResults)
+        pinhole.did(label, () => panel.writeEdits(key, before), () => panel.writeEdits(key, patch))
+    }
+    function assign(name) {
+        if (picking === "photo") {
+            const face = selection.key
+            const last = !personView && rows.length === 1 && page === 0 && !nextPage
+            closePicker(!last)
+            if (last) {
+                back(false)
+                forceActiveFocus()
+            }
+            edit({ [face]: Object.assign({}, edits[face], { person: name }) }, qsTr("assigning a photo"), last)
+            return
+        }
+        if (picking === "merge") {
+            const from = anchor.name
+            const patch = {}
+            for (const face of Object.keys(edits)) {
+                const previous = edits[face]
+                if (previous.name === from || previous.person === from) {
+                    patch[face] = Object.assign({}, previous)
+                    if (previous.name === from) patch[face].name = name
+                    if (previous.person === from) patch[face].person = name
+                }
+            }
+            closePicker(false)
+            back(false)
+            forceActiveFocus()
+            edit(patch, qsTr("merging people"), true)
+            return
+        }
+        const job = request("assignment", { anchor: anchor.anchor })
+        assignmentJob = job
+        job.then(result => {
+            if (assignmentJob !== job) return
+            const patch = {}
+            for (const face of JSON.parse(result.stdout).keys)
+                patch[face] = Object.assign({}, edits[face], { person: name })
+            closePicker(false)
+            back(false)
+            forceActiveFocus()
+            if (Object.keys(patch).length) edit(patch, qsTr("assigning a group"), true)
+            else load()
+        }).catch(error => {
+            if (assignmentJob !== job) return
+            assignmentJob = null
+            failure = qsTr("People could not load the face groups.")
+            pinhole.warn(error)
+        })
     }
     function move(delta) {
-        if (!visibleRows.length) return
-        selected = Math.max(0, Math.min(visibleRows.length - 1, selected + delta))
+        if (!rows.length) return
+        selected = Math.max(0, Math.min(rows.length - 1, selected + delta))
         grid.positionViewAtIndex(selected, GridView.Contain)
     }
 
@@ -156,9 +250,9 @@ Panel {
     Keys.onShortcutOverride: event => { if (tabKey(event)) event.accepted = true }
     Keys.onPressed: event => {
         if (!tabKey(event)) return
-        const controls = [closeButton, backButton, openButton, rejectButton,
-            nameInput.input, save, grid, previous, next].filter(item =>
-            item.visible && item.activeFocusOnTab && item.usable !== false)
+        const candidates = picking ? [picker.searchField, picker.choicesList, picker.createButton, picker.cancelButton]
+            : [closeButton, ...tabs.children, backButton, groupButton, assignButton, openButton, rejectButton, grid, previous, next]
+        const controls = candidates.filter(item => item.visible && item.activeFocusOnTab && item.usable !== false)
         const reverse = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
         const current = controls.indexOf(panel.Window.window.activeFocusItem)
         const index = current < 0 ? (reverse ? controls.length - 1 : 0)
@@ -202,6 +296,7 @@ Panel {
         height: Math.max(0, Math.min(690, parent.height - 24))
         Column {
             id: header
+            visible: !panel.picking
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
@@ -213,14 +308,43 @@ Panel {
                 UiText {
                     width: parent.width - closeButton.width - parent.spacing
                     elide: Text.ElideRight
-                    text: panel.anchor ? panel.edits[panel.anchor.key]?.name || qsTr("Suggested group") : qsTr("People")
+                    text: panel.anchor ? panel.anchor.name || qsTr("Suggested group") : qsTr("People")
                 }
                 ShellButton { id: closeButton; text: "✕"; onTapped: panel.close() }
+            }
+            Choices {
+                id: tabs
+                visible: !panel.anchor
+                value: panel.tab
+                options: [{ value: "people", text: qsTr("Named people") },
+                          { value: "groups", text: qsTr("To review") }]
+                onChosen: value => {
+                    panel.tab = value
+                    panel.page = 0
+                    panel.rows = []
+                    panel.load(false)
+                }
             }
             Flow {
                 width: parent.width
                 spacing: 8
                 ShellButton { id: backButton; visible: !!panel.anchor; text: qsTr("Back to people"); hint: "Esc"; onTapped: panel.back() }
+                ShellButton {
+                    id: groupButton
+                    objectName: "peopleAssignGroup"
+                    visible: !!panel.anchor
+                    usable: panel.personView ? panel.names.length > 1 : panel.rows.length > 0
+                    text: panel.personView ? qsTr("Merge with a person") : qsTr("Assign group")
+                    onTapped: panel.openPicker(panel.personView ? "merge" : "group", groupButton)
+                }
+                ShellButton {
+                    id: assignButton
+                    objectName: "peopleAssignPhoto"
+                    visible: !!panel.anchor
+                    usable: !!panel.selection
+                    text: panel.personView ? qsTr("Move selected photo") : qsTr("Assign selected photo")
+                    onTapped: panel.openPicker("photo", assignButton)
+                }
                 ShellButton {
                     id: openButton
                     objectName: "peopleOpen"
@@ -231,33 +355,16 @@ Panel {
                 }
                 ShellButton {
                     id: rejectButton
-                    visible: !!panel.anchor
+                    visible: !!panel.anchor && !panel.personView
                     text: qsTr("Different person")
-                    usable: !!panel.selection && panel.selection.key !== panel.anchor?.key
-                    onTapped: panel.edit(Object.assign({}, panel.edits[panel.anchor.key], {
-                        rejected: panel.rejected.concat([panel.selection.key])
-                    }), qsTr("removing a face from a group"))
-                }
-            }
-            Row {
-                visible: !!panel.anchor
-                width: parent.width
-                spacing: 8
-                FieldInput {
-                    id: nameInput
-                    objectName: "peopleName"
-                    width: Math.max(0, parent.width - save.width - parent.spacing)
-                    height: save.height
-                    placeholder: qsTr("Person’s name")
-                    input.maximumLength: 100
-                    onAccepted: save.press()
-                }
-                ShellButton {
-                    id: save
-                    text: qsTr("Save name")
-                    usable: nameInput.text.trim() !== (panel.edits[panel.anchor?.key]?.name || "")
-                    onTapped: panel.edit(Object.assign({}, panel.edits[panel.anchor.key], { name: nameInput.text.trim() }),
-                                         qsTr("naming a person"))
+                    usable: !!panel.selection && panel.selection.key !== panel.anchor?.anchor
+                    onTapped: {
+                        const face = panel.anchor.anchor
+                        const previous = panel.edits[face] || {}
+                        panel.edit({ [face]: Object.assign({}, previous, {
+                            rejected: (previous.rejected || []).concat([panel.selection.key])
+                        }) }, qsTr("removing a face from a group"))
+                    }
                 }
             }
             UiText {
@@ -269,6 +376,7 @@ Panel {
         }
         ScrollGrid {
             id: grid
+            visible: !panel.picking
             objectName: "peopleGrid"
             readonly property int columns: Math.max(1, Math.floor(width / 154))
             anchors.top: header.bottom
@@ -278,7 +386,7 @@ Panel {
             anchors.margins: 12
             cellWidth: width / columns
             cellHeight: cellWidth
-            model: panel.visibleRows
+            model: panel.rows
             activeFocusOnTab: count > 0
             keyNavigationEnabled: false
             delegate: PeopleTile {
@@ -289,7 +397,7 @@ Panel {
                 row: modelData
                 group: !panel.anchor
                 chosen: panel.selected === index
-                label: group ? panel.edits[row.key]?.name || qsTr("Group · %1 photos").arg(row.count)
+                label: group ? row.name || qsTr("Group · %1 photos").arg(row.count)
                              : pinhole.library.item(row.id).filename || qsTr("Photo %1").arg(index + 1)
                 onSelected: {
                     panel.selected = index
@@ -301,13 +409,15 @@ Panel {
         UiText {
             anchors.centerIn: grid
             width: Math.min(grid.width, 450)
-            visible: panel.status.phase === "ready" && grid.count === 0 && !panel.readJob
+            visible: !panel.picking && panel.status.phase === "ready" && grid.count === 0 && !panel.readJob
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: panel.anchor ? qsTr("This group has no visible matches.") : qsTr("No suggested groups on this page.")
+            text: panel.anchor ? qsTr("This group has no visible matches.")
+                : panel.tab === "people" ? qsTr("No named people yet. Start in To review.") : qsTr("No suggested groups on this page.")
         }
         Row {
             id: footer
+            visible: !panel.picking
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottomMargin: 12
@@ -326,6 +436,20 @@ Panel {
                 usable: panel.nextPage && !panel.readJob
                 onTapped: { ++panel.page; panel.load() }
             }
+        }
+        PeoplePicker {
+            id: picker
+            anchors.fill: parent
+            anchors.margins: 12
+            visible: !!panel.picking
+            names: panel.names.filter(name => name !== panel.anchor?.name)
+            busy: !!panel.assignmentJob
+            allowCreate: panel.picking !== "merge"
+            title: panel.failure || (panel.picking === "group" ? qsTr("Choose a person for this group")
+                : panel.picking === "merge" ? qsTr("Choose a person to merge with")
+                : qsTr("Choose a person for the selected photo"))
+            onChosen: name => panel.assign(name)
+            onCancelled: panel.closePicker()
         }
     }
 }
