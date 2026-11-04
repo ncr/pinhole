@@ -199,3 +199,22 @@ PATH=/usr/bin:$PATH app/bin/measure-startup \
   --library /path/to/library --output .tools/startup-pcores \
   --native-hidden --host-only --warmup 2 --runs 10 --cpu-affinity 4-11
 ```
+
+## M2 Pro with a warm private service
+
+On November 4 the Cargo-built `pinholed` served the 49,095-item local
+library in read-only mode. Both sets used the same 854×1062 Wayland window
+on hidden workspace 5 and inherited CPU affinity. The grid now filters the
+timeline's existing presentation order directly, skipping a second sort
+when building visible cells. Stacks and hidden photos are applied before
+the first frame.
+
+| First frame | Runs per build | Before, median (range) | After, median (range) |
+|---|---:|---:|---:|
+| Warm QML and graphics caches | 10 after 2 warmups | 349 ms (280–463) | 352 ms (330–436) |
+| Fresh app caches on a warm filesystem | 3 isolated launches | 655 ms (620–748) | 570 ms (490–645) |
+
+The warm runs show no measurable first-frame gain and the median still
+exceeds 300 ms. The fresh-cache sample is small and the ranges overlap.
+Native hidden windows reported the first frame and media readiness but
+no resolved-photo milestone in either set.

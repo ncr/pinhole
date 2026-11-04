@@ -596,18 +596,15 @@ void PhotoGrid::rebuildCells(const std::vector<int> *moved) {
         auto cardOf = [&](int i) { return card.empty() ? -1 : card[size_t(i)]; };
         m_cellOf.assign(size_t(n), -1);
         m_cells.reserve(size_t(n));
-        for (int i = 0; i < n; ++i) {
+        // The timeline already holds every photo in presentation order.
+        // Filtering it keeps that order without sorting the visible cells again.
+        const auto *order = m_timeline ? &m_timeline->order() : nullptr;
+        for (int position = 0; position < n; ++position) {
+            const int i = order ? (*order)[size_t(position)] : position;
             if (!isHidden(i) && (cardOf(i) < 0 || cardOf(i) == i)) {
                 m_cellOf[size_t(i)] = int(m_cells.size());
                 m_cells.push_back(i);
             }
-        }
-        if (m_timeline) {
-            std::sort(m_cells.begin(), m_cells.end(), [this](int a, int b) {
-                return m_timeline->positionOf(a) < m_timeline->positionOf(b);
-            });
-            for (int cell = 0; cell < int(m_cells.size()); ++cell)
-                m_cellOf[size_t(m_cells[size_t(cell)])] = cell;
         }
         for (int i = 0; i < n; ++i)
             if (cardOf(i) >= 0 && cardOf(i) != i)
