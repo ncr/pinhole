@@ -26,6 +26,9 @@ LEGACY_MODELS = Path(__file__).resolve().parents[2] / ".tools/face-recognition"
 # identity, so a new model never silently moves a name to a different face.
 RECIPE = "yunet-sface-v1"
 SIMILARITY = 0.60
+DEFAULT_GROUPING = "careful"
+JOIN_THRESHOLDS = {"off": None, "careful": 0.62, "wider": 0.60}
+EXEMPLARS = 6
 
 
 def verified(path, digest):
@@ -243,16 +246,78 @@ def group_faces(faces, vectors, names, excluded):
                 yield from members
 
 
-def rebuild(db, names, excluded, progress):
-    settings = json.dumps([sorted(names), excluded], sort_keys=True)
+def join_groups(faces, vectors, suggestions, protected, threshold):
+    """Join groups that have two matches between distinct faces on both sides."""
+    import numpy as np
+
+    groups = {}
+    for anchor, member, score in suggestions:
+        if anchor in protected:
+            # Older labels inherit their original group's membership.
+            yield anchor, member, score
+        else:
+            groups.setdefault(anchor, []).append((member, score))
+
+    anchors = sorted(groups, key=lambda anchor: (-len(groups[anchor]), anchor))
+    if not anchors:
+        return
+    positions = {face["key"]: i for i, face in enumerate(faces)}
+    samples = np.full((len(anchors), EXEMPLARS), -1, dtype=int)
+    photos = []
+    for i, anchor in enumerate(anchors):
+        members = groups[anchor]
+        # Sample the cover and faces at a range of similarities to it.
+        choices = np.linspace(0, len(members) - 1, min(EXEMPLARS, len(members)), dtype=int)
+        samples[i, :len(choices)] = [positions[members[j][0]] for j in choices]
+        photos.append({faces[positions[key]]["id"] for key, _ in members})
+    exemplars = vectors[samples]
+    exemplars[samples < 0] = 0
+    candidates = exemplars.reshape(-1, vectors.shape[1])
+
+    absorbed = set()
+    for start in range(0, len(anchors), 16):
+        batch = exemplars[start:start + 16]
+        scores = (batch.reshape(-1, vectors.shape[1]) @ candidates.T).reshape(
+            len(batch), EXEMPLARS, len(anchors), EXEMPLARS).transpose(0, 2, 1, 3)
+        for i, pairs_by_group in enumerate(scores, start):
+            if i in absorbed:
+                continue
+            anchor = anchors[i]
+            seen = photos[i].copy()
+            yield from ((anchor, member, score) for member, score in groups[anchor])
+            peaks = pairs_by_group.max(axis=(1, 2))
+            eligible = np.flatnonzero(peaks[i + 1:] >= threshold) + i + 1
+            for j in eligible[np.argsort(-peaks[eligible], kind="stable")]:
+                if j in absorbed or seen & photos[j]:
+                    continue
+                pairs = pairs_by_group[j]
+                first, second = np.unravel_index(pairs.argmax(), pairs.shape)
+                pairs[first, :] = pairs[:, second] = 0
+                support = float(pairs.max())
+                if support < threshold:
+                    continue
+                absorbed.add(j)
+                seen.update(photos[j])
+                # Later groups still have to match this anchor's original
+                # exemplars. Faces added here cannot start a chain of joins.
+                for member, score in groups[anchors[j]]:
+                    yield anchor, member, min(score, support)
+
+
+def rebuild(db, names, excluded, grouping, progress):
+    settings = json.dumps([sorted(names), excluded, grouping], sort_keys=True)
     if db.execute("SELECT value FROM meta WHERE key='suggestion-settings'").fetchone() == (settings,):
         return
     progress()
     faces, vectors = face_rows(db)
+    suggestions = group_faces(faces, vectors, names, excluded)
+    threshold = JOIN_THRESHOLDS[grouping]
+    if threshold is not None:
+        protected = set(names) | {key for key, rejected in excluded.items() if rejected}
+        suggestions = join_groups(faces, vectors, suggestions, protected, threshold)
     with db:
         db.execute("DELETE FROM suggestions")
-        db.executemany("INSERT INTO suggestions VALUES (?,?,?)",
-                       group_faces(faces, vectors, names, excluded))
+        db.executemany("INSERT INTO suggestions VALUES (?,?,?)", suggestions)
         db.execute("INSERT OR REPLACE INTO meta VALUES ('suggestion-settings', ?)", (settings,))
 
 
@@ -360,6 +425,17 @@ def load_edits(path, source, previous):
         return previous
 
 
+def load_grouping(path, previous):
+    try:
+        settings = json.loads(path.read_text()).get("settings", {}).get("me.people", {})
+        value = settings.get("grouping")
+        return value if isinstance(value, str) and value in JOIN_THRESHOLDS else DEFAULT_GROUPING
+    except FileNotFoundError:
+        return DEFAULT_GROUPING
+    except (OSError, ValueError, AttributeError):
+        return previous
+
+
 def catalog_rows(catalog, source):
     catalog.execute("BEGIN")
     try:
@@ -373,11 +449,12 @@ def catalog_rows(catalog, source):
         catalog.rollback()
 
 
-def run_index(db, library, source):
+def run_index(db, library, source, settings):
     state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/me.people/state.json"
     path = library / "library.sqlite"
     inode = version = catalog = None
     edits = ([], {})
+    grouping = DEFAULT_GROUPING
     errors = 0
     retry = 0
     engine = None
@@ -402,6 +479,7 @@ def run_index(db, library, source):
                     inode, version = identity, None
                 changed = catalog.execute("PRAGMA data_version").fetchone()[0]
                 saved = load_edits(state, source, edits)
+                preference = load_grouping(settings, grouping)
                 refresh = changed != version or (errors and time.monotonic() >= retry)
                 if refresh:
                     assets = catalog_rows(catalog, source)
@@ -414,12 +492,12 @@ def run_index(db, library, source):
                     errors = scan(db, library, assets, analyzer, lambda done, total, errors:
                                   set_status(db, "scanning", done=done, total=total, errors=errors))
                     retry = time.monotonic() + 60
-                if refresh or saved != edits:
+                if refresh or saved != edits or preference != grouping:
                     # Empty libraries and old caches can be served without a runtime.
                     if db.execute("SELECT 1 FROM faces LIMIT 1").fetchone():
-                        rebuild(db, *saved, lambda: set_status(db, "grouping"))
-                    set_status(db, "ready", errors=errors)
-                    version, edits = changed, saved
+                        rebuild(db, *saved, preference, lambda: set_status(db, "grouping"))
+                    set_status(db, "ready", errors=errors, grouping=preference)
+                    version, edits, grouping = changed, saved, preference
             except ImportError as error:
                 print(f"pinhole-faces: {error}", file=sys.stderr, flush=True)
                 set_status(db, "runtime")
@@ -434,7 +512,7 @@ def run_index(db, library, source):
             catalog.close()
 
 
-def daemon(library, source):
+def daemon(library, source, settings):
     # Match PluginHost::cacheDir so existing face groups and labels carry over.
     library = library.absolute()
     cache = (xdg("XDG_CACHE_HOME", ".cache") / "pinhole/plugins/me.people"
@@ -443,7 +521,7 @@ def daemon(library, source):
     with (cache / (RECIPE + "-scan.lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         with closing(connect(cache, source)) as db:
-            run_index(db, library.resolve(), source)
+            run_index(db, library.resolve(), source, settings)
 
 
 def exit_with_parent():
@@ -468,7 +546,8 @@ def main():
         threading.Thread(target=exit_with_parent, daemon=True).start()
         os.nice(10)
         os.environ.update(OPENBLAS_NUM_THREADS="2", OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
-        daemon(args.library, args.library_key)
+        settings = args.managed_plugins or xdg("XDG_CONFIG_HOME", ".config") / "pinhole/plugins.json"
+        daemon(args.library, args.library_key, settings)
         return
     if args.cache is None:
         parser.error("--cache is required for this operation")

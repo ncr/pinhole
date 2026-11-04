@@ -12,6 +12,7 @@ Panel {
     property var anchor: null
     property string tab: "groups"
     property int listPage: 0
+    readonly property string grouping: pinhole.settings.grouping || "careful"
     property string picking: ""
     property var pickerOpener: null
     property var assignmentJob: null
@@ -251,7 +252,7 @@ Panel {
     Keys.onPressed: event => {
         if (!tabKey(event)) return
         const candidates = picking ? [picker.searchField, picker.choicesList, picker.createButton, picker.cancelButton]
-            : [closeButton, ...tabs.children, backButton, groupButton, assignButton, openButton, rejectButton, grid, previous, next]
+            : [closeButton, ...tabs.children, ...groupingOptions.children, backButton, groupButton, assignButton, openButton, rejectButton, grid, previous, next]
         const controls = candidates.filter(item => item.visible && item.activeFocusOnTab && item.usable !== false)
         const reverse = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
         const current = controls.indexOf(panel.Window.window.activeFocusItem)
@@ -323,6 +324,35 @@ Panel {
                     panel.page = 0
                     panel.rows = []
                     panel.load(false)
+                }
+            }
+            Flow {
+                id: groupingOptions
+                visible: !panel.anchor && panel.tab === "groups"
+                width: parent.width
+                spacing: 4
+                UiText { text: qsTr("Join groups"); height: separate.height; verticalAlignment: Text.AlignVCenter }
+                ShellButton {
+                    id: separate
+                    objectName: "peopleGroupingOff"
+                    text: qsTr("Off")
+                    checkable: true
+                    active: panel.grouping === "off"
+                    onTapped: pinhole.settings.grouping = "off"
+                }
+                ShellButton {
+                    objectName: "peopleGroupingCareful"
+                    text: qsTr("Careful")
+                    checkable: true
+                    active: panel.grouping === "careful"
+                    onTapped: pinhole.settings.grouping = "careful"
+                }
+                ShellButton {
+                    objectName: "peopleGroupingWider"
+                    text: qsTr("Wider")
+                    checkable: true
+                    active: panel.grouping === "wider"
+                    onTapped: pinhole.settings.grouping = "wider"
                 }
             }
             Flow {

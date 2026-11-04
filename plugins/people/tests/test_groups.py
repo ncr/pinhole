@@ -38,6 +38,27 @@ class Suggestions(unittest.TestCase):
         self.assertEqual(self.groups([], []), [])
 
 
+class JoiningSuggestions(unittest.TestCase):
+    def joined(self, photos, angles, protected=()):
+        faces = [dict(key=str(i), id=photo) for i, photo in enumerate(photos)]
+        theta = np.deg2rad(angles)
+        vectors = np.column_stack((np.cos(theta), np.sin(theta)))
+        suggestions = [(str(i // 2 * 2), str(i), 1.0) for i in range(len(faces))]
+        return {member: anchor for anchor, member, _ in
+                worker.join_groups(faces, vectors, suggestions, set(protected), 0.62)}
+
+    def test_groups_need_two_matches_without_chaining_through_adopted_faces(self):
+        self.assertEqual(self.joined(list("abcdef"), [0, 4, 45, 49, 90, 94]),
+                         {"0": "0", "1": "0", "2": "0", "3": "0", "4": "4", "5": "4"})
+        self.assertEqual(self.joined(list("abcd"), [0, 110, 20, 40]),
+                         {"0": "0", "1": "0", "2": "2", "3": "2"})
+
+    def test_overlapping_photos_and_groups_with_saved_edits_stay_separate(self):
+        separate = {"0": "0", "1": "0", "2": "2", "3": "2"}
+        self.assertEqual(self.joined(list("abac"), [0, 4, 20, 24]), separate)
+        self.assertEqual(self.joined(list("abcd"), [0, 4, 20, 24], protected=["2"]), separate)
+
+
 class Review(unittest.TestCase):
     def test_legacy_and_explicit_labels_share_one_person_without_hiding_pending_faces(self):
         with sqlite3.connect(":memory:") as db:

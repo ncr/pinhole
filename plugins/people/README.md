@@ -31,10 +31,13 @@ The [YuNet weights are MIT](https://github.com/opencv/opencv_zoo/blob/48b10fa505
 and the [SFace weights are Apache 2.0](https://github.com/opencv/opencv_zoo/blob/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_recognition_sface/LICENSE).
 The helper verifies their SHA-256 digests before loading them.
 
-The first version groups around exemplar faces using a cosine similarity
-cutoff of 0.60 and at most one face per photo in a group. The cutoff is
-provisional. Small faces, profiles and large changes in appearance can be
-missed or split across suggestions. Inspect groups before naming them.
+The first pass groups around exemplar faces at a cosine similarity of
+0.60. **Join groups** in **To review** sets how the second pass works.
+**Careful** (the default) requires two matches across different faces
+at 0.62, while **Wider** uses 0.60 and **Off** keeps the first-pass groups.
+Groups that share a photo or have saved edits stay separate during this
+pass. Changing the setting regroups the existing index in the background.
+Inspect groups before naming them.
 Face vectors and suggestions are in the plugin's per-source cache.
 Assignments and rejections are in plugin state, keyed by the face and its
 thumbnail bytes. They survive cache rebuilds with the same thumbnails and
