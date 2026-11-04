@@ -64,7 +64,7 @@ QQuickItem *groupMarker(QQuickItem *root) {
 
 QQuickItem *mapAction(QQuickItem *root) {
     return findItem(root, [](QQuickItem *item) {
-        if (item->property("key").toString() == "N" && item->metaObject()->indexOfSignal("tapped()") >= 0)
+        if (item->property("key").toString() == "M" && item->metaObject()->indexOfSignal("tapped()") >= 0)
             return true;
         const auto text = item->property("text").toString();
         return item->objectName().startsWith("menuOption_") && (text == "Map" || text == "Mapa");
@@ -136,7 +136,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
         case 0:
             if (run->clock.elapsed() < 950) return;
             if (keys) {
-                press(window, Qt::Key_N);
+                press(window, Qt::Key_M);
             } else if (auto *button = mapAction(root)) {
                 click(window, device, button);
             } else {
@@ -262,7 +262,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 press(window, Qt::Key_G);
                 if (named(map, "placesDrawer"))
                     return fail("G did not close Photos in view");
-                press(window, Qt::Key_N);
+                press(window, Qt::Key_M);
             } else {
                 click(window, device, named(map, "placesArea"));
                 if (named(map, "placesDrawer"))
@@ -286,15 +286,15 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
             break;
         case 11:
             if (!named(root, "infoMap")) return;
-            press(window, Qt::Key_W);
+            press(window, Qt::Key_M);
             break;
         case 12:
             if (!map || !viewer->isOpen() || zoom() != 14) return;
-            press(window, Qt::Key_Escape);
+            press(window, Qt::Key_M);
             break;
         default:
             if (map || !viewer->isOpen()) return;
-            std::puts("selftest: places: Info W and return to the photo: PASS");
+            std::puts("selftest: places: Info M and return to the photo: PASS");
             timer->stop();
             return QCoreApplication::quit();
         }

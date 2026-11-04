@@ -1523,7 +1523,8 @@ ApplicationWindow {
         name: "grid.newest"
         text: qsTr("Newest")
         section: "library"
-        keys: ["End"]
+        keys: ["N", "End"]
+        keysText: "N End"
         keyLayer: "grid"
         when: grid.count > 0
         onTriggered: grid.cursorToEnd()

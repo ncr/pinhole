@@ -373,7 +373,7 @@ PinholePlugin {
         PluginAction {
             place: "grid"
             text: qsTr("Map")
-            key: "N"
+            key: "M"
             shown: pinhole.library.count > 0
             onTriggered: plugin.openMap(null)
         },
@@ -387,9 +387,8 @@ PinholePlugin {
         }
     ]
     help: [
-        ["N", qsTr("Browse photos on the map")],
+        ["M", qsTr("Browse photos on the map")],
         ["I", qsTr("A photo's details")],
-        ["W", qsTr("Where, on the map")],
         ["⇧ I", qsTr("A big video's details")]
     ]
 
@@ -474,7 +473,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Where"),
-            text: qsTr("W shows this photo and nearby photos on the map."),
+            text: qsTr("M shows this photo and nearby photos on the map."),
             open: () => plugin.placeStep(),
             action: mapLight
         }
@@ -558,7 +557,7 @@ PinholePlugin {
                     objectName: "infoMap"
                     visible: plugin.hasPlace
                     text: qsTr("Open map")
-                    key: "W"
+                    key: "M"
                     keyLayer: "viewer"
                     onTapped: plugin.openMap(Geo.point(plugin.photoId, plugin.facts.latitude, plugin.facts.longitude, plugin.item.date))
                 }

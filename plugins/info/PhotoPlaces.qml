@@ -654,7 +654,7 @@ FocusScope {
         id: closeCommand
         name: "places.close"
         keyLayer: "plugin"
-        keys: ["N"]
+        keys: ["M"]
         when: places.visible
         onTriggered: places.owner.closeMap()
     }

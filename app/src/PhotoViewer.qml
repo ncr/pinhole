@@ -729,7 +729,7 @@ Item {
             name: "video.sound"
             text: qsTr("Sound")
             section: "video"
-            keys: ["M"]
+            keys: ["Shift+M"]
             keyLayer: "viewer"
             onTriggered: root.muted = !root.muted
         }
