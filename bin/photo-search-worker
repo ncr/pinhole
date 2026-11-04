@@ -26,6 +26,12 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     config = commands.add_parser('config')
     config.add_argument('--checkout', type=Path, required=True)
+    config.add_argument('--library', type=Path)
+    config.add_argument('--library-key')
+    daemon = commands.add_parser('daemon')
+    for option in ('checkout', 'library', 'managed-plugins'):
+        daemon.add_argument('--' + option, type=Path, required=True)
+    daemon.add_argument('--library-key', required=True)
     server = commands.add_parser('serve')
     for option in ('index', 'models', 'library'):
         server.add_argument('--' + option, type=Path, required=True)
@@ -39,6 +45,7 @@ def main():
     server.add_argument('--smoke-receipt', type=Path)
     server.add_argument('--threads', type=int, default=2)
     server.add_argument('--background', action='store_true')
+    server.add_argument('--managed-plugins', type=Path)
     request = commands.add_parser('request')
     address = request.add_mutually_exclusive_group(required=True)
     address.add_argument('--socket', type=Path)
@@ -48,10 +55,20 @@ def main():
     os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1',
                       OPENBLAS_NUM_THREADS='2', TOKENIZERS_PARALLELISM='false')
     try:
-        if args.command == 'config':
+        if args.command in ('config', 'daemon'):
             from photo_search.engines import local_profile
-            print(json.dumps(local_profile(args.checkout) | {"worker": str(args.checkout / "bin/photo-search-worker")}))
-            return 0
+            from photo_search.managed import index_path, service_manages
+            profile = local_profile(args.checkout)
+            script = str(args.checkout / "bin/photo-search-worker")
+            if args.command == 'config':
+                managed = bool(args.library and args.library_key and service_manages(args.library, args.library_key))
+                print(json.dumps(profile | {"worker": script, "managed": managed}))
+                return 0
+            python = profile["python"]
+            os.execv(python, [python, script, "serve", "--background", "--index",
+                             str(index_path(args.library, profile["indexFile"])), "--library", str(args.library),
+                             "--library-key", args.library_key, "--managed-plugins", str(args.managed_plugins),
+                             *profile["args"]])
         if args.socket is None:
             args.socket = endpoint(args.index)
         if args.command == 'request':

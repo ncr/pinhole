@@ -1,6 +1,6 @@
 import QtQuick
 
-// The app owns indexing independently of whether the search card is open.
+// The shared library uses pinholed's worker; isolated libraries own theirs.
 Item {
     id: indexer
     visible: false
@@ -8,6 +8,8 @@ Item {
     readonly property bool paused: pinhole.settings.indexingPaused === true
     property bool ready: false
     property bool catalogReady: false
+    property bool managed: false
+    property int missedStatus: 0
     property string sourceKey: ""
     property string indexPath: ""
     property string failure: ""
@@ -28,6 +30,7 @@ Item {
         cancel(statusJob); statusJob = null
         cancel(indexingJob); indexingJob = null
         cancel(server); server = null
+        managed = false; missedStatus = 0
         ready = false; catalogReady = false; failure = ""; indexPath = ""
         status = { indexed: 0, total: 0, running: false, waiting: false, errors: 0 }
     }
@@ -52,14 +55,21 @@ Item {
             reset()
             sourceKey = pinhole.library.key
         }
-        if (server || !sourceKey || !pinhole.library.count) return
+        if (server || managed || !sourceKey || !pinhole.library.count) return
         const current = generation
-        const job = pinhole.run(helper, ["config"])
+        const job = pinhole.run(helper, ["config", "--library", pinhole.library.dir, "--library-key", sourceKey])
         server = job
         job.then(result => {
             if (server !== job || current !== generation) return
             profile = JSON.parse(result.stdout)
-            launchWorker()
+            indexPath = pinhole.cacheDir + "/" + profile.indexFile
+            if (profile.managed) {
+                server = null
+                managed = true
+                poll()
+            } else {
+                launchWorker()
+            }
         }).catch(error => {
             if (server !== job || current !== generation) return
             server = null; report(error)
@@ -67,7 +77,6 @@ Item {
     }
     function launchWorker() {
         const current = generation
-        indexPath = pinhole.cacheDir + "/" + profile.indexFile
         const args = [profile.worker, "serve", "--background", "--index", indexPath,
             "--library", pinhole.library.dir, "--library-key", sourceKey]
         const job = pinhole.run(profile.python, args.concat(profile.args), {
@@ -104,7 +113,7 @@ Item {
         return value.result
     }
     function catalog() {
-        if (!ready) return
+        if (!ready || managed) return
         const revision = ++catalogRevision
         const current = generation
         cancel(catalogJob)
@@ -129,7 +138,7 @@ Item {
         })
     }
     function poll() {
-        if (!ready || !catalogReady || statusJob) return
+        if ((!managed && (!ready || !catalogReady)) || statusJob) return
         const current = generation
         const job = request({ op: "status" })
         statusJob = job
@@ -137,10 +146,20 @@ Item {
             if (current !== generation || statusJob !== job) return
             statusJob = null
             status = unpack(result)
-            if (status.error) failure = friendly(status.error)
+            if (managed) {
+                missedStatus = 0
+                ready = true
+                catalogReady = status.catalog_ready
+                failure = status.error ? friendly(status.error) : ""
+            } else if (status.error) failure = friendly(status.error)
         }).catch(error => {
             if (current !== generation || statusJob !== job) return
-            statusJob = null; report(error)
+            statusJob = null
+            if (managed) {
+                ready = false; catalogReady = false
+                if (++missedStatus >= 5)
+                    failure = qsTr("Waiting for Pinhole's background search service.")
+            } else report(error)
         })
     }
     function toggleIndexing() {
@@ -167,7 +186,7 @@ Item {
     // leaves the first frame and settling of the photo grid to Pinhole.
     Timer { id: startup; interval: 4000; running: true; onTriggered: indexer.ensureStarted() }
     Timer { id: changes; interval: 900; onTriggered: indexer.catalog() }
-    Timer { interval: 2000; repeat: true; running: indexer.ready && indexer.status.running; onTriggered: indexer.poll() }
+    Timer { interval: 2000; repeat: true; running: indexer.managed || (indexer.ready && indexer.status.running); onTriggered: indexer.poll() }
     Connections {
         target: pinhole.library
         function onChanged() {
@@ -175,9 +194,9 @@ Item {
                 indexer.reset()
                 indexer.sourceKey = pinhole.library.key
                 startup.restart()
-            } else if (indexer.ready) {
+            } else if (indexer.ready && !indexer.managed) {
                 if (!changes.running) changes.start()
-            } else if (!indexer.server && !indexer.failure && !startup.running) {
+            } else if (!indexer.managed && !indexer.server && !indexer.failure && !startup.running) {
                 startup.start()
             }
         }

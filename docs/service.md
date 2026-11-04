@@ -83,6 +83,7 @@ service tripped over (a panic, a bug): the rest go on.
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source`. If supplied, `source` must be nonempty and match the index's `meta.source`. The index must also belong to the source served; otherwise `other_source`. A library given with `--library` can fetch when it is a copy of that source's library; another source's library or one with no owner cannot. | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
+| `semantic_index` | `library`, `key` | `managed`: whether the shared service owns the enabled personal search plugin's worker for this library and source |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
 | `set_favorite` | `assets` (ids from the index), `favorite` (true or false), and `source` (the id of the source they are of, optional) | `changed`: how many were not so already; see Favourites |

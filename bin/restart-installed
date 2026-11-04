@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Restart only windows belonging to this install, after successful activation."""
 import os
+import json
 from pathlib import Path
 import signal
 import subprocess
@@ -34,6 +35,31 @@ def stop(processes):
             raise RuntimeError('Pinhole did not close in time; no replacement window was started.')
         time.sleep(.05)
 
+def session(process):
+    env = dict(item.split('=', 1) for item in
+               os.fsdecode((process / 'environ').read_bytes()).split('\0') if '=' in item)
+    return env, os.readlink(process / 'cwd')
+
+
+def launch(program, args, env, cwd, logfile):
+    home = Path(env.get('HOME') or Path.home())
+    state = Path(env.get('XDG_STATE_HOME') or home / '.local/state') / 'pinhole'
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / logfile).open('ab') as log:
+        subprocess.Popen([str(program), *args],
+                         cwd=cwd if Path(cwd).is_dir() else home, env=env,
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True, close_fds=True)
+
+
+def background_search_enabled(env):
+    home = Path(env.get('HOME') or Path.home())
+    config = Path(env.get('XDG_CONFIG_HOME') or home / '.config') / 'pinhole'
+    try:
+        return json.loads((config / 'plugins.json').read_text())['enabled']['me.semantic-search'] is True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
 
 def restart(prefix, checkout):
     prefix, checkout = Path(prefix).resolve(), Path(checkout).resolve()
@@ -52,29 +78,28 @@ def restart(prefix, checkout):
             argv = (process / 'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
             executable = os.readlink(process / 'exe').removesuffix(' (deleted)')
             if executable in executables:
-                env = dict(item.split('=', 1) for item in
-                           os.fsdecode((process / 'environ').read_bytes()).split('\0') if '=' in item)
-                cwd = os.readlink(process / 'cwd')
+                env, cwd = session(process)
                 window_runtime = env.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
                 sockets.add(env.get('PINHOLE_SOCKET', window_runtime + '/pinhole.sock'))
                 windows.append((process, started, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
             elif Path(executable).name == 'pinholed' and b'--socket' in argv:
                 socket = os.fsdecode(argv[argv.index(b'--socket') + 1])
-                daemons.append((process, started, socket))
+                env, cwd = session(process)
+                daemons.append((process, started, socket, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
         except (OSError, IndexError):
             continue
     stop([(process, started) for process, started, *_ in windows])
-    stop([(process, started) for process, started, socket in daemons if socket in sockets])
+    daemons = [daemon for daemon in daemons if daemon[2] in sockets]
+    stop([(process, started) for process, started, *_ in daemons])
     for _, _, args, env, cwd in windows:
-        state = Path(env.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'pinhole'
-        state.mkdir(parents=True, exist_ok=True)
-        with (state / 'install-restart.log').open('ab') as log:
-            subprocess.Popen([str(prefix / 'bin/pinhole'), *args],
-                             cwd=cwd if Path(cwd).is_dir() else str(Path.home()), env=env,
-                             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                             start_new_session=True, close_fds=True)
+        launch(prefix / 'bin/pinhole', args, env, cwd, 'install-restart.log')
     if windows:
         print('Restarted Pinhole after installation.')
+    else:
+        for _, _, _, args, env, cwd in daemons:
+            if '--given' not in args and background_search_enabled(env):
+                launch(prefix / 'bin/pinholed', args, env, cwd, 'pinholed.log')
+                print('Restarted Pinhole background search service.')
 
 
 if __name__ == '__main__':

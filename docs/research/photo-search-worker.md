@@ -1,8 +1,11 @@
 # Offline semantic index worker
 
-`bin/photo-search-worker` owns only a rebuildable vector index. Its catalog
-comes from the plugin's public `pinhole.query` API; it never opens the photo
-library's SQLite database, fetches originals or contacts a model service.
+`bin/photo-search-worker` owns only a rebuildable vector index. For the
+shared library, pinholed supervises the worker, which reads the current
+thumbnail catalog through a read-only SQLite connection. It checks source
+ownership and reads rows in a single transaction. For a separate library
+the window supplies the catalog through the public `pinhole.query` API.
+Neither path fetches originals or contacts a model service.
 See [the full-encoder measurements](photo-search-full-encoder.md) for the
 explicit CPU/ANE boundary and the current firmware timeout limitation.
 
@@ -32,9 +35,11 @@ existing database with another identity is rejected **before any writable
 SQLite connection or pragma**, including an accidentally supplied library
 DB. Nothing converts another application's database into an index.
 
-The server prints a JSON `ready` event and errors on stdout. The plugin
-owns the long-running job with `pinhole.run`; closing the app, disabling or
-reloading the plugin terminates the process. Finished vectors are committed per
+The server prints a JSON `ready` event and errors on stdout. The shared
+worker follows the daemon's lifetime, the current source and the plugin's
+enabled switch. It reads the persisted pause setting even with no window
+connected. A window owns its separate library's worker with `pinhole.run`.
+Finished vectors are committed per
 photo in WAL mode. SIGTERM is handled between operations and the socket is
 removed on orderly exit. A process lock rejects a second worker before it
 can unlink a live socket or open the same index.

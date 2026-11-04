@@ -3,7 +3,10 @@
 set -eu
 script=$(readlink -f -- "$0")
 checkout=$(CDPATH= cd -- "$(dirname -- "$script")/../.." && pwd)
-if [ "${1:-}" = config ]; then
-    exec python3 "$checkout/bin/photo-search-worker" config --checkout "$checkout"
-fi
+case "${1:-}" in
+    config|daemon)
+        command=$1
+        shift
+        exec python3 "$checkout/bin/photo-search-worker" "$command" --checkout "$checkout" "$@" ;;
+esac
 exec python3 "$checkout/bin/photo-search-worker" "$@"

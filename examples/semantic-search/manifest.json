@@ -3,7 +3,7 @@
   "api": 8,
   "id": "me.semantic-search",
   "name": "Photo content search",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Local English and Polish text search over photo thumbnails.",
   "entryPoints": { "main": "SemanticSearch.qml" }
 }

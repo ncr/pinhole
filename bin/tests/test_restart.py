@@ -61,7 +61,8 @@ int main(int argc, char **argv) {
         self.events = self.root / 'events'
         self.socket = str(self.root / 'runtime/pinhole.sock')
         self.env = dict(os.environ, PINHOLE_TEST_EVENTS=str(self.events), PINHOLE_TEST_SESSION='original session',
-                        PINHOLE_SOCKET=self.socket, XDG_STATE_HOME=str(self.root / 'state'))
+                        PINHOLE_SOCKET=self.socket, XDG_STATE_HOME=str(self.root / 'state'),
+                        XDG_CONFIG_HOME=str(self.root / 'config'))
         self.children = []
         self.addCleanup(self.cleanup_processes)
 
@@ -124,6 +125,19 @@ int main(int argc, char **argv) {
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f'stop|{service.pid}', self.lines())
         self.assertEqual(len([line for line in self.lines() if line.startswith('start|')]), 1)
+
+    def test_closed_app_stays_closed_and_background_search_service_restarts(self):
+        config = self.root / 'config' / 'pinhole'
+        config.mkdir(parents=True)
+        (config / 'plugins.json').write_text('{"enabled":{"me.semantic-search":true}}')
+        self.env['XDG_CONFIG_HOME'] = str(config.parent)
+        (self.prefix / 'bin/pinholed').symlink_to(self.daemon)
+        service = self.start(self.daemon, '--socket', self.socket)
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 2)
+        self.assertIn(f'stop|{service.pid}', self.lines())
+        self.assertTrue(self.lines()[-1].endswith(f'|--socket|{self.socket}'))
 
     def test_other_installation_and_other_library_service_are_untouched(self):
         other = self.root / 'other/pinhole'

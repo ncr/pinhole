@@ -39,5 +39,6 @@
   "No saved tags": "Brak zapisanych tagów",
   "Suggested tags: %1": "Proponowane tagi: %1",
   "Set up a local photo search engine for this computer.": "Skonfiguruj lokalny silnik wyszukiwania zdjęć na tym komputerze.",
+  "Waiting for Pinhole's background search service.": "Czekam na usługę wyszukiwania Pinhole w tle.",
   "The NPU stopped responding. Restart the computer and repeat its smoke test before indexing again. Existing results still work.": "NPU przestało odpowiadać. Przed dalszym indeksowaniem uruchom komputer ponownie i powtórz test NPU. Dotychczasowe wyniki nadal działają."
 }

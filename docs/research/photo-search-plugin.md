@@ -1,9 +1,11 @@
 # Photo content search personal plugin
 
 `examples/semantic-search` is a personal plugin for local English and Polish
-text search over indexed thumbnails. It starts background indexing shortly
-after Pinhole opens. Ctrl F opens the search card. The worker and model stay
-off the first-frame path.
+text search over indexed thumbnails. The shared pinholed service starts
+the worker for the current source and keeps indexing when the window is
+closed. Ctrl F connects to the same worker. A library opened separately
+with `--library` uses a window-owned worker. The model stays off the
+first-frame path.
 
 On a CUDA host the optional WeMM 4B environment selects the WeMM recipe.
 Both image and text embeddings use the same resident BF16 model and the
@@ -61,6 +63,7 @@ results. Enter submits the description; Down moves focus to the results,
 arrow keys move through the grid, and Enter opens the selected photo.
 Closing that photo returns directly to the same results and selection.
 Escape or a click outside the card closes search while indexing continues.
+The shared library continues indexing as long as pinholed runs.
 The plugin uses stable ids and filters other
 plugins' hidden photos. Scrolling stays inside the shared `ScrollGrid`.
 

@@ -93,6 +93,7 @@ class Worker:
         self.pending = []
         self.running = False
         self.waiting = False
+        self.catalog_ready = False
         self.last_error = ''
         self.processed = self.skipped = 0
         self.stamps = {}
@@ -112,6 +113,7 @@ class Worker:
 
     def status(self):
         return self.store.status() | {"running": self.running, "waiting": self.waiting, "pending": len(self.pending),
+                                      "catalog_ready": self.catalog_ready, "managed": bool(getattr(self.args, "managed_plugins", None)),
                                       "processed": self.processed, "skipped": self.skipped,
                                       "error": self.last_error, "backend": self.args.backend}
 
@@ -327,6 +329,7 @@ class Worker:
 
 def serve(args):
     import fcntl
+    import select
     import torch
     torch.set_num_threads(args.threads)
     torch.set_num_interop_threads(1)
@@ -340,6 +343,10 @@ def serve(args):
                 raise ValueError('refusing to replace a foreign socket path')
             args.socket.unlink()
         worker = Worker(args)
+        catalog = None
+        if args.managed_plugins:
+            from .managed import Catalog
+            catalog = Catalog(args)
         stopping = False
 
         def stop(*_):
@@ -357,6 +364,10 @@ def serve(args):
                 print(json.dumps({"event": "ready", "status": worker.status()}), flush=True)
                 next_step = 0
                 while not stopping:
+                    if catalog is not None:
+                        if select.select([0], [], [], 0)[0] and not os.read(0, 1):
+                            break
+                        catalog.poll(worker)
                     worker.release_idle()
                     try:
                         connection, _ = listener.accept()
@@ -375,7 +386,10 @@ def serve(args):
                     with connection:
                         connection.settimeout(5)
                         try:
-                            response = {"ok": True, "result": worker.request(receive(connection))}
+                            request = receive(connection)
+                            if catalog is not None and request.get("op") == "catalog":
+                                raise ValueError("pinholed manages this photo catalog")
+                            response = {"ok": True, "result": worker.request(request)}
                         except Exception as error:
                             response = {"ok": False, "error": str(error)}
                         try:
@@ -383,5 +397,7 @@ def serve(args):
                         except (BrokenPipeError, ConnectionResetError, socket.timeout):
                             pass
         finally:
+            if catalog is not None:
+                catalog.close()
             worker.close()
             args.socket.unlink(missing_ok=True)

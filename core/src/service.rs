@@ -862,6 +862,20 @@ pub fn run(config: Config) -> Result<()> {
             std::thread::spawn(move || sync_loop(shared, sync_rx));
         }
         watch(&shared, &*shared.source());
+        {
+            let shared = shared.clone();
+            std::thread::spawn(move || crate::semantic::supervise(&shared.config.plugins, || {
+                let helper = crate::semantic::helper(&shared.config.plugins)?;
+                let source = shared.source();
+                if source.kind() == "none" {
+                    return None;
+                }
+                let library = shared.storage.library();
+                library.join("library.sqlite").is_file().then(|| crate::semantic::Job {
+                    helper, library, key: source.id(),
+                })
+            }));
+        }
     }
     {
         let shared = shared.clone();
@@ -1065,6 +1079,14 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
         }
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
+            Some("semantic_index") => {
+                let params = &request["params"];
+                let managed = shared.config.given.is_none()
+                    && params["key"].as_str() == Some(shared.source().id().as_str())
+                    && params["library"].as_str().is_some_and(|library| Path::new(library) == shared.storage.library())
+                    && crate::semantic::helper(&shared.config.plugins).is_some();
+                reply.send(Ok(json!({"managed": managed})));
+            }
             Some("sync") => {
                 let _ = shared.sync_now.lock().unwrap().send(());
                 reply.send(Ok(json!({})))
