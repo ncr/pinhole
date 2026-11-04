@@ -64,6 +64,22 @@ client binaries and shared Rust toolchain. Setup uses one job by default for
 installed tools and toolchains, keyed by both pin files and patch, rather
 than retaining the whole source build.
 
+On ARM64 Linux with kernel pages larger than 4 KiB, the upstream release
+engine can exit with `jemalloc: Unsupported system page size` before it
+can provide the Rust toolchain path. This bootstrap installs the release
+launchers with toolchain setup deferred and uses `rustup` on PATH to obtain
+the nightly named by the pinned Blaze source. It verifies the Rust commit,
+rebuilds the engine with `JEMALLOC_SYS_WITH_LG_PAGE=16` (64 KiB allocator
+pages), and runs the same JPEG regression before installing it. Rustup
+adds the pinned nightly and its WASI target alongside the existing
+toolchains. Pinhole still builds with the resulting Blaze engine.
+
+On the M2 Pro with 16 KiB kernel pages, the rebuilt engine passed
+`blaze --version` and the scalar JPEG reproduction. The required SIMD
+reproduction stops on `aarch64.neon.sqshrun.v4i16`, called by zune-jpeg's
+`vqshrun_n_s32`, with both Cranelift and LLVM. Setup leaves the engine in
+staging and preserves the previous installation when this check fails.
+
 ## Correctness checks
 
 ```sh

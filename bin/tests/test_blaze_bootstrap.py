@@ -89,6 +89,50 @@ class CompilerBootstrapTests(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertEqual((a / 'toolchains').resolve(), (b / 'toolchains').resolve())
 
+    def test_large_page_bootstrap_does_not_execute_the_upstream_engine(self):
+        pin = self.fixture_pin() | {'revision': 'tested-revision', 'date': '2026-10-30'}
+        data = self.root / 'data'
+        cache = self.root / 'cache'
+        base = data / 'pinhole/tools' / pin['upstream_version']
+        (base / 'bin').mkdir(parents=True)
+        for name in ('blaze', 'blaze-rustc', 'blaze-proc-macro-srv'):
+            (base / 'bin' / name).write_text('release launcher')
+        work = cache / 'pinhole/blaze-bootstrap' / pin['version']
+        source = work / 'source'
+        source.mkdir(parents=True)
+        (source / '.pinhole-patch').write_text(pin['fingerprint'])
+        toolchain = self.root / 'nightly'
+        built = work / 'target/release/blaze-engine'
+        commands = []
+
+        def run(arguments, *, env, cwd=None, capture=False):
+            args = list(map(str, arguments))
+            commands.append(args)
+            self.assertNotEqual(args[0], str(base / 'bin/blaze'))
+            if args[0] == str(toolchain / 'bin/rustc'):
+                return 'host: aarch64-unknown-linux-gnu\ncommit-hash: expected'
+            if args[0] == str(toolchain / 'bin/cargo'):
+                self.assertEqual(env['JEMALLOC_SYS_WITH_LG_PAGE'], '16')
+                built.parent.mkdir(parents=True)
+                built.write_text('rebuilt engine')
+            if args[1:] == ['--version']:
+                return f"blaze {pin['version']} (tested)"
+            return None
+
+        with (patch.object(bootstrap, 'load_pin', return_value=pin),
+              patch.object(bootstrap, 'valid_engine', return_value=False),
+              patch.object(bootstrap, 'large_arm_pages', return_value=True),
+              patch.object(bootstrap, 'rustup_toolchain', return_value=(toolchain, 'expected')),
+              patch.object(bootstrap, 'ensure_library'),
+              patch.object(bootstrap, 'run', side_effect=run),
+              patch.object(bootstrap.subprocess, 'run'),
+              patch.object(bootstrap.sys, 'argv', ['bootstrap-blaze']),
+              patch.dict(os.environ, {'XDG_DATA_HOME': str(data), 'XDG_CACHE_HOME': str(cache),
+                                      'BLAZE_HOME': str(self.root / 'state')})):
+            self.assertEqual(bootstrap.main(), 0)
+        self.assertTrue(any('jpeg-repro' in ' '.join(args) for args in commands))
+        self.assertEqual((base.with_name(pin['version']) / 'bin/blaze-engine').read_text(), 'rebuilt engine')
+
     def test_standard_library_is_bundled_and_survives_relocation(self):
         import shutil
         source = self.fixture_library(self.root / 'verified-source')

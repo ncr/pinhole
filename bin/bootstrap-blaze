@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -137,6 +138,26 @@ def prepare_state(state, version):
     return home
 
 
+def large_arm_pages():
+    return (sys.platform == 'linux' and platform.machine() in ('aarch64', 'arm64')
+            and os.sysconf('SC_PAGE_SIZE') > 4096)
+
+
+def rustup_toolchain(source, env):
+    # The release engine cannot start on this host to provide its Rust path.
+    # Read the nightly and its full commit from the verified source instead.
+    rustup = shutil.which('rustup', path=env.get('PATH'))
+    if rustup is None:
+        raise RuntimeError('Blaze bootstrap on ARM64 Linux with large pages needs rustup on PATH')
+    nightly = (source / 'harness/toolchain').read_text().strip()
+    pins = (source / 'crates/blaze-cargo/src/cargo/toolchain/pins.txt').read_text().splitlines()
+    expected = next(line.split()[1] for line in pins if line.startswith('commit '))
+    run([rustup, 'toolchain', 'install', nightly, '--profile', 'minimal',
+         '--target', 'wasm32-wasip1', '--no-self-update'], env=env)
+    rustc = Path(run([rustup, 'which', '--toolchain', nightly, 'rustc'], env=env, capture=True))
+    return rustc.parent.parent, expected
+
+
 def main():
     if len(sys.argv) != 1:
         raise RuntimeError('Usage: bin/bootstrap-blaze (called by bin/setup-blaze)')
@@ -145,8 +166,12 @@ def main():
     data = Path(env.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'pinhole'
     state = Path(env.get('BLAZE_HOME', str(data / 'blaze')))
     state.mkdir(parents=True, exist_ok=True)
-    lock = (state / 'setup.lock').open('a')
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    with (state / 'setup.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return install_compiler(pin, env, data, state)
+
+
+def install_compiler(pin, env, data, state):
     final = data / 'tools' / pin['version']
     env['BLAZE_HOME'] = str(prepare_state(state, pin['version']))
     env['BLAZE_CACHE'] = str(Path(env['BLAZE_HOME']) / 'store')
@@ -174,15 +199,18 @@ def main():
     base = data / 'tools' / pin['upstream_version']
     base_env = env | {'BLAZE_HOME': str(prepare_state(state, pin['upstream_version'])), 'CARGO_HOME': str(base)}
     base_program = base / 'bin/blaze'
+    rebuild_allocator = large_arm_pages()
     if not base_program.is_file():
         installer = work / 'upstream-installer.sh'
         run(['curl', '--fail', '--silent', '--show-error', '--location', '--proto', '=https',
              '--tlsv1.2', 'https://ix.dev/blaze', '-o', installer], env=base_env)
-        run(['sh', installer, '--version', pin['upstream_version']], env=base_env)
-    base_version = run([base_program, '--version'], env=base_env, capture=True)
-    if not base_version.startswith('blaze ' + pin['upstream_version'] + ' '):
-        raise RuntimeError('Unexpected upstream compiler version; refusing the bootstrap')
-    toolchain = Path(run([base_program, 'toolchain', '--path'], env=base_env, capture=True).splitlines()[-1])
+        flags = ['--no-toolchain'] if rebuild_allocator else []
+        run(['sh', installer, '--version', pin['upstream_version'], *flags], env=base_env)
+    if not rebuild_allocator:
+        base_version = run([base_program, '--version'], env=base_env, capture=True)
+        if not base_version.startswith('blaze ' + pin['upstream_version'] + ' '):
+            raise RuntimeError('Unexpected upstream compiler version; refusing the bootstrap')
+        toolchain = Path(run([base_program, 'toolchain', '--path'], env=base_env, capture=True).splitlines()[-1])
     source = work / 'source'
     source.mkdir(exist_ok=True)
     marker = source / '.pinhole-patch'
@@ -199,9 +227,14 @@ def main():
         run(['git', 'apply', '--check', ROOT / pin['patch']], env=env, cwd=source)
         run(['git', 'apply', ROOT / pin['patch']], env=env, cwd=source)
         marker.write_text(pin['fingerprint'] + '\n')
+    if rebuild_allocator:
+        toolchain, expected_rustc = rustup_toolchain(source, env)
     # The upstream script verifies both the LLVM pin and archive SHA256.
     target = run([toolchain / 'bin/rustc', '-vV'], env=env, capture=True)
     host = next(line.removeprefix('host: ') for line in target.splitlines() if line.startswith('host: '))
+    if rebuild_allocator and (host != 'aarch64-unknown-linux-gnu' or
+                              f'commit-hash: {expected_rustc}' not in target.splitlines()):
+        raise RuntimeError('The bootstrap Rust does not match Blaze’s pinned ARM64 Linux nightly')
     llvm = work / 'llvm'
     run([sys.executable, source / '.github/scripts/llvm.py', 'fetch', '--target', host, '--dir', llvm], env=env)
     jobs = int(env.get('PINHOLE_BLAZE_BOOTSTRAP_JOBS', '1'))
@@ -214,6 +247,9 @@ def main():
         'CARGO_INCREMENTAL': '0', 'BLAZE_RELEASE': 'v' + pin['upstream_version'],
         'BLAZE_GIT_SHA': pin['revision'], 'BLAZE_GIT_DATE': pin['date'],
     }
+    if rebuild_allocator:
+        # A 64 KiB allocator page supports Linux ARM64's 16 and 64 KiB kernels.
+        build_env['JEMALLOC_SYS_WITH_LG_PAGE'] = '16'
     print('Bootstrapping the patched compiler with Cargo once; Pinhole itself still uses Blaze.', flush=True)
     run([toolchain / 'bin/cargo', 'build', '--locked', '--release', '-p', 'blaze-engine',
          '--features', 'llvm', '-j' + str(jobs)], env=build_env, cwd=source)
