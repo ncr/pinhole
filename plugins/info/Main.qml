@@ -373,7 +373,7 @@ PinholePlugin {
         PluginAction {
             place: "grid"
             text: qsTr("Map")
-            key: "M"
+            key: "N"
             shown: pinhole.library.count > 0
             onTriggered: plugin.openMap(null)
         },
@@ -387,7 +387,7 @@ PinholePlugin {
         }
     ]
     help: [
-        ["M", qsTr("Browse photos on the map")],
+        ["N", qsTr("Browse photos on the map")],
         ["I", qsTr("A photo's details")],
         ["W", qsTr("Where, on the map")],
         ["⇧ I", qsTr("A big video's details")]

@@ -847,9 +847,9 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
              return grid->atNewest() && grid->scrollFraction() > 0.999 && b->property("opacity").toDouble() < 0.1;
          }, 1500},
         // The buttons' keys.
-        {"away again, N glides back to the newest", [=] {
+        {"away again, End glides back to the newest", [=] {
              grid->jumpToFraction(0.3);
-             QTimer::singleShot(300, window, [=] { key(window, Qt::Key_N, {}, QStringLiteral("n")); });
+             QTimer::singleShot(300, window, [=] { key(window, Qt::Key_End); });
          },
          [=] { return grid->atNewest() && grid->scrollFraction() > 0.999; }, 1800},
         // The keyboard's cursor: the first press shows it, the next moves it

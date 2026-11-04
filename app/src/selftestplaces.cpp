@@ -65,7 +65,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
         switch (*phase) {
         case 0:
             if (clock->elapsed() < 1200) return;
-            press(window, Qt::Key_M);
+            press(window, Qt::Key_N);
             break;
         case 1: {
             if (!map || !viewport || !map->isVisible() || !groupMarker(viewport) || clock->elapsed() < 2300) return;
@@ -139,7 +139,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
             break;
         default:
             if (map || !viewer->isOpen()) return;
-            std::puts("selftest: places: M, grouped photos, wheel and pinch zoom, viewer return, Escape and Info W: PASS");
+            std::puts("selftest: places: N, grouped photos, wheel and pinch zoom, viewer return, Escape and Info W: PASS");
             timer->stop();
             return QCoreApplication::quit();
         }

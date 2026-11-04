@@ -54,7 +54,7 @@ when it was taken, the camera, lens and exposure, its size and format (a
 video's codec, frame rate and length), and where. It stays open from photo
 to photo. A video's original over 50 MB is read only when asked (⇧ I).
 
-Map (M in the grid, or W in a located photo's Info panel) shows the current
+Map (N in the grid, or W in a located photo's Info panel) shows the current
 library's photos and videos on an OpenStreetMap background. Drag to move,
 pinch or turn the wheel to zoom, and double-click a group to look closer.
 A click opens a photo or shows the group's photos; **Photos in view** shows
