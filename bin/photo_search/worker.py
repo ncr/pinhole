@@ -12,7 +12,7 @@ import time
 import numpy as np
 
 from .ane import hash_file
-from .models import PINS
+from .engines import create_engine
 from .store import Store
 
 MAX_MESSAGE = 24 << 20
@@ -39,17 +39,6 @@ TAGS = (
     ('sunset', 'zachód słońca', 'zachód słońca na horyzoncie'),
     ('water', 'woda', 'krajobraz z jeziorem, rzeką lub morzem'),
 )
-
-
-def identity(name, models, backend):
-    """Version the derived index separately for every inference recipe."""
-    if name == 'wemm':
-        from .wemm import identity as wemm_identity
-        return wemm_identity()
-    path = models / PINS[name]['directory']
-    return {"recipe": 1, "image": PINS[name], "text": PINS['multilingual' if name == 'clip' else name],
-            "processor_sha256": hash_file(path / 'preprocessor_config.json'),
-            "backend": backend, "patch_backend": "cpu"}
 
 
 def thumbnail(root, relative):
@@ -96,27 +85,33 @@ def client(path, request, timeout=120):
 class Worker:
     def __init__(self, args):
         self.args = args
-        self.identity = identity(args.model, args.models, args.backend)
-        from .wemm import DIMENSION
-        self.store = Store(args.index, args.library_key, self.identity,
-                           {'clip': 512, 'siglip2': 768, 'wemm': DIMENSION}[args.model])
-        self.image_model = self.text_model = self.wemm_model = self.runtime = None
+        self.engine = create_engine(args)
+        self.identity = self.engine.identity()
+        self.store = Store(args.index, args.library_key, self.identity, self.engine.dimensions[args.model])
+        self.last_inference = None
         self.tag_vectors = None
         self.pending = []
         self.running = False
+        self.waiting = False
         self.last_error = ''
         self.processed = self.skipped = 0
         self.stamps = {}
 
     def close(self):
-        if self.image_model:
-            self.image_model.restore()
-        if self.runtime:
-            self.runtime.close()
-        self.store.close()
+        try:
+            self.engine.close()
+        finally:
+            self.store.close()
+
+    def release_idle(self):
+        delay = self.engine.idle_seconds
+        if (delay is not None and not self.running and self.last_inference is not None
+                and time.monotonic() - self.last_inference >= delay):
+            self.engine.close()
+            self.last_inference = None
 
     def status(self):
-        return self.store.status() | {"running": self.running, "pending": len(self.pending),
+        return self.store.status() | {"running": self.running, "waiting": self.waiting, "pending": len(self.pending),
                                       "processed": self.processed, "skipped": self.skipped,
                                       "error": self.last_error, "backend": self.args.backend}
 
@@ -145,19 +140,11 @@ class Worker:
                 self.store.fail(asset, str(error))
                 self.stamps.pop(asset, None)
 
-    def wemm_encoder(self):
-        if self.wemm_model is None:
-            from .wemm import WeMM
-            self.wemm_model = WeMM(self.args.models)
-        return self.wemm_model
-
     def encode_text(self, texts):
-        if self.args.model == 'wemm':
-            return self.wemm_encoder().texts(texts)
-        if self.text_model is None:
-            from .models import TextModel
-            self.text_model = TextModel(self.args.model, self.args.models)
-        return self.text_model.encode(texts)[0]
+        try:
+            return self.engine.encode_text(texts)
+        finally:
+            self.last_inference = time.monotonic()
 
     def suggest_tags(self, asset):
         if not isinstance(asset, str) or not 0 < len(asset) <= 1024:
@@ -171,12 +158,33 @@ class Worker:
         order = np.argsort(-(self.tag_vectors @ image), kind='stable')[:5]
         return [{'id': TAGS[i][0], 'label': TAGS[i][1]} for i in order]
 
+    def missing(self):
+        return self.store.db.execute('''SELECT c.asset_id,c.path FROM catalog c LEFT JOIN embeddings e
+            USING(asset_id) WHERE c.fingerprint IS NULL OR e.asset_id IS NULL OR c.fingerprint<>e.fingerprint
+            ORDER BY c.asset_id''').fetchall()
+
+    def start(self, pending):
+        if pending:
+            self.engine.check_indexing()
+        self.pending = deque(pending)
+        self.processed = self.skipped = 0
+        self.running, self.last_error = bool(self.pending), ''
+
+    def stop(self):
+        self.pending, self.running, self.waiting = [], False, False
+        if self.engine.idle_seconds is not None:
+            self.engine.close()
+            self.last_inference = None
+
     def request(self, message):
         op = message.get('op')
         if op == 'status':
             return self.status()
         if op == 'catalog':
             assets = message['assets']
+            auto = message.get('auto_index')
+            if 'auto_index' in message and type(auto) is not bool:
+                raise ValueError('auto_index must be boolean')
             if not isinstance(assets, list) or len(assets) > 100000:
                 raise ValueError('invalid or excessive catalog')
             # Validate all paths before changing the previous catalog. A
@@ -191,31 +199,29 @@ class Worker:
             active = {x['id'] for x in assets}
             self.stamps = {key: value for key, value in self.stamps.items() if key in active}
             self.refresh()
-            if self.running:
+            if auto is False and self.running:
+                self.stop()
+            elif self.running:
                 catalog = {x['id']: x['path'] for x in assets}
                 retained = [(asset, catalog[asset]) for asset, _ in self.pending if asset in catalog]
                 queued = {asset for asset, _ in retained}
-                missing = self.store.db.execute('''SELECT c.asset_id,c.path FROM catalog c LEFT JOIN embeddings e
-                    USING(asset_id) WHERE c.fingerprint IS NULL OR e.asset_id IS NULL OR c.fingerprint<>e.fingerprint
-                    ORDER BY c.asset_id''').fetchall()
-                self.pending = deque(retained + [(asset, path) for asset, path in missing if asset not in queued])
+                self.pending = deque(retained + [(asset, path) for asset, path in self.missing() if asset not in queued])
                 self.running = bool(self.pending)
+            elif auto and not self.last_error:
+                try:
+                    self.start(self.missing())
+                except (OSError, RuntimeError, ValueError) as error:
+                    self.last_error = str(error)
             return self.status()
         if op == 'start':
             if self.running:
                 return self.status()
-            if self.args.backend == 'hybrid-ane':
-                # Fail before starting or loading a model if the current
-                # boot is quarantined. Querying existing vectors stays usable.
-                from .ane import assert_device_healthy
-                assert_device_healthy(self.args.cache.parent / 'ane-device-health.json')
-                assert_device_healthy(self.args.smoke_receipt.parent / 'ane-device-health.json')
-            self.pending = deque(self.store.db.execute('SELECT asset_id,path FROM catalog ORDER BY asset_id').fetchall())
-            self.processed = self.skipped = 0
-            self.running, self.last_error = bool(self.pending), ''
+            pending = self.missing() if message.get('missing_only') is True else self.store.db.execute(
+                'SELECT asset_id,path FROM catalog ORDER BY asset_id').fetchall()
+            self.start(pending)
             return self.status()
         if op == 'stop':
-            self.pending, self.running = [], False
+            self.stop()
             return self.status()
         if op == 'query':
             text = message.get('text', '')
@@ -239,12 +245,12 @@ class Worker:
 
     def import_run(self, directory, corpus_path):
         """Map hashed benchmark ids back through the plugin's public catalog."""
-        if self.args.model == 'wemm':
-            raise ValueError('benchmark import is available only for CLIP and SigLIP 2')
+        if not self.engine.benchmark_import:
+            raise ValueError('this engine does not support benchmark import')
         from .compare import read_run
         report, ids, vectors = read_run(directory)
         corpus = json.loads(corpus_path.read_text())
-        expected_backend = 'hybrid-ane' if self.args.backend == 'hybrid-ane' else 'cpu'
+        expected_backend = self.args.backend
         if (report['model'] != self.args.model or report['backend'] != expected_backend or
                 report.get('patch_backend') != 'cpu' or report['corpus_id'] != corpus['corpus_id'] or
                 report['source']['checkpoint_sha256'] != self.identity['image']['checkpoint_sha256'] or
@@ -271,18 +277,6 @@ class Worker:
             self.store.put(asset, digest, vector)
         return self.status() | {"imported": len(staged)}
 
-    def encode_image(self, image):
-        if self.args.model == 'wemm':
-            return self.wemm_encoder().images([image])[0]
-        if self.image_model is None:
-            from .models import ImageModel
-            self.image_model = ImageModel(self.args.model, self.args.models)
-            if self.args.backend == 'hybrid-ane':
-                from .ane import NativeRuntime
-                self.runtime = NativeRuntime(self.args.ane_library, self.args.cache, self.args.smoke_receipt)
-                self.image_model.hybrid(self.runtime, self.args.cache, self.args.compiler)
-        return self.image_model.encode(self.image_model.pixels(image))[0]
-
     def step(self):
         if not self.running or not self.pending:
             self.running = False
@@ -306,7 +300,13 @@ class Worker:
                 self.running = False
             return
         try:
-            vector = self.encode_image(image)
+            if not self.engine.can_index():
+                self.pending.appendleft((asset, relative))
+                self.waiting = True
+                return
+            self.waiting = False
+            vector = self.engine.encode_image(image)
+            self.last_inference = time.monotonic()
             if hash_file(path) != digest:
                 raise ValueError('thumbnail changed during inference')
             self.store.put(asset, digest, vector)
@@ -315,7 +315,7 @@ class Worker:
             # A model/device failure ends the whole job, never silently
             # substituting a CPU backend or labelling a partial run complete.
             self.last_error = str(error)
-            self.pending, self.running = [], False
+            self.stop()
             raise
         finally:
             if not self.pending:
@@ -352,15 +352,22 @@ def serve(args):
                 listener.listen(4)
                 listener.settimeout(.025)
                 print(json.dumps({"event": "ready", "status": worker.status()}), flush=True)
+                next_step = 0
                 while not stopping:
+                    worker.release_idle()
                     try:
                         connection, _ = listener.accept()
                     except socket.timeout:
-                        if worker.running:
+                        started = time.monotonic()
+                        if worker.running and started >= next_step:
                             try:
                                 worker.step()
                             except Exception as error:
                                 print(json.dumps({"event": "error", "error": str(error)}), flush=True)
+                            if args.background:
+                                finished = time.monotonic()
+                                delay = 3 if worker.waiting else min(2, max(.15, finished - started))
+                                next_step = finished + delay
                         continue
                     with connection:
                         connection.settimeout(5)

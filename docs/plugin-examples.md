@@ -1,5 +1,9 @@
 # Plugin examples
 
+The [photo-content search plugin](research/photo-search-plugin.md) shows how a
+covering results panel calls `pinhole.openPhotoDirect(id)` (API 8) and restores
+its selection when the viewer closes.
+
 Choose the pattern closest to your idea. These are common uses of the same
 `PinholePlugin` API, not different manifest types; a plugin can combine them.
 Each example below includes every file needed, its dependencies and how to

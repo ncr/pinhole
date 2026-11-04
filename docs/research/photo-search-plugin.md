@@ -1,8 +1,9 @@
 # Photo content search personal plugin
 
 `examples/semantic-search` is a personal plugin for local English and Polish
-text search over indexed thumbnails. Ctrl F creates its view and starts its
-owned worker. No model or library scan runs on the first-frame path.
+text search over indexed thumbnails. It starts background indexing shortly
+after Pinhole opens. Ctrl F opens the search card. The worker and model stay
+off the first-frame path.
 
 On a CUDA host the optional WeMM 4B environment selects the WeMM recipe.
 Both image and text embeddings use the same resident BF16 model and the
@@ -26,18 +27,19 @@ bin/setup-photo-search-wemm
 
 Use `--snapshot /path/to/weights` to reuse an existing copy of the pinned
 Tencent weights and tokenizer. Setup verifies their SHA-256 hashes.
-The worker loads the local checkpoint only when indexing or answering
-a query against an existing index. The first such operation includes
-loading the model. It releases GPU memory when search closes.
+The worker loads the local checkpoint when indexing or answering a query
+against an existing index. It waits for about 11 GiB of free GPU memory
+before loading WeMM for background indexing, and unloads the model on
+pause or after one minute without inference when indexing is finished.
 
-The host must support plugin API 5. On the Mac, use the optional
+The host must support plugin API 8. On an Apple Silicon Mac running Linux, use the
 environment and pinned models described in the full-encoder notes.
 Both environments live under the checkout's ignored `.tools/photo-search`
 directory. The plugin does not install packages or download models.
 
 Keep this developer plugin in the checkout: its executable resolves its own
 symlink with `readlink -f`, then finds the environment and worker relative to
-the repository. It is not a standalone distributable folder. On an API-5
+the repository. It is not a standalone distributable folder. On an API-8
 host, link the folder into the personal plugin directory and enable
 **Photo content search** in Settings → Plugins:
 
@@ -48,17 +50,18 @@ pinhole plugin check me.semantic-search
 ```
 
 Update the host with `bin/install --non-interactive` if its plugin API
-predates API 5. The source installer builds the application with Cargo
+predates API 8. The source installer builds the application with Cargo
 and Qt. The personal plugin is linked and enabled separately as described
 above.
 
 ## Using the prototype
 
-Ctrl F opens a description field and a grid of up to 100 visible
+Ctrl F opens a search card with up to 100 visible
 results. Enter submits the description; Down moves focus to the results,
 arrow keys move through the grid, and Enter opens the selected photo.
-Closing that photo returns to the same results; Escape then closes search
-and ends its processes. The plugin uses stable ids and filters other
+Closing that photo returns directly to the same results and selection.
+Escape or a click outside the card closes search while indexing continues.
+The plugin uses stable ids and filters other
 plugins' hidden photos. Scrolling stays inside the shared `ScrollGrid`.
 
 For the CLIP recipe, **Use the 384-photo benchmark** imports the existing corrected CLIP run
@@ -67,9 +70,9 @@ ids through a catalog obtained with `pinhole.query` and verifies current
 thumbnail bytes before admission. Results explicitly cover indexed photos
 only; importing this sample does not index the full library.
 
-Choose **Tag selected photo** after selecting a search result with the
-arrow keys or returning from its viewer. The editor shows the saved tags
-and up to five suggestions from a fixed Polish vocabulary. Choose a
+The footer shows saved tags and suggestions for the selected or hovered
+result. Suggestions come from a fixed Polish vocabulary. Choose **Tag
+selected photo** to edit the saved tags. Choose a
 suggestion to save it. Choose it again or press its remove button to
 remove it. Ctrl+Z and Ctrl+Shift+Z undo and redo edits. Escape returns
 to search. Suggestions use the indexed image and the existing text tower,
@@ -86,15 +89,15 @@ They survive index rebuilds. The editor works on the selected search
 result. Tags are stored separately from photo file metadata. Suggestions
 are ranked within the vocabulary and need human review.
 
-**Index thumbnails on GPU** with WeMM or **Index thumbnails on NPU** with
-CLIP incrementally indexes the current source's local
-still thumbnails. It does not fetch originals. **Pause indexing** stops
-between photos; completed vectors survive closing, reload and restart.
+Indexing works through the current source's local still thumbnails at low
+CPU and I/O priority, with a pause between photos. **Pause indexing** saves
+the pause across app restarts. **Resume indexing** picks up missing or changed
+thumbnails. Completed vectors survive closing, reload and restart.
 Each source has its own derivative cache and model identity. Library
 refreshes reconcile pending work, keeping finished vectors and adding new
 photos. Same-path thumbnail replacements are excluded before querying until
-reindexed. Query/catalog jobs are cancelled when closing or changing source;
-stale responses cannot replace newer results.
+reindexed. Closing the card cancels its queries. Changing source cancels the
+old worker and opens the new source's index.
 
 A device timeout quarantines indexing until restart plus a fresh smoke test.
 The existing imported index still accepts Polish queries entirely locally.

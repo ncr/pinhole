@@ -1,7 +1,7 @@
 import QtQuick
 import Pinhole.Plugin
 
-// No library scans or model processes on the first-frame path.
+// Indexing and the on-demand search view have independent lifetimes.
 PinholePlugin {
     id: plugin
     covering: view.item !== null && view.item.shown
@@ -16,10 +16,11 @@ PinholePlugin {
         }
     }]
     help: [["Ctrl+F", qsTr("Search photo content")]]
+    SemanticIndexer { id: backgroundIndex }
     Loader {
         id: view
         anchors.fill: parent
         active: false
-        sourceComponent: SemanticPanel {}
+        sourceComponent: SemanticPanel { indexer: backgroundIndex }
     }
 }

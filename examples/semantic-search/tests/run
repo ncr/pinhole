@@ -74,13 +74,16 @@ def prepare(task, corpus_path, images, rankings):
     plugin = task / 'plugins/semantic-search'
     plugin.mkdir(parents=True)
     original = ROOT / 'examples/semantic-search'
-    for name in ['manifest.json', 'i18n', 'pinhole-semantic', 'SemanticTags.qml']:
+    for name in ['manifest.json', 'i18n', 'pinhole-semantic', 'SemanticPanel.qml', 'SemanticTags.qml']:
         (plugin / name).symlink_to(original / name)
-    text = (original / 'SemanticPanel.qml').read_text()
-    text = text.replace('run: base + "full-v2/clip-hybrid-ane", corpus: base + "icloud-pl-v1/corpus.json"',
-                        f'run: {json.dumps(str(benchmark))}, corpus: {json.dumps(str(task / "corpus.json"))}')
-    text = text.replace('base + "resident-tiles"', json.dumps(str(task / 'resident-tiles')))
-    (plugin / 'SemanticPanel.qml').write_text(text)
+    (profile / 'config/pinhole').mkdir()
+    write(profile / 'config/pinhole/plugins.json', {'settings': {'me.semantic-search': {'indexingPaused': True}}})
+    text = (original / 'SemanticIndexer.qml').read_text()
+    text = text.replace('profile = JSON.parse(result.stdout)',
+                        'profile = JSON.parse(result.stdout)\n'
+                        + f'            profile.benchmark = {json.dumps({"run": str(benchmark), "corpus": str(task / "corpus.json")})}\n'
+                        + f'            profile.args[profile.args.indexOf("--cache") + 1] = {json.dumps(str(task / "resident-tiles"))}')
+    (plugin / 'SemanticIndexer.qml').write_text(text)
     queries = list(rankings['queries'])
     if len(queries) < 2:
         raise ValueError('test requires at least two query rankings')

@@ -1,6 +1,6 @@
     TestCase {
         name: "SemanticSearchIntegration"
-        when: true
+        when: backgroundIndex.catalogReady || backgroundIndex.failure !== ""
         property string stage: "initial"
         property var details: ({})
         property var savedTag: null
@@ -8,6 +8,10 @@
         SignalSpy { id: opens; target: pinhole.viewer; signalName: "openChanged" }
         function test_pipeline() {
             compare(view.item, null, "view is lazy")
+            verify(backgroundIndex.catalogReady, backgroundIndex.failure)
+            compare(view.item, null, "background indexing does not create the view")
+            verify(backgroundIndex.paused)
+            const worker = backgroundIndex.server
             keyClick(Qt.Key_F, Qt.ControlModifier)
             tryVerify(() => view.item !== null, 5000)
             const panel = view.item
@@ -20,11 +24,14 @@
             const field = findChild(panel, "semanticSearchInput")
             verify(field !== null)
             compare(field.placeholder, "Opisz zdjęcie lub wpisz #tag…")
+            compare(field.height, findChild(panel, "semanticSearchClose").height)
+            verify(findChild(panel, "semanticSearchCard").width < panel.width)
             stage = "query"
             field.text = @QUERY@
             panel.lookup()
             tryVerify(() => panel.results.length === Math.min(100, @PHOTO_COUNT@), 60000)
             compare(panel.results[0].id, @EXPECTED@)
+            tryVerify(() => panel.suggestedPreview.length > 0, 30000)
             verify(panel.failure === "", panel.failure)
             stage = "keyboard"
             keyClick(Qt.Key_Down)
@@ -34,6 +41,7 @@
             stage = "open-photo"
             keyClick(Qt.Key_Return)
             tryCompare(pinhole.viewer, "open", true, 5000)
+            compare(viewer.origin.width, 0)
             compare(panel.shown, false)
             keyClick(Qt.Key_Escape)
             tryCompare(panel, "shown", true, 5000)
@@ -45,8 +53,8 @@
             tryVerify(() => panel.queryJob === null && panel.results.length > 0, 30000)
             compare(panel.results[0].id, @EXPECTED_SECOND@)
             stage = "catalog-cancellation"
-            panel.catalog()
-            panel.catalog()
+            panel.indexer.catalog()
+            panel.indexer.catalog()
             tryCompare(panel, "catalogReady", true, 30000)
             tryVerify(() => panel.results.length > 0, 30000)
             stage = "narrow-window"
@@ -138,6 +146,7 @@
                 changes: opens.count, returning: panel.returning})
             stage = "mouse-viewer"
             tryCompare(pinhole.viewer, "open", true, 5000)
+            compare(viewer.origin.width, 0)
             details = Object.assign({}, details, {layerBeforeEscape: keymap.layer})
             tryCompare(keymap, "layer", "viewer", 5000)
             stage = "mouse-return"
@@ -149,18 +158,18 @@
             window.width = oldWidth
             keyClick(Qt.Key_Escape)
             tryCompare(panel, "shown", false, 5000)
-            compare(panel.server, null)
+            compare(panel.indexer.server, worker)
             stage = "reopen"
             panel.show()
             tryCompare(panel, "catalogReady", true, 30000)
             compare(panel.status.indexed, @PHOTO_COUNT@)
             stage = "quarantine"
-            panel.indexing()
+            panel.indexer.toggleIndexing()
             tryVerify(() => panel.failure !== "", 10000)
             verify(panel.failure.includes("NPU"), panel.failure)
             stage = "offline-tags"
-            panel.cancel(panel.server)
-            tryCompare(panel, "server", null, 5000)
+            panel.indexer.cancel(panel.indexer.server)
+            tryCompare(panel.indexer, "server", null, 5000)
             compare(panel.catalogReady, false)
             field.input.forceActiveFocus()
             field.text = "#"

@@ -364,6 +364,14 @@ void PluginHost::openPhoto(const QJSValue &photo) const {
     m_plugins->viewerObject()->openAt(index, m_plugins->grid()->rectOf(index));
 }
 
+void PluginHost::openPhotoDirect(const QJSValue &photo) const {
+    const int index = m_plugins->library()->positionOf(photo);
+    if (!m_plugins->grid() || index < 0)
+        return;
+    m_plugins->handedOver(m_id);
+    m_plugins->viewerObject()->openAt(index, {});
+}
+
 void PluginHost::report(const QString &problem, bool print) {
     if (print)
         qWarning("%s: %s", qPrintable(m_id), qPrintable(problem));

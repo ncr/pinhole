@@ -1,7 +1,4 @@
 """Pinned Tencent WeMM 4B inference on a local CUDA device."""
-from .ane import hash_file
-from .models import normalize
-
 REPO = "tencent/WeMM-Embedding-4B"
 REVISION = "41a4fafdd26252ddff05c025413af7e61e26f08e"
 DIMENSION = 2560
@@ -23,6 +20,8 @@ def identity():
 
 
 def verify_snapshot(path):
+    from .ane import hash_file
+
     for name, expected in FILES.items():
         if hash_file(path / name) != expected:
             raise ValueError(f"WeMM checkpoint file differs from its pinned hash: {name}")
@@ -60,6 +59,7 @@ class WeMM:
     def encode(self, content):
         from qwen_vl_utils import process_vision_info
         from torch.nn.functional import normalize as torch_normalize
+        from .models import normalize
 
         torch = self.torch
         conversations = [[{"role": "user", "content": [item]}] for item in content]

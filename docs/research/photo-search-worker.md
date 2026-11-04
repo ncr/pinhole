@@ -6,8 +6,8 @@ library's SQLite database, fetches originals or contacts a model service.
 See [the full-encoder measurements](photo-search-full-encoder.md) for the
 explicit CPU/ANE boundary and the current firmware timeout limitation.
 
-The helper is separate from the GUI, and models are loaded lazily. A text
-tower stays resident for successive Polish queries. The socket client uses
+The helper is separate from the GUI, and models are loaded lazily. The
+selected encoder accepts Polish or English queries. The socket client uses
 only Python's standard library, so status polling does not import PyTorch.
 The worker can answer queries over saved ANE vectors while the device is
 quarantined, since the text tower runs on CPU. Starting new indexing fails
@@ -33,8 +33,8 @@ SQLite connection or pragma**, including an accidentally supplied library
 DB. Nothing converts another application's database into an index.
 
 The server prints a JSON `ready` event and errors on stdout. The plugin
-owns the long-running job with `pinhole.run`; closing, disabling or
-reloading it terminates the process. Finished vectors are committed per
+owns the long-running job with `pinhole.run`; closing the app, disabling or
+reloading the plugin terminates the process. Finished vectors are committed per
 photo in WAL mode. SIGTERM is handled between operations and the socket is
 removed on orderly exit. A process lock rejects a second worker before it
 can unlink a live socket or open the same index.
@@ -53,7 +53,9 @@ Operations:
   with thumbnail paths relative to the library directory. Absolute paths,
   symlink escapes, duplicates and excessive input are rejected. Missing
   thumbnails are individual indexing errors. Removed photos lose derived
-  vectors; changed paths invalidate old results.
+  vectors; changed paths invalidate old results. With `auto_index: true`,
+  it queues missing or invalidated vectors. With `auto_index: false` it
+  pauses the queue.
 - `start`, `stop`, `status`: indexing proceeds one photo at a time between
   requests. It hashes local thumbnail bytes and skips unchanged embeddings.
   Restarting resumes saved work. A model/device failure terminates the job
@@ -83,3 +85,13 @@ preservation, stable ties, malformed embeddings, catalog removal, same-path
 replacement, missing/symlinked thumbnails, cache skips, terminal inference
 failure, quarantine, benchmark import and persistent text-tower reuse.
 They use synthetic data and never access an accelerator.
+
+## Adding an engine
+
+`bin/photo_search/engines.py` owns the available engines and host profiles.
+Register an engine with its model dimensions, index identity, image and
+text encoders, resource cleanup, and any indexing availability checks.
+Add a profile with an interpreter, worker arguments, and a unique index
+filename for the recipe. The search card receives this configuration from
+the helper. The catalog, index store, ranking, and UI use the same protocol
+for every engine.

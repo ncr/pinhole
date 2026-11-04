@@ -1188,6 +1188,15 @@ QtObject {
         QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
     }
 
+    void directPhotoOpeningRequiresApi8() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        write(dir.path() + "/Main.qml", "import QtQuick\nItem { function show(id) { pinhole.openPhotoDirect(id) } }\n");
+        QCOMPARE(Plugins::apiUses(dir.path()).value(8), QStringList({"pinhole.openPhotoDirect"}));
+        write(dir.path() + "/Main.qml", "import QtQuick\nItem { function show(id) { pinhole.openPhoto(id) } }\n");
+        QVERIFY(Plugins::apiUses(dir.path()).value(8).isEmpty());
+    }
+
     void checkableBuiltinShellButtonsRequireApi7WithoutClaimingCustomComponents() {
         QTemporaryDir dir;
         const QString main = dir.path() + "/Main.qml";

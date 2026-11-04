@@ -94,7 +94,7 @@ class WorkerTests(unittest.TestCase):
         root = self.root = Path(self.temporary.name)
         self.args = SimpleNamespace(model='clip', models=root, backend='cpu', index=root / 'vectors.sqlite',
                                     library_key='source-a', library=root, cache=root / 'tiles')
-        with patch('photo_search.worker.identity', return_value={'image': PINS['clip'], 'processor_sha256': 'processor'}):
+        with patch('photo_search.engines.LegacyEngine.identity', return_value={'image': PINS['clip'], 'processor_sha256': 'processor'}):
             self.worker = Worker(self.args)
         self.assets = [{'id': 'a', 'path': 'a.jpg'}, {'id': 'b', 'path': 'b.jpg'}]
         (root / 'a.jpg').write_bytes(b'local thumbnail a')
@@ -117,7 +117,7 @@ class WorkerTests(unittest.TestCase):
         self.worker.request({'op': 'start'})
         self.worker.step()
         self.assertEqual(self.worker.skipped, 1)
-        self.assertIsNone(self.worker.image_model)
+        self.assertIsNone(self.worker.engine.image_model)
         self.worker.request({'op': 'stop'})
         self.assertEqual(self.worker.status()['pending'], 0)
         self.assertEqual(self.worker.status()['indexed'], 1)
@@ -136,7 +136,7 @@ class WorkerTests(unittest.TestCase):
         self.worker.request({'op': 'start'})
         self.worker.step()
         self.assertEqual(self.worker.status()['errors'], 1)
-        self.assertIsNone(self.worker.image_model)
+        self.assertIsNone(self.worker.engine.image_model)
 
     def test_catalog_refresh_preserves_running_job_and_adds_new_photos_once(self):
         from photo_search.ane import hash_file
@@ -152,6 +152,39 @@ class WorkerTests(unittest.TestCase):
         self.worker.request({'op': 'catalog', 'assets': assets})
         self.assertFalse(self.worker.running)
 
+    def test_auto_index_queues_only_missing_vectors_and_respects_pause(self):
+        from photo_search.ane import hash_file
+
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        for _ in range(2):
+            status = self.worker.request({'op': 'catalog', 'assets': self.assets, 'auto_index': True})
+            self.assertTrue(status['running'])
+            self.assertEqual(list(self.worker.pending), [('b', 'b.jpg')])
+        status = self.worker.request({'op': 'catalog', 'assets': self.assets, 'auto_index': False})
+        self.assertFalse(status['running'])
+        self.assertEqual(status['indexed'], 1)
+        with patch.object(self.worker.engine, 'check_indexing', side_effect=RuntimeError('unavailable')) as check:
+            for _ in range(2):
+                status = self.worker.request({'op': 'catalog', 'assets': self.assets, 'auto_index': True})
+                self.assertEqual(status['error'], 'unavailable')
+                self.assertFalse(status['running'])
+            check.assert_called_once()
+        self.assertTrue(self.worker.request({'op': 'start', 'missing_only': True})['running'])
+
+    def test_auto_index_waits_for_accelerator_without_losing_pending_photo(self):
+        self.worker.request({'op': 'catalog', 'assets': self.assets[:1], 'auto_index': True})
+        with patch('photo_search.models.load_image', return_value=object()), \
+                patch.object(self.worker.engine, 'can_index', side_effect=[False, True]), \
+                patch.object(self.worker.engine, 'encode_image', return_value=self.vector()) as encode:
+            self.worker.step()
+            self.assertTrue(self.worker.status()['waiting'])
+            self.assertEqual(self.worker.status()['pending'], 1)
+            encode.assert_not_called()
+            self.worker.step()
+            encode.assert_called_once()
+        self.assertFalse(self.worker.status()['waiting'])
+        self.assertEqual(self.worker.status()['indexed'], 1)
+
     def test_bad_thumbnail_is_per_photo_error_before_model_loading(self):
         with patch('photo_search.models.load_image', side_effect=ValueError('damaged image')):
             self.worker.request({'op': 'start'})
@@ -160,12 +193,12 @@ class WorkerTests(unittest.TestCase):
             self.worker.step()
         self.assertFalse(self.worker.running)
         self.assertEqual(self.worker.status()['errors'], 2)
-        self.assertIsNone(self.worker.image_model)
+        self.assertIsNone(self.worker.engine.image_model)
 
     def test_device_failure_is_terminal_and_never_falls_back(self):
         from unittest.mock import Mock
-        self.worker.image_model = Mock()
-        self.worker.image_model.encode.side_effect = RuntimeError('ANE timeout')
+        self.worker.engine.image_model = Mock()
+        self.worker.engine.image_model.encode.side_effect = RuntimeError('ANE timeout')
         with patch('photo_search.models.load_image', return_value=object()):
             self.worker.request({'op': 'start'})
             with self.assertRaisesRegex(RuntimeError, 'ANE timeout'):
@@ -174,16 +207,18 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.worker.status()['indexed'], 0)
         self.assertEqual(self.worker.status()['error'], 'ANE timeout')
         self.worker.step()
-        self.worker.image_model.encode.assert_called_once()
+        self.worker.engine.image_model.encode.assert_called_once()
 
     def test_quarantined_boot_rejects_start_but_keeps_queries_available(self):
-        self.args.backend = 'hybrid-ane'
+        from photo_search.engines import AneEngine
+        self.args.ane_library = self.args.compiler = self.args.smoke_receipt = self.root / 'fixture'
+        self.worker.engine = AneEngine(self.args)
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         (self.root / 'ane-device-health.json').write_text(json.dumps({'boot_id': boot, 'quarantined': True}))
         with self.assertRaisesRegex(RuntimeError, 'reboot'):
             self.worker.request({'op': 'start'})
         self.assertFalse(self.worker.running)
-        self.assertIsNone(self.worker.image_model)
+        self.assertIsNone(self.worker.engine.image_model)
         self.assertEqual(self.worker.request({'op': 'query', 'text': 'pies'})['results'], [])
 
     def test_import_maps_opaque_ids_and_rejects_changed_thumbnail(self):
@@ -210,7 +245,7 @@ class WorkerTests(unittest.TestCase):
     def test_queries_reuse_text_encoder_and_empty_index_does_not_load_it(self):
         from unittest.mock import Mock
         self.assertEqual(self.worker.request({'op': 'query', 'text': 'pies'})['results'], [])
-        self.assertIsNone(self.worker.text_model)
+        self.assertIsNone(self.worker.engine.text_model)
         from photo_search.ane import hash_file
         self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
         model = Mock()
@@ -236,6 +271,7 @@ class WorkerTests(unittest.TestCase):
         encoder.images.return_value = encoder.texts.return_value = vector
         image = object()
         with closing(Worker(args)) as worker, \
+                patch.object(worker.engine, 'check_indexing'), \
                 patch('photo_search.wemm.WeMM', return_value=encoder) as load, \
                 patch('photo_search.models.load_image', return_value=image):
             worker.request({'op': 'catalog', 'assets': self.assets[:1]})
@@ -261,32 +297,34 @@ class WorkerTests(unittest.TestCase):
         result = self.worker.request({'op': 'query', 'text': 'pies'})
         self.assertEqual(result['results'], [])
         self.assertEqual(self.worker.status()['errors'], 1)
-        self.assertIsNone(self.worker.text_model)
+        self.assertIsNone(self.worker.engine.text_model)
 
     def test_tag_suggestions_rank_cached_vectors_and_recheck_the_photo(self):
         import numpy as np
         from unittest.mock import Mock
         from photo_search.ane import hash_file
+        from photo_search.engines import AneEngine
         from photo_search.worker import TAGS
 
         request = {'op': 'suggest_tags', 'id': 'a'}
         self.assertEqual(self.worker.request(request), [])
-        self.assertIsNone(self.worker.text_model)
+        self.assertIsNone(self.worker.engine.text_model)
         self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
-        self.args.backend = 'hybrid-ane'
+        self.args.ane_library = self.args.compiler = self.args.smoke_receipt = self.root / 'fixture'
+        self.worker.engine = AneEngine(self.args)
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         (self.root / 'ane-device-health.json').write_text(json.dumps({'boot_id': boot, 'quarantined': True}))
         vectors = np.tile(-self.vector(), (len(TAGS), 1))
         vectors[-1] = self.vector()
-        self.worker.text_model = Mock()
-        self.worker.text_model.encode.return_value = vectors, {}
+        self.worker.engine.text_model = Mock()
+        self.worker.engine.text_model.encode.return_value = vectors, {}
         for _ in range(2):
             tags = self.worker.request(request)
             self.assertEqual(tags[0], {'id': TAGS[-1][0], 'label': TAGS[-1][1]})
             self.assertEqual(len(tags), 5)
-        self.worker.text_model.encode.assert_called_once_with([prompt for _, _, prompt in TAGS])
-        self.assertIsNone(self.worker.image_model)
-        self.assertIsNone(self.worker.runtime)
+        self.worker.engine.text_model.encode.assert_called_once_with([prompt for _, _, prompt in TAGS])
+        self.assertIsNone(self.worker.engine.image_model)
+        self.assertIsNone(self.worker.engine.runtime)
         (self.root / 'a.jpg').write_bytes(b'replaced in place')
         self.assertEqual(self.worker.request(request), [])
         self.assertEqual(self.worker.status()['errors'], 1)

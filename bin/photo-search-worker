@@ -20,20 +20,25 @@ def endpoint(index):
 
 
 def main():
+    from photo_search.engines import ENGINES
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
+    config = commands.add_parser('config')
+    config.add_argument('--checkout', type=Path, required=True)
     server = commands.add_parser('serve')
     for option in ('index', 'models', 'library'):
         server.add_argument('--' + option, type=Path, required=True)
     server.add_argument('--socket', type=Path)
     server.add_argument('--library-key', required=True)
-    server.add_argument('--model', choices=['clip', 'siglip2', 'wemm'], required=True)
-    server.add_argument('--backend', choices=['cpu', 'hybrid-ane', 'cuda'], required=True)
+    server.add_argument('--model', choices=sorted({model for engine in ENGINES.values() for model in engine.dimensions}), required=True)
+    server.add_argument('--backend', choices=ENGINES, required=True)
     server.add_argument('--cache', type=Path, default=Path('.tools/photo-search/resident-tiles'))
     server.add_argument('--ane-library', type=Path)
     server.add_argument('--compiler', type=Path)
     server.add_argument('--smoke-receipt', type=Path)
     server.add_argument('--threads', type=int, default=2)
+    server.add_argument('--background', action='store_true')
     request = commands.add_parser('request')
     address = request.add_mutually_exclusive_group(required=True)
     address.add_argument('--socket', type=Path)
@@ -43,6 +48,10 @@ def main():
     os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1',
                       OPENBLAS_NUM_THREADS='2', TOKENIZERS_PARALLELISM='false')
     try:
+        if args.command == 'config':
+            from photo_search.engines import local_profile
+            print(json.dumps(local_profile(args.checkout) | {"worker": str(args.checkout / "bin/photo-search-worker")}))
+            return 0
         if args.socket is None:
             args.socket = endpoint(args.index)
         if args.command == 'request':
@@ -69,10 +78,14 @@ def main():
                 return 0 if result.get('ok') else 1
         if not 1 <= args.threads <= 4:
             raise ValueError('threads must be 1–4')
-        if (args.model == 'wemm') != (args.backend == 'cuda'):
-            raise ValueError('WeMM and the CUDA backend must be selected together')
-        if args.backend == 'hybrid-ane' and not all([args.ane_library, args.compiler, args.smoke_receipt]):
-            raise ValueError('hybrid-ane requires library, compiler and current-boot smoke receipt')
+        if args.background:
+            import shutil
+            import subprocess
+            os.nice(15)
+            if hasattr(os, 'SCHED_IDLE'):
+                os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+            if ionice := shutil.which('ionice'):
+                subprocess.run([ionice, '-c', '3', '-p', str(os.getpid())], check=True)
         from photo_search.worker import serve
         serve(args)
         return 0

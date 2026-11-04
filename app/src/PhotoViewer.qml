@@ -89,7 +89,12 @@ Item {
         root.openedAt = Date.now()
         root.cell = viewer.origin
         shrinking.stop()
-        growing.start()
+        if (viewer.origin.width <= 0 || viewer.origin.height <= 0) {
+            growing.stop()
+            root.progress = 1
+        } else {
+            growing.start()
+        }
     }
 
     // Shrinking back into the grid: viewer.open still, until it is there.
@@ -97,12 +102,17 @@ Item {
 
     function closeViewer() {
         actionBar.closeMenus()
-        root.grid.reveal(viewer.index)
-        root.cell = root.grid.rectOf(viewer.index)
         videoPlayer.stop()
         layers.hide()
         // Still opening, it would grow again after it closed, and stay.
         growing.stop()
+        if (viewer.origin.width <= 0 || viewer.origin.height <= 0) {
+            root.progress = 0
+            viewer.close()
+            return
+        }
+        root.grid.reveal(viewer.index)
+        root.cell = root.grid.rectOf(viewer.index)
         shrinking.start()
     }
 

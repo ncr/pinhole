@@ -84,8 +84,9 @@ installed API version and the same bundled documents to tools. Start with
 [the quick start](docs/plugin-quickstart.md) or [the agent contract](docs/plugin-agents.md).
 
 The [local photo-content search plugin](docs/research/photo-search-plugin.md)
-uses a resumable thumbnail index. On an NVIDIA CUDA host with the optional
-WeMM 4B environment, Ctrl F accepts photo descriptions in English or Polish.
+indexes thumbnails automatically while Pinhole is open. Ctrl F opens the
+search card and accepts photo descriptions in English or Polish. The local
+profiles use WeMM 4B on NVIDIA CUDA or CLIP on Apple Silicon with ANE.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or

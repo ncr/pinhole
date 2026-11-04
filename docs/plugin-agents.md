@@ -58,7 +58,9 @@ it is not a substitute for running the interaction in the app.
   use `IS NULL` in SQL when missing and empty values must be distinguished.
 - Persist photo ids. Library positions are capture-date order, independent
   of the main grid's Automatic/Date taken/Date added timeline. Reloads move
-  positions. Use `openPhoto` and `reveal` to navigate.
+  positions. Use `openPhoto` and `reveal` to navigate. From a covering search
+  or results panel, `openPhotoDirect` (API 8) opens the viewer without a
+  transition to or from the library grid.
 - Originals and the library database are read-only to the UI. Fetch with
   `pinhole.fetch`; query with `pinhole.query`, not an external sqlite3.
   Keep user choices in `settings`, user work in `state`, derived data in
