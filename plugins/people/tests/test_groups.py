@@ -39,13 +39,13 @@ class Suggestions(unittest.TestCase):
 
 
 class JoiningSuggestions(unittest.TestCase):
-    def joined(self, photos, angles, protected=()):
+    def joined(self, photos, angles, protected=(), wider=False):
         faces = [dict(key=str(i), id=photo) for i, photo in enumerate(photos)]
         theta = np.deg2rad(angles)
         vectors = np.column_stack((np.cos(theta), np.sin(theta)))
         suggestions = [(str(i // 2 * 2), str(i), 1.0) for i in range(len(faces))]
         return {member: anchor for anchor, member, _ in
-                worker.join_groups(faces, vectors, suggestions, set(protected), 0.62)}
+                worker.join_groups(faces, vectors, suggestions, set(protected), 0.62, wider=wider)}
 
     def test_groups_need_two_matches_without_chaining_through_adopted_faces(self):
         self.assertEqual(self.joined(list("abcdef"), [0, 4, 45, 49, 90, 94]),
@@ -53,10 +53,22 @@ class JoiningSuggestions(unittest.TestCase):
         self.assertEqual(self.joined(list("abcd"), [0, 110, 20, 40]),
                          {"0": "0", "1": "0", "2": "2", "3": "2"})
 
+    def test_wider_checks_matches_outside_the_six_original_samples(self):
+        angles = [0, 0, 0, 10, 0, 0, 12, 0] + [60, 60, 60, 10, 60, 60, 12, 60]
+        theta = np.deg2rad(angles)
+        vectors = np.column_stack((np.cos(theta), np.sin(theta)))
+        faces = [dict(key=str(i), id=str(i)) for i in range(len(angles))]
+        suggestions = [(str(i // 8 * 8), str(i), 1.0) for i in range(len(angles))]
+        careful = worker.join_groups(faces, vectors, suggestions, set(), 0.62)
+        self.assertEqual({anchor for anchor, _, _ in careful}, {"0", "8"})
+        wider = worker.join_groups(faces, vectors, suggestions, set(), 0.58, wider=True)
+        self.assertEqual({anchor for anchor, _, _ in wider}, {"0"})
+
     def test_overlapping_photos_and_groups_with_saved_edits_stay_separate(self):
         separate = {"0": "0", "1": "0", "2": "2", "3": "2"}
-        self.assertEqual(self.joined(list("abac"), [0, 4, 20, 24]), separate)
-        self.assertEqual(self.joined(list("abcd"), [0, 4, 20, 24], protected=["2"]), separate)
+        for wider in (False, True):
+            self.assertEqual(self.joined(list("abac"), [0, 4, 20, 24], wider=wider), separate)
+            self.assertEqual(self.joined(list("abcd"), [0, 4, 20, 24], protected=["2"], wider=wider), separate)
 
 
 class Review(unittest.TestCase):

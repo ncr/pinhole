@@ -33,8 +33,10 @@ The helper verifies their SHA-256 digests before loading them.
 
 The first pass groups around exemplar faces at a cosine similarity of
 0.60. **Join groups** in **To review** sets how the second pass works.
-**Careful** (the default) requires two matches across different faces
-at 0.62, while **Wider** uses 0.60 and **Off** keeps the first-pass groups.
+**Careful** (the default) compares up to six faces per group and requires
+two independent matches at 0.62. **Wider** compares up to 32 faces per
+group, checks two independent matches at 0.58 and considers stronger
+pairs first. **Off** keeps the first-pass groups.
 Groups that share a photo or have saved edits stay separate during this
 pass. Changing the setting regroups the existing index in the background.
 Inspect groups before naming them.
