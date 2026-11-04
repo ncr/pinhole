@@ -64,11 +64,16 @@ remove it. Ctrl+Z and Ctrl+Shift+Z undo and redo edits. Escape returns
 to search. Suggestions use the indexed image and the existing text tower,
 so they also work with the imported sample during an ANE quarantine.
 
+Enter a full saved tag name prefixed with `#` in the search field, such as
+`#rower`. Enter `#` alone to see all tagged photos in the current source.
+Tag matching ignores letter case and excludes hidden and removed photos.
+It works with the search worker unavailable and reads only approved tags.
+
 Approved tags are kept in the plugin's state by source and stable photo
 ID, with a limit of 2,000 tagged photos per source in this prototype.
 They survive index rebuilds. The editor works on the selected search
-result. Tags are separate from text retrieval and photo file metadata.
-The suggestions are ranked within the vocabulary and need human review.
+result. Tags are stored separately from photo file metadata. Suggestions
+are ranked within the vocabulary and need human review.
 
 **Index thumbnails on NPU** incrementally indexes the current source's local
 still thumbnails. It does not fetch originals. **Pause indexing** stops
@@ -122,6 +127,8 @@ settings, originals or clipboard contents.
 The tagging check opens the editor with the keyboard, saves and removes a
 suggestion, exercises undo and redo, and verifies the stored source/photo
 entry after the window closes.
+It also checks exact tag matching, switching back to model search and
+retrieving saved tags after the worker stops.
 
 On this M2 Pro, the complete 384-photo interaction test passed both offscreen
 and on native Wayland on hidden workspace 5, including the 420-px panel,

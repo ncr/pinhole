@@ -19,7 +19,7 @@
             tryVerify(() => panel.status.indexed === @PHOTO_COUNT@, 30000)
             const field = findChild(panel, "semanticSearchInput")
             verify(field !== null)
-            compare(field.placeholder, "Opisz zdjęcie po polsku…")
+            compare(field.placeholder, "Opisz zdjęcie lub wpisz #tag…")
             stage = "query"
             field.text = @QUERY@
             panel.lookup()
@@ -95,6 +95,23 @@
             savedTag = {key: "tags:" + panel.sourceKey, photo: "photo:" + tagged, tag: panel.savedTags[0]}
             keyClick(Qt.Key_Escape)
             tryCompare(panel, "tagAsset", "")
+            stage = "exact-tags"
+            field.input.forceActiveFocus()
+            field.text = "# " + savedTag.tag.label.toUpperCase()
+            keyClick(Qt.Key_Return)
+            tryVerify(() => panel.tagQuery && panel.results.length === 1)
+            compare(panel.results[0].id, tagged)
+            field.text = "# taki tag nie istnieje"
+            keyClick(Qt.Key_Return)
+            tryCompare(panel, "results", [])
+            field.text = "#"
+            keyClick(Qt.Key_Return)
+            tryVerify(() => panel.results.length === 1)
+            compare(panel.results[0].id, tagged)
+            field.text = @SECOND@
+            keyClick(Qt.Key_Return)
+            tryVerify(() => !panel.tagQuery && panel.results.length > 0, 30000)
+            compare(panel.results[0].id, @EXPECTED_SECOND@)
             stage = "mouse"
             const grid = findChild(panel, "semanticSearchResults")
             verify(grid !== null)
@@ -141,6 +158,16 @@
             panel.indexing()
             tryVerify(() => panel.failure !== "", 10000)
             verify(panel.failure.includes("NPU"), panel.failure)
+            stage = "offline-tags"
+            panel.cancel(panel.server)
+            tryCompare(panel, "server", null, 5000)
+            compare(panel.catalogReady, false)
+            field.input.forceActiveFocus()
+            field.text = "#"
+            keyClick(Qt.Key_Return)
+            tryVerify(() => panel.tagQuery && panel.results.length === 1)
+            compare(panel.results[0].id, tagged)
+            compare(panel.queryJob, null)
             panel.close()
             stage = "complete"
         }

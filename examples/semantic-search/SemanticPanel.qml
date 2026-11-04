@@ -24,6 +24,8 @@ Panel {
     property var results: []
     property int selected: -1
     property var allResults: []
+    property bool tagQuery: false
+    property string tagName: ""
     readonly property string indexPath: pinhole.cacheDir + "/clip-hybrid-v1.sqlite"
     readonly property string helper: pinhole.dir + "/pinhole-semantic"
     property string checkout: ""
@@ -34,6 +36,7 @@ Panel {
         returning = false
         if (sourceKey !== pinhole.library.key) reset()
         sourceKey = pinhole.library.key
+        if (search.text.trim().startsWith("#")) lookup()
         if (!server) launch()
         Qt.callLater(() => search.input.forceActiveFocus())
     }
@@ -48,6 +51,7 @@ Panel {
         cancel(server); server = null
         ready = false; catalogReady = false
         results = []; allResults = []; selected = -1
+        tagQuery = false; tagName = ""
         failure = ""
     }
     function close() {
@@ -123,9 +127,10 @@ Panel {
         const revision = ++catalogGeneration
         cancel(catalogJob)
         cancel(queryJob); queryJob = null
-        closeTags(false)
+        closeTags(true)
         results = []; allResults = []; selected = -1
         catalogReady = false
+        if (tagQuery) findTags()
         const current = generation
         const job = pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001")
         catalogJob = job
@@ -150,6 +155,12 @@ Panel {
         cancel(queryJob); queryJob = null
         const text = search.text.trim()
         results = []; allResults = []; selected = -1
+        tagQuery = text.startsWith("#")
+        tagName = tagQuery ? text.slice(1).trim().normalize("NFC").toLowerCase() : ""
+        if (tagQuery) {
+            findTags()
+            return
+        }
         if (!catalogReady || !text) return
         const current = generation
         const job = request({ op: "query", text: text, limit: 500 })
@@ -167,12 +178,29 @@ Panel {
             report(error)
         })
     }
+    function findTags() {
+        const entries = sourceKey ? pinhole.state["tags:" + sourceKey] || {} : {}
+        const matches = []
+        for (const [key, tags] of Object.entries(entries)) {
+            if (!key.startsWith("photo:") || !tags.length) continue
+            if (tagName && !tags.some(tag => tag.label.normalize("NFC").toLowerCase() === tagName)) continue
+            const id = key.slice(6)
+            const position = pinhole.library.indexOf(id)
+            if (position >= 0) matches.push({ id: id, position: position })
+        }
+        matches.sort((a, b) => a.position - b.position)
+        allResults = matches
+        filterResults()
+    }
     function filterResults() {
-        results = allResults.filter(row => {
+        const previous = results[selected]?.id
+        const visibleResults = allResults.filter(row => {
             const position = pinhole.library.indexOf(row.id)
             return position >= 0 && !pinhole.isHidden(position)
-        }).slice(0, 100)
-        selected = results.length ? 0 : -1
+        })
+        results = tagQuery ? visibleResults : visibleResults.slice(0, 100)
+        const retained = results.findIndex(row => row.id === previous)
+        selected = retained >= 0 ? retained : results.length ? 0 : -1
         if (tagAsset) {
             const taggedPosition = pinhole.library.indexOf(tagAsset)
             if (taggedPosition < 0 || pinhole.isHidden(taggedPosition)) closeTags(true)
@@ -222,11 +250,12 @@ Panel {
     }
 
     function openTags() {
-        if (!sourceKey || !catalogReady || selected < 0 || selected >= results.length) return
+        if (!sourceKey || (!tagQuery && !catalogReady) || selected < 0 || selected >= results.length) return
         const asset = results[selected].id
         savedTags = (pinhole.state["tags:" + sourceKey] || {})["photo:" + asset] || []
         tagAsset = asset
         tagError = ""
+        if (!catalogReady) return
         const job = request({ op: "suggest_tags", id: asset })
         tagJob = job
         job.then(result => {
@@ -258,7 +287,10 @@ Panel {
         if (value.length) entries[photo] = value
         else delete entries[photo]
         pinhole.state[key] = Object.keys(entries).length ? entries : null
-        if (key === "tags:" + sourceKey && asset === tagAsset) savedTags = value
+        if (key === "tags:" + sourceKey) {
+            if (asset === tagAsset) savedTags = value
+            if (tagQuery) findTags()
+        }
     }
     function toggleTag(tag) {
         if (!tagAsset || !sourceKey || sourceKey !== pinhole.library.key) return
@@ -301,6 +333,7 @@ Panel {
                 panel.reset(); panel.returning = false
                 if (panel.shown) panel.show()
             } else if (panel.ready) panel.catalog()
+            else if (panel.tagQuery) panel.findTags()
         }
     }
     Connections {
@@ -334,7 +367,7 @@ Panel {
                 id: search
                 objectName: "semanticSearchInput"
                 width: Math.max(80, parent.width - closeButton.width - 12)
-                placeholder: qsTr("Describe a photo in Polish…")
+                placeholder: qsTr("Describe a photo or enter #tag…")
                 input.maximumLength: 2048
                 onAccepted: panel.lookup()
             }
@@ -358,26 +391,28 @@ Panel {
                 objectName: "semanticTagButton"
                 text: qsTr("Tag selected photo")
                 visible: panel.selected >= 0 && panel.sourceKey !== ""
-                usable: panel.catalogReady
+                usable: panel.tagQuery || panel.catalogReady
                 onTapped: panel.openTags()
             }
         }
         UiText {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: !panel.ready ? qsTr("Starting local search…")
+            text: panel.tagQuery ? qsTr("Showing photos with saved tags.")
+                : !panel.ready ? qsTr("Starting local search…")
                 : !panel.catalogReady ? qsTr("Reading the photo catalog…")
                 : qsTr("Indexed: %1 of %2. Results cover indexed photos only.").arg(panel.status.indexed).arg(panel.status.total)
         }
         UiText {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: qsTr("Experimental CLIP. Search stays on this computer. Similarity scores are not probabilities.")
+            text: panel.tagQuery ? qsTr("Enter # and the full tag name. Enter # alone to see all tagged photos.")
+                : qsTr("Experimental CLIP. Search stays on this computer. Similarity scores are not probabilities.")
             color: theme.darkForeground
         }
         UiText {
             width: parent.width
-            visible: panel.failure !== ""
+            visible: !panel.tagQuery && panel.failure !== ""
             wrapMode: Text.WrapAnywhere
             color: theme.red
             text: panel.failure
@@ -424,8 +459,9 @@ Panel {
     }
     UiText {
         anchors.centerIn: grid
-        visible: panel.browsing && panel.catalogReady && panel.results.length === 0
-        text: panel.queryJob ? qsTr("Searching…") : panel.status.indexed === 0
+        visible: panel.browsing && (panel.tagQuery || panel.catalogReady) && panel.results.length === 0
+        text: panel.tagQuery ? qsTr("No visible photos with this tag.")
+            : panel.queryJob ? qsTr("Searching…") : panel.status.indexed === 0
             ? qsTr("Import the benchmark or index local thumbnails to begin.")
             : search.text.trim() ? qsTr("No visible results.") : qsTr("Type a description to search.")
         width: Math.min(grid.width, 500)
