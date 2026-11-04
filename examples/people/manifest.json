@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "api": 8,
+  "id": "me.people",
+  "name": "People",
+  "version": "0.1.0",
+  "description": "Review and name local face groups.",
+  "entryPoints": { "main": "PeoplePlugin.qml" }
+}

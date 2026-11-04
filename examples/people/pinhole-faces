@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Local face analysis over a catalog supplied by the Pinhole plugin."""
+import argparse
+from contextlib import closing
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import sys
+import tempfile
+import time
+from urllib.request import urlopen
+
+MODELS = {
+    "face_detection_yunet": ("face_detection_yunet_2023mar.onnx",
+        "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
+    "face_recognition_sface": ("face_recognition_sface_2021dec.onnx",
+        "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"),
+}
+REVISION = "48b10fa505aeb51fbd127fc60a5c660040e823b7"
+MODEL_DIR = Path(__file__).resolve().parents[2] / ".tools/face-recognition"
+# Bump when changing the models or preprocessing. Saved labels use this same
+# identity, so a new model never silently moves a name to a different face.
+RECIPE = "yunet-sface-v1"
+SIMILARITY = 0.60
+
+
+def verified(path, digest):
+    try:
+        with path.open("rb") as file:
+            return hashlib.file_digest(file, "sha256").hexdigest() == digest
+    except FileNotFoundError:
+        return False
+
+
+def setup():
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    for folder, (name, digest) in MODELS.items():
+        path = MODEL_DIR / name
+        if verified(path, digest):
+            continue
+        with tempfile.TemporaryDirectory(dir=MODEL_DIR) as temporary:
+            part = Path(temporary) / name
+            base = "https://media.githubusercontent.com/media/opencv/opencv_zoo"
+            with urlopen(f"{base}/{REVISION}/models/{folder}/{name}", timeout=60) as response, part.open("wb") as file:
+                shutil.copyfileobj(response, file)
+            if not verified(part, digest):
+                raise ValueError(f"SHA-256 mismatch: {name}")
+            part.replace(path)
+
+
+class ModelsMissing(Exception):
+    pass
+
+
+class Analyzer:
+    def __init__(self):
+        import cv2
+        import numpy as np
+        self.cv = cv2
+        self.np = np
+        cv2.setNumThreads(2)
+        paths = []
+        for name, digest in MODELS.values():
+            path = MODEL_DIR / name
+            if not verified(path, digest):
+                raise ModelsMissing("Run pinhole-faces setup to install the verified OpenCV models.")
+            paths.append(str(path))
+        self.detector = cv2.FaceDetectorYN.create(paths[0], "", (320, 320), 0.85, 0.3, 5000)
+        self.recognizer = cv2.FaceRecognizerSF.create(paths[1], "")
+
+    def faces(self, data):
+        cv, np = self.cv, self.np
+        image = cv.imdecode(np.frombuffer(data, dtype=np.uint8), cv.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("Unreadable thumbnail")
+        height, width = image.shape[:2]
+        if min(width, height) < 24:
+            return []
+        if max(width, height) > 480:
+            scale = 480 / max(width, height)
+            image = cv.resize(image, (max(1, round(width * scale)), max(1, round(height * scale))), interpolation=cv.INTER_AREA)
+            height, width = image.shape[:2]
+        self.detector.setInputSize((width, height))
+        _, detections = self.detector.detect(image)
+        faces = []
+        if detections is None:
+            return faces
+        for face in sorted(detections, key=lambda row: (row[0], row[1])):
+            x, y, w, h = map(float, face[:4])
+            left, top = max(0, x), max(0, y)
+            right, bottom = min(width, x + w), min(height, y + h)
+            if min(right - left, bottom - top) < 24:
+                continue
+            crop = self.recognizer.alignCrop(image, face)
+            vector = self.recognizer.feature(crop).flatten()
+            norm = np.linalg.norm(vector)
+            if norm > 0 and np.isfinite(norm):
+                box = [left / width, top / height, (right - left) / width, (bottom - top) / height]
+                faces.append((box, (vector / norm).astype("<f4").tobytes()))
+        return faces
+
+
+def connect(cache, source):
+    path = cache / (RECIPE + "-" + hashlib.sha256(source.encode()).hexdigest() + ".sqlite")
+    cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA foreign_keys=ON")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS photos (
+            id TEXT PRIMARY KEY, path TEXT NOT NULL, stamp TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS faces (
+            key TEXT PRIMARY KEY, photo TEXT NOT NULL REFERENCES photos ON DELETE CASCADE,
+            box TEXT NOT NULL, vector BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS faces_photo ON faces(photo);
+        CREATE TABLE IF NOT EXISTS suggestions (
+            anchor TEXT NOT NULL REFERENCES faces ON DELETE CASCADE,
+            member TEXT NOT NULL REFERENCES faces ON DELETE CASCADE,
+            score REAL NOT NULL,
+            PRIMARY KEY (anchor, member)
+        );
+        CREATE INDEX IF NOT EXISTS suggestions_member ON suggestions(member);
+    """)
+    return db
+
+
+def scan(db, library, assets, progress):
+    cached = {photo: (path, stamp) for photo, path, stamp in db.execute("SELECT * FROM photos")}
+    available = set()
+    failures = 0
+    analyzer = None
+    for index, asset in enumerate(assets, 1):
+        photo, relative = asset["id"], asset["path"]
+        try:
+            path = (library / relative).resolve()
+            if not path.is_relative_to(library):
+                raise ValueError("Thumbnail outside library")
+            stat = path.stat()
+            stamp = f"{stat.st_mtime_ns}:{stat.st_ctime_ns}:{stat.st_size}"
+            if cached.get(photo) != (relative, stamp):
+                data = path.read_bytes()
+                if analyzer is None:
+                    analyzer = Analyzer()
+                faces = analyzer.faces(data)
+                digest = hashlib.sha256(data).hexdigest()
+                db.execute("DELETE FROM meta WHERE key='suggestion-settings'")
+                db.execute("DELETE FROM photos WHERE id=?", (photo,))
+                db.execute("INSERT INTO photos VALUES (?,?,?)", (photo, relative, stamp))
+                db.executemany("INSERT INTO faces VALUES (?,?,?,?)", (
+                    (face_key(photo, digest, i), photo, json.dumps(box), vector)
+                    for i, (box, vector) in enumerate(faces)
+                ))
+                time.sleep(0.005)
+            available.add(photo)
+        except (OSError, ValueError):
+            failures += 1
+        if index % 32 == 0:
+            db.commit()
+        if index % 50 == 0 or index == len(assets):
+            progress(index, len(assets), failures)
+    with db:
+        removed = cached.keys() - available
+        if removed:
+            db.execute("DELETE FROM meta WHERE key='suggestion-settings'")
+            db.executemany("DELETE FROM photos WHERE id=?", ((photo,) for photo in removed))
+    return failures
+
+
+def face_key(photo, digest, index):
+    return hashlib.sha256(json.dumps([RECIPE, photo, digest, index]).encode()).hexdigest()
+
+
+def face_rows(db):
+    import numpy as np
+    rows = db.execute("SELECT key, photo, box, vector FROM faces ORDER BY photo, key").fetchall()
+    faces = [dict(key=key, id=photo, box=json.loads(box)) for key, photo, box, _ in rows]
+    vectors = np.frombuffer(b"".join(row[3] for row in rows), dtype="<f4").reshape(-1, 128)
+    return faces, vectors
+
+
+def emit(event, **values):
+    print(json.dumps(dict(event=event, **values)), flush=True)
+
+
+def group_faces(faces, vectors, names, excluded):
+    import numpy as np
+
+    protected_keys = set(names) | {key for key, rejected in excluded.items() if rejected}
+
+    def priority(i):
+        face = faces[i]
+        _, _, w, h = face["box"]
+        return (face["key"] not in protected_keys, -w * h, face["key"])
+
+    order = sorted(range(len(faces)), key=priority)
+    free = np.ones(len(faces), dtype=bool)
+    protected = {i for i in order if faces[i]["key"] in protected_keys}
+    # Keep exemplars with saved edits from being absorbed by other groups.
+    free[list(protected)] = False
+    for start in range(0, len(order), 128):
+        seeds = [i for i in order[start:start + 128] if free[i] or i in protected]
+        candidates = np.flatnonzero(free)
+        scores = vectors[seeds] @ vectors[candidates].T
+        for seed, similarity in zip(seeds, scores):
+            if not free[seed] and seed not in protected:
+                continue
+            free[seed] = False
+            anchor = faces[seed]["key"]
+            rejected = set(excluded.get(anchor, ()))
+            seen = {faces[seed]["id"]}
+            members = [(anchor, anchor, 1.0)]
+            eligible = np.flatnonzero((similarity >= SIMILARITY) & free[candidates])
+            for slot in eligible[np.argsort(-similarity[eligible], kind="stable")]:
+                member = candidates[slot]
+                face = faces[member]
+                if face["id"] in seen or face["key"] in rejected:
+                    continue
+                seen.add(face["id"])
+                free[member] = False
+                members.append((anchor, face["key"], float(similarity[slot])))
+            if len(members) > 1 or anchor in names:
+                yield from members
+
+
+def rebuild(db, names, excluded):
+    settings = json.dumps([sorted(names), excluded], sort_keys=True)
+    if db.execute("SELECT value FROM meta WHERE key='suggestion-settings'").fetchone() == (settings,):
+        return
+    emit("grouping")
+    faces, vectors = face_rows(db)
+    with db:
+        db.execute("DELETE FROM suggestions")
+        db.executemany("INSERT INTO suggestions VALUES (?,?,?)",
+                       group_faces(faces, vectors, names, excluded))
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('suggestion-settings', ?)", (settings,))
+
+
+def status(db):
+    return dict(indexed=db.execute("SELECT count(*) FROM photos").fetchone()[0])
+
+
+def groups(db, offset):
+    rows = db.execute("""
+        SELECT f.key, f.photo, f.box, p.path, count(*)
+        FROM suggestions s JOIN faces f ON f.key=s.anchor JOIN photos p ON p.id=f.photo
+        GROUP BY f.key ORDER BY count(*) DESC, f.key LIMIT 49 OFFSET ?
+        """, (offset,))
+    return [dict(key=key, id=photo, box=json.loads(box), path=path, count=count)
+            for key, photo, box, path, count in rows]
+
+
+def members(db, anchor, offset):
+    rows = db.execute("""
+        SELECT f.key, f.photo, f.box, p.path
+        FROM suggestions s JOIN faces f ON f.key=s.member JOIN photos p ON p.id=f.photo
+        WHERE s.anchor=? ORDER BY (s.member=s.anchor) DESC, s.score DESC, f.key LIMIT 49 OFFSET ?
+        """, (anchor, offset))
+    return [dict(key=key, id=photo, box=json.loads(box), path=path) for key, photo, box, path in rows]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("operation", choices=("setup", "scan", "groups", "members"))
+    parser.add_argument("--cache", type=Path)
+    args = parser.parse_args()
+    os.umask(0o077)
+    if args.operation == "setup":
+        setup()
+        return
+    if args.cache is None:
+        parser.error("--cache is required for this operation")
+    request = json.load(sys.stdin)
+    if args.operation == "scan":
+        os.nice(10)
+    os.environ.update(OPENBLAS_NUM_THREADS="2", OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
+    with closing(connect(args.cache, request["source"])) as db:
+        if args.operation == "scan":
+            lock = args.cache / (RECIPE + "-scan.lock")
+            with lock.open("a") as handle:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    emit("busy")
+                    return
+                failures = scan(db, Path(request["library"]).resolve(), request["assets"],
+                                lambda done, total, errors: emit("progress", done=done, total=total, errors=errors))
+                rebuild(db, request["names"], request["excluded"])
+                emit("done", errors=failures)
+        elif args.operation == "groups":
+            emit("groups", rows=groups(db, request["offset"]), **status(db))
+        else:
+            emit("members", rows=members(db, request["anchor"], request["offset"]))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except ModelsMissing as error:
+        print(error, file=sys.stderr)
+        sys.exit(3)
+    except ModuleNotFoundError as error:
+        print(error, file=sys.stderr)
+        sys.exit(2)
+    except (OSError, ValueError, sqlite3.Error) as error:
+        print(error, file=sys.stderr)
+        sys.exit(1)
