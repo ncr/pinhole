@@ -52,13 +52,19 @@ def launch(program, args, env, cwd, logfile):
                          start_new_session=True, close_fds=True)
 
 
-def background_search_enabled(env):
+def background_index_enabled(prefix, env):
     home = Path(env.get('HOME') or Path.home())
     config = Path(env.get('XDG_CONFIG_HOME') or home / '.config') / 'pinhole'
+    builtin = Path(env.get('PINHOLE_BUILTIN_PLUGINS') or prefix / 'lib/pinhole/plugins')
     try:
-        return json.loads((config / 'plugins.json').read_text())['enabled']['me.semantic-search'] is True
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
+        settings = json.loads((config / 'plugins.json').read_text())
+        switches = settings.get('enabled') or {}
+    except (OSError, ValueError, AttributeError):
+        switches = {}
+    if not isinstance(switches, dict):
+        switches = {}
+    return (switches.get('me.semantic-search') is True
+            or (switches.get('me.people') is not False and (builtin / 'people/pinhole-faces').is_file()))
 
 
 def restart(prefix, checkout):
@@ -97,9 +103,9 @@ def restart(prefix, checkout):
         print('Restarted Pinhole after installation.')
     else:
         for _, _, _, args, env, cwd in daemons:
-            if '--given' not in args and background_search_enabled(env):
+            if '--given' not in args and background_index_enabled(prefix, env):
                 launch(prefix / 'bin/pinholed', args, env, cwd, 'pinholed.log')
-                print('Restarted Pinhole background search service.')
+                print('Restarted Pinhole background indexing service.')
 
 
 if __name__ == '__main__':

@@ -104,9 +104,9 @@ search card and accepts photo descriptions in English or Polish. The local
 profiles use WeMM 4B on NVIDIA CUDA, CLIP on Apple Silicon with ANE,
 or WeMM 4B on Apple GPUs with Asahi Vulkan when explicitly enabled.
 
-The [People plugin](examples/people/README.md) scans local thumbnails for
-similar faces. Open it with Shift+F to review suggested groups, name them
-and remove incorrect matches.
+[People](plugins/people/README.md) groups similar faces in thumbnails
+automatically in pinholed, even after the window closes. Shift+F shows the
+suggestions, where you can name groups and remove incorrect matches.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or

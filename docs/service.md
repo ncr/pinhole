@@ -557,3 +557,13 @@ Download links expire within about half an hour. The service uses the one
 in the index when it is under 20 minutes old and otherwise looks the asset
 up again, gathering everything requested within 25 ms into one lookup of up
 to 100 assets.
+
+## Background face indexing
+
+The shared service supervises the built-in People worker for the current
+source alongside the optional semantic search worker. Both stop on source
+change or service exit. People is enabled by default and follows the
+People switch in Settings → Plugins. Its worker reads thumbnails from
+the local catalog and writes only the per-source People cache. The
+window reads that cache and writes names and corrections to plugin state.
+A service started with `--given` never starts an indexing worker.

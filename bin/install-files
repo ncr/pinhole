@@ -89,6 +89,9 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/screenshots/i18n" plugins/screens
 install -d "$PREFIX/lib/pinhole/plugins/frame/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/frame" plugins/frame/manifest.json plugins/frame/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/frame/i18n" plugins/frame/i18n/*.json
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/people" plugins/people/manifest.json plugins/people/*.qml
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/people/i18n" plugins/people/i18n/*.json
+install -Dm755 plugins/people/pinhole-faces "$PREFIX/lib/pinhole/plugins/people/pinhole-faces"
 # An sRGB profile, for plugins to make a picture sRGB with (pinhole.srgbProfile).
 install -Dm644 app/assets/sRGB.icc "$PREFIX/share/pinhole/sRGB.icc"
 install -Dm644 pkgbuild/pinhole.svg "$PREFIX/share/icons/hicolor/scalable/apps/pinhole.svg"

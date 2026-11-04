@@ -21,7 +21,7 @@ pub mod kinds;
 pub mod plugins;
 pub mod process;
 pub mod render;
-mod semantic;
+mod local_index;
 pub mod service;
 pub mod source;
 pub mod storage;

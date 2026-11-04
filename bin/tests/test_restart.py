@@ -139,6 +139,18 @@ int main(int argc, char **argv) {
         self.assertIn(f'stop|{service.pid}', self.lines())
         self.assertTrue(self.lines()[-1].endswith(f'|--socket|{self.socket}'))
 
+    def test_closed_app_restarts_for_default_people_indexing(self):
+        helper = self.prefix / 'lib/pinhole/plugins/people/pinhole-faces'
+        helper.parent.mkdir(parents=True)
+        helper.touch()
+        (self.prefix / 'bin/pinholed').symlink_to(self.daemon)
+        service = self.start(self.daemon, '--socket', self.socket)
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 2)
+        self.assertIn(f'stop|{service.pid}', self.lines())
+        self.assertTrue(self.lines()[-1].endswith(f'|--socket|{self.socket}'))
+
     def test_other_installation_and_other_library_service_are_untouched(self):
         other = self.root / 'other/pinhole'
         other.parent.mkdir()

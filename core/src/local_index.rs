@@ -1,17 +1,37 @@
-//! Owns the optional local search worker for the shared library.
+//! Owns local indexing workers for the shared library.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const PLUGIN: &str = "me.semantic-search";
+#[derive(Clone, Copy)]
+pub enum Index {
+    Semantic,
+    People,
+}
 
-pub fn helper(plugins: &Path) -> Option<PathBuf> {
-    if crate::plugins::switches_in(plugins).get(PLUGIN) != Some(&true) {
+pub fn semantic_helper(plugins: &Path) -> Option<PathBuf> {
+    let id = "me.semantic-search";
+    if crate::plugins::switches_in(plugins).get(id) != Some(&true) {
         return None;
     }
-    let helper = plugins.parent()?.join("plugins").join(PLUGIN).join("pinhole-semantic");
+    let helper = plugins.parent()?.join("plugins").join(id).join("pinhole-semantic");
     helper.is_file().then_some(helper)
+}
+
+impl Index {
+    pub fn helper(self, plugins: &Path, builtin: &Path) -> Option<PathBuf> {
+        match self {
+            Self::Semantic => semantic_helper(plugins),
+            Self::People => {
+                if crate::plugins::switches_in(plugins).get("me.people") == Some(&false) {
+                    return None;
+                }
+                let helper = builtin.join("people/pinhole-faces");
+                helper.is_file().then_some(helper)
+            }
+        }
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -55,7 +75,7 @@ pub fn supervise(plugins: &Path, current: impl Fn() -> Option<Job>) {
                 match job.spawn(plugins) {
                     Ok(process) => child = Some((job, process)),
                     Err(error) => {
-                        eprintln!("pinholed: could not start local photo search: {error}");
+                        eprintln!("pinholed: could not start {}: {error}", job.helper.display());
                         retry = Instant::now() + Duration::from_secs(10);
                     }
                 }

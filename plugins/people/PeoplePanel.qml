@@ -14,12 +14,9 @@ Panel {
     property int page: 0
     property bool nextPage: false
     property int selected: 0
-    property int indexed: 0
-    property string progress: ""
+    property var status: ({ phase: "waiting" })
     property string failure: ""
-    property var scanJob: null
     property var readJob: null
-    property var catalog: []
     readonly property var rejected: anchor ? edits[anchor.key]?.rejected || [] : []
     readonly property var visibleRows: rows.filter(row => !rejected.includes(row.key))
     readonly property var selection: visibleRows[selected]
@@ -34,123 +31,73 @@ Panel {
         edits = pinhole.state[stateKey] || {}
         shown = true
         page = 0
-        indexed = 0
+        status = { phase: "waiting" }
         forceActiveFocus()
         load(false)
     }
     function close() {
-        scanJob?.cancel()
         readJob?.cancel()
-        scanJob = null
         readJob = null
         shown = false
         returning = false
         anchor = null
         rows = []
-        progress = ""
         failure = ""
-        catalog = []
-    }
-    function request(operation, data, output) {
-        return pinhole.run("pinhole-faces", [operation, "--cache", pinhole.cacheDir], {
-            input: JSON.stringify(Object.assign({ source: source }, data)),
-            timeout: output ? 0 : 10000,
-            output: output
-        })
-    }
-    function report(error) {
-        if (error.code === "cancelled") return
-        failure = error.exitCode === 2 ? qsTr("Install Python OpenCV and NumPy to scan photos.")
-            : error.exitCode === 3 ? qsTr("Run pinhole-faces setup to download the face models.")
-            : qsTr("People could not finish the operation.")
-        pinhole.warn(error)
     }
     function load(focusResults = true) {
         readJob?.cancel()
-        const job = request(anchor ? "members" : "groups", { anchor: anchor?.key, offset: page * 48 })
+        const job = pinhole.run("pinhole-faces", [anchor ? "members" : "groups", "--cache", pinhole.cacheDir], {
+            input: JSON.stringify({ source: source, anchor: anchor?.key, offset: page * 48 }),
+            timeout: 10000
+        })
         readJob = job
         job.then(result => {
             if (readJob !== job) return
             const response = JSON.parse(result.stdout)
             readJob = null
-            if (response.indexed !== undefined) indexed = response.indexed
+            failure = ""
+            status = response.status
             nextPage = response.rows.length > 48
-            rows = response.rows.slice(0, 48).filter(row => {
+            const current = selection?.key
+            const incoming = response.rows.slice(0, 48).filter(row => {
                 const photo = pinhole.library.item(row.id)
                 return photo.thumbPath === pinhole.library.dir + "/" + row.path
             })
-            selected = 0
-            if (shown && focusResults) {
-                if (visibleRows.length) grid.forceActiveFocus()
-                else scan.forceActiveFocus()
+            if (JSON.stringify(incoming) !== JSON.stringify(rows)) {
+                rows = incoming
+                selected = Math.max(0, visibleRows.findIndex(row => row.key === current))
+                if (grid.activeFocus && visibleRows.length)
+                    grid.positionViewAtIndex(selected, GridView.Contain)
             }
+            if (shown && focusResults && visibleRows.length) grid.forceActiveFocus()
         }).catch(error => {
             if (readJob !== job) return
             readJob = null
-            report(error)
+            if (error.code !== "cancelled") {
+                failure = qsTr("People could not load the face groups.")
+                pinhole.warn(error)
+            }
         })
     }
-    function start() {
-        catalog = []
-        failure = ""
-        progress = qsTr("Reading the photo catalog…")
-        collect("")
-    }
-    function collect(after) {
-        const job = pinhole.query("SELECT id, thumb_path AS path FROM assets "
-            + "WHERE id > ? AND is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 1000", [after])
-        scanJob = job
-        job.then(assets => {
-            if (scanJob !== job) return
-            for (const asset of assets) catalog.push(asset)
-            if (assets.length === 1000) collect(assets[999].id)
-            else analyze()
-        }).catch(error => {
-            if (scanJob !== job) return
-            scanJob = null
-            catalog = []
-            progress = ""
-            report(error)
-        })
-    }
-    function analyze() {
-        const names = Object.keys(edits).filter(key => edits[key].name)
-        const excluded = {}
-        for (const key of Object.keys(edits)) {
-            if (edits[key].rejected?.length) excluded[key] = edits[key].rejected
+    function statusText() {
+        switch (status.phase) {
+        case "scanning": return qsTr("Checked %1 of %2 thumbnails.").arg(status.done).arg(status.total)
+        case "grouping": return qsTr("Grouping similar faces…")
+        case "models": return qsTr("Downloading face models…")
+        case "runtime": return qsTr("Face indexing needs Python OpenCV and NumPy.")
+        case "error": return qsTr("Face indexing encountered an error and will retry.")
+        case "ready":
+            if (status.errors) return qsTr("Skipped unreadable or missing thumbnails: %1.").arg(status.errors)
+            return anchor ? qsTr("Review the suggested matches before naming the group.")
+                          : qsTr("Face groups are suggestions. New photos are checked in the background.")
+        default: return qsTr("Waiting for background face indexing…")
         }
-        progress = qsTr("Scanning thumbnails…")
-        const job = request("scan", { library: pinhole.library.dir, assets: catalog, names: names, excluded: excluded }, line => {
-            if (scanJob !== job) return
-            const result = JSON.parse(line)
-            if (result.event === "progress")
-                progress = qsTr("Checked %1 of %2 thumbnails.").arg(result.done).arg(result.total)
-            else if (result.event === "grouping")
-                progress = qsTr("Grouping similar faces…")
-            else if (result.event === "done")
-                progress = result.errors ? qsTr("Skipped unreadable or missing thumbnails: %1.").arg(result.errors) : ""
-            else if (result.event === "busy")
-                progress = qsTr("A scan is already running in another window.")
-        })
-        scanJob = job
-        catalog = []
-        job.then(() => {
-            if (scanJob !== job) return
-            scanJob = null
-            page = 0
-            load(false)
-        }).catch(error => {
-            if (scanJob !== job) return
-            scanJob = null
-            progress = ""
-            report(error)
-        })
     }
-    function stop() {
-        scanJob?.cancel()
-        scanJob = null
-        catalog = []
-        progress = qsTr("Scan paused. Scan again to continue.")
+    Timer {
+        interval: 3000
+        repeat: true
+        running: panel.shown
+        onTriggered: { if (!panel.readJob) panel.load(false) }
     }
     function enter(row) {
         if (!row) return
@@ -209,7 +156,7 @@ Panel {
     Keys.onShortcutOverride: event => { if (tabKey(event)) event.accepted = true }
     Keys.onPressed: event => {
         if (!tabKey(event)) return
-        const controls = [closeButton, scan, backButton, openButton, rejectButton,
+        const controls = [closeButton, backButton, openButton, rejectButton,
             nameInput.input, save, grid, previous, next].filter(item =>
             item.visible && item.activeFocusOnTab && item.usable !== false)
         const reverse = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
@@ -273,13 +220,6 @@ Panel {
             Flow {
                 width: parent.width
                 spacing: 8
-                ShellButton {
-                    id: scan
-                    objectName: "peopleScan"
-                    visible: !panel.anchor
-                    text: panel.scanJob ? qsTr("Pause scan") : qsTr("Scan thumbnails")
-                    onTapped: panel.scanJob ? panel.stop() : panel.start()
-                }
                 ShellButton { id: backButton; visible: !!panel.anchor; text: qsTr("Back to people"); hint: "Esc"; onTapped: panel.back() }
                 ShellButton {
                     id: openButton
@@ -323,9 +263,7 @@ Panel {
             UiText {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: panel.failure || panel.progress || (panel.anchor ? qsTr("Review the suggested matches before naming the group.")
-                    : panel.indexed ? qsTr("Checked thumbnails: %1. Groups are suggestions.").arg(panel.indexed)
-                    : qsTr("Scan this source’s thumbnails locally to find groups of similar faces."))
+                text: panel.failure || panel.statusText()
                 color: panel.failure ? theme.red : theme.foreground
             }
         }
@@ -363,10 +301,10 @@ Panel {
         UiText {
             anchors.centerIn: grid
             width: Math.min(grid.width, 450)
-            visible: !panel.anchor && panel.indexed > 0 && grid.count === 0 && !panel.scanJob && !panel.readJob
+            visible: panel.status.phase === "ready" && grid.count === 0 && !panel.readJob
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: qsTr("No suggested groups on this page.")
+            text: panel.anchor ? qsTr("This group has no visible matches.") : qsTr("No suggested groups on this page.")
         }
         Row {
             id: footer

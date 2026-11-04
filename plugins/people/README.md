@@ -1,26 +1,16 @@
 # People
 
-A personal Pinhole plugin for reviewing and naming suggested groups of
-similar faces. It uses plugin API 8 and a local Python 3 installation with
-OpenCV (tested with 4.13.0) and NumPy. The helper runs on the CPU with two
-threads and lower scheduling priority.
+People is enabled by default. The shared `pinholed` service indexes
+still thumbnails in the current source, even with the window closed.
+It uses Python 3 with OpenCV and NumPy, two CPU threads and lower
+scheduling priority. On the first scan it downloads and verifies the
+two public model files (39 MB). Photo data stays on the computer.
 
-From the Pinhole checkout, fetch and verify the two public models (39 MB)
-and link the plugin:
-
-```sh
-examples/people/pinhole-faces setup
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/pinhole/plugins"
-ln -s "$PWD/examples/people" "${XDG_CONFIG_HOME:-$HOME/.config}/pinhole/plugins/me.people"
-pinhole plugin check "$PWD/examples/people"
-```
-
-Enable **People** in Settings → Plugins. Choose **People** in the grid
-actions or press Shift+F. Choose **Scan thumbnails** to process still
-thumbnails in the current source. Closing the panel or pausing the scan
-stops the worker. Scanning again skips thumbnails already analyzed and
-checks for additions, edits and removals. It works offline after setup and
-uses the thumbnails already present on disk.
+Choose **People** in the grid actions or press Shift+F to see progress
+and browse results. The worker resumes from the local cache and handles
+additions, edits and removals. Settings → Plugins → People controls both
+the worker and the view. A library explicitly opened with `--library`
+can display existing suggestions in its cache.
 
 Select a group to see the photos and the particular face on each photo.
 Enter a name and choose **Save name**. Select a match and choose **Different
