@@ -221,9 +221,10 @@ Panel {
             if (current !== generation || statusJob !== job) return
             statusJob = null
             const wasRunning = status.running
+            const hadIndex = status.indexed > 0
             status = unpack(result)
             if (status.error) failure = status.error
-            if (wasRunning && !status.running) lookup()
+            if ((wasRunning && !status.running) || (!hadIndex && status.indexed > 0)) lookup()
         }).catch(error => {
             if (current !== generation || statusJob !== job) return
             statusJob = null; report(error)
