@@ -21,7 +21,6 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QSaveFile>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -699,6 +698,8 @@ void PluginMark::setPhotos(const QVariantList &photos) {
 }
 
 void Plugins::setMarks(const QString &id, const QList<QObject *> &marks) {
+    if (marks.isEmpty() && !m_marks.contains(id))
+        return;
     std::vector<GivenMark> before = std::move(m_marks[id]);
     std::vector<GivenMark> now;
     for (QObject *object : marks) {
@@ -1215,19 +1216,6 @@ void Plugins::scan() {
     QHash<QString, QString> stamps;
     for (const auto &p : m_plugins)
         loads.insert(p->id, p->loads);
-    auto stampOf = [](const QString &dir) {
-        QStringList parts;
-        QDirIterator it(dir, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            const QFileInfo info(it.next());
-            // A helper's build folder is not the plugin.
-            if (info.filePath().contains(QLatin1String("/target/")))
-                continue;
-            parts << info.filePath() + QString::number(info.lastModified().toMSecsSinceEpoch()) + QString::number(info.size());
-        }
-        parts.sort();
-        return parts.join('|');
-    };
     for (const auto &p : m_plugins)
         stamps.insert(p->id, p->stamp);
 
@@ -1251,7 +1239,6 @@ void Plugins::scan() {
             if (plugin->error.isEmpty())
                 plugin->main = main;
             plugin->sources = sourceKinds(manifest);
-            plugin->stamp = stampOf(plugin->dir);
             // One's own with a built-in's id takes its place.
             const auto same = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == plugin->id; });
             if (same != found.end()) {
@@ -1267,9 +1254,31 @@ void Plugins::scan() {
         return a->personal != b->personal ? !a->personal : a->name.localeAwareCompare(b->name) < 0;
     });
 
+    QStringList paths{personalDir(), builtInDir()};
     // Hosts stay with their plugins across scans, so what the QML loaded
     // holds of one stays good; one loaded again stops what it started.
     for (auto &plugin : found) {
+        QStringList parts, directories{plugin->dir};
+        paths << plugin->dir;
+        while (!directories.isEmpty()) {
+            const QDir dir(directories.takeLast());
+            for (const QFileInfo &entry : dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Unsorted)) {
+                const QString path = entry.filePath();
+                if (entry.isDir()) {
+                    // Skip a helper's build tree before walking it.
+                    if (entry.fileName() == QLatin1String("target"))
+                        continue;
+                    if (!entry.isSymLink())
+                        directories << path;
+                } else {
+                    parts << path + QString::number(entry.lastModified().toMSecsSinceEpoch()) + QString::number(entry.size());
+                }
+                paths << path;
+            }
+        }
+        parts.sort();
+        plugin->stamp = parts.join('|');
+
         const auto old = std::find_if(m_plugins.begin(), m_plugins.end(), [&](const auto &p) { return p->id == plugin->id; });
         if (old != m_plugins.end() && (*old)->dir == plugin->dir)
             plugin->host = std::move((*old)->host);
@@ -1300,24 +1309,10 @@ void Plugins::scan() {
     updateCatalogs();
     ++m_revision;
     emit changed();
-    watch();
-}
-
-void Plugins::watch() {
     const QStringList watched = m_watcher.files() + m_watcher.directories();
     if (!watched.isEmpty())
         m_watcher.removePaths(watched);
     QDir().mkpath(personalDir());
-    QStringList paths{personalDir(), builtInDir()};
-    for (const auto &p : m_plugins) {
-        QDirIterator it(p->dir, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-        paths << p->dir;
-        while (it.hasNext()) {
-            const QString path = it.next();
-            if (!path.contains(QLatin1String("/target/")))
-                paths << path;
-        }
-    }
     m_watcher.addPaths(paths);
 }
 

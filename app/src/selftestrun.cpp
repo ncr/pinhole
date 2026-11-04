@@ -622,10 +622,13 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 ++*failures;
         };
         QTimer::singleShot(delay, window, [window, arg, apart, failures] {
-            if (QObject *help = window->findChild<QObject *>(QStringLiteral("help")))
-                help->setProperty("shown", true);
+            QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, true));
             QTimer::singleShot(400, window, [window, arg, apart, failures] {
                 QObject *help = window->findChild<QObject *>(QStringLiteral("help"));
+                if (!help) {
+                    QCoreApplication::exit(1);
+                    return;
+                }
                 const QString file = arg;
                 const QString stem = file.left(file.lastIndexOf('.')), suffix = file.mid(file.lastIndexOf('.'));
                 help->setProperty("tab", QStringLiteral("keyboard"));

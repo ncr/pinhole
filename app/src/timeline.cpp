@@ -62,14 +62,26 @@ void Timeline::rebuild() {
         else if (added > m_now)
             m_nextChange = std::min(m_nextChange, added);
     }
-    if (m_mode != "taken") {
-        std::sort(m_order.begin(), m_order.end(), [this](int a, int b) {
-            const bool ar = recentlyAdded(a), br = recentlyAdded(b);
-            if (ar != br)
-                return ar < br;
-            const qint64 ad = dateOf(a), bd = dateOf(b);
+    const auto byDate = [this](auto date) {
+        return [this, date](int a, int b) {
+            const qint64 ad = date(m_library->at(a)), bd = date(m_library->at(b));
             return ad != bd ? ad < bd : a < b;
+        };
+    };
+    if (m_mode == "smart") {
+        const auto recent = std::stable_partition(m_order.begin(), m_order.end(), [this](int i) {
+            return !m_recent[size_t(i)];
         });
+        // The index already reads in capture order. Check it after date
+        // conversion as older databases can contain missing or mixed types.
+        const auto captureOrder = byDate([](const LibraryItem &item) { return item.date; });
+        if (!std::is_sorted(m_order.begin(), recent, captureOrder))
+            std::sort(m_order.begin(), recent, captureOrder);
+        std::sort(recent, m_order.end(), byDate([](const LibraryItem &item) { return item.added; }));
+    } else if (m_mode == "added") {
+        std::sort(m_order.begin(), m_order.end(), byDate([](const LibraryItem &item) {
+            return item.added > 0 ? item.added : item.date;
+        }));
     }
     m_position.resize(size_t(n));
     for (int place = 0; place < n; ++place)

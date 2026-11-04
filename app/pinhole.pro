@@ -1,4 +1,4 @@
-CONFIG += release
+CONFIG += release qtquickcompiler
 TARGET = pinhole
 TEMPLATE = app
 

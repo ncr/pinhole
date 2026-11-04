@@ -518,6 +518,26 @@ private slots:
         QCOMPARE(timeline.dateOf(1), 2000LL);
     }
 
+    void automaticOrderSortsMissingCaptureDatesAfterNegativeTimestamps() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"unknown", 0}, {"older", -1000}, {"newer", 1000}});
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "missing-capture");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE assets SET asset_date = NULL WHERE id = 'unknown'"));
+        }
+        QSqlDatabase::removeDatabase("missing-capture");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        QCOMPARE(library.at(0).id, QByteArray("unknown")); // SQLite orders NULL first
+        Timeline timeline(dir.path() + "/window.conf");
+        timeline.setLibrary(&library);
+        QCOMPARE(timeline.order(), (std::vector<int>{1, 0, 2}));
+    }
+
     // Real asynchronous process replies: checking cannot install, repeated
     // clicks cannot start a second build, and a failed build stays retryable.
     void updaterChecksThenBuildsOnlyWhenAsked() {
@@ -5394,6 +5414,26 @@ private slots:
         QVERIFY(!awake->wanted());
     }
 
+    void aPluginWatchesNestedSourceFilesButSkipsBuildTrees() {
+        PluginBench bench({{"t", {}}});
+        const QString root = bench.dir.path() + "/plugins/t";
+        QVERIFY(QDir().mkpath(root + "/helper/src"));
+        QVERIFY(QDir().mkpath(root + "/helper/target/debug"));
+        const QString source = root + "/helper/src/view.js";
+        const QString build = root + "/helper/target/debug/helper";
+        write(source, "old source");
+        write(build, "old output");
+        bench.plugins->rescan();
+        QTest::qWait(450); // settle the notifications from creating the directories
+        const QString main = bench.plugins->at("t").value("main").toString();
+        QSignalSpy changed(bench.plugins.get(), &Plugins::changed);
+        write(build, "new compiler output");
+        QTest::qWait(450);
+        QCOMPARE(changed.count(), 0);
+        write(source, "new plugin source");
+        QTRY_VERIFY(bench.plugins->at("t").value("main").toString() != main);
+    }
+
     // Kept on only while the window is seen: on a workspace Hyprland is not
     // showing it stays visible, but Qt has it unexposed once its frames stop
     // coming, and it lets go; seen again, it holds again.
@@ -6309,6 +6349,16 @@ PinholePlugin {
         bench.plugins->flush();
         QCOMPARE(QFileInfo(config).lastModified(), moved);
         QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
+        QVERIFY(!plugin->property("covering").toBool());
+        QVERIFY(bench.js("var editor = series.ensureEditor(); editor.openSeries(0, 0); editor.keys").toBool());
+        QVERIFY(plugin->property("covering").toBool());
+        bench.js("series.openStudio(0, false)");
+        QVERIFY(plugin->property("studioShown").toBool());
+        QVERIFY(!bench.js("editor.keys").toBool());
+        QVERIFY(bench.js("series.ensureStudio().close(); editor.keys").toBool());
+        QVERIFY(bench.js("series.ensureEditor() === editor").toBool());
+        bench.js("editor.close()");
+        QVERIFY(!plugin->property("covering").toBool());
         plugin.reset();
     }
 

@@ -14,7 +14,22 @@ import Pinhole.Plugin
 // Pinhole's history, to undo with Ctrl Z.
 PinholePlugin {
     id: plugin
-    covering: studio.shown || editor.shown
+    readonly property bool studioShown: studioView.item?.shown ?? false
+    covering: studioShown || (editorView.item?.shown ?? false)
+
+    function ensureEditor() {
+        if (!editorView.item)
+            editorView.setSource("Editor.qml", { plugin: plugin })
+        return editorView.item
+    }
+    function ensureStudio() {
+        if (!studioView.item)
+            studioView.setSource("Studio.qml", { plugin: plugin })
+        return studioView.item
+    }
+    function openStudio(k, fromGrid) {
+        ensureStudio()?.openSeries(k, fromGrid)
+    }
 
     // Every series, in the library's order: the positions of its shots.
     property var series: []
@@ -229,7 +244,7 @@ PinholePlugin {
             text: qsTr("Series")
             key: "G"
             shown: plugin.series.length > 0
-            onTriggered: studio.openSeries(plugin.near(pinhole.currentIndex()), true)
+            onTriggered: plugin.openStudio(plugin.near(pinhole.currentIndex()), true)
         },
         // A photo shown full window: its series, and putting it right.
         PluginAction {
@@ -239,7 +254,7 @@ PinholePlugin {
             text: plugin.shownSeries >= 0 ? qsTr("Series of %1").arg(plugin.series[plugin.shownSeries].length) : ""
             key: "G"
             shown: plugin.shownSeries >= 0
-            onTriggered: editor.openSeries(plugin.shownSeries, pinhole.viewer.index)
+            onTriggered: plugin.ensureEditor()?.openSeries(plugin.shownSeries, pinhole.viewer.index)
         },
         PluginAction {
             place: "viewer"
@@ -363,19 +378,9 @@ PinholePlugin {
         when: joining.shown && !plugin.covering
         mouse: qsTr("Click the band")
         touchpad: qsTr("Tap the band")
-        onTriggered: editor.openSeries(addAction.k, pinhole.viewer.index)
+        onTriggered: plugin.ensureEditor()?.openSeries(addAction.k, pinhole.viewer.index)
     }
 
-    Editor {
-        id: editor
-        objectName: "seriesEditor"
-        anchors.fill: parent
-        plugin: plugin
-        studio: studio
-    }
-    Studio {
-        id: studio
-        anchors.fill: parent
-        plugin: plugin
-    }
+    Loader { id: editorView; anchors.fill: parent }
+    Loader { id: studioView; anchors.fill: parent }
 }

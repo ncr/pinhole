@@ -55,6 +55,7 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
         case 0:
             if (guide) return fail("workshop was constructed during startup");
             if (window->findChild<QQuickItem *>("selectBar")) return fail("selection bar was constructed during startup");
+            if (window->findChild<QQuickItem *>("addSource")) return fail("source picker was constructed during startup");
             if (side->property("prepared").toBool()) return fail("settings rows were constructed during startup");
             if (auto *grid = window->findChild<QQuickItem *>("grid")) grid->forceActiveFocus();
             std::fprintf(stderr, "selftest: accessibility: initial layer=%s active=%d\n", qPrintable(window->property("keyLayer").toString()), window->isActive());
@@ -139,9 +140,7 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
             return;
         case 9: {
             if (side->property("shown").toBool()) return fail("Escape did not close settings");
-            auto *picker = window->findChild<QQuickItem *>("addSource");
-            if (!picker) return fail("missing source picker");
-            picker->setProperty("shown", true);
+            if (!QMetaObject::invokeMethod(window, "showAddSource", Q_ARG(QVariant, true))) return fail("cannot open source picker");
             return;
         }
         case 10: {

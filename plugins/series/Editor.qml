@@ -10,8 +10,8 @@ import Pinhole.Plugin
 // photo it was opened from.
 Item {
     id: editor
+    objectName: "seriesEditor"
     required property var plugin
-    required property var studio
     readonly property var pinhole: plugin.pinhole
 
     property bool shown: false
@@ -19,7 +19,7 @@ Item {
     opacity: shown ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     // Its keys, but for while Studio is over it.
-    readonly property bool keys: shown && !studio.shown
+    readonly property bool keys: shown && !plugin.studioShown
 
     // The series, followed by one of its photos (its place among the
     // series moves as they change), and the photo the keys act on.
@@ -150,7 +150,7 @@ Item {
     }
     function toStudio() {
         if (k >= 0)
-            studio.openSeries(k, false)
+            plugin.openStudio(k, false)
     }
 
     // ← → through the photos, up close too.

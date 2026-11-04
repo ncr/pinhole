@@ -218,3 +218,41 @@ The warm runs show no measurable first-frame gain and the median still
 exceeds 300 ms. The fresh-cache sample is small and the ranges overlap.
 Native hidden windows reported the first frame and media readiness but
 no resolved-photo milestone in either set.
+
+## Avoiding work before the first frame
+
+The automatic timeline now keeps older photos in the index's capture
+order and sorts the recently added partition by addition date. It checks
+capture order after converting timestamps, so a missing date in an
+older index still sorts correctly relative to dates before 1970. The
+timeline step fell from about 65 ms to under 1 ms in the isolated
+same-library comparison.
+
+The plugin host walks source trees once for both change stamps and file
+watches, pruning helper build directories before traversal. Help, the
+source pickers, tours, and the Series editor and studio are built on
+their first use. The Series editor and studio contribute their own
+commands to Help once instantiated. Grouping and hiding still apply on
+the initial grid. The qmake build compiles the application's bundled
+QML with the [Qt Quick Compiler](https://doc.qt.io/qt-6.12/qmldiskcache.html).
+Plugin source files still load from disk and can be edited and reloaded.
+
+The following November 4 runs used the same 49,095-item library, all
+16 built-in plugins, the warm read-only private service, and the
+854×1062 Wayland window on hidden workspace 5. The app and service
+inherited the desktop's affinity. Warm sets had two warmups each.
+
+| First frame | Before, median (range) | After, median (range) |
+|---|---:|---:|
+| Warm caches, from entry to `main` | 395 ms (326–461), 20 runs | 291 ms (245–318), 15 runs |
+| Warm caches, from process launch | 430 ms (376–516) | 332 ms (289–360) |
+| Fresh app caches, from entry to `main` | 528 ms (520–597), 3 runs | 332 ms (320–381), 3 runs |
+| Fresh app caches, from process launch | 574 ms (567–645) | 365 ms (360–422) |
+
+Twelve of the fifteen warm launches reached a first frame within 300 ms
+of entering `main`. Including the dynamic loader and trace delivery, the
+median remains above 300 ms. The fresh sets used a warm filesystem and
+new QML and graphics caches for each launch. Native hidden runs did not
+report photo readiness. A separate Xvfb/OpenGL run on a 384-item fixture
+reported a median of 437 ms to resolve the initial thumbnail tier from
+`main` (423–465 ms over five warm launches).

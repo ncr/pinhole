@@ -173,17 +173,21 @@ ApplicationWindow {
         if (!canSignIn(source))
             return
         side.shown = false
-        addPicker.shown = false
+        showAddSource(false)
         win.pluginSources[source.kind].signIn(source)
     }
-    SourcePicker {
-        id: firstRunPicker
-        objectName: "firstRun"
-        firstRun: true
-        // Under a plugin's own screen (iCloud's sign-in) as it covers the
-        // window, which then has the keys.
-        shown: win.firstRun
-        kinds: win.pluginSourceList
+    Loader {
+        anchors.fill: parent
+        property bool opened: false
+        active: win.firstRun || opened
+        onLoaded: opened = true
+        sourceComponent: SourcePicker {
+            objectName: "firstRun"
+            firstRun: true
+            // Under a plugin's own screen (iCloud's sign-in).
+            shown: win.firstRun
+            kinds: win.pluginSourceList
+        }
     }
 
     // The plugins sources come from all off: which to turn on, each a
@@ -1010,7 +1014,7 @@ ApplicationWindow {
     PluginPlane {
         id: pluginPlane
         onCollectionChanged: {
-            if (tour.shown && pluginItem(tour.pluginId) === null) tour.close()
+            if (tourShown && pluginItem(tourView.item.pluginId) === null) tourView.item.close()
             tourDue.restart()
         }
         onTourStateChanged: tourDue.restart()
@@ -1041,22 +1045,23 @@ ApplicationWindow {
         if (!item || !item.tour || item.tour.length === 0)
             return
         side.shown = false
-        tour.start(id, plugins.at(id).name, item.tour)
+        tourView.active = true
+        tourView.item.start(id, plugins.at(id).name, item.tour)
     }
     property bool touredThisLaunch: false
     Timer {
         id: tourDue
         interval: 1200
         onTriggered: {
-            if (!autoTours || tour.shown)
+            if (!autoTours || tourShown)
                 return
             // Those on at launch whose tour is not seen, and of them those
             // ready; those turned on since, ready.
             const candidates = pluginPlane.tourCandidates()
             const unseen = candidates.unseen, ready = candidates.ready, turnedOn = candidates.turnedOn
             // The card takes in those ready since it showed.
-            if (newPlugins.shown) {
-                newPlugins.add(ready)
+            if (newPluginsShown) {
+                newPluginsView.item.add(ready)
                 return
             }
             if (!win.tourFree)
@@ -1065,10 +1070,12 @@ ApplicationWindow {
                 win.startTour(turnedOn[0])
             } else if (!win.touredThisLaunch && ready.length > 0) {
                 win.touredThisLaunch = true
-                if (unseen.length > 1)
-                    newPlugins.open(ready)
-                else
+                if (unseen.length > 1) {
+                    newPluginsView.active = true
+                    newPluginsView.item.open(ready)
+                } else {
                     win.startTour(ready[0])
+                }
             }
         }
     }
@@ -1088,32 +1095,48 @@ ApplicationWindow {
         pluginSources: win.pluginSources
         onAddRequested: {
             side.shown = false
-            addPicker.shown = true
+            win.showAddSource(true)
         }
         onSignInRequested: source => win.signInTo(source)
     }
-    SourcePicker {
+    function showAddSource(shown) {
+        if (shown)
+            addPicker.active = true
+        if (addPicker.item)
+            addPicker.item.shown = shown
+    }
+    readonly property bool addSourceShown: addPicker.item?.shown ?? false
+    Loader {
         id: addPicker
-        objectName: "addSource"
-        kinds: win.pluginSourceList
+        anchors.fill: parent
+        active: false
+        sourceComponent: SourcePicker {
+            objectName: "addSource"
+            kinds: win.pluginSourceList
+        }
     }
     // A plugin's own screen over the photos (iCloud's sign-in, chosen in
     // the picker): the picker gives way to it.
-    onPluginCoveringChanged: if (pluginCovering) addPicker.shown = false
+    onPluginCoveringChanged: if (pluginCovering) showAddSource(false)
     // A folder added, or an Apple ID signed in to: what was open for it goes.
     Connections {
         target: sources
         function onSwitched() {
-            addPicker.shown = false
+            win.showAddSource(false)
             side.shown = false
         }
     }
     // The help over the card, as ? on it takes the keys.
-    NewPlugins {
-        id: newPlugins
-        objectName: "newPlugins"
-        ready: id => win.pluginItem(id)?.tourReady ?? false
-        onTourRequested: id => win.startTour(id)
+    readonly property bool newPluginsShown: newPluginsView.item?.shown ?? false
+    Loader {
+        id: newPluginsView
+        anchors.fill: parent
+        active: false
+        sourceComponent: NewPlugins {
+            objectName: "newPlugins"
+            ready: id => win.pluginItem(id)?.tourReady ?? false
+            onTourRequested: id => win.startTour(id)
+        }
     }
     property bool guideShown: false
     Loader {
@@ -1132,8 +1155,33 @@ ApplicationWindow {
             }
         }
     }
-    HelpOverlay { id: help; objectName: "help"; pluginSections: win.pluginHelp }
-    Tour { id: tour; objectName: "tour"; grid: grid; photoViewer: win.photoViewer; side: side }
+    function showHelp(shown) {
+        if (shown)
+            helpView.active = true
+        if (helpView.item)
+            helpView.item.shown = shown
+    }
+    readonly property bool helpShown: helpView.item?.shown ?? false
+    Loader {
+        id: helpView
+        anchors.fill: parent
+        active: false
+        sourceComponent: HelpOverlay { objectName: "help"; pluginSections: win.pluginHelp }
+    }
+    readonly property bool tourShown: tourView.item?.shown ?? false
+    Loader {
+        id: tourView
+        anchors.fill: parent
+        active: false
+        readonly property PhotoGrid photoGrid: grid
+        readonly property Item sidePanel: side
+        sourceComponent: Tour {
+            objectName: "tour"
+            grid: tourView.photoGrid
+            photoViewer: win.photoViewer
+            side: tourView.sidePanel
+        }
+    }
 
     // The grid's own controls, 1 shown to 0 gone: they fade as a panel or
     // the viewer comes over the photos, and back, rather than vanish.
@@ -1142,16 +1190,16 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: help.shown || guideShown || side.shown || addPicker.shown || newPlugins.shown || pluginCovering
+    readonly property bool panelUp: helpShown || guideShown || side.shown || addSourceShown || newPluginsShown || pluginCovering
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
-    readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tour.shown
+    readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tourShown
     // Whose the keys are (keymap.h): the one on top, so two never share one.
-    readonly property string keyLayer: tour.shown ? "tour"
-        : help.shown ? "help"
+    readonly property string keyLayer: tourShown ? "tour"
+        : helpShown ? "help"
         : guideShown ? "guide"
-        : newPlugins.shown ? "newPlugins"
-        : addPicker.shown ? "addSource"
+        : newPluginsShown ? "newPlugins"
+        : addSourceShown ? "addSource"
         : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"
         : pluginCovering ? "plugin"
@@ -1213,7 +1261,7 @@ ApplicationWindow {
     }
     // Not while choosing a source, nor while a tour shows. (A field typed
     // into, an Apple ID, takes Ctrl Z first.)
-    readonly property bool historyKeys: !addPicker.shown && !tour.shown
+    readonly property bool historyKeys: !addSourceShown && !tourShown
     // What was done, undone or done again, said at the foot for a while,
     // with the button that takes it back (or does it again): undo and redo
     // for a pointer, as Ctrl+Z and Ctrl+⇧Z are for the keys.
@@ -1319,7 +1367,7 @@ ApplicationWindow {
         keys: ["?"]
         keyLayer: "any"
         when: keymap.layer !== "tour"
-        onTriggered: help.shown = !help.shown
+        onTriggered: win.showHelp(!win.helpShown)
     }
     Command {
         name: "help.close"
@@ -1327,7 +1375,7 @@ ApplicationWindow {
         keyLayer: "help"
         mouse: qsTr("Click beside it")
         touchpad: qsTr("Tap beside it")
-        onTriggered: help.shown = false
+        onTriggered: win.showHelp(false)
     }
     // Frame times, for working on the grid: a key nobody presses by chance.
     Command {

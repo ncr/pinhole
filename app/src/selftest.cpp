@@ -1795,6 +1795,20 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
     });
 }
 
+static QObject *seriesPlugin(QQuickWindow *window) {
+    QVariant plugin;
+    QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, plugin),
+                              Q_ARG(QVariant, QStringLiteral("pinhole.series")));
+    return plugin.value<QObject *>();
+}
+
+static QObject *seriesView(QQuickWindow *window, const char *opener) {
+    QVariant view;
+    if (QObject *plugin = seriesPlugin(window))
+        QMetaObject::invokeMethod(plugin, opener, Q_RETURN_ARG(QVariant, view));
+    return view.value<QObject *>();
+}
+
 void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
     auto clock = std::make_shared<QElapsedTimer>();
     clock->start();
@@ -1802,18 +1816,7 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    // In a plugin, by the items it shows: a Loader's item is not its child.
-    auto editor = [window] {
-        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
-            if (item->objectName() == QLatin1String("seriesEditor"))
-                return item;
-            for (QQuickItem *child : item->childItems())
-                if (QQuickItem *found = find(child))
-                    return found;
-            return nullptr;
-        };
-        return static_cast<QObject *>(find(window->contentItem()));
-    };
+    auto editor = [window] { return seriesView(window, "ensureEditor"); };
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     auto describe = [editor](const QString &name) {
         QObject *e = editor();
@@ -2221,15 +2224,7 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
     // to one with a background of the same name; Ctrl+Z.
     auto studio = [=] {
         const QString video = qEnvironmentVariable("PINHOLE_SELFTEST_VIDEO");
-        std::function<QQuickItem *(QQuickItem *)> find = [&find](QQuickItem *item) -> QQuickItem * {
-            if (item->objectName() == QLatin1String("seriesStudio"))
-                return item;
-            for (QQuickItem *child : item->childItems())
-                if (QQuickItem *found = find(child))
-                    return found;
-            return nullptr;
-        };
-        QQuickItem *studioItem = find(window->contentItem());
+        QObject *studioItem = video.isEmpty() ? nullptr : seriesView(window, "ensureStudio");
         if (video.isEmpty() || !studioItem) {
             say(video.isEmpty() ? QStringLiteral("no PINHOLE_SELFTEST_VIDEO: the studio left out") : QStringLiteral("no studio"));
             *failed = *failed || !video.isEmpty();
@@ -2315,17 +2310,7 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    auto editor = [window] {
-        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
-            if (item->objectName() == QLatin1String("seriesEditor"))
-                return item;
-            for (QQuickItem *child : item->childItems())
-                if (QQuickItem *found = find(child))
-                    return found;
-            return nullptr;
-        };
-        return static_cast<QObject *>(find(window->contentItem()));
-    };
+    auto editor = [window] { return seriesView(window, "ensureEditor"); };
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     auto wait = std::make_shared<QTimer>();
     wait->setInterval(250);
@@ -2388,7 +2373,15 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
 
 void runKeysSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, Keymap &keymap) {
     auto find = [window](const char *name) { return window->findChild<QObject *>(QString::fromLatin1(name)); };
-    auto show = [find](const char *name, bool shown) {
+    auto show = [find, window](const char *name, bool shown) {
+        if (qstrcmp(name, "help") == 0) {
+            QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, shown));
+            return;
+        }
+        if (qstrcmp(name, "addSource") == 0) {
+            QMetaObject::invokeMethod(window, "showAddSource", Q_ARG(QVariant, shown));
+            return;
+        }
         if (QObject *o = find(name))
             o->setProperty("shown", shown);
     };
@@ -2561,20 +2554,7 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    // As the window shows it: a plugin's items are the window's items'
-    // children, not its objects'.
-    auto plugin = [window]() -> QObject * {
-        std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
-            if (item->objectName() == QLatin1String("seriesEditor"))
-                return item;
-            for (QQuickItem *child : item->childItems())
-                if (QQuickItem *found = find(child))
-                    return found;
-            return nullptr;
-        };
-        QQuickItem *editor = find(window->contentItem());
-        return editor ? editor->property("plugin").value<QObject *>() : nullptr;
-    };
+    auto plugin = [window] { return seriesPlugin(window); };
     QObject *history = qmlEngine(window)->rootContext()->contextProperty("history").value<QObject *>();
     // A QML var: a QJSValue, or already a QVariant.
     auto plain = [](const QVariant &v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; };

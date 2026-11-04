@@ -738,7 +738,6 @@ private:
     // belong failed.
     QJsonObject unmoved(QJsonObject config) const;
     bool enabled(const Plugin &plugin) const;
-    void watch();
     // Each plugin, on or off, may bring its own translations (i18n/).
     void updateCatalogs();
     // The engine's warnings: those from a plugin's files are its problems.

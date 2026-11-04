@@ -332,6 +332,7 @@ int main(int argc, char *argv[]) {
     auto *grid = window->findChild<PhotoGrid *>("grid");
     window->installEventFilter(&viewer);
     timeline.setLibrary(&library);
+    startup.mark(QStringLiteral("timeline_ready"));
     grid->setTimeline(&timeline);
     viewer.setTimeline(&timeline);
     grid->setSources(&library, &loader, &stats);
@@ -344,6 +345,7 @@ int main(int argc, char *argv[]) {
     // The stage's window, where there is one: a child of this one.
     stage.make(&engine, window);
     grid->setTouchpadHold(&hold);
+    startup.mark(QStringLiteral("grid_ready"));
     // Plugins load now, with the library whole, before the first frame.
     plugins.libraryOpened();
     startup.mark(QStringLiteral("plugins_ready"));

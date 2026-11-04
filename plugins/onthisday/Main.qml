@@ -69,14 +69,18 @@ PinholePlugin {
         let first = 0
         // A run grows while the photos after it are of its day.
         let runs = null
-        for (let i = 0; i < days.length; ++i) {
+        let previous = 0
+        for (let i = 0, count = days.length; i < count; ++i) {
             const d = days[i]
-            if (d === 0)
+            if (d === 0) {
+                previous = 0
                 continue
-            if (i > 0 && days[i - 1] === d) {
+            }
+            if (d === previous) {
                 runs[runs.length - 1] = i + 1
                 continue
             }
+            previous = d
             runs = map[d] || (map[d] = [])
             runs.push(i, i + 1)
             if (first === 0 || d < first * 10000)
