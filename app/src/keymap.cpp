@@ -129,6 +129,14 @@ bool Keymap::lostField(QObject *watched, QEvent *event) {
     return true;
 }
 
+bool Keymap::isTouchpadScroll(const QWheelEvent &event) {
+    // On Wayland a wheel can carry the seat's touchpad device too. The
+    // compositor's scroll phase and source describe the actual motion.
+    return event.phase() != Qt::NoScrollPhase
+        || event.source() == Qt::MouseEventSynthesizedBySystem
+        || (event.angleDelta().isNull() && !event.pixelDelta().isNull());
+}
+
 bool Keymap::eventFilter(QObject *watched, QEvent *event) {
     switch (event->type()) {
     // A key that is a shortcut never arrives as a key press: Qt asks
@@ -141,12 +149,8 @@ bool Keymap::eventFilter(QObject *watched, QEvent *event) {
         setInput(QStringLiteral("keyboard"));
         break;
     case QEvent::Wheel: {
-        // A touchpad scrolls in phases (begin, update, end) and a mouse's
-        // wheel without; libinput says which.
-        const auto *wheel = static_cast<QWheelEvent *>(event);
-        const bool touchpad = wheel->phase() != Qt::NoScrollPhase
-                              || (wheel->pointingDevice() && wheel->pointingDevice()->type() == QInputDevice::DeviceType::TouchPad);
-        m_pointer = touchpad ? QStringLiteral("touchpad") : QStringLiteral("mouse");
+        m_pointer = isTouchpadScroll(*static_cast<QWheelEvent *>(event))
+            ? QStringLiteral("touchpad") : QStringLiteral("mouse");
         setInput(m_pointer);
         break;
     }

@@ -7,6 +7,8 @@
 #include <QQuickWindow>
 #include <QTimer>
 #include <QWheelEvent>
+#include <private/qhighdpiscaling_p.h>
+#include <private/qquickwindow_p.h>
 #include <qpa/qwindowsysteminterface.h>
 
 #include <cstdio>
@@ -28,7 +30,8 @@ QPointF center(QQuickItem *item) {
 
 void pointer(QQuickWindow *window, const QPointingDevice *device, QPointF at,
              Qt::MouseButtons state, Qt::MouseButton button, QEvent::Type type) {
-    QWS::handleMouseEvent<Delivery>(window, device, at, window->mapToGlobal(at.toPoint()), state, button, type);
+    QWS::handleMouseEvent<Delivery>(window, device, QHighDpi::toNativePixels(at, window),
+        QHighDpi::toNativeGlobalPosition(window->mapToGlobal(at), window), state, button, type);
 }
 
 void click(QQuickWindow *window, const QPointingDevice *device, QQuickItem *item,
@@ -116,6 +119,9 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
         };
         if (run->clock.elapsed() > 14000)
             return fail("timed out");
+        // A tiled window on the hidden workspace may not receive frame callbacks.
+        // Settle pending Quick layouts before locating the next control.
+        QQuickWindowPrivate::get(window)->polishItems();
         const bool keys = run->input == 0;
         const auto *device = run->input == 2 ? touchpad : QPointingDevice::primaryPointingDevice();
         auto *root = window->contentItem();
@@ -162,7 +168,8 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
             if (keys)
                 press(window, Qt::Key_Plus);
             else if (run->input == 1)
-                wheel(window, device, at, {}, QPoint(0, 120), Qt::NoScrollPhase);
+                // Wayland can report the seat's touchpad device for a real wheel notch.
+                wheel(window, touchpad, at, QPoint(0, 15), QPoint(0, 120), Qt::NoScrollPhase);
             else
                 pinch(window, device, at);
             if (zoom() <= beforeZoom)
@@ -171,6 +178,8 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 press(window, Qt::Key_Home);
             else
                 click(window, device, named(map, "placesFit"));
+            if (std::abs(zoom() - beforeZoom) > 0.01)
+                return fail("Fit all did not restore the overview");
             break;
         }
         case 2:

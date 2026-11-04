@@ -1,4 +1,5 @@
 #include "maptiles.h"
+#include "keymap.h"
 
 #include <QBuffer>
 #include <QDateTime>
@@ -115,9 +116,7 @@ bool MapWheel::eventFilter(QObject *watched, QEvent *event) {
     if (!contains(at))
         return false;
     const QPoint pixels = wheel->pixelDelta(), angle = wheel->angleDelta();
-    const bool touchpad = wheel->phase() != Qt::NoScrollPhase
-        || wheel->pointingDevice()->type() == QInputDevice::DeviceType::TouchPad;
-    if (touchpad && !(wheel->modifiers() & Qt::ControlModifier)) {
+    if (Keymap::isTouchpadScroll(*wheel) && !(wheel->modifiers() & Qt::ControlModifier)) {
         const QPointF delta = pixels.isNull() ? QPointF(angle) / 8 : QPointF(pixels);
         if (!delta.isNull())
             emit pan(delta.x(), delta.y());

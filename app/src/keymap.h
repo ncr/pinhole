@@ -5,6 +5,8 @@
 #include <QStringList>
 #include <QVariantList>
 
+class QWheelEvent;
+
 // Every action of the window, each a Command (Command.qml), as one list: the
 // keys that do it, and how it is done with a mouse and with a touchpad. The
 // keys work through it and the help is made from it, so neither can drift
@@ -37,6 +39,8 @@ public:
     void setPlugin(const QString &plugin);
     QString input() const { return m_input; }
     int revision() const { return m_revision; }
+
+    static bool isTouchpadScroll(const QWheelEvent &event);
 
     // Command.qml adds itself as it is made, and goes as it is destroyed.
     Q_INVOKABLE void add(QObject *action);
