@@ -15,9 +15,13 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// How many programs at once: the threads of the cores they may use.
+/// How many programs at once: the selected threads, capped by the CPU quota.
 pub fn cores() -> usize {
-    allowed().len()
+    static SLOTS: OnceLock<usize> = OnceLock::new();
+    *SLOTS.get_or_init(|| {
+        let budget = std::thread::available_parallelism().map_or(1, |n| n.get());
+        allowed().len().clamp(1, budget)
+    })
 }
 
 /// The CPUs background work may use: every thread of the first four in five
@@ -26,23 +30,33 @@ pub fn cores() -> usize {
 fn allowed() -> &'static [usize] {
     static ALLOWED: OnceLock<Vec<usize>> = OnceLock::new();
     ALLOWED.get_or_init(|| {
-        let all = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let topology = |cpu: usize, what: &str| -> Option<u32> {
-            std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/topology/{what}")).ok()?.trim().parse().ok()
-        };
-        let core_of: Option<Vec<(u32, u32)>> =
-            (0..all).map(|cpu| Some((topology(cpu, "physical_package_id")?, topology(cpu, "core_id")?))).collect();
-        match core_of {
-            Some(core_of) => {
-                let mut cores: Vec<(u32, u32)> = core_of.clone();
-                cores.sort();
-                cores.dedup();
-                let kept = &cores[..(cores.len() * 4 / 5).max(1)];
-                (0..all).filter(|cpu| kept.contains(&core_of[*cpu])).collect()
-            }
-            None => (0..(all * 4 / 5).max(1)).collect(),
+        // A cgroup CPU quota is a count, and an inherited affinity mask
+        // can contain nonconsecutive CPU IDs.
+        let mut mask = [0u64; 16];
+        if unsafe { sched_getaffinity(0, std::mem::size_of_val(&mask), mask.as_mut_ptr()) } != 0 {
+            return Vec::new();
         }
+        let cpus: Vec<_> = (0..mask.len() * 64).filter(|cpu| mask[cpu / 64] & (1 << (cpu % 64)) != 0).collect();
+        let topology = |cpu| {
+            let read = |what| {
+                std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/topology/{what}")).ok()?.trim().parse().ok()
+            };
+            Some((read("physical_package_id")?, read("core_id")?))
+        };
+        background_cpus(&cpus, topology)
     })
+}
+
+fn background_cpus(cpus: &[usize], topology: impl Fn(usize) -> Option<(u32, u32)>) -> Vec<usize> {
+    let core_of: Option<Vec<_>> = cpus.iter().copied().map(topology).collect();
+    let Some(core_of) = core_of else {
+        return cpus.iter().copied().take((cpus.len() * 4 / 5).max(1)).collect();
+    };
+    let mut cores = core_of.clone();
+    cores.sort_unstable();
+    cores.dedup();
+    let kept = &cores[..(cores.len() * 4 / 5).max(1).min(cores.len())];
+    cpus.iter().copied().zip(core_of).filter_map(|(cpu, core)| kept.contains(&core).then_some(cpu)).collect()
 }
 
 /// A program to start for background work: idle priority, one thread.
@@ -387,6 +401,7 @@ struct SchedParam {
 extern "C" {
     fn setpriority(which: i32, who: u32, prio: i32) -> i32;
     fn sched_setscheduler(pid: i32, policy: i32, param: *const SchedParam) -> i32;
+    fn sched_getaffinity(pid: i32, size: usize, mask: *mut u64) -> i32;
     fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
     fn kill(pid: i32, signal: i32) -> i32;
     fn sysconf(name: i32) -> i64;
@@ -403,7 +418,9 @@ fn lower(mask: &[u64; 16]) {
     unsafe {
         setpriority(PRIO_PROCESS, 0, 19);
         sched_setscheduler(0, SCHED_IDLE, &SchedParam { priority: 0 });
-        sched_setaffinity(0, std::mem::size_of_val(mask), mask.as_ptr());
+        if mask.iter().any(|word| *word != 0) {
+            sched_setaffinity(0, std::mem::size_of_val(mask), mask.as_ptr());
+        }
     }
 }
 
@@ -423,17 +440,25 @@ mod tests {
     }
 
     #[test]
-    fn it_runs_only_on_four_in_five_cores_with_their_second_threads() {
+    fn background_cpus_keep_siblings_with_nonconsecutive_ids() {
+        let cpus = [2, 3, 4, 5, 6, 10, 11, 12, 13, 14];
+        let siblings = |cpu| Some((0, cpu as u32 % 8));
+        assert_eq!(background_cpus(&cpus, siblings), [2, 3, 4, 5, 10, 11, 12, 13]);
+        assert_eq!(background_cpus(&[2, 10], siblings), [2, 10]);
+        assert_eq!(background_cpus(&[4, 8, 12], |_| None), [4, 8]);
+    }
+
+    #[test]
+    fn a_background_program_inherits_only_the_selected_cpus() {
         let out = command("sh").args(["-c", "grep Cpus_allowed_list /proc/self/status"]).output().unwrap();
         let line = String::from_utf8(out.stdout).unwrap();
         let all = std::thread::available_parallelism().unwrap().get();
-        assert!(cores() < all || all < 2, "{line}");
-        assert!(cores() >= 1);
-        // The CPUs it may use are exactly those it was given.
-        let listed: usize = line.split_once(':').unwrap().1.trim().split(',')
-            .map(|r| r.split_once('-').map_or(1, |(a, b)| b.parse::<usize>().unwrap() - a.parse::<usize>().unwrap() + 1))
-            .sum();
-        assert_eq!(listed, cores(), "{line}");
+        assert!((1..=all).contains(&cores()));
+        let listed: Vec<_> = line.split_once(':').unwrap().1.trim().split(',').flat_map(|part| {
+            let (first, last) = part.split_once('-').unwrap_or((part, part));
+            first.parse::<usize>().unwrap()..=last.parse::<usize>().unwrap()
+        }).collect();
+        assert_eq!(listed, allowed(), "{line}");
     }
 
     #[test]
