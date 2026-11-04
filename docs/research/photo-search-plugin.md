@@ -83,9 +83,10 @@ stale responses cannot replace newer results.
 
 A device timeout quarantines indexing until restart plus a fresh smoke test.
 The existing imported index still accepts Polish queries entirely locally.
-This machine is currently in that state; the plugin displays an actionable
-Polish explanation instead of retrying the NPU or substituting CPU image
-inference. The full library must not be described as indexed.
+During quarantine the plugin explains how to restore device access in Polish.
+The November 4 reboot and successful smoke test restored access on the
+M2 Pro. The completed SigLIP 2 comparison used the same 384-thumbnail sample.
+The plugin still uses the CLIP recipe, and its import covers only the sample.
 
 ## Verification
 
