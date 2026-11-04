@@ -101,7 +101,8 @@ installed API version and the same bundled documents to tools. Start with
 The [local photo-content search plugin](docs/research/photo-search-plugin.md)
 indexes thumbnails automatically in pinholed, even after the window closes. Ctrl F opens the
 search card and accepts photo descriptions in English or Polish. The local
-profiles use WeMM 4B on NVIDIA CUDA or CLIP on Apple Silicon with ANE.
+profiles use WeMM 4B on NVIDIA CUDA, CLIP on Apple Silicon with ANE,
+or WeMM 4B on Apple GPUs with Asahi Vulkan when explicitly enabled.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or

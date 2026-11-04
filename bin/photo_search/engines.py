@@ -137,7 +137,65 @@ class CudaEngine:
             torch.cuda.empty_cache()
 
 
-ENGINES = {"cpu": LegacyEngine, "hybrid-ane": AneEngine, "cuda": CudaEngine}
+class VulkanEngine:
+    dimensions = {"wemm": DIMENSION}
+    benchmark_import = False
+    idle_seconds = 60
+
+    def __init__(self, args):
+        self.args = args
+        self.model = None
+
+    def identity(self):
+        from .wemm_vulkan import identity
+
+        return identity()
+
+    def check_indexing(self):
+        from .wemm_vulkan import check_installation
+
+        check_installation(self.args.models)
+
+    def can_index(self):
+        from .wemm_vulkan import KEEP_MEMORY_KIB, START_MEMORY_KIB, available_memory_kib
+
+        if self.model is not None and self.model.process.poll() is not None:
+            self.close()
+        available = available_memory_kib()
+        if self.model is None:
+            return available >= START_MEMORY_KIB
+        if available >= KEEP_MEMORY_KIB:
+            return True
+        self.close()
+        return False
+
+    def encoder(self):
+        if self.model is not None and self.model.process.poll() is not None:
+            self.close()
+        if self.model is None:
+            from .wemm_vulkan import START_MEMORY_KIB, WeMMVulkan, available_memory_kib
+
+            if available_memory_kib() < START_MEMORY_KIB:
+                raise RuntimeError("WeMM Vulkan is waiting for 7 GiB of available memory")
+            self.model = WeMMVulkan(self.args.models, self.args.threads)
+        return self.model
+
+    def encode_image(self, image):
+        return self.encoder().image(image)
+
+    def encode_text(self, texts):
+        import numpy as np
+
+        model = self.encoder()
+        return np.stack([model.text(text) for text in texts])
+
+    def close(self):
+        if self.model is not None:
+            self.model.close()
+            self.model = None
+
+
+ENGINES = {"cpu": LegacyEngine, "hybrid-ane": AneEngine, "cuda": CudaEngine, "vulkan": VulkanEngine}
 
 
 def create_engine(args):
@@ -161,6 +219,12 @@ def local_profile(checkout):
                              "--threads", "2"]}
     if machine in ("aarch64", "arm64"):
         python = base / "venv/bin/python"
+        vulkan = base / "wemm-vulkan"
+        if (vulkan / "enabled").is_file() and os.access(python, os.X_OK):
+            return {"name": "WeMM 4B · Apple GPU Vulkan", "python": str(python),
+                    "indexFile": "wemm-4b-vulkan-v1.sqlite", "benchmark": None,
+                    "args": ["--model", "wemm", "--backend", "vulkan", "--models", str(vulkan),
+                             "--threads", "2"]}
         models = base / "models"
         library = checkout / ".tools/omarchy-ane/libane/libane.so"
         compiler = checkout / ".tools/ane-compiler-package/usr/bin/mil-hwxc"

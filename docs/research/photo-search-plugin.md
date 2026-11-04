@@ -39,6 +39,40 @@ environment and pinned models described in the full-encoder notes.
 Both environments live under the checkout's ignored `.tools/photo-search`
 directory. The plugin does not install packages or download models.
 
+### WeMM on the Asahi Vulkan driver
+
+The optional Apple GPU profile uses the Q8_0 WeMM 4B model and its BF16
+projector from [this GGUF snapshot](https://huggingface.co/seamon67/WeMM-Embedding-4B-GGUF/tree/1e3e1b0d7fdb3c3661315b338b3e3b5b055e0121).
+Build [llama.cpp b12101](https://github.com/ggml-org/llama.cpp/tree/b12101) with
+`-DGGML_VULKAN=ON`. Place its build's `bin` directory or a symlink to it at
+`.tools/photo-search/wemm-vulkan/bin`. Put both GGUF files in the adjacent
+`weights` directory. The worker checks their SHA-256 hashes and the runtime
+revision before loading. This profile uses the same `venv` as the ANE
+profile and requires Asahi Vulkan and `setpriv` from util-linux.
+
+Create `.tools/photo-search/wemm-vulkan/enabled` and restart pinholed to
+select WeMM Vulkan. Remove the marker and restart the daemon to select
+CLIP ANE again. The separate indices retain their progress. Indexing
+waits for 7 GiB of available system memory before loading WeMM and releases
+the model when available memory falls below 2 GiB. It follows the same
+background scheduling and pause controls as the other profiles.
+
+On an Apple M2 Pro, the Vulkan runtime took a median of 1.70 s per image
+and about 0.51 s per query once loaded. This benchmark ran without the
+background worker's pacing. The table reports mean nDCG@10 across 40
+Polish queries and their English translations on the same 384 frozen JPEGs.
+
+| Profile | Polish | English |
+| --- | ---: | ---: |
+| WeMM 4B Q8_0 · Apple GPU Vulkan | 0.629 | 0.762 |
+| WeMM 4B BF16 · NVIDIA CUDA | 0.630 | 0.758 |
+| CLIP · Apple Neural Engine | 0.555 | 0.580 |
+
+The Vulkan scores were close to the CUDA scores. The advantage over CLIP
+was clearer in English on this sample. Most relevance judgments were
+model-generated. The two WeMM benchmarks decoded the frozen JPEGs directly.
+The plugin converts thumbnails with embedded color profiles to sRGB.
+
 Keep this developer plugin in the checkout: its executable resolves its own
 symlink with `readlink -f`, then finds the environment and worker relative to
 the repository. It is not a standalone distributable folder. On an API-8
