@@ -4882,13 +4882,13 @@ private slots:
             QString main;
             QCOMPARE(Plugins::manifestProblem(QStringLiteral(PINHOLE_I18N) + folder, &manifest, &main), QString());
             QVERIFY(manifest.value("workers").isArray());
-            QVERIFY(Plugins::apiUses(QStringLiteral(PINHOLE_I18N) + folder).value(10).contains("workers in the manifest"));
+            QVERIFY(Plugins::apiUses(QStringLiteral(PINHOLE_I18N) + folder).value(11).contains("workers in the manifest"));
         }
         QTemporaryDir dir;
         write(dir.path() + "/run", "#!/bin/sh\n");
         write(dir.path() + "/data", "");
         QFile(dir.path() + "/run").setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
-        const auto problem = [&dir](const QJsonValue &workers, int api = 10) {
+        const auto problem = [&dir](const QJsonValue &workers, int api = 11) {
             return Plugins::workersProblem(dir.path(), {{"api", api}, {"workers", workers}});
         };
         const QJsonObject fine{{"name", "faces"}, {"program", "run"}, {"args", QJsonArray{"daemon"}}, {"per", "source"}};
@@ -4901,7 +4901,7 @@ private slots:
             return QJsonArray{changed};
         };
         const QList<std::pair<QString, QJsonValue>> wrong = {
-            {"\"api\": 10", QJsonArray{fine}},
+            {"\"api\": 11", QJsonArray{fine}},
             {"is a list", fine},
             {"twice", QJsonArray{fine, fine}},
             {"\"name\"", QJsonArray{"run"}},
@@ -4917,7 +4917,7 @@ private slots:
             {"not a program", with("program", "gone")},
         };
         for (const auto &[said, workers] : wrong) {
-            const QString why = problem(workers, said == QLatin1String("\"api\": 10") ? 9 : 10);
+            const QString why = problem(workers, said == QLatin1String("\"api\": 11") ? 10 : 11);
             QVERIFY2(why.contains(said), qPrintable(said + " not in: " + why));
         }
     }

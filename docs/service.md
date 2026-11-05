@@ -83,7 +83,7 @@ service tripped over (a panic, a bug): the rest go on.
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source`. If supplied, `source` must be nonempty and match the index's `meta.source`. The index must also belong to the source served; otherwise `other_source`. A library given with `--library` can fetch when it is a copy of that source's library; another source's library or one with no owner cannot. | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
-| `semantic_index` | `library`, `key` | `managed`: whether the shared service owns the enabled personal search plugin's worker for this library and source |
+| `workers` | | `workers`: the plugins' workers it runs or would, as the `workers` event; see Workers |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
 | `set_favorite` | `assets` (ids from the index), `favorite` (true or false), and `source` (the id of the source they are of, optional) | `changed`: how many were not so already; see Favourites |
@@ -558,12 +558,33 @@ in the index when it is under 20 minutes old and otherwise looks the asset
 up again, gathering everything requested within 25 ms into one lookup of up
 to 100 assets.
 
-## Background face indexing
+## Workers
 
-The shared service supervises the built-in People worker for the current
-source alongside the optional semantic search worker. Both stop on source
-change or service exit. People is enabled by default and follows the
-People switch in Settings → Plugins. Its worker reads thumbnails from
-the local catalog and writes only the per-source People cache. The
-window reads that cache and writes names and corrections to plugin state.
-A service started with `--given` never starts an indexing worker.
+The shared service keeps the workers plugins declare in their manifests
+running (docs/plugins.md, Workers): each of a plugin that is on, for the
+source shown once it has a library. People's face finder is one, the
+optional photo search's indexer another. Each is started again with the
+source shown, stopped (its stdin closed, killed five seconds later) when
+its plugin is turned off, and started again ten seconds after it ended by
+itself. A service started with `--given` runs none, and says none.
+
+```json
+{"event": "workers", "workers": [
+  {"plugin": "me.people", "name": "faces", "library": "/home/me/.local/share/pinhole/library/folder/Pictures",
+   "key": "folder:/home/me/Pictures", "running": true, "since": 1793026800000, "last_exit": null}
+]}
+```
+
+Every worker of a plugin that is on, sent to every window whenever any of
+it changes (the workers are looked at every two seconds). `workers`
+answers the same as of now: the plugins' switches and the source shown as
+they are when it is asked, a worker not yet started for them `running:
+false`. A program that asks whether the service runs its plugin's worker
+for a library (the photo search example's `config`) asks it, and finds its
+plugin there with that `library` and `key`. `library` and `key` are what it
+runs for, or would: null while no source with a library is shown.
+`running` is whether its process is there now, and `since` since when it
+has been, or not (milliseconds since 1970). `last_exit` is how it last
+ended by itself, or null: `code` (its exit code, or null) and `signal`
+(the signal that ended it, or null), and `at`. One stopped by the service
+(another source, the plugin turned off) has no `last_exit` for that.

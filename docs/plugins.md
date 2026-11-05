@@ -49,6 +49,7 @@ editor or a script to run on save. A manifest's `sources`
 are checked as pinholed takes them (a provider's kind namespaced by the
 plugin's id, its program in the folder and runnable, `accepts` and
 `rounds_every_secs` as [source-providers.md](source-providers.md) says),
+and so are its `workers` (Workers, below),
 so what pinholed would refuse is said here, and under the plugin in the
 side panel. It refuses anything the plugin uses of an API newer than its
 manifest asks for, saying the number to give, and warns of a file named as
@@ -313,11 +314,11 @@ root's `holdSdr`. API 7 adds `ShellButton.checkable` for selected buttons
 that report their state to accessibility tools. API 8 adds
 `pinhole.openPhotoDirect(photo)` for views that cover the library grid.
 API 9 adds `pinhole.openPhotos(photos, photo)`: the same, stepping
-through the view's own photos only. API 11 brings `openPhotos`' `comeBack`,
-`away` and `returned()`: Pinhole keeps a view to come back to while its
-photo shows. API 10 takes ids in `hidden` and
+through the view's own photos only. API 10 takes ids in `hidden` and
 `stacks`, as everywhere else, and adds `pinhole.selectionIds()` and
-`pinhole.screenshots()`.
+`pinhole.screenshots()`. API 11 brings `openPhotos`' `comeBack`, `away` and
+`returned()`: Pinhole keeps a view to come back to while its photo shows;
+and `workers` in the manifest (Workers, below).
 
 `Main.qml` beside it:
 
@@ -366,6 +367,68 @@ PinholePlugin {
   }
 }
 ```
+
+## Workers
+
+A plugin that works through the whole library in the background (finding
+faces, indexing what photos show) declares the program that does it in its
+manifest, and the shared service, pinholed, keeps it running, with or
+without a window:
+
+```json
+{
+  "schemaVersion": 1,
+  "api": 11,
+  "id": "me.people",
+  "entryPoints": { "main": "PeoplePlugin.qml" },
+  "workers": [
+    { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
+  ]
+}
+```
+
+| Field | |
+|---|---|
+| `name` | its name among the plugin's workers: letters, digits, `.`, `_` and `-`, at most 64 |
+| `program` | a file in the plugin's folder that can be run, by a relative path without `..` |
+| `args` | strings given to it first (none if left out) |
+| `per` | `"source"`, the only one there is (also if left out): one runs for the source shown |
+
+`workers` needs `"api": 11`. pinholed finds them as it finds providers
+(source-providers.md): in Pinhole's own plugins and yours, a plugin of
+your own with a built-in's id in that one's place. It looks again every
+two seconds, so a manifest changed, a plugin added or a switch in
+`plugins.json` is followed without a restart. A worker runs while its
+plugin is on, as the side panel has it (a built-in plugin unless turned
+off, one of your own only once turned on), and a source with a library is
+shown. It is given, after `args`:
+
+```
+--library <the library's folder, with library.sqlite>
+--library-key <the source's id, the library's meta.source>
+--cache-dir ~/.cache/pinhole/plugins/<id>/<kind>-<name>/
+--managed-plugins ~/.config/pinhole/plugins.json
+```
+
+`--cache-dir` is the plugin's `pinhole.cacheDir` for that library, made
+before it starts, so what the worker writes there the plugin's QML reads.
+`--managed-plugins` is where its settings are (`settings.<id>` in it), read
+again as they change. It starts ten points lower in CPU priority than
+pinholed (`nice`); lower it more, or its I/O, as it needs. Its stdout and
+stderr go into `~/.local/state/pinhole/pinholed.log`, each line after its
+plugin's id and name (at most 200 lines in ten seconds, 2,000 bytes a
+line, as a provider's). Read the library only: open `library.sqlite`
+read-only, and give up on a library whose `meta.source` is not
+`--library-key`.
+
+It is stopped when another source is shown, its plugin is turned off or
+its manifest changes it, by closing its stdin: watch stdin and end at EOF
+(also how it ends with pinholed, however that ends). One still running
+five seconds later is killed. One that ends by itself is started again ten
+seconds later. A service started for a library given (`--given`) runs
+none. The window asks pinholed's `workers` (docs/service.md) for how each
+is doing; a plugin's QML can tell from the files the worker writes in its
+cache.
 
 ## What a plugin is given
 

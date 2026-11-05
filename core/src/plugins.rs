@@ -564,13 +564,13 @@ mod tests {
                 std::fs::set_permissions(at.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
             }
         };
-        plugin(&places.builtin, "people", "pinhole.people", 10,
+        plugin(&places.builtin, "people", "pinhole.people", 11,
                serde_json::json!([{"name": "faces", "program": "run", "args": ["daemon"], "per": "source"}]));
         // A built-in one your copy replaces, workers and all.
-        plugin(&places.builtin, "search", "pinhole.search", 10, serde_json::json!([{"name": "old", "program": "run"}]));
-        plugin(&places.personal, "my-search", "pinhole.search", 10, serde_json::json!([{"name": "new", "program": "./run"}]));
+        plugin(&places.builtin, "search", "pinhole.search", 11, serde_json::json!([{"name": "old", "program": "run"}]));
+        plugin(&places.personal, "my-search", "pinhole.search", 11, serde_json::json!([{"name": "new", "program": "./run"}]));
         // Of your own: one right, and many wrong.
-        plugin(&places.personal, "mine", "me.mine", 10, serde_json::json!([
+        plugin(&places.personal, "mine", "me.mine", 11, serde_json::json!([
             {"name": "index", "program": "run"},
             {"name": "index", "program": "run"},
             {"name": "up", "program": "../mine/run"},
@@ -582,8 +582,8 @@ mod tests {
             {"name": "args", "program": "run", "args": ["a", 1]},
             "run",
         ]));
-        plugin(&places.personal, "old", "me.old", 9, serde_json::json!([{"name": "w", "program": "run"}]));
-        plugin(&places.personal, "odd", "me.odd", 10, serde_json::json!({"name": "w", "program": "run"}));
+        plugin(&places.personal, "old", "me.old", 10, serde_json::json!([{"name": "w", "program": "run"}]));
+        plugin(&places.personal, "odd", "me.odd", 11, serde_json::json!({"name": "w", "program": "run"}));
 
         let (found, problems) = workers(&places);
         let names: Vec<(&str, &str, bool)> = found.iter().map(|w| (w.plugin.as_str(), w.name.as_str(), w.builtin)).collect();
@@ -596,7 +596,7 @@ mod tests {
                     "me.mine: worker \"abs\": \"program\" is a path", "me.mine: worker \"plain\":", "me.mine: worker \"missing\":",
                     "me.mine: worker \"bad/name\": a worker's \"name\"", "me.mine: worker \"per\": \"per\" is \"source\"",
                     "me.mine: worker \"args\": \"args\" is a list of strings", "me.mine: worker \"\": a worker is an object",
-                    "me.old: workers: workers need \"api\": 10", "me.odd: \"workers\" is a list"] {
+                    "me.old: workers: workers need \"api\": 11", "me.odd: \"workers\" is a list"] {
             assert!(said.contains(why), "{why} not in:\n{said}");
         }
         assert_eq!(problems.len(), 11, "{said}");

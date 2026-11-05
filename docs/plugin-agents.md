@@ -32,6 +32,9 @@ plugins start disabled; the user enables them in Settings (Tab) → Plugins.
 Saving reloads an enabled plugin. Use the installed scaffold's manifest API
 and check `pinhole plugin docs --json` for the installed version. A manifest's
 `api` is the minimum host API required, separate from the plugin's `version`.
+Background work over the whole library (indexing, face finding) is a
+manifest `workers` entry (API 11) that pinholed runs for the source shown,
+not a program the QML starts and keeps alive; see the plugin API's Workers.
 Run `plugin check` after changes.
 It checks the manifest, QML and JS, translations and known API footguns;
 it is not a substitute for running the interaction in the app.

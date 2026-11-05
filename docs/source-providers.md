@@ -124,6 +124,11 @@ Pinhole's library or another provider's state.
 - Its stdout is the protocol and nothing else. A print left in by mistake
   stops it (below).
 
+A program that works through a library already there (finding faces,
+indexing), not one that brings photos, is a worker instead: declared under
+`workers` in the manifest, and kept running for the source shown
+([plugins.md](plugins.md), Workers).
+
 ## The protocol
 
 One JSON object per line, UTF-8, ending in `\n`.

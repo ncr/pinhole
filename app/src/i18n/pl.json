@@ -356,7 +356,7 @@
   "\"accepts\" is a list of extensions in lower case, without the dot": "\"accepts\" to lista rozszerzeń małymi literami, bez kropki",
   "\"rounds_every_secs\" is a whole number from 5 to 86400": "\"rounds_every_secs\" to liczba całkowita od 5 do 86400",
   "manifest.json's \"workers\" is a list": "\"workers\" w manifest.json to lista",
-  "workers need \"api\": 10": "procesy w tle potrzebują \"api\": 10",
+  "workers need \"api\": 11": "procesy w tle potrzebują \"api\": 11",
   "each of manifest.json's \"workers\" has a \"name\" of letters, digits, '.', '_' and '-'": "każdy z \"workers\" w manifest.json ma \"name\" z liter, cyfr, '.', '_' i '-'",
   "\"workers\": %1 is named twice": "\"workers\": %1 występuje dwa razy",
   "\"workers\": %1: %2": "\"workers\": %1: %2",

@@ -892,7 +892,7 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
     if (!declared.isArray())
         return tr("manifest.json's \"workers\" is a list");
     if (manifest.value("api").toInt(1) < 11)
-        return tr("workers need \"api\": 10");
+        return tr("workers need \"api\": 11");
     static const QRegularExpression named(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"));
     QStringList seen;
     for (const QJsonValue &each : declared.toArray()) {
