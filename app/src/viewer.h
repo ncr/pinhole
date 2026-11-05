@@ -140,6 +140,9 @@ public:
 
     // `from` is the photo's cell in the grid, where the opening grows from.
     Q_INVOKABLE void openAt(int index, QRectF from);
+    // Open at `index` with only `photos` in the row, in their order (a
+    // plugin's results), until the viewer closes.
+    void openAmong(const std::vector<int> &photos, int index);
     Q_INVOKABLE void close();
     // The next or previous photo (keys, the mouse wheel, a click), shown at
     // once with no slide, so two neighbours can be compared by flicking
@@ -204,6 +207,8 @@ private:
     void request(int index, const QString &kind);
     void setMessage(const QString &message);
     void fitPhoto();
+    // Where a photo comes in the order the row follows.
+    int rankOf(int index) const;
     void remember(int index, const QString &mediumPath);
     // The HDR of the file now shown, read on a thread.
     void readHdrOf(const QString &path);
@@ -220,6 +225,8 @@ private:
     std::vector<int> m_hiddenList;
     std::vector<int> m_row;
     bool m_rowMapped = false;
+    // The photos given to openAmong(), the whole row while it is open.
+    std::vector<int> m_among;
     bool m_open = false;
     int m_index = -1;
     // Replies for a photo no longer shown are dropped: each show() starts a

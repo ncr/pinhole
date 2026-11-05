@@ -266,9 +266,15 @@ void Viewer::rebuildRow() {
             hidden.assign(size_t(n), 0);
         hidden[size_t(i)] = 1;
     }
-    m_rowMapped = !hidden.empty() || m_timeline;
+    m_rowMapped = !hidden.empty() || m_timeline || !m_among.empty();
     m_row.clear();
-    if (m_rowMapped) {
+    if (!m_among.empty()) {
+        m_rowPositions.assign(size_t(n), int(m_among.size()));
+        for (int i : m_among) {
+            m_rowPositions[size_t(i)] = int(m_row.size());
+            m_row.push_back(i);
+        }
+    } else if (m_rowMapped) {
         m_row.reserve(size_t(n));
         m_rowPositions.resize(size_t(n));
         for (int place = 0; place < n; ++place) {
@@ -307,12 +313,17 @@ int Viewer::stepTarget(int delta, int *place) const {
     const int photo = photoAt(to);
     // Never back the other way: a hidden photo shown past either end of
     // the row has nothing beyond it.
-    const auto rank = [this](int index) { return m_timeline ? m_timeline->positionOf(index) : index; };
-    if (photo < 0 || photo == m_index || (rank(photo) > rank(m_index)) != (delta > 0))
+    if (photo < 0 || photo == m_index || (rankOf(photo) > rankOf(m_index)) != (delta > 0))
         return -1;
     if (place)
         *place = to;
     return photo;
+}
+
+int Viewer::rankOf(int index) const {
+    if (!m_among.empty())
+        return placeOf(index);
+    return m_timeline ? m_timeline->positionOf(index) : index;
 }
 
 int Viewer::photoAt(int place) const {
@@ -450,11 +461,27 @@ void Viewer::letGo() {
     emit motionChanged();
 }
 
+void Viewer::openAmong(const std::vector<int> &photos, int index) {
+    m_among.clear();
+    std::vector<char> seen(size_t(m_library->count()), 0);
+    for (int i : photos)
+        if (i >= 0 && i < m_library->count() && !std::exchange(seen[size_t(i)], 1))
+            m_among.push_back(i);
+    if (index < 0 || index >= m_library->count() || !seen[size_t(index)])
+        m_among.clear();
+    rebuildRow();
+    openAt(index, {});
+}
+
 void Viewer::close() {
     if (!m_open)
         return;
     letGo();
     m_open = false;
+    if (!m_among.empty()) {
+        m_among.clear();
+        rebuildRow();
+    }
     m_generation += 1; // anything still arriving is for a closed viewer
     m_motion.reset();
     m_jumpFrom = -1;
@@ -470,7 +497,7 @@ void Viewer::goTo(int place) {
     const int index = photoAt(place);
     if (index < 0 || index == m_index)
         return;
-    const bool forward = m_timeline ? m_timeline->positionOf(index) > m_timeline->positionOf(m_index) : index > m_index;
+    const bool forward = rankOf(index) > rankOf(m_index);
     const int delta = place - placeFrom(forward ? 1 : -1);
     if (std::abs(delta) <= 1) {
         step(delta);
@@ -666,6 +693,9 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     for (int &i : m_hiddenList)
         i = mapped(i);
     std::erase(m_hiddenList, -1);
+    for (int &i : m_among)
+        i = mapped(i);
+    std::erase(m_among, -1);
     // As given, too: what `hidden` reads, and what the same given again is
     // compared with.
     const QVariantList hiddenBefore = std::exchange(m_hiddenGiven, QVariantList(m_hiddenList.begin(), m_hiddenList.end()));

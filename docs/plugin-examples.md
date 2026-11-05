@@ -1,8 +1,9 @@
 # Plugin examples
 
-The [photo-content search plugin](research/photo-search-plugin.md) shows how a
-covering results panel calls `pinhole.openPhotoDirect(id)` (API 8) and restores
-its selection when the viewer closes.
+The photo-content search plugin (`examples/semantic-search` in Pinhole's
+repository) shows how a covering results panel calls
+`pinhole.openPhotos(results, id)` (API 9), so ← → go through the results,
+and comes back on the photo last looked at when the viewer closes.
 
 Choose the pattern closest to your idea. These are common uses of the same
 `PinholePlugin` API, not different manifest types; a plugin can combine them.

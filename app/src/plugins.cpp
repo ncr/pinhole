@@ -373,6 +373,20 @@ void PluginHost::openPhotoDirect(const QJSValue &photo) const {
     m_plugins->viewerObject()->openAt(index, {});
 }
 
+void PluginHost::openPhotos(const QJSValue &photos, const QJSValue &photo) const {
+    const PluginLibrary *library = m_plugins->library();
+    const int index = library->positionOf(photo);
+    if (!m_plugins->grid() || index < 0)
+        return;
+    std::vector<int> among;
+    const int n = photos.property(QStringLiteral("length")).toInt();
+    among.reserve(size_t(std::max(0, n)));
+    for (int i = 0; i < n; ++i)
+        among.push_back(library->positionOf(photos.property(quint32(i))));
+    m_plugins->handedOver(m_id);
+    m_plugins->viewerObject()->openAmong(among, index);
+}
+
 void PluginHost::report(const QString &problem, bool print) {
     if (print)
         qWarning("%s: %s", qPrintable(m_id), qPrintable(problem));

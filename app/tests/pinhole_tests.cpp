@@ -426,6 +426,36 @@ private slots:
         QCOMPARE(timeline.mode(), "taken");
     }
 
+    void viewerStepsThroughAPluginsPhotosInTheirOrder() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}, {"e", 5000}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ServiceClient service(dir.path());
+        Viewer viewer(&library, &service);
+        viewer.setHidden({3});
+        // Search results, best first: hidden ones too, as given.
+        viewer.openAmong({4, 1, 3}, 1);
+        QCOMPARE(viewer.count(), 3);
+        QCOMPARE(viewer.place(), 1);
+        viewer.step(1); QCOMPARE(viewer.index(), 3);
+        viewer.step(1); QCOMPARE(viewer.index(), 3); // the last of them
+        viewer.goTo(0); QCOMPARE(viewer.index(), 4);
+        viewer.step(-1); QCOMPARE(viewer.index(), 4);
+        viewer.libraryReloaded({0, 1, 2, 3, -1}); // the one shown went: closed
+        QVERIFY(!viewer.isOpen());
+        // Closed, the whole library again, but for the hidden photo.
+        QCOMPARE(viewer.count(), 4);
+        viewer.openAmong({0, 2}, 2);
+        viewer.close();
+        QCOMPARE(viewer.count(), 4);
+        // A photo not among them opens with the whole library.
+        viewer.openAmong({0, 2}, 1);
+        QCOMPARE(viewer.count(), 4);
+        viewer.step(1); QCOMPARE(viewer.index(), 2);
+    }
+
     void gridAndViewerFollowTimelineWithoutChangingPluginPositions() {
         QTemporaryDir dir;
         const qint64 now = 1793620800000LL, day = 86400000;

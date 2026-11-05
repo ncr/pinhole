@@ -281,6 +281,9 @@ public:
     // Open a photo (a position or an id) full window.
     Q_INVOKABLE void openPhoto(const QJSValue &photo) const;
     Q_INVOKABLE void openPhotoDirect(const QJSValue &photo) const;
+    // As openPhotoDirect, with only `photos` (ids or positions) to step
+    // through, in their order, until the viewer closes.
+    Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo) const;
     // A photo's file of `kind` (medium, full, original, video, live, and
     // a Live Photo's loop, bounce or long_exposure) from the service: a
     // promise of its path, rejected with an Error whose `code` is the
@@ -542,7 +545,8 @@ public:
     // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
     // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
     // 7: ShellButton.checkable for accessible selected buttons.
-    static constexpr int api = 8;
+    // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos.
+    static constexpr int api = 9;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

@@ -61,8 +61,9 @@ it is not a substitute for running the interaction in the app.
 - Persist photo ids. Library positions are capture-date order, independent
   of the main grid's Automatic/Date taken/Date added timeline. Reloads move
   positions. Use `openPhoto` and `reveal` to navigate. From a covering search
-  or results panel, `openPhotoDirect` (API 8) opens the viewer without a
-  transition to or from the library grid.
+  or results panel, `openPhotos(results, photo)` (API 9) opens the viewer
+  without a transition to or from the library grid and steps through the
+  results alone; `openPhotoDirect` (API 8) does the same over the library.
 - Originals and the library database are read-only to the UI. Fetch with
   `pinhole.fetch`; query with `pinhole.query`, not an external sqlite3.
   Keep user choices in `settings`, user work in `state`, derived data in
