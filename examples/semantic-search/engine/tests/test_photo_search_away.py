@@ -49,9 +49,15 @@ class Away(unittest.TestCase):
     def test_a_real_monitor_awake_means_someone_is_there(self):
         self.assertFalse(self.ask([{"make": "Dell", "dpmsStatus": True, "disabled": False}]))
 
+    def test_a_built_in_panel_without_a_make_is_a_real_monitor(self):
+        # A MacBook under Asahi: eDP-1 reports an empty make.
+        self.assertFalse(self.ask([{"make": "", "name": "eDP-1", "dpmsStatus": True, "disabled": False}]))
+        self.assertTrue(self.ask([{"make": "", "name": "eDP-1", "dpmsStatus": False, "disabled": False}]))
+
     def test_asleep_gone_or_locked_means_away(self):
         self.assertTrue(self.ask([{"make": "Dell", "dpmsStatus": False, "disabled": False}]))
         self.assertTrue(self.ask([{"make": "", "name": "FALLBACK", "dpmsStatus": True, "disabled": False}]))
+        self.assertTrue(self.ask([{"make": "", "name": "HEADLESS-2", "dpmsStatus": True, "disabled": False}]))
         self.assertTrue(self.ask([{"make": "Dell", "dpmsStatus": True, "disabled": False}], hyprlock=True))
 
     def test_without_hyprland_it_cannot_say(self):

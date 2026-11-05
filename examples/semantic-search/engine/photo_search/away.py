@@ -2,9 +2,10 @@
 draws it only then: a model's work on the same card makes the desktop drop
 frames while it runs (an RTX 5080, a 4B model: a hitch every few seconds).
 
-Asked of Hyprland, through its socket: away while every real monitor (one
-with a make: not Hyprland's FALLBACK, not a headless one) is asleep (DPMS)
-or gone, or the screen is locked (hyprlock). None where it cannot say (no
+Asked of Hyprland, through its socket: away while every real monitor (not
+Hyprland's FALLBACK, not a headless one) is asleep (DPMS) or gone, or the
+screen is locked (hyprlock). A real monitor may have no make: a MacBook's
+built-in panel under Asahi reports none. None where it cannot say (no
 Hyprland), for the caller to decide.
 """
 import glob
@@ -36,6 +37,11 @@ def monitors(path):
     return json.loads(data)
 
 
+def real(monitor):
+    name = monitor.get("name") or ""
+    return name != "FALLBACK" and not name.startswith("HEADLESS")
+
+
 def locked():
     for entry in os.listdir("/proc"):
         if entry.isdigit():
@@ -53,7 +59,7 @@ def away():
     if path is None:
         return None
     try:
-        shown = [m for m in monitors(path) if m.get("make") and not m.get("disabled")]
+        shown = [m for m in monitors(path) if real(m) and not m.get("disabled")]
     except (OSError, ValueError):
         return None
     return locked() or not any(m.get("dpmsStatus") for m in shown)
