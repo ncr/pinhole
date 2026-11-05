@@ -268,6 +268,8 @@ public:
     Q_INVOKABLE int currentIndex() const;
     // The photos ticked, by position, oldest first.
     Q_INVOKABLE QList<int> selection() const;
+    // The same by id, which a reload of the library does not move (API 10).
+    Q_INVOKABLE QStringList selectionIds() const;
     int selectionCount() const;
     // Whether a photo (a position or an id) is hidden from the grid, by any
     // plugin's `hidden`: what a plugin counting or showing photos leaves
@@ -545,8 +547,9 @@ public:
     // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
     // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
     // 7: ShellButton.checkable for accessible selected buttons.
-    // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos.
-    static constexpr int api = 9;
+    // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos. 10: ids in hidden
+    // and stacks, pinhole.selectionIds.
+    static constexpr int api = 10;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

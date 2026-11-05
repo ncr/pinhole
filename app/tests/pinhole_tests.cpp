@@ -3819,6 +3819,16 @@ Item {
         QCOMPARE(bench.plugins->hiddenOf("me.b", {2}, true), QVariantList{2});
     }
 
+    void aPluginHidesAndStacksPhotosByIdAsByPosition() {
+        PluginBench bench({{"me.a", {}}});
+        // Ids are photos, as marks and fetch take them: never photo 0 by
+        // way of a string's number.
+        QCOMPARE(bench.plugins->hiddenOf("me.a", {QString("c"), QString("a")}, true), (QVariantList{2, 0}));
+        QCOMPARE(bench.plugins->hiddenOf("me.a", {QString("none"), 1}, true), QVariantList{1});
+        QCOMPARE(bench.plugins->stacksOf("me.a", {QVariant(QVariantList{QString("b"), QString("c")})}, true),
+                 (QVariantList{QVariant(QVariantList{1, 2})}));
+    }
+
     void twoPluginsStacksFollowTheirPhotosThroughAReloadUntilEachGivesItsOwn() {
         PluginBench bench({{"me.a", {}}, {"me.b", {}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}});
         ThumbnailLoader loader(&bench.library, 1);

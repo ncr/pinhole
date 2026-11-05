@@ -305,6 +305,14 @@ int PluginHost::currentIndex() const { return m_plugins->grid() ? m_plugins->gri
 
 QList<int> PluginHost::selection() const { return m_plugins->grid() ? m_plugins->grid()->selection() : QList<int>(); }
 
+QStringList PluginHost::selectionIds() const {
+    QStringList ids;
+    for (int index : selection())
+        if (const QString id = m_plugins->library()->item(index).value(QStringLiteral("id")).toString(); !id.isEmpty())
+            ids.append(id);
+    return ids;
+}
+
 int PluginHost::selectionCount() const { return m_plugins->grid() ? m_plugins->grid()->selectionCount() : 0; }
 
 bool PluginHost::isHidden(const QJSValue &photo) const {
@@ -963,21 +971,10 @@ void Plugins::libraryReloaded(const std::vector<int> &moved) {
         emit hiddenChanged();
 }
 
-namespace {
-
-std::vector<int> positions(const QVariantList &list) {
-    std::vector<int> out;
-    out.reserve(size_t(list.size()));
-    for (const QVariant &index : list)
-        out.push_back(index.toInt());
-    return out;
-}
-
-} // namespace
-
 QVariantList Plugins::hiddenOf(const QString &id, const QVariantList &given, bool fresh) {
     Followed &followed = m_followed[id];
-    std::vector<int> list = positions(given);
+    // Ids or positions, as a mark's photos are (API 10).
+    std::vector<int> list = markPhotos(given);
     if (fresh || list != followed.hiddenGiven) {
         followed.hidden = list;
         followed.hiddenGiven = std::move(list);
@@ -990,7 +987,7 @@ QVariantList Plugins::stacksOf(const QString &id, const QVariantList &given, boo
     std::vector<std::vector<int>> lists;
     lists.reserve(size_t(given.size()));
     for (const QVariant &stack : given)
-        lists.push_back(positions(stack.toList()));
+        lists.push_back(markPhotos(stack.toList()));
     if (fresh || lists != followed.stacksGiven) {
         followed.stacks = lists;
         followed.stacksGiven = std::move(lists);

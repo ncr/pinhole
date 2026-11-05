@@ -303,7 +303,8 @@ root's `holdSdr`. API 7 adds `ShellButton.checkable` for selected buttons
 that report their state to accessibility tools. API 8 adds
 `pinhole.openPhotoDirect(photo)` for views that cover the library grid.
 API 9 adds `pinhole.openPhotos(photos, photo)`: the same, stepping
-through the view's own photos only.
+through the view's own photos only. API 10 takes ids in `hidden` and
+`stacks`, as everywhere else, and adds `pinhole.selectionIds()`.
 
 `Main.qml` beside it:
 
@@ -439,8 +440,8 @@ its settings, is there as the window first shows. It sets:
   the arc beside the photo's date while it is true, as the photo still
   coming does. Live Photos (`plugins/live`) is one: its motion and
   effects play in its layer.
-- `stacks`: photos shown in the grid as one card, each a list of library
-  positions, as Series does with each series. The card stands where the
+- `stacks`: photos shown in the grid as one card, each a list of photos
+  (ids, or library positions), as Series does with each series. The card stands where the
   first one is, shows it and carries the mark for several photos; opening
   it opens that photo, selecting or dragging it takes them all, and the
   strip under a photo shown full window underlines a stack's photos. A
@@ -448,7 +449,8 @@ its settings, is there as the window first shows. It sets:
   read again, each stack's photos stay together where they are now until
   it gives `stacks` again (on `library.changed()`, from the ids it keeps,
   as Series does).
-- `hidden`: photos not in the grid at all, a list of library positions,
+- `hidden`: photos not in the grid at all, a list of photos (ids, or
+  library positions; ids since API 10),
   as Screenshots hides screenshots. They leave any stack they are in, the
   viewer's ← and →, its strip and Home/End pass over them, and Ctrl A and a
   range leave them out; a plugin can still `openPhoto` one. Say somewhere
@@ -593,7 +595,8 @@ this API. A library position is not a visual grid position.
 | `display` | the display the window is on, as the compositor says (API 4): `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
 | `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole (API 4): for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
-| `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them |
+| `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them, as library positions |
+| `selectionIds()` | the same by id (API 10): what to keep across a step that takes a while, as a reload moves positions |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
 | `openPhotoDirect(photo)` | open a photo full window from a plugin panel without revealing or animating from the library grid (API 8); closing the viewer skips the grid animation as well |
 | `openPhotos(photos, photo)` | as `openPhotoDirect`, with `photos` (ids or positions, in the view's order: search results by relevance, a person's photos, a place's) as the only ones ← →, the strip, Home and End go through, until the viewer closes (API 9). `photo` must be one of them |
