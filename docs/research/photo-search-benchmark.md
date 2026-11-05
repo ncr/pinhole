@@ -15,7 +15,7 @@ Retrieval quality still requires human relevance judgments.
 ## Prepare a private corpus
 
 ```sh
-python3 bin/photo-search-benchmark prepare \
+python3 examples/semantic-search/engine/photo-search-benchmark prepare \
   --library /path/to/pinhole/library \
   --output .tools/photo-search/icloud-pl-v1 --count 384
 ```
@@ -53,7 +53,7 @@ Ground truth must be judged independently of a model's ranking.
 An offline review page avoids editing opaque photo ids by hand:
 
 ```sh
-python3 bin/photo-search-benchmark review \
+python3 examples/semantic-search/engine/photo-search-benchmark review \
   --corpus .tools/photo-search/icloud-pl-v1/corpus.json \
   --judgments .tools/photo-search/icloud-pl-v1/judgments.json \
   --output .tools/photo-search/icloud-pl-v1/review.html
@@ -95,7 +95,7 @@ backend and timing separately alongside the rankings. The local inference
 runner is documented in [the full-encoder notes](photo-search-full-encoder.md).
 
 ```sh
-python3 bin/photo-search-benchmark evaluate \
+python3 examples/semantic-search/engine/photo-search-benchmark evaluate \
   --corpus .tools/photo-search/icloud-pl-v1/corpus.json \
   --judgments .tools/photo-search/icloud-pl-v1/judgments.json \
   --rankings .tools/photo-search/icloud-pl-v1/siglip2-rankings.json \
@@ -142,7 +142,7 @@ Compiler executable SHA-256:
 `741dce3200be2805f3be27da16c5d13d6b68c0426b62dd40fa0d5360dab39083`.
 
 ```sh
-python3 bin/photo-search-benchmark probe-ane \
+python3 examples/semantic-search/engine/photo-search-benchmark probe-ane \
   --compiler /path/to/mil-hwxc --output .tools/photo-search/ane-probe
 ```
 

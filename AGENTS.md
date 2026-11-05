@@ -13,7 +13,8 @@ API version and the same bundled documents without a window. New public
 capabilities must update the contract, checker, examples and Polish strings.
 
 Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run` and
-`python3 -m unittest discover -s bin/tests`. Core tests run with
+`python3 -m unittest discover -s bin/tests` and
+`python3 -m unittest discover -s examples/semantic-search/engine/tests`. Core tests run with
 `cargo test --release --locked --workspace --no-fail-fast --manifest-path core/Cargo.toml`.
 Record failures honestly. The independent JPEG regression is documented in
 [the JPEG fixture notes](docs/reviews/jpeg-repro/README.md).

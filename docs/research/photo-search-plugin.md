@@ -24,7 +24,7 @@ On Linux x86-64 with an NVIDIA GPU that supports native BF16 and about
 11 GiB free VRAM, install `uv` and run from the checkout:
 
 ```sh
-bin/setup-photo-search-wemm
+examples/semantic-search/engine/setup-photo-search-wemm
 ```
 
 Use `--snapshot /path/to/weights` to reuse an existing copy of the pinned

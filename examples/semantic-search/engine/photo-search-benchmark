@@ -13,7 +13,8 @@ import struct
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+# The checkout: the engine is in examples/semantic-search/engine.
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def digest(data):

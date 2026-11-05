@@ -120,6 +120,8 @@ class Checks:
             self.run('accessibility', ['app/bin/test-accessibility'], env=env)
             self.run('calendar', ['plugins/calendar/tests/run'], env=env)
             self.run('installer-updater', [sys.executable, '-m', 'unittest', 'discover', '-s', 'bin/tests', '-v'], env=env)
+            self.run('photo-search-engine', [sys.executable, '-m', 'unittest', 'discover', '-s',
+                                             'examples/semantic-search/engine/tests', '-v'], env=env)
             for manifest in sorted((ROOT / 'plugins').glob('*/manifest.json')):
                 self.run(f'plugin-{manifest.parent.name}', ['app/build/pinhole', 'plugin', 'check', str(manifest.parent)], env=env)
             self.run('offline-plugin-api', ['app/build/pinhole', 'plugin', 'docs', '--json'], env=env)

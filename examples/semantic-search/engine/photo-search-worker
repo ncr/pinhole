@@ -60,7 +60,7 @@ def main():
             from photo_search.engines import local_profile
             from photo_search.managed import index_path, service_manages
             profile = local_profile(args.checkout)
-            script = str(args.checkout / "bin/photo-search-worker")
+            script = str(Path(__file__).resolve())
             if args.command == 'config':
                 managed = bool(args.library and args.library_key and service_manages(args.library, args.library_key))
                 print(json.dumps(profile | {"worker": script, "managed": managed}))

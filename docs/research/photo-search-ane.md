@@ -61,7 +61,7 @@ passed all 1024 lane checks. These preceded larger projection submissions.
 
 ## The local workaround
 
-[`bin/photo-search-ane`](../../bin/photo-search-ane) leaves the compiler's
+[`examples/semantic-search/engine/photo-search-ane`](../../examples/semantic-search/engine/photo-search-ane) leaves the compiler's
 hardware envelope intact. Instead, it lowers the patch projection into
 already supported H14 matrix multiplications:
 
@@ -111,10 +111,10 @@ uv pip install --python .tools/photo-search/venv/bin/python \
 For each model (`siglip2` or `clip`):
 
 ```sh
-.tools/photo-search/venv/bin/python bin/photo-search-ane fetch-projection \
+.tools/photo-search/venv/bin/python examples/semantic-search/engine/photo-search-ane fetch-projection \
   --model clip --output .tools/photo-search/projection-weights/clip
 
-.tools/photo-search/venv/bin/python bin/photo-search-ane lower \
+.tools/photo-search/venv/bin/python examples/semantic-search/engine/photo-search-ane lower \
   --weights .tools/photo-search/projection-weights/clip \
   --compiler /path/to/mil-hwxc \
   --output .tools/photo-search/projection-scaled/clip
@@ -132,7 +132,7 @@ in its report. Actual device verification is explicit:
 
 ```sh
 OPENBLAS_NUM_THREADS=2 .tools/photo-search/venv/bin/python \
-  bin/photo-search-ane verify --backend ane \
+  examples/semantic-search/engine/photo-search-ane verify --backend ane \
   --runner .tools/omarchy-ane/tools/ane-run \
   --smoke-receipt .tools/photo-search/ane-smoke.json \
   --weights .tools/photo-search/projection-weights/clip \

@@ -2,18 +2,19 @@
 # Prepare the optional CUDA environment. The plugin never downloads at runtime.
 set -eu
 umask 077
-cd "$(dirname -- "$0")/.."
+# From the checkout, whose .tools/photo-search it fills.
+cd "$(dirname -- "$0")/../../.."
 snapshot=
 case "${1:-}" in
     --help|-h)
-        echo "Usage: bin/setup-photo-search-wemm [--snapshot LOCAL_MODEL_DIRECTORY]"
+        echo "Usage: examples/semantic-search/engine/setup-photo-search-wemm [--snapshot LOCAL_MODEL_DIRECTORY]"
         exit 0 ;;
     --snapshot)
         [ "$#" = 2 ] || { echo 'Expected a local model directory.' >&2; exit 2; }
         snapshot=$(realpath -e -- "$2") ;;
     '')
         [ "$#" = 0 ] || exit 2 ;;
-    *) echo 'Run bin/setup-photo-search-wemm --help.' >&2; exit 2 ;;
+    *) echo 'Run examples/semantic-search/engine/setup-photo-search-wemm --help.' >&2; exit 2 ;;
 esac
 base="$PWD/.tools/photo-search"
 target="$base/wemm-cuda"

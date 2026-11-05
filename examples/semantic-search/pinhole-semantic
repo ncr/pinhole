@@ -7,6 +7,6 @@ case "${1:-}" in
     config|daemon)
         command=$1
         shift
-        exec python3 "$checkout/bin/photo-search-worker" "$command" --checkout "$checkout" "$@" ;;
+        exec python3 "$checkout/examples/semantic-search/engine/photo-search-worker" "$command" --checkout "$checkout" "$@" ;;
 esac
-exec python3 "$checkout/bin/photo-search-worker" "$@"
+exec python3 "$checkout/examples/semantic-search/engine/photo-search-worker" "$@"

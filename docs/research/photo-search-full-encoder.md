@@ -8,7 +8,7 @@ vectors, rankings, photo ids or library keys are committed or uploaded.
 
 ## What actually runs where
 
-`bin/photo-search-models encode --backend hybrid-ane` offloads attention
+`examples/semantic-search/engine/photo-search-models encode --backend hybrid-ane` offloads attention
 q/k/v/out linear projections and CLIP's final visual projection to the ANE.
 It keeps the patch convolution, MLP, layer normalization, dynamic attention
 products, softmax and SigLIP pooling on CPU. These boundaries are selected
@@ -93,10 +93,10 @@ Use the optional experiment environment with NumPy, Pillow, PyTorch,
 transformers and sentence-transformers. Tested versions: Python 3.14.9,
 NumPy 2.3.4, Pillow 12.0.0, torch 2.9.1+cpu, transformers 4.57.1,
 sentence-transformers 5.1.2. Public model revisions are in
-`bin/photo_search/models.py`; models live under `.tools/photo-search/models`.
+`examples/semantic-search/engine/photo_search/models.py`; models live under `.tools/photo-search/models`.
 
 ```sh
-.tools/photo-search/venv/bin/python bin/photo-search-models encode \
+.tools/photo-search/venv/bin/python examples/semantic-search/engine/photo-search-models encode \
   --model clip --backend cpu --models .tools/photo-search/models \
   --corpus .tools/photo-search/icloud-pl-v1/corpus.json \
   --output .tools/photo-search/example-cpu

@@ -1,6 +1,6 @@
 # Offline semantic index worker
 
-`bin/photo-search-worker` owns only a rebuildable vector index. For the
+`examples/semantic-search/engine/photo-search-worker` owns only a rebuildable vector index. For the
 shared library, pinholed supervises the worker, which reads the current
 thumbnail catalog through a read-only SQLite connection. It checks source
 ownership and reads rows in a single transaction. For a separate library
@@ -21,7 +21,7 @@ before model/device loading in that boot; there is no backend fallback.
 Start the server with the experiment's Python environment:
 
 ```sh
-.tools/photo-search/venv/bin/python bin/photo-search-worker serve \
+.tools/photo-search/venv/bin/python examples/semantic-search/engine/photo-search-worker serve \
   --index /private/cache/index.sqlite --library /path/to/library \
   --library-key source-key --models .tools/photo-search/models \
   --model clip --backend cpu
@@ -93,7 +93,7 @@ They use synthetic data and never access an accelerator.
 
 ## Adding an engine
 
-`bin/photo_search/engines.py` owns the available engines and host profiles.
+`examples/semantic-search/engine/photo_search/engines.py` owns the available engines and host profiles.
 Register an engine with its model dimensions, index identity, image and
 text encoders, resource cleanup, and any indexing availability checks.
 Add a profile with an interpreter, worker arguments, and a unique index
