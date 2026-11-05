@@ -792,7 +792,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             std::function<void()> show;
         };
         const QList<Over> overs = {
-            {"the help", "helpCard", [=] { item("help")->setProperty("shown", true); }},
+            // Made the first time it is asked for (Main.qml's showHelp).
+            {"the help", "helpCard", [=] { QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, true)); }},
             {"iCloud's sign-in", "signInCard",
              [=] {
                  if (QObject *icloud = pluginItem(window->contentItem(), QStringLiteral("pinhole.icloud")))
