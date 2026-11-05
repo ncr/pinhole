@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 10,
   "id": "pinhole.onthisday",
   "name": "On this day",
   "version": "1.0.0",

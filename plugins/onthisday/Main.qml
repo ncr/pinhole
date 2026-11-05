@@ -1,7 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
 // Screenshots are told apart as the Screenshots plugin tells them.
-import "../screenshots/Find.js" as Find
 
 // On this day: the photos taken on today's date in earlier years, a year
 // at a time (Days.qml), from a button in the grid that shows only when
@@ -97,7 +96,7 @@ PinholePlugin {
     }
 
     // The screenshots, as the Screenshots plugin finds them in the
-    // library (Find.js), whether or not it is on.
+    // library (pinhole.screenshots), whether or not it is on.
     property var finding: null
     function findShots() {
         if (finding)
@@ -113,22 +112,18 @@ PinholePlugin {
         }
         // Read only, away from the window; while the service writes the
         // index (as a round starts), waited for rather than failed.
-        const tables = pinhole.query(Find.tablesQuery)
-        finding = tables
-        tables.then(rows => {
-            if (finding !== tables)
+        const found = pinhole.screenshots()
+        finding = found
+        found.then(ids => {
+            if (finding !== found)
                 return
-            const found = pinhole.query(Find.query(rows.map(row => row.name)))
-            finding = found
-            return found.then(rows => {
-                if (finding !== found)
-                    return
-                finding = null
-                shotIds = rows.map(row => row.id)
-                placeShots()
-                recount()
-            })
+            finding = null
+            shotIds = ids
+            placeShots()
+            recount()
         }).catch(error => {
+            if (finding === found)
+                finding = null
             if (error.code !== "cancelled")
                 pinhole.warn(error)
         })

@@ -343,6 +343,8 @@ public:
     // (API 5). Never sqlite3 on the file: that one opens it while the
     // service writes, and fails "database is locked".
     Q_INVOKABLE QJSValue query(const QString &sql, const QVariantList &values = {});
+    // The ids of the photos the library says are screenshots (API 10).
+    Q_INVOKABLE QJSValue screenshots();
     Q_INVOKABLE bool exists(const QString &path) const;
     // A file's size in bytes, and as people read it: "1.8 MB".
     Q_INVOKABLE double fileSize(const QString &path) const;
@@ -548,7 +550,7 @@ public:
     // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
     // 7: ShellButton.checkable for accessible selected buttons.
     // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos. 10: ids in hidden
-    // and stacks, pinhole.selectionIds.
+    // and stacks, pinhole.selectionIds, pinhole.screenshots.
     static constexpr int api = 10;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;

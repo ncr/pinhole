@@ -5932,6 +5932,43 @@ PinholePlugin {
         QVERIFY2(clean.errors.isEmpty() && clean.warnings.isEmpty(), qPrintable((clean.errors + clean.warnings).join('\n')));
     }
 
+    // What compiles and looks right, but loses work or never runs.
+    void checkRefusesWhatLooksRightButIsNot() {
+        QTemporaryDir root;
+        const QString dir = root.path() + "/me.quiet";
+        QDir().mkpath(dir);
+        write(dir + "/manifest.json", R"({"schemaVersion": 1, "id": "me.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        write(dir + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+import Pinhole.Internal
+import "../other/Shared.js" as Shared
+PinholePlugin {
+    property bool onAir: false
+    Shortcut { sequence: "Escape" }
+    function keep(id) {
+        pinhole.state.edits[id] = { person: "Ola" }
+        pinhole.state.list.push(id)
+        delete pinhole.cache.found[id]
+        pinhole.state.edits = Object.assign({}, pinhole.state.edits, { [id]: 1 })
+    }
+}
+)");
+        const Plugins::Findings found = Plugins::footguns(dir);
+        const QString errors = found.errors.join('\n'), warnings = found.warnings.join('\n');
+        QVERIFY2(errors.contains("Main.qml:3: Pinhole.Internal"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:4: imports ../other/Shared.js from outside the plugin"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:6: a property named onAir"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:9: pinhole.state's key changed inside"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:10: pinhole.state's key changed in place"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:11: deleting inside pinhole.cache's key"), qPrintable(errors));
+        // A whole key assigned is right.
+        QVERIFY2(!errors.contains("Main.qml:12"), qPrintable(errors));
+        QVERIFY2(warnings.contains("Main.qml:7: a Shortcut takes its keys everywhere"), qPrintable(warnings));
+        // Pinhole's own (or a copy keeping its id) may use Pinhole.Internal.
+        write(dir + "/manifest.json", R"({"schemaVersion": 1, "id": "pinhole.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        QVERIFY(!Plugins::footguns(dir).errors.join('\n').contains("Pinhole.Internal"));
+    }
+
     // A reviewer's careless ways round check, each refused; and words
     // shown that only name a program or Pictures are not.
     void checkRefusesTheEvasions() {

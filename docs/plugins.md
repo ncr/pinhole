@@ -231,6 +231,16 @@ footgun Pinhole's own plugins hit):
   `Panel`;
 - `Qt.createQmlObject`: QML made from a string, which check cannot look
   over (a file of the plugin's, with a `Loader` or `Qt.createComponent`);
+- a key of `pinhole.state`, `cache` or `settings` changed inside
+  (`pinhole.state.edits[id] = x`, `.push()`, `delete`): a copy is changed,
+  nothing is kept and nothing bound to it hears. Copy the key, change the
+  copy, assign it whole;
+- a property named `on` and a capital (`property bool onAir`): QML reads
+  it as a signal's handler;
+- a file imported from outside the plugin (`import "../screenshots/…"`):
+  another plugin's file changes, or is replaced, without it;
+- `import Pinhole.Internal` in a plugin whose id is not `pinhole.…`: it is
+  Pinhole's own plugins', with no promise it stays;
 - a `VideoOutput` or QtMultimedia's `Video` (`VideoView`): they show HDR
   video wrong;
 - `sqlite3` (`pinhole.query`), named anywhere in a string: by its path,
@@ -304,7 +314,8 @@ that report their state to accessibility tools. API 8 adds
 `pinhole.openPhotoDirect(photo)` for views that cover the library grid.
 API 9 adds `pinhole.openPhotos(photos, photo)`: the same, stepping
 through the view's own photos only. API 10 takes ids in `hidden` and
-`stacks`, as everywhere else, and adds `pinhole.selectionIds()`.
+`stacks`, as everywhere else, and adds `pinhole.selectionIds()` and
+`pinhole.screenshots()`.
 
 `Main.qml` beside it:
 
@@ -619,6 +630,7 @@ this API. A library position is not a visual grid position.
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
 | `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy` or `cancelled`; see Bounded library queries below |
+| `screenshots()` | the ids of the photos the library says are screenshots (API 10), as Screenshots hides them: iCloud's mark for an iPhone's or an iPad's, a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
 | `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
 | `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |

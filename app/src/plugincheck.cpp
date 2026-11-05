@@ -237,7 +237,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
-        {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}};
+        {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -290,6 +290,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.openPhotoDirect", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotoDirect\\b"))},
         {"pinhole.openPhotos", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotos\\b"))},
         {"pinhole.selectionIds", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*selectionIds\\b"))},
+        {"pinhole.screenshots", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*screenshots\\b"))},
         {"VideoView", QRegularExpression(QStringLiteral("\\bVideoView\\s*\\{"))},
         // Its root's, kept at SDR while true.
         {"holdSdr", QRegularExpression(QStringLiteral("\\bholdSdr\\s*:"))},
@@ -600,6 +601,23 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         {QRegularExpression(QStringLiteral("[\"'`][^\"'`\\n]*(?<![\\w.-])(xdg-user-dir)(?![\\w.-])")),
          QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir"),
          true},
+        // A key of what it keeps, changed inside: a copy is changed, and
+        // nothing is kept or told.
+        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+                                           "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])+\\s*(?:[-+*/]?=(?!=)|\\+\\+|--)")),
+         QStringLiteral("pinhole.%1's key changed inside is a copy changed: nothing is kept, and nothing bound to it hears. "
+                        "Copy the key, change the copy, assign it whole")},
+        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+                                           "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])*\\s*\\.\\s*(?:push|pop|shift|unshift|splice|sort|reverse|fill)\\s*\\(")),
+         QStringLiteral("pinhole.%1's key changed in place is a copy changed: nothing is kept, and nothing bound to it hears. "
+                        "Copy the key, change the copy, assign it whole")},
+        {QRegularExpression(QStringLiteral("\\bdelete\\s+pinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+                                           "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])+")),
+         QStringLiteral("deleting inside pinhole.%1's key changes a copy: nothing is kept. Copy the key, delete from the "
+                        "copy, assign it whole")},
+        // A property QML reads as a signal's handler.
+        {QRegularExpression(QStringLiteral("\\bproperty\\s+[\\w<>.]+\\s+(on[A-Z]\\w*)")),
+         QStringLiteral("a property named %1 is read by QML as a signal's handler: it never holds a value. Name it otherwise")},
         {QRegularExpression(QStringLiteral("\\bPicturesLocation\\b")),
          QStringLiteral("Pictures found by hand is the real one in a self-test: use pinhole.picturePath, or pinhole.picturesDir")},
     };
@@ -632,6 +650,16 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
     static const QRegularExpression often(QStringLiteral("^on(Triggered|PositionChanged|Wheel|Moved|\\w+Changed)$"));
     static const QRegularExpression made(QStringLiteral("\\.(map|filter|concat|slice)\\s*\\(|\\bfield\\s*\\(|\\blibrary\\b|JSON\\.stringify|Date\\.now"));
 
+    static const QRegularExpression shortcut(QStringLiteral("\\bShortcut\\s*\\{"));
+    static const QRegularExpression importLine(QStringLiteral("^[ \\t]*import\\s+\"([^\"]+)\""), QRegularExpression::MultilineOption);
+    static const QRegularExpression internal(QStringLiteral("^[ \\t]*import\\s+Pinhole\\.Internal\\b"), QRegularExpression::MultilineOption);
+    const QString root = QDir::cleanPath(QDir(dir).absolutePath());
+    // Pinhole's own, or a copy of one of them (its id kept): Pinhole.Internal
+    // is theirs.
+    QFile manifestFile(QDir(dir).filePath(QStringLiteral("manifest.json")));
+    const bool builtinId = manifestFile.open(QIODevice::ReadOnly)
+        && QJsonDocument::fromJson(manifestFile.readAll()).object().value(QStringLiteral("id")).toString().startsWith(QLatin1String("pinhole."));
+
     QSet<QString> strings;
     QDirIterator it(dir, {"*.qml", "*.js"}, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
@@ -660,6 +688,31 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                     .arg(lineAt(rule.inStrings ? literals : code, match.capturedStart()))
                                     .arg(what);
             }
+        // A Shortcut takes its keys over every screen, while the plugin is
+        // away too, Escape and all.
+        for (auto m = shortcut.globalMatch(code); m.hasNext();)
+            found.warnings << QStringLiteral("%1:%2: a Shortcut takes its keys everywhere, while the plugin is not shown "
+                                             "too: use a Command with keyLayer \"plugin\" and a when")
+                                  .arg(file)
+                                  .arg(lineAt(code, m.next().capturedStart()));
+        // A file from outside the plugin: another plugin's changes, or goes,
+        // with it.
+        for (auto m = importLine.globalMatch(text); m.hasNext();) {
+            const auto match = m.next();
+            const QString imported = QDir::cleanPath(QFileInfo(path).absoluteDir().absoluteFilePath(match.captured(1)));
+            if (!imported.startsWith(root + QLatin1Char('/')) && imported != root)
+                found.errors << QStringLiteral("%1:%2: imports %3 from outside the plugin: another plugin's file changes, "
+                                               "or is replaced, without it. Copy what it needs in")
+                                    .arg(file)
+                                    .arg(lineAt(text, match.capturedStart()))
+                                    .arg(match.captured(1));
+        }
+        if (!builtinId)
+            for (auto m = internal.globalMatch(code); m.hasNext();)
+                found.errors << QStringLiteral("%1:%2: Pinhole.Internal is Pinhole's own plugins', and may change with any "
+                                               "version: use what Pinhole.Plugin gives")
+                                    .arg(file)
+                                    .arg(lineAt(code, m.next().capturedStart()));
         for (auto m = picturesPath.globalMatch(literals); m.hasNext();) {
             const auto match = m.next();
             found.errors << QStringLiteral("%1:%2: %3 by hand is the real Pictures in a self-test: use pinhole.picturePath, "

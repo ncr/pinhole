@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QJSEngine>
 
 #include <algorithm>
@@ -151,6 +152,50 @@ void PluginLibrary::touched() {
 }
 
 bool PluginLibrary::stale() const { return m_told != m_library->generation(); }
+
+// What the library says is a screenshot (API 10), for Screenshots and On
+// this day alike: iCloud's subtype of an iPhone's or an iPad's, a name
+// screenshots are given, or a PNG with no place shaped like a phone's
+// screen. A promise of their ids.
+QJSValue PluginHost::screenshots() {
+    // Names screenshots are given: Omarchy's and grim's, hyprshot's, a Mac's
+    // (in English and in Polish), and a few more languages'. GLOB patterns,
+    // on the name in lower case.
+    static const QStringList names = {
+        "screenshot*", "screen shot*", "zrzut ekranu*", "*hyprshot*", "*_grim.png", "bildschirmfoto*",
+        "capture d?écran*", "captura de pantalla*", "schermata*", "skärmavbild*", "schermafbeelding*"};
+    // A phone's screen, either way up, as the short side over the long one
+    // of the thumbnail: an iPhone since the X (19.5:9), and one before it or
+    // a 1080p screen (16:9). Other shapes (3:2, 4:3, 16:10) are as often a
+    // picture as a screen, and a scan at 16:9 measures 0.5604.
+    static const QList<std::pair<double, double>> shapes = {{0.455, 0.468}, {0.561, 0.566}};
+    constexpr int icloudScreenshot = 3;
+    const bool icloud = m_plugins->library() && m_plugins->library()->key().startsWith(QLatin1String("icloud:"));
+    QStringList named, shaped;
+    for (const QString &name : names)
+        named << QStringLiteral("lower(a.filename) GLOB '%1'").arg(QString(name).replace('\'', QLatin1String("''")));
+    const QString ratio = QStringLiteral("MIN(a.thumb_w, a.thumb_h) * 1.0 / MAX(a.thumb_w, a.thumb_h)");
+    for (const auto &[low, high] : shapes)
+        shaped << QStringLiteral("%1 BETWEEN %2 AND %3").arg(ratio).arg(low).arg(high);
+    const QString sql = QStringLiteral("SELECT a.id FROM assets a")
+        + (icloud ? QStringLiteral(" LEFT JOIN icloud_assets i ON i.asset_id = a.id") : QString())
+        + QStringLiteral(" WHERE NOT a.is_video AND (")
+        + (icloud ? QStringLiteral("i.subtype = %1 OR ").arg(icloudScreenshot) : QString())
+        + named.join(QLatin1String(" OR "))
+        + QStringLiteral(" OR (lower(a.filename) GLOB '*.png' AND NOT a.has_location AND a.thumb_w > 0 AND a.thumb_h > 0 AND (")
+        + shaped.join(QLatin1String(" OR ")) + QStringLiteral(")));");
+    QJSValue rows = query(sql, {});
+    QJSEngine *js = engine();
+    if (!js)
+        return rows;
+    static QHash<QJSEngine *, QJSValue> ids;
+    if (!ids.contains(js))
+        connect(js, &QObject::destroyed, js, [js] { ids.remove(js); });
+    QJSValue &toIds = ids[js];
+    if (toIds.isUndefined())
+        toIds = js->evaluate(QStringLiteral("(function (rows) { return rows.map(function (row) { return row.id }) })"));
+    return rows.property(QStringLiteral("then")).callWithInstance(rows, {toIds});
+}
 
 QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
     const int generation = m_generation;

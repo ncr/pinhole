@@ -1,13 +1,12 @@
 import QtQuick
 import Pinhole.Plugin
-import "Find.js" as Find
 
 // Screenshots: kept from crowding out the photos. Each day's are one card
 // in the grid, or, as the side panel says, none of them is there at all
 // (`hidden`), the viewer's ← and → passing over them too, and a button in
 // the grid saying how many are away and bringing them back.
 //
-// A screenshot is known by what the library says of it (Find.js): iCloud
+// A screenshot is known by what the library says of it (pinhole.screenshots): iCloud
 // marks an iPhone's or an iPad's as one; one named so is one (Omarchy's
 // screenshot-…, a Mac's Screenshot … or Zrzut ekranu …); and so is a PNG
 // with no place shaped like a phone's screen. What it found last is kept
@@ -95,20 +94,18 @@ PinholePlugin {
             return
         }
         finding = true
-        // Which tables there are, then what it can ask of them.
         const key = keptKey, showing = shown, dir = pinhole.library.dir
         // Read only, away from the window; while the service writes the
         // index (as a round starts), waited for rather than failed.
-        pinhole.query(Find.tablesQuery)
-            .then(tables => pinhole.query(Find.query(tables.map(row => row.name))))
-            .then(rows => {
+        pinhole.screenshots()
+            .then(ids => {
                 // Another library shown meanwhile: these are the last one's,
                 // neither kept as this one's nor shown; it is looked at next.
                 if (showing !== shown || dir !== pinhole.library.dir) {
                     findAgain = true
                     return
                 }
-                const list = rows.map(row => row.id)
+                const list = ids
                 if (key !== "")
                     keep(key, list)
                 take(list)
