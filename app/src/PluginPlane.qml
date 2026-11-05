@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 
 // Owns plugin lifetime, aggregated actions and photo presentation state.
 // It knows no application panels: the shell decides how tours are shown.
@@ -126,6 +127,16 @@ Item {
             coverOrder = order
     }
     Binding { target: keymap; property: "plugin"; value: root.coveringPlugin }
+    // The plugin over the photos has the keys: what it shows, unless it gave
+    // them to something of its own first (a field, a list), else its root,
+    // so the keys never stay with the grid beneath it.
+    onCoveringPluginChanged: if (coveringPlugin !== "") Qt.callLater(() => {
+        const item = pluginItem(coveringPlugin)
+        if (!item || !item.Window.window) return
+        for (let at = item.Window.window.activeFocusItem; at; at = at.parent)
+            if (at === item) return
+        item.forceActiveFocus()
+    })
     property int pluginsLoaded: 0
     function pluginItem(id) {
         for (let i = 0; i < pluginLayer.count; ++i) {

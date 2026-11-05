@@ -14,6 +14,8 @@ Rectangle {
     Accessible.role: Accessible.Grouping
     Accessible.name: placeholder
     signal accepted()
+    // Escape took back what was typed.
+    signal cleared()
 
     width: parent ? parent.width : 300
     height: Math.round(theme.fontSize * 2.857)
@@ -46,10 +48,21 @@ Rectangle {
         Accessible.labelledBy: field
         onActiveFocusChanged: if (activeFocus) Focus.reveal(field)
         clip: true
+        // Escape with something typed clears it, before a panel's own
+        // Escape closes anything; with nothing typed it goes on to that.
         Keys.onShortcutOverride: event => {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || (event.key === Qt.Key_Escape && input.text !== "" && !field.done)
                     || ((event.modifiers & Qt.ControlModifier) && [Qt.Key_Z, Qt.Key_Y, Qt.Key_C, Qt.Key_X, Qt.Key_V, Qt.Key_A].includes(event.key)))
                 event.accepted = true
+        }
+        Keys.onEscapePressed: event => {
+            if (input.text === "" || field.done) {
+                event.accepted = false
+                return
+            }
+            input.text = ""
+            field.cleared()
         }
         onAccepted: field.accepted()
     }

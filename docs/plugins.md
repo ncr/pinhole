@@ -408,7 +408,13 @@ its settings, is there as the window first shows. It sets:
   distinct from the saved active state. Press the opener again, click
   outside or press Escape to close. Arrow keys skip unavailable actions.
 - `covering`: true while it is over the photos: the grid's controls fade
-  and its keys rest, as for Pinhole's panels. Its own `Shortcut`s and
+  and its keys rest, as for Pinhole's panels. It has the keys then: unless
+  something of its own took them first (a field, a list), Pinhole gives
+  them to its root, so a `Keys` handler there and a `Command` work at once;
+  give them to an item of yours with `forceActiveFocus()` when its `when`
+  asks for that item's `activeFocus`. A `FieldInput` with something typed
+  takes Escape first and clears it (`cleared()`); with nothing typed,
+  Escape goes on to the plugin's own. Its own `Shortcut`s and
   `Command`s should be enabled only then. One plugin covers at a time, the
   last to start: it is drawn over the other plugins, which are hidden
   meanwhile (an overlay as Info's too), and the `"plugin"` key layer is its

@@ -60,6 +60,7 @@ Window {
     property int globalUndo: 0
     property int underneath: 0
     property int tileTaps: 0
+    property int escapes: 0
     property int wheels: 0
     property bool menus: false
     property bool longMenu: false
@@ -78,6 +79,8 @@ Window {
         Keys.onShortcutOverride: event => {
             if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && !(event.modifiers & Qt.ControlModifier)) event.accepted = true
         }
+        // What the field lets by reaches the screen it is on.
+        Keys.onEscapePressed: window.escapes++
         Keys.onPressed: event => {
             if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                 Focus.move(modal, event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1, window.activeFocusItem)
@@ -306,6 +309,21 @@ private slots:
         QCOMPARE(f.root->property("underneath").toInt(), 0);
         QCOMPARE(f.root->property("wheels").toInt(), 0);
         QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void escapeInAFieldClearsWhatIsTypedBeforeAnythingCloses() {
+        Fixture f; QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        auto *field = f.item("field");
+        auto *input = qvariant_cast<QQuickItem *>(field->property("input"));
+        input->forceActiveFocus();
+        for (const char key : {'o', 'l', 'a'}) QTest::keyClick(f.window(), key);
+        QCOMPARE(field->property("text").toString(), QString("ola"));
+        QTest::keyClick(f.window(), Qt::Key_Escape);
+        QCOMPARE(field->property("text").toString(), QString());
+        QCOMPARE(f.root->property("escapes").toInt(), 0);
+        QTest::keyClick(f.window(), Qt::Key_Escape);
+        QCOMPARE(f.root->property("escapes").toInt(), 1);
     }
 
     void aButtonOverATappableItemTakesTheClickAlone() {

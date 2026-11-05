@@ -457,7 +457,7 @@ Panel {
         event.accepted = true
     }
     readonly property bool keysOnTiles: shown && !picking && grid.activeFocus
-    Command { name: "people.back"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown && !newName.input.activeFocus; onTriggered: panel.back() }
+    Command { name: "people.back"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.back() }
     Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
     Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
     Command { name: "people.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(1, 0) }
@@ -725,7 +725,7 @@ Panel {
                     grid.forceActiveFocus()
                     panel.choose(existing || typed)
                 }
-                Keys.onEscapePressed: { text = ""; grid.forceActiveFocus() }
+                onCleared: grid.forceActiveFocus()
             }
         }
     }
