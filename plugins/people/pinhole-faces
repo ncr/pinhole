@@ -586,7 +586,7 @@ def load_edits(path, source, previous):
 
 def load_grouping(path, previous):
     try:
-        settings = json.loads(path.read_text()).get("settings", {}).get("me.people", {})
+        settings = json.loads(path.read_text()).get("settings", {}).get("pinhole.people", {})
         value = settings.get("grouping")
         return value if isinstance(value, str) and value in JOIN_THRESHOLDS else DEFAULT_GROUPING
     except FileNotFoundError:
@@ -609,7 +609,7 @@ def catalog_rows(catalog, source):
 
 
 def run_index(db, library, source, settings):
-    state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/me.people/state.json"
+    state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/pinhole.people/state.json"
     path = library / "library.sqlite"
     inode = version = catalog = None
     edits = ([], {})
@@ -675,7 +675,7 @@ def daemon(library, source, settings, cache=None):
     # pinholed gives the plugin's cache for this library (PluginHost::cacheDir),
     # so existing face groups and labels carry over; the same when run by hand.
     library = library.absolute()
-    cache = cache or (xdg("XDG_CACHE_HOME", ".cache") / "pinhole/plugins/me.people"
+    cache = cache or (xdg("XDG_CACHE_HOME", ".cache") / "pinhole/plugins/pinhole.people"
                       / f"{library.parent.name}-{library.name}")
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (cache / (RECIPE + "-scan.lock")).open("a") as lock:

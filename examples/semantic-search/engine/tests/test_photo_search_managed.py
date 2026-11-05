@@ -90,7 +90,7 @@ class ServiceManagesTests(unittest.TestCase):
         library = '/data/library/folder/Pictures'
         mine = {'plugin': 'me.semantic-search', 'name': 'index', 'library': library, 'key': 'folder:/p', 'running': False}
         cases = [([mine], True),
-                 ([dict(mine, plugin='me.people')], False),
+                 ([dict(mine, plugin='pinhole.people')], False),
                  ([dict(mine, key='folder:/other')], False),
                  ([dict(mine, library='/data/library/folder/Other')], False),
                  ([dict(mine, library=None, key=None)], False),

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "api": 11,
-  "id": "me.people",
+  "id": "pinhole.people",
   "name": "People",
   "version": "0.5.0",
   "description": "Review and name local face groups.",

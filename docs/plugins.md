@@ -397,7 +397,7 @@ without a window:
 {
   "schemaVersion": 1,
   "api": 11,
-  "id": "me.people",
+  "id": "pinhole.people",
   "entryPoints": { "main": "PeoplePlugin.qml" },
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }

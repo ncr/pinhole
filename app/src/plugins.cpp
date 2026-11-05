@@ -74,9 +74,50 @@ QString configPath() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
 }
 
+// Pinhole's own plugins once under another id, and the one they have now:
+// their switch, settings, state and cache follow them, once.
+const std::pair<const char *, const char *> renamedPlugins[] = {
+    {"me.people", "pinhole.people"},
+};
+
 QJsonObject readConfig() {
     QFile file(configPath());
-    return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+    QJsonObject config = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+    file.close();
+    bool changed = false;
+    for (const auto &[was, is] : renamedPlugins) {
+        const QString from = QString::fromLatin1(was), to = QString::fromLatin1(is);
+        for (const QString section : {"enabled", "settings"}) {
+            QJsonObject part = config.value(section).toObject();
+            if (part.contains(from) && !part.contains(to)) {
+                part.insert(to, part.value(from));
+                part.remove(from);
+                config.insert(section, part);
+                changed = true;
+            }
+        }
+        for (const QString &root : {Plugins::stateRoot(), Plugins::cacheRoot()}) {
+            const QString old = root + '/' + from, now = root + '/' + to;
+            if (!QFileInfo::exists(old))
+                continue;
+            if (!QFileInfo::exists(now)) {
+                QDir().rename(old, now);
+                continue;
+            }
+            // Begun under the new id already (pinholed's worker before this
+            // window): what is only under the old one goes over.
+            for (const QString &name : QDir(old).entryList(QDir::AllEntries | QDir::NoDotAndDotDot))
+                if (!QFileInfo::exists(now + '/' + name))
+                    QDir().rename(old + '/' + name, now + '/' + name);
+            QDir().rmdir(old);
+        }
+    }
+    if (changed) {
+        QSaveFile saved(configPath());
+        if (saved.open(QIODevice::WriteOnly) && saved.write(QJsonDocument(config).toJson()) >= 0)
+            saved.commit();
+    }
+    return config;
 }
 
 QJsonObject readToured() {

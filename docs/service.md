@@ -570,7 +570,7 @@ itself. A service started with `--given` runs none, and says none.
 
 ```json
 {"event": "workers", "workers": [
-  {"plugin": "me.people", "name": "faces", "library": "/home/me/.local/share/pinhole/library/folder/Pictures",
+  {"plugin": "pinhole.people", "name": "faces", "library": "/home/me/.local/share/pinhole/library/folder/Pictures",
    "key": "folder:/home/me/Pictures", "running": true, "since": 1793026800000, "last_exit": null}
 ]}
 ```

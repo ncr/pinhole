@@ -282,10 +282,13 @@ private:
 
         explicit PluginBench(const QList<std::pair<QString, QJsonObject>> &manifests,
                              const QList<std::pair<QByteArray, qint64>> &photos = {{"a", 1000}, {"b", 2000}, {"c", 3000}},
-                             bool withService = false) {
+                             bool withService = false, bool fresh = true) {
             QStandardPaths::setTestModeEnabled(true);
-            QFile::remove(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
-            forgetKept();
+            // Not fresh: what a test put there before (plugins.json, state).
+            if (fresh) {
+                QFile::remove(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+                forgetKept();
+            }
             makeLibrary(dir.path(), photos, false, "folder:/x");
             QString error;
             library.open(dir.path(), &error);
@@ -3853,6 +3856,28 @@ Item {
         // One loaded again (fresh) with the same positions as before is
         // taken at its word.
         QCOMPARE(bench.plugins->hiddenOf("me.b", {2}, true), QVariantList{2});
+    }
+
+    void aPluginRenamedKeepsItsSwitchSettingsStateAndCache() {
+        QStandardPaths::setTestModeEnabled(true);
+        PluginBench::forgetKept();
+        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
+        QDir().mkpath(QFileInfo(config).absolutePath());
+        write(config, R"({"enabled": {"me.people": false}, "settings": {"me.people": {"grouping": "wider"}}})");
+        QDir().mkpath(Plugins::stateRoot() + "/me.people");
+        write(Plugins::stateRoot() + "/me.people/state.json", "{\"people:x\": {}}");
+        QDir().mkpath(Plugins::cacheRoot() + "/me.people/folder-x");
+        QDir().mkpath(Plugins::cacheRoot() + "/pinhole.people");
+        write(Plugins::cacheRoot() + "/me.people/folder-x/index.sqlite", "faces");
+        PluginBench bench({{"pinhole.people", {}}}, {{"a", 1000}}, false, false);
+        const QJsonObject kept = QJsonDocument::fromJson(read(config).toUtf8()).object();
+        QCOMPARE(kept.value("enabled").toObject().value("pinhole.people").toBool(true), false);
+        QVERIFY(!kept.value("enabled").toObject().contains("me.people"));
+        QCOMPARE(kept.value("settings").toObject().value("pinhole.people").toObject().value("grouping").toString(), QString("wider"));
+        QVERIFY(QFileInfo::exists(Plugins::stateRoot() + "/pinhole.people/state.json"));
+        QVERIFY(!QFileInfo::exists(Plugins::stateRoot() + "/me.people"));
+        QVERIFY(QFileInfo::exists(Plugins::cacheRoot() + "/pinhole.people/folder-x/index.sqlite"));
+        QVERIFY(!QFileInfo::exists(Plugins::cacheRoot() + "/me.people"));
     }
 
     void onlyPinholesOwnPluginsLoadWithPinholeInternal() {
