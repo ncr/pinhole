@@ -267,7 +267,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 click(window, device, named(map, "placesArea"));
                 if (named(map, "placesDrawer"))
                     return fail("Photos in view did not toggle");
-                click(window, device, named(map, "placesClose"));
+                click(window, device, named(map, "panelClose"));
             }
             break;
         case 9:

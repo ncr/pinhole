@@ -268,30 +268,14 @@ Panel {
         }
     }
 
-    Item {
+    PanelHeader {
         id: titlebar
         visible: panel.browsing
-        width: parent.width
-        height: search.height + 16
-        FieldInput {
-            id: search
-            objectName: "semanticSearchInput"
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.right: toolbar.left
-            anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            height: closeButton.height
-            placeholder: qsTr("Describe a photo or enter #tag…")
-            input.maximumLength: 2048
-            onAccepted: panel.accept()
-        }
-        Row {
-            id: toolbar
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 6
+        onClosed: panel.close()
+        // How much of the library can be found yet, along its foot.
+        progress: panel.catalogReady && !panel.indexer.complete && !panel.tagQuery ? panel.indexer.progress : -1
+        progressColor: panel.indexer.paused ? theme.darkForeground : theme.accent
+        tools: [
             ShellButton {
                 id: tagButton
                 objectName: "semanticTagButton"
@@ -301,21 +285,16 @@ Panel {
                 usable: panel.tagQuery || panel.catalogReady
                 onTapped: panel.openTags()
             }
-            ShellButton { id: closeButton; objectName: "semanticSearchClose"; text: "✕"; hint: "Esc"; onTapped: panel.close() }
-        }
-        // How much of the library can be found yet, along its foot.
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 2
-            visible: panel.catalogReady && !panel.indexer.complete && !panel.tagQuery
-            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12)
-            Rectangle {
-                height: parent.height
-                width: parent.width * panel.indexer.progress
-                color: panel.indexer.paused ? theme.darkForeground : theme.accent
-                Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-            }
+        ]
+        // The question in the title's place.
+        FieldInput {
+            id: search
+            objectName: "semanticSearchInput"
+            width: Math.max(0, titlebar.room)
+            height: titlebar.controlHeight
+            placeholder: qsTr("Describe a photo or enter #tag…")
+            input.maximumLength: 2048
+            onAccepted: panel.accept()
         }
     }
     Item {

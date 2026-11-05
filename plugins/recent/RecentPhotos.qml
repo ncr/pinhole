@@ -108,32 +108,19 @@ Item {
     Component.onDestruction: { if (pending) pending.cancel() }
 
     Panel {}
-    Column {
-        id: heading
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: dismiss.left
-        anchors.margins: 16
-        spacing: 6
-        UiText {
-            text: qsTr("Recent additions")
-            color: theme.brightForeground
-            font.pixelSize: Math.round(theme.fontSize * 1.5)
-        }
-        UiText {
-            width: parent.width
-            wrapMode: Text.WordWrap
-            text: qsTr("Newest additions first. A received photo keeps the date it was taken in the main grid.")
-            color: theme.foreground
-        }
+    PanelHeader {
+        id: titlebar
+        title: qsTr("Recent additions")
+        closeCommand: closeCommand
     }
-    ShellButton {
-        id: dismiss
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 16
-        text: "✕"
-        action: closeCommand
+    UiText {
+        id: heading
+        anchors.top: titlebar.bottom
+        x: 14
+        width: parent.width - 28
+        wrapMode: Text.WordWrap
+        text: qsTr("Newest additions first. A received photo keeps the date it was taken in the main grid.")
+        color: theme.darkForeground
     }
     UiText {
         anchors.centerIn: parent

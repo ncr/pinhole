@@ -24,7 +24,7 @@
             const field = findChild(panel, "semanticSearchInput")
             verify(field !== null)
             compare(field.placeholder, "Opisz zdjęcie lub wpisz #tag…")
-            compare(field.height, findChild(panel, "semanticSearchClose").height)
+            compare(field.height, findChild(panel, "panelClose").height)
             verify(field.width > panel.width / 2, "the question spans the window")
             stage = "query"
             field.text = @QUERY@

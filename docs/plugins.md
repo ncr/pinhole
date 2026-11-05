@@ -96,6 +96,11 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
   (`captionHeight` tall, given `photo` and `index`). Each drawn at the
   display's own pixels, the ring on the cursor's and under the pointer as
   Pinhole's own.
+- `PanelHeader` (API 11): the title bar of a view over the whole window,
+  as the map's: `title`, a quieter `detail`, `tools` (buttons at the
+  right), then ✕ pressing `closeCommand` and showing its key (or
+  `closed()` and `closeHint`); its children go before the title (a ‹ back
+  button), and `progress` (0 to 1, -1 for none) is a line along its foot.
 - `Choices`: one of a few on a row of buttons, each also its number's key:
   `options` as `[{ value, text }]`, `value`, `chosen(value)`.
 - `ShellButton`'s `complain(text)`: what pressing it could not do, under it

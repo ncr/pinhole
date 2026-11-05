@@ -331,35 +331,19 @@ FocusScope {
     Component.onDestruction: { if (pending) pending.cancel() }
     Panel {}
 
-    Item {
+    PanelHeader {
         id: titlebar
-        width: parent.width
         readonly property bool compact: width < theme.fontSize * 40
-        height: close.height + 16
-        UiText {
-            anchors.left: parent.left
-            anchors.leftMargin: 14
-            anchors.right: toolbar.left
-            anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("Map")
-            font.pixelSize: Math.round(theme.fontSize * 1.35)
-            color: theme.brightForeground
-            elide: Text.ElideRight
-        }
-        Row {
-            id: toolbar
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 6
+        title: qsTr("Map")
+        closeCommand: closeCommand
+        tools: [
             ShellButton {
                 objectName: "placesFit"
                 text: titlebar.compact ? qsTr("Fit") : qsTr("Fit all")
                 helpText: qsTr("Fit all")
                 action: fitCommand
                 hint: titlebar.compact ? "" : fitCommand.keyName
-            }
+            },
             ShellButton {
                 objectName: "placesArea"
                 text: titlebar.compact ? qsTr("Photos") : qsTr("Photos in view")
@@ -368,14 +352,7 @@ FocusScope {
                 active: places.areaOpen
                 hint: titlebar.compact ? "" : areaCommand.keyName
             }
-            ShellButton {
-                id: close
-                objectName: "placesClose"
-                text: "✕"
-                action: closeCommand
-                hint: ""
-            }
-        }
+        ]
     }
 
     // How to get about, for a screen reader: the help (?) lists the keys.

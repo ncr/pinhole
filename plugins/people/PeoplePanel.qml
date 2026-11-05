@@ -443,7 +443,7 @@ Panel {
     Keys.onPressed: event => {
         if (!tabKey(event)) return
         const candidates = picking ? [picker.searchField, picker.choicesList, picker.createButton, picker.cancelButton]
-            : [backButton, ...nameButtons.children, newName.input, mergeButton, checkButton, closeButton]
+            : [backButton, ...nameButtons.children, newName.input, mergeButton, checkButton]
         const controls = candidates.filter(item => item && item.visible && item.activeFocusOnTab && item.usable !== false)
         const reverse = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
         const current = controls.indexOf(panel.Window.window.activeFocusItem)
@@ -559,61 +559,24 @@ Panel {
                 panel.close()
         }
     }
-    Item {
+    PanelHeader {
         id: titlebar
         visible: !panel.picking
-        width: parent.width
-        height: closeButton.height + 16
-        Row {
-            id: heading
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
-            ShellButton {
-                id: backButton
-                objectName: "peopleBack"
-                visible: panel.view !== "home"
-                text: "‹ " + qsTr("People")
-                hint: "Esc"
-                onTapped: panel.back()
-            }
-            // Whom the faces below are compared with.
-            PeopleTile {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: (panel.view === "check" || panel.view === "person") && panel.personRow !== null
-                width: visible ? closeButton.height : 0
-                height: width
-                row: panel.personRow ?? { id: "", box: [0, 0, 1, 1] }
-                enabled: false
-            }
-            UiText {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, titlebar.width - x - toolbar.width - 40)
-                elide: Text.ElideRight
-                font.pixelSize: Math.round(theme.fontSize * 1.35)
-                color: theme.brightForeground
-                text: panel.view === "home" ? qsTr("People")
-                    : panel.view === "group" ? qsTr("Who is this?")
-                    : panel.view === "check" ? qsTr("Is this %1?").arg(panel.person)
-                    : panel.person
-            }
-            UiText {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: text !== ""
-                color: theme.darkForeground
-                text: panel.view === "group" && panel.anchor ? qsTr("%n photo(s)", "", panel.anchor.count)
-                    : panel.view === "person" && panel.personRow ? qsTr("%n photo(s)", "", panel.personRow.count)
-                    : panel.view === "check" && panel.likely.length ? qsTr("%1 of %2").arg(panel.checking + 1).arg(panel.likely.length)
-                    : ""
-            }
-        }
-        Row {
-            id: toolbar
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 6
+        title: panel.view === "home" ? qsTr("People")
+            : panel.view === "group" ? qsTr("Who is this?")
+            : panel.view === "check" ? qsTr("Is this %1?").arg(panel.person)
+            : panel.person
+        detail: panel.view === "group" && panel.anchor ? qsTr("%n photo(s)", "", panel.anchor.count)
+            : panel.view === "person" && panel.personRow ? qsTr("%n photo(s)", "", panel.personRow.count)
+            : panel.view === "check" && panel.likely.length ? qsTr("%1 of %2").arg(panel.checking + 1).arg(panel.likely.length)
+            : ""
+        // Esc goes back a level; ✕ closes from any.
+        closeHint: panel.view === "home" ? "Esc" : ""
+        onClosed: panel.close()
+        // Faces found so far, while they are being found.
+        progress: panel.status.phase === "scanning" && panel.status.total > 0
+            ? Math.min(1, (panel.status.done || 0) / Math.max(1, panel.status.total)) : -1
+        tools: [
             ShellButton {
                 id: checkButton
                 objectName: "peopleCheck"
@@ -621,7 +584,7 @@ Panel {
                 text: qsTr("%n more to check", "", panel.personRow?.likely ?? 0)
                 hint: checkCommand.keyName
                 onTapped: panel.go("check", panel.person)
-            }
+            },
             ShellButton {
                 id: mergeButton
                 objectName: "peopleMerge"
@@ -631,21 +594,23 @@ Panel {
                 hint: ""
                 onTapped: panel.openPicker("merge")
             }
-            ShellButton { id: closeButton; objectName: "peopleClose"; text: "✕"; hint: panel.view === "home" ? "Esc" : ""; onTapped: panel.close() }
+        ]
+        ShellButton {
+            id: backButton
+            objectName: "peopleBack"
+            visible: panel.view !== "home"
+            text: "‹ " + qsTr("People")
+            hint: "Esc"
+            onTapped: panel.back()
         }
-        // Faces found so far, along its foot, while they are being found.
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 2
-            visible: panel.status.phase === "scanning" && panel.status.total > 0
-            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12)
-            Rectangle {
-                height: parent.height
-                width: parent.width * Math.min(1, (panel.status.done || 0) / Math.max(1, panel.status.total || 1))
-                color: theme.accent
-                Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-            }
+        // Whom the faces below are compared with.
+        PeopleTile {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: (panel.view === "check" || panel.view === "person") && panel.personRow !== null
+            width: visible ? titlebar.controlHeight : 0
+            height: width
+            row: panel.personRow ?? { id: "", box: [0, 0, 1, 1] }
+            enabled: false
         }
     }
 
@@ -705,7 +670,7 @@ Panel {
                 objectName: "peopleNewName"
                 visible: panel.view === "group"
                 width: Math.min(theme.fontSize * 16, nameButtons.width)
-                height: closeButton.height
+                height: titlebar.controlHeight
                 placeholder: qsTr("New name…")
                 input.maximumLength: 100
                 onAccepted: {
