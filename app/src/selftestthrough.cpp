@@ -500,7 +500,27 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                   QStringLiteral("a click on the Videos switch in the panel turns it %1 and the next back").arg(turned ? "on" : "off"));
         }, 300);
         // A click or a touch tap on a switch while the panel coasts stops
-        // the panel there, and that is all: the switch does not turn.
+        // the panel there, and that is all: the switch does not turn. On
+        // the Plugins tab, which is long enough to coast (the Photos tab
+        // fits the window): a plugin's switch, of one that brings no
+        // sources, in the middle half of the panel when it is clicked.
+        auto switchInView = [=]() -> QQuickItem * {
+            const QRectF r = panelRect();
+            const QRectF middle(r.left(), r.top() + r.height() / 4, r.width(), r.height() / 2);
+            for (const char *id : {"pinhole.calendar", "pinhole.colour", "pinhole.favourites", "pinhole.frame",
+                                   "pinhole.recent", "pinhole.series", "pinhole.sheet", "pinhole.theme"}) {
+                const QByteArray name = QByteArray("pluginSwitch:") + id;
+                QQuickItem *toggle = item(name.constData());
+                if (toggle && toggle->isVisible()
+                    && middle.contains(toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2))))
+                    return toggle;
+            }
+            return nullptr;
+        };
+        add(QStringLiteral("the Plugins tab, %1").arg(wide), [=] {
+            item("sidePanel")->setProperty("section", QStringLiteral("plugins"));
+            scroller()->setProperty("contentY", 0);
+        }, 500);
         for (const bool byTouch : {false, true}) {
             const QString how = byTouch ? QStringLiteral("a touch tap") : QStringLiteral("a click");
             add(QStringLiteral("%1 on a switch while the panel coasts, %2").arg(how, wide), [=] {
@@ -509,9 +529,10 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 swipe(window, panelRect().center(), {0, -5}, 4);
                 const double lifted = contentY();
                 QTimer::singleShot(60, window, [=] {
-                    QQuickItem *toggle = item("markSwitch:pinhole/video");
+                    QQuickItem *toggle = switchInView();
                     if (!toggle) {
-                        check(false, QStringLiteral("the Videos switch is in the panel"));
+                        check(false, QStringLiteral("a plugin's switch in the middle of the panel (at %1 of %2)")
+                                         .arg(qRound(contentY())).arg(qRound(most())));
                         return;
                     }
                     const QPointF at = toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2));
@@ -526,9 +547,10 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                     QTimer::singleShot(300, window, [=] {
                         const double on = contentY() - y;
                         check(coasting && panelRect().contains(at) && !turned && std::abs(on) < 1 && untouched().isEmpty(),
-                              QStringLiteral("%1 on the Videos switch while the panel coasts (%2 px from %3, at %4) stops it "
-                                             "(%5 px on after) and turns nothing (the switch %6), the grid still")
-                                  .arg(how).arg(qRound(y - lifted)).arg(qRound(lifted)).arg(qRound(y)).arg(qRound(on))
+                              QStringLiteral("%1 on %2 while the panel coasts (%3 px from %4, at %5 of %6) stops it "
+                                             "(%7 px on after) and turns nothing (the switch %8), the grid still")
+                                  .arg(how, toggle->objectName()).arg(qRound(y - lifted)).arg(qRound(lifted)).arg(qRound(y))
+                                  .arg(qRound(most())).arg(qRound(on))
                                   .arg(turned ? QStringLiteral("TURNED") : QStringLiteral("as it was")));
                         // Put back, for what follows.
                         if (turned)
@@ -537,9 +559,13 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                 });
             }, 900);
         }
-        // Then, at rest, the same switch answers the first click.
+        // Then, at rest, a switch answers the first click.
         add(QStringLiteral("a switch at rest after a coast, %1").arg(wide), [=] {
-            QQuickItem *toggle = item("markSwitch:pinhole/video");
+            QQuickItem *toggle = switchInView();
+            if (!toggle) {
+                check(false, QStringLiteral("a plugin's switch in the middle of the panel at rest"));
+                return;
+            }
             const QPointF at = toggle->mapToScene(QPointF(toggle->width() / 2, toggle->height() / 2));
             const bool was = toggle->property("checked").toBool();
             click(window, at);
@@ -547,8 +573,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             if (turned)
                 click(window, at);
             check(turned && toggle->property("checked").toBool() == was,
-                  QStringLiteral("at rest, a click on the Videos switch turns it, and another back"));
-        }, 300);
+                  QStringLiteral("at rest, a click on %1 turns it, and another back").arg(toggle->objectName()));
+        }, 600);
         // A plugin's settings with scrollables of their own (the test
         // plugin test.scrolls, app/tests/scrolls): the wheel and the
         // touchpad over one move it while it can go their way, the panel
@@ -677,9 +703,12 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             QTimer::singleShot(120, window, [=] {
                 const double coasting = contentY();
                 QTimer::singleShot(1500, window, [=] {
-                    check(lifted > 20 && coasting > lifted && contentY() >= coasting && untouched().isEmpty(),
-                          QStringLiteral("a swipe moves the panel %1 px with the fingers, it coasts on to %2 and %3, the grid still")
-                              .arg(qRound(lifted)).arg(qRound(coasting)).arg(qRound(contentY())));
+                    // On, or to its end and back there.
+                    const bool on = contentY() >= coasting || std::abs(contentY() - most()) < 0.5;
+                    check(lifted > 20 && coasting > lifted && on && untouched().isEmpty(),
+                          QStringLiteral("a swipe moves the panel %1 px with the fingers, it coasts on to %2 and %3 (its end %4), "
+                                         "the grid still")
+                              .arg(qRound(lifted)).arg(qRound(coasting)).arg(qRound(contentY())).arg(qRound(most())));
                 });
             });
         }, 1900);
@@ -724,7 +753,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             // does (more than a few lines): back at the end, the grid still.
             for (const bool far : {true, false}) {
                 add(QStringLiteral("%1 into its %2, %3").arg(far ? "flicks fast" : "a coast", end, wide), [=] {
-                    const double start = far ? (down ? 0 : most()) : (down ? most() - 700 : 700);
+                    // Short of it by 700 px, or as far as the panel goes.
+                    const double start = far ? (down ? 0 : most()) : std::clamp(down ? most() - 700 : 700, 0.0, most());
                     scroller()->setProperty("contentY", start);
                     still();
                     const QPointF at = panelRect().center();

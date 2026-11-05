@@ -442,6 +442,21 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &di
                        grid->jumpToFraction(0.5);
                    },
                    300});
+    // A list of a few screens (On this day of a small library, the side
+    // panel, the help) the grid's spin crosses in a moment, and a notch's
+    // glide eases in short of an end: given room (4000 px of margin
+    // before and after, then taken back), it is compared on the way, as
+    // the grid is in its middle.
+    auto compareWithRoom = [=](const QString &name, Scroller *scroller) {
+        QQuickItem *f = scroller->flickable();
+        const QVariant before = f->property("topMargin"), after = f->property("bottomMargin");
+        f->setProperty("topMargin", before.toDouble() + 4000);
+        f->setProperty("bottomMargin", after.toDouble() + 4000);
+        compare(scrollerMover(name, scroller));
+        f->setProperty("topMargin", before);
+        f->setProperty("bottomMargin", after);
+        f->setProperty("contentY", -before.toDouble());
+    };
     auto view = [=](const QString &name, const char *id, int key) {
         steps->append({QStringLiteral("%1 opened").arg(name), [=] { press(window, key); }, 1500});
         steps->append({name, [=] {
@@ -449,18 +464,19 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &di
                            Scroller *scroller = item ? largest<Scroller>(item) : nullptr;
                            check(scroller != nullptr, QStringLiteral("%1 shows a list that scrolls (a Scroller in it)").arg(name));
                            if (scroller)
-                               compare(scrollerMover(name, scroller));
+                               compareWithRoom(name, scroller);
                        },
                        300});
     };
     // Pinhole's own: the side panel and the help, shown, their Scroller
-    // given the same gestures. Each holds a screen or two, which the grid's
-    // spin crosses in a moment, and a notch's glide eases in short of an
-    // end: given room (4000 px of margin before and after, then taken
-    // back), they are compared on the way, as the grid is in its middle.
+    // given the same gestures, with room.
     auto own = [=](const QString &name, const char *objectName) {
         auto shown = [=](bool on) {
-            if (QQuickItem *item = named(window->contentItem(), QString::fromLatin1(objectName)))
+            // The help is made the first time it is asked for (Main.qml's
+            // showHelp), as the window does.
+            if (QLatin1String(objectName) == QLatin1String("help"))
+                QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, on));
+            else if (QQuickItem *item = named(window->contentItem(), QString::fromLatin1(objectName)))
                 item->setProperty("shown", on);
         };
         steps->append({QStringLiteral("%1 shown").arg(name), [=] { shown(true); }, 1200});
@@ -469,15 +485,8 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &di
                            Scroller *scroller = item ? largest<Scroller>(item) : nullptr;
                            check(scroller != nullptr, QStringLiteral("%1 scrolls (a Scroller over it)").arg(name));
                            QQuickItem *f = scroller ? scroller->flickable() : nullptr;
-                           if (f) {
-                               const QVariant before = f->property("topMargin"), after = f->property("bottomMargin");
-                               f->setProperty("topMargin", before.toDouble() + 4000);
-                               f->setProperty("bottomMargin", after.toDouble() + 4000);
-                               compare(scrollerMover(name, scroller));
-                               f->setProperty("topMargin", before);
-                               f->setProperty("bottomMargin", after);
-                               f->setProperty("contentY", -before.toDouble());
-                           }
+                           if (f)
+                               compareWithRoom(name, scroller);
                            if (f && name == QLatin1String("the side panel")) {
                                const Mover mover = scrollerMover(name, scroller);
                                bounce(name, mover, [f](double at) { f->setProperty("contentY", at); }, f->height(),

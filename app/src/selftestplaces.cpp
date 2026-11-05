@@ -278,6 +278,8 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 run->clock.restart();
                 return;
             }
+            // Info's M, with a time of its own as each input's run has.
+            run->clock.restart();
             viewer->openAt(0, {});
             break;
         case 10:
