@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Pinhole.Plugin
 
 // This day in every earlier year with photos of it, the latest first, over
@@ -371,11 +372,11 @@ Item {
                         Image {
                             anchors.fill: parent
                             source: days.pinhole.library.item(tile.modelData).thumbnail ?? ""
-                            sourceSize.width: days.cell * 1.5
-                            sourceSize.height: days.cell * 1.5
+                            sourceSize.width: days.cell * Screen.devicePixelRatio
+                            sourceSize.height: days.cell * Screen.devicePixelRatio
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            opacity: status === Image.Ready ? (hover.hovered ? 0.85 : 1) : 0
+                            opacity: status === Image.Ready ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 120 } }
                         }
                         Chip {
@@ -385,13 +386,15 @@ Item {
                             anchors.margins: 6
                             text: "▶"
                         }
-                        // The one the keys are on, while they are in use.
+                        // The one the keys are on, and the one under the
+                        // pointer, as PhotoTiles rings them.
                         Rectangle {
+                            readonly property bool chosen: keymap.input === "keyboard" && days.cursor === tile.at
                             anchors.fill: parent
                             color: "transparent"
-                            border.width: 2
-                            border.color: theme.brightForeground
-                            visible: keymap.input === "keyboard" && days.cursor === tile.at
+                            border.width: chosen ? 2 : 1
+                            border.color: theme.accent
+                            visible: chosen || hover.hovered
                         }
                         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: days.openPhoto(tile.at) }

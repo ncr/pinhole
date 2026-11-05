@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Effects
 import Pinhole.Plugin
 
@@ -53,7 +54,7 @@ Item {
             x: placed(side / 2 - centreX * width, width)
             y: placed(side / 2 - centreY * height, height)
             source: photo.thumbnail || ""
-            sourceSize: Qt.size(Math.min(1024, width * 1.5), Math.min(1024, height * 1.5))
+            sourceSize: Qt.size(Math.min(1024, width * Screen.devicePixelRatio), Math.min(1024, height * Screen.devicePixelRatio))
             asynchronous: true
             smooth: true
         }
