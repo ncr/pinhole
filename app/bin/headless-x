@@ -1,0 +1,51 @@
+#!/bin/sh
+# Run a command on an X display of its own, never on the desktop:
+#
+#   app/bin/headless-x 1600x1000 command [argument…]
+#
+# Under Xvfb (xvfb-run -a) where it is installed. Without it, under
+# Hyprland: a rootful Xwayland of that size, started by Hyprland on
+# workspace 5 without showing it, and stopped after. The command runs with
+# DISPLAY set to it and no Wayland or Hyprland of its own; its exit code is
+# this one's.
+set -eu
+size="$1"
+shift
+if command -v xvfb-run >/dev/null 2>&1; then
+    exec xvfb-run -a -s "-screen 0 ${size}x24" "$@"
+fi
+# The caller may have given the command a runtime folder of its own:
+# Hyprland's is the account's.
+runtime="/run/user/$(id -u)"
+instance="${HYPRLAND_INSTANCE_SIGNATURE:-0}"
+if ! command -v Xwayland >/dev/null 2>&1 || ! command -v hyprctl >/dev/null 2>&1 \
+    || ! XDG_RUNTIME_DIR="$runtime" hyprctl -i "$instance" version >/dev/null 2>&1; then
+    echo "headless-x: neither xvfb-run nor Hyprland's Xwayland to run it in" >&2
+    exit 127
+fi
+dir="$(mktemp -d)"
+n=90
+while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ]; do n=$((n + 1)); done
+printf 'echo $$ > %s/pid\nexec Xwayland :%s -geometry %s -nolisten tcp > %s/log 2>&1\n' "$dir" "$n" "$size" "$dir" > "$dir/run.sh"
+stop() {
+    [ -s "$dir/pid" ] && kill "$(cat "$dir/pid")" 2>/dev/null || true
+    rm -rf "$dir"
+}
+trap stop EXIT
+trap 'exit 143' INT TERM
+XDG_RUNTIME_DIR="$runtime" hyprctl -i "$instance" dispatch \
+    "hl.dsp.exec_cmd('sh $dir/run.sh', { workspace = '5 silent' })" >/dev/null
+tries=0
+until [ -e "/tmp/.X11-unix/X$n" ]; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 100 ]; then
+        echo "headless-x: Xwayland :$n did not start" >&2
+        cat "$dir/log" >&2 2>/dev/null || true
+        exit 1
+    fi
+    sleep 0.1
+done
+unset WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD
+status=0
+DISPLAY=":$n" "$@" || status=$?
+exit "$status"

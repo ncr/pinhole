@@ -35,4 +35,4 @@ INSERT INTO assets VALUES
     ('c', 'public.jpeg', 'Lisbon.jpg', 1695900000000, 1695900000000, 0, NULL, 1, 1,
         0, 0, NULL, 100, 'thumbs/sample.jpg', 480, 320, 0, 38.72, -9.14);
 SQL
-xvfb-run -a "$ROOT/build/pinhole" --library "$scratch/library"
+"$ROOT/bin/headless-x" 1280x1024 "$ROOT/build/pinhole" --library "$scratch/library"

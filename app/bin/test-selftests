@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the window's self-tests that need a library and plugins of their own,
-each in a scratch profile under Xvfb, never on the desktop:
+each in a scratch profile on an X display of its own, never on the desktop
+(bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
     app/bin/test-selftests                 # covering through physics stacks hidden layers colour
     app/bin/test-selftests through layers  # some of them
@@ -88,16 +89,20 @@ def run(mode, scratch, lib, farm, logs):
         # It changes the library: a copy of its own.
         given = profile / "library"
         shutil.copytree(lib, given)
-    command = ["xvfb-run", "-a", "-s", "-screen 0 1600x1000x24", str(APP / "build/pinhole"), "--library", str(given)]
+    # A display of its own (bin/headless-x: Xvfb, or Hyprland's Xwayland on
+    # workspace 5), which the window's environment is not given.
+    command = [str(APP / "bin/headless-x"), "1600x1000", str(APP / "build/pinhole"), "--library", str(given)]
     if mode == "hidden":
         # Screenshots hiding, what it found kept from a run before.
         (profile / "config/pinhole").mkdir(parents=True)
         (profile / "config/pinhole/plugins.json").write_text('{"settings": {"pinhole.screenshots": {"hide": true}}}')
-        subprocess.run(["timeout", "25", *command], env=env | {"PINHOLE_SELFTEST": "lazyplugins:" + str(out)},
+        subprocess.run([*command[:2], "timeout", "25", *command[2:]],
+                       env=env | {"PINHOLE_SELFTEST": "lazyplugins:" + str(out)},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
     with (logs / f"{mode}.log").open("w") as log:
-        code = subprocess.run(["timeout", "300", *command], env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+        code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
+                              stderr=subprocess.STDOUT).returncode
     text = (logs / f"{mode}.log").read_text(errors="replace")
     failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
     print(f"{mode}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code}")

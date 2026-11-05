@@ -27,7 +27,10 @@ Use `app/bin/measure-startup --help` for repeatable launch measurements.
 Separate fresh QML caches from warm launches and report distributions,
 first frame and photo readiness. Xvfb runs must explicitly use
 `QT_QPA_PLATFORM=xcb`; inherited `wayland;xcb` can open a test on the real
-desktop. Native tests belong on hidden workspace 5 (CLAUDE.md). Never use
+desktop. Native tests belong on hidden workspace 5 (CLAUDE.md).
+`app/bin/test-selftests`, `test-accessibility` and `test-places` get a display
+of their own from `app/bin/headless-x`: Xvfb, or where it is not installed,
+a rootful Xwayland that Hyprland starts on workspace 5 silently. Never use
 the user's clipboard or Pictures for a self-test.
 
 Use the shared `ShellButton`, `Toggle`, `FieldInput` and `Choices` controls.
