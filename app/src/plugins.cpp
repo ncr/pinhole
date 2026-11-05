@@ -1286,6 +1286,20 @@ void Plugins::layerFailed(const QString &id, const QString &message) {
             p->host->report(QStringLiteral("viewerLayer: ") + message.trimmed());
 }
 
+namespace {
+bool importsInternal(const QString &dir) {
+    static const QRegularExpression internal(QStringLiteral("^[ \\t]*import\\s+Pinhole\\.Internal\\b"),
+                                             QRegularExpression::MultilineOption);
+    QDirIterator files(dir, {"*.qml"}, QDir::Files, QDirIterator::Subdirectories);
+    while (files.hasNext()) {
+        QFile file(files.next());
+        if (file.open(QIODevice::ReadOnly) && internal.match(QString::fromUtf8(file.readAll())).hasMatch())
+            return true;
+    }
+    return false;
+}
+} // namespace
+
 void Plugins::rescan() {
     scan();
 }
@@ -1316,6 +1330,11 @@ void Plugins::scan() {
             plugin->description = manifest.value("description").toString();
             plugin->version = manifest.value("version").toString();
             plugin->author = manifest.value("author").toString();
+            // Pinhole.Internal is Pinhole's own plugins' (and copies keeping
+            // their id): it may change with any version, so another's does
+            // not load with it, as check says.
+            if (plugin->error.isEmpty() && !plugin->id.startsWith(QLatin1String("pinhole.")) && importsInternal(plugin->dir))
+                plugin->error = tr("imports Pinhole.Internal, which is Pinhole's own plugins': use what Pinhole.Plugin gives");
             if (plugin->error.isEmpty())
                 plugin->main = main;
             plugin->sources = sourceKinds(manifest);

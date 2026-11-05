@@ -3855,6 +3855,16 @@ Item {
         QCOMPARE(bench.plugins->hiddenOf("me.b", {2}, true), QVariantList{2});
     }
 
+    void onlyPinholesOwnPluginsLoadWithPinholeInternal() {
+        PluginBench bench({{"me.map", {}}, {"pinhole.map", {}}});
+        for (const QString id : {"me.map", "pinhole.map"})
+            write(bench.dir.path() + "/plugins/" + id + "/Main.qml", "import QtQuick\nimport Pinhole.Internal\nItem {}\n");
+        bench.plugins->rescan();
+        QVERIFY(bench.plugins->at("me.map").value("main").toString().isEmpty());
+        QVERIFY(bench.plugins->at("me.map").value("error").toString().contains("Pinhole.Internal"));
+        QVERIFY(bench.plugins->at("pinhole.map").value("main").toString().contains("Main.qml"));
+    }
+
     void aPluginHidesAndStacksPhotosByIdAsByPosition() {
         PluginBench bench({{"me.a", {}}});
         // Ids are photos, as marks and fetch take them: never photo 0 by
