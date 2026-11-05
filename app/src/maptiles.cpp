@@ -59,6 +59,7 @@ MapTiles::MapTiles(QQuickItem *parent) : QQuickPaintedItem(parent) {
     connect(this, &QQuickItem::heightChanged, this, &MapTiles::schedule);
     connect(this, &QQuickItem::visibleChanged, this, &MapTiles::schedule);
     connect(this, &MapTiles::styleChanged, this, &MapTiles::restyle);
+    connect(this, &MapTiles::avoidChanged, this, [this] { update(); });
     connect(this, &MapTiles::languageChanged, this, [this] {
         m_data.clear();
         restyle();
@@ -352,6 +353,10 @@ void MapTiles::drawLabels(QPainter *painter) {
         return a.order != b.order ? a.order < b.order : a.label->rank < b.label->rank;
     });
     QVector<QRectF> placed;
+    QVector<QRectF> taken;
+    for (const QVariant &rect : std::as_const(m_avoid))
+        taken.append(rect.toRectF());
+    const QRectF bounds(0, 0, width(), height());
     for (const auto &candidate : std::as_const(candidates)) {
         const QImage *image = labelImage(*candidate.label);
         if (!image)
@@ -359,7 +364,9 @@ void MapTiles::drawLabels(QPainter *painter) {
         const QSizeF size = image->deviceIndependentSize();
         const QRectF rect(candidate.at - QPointF(size.width() / 2, size.height() / 2), size);
         const QRectF room = rect.adjusted(-14, -8, 14, 8);
-        if (std::any_of(placed.cbegin(), placed.cend(), [&](const QRectF &other) { return other.intersects(room); }))
+        if (!bounds.contains(rect)
+                || std::any_of(placed.cbegin(), placed.cend(), [&](const QRectF &other) { return other.intersects(room); })
+                || std::any_of(taken.cbegin(), taken.cend(), [&](const QRectF &other) { return other.intersects(rect); }))
             continue;
         placed.append(rect);
         painter->drawImage(rect.topLeft(), *image);

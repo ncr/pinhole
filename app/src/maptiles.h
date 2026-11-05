@@ -37,6 +37,8 @@ class MapTiles : public QQuickPaintedItem {
     // letters, else as written there.
     Q_PROPERTY(QString language MEMBER m_language NOTIFY languageChanged)
     Q_PROPERTY(QColor land READ land NOTIFY styleChanged)
+    // Where names should not go (the photos' markers), in its coordinates.
+    Q_PROPERTY(QVariantList avoid MEMBER m_avoid NOTIFY avoidChanged)
 public:
     explicit MapTiles(QQuickItem *parent = nullptr);
     void paint(QPainter *painter) override;
@@ -49,6 +51,7 @@ signals:
     void unavailableChanged();
     void styleChanged();
     void languageChanged();
+    void avoidChanged();
 
 private:
     struct Tile { int z, x, y; QRectF rect; };
@@ -85,6 +88,7 @@ private:
     QString m_font;
     int m_fontSize = 13;
     QString m_language;
+    QVariantList m_avoid;
     bool m_unavailable = false;
 };
 

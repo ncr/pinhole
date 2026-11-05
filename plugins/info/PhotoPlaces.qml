@@ -422,6 +422,9 @@ FocusScope {
             light: theme.light
             fontFamily: theme.font
             fontSize: theme.fontSize
+            // Names keep clear of the photos' markers.
+            avoid: places.groups.filter(g => places.isInView(g)).map(g =>
+                Qt.rect(places.screenX(g) - 34, places.screenY(g) - 34, 74, 74))
         }
         MapWheel {
             width: places.viewWidth
@@ -468,53 +471,63 @@ FocusScope {
                     Accessible.name: count > 1 ? qsTr("%n photo(s) here", "", count)
                                                : (photo.filename || qsTr("Open the photo"))
                     Accessible.onPressAction: places.showGroup(modelData)
+                    // Omarchy's cards: square corners (or the theme's own
+                    // rounding), a hairline; several photos as a second
+                    // card behind, offset.
+                    readonly property int corner: Math.min(4, theme.radius)
+                    readonly property bool lit: marker.highlighted || hover.hovered || marker.keyboardFocus
                     Rectangle {
                         visible: marker.count > 1
-                        x: 5; y: -4
+                        x: 4; y: -4
                         width: parent.width; height: parent.height
-                        radius: 7
-                        rotation: 8
+                        radius: marker.corner
                         color: theme.background
-                        border.color: theme.foreground
+                        border.width: 1
+                        border.color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.55)
                     }
                     Rectangle {
                         anchors.fill: parent
-                        radius: 6
-                        color: marker.highlighted || hover.hovered ? theme.accent : theme.brightForeground
+                        radius: marker.corner
+                        color: theme.background
                         Image {
                             anchors.fill: parent
-                            anchors.margins: 3
+                            anchors.margins: 2
                             source: marker.photo.thumbnail || ""
-                            sourceSize: Qt.size(96, 96)
+                            sourceSize: Qt.size(112, 112)
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
                         }
-                    }
-                    Rectangle {
-                        visible: marker.count > 1
-                        anchors.left: parent.left
-                        anchors.bottom: parent.bottom
-                        anchors.margins: -4
-                        width: Math.max(21, badge.implicitWidth + 12)
-                        height: 20
-                        radius: 10
-                        color: theme.background
-                        border.color: theme.foreground
-                        UiText {
-                            id: badge
-                            anchors.centerIn: parent
-                            text: marker.count.toLocaleString(Qt.locale(), "f", 0)
-                            color: theme.brightForeground
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: marker.corner
+                            color: "transparent"
+                            border.width: marker.lit ? 2 : 1
+                            border.color: marker.lit ? theme.accent
+                                : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.55)
                         }
                     }
+                    // How many, as a chip on the corner: tabular digits,
+                    // centred on their capital height.
                     Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        radius: 9
-                        color: "transparent"
-                        border.width: 2
-                        border.color: theme.accent
-                        visible: marker.keyboardFocus
+                        visible: marker.count > 1
+                        x: -5
+                        y: parent.height - height + 5
+                        width: Math.max(height, badge.implicitWidth + 12)
+                        height: Math.round(theme.fontSize * 1.6)
+                        radius: marker.corner
+                        color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.94)
+                        border.width: 1
+                        border.color: marker.lit ? theme.accent
+                            : Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.4)
+                        UiText {
+                            id: badge
+                            x: Math.round((parent.width - implicitWidth) / 2)
+                            y: centredIn(parent.height)
+                            font.pixelSize: Math.round(theme.fontSize * 0.857)
+                            font.features: { "tnum": 1 }
+                            text: marker.count.toLocaleString(Qt.locale(), "f", 0)
+                            color: marker.lit ? theme.accent : theme.brightForeground
+                        }
                     }
                     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
