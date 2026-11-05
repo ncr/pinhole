@@ -115,6 +115,7 @@ Panel {
             allResults = value.results
             indexer.status = value.status
             filterResults()
+            openIfAsked()
         }).catch(error => {
             if (queryJob !== job) return
             queryJob = null
@@ -135,6 +136,7 @@ Panel {
         matches.sort((a, b) => b.position - a.position)
         allResults = matches
         filterResults()
+        openIfAsked()
     }
     function filterResults() {
         const previous = results[selected]?.id
@@ -149,10 +151,12 @@ Panel {
             const taggedPosition = pinhole.library.indexOf(tagAsset)
             if (taggedPosition < 0 || pinhole.isHidden(taggedPosition)) closeTags(true)
         }
-        if (openWhenReady) {
-            openWhenReady = false
-            openResult(selected)
-        }
+    }
+    // ⏎ pressed before the answer came: it opens once the answer does.
+    function openIfAsked() {
+        if (!openWhenReady) return
+        openWhenReady = false
+        openResult(selected)
     }
     function accept() {
         if (debounce.running || queryJob) {
@@ -259,7 +263,10 @@ Panel {
     }
     Connections {
         target: search.input
-        function onTextChanged() { debounce.restart() }
+        function onTextChanged() {
+            panel.openWhenReady = false
+            debounce.restart()
+        }
     }
     Timer { id: debounce; interval: 250; onTriggered: panel.lookup() }
     Connections {

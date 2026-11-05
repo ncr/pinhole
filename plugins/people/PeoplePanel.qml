@@ -30,7 +30,10 @@ Panel {
     property int selected: 0
     property var status: ({ phase: "waiting" })
     property string failure: ""
+    // The read now wanted (any object: a chain's token) and the program it
+    // waits on, which is what can be cancelled.
     property var readJob: null
+    property var running: null
     property var assignmentJob: null
     property string picking: ""
     readonly property int columns: Math.max(3, Math.floor((width - 24) / (theme.fontSize * (view === "home" ? 10 : 11))))
@@ -68,9 +71,13 @@ Panel {
         Qt.callLater(() => grid.forceActiveFocus())
         load()
     }
-    function close() {
-        readJob?.cancel()
+    function stopReading() {
+        running?.cancel()
+        running = null
         readJob = null
+    }
+    function close() {
+        stopReading()
         closePicker(false)
         shown = false
         returning = false
@@ -85,8 +92,13 @@ Panel {
             timeout: 10000
         })
     }
-    function read(operation, options) {
-        return request(operation, options).then(result => {
+    // One step of the chain `token` is, or nothing once another is wanted.
+    function read(token, operation, options) {
+        if (readJob !== token) return Promise.reject({ code: "cancelled" })
+        const job = request(operation, options)
+        running = job
+        return job.then(result => {
+            if (readJob !== token) throw { code: "cancelled" }
             const response = JSON.parse(result.stdout)
             status = response.status
             failure = ""
@@ -96,51 +108,56 @@ Panel {
     // Everything the view shows, again: after a change, and every few
     // seconds while the faces are still being found.
     function load() {
-        readJob?.cancel()
+        stopReading()
         const kept = selection?.key
+        const token = {}
+        readJob = token
+        const keep = rows => rows.filter(row => {
+            const photo = pinhole.library.item(row.id)
+            return photo.thumbPath === pinhole.library.dir + "/" + row.path
+        })
         let job
         if (view === "home") {
-            job = read("people", { limit: 500 }).then(rows => {
+            job = read(token, "people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read("groups", { limit: groupLimit })
+                return read(token, "groups", { limit: groupLimit })
             }).then(rows => {
                 moreGroups = rows.length > groupLimit
                 groups = rows.slice(0, groupLimit)
             })
         } else if (view === "check") {
-            job = read("people", { limit: 500 }).then(rows => {
+            job = read(token, "people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read("likely", { person: person, limit: 200 })
+                return read(token, "likely", { person: person, limit: 200 })
             }).then(rows => {
                 likely = rows.slice(0, 200)
                 checking = Math.min(checking, Math.max(0, likely.length - 1))
                 if (!likely.length) return []
-                return read("members", { anchor: likely[checking].anchor, limit: 60 })
+                return read(token, "members", { anchor: likely[checking].anchor, limit: 60 })
             }).then(rows => {
-                faces = rows.slice(0, 60)
+                faces = keep(rows.slice(0, 60))
                 moreFaces = rows.length > 60
             })
         } else {
             const operation = view === "group" ? "members" : "person"
-            job = read("people", { limit: 500 }).then(rows => {
+            job = read(token, "people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read(operation, { anchor: anchor?.anchor, person: person, limit: faceLimit })
+                return read(token, operation, { anchor: anchor?.anchor, person: person, limit: faceLimit })
             }).then(rows => {
                 moreFaces = rows.length > faceLimit
-                faces = rows.slice(0, faceLimit)
+                faces = keep(rows.slice(0, faceLimit))
             })
         }
-        readJob = job
         job.then(() => {
-            if (readJob !== job) return
-            readJob = null
+            if (readJob !== token) return
+            readJob = null; running = null
             const at = tiles.findIndex(row => row.key === kept)
             selected = at >= 0 ? at : Math.min(selected, Math.max(0, tiles.length - 1))
             if (view === "group" && !faces.length) back()
-            if (view === "check" && !likely.length) back()
+            if (view === "check" && !likely.length) go("person", person)
         }).catch(error => {
-            if (readJob !== job) return
-            readJob = null
+            if (readJob !== token) return
+            readJob = null; running = null
             if (error.code !== "cancelled") {
                 failure = qsTr("People could not load the face groups.")
                 pinhole.warn(error)
@@ -180,8 +197,21 @@ Panel {
         if (!row) return
         if (view !== "home") {
             if (pinhole.library.indexOf(row.id) < 0) return
-            returning = true
-            pinhole.openPhotos(faces.map(face => face.id).filter((id, i, all) => all.indexOf(id) === i), row.id)
+            const open = rows => {
+                const ids = rows.map(face => face.id).filter((id, i, all) => all.indexOf(id) === i && pinhole.library.indexOf(id) >= 0)
+                returning = true
+                pinhole.openPhotos(ids.includes(row.id) ? ids : [row.id], row.id)
+            }
+            if (!moreFaces) {
+                open(faces)
+                return
+            }
+            // All of them for ← →, not only those scrolled to yet.
+            const operation = view === "person" ? "person" : "members"
+            const owner = view === "group" ? anchor?.anchor : view === "check" ? likely[checking]?.anchor : null
+            request(operation, { anchor: owner, person: person, limit: 2000 })
+                .then(result => { if (shown && !returning) open(JSON.parse(result.stdout).rows) })
+                .catch(() => { if (shown && !returning) open(faces) })
         } else if (row.name) {
             go("person", row)
         } else {
@@ -194,8 +224,7 @@ Panel {
         else go("home")
     }
     function openPicker(mode) {
-        readJob?.cancel()
-        readJob = null
+        stopReading()
         picking = mode
         failure = ""
         picker.reset()
@@ -239,7 +268,7 @@ Panel {
             for (const face of JSON.parse(result.stdout).keys)
                 patch[face] = Object.assign({}, edits[face], { person: name })
             const added = Object.keys(patch).length
-            if (view === "group") {
+            if (view === "group" && anchor?.anchor === row.anchor) {
                 const at = groups.findIndex(group => group.anchor === row.anchor)
                 const next = groups[at + 1] ?? null
                 if (next) {
@@ -396,7 +425,7 @@ Panel {
         event.accepted = true
     }
     readonly property bool keysOnTiles: shown && !picking && grid.activeFocus
-    Command { name: "people.back"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.back() }
+    Command { name: "people.back"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown && !newName.input.activeFocus; onTriggered: panel.back() }
     Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
     Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
     Command { name: "people.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(1, 0) }
