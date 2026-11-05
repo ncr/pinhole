@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Run the window's self-tests that need a library and plugins of their own,
+each in a scratch profile under Xvfb, never on the desktop:
+
+    app/bin/test-selftests                 # covering through physics stacks hidden layers colour
+    app/bin/test-selftests through layers  # some of them
+
+A fake library (core/target/release/pinhole-fake) with screenshots and
+photos taken on this day in earlier years; Pinhole's plugins and the test
+plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Each
+mode's log is kept in build/selftests/<mode>.log. Exits 1 if any fails.
+"""
+import datetime
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+
+APP = Path(__file__).resolve().parents[1]
+ROOT = APP.parent
+MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour"]
+TEST_PLUGINS = ["scrolls", "layers"]
+
+
+def library(scratch):
+    fake = ROOT / "core/target/release/pinhole-fake"
+    if not fake.exists():
+        subprocess.run(["cargo", "build", "--release", "--locked", "--manifest-path", str(ROOT / "core/Cargo.toml"),
+                        "--bin", "pinhole-fake"], check=True)
+    out = scratch / "library"
+    subprocess.run([str(fake), "--count", "512", "--out", str(out)], check=True, stdout=subprocess.DEVNULL)
+    db = sqlite3.connect(out / "library.sqlite")
+    ids = [row[0] for row in db.execute("SELECT id FROM assets WHERE NOT is_video ORDER BY asset_date")]
+    # Screenshots, as Screenshots knows them: by name, a phone's shape.
+    # Every other photo among a dozen, each on a day of its own (photos
+    # shown between hidden ones), and four a day on three days, each day's
+    # one card (a stack).
+    first = datetime.datetime(2024, 5, 1, 10)
+    shots = [(asset, None) for asset in ids[40:64:2]] + [(asset, n) for n, asset in enumerate(ids[200:212])]
+    for k, (asset, n) in enumerate(shots):
+        size = "thumb_w = 222, thumb_h = 480"
+        if n is None:
+            db.execute(f"UPDATE assets SET filename = ?, {size} WHERE id = ?", (f"Screenshot {k:03d}.png", asset))
+        else:
+            when = first + datetime.timedelta(days=n // 4, minutes=n % 4)
+            db.execute(f"UPDATE assets SET filename = ?, {size}, asset_date = ? WHERE id = ?",
+                       (f"Screenshot {when:%Y-%m-%d at %H.%M.00}.png", int(when.timestamp() * 1000), asset))
+    # On this day, in four earlier years: three photos each.
+    today = datetime.datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    for n, asset in enumerate(ids[100:112]):
+        when = today.replace(year=today.year - 1 - n // 3, minute=n)
+        db.execute("UPDATE assets SET asset_date = ? WHERE id = ?", (int(when.timestamp() * 1000), asset))
+    db.commit()
+    db.close()
+    return out
+
+
+def plugins(scratch):
+    farm = scratch / "plugins"
+    farm.mkdir()
+    for plugin in sorted((ROOT / "plugins").iterdir()):
+        if (plugin / "manifest.json").exists():
+            (farm / plugin.name).symlink_to(plugin)
+    for name in TEST_PLUGINS:
+        (farm / f"test-{name}").symlink_to(APP / "tests" / name)
+    return farm
+
+
+def run(mode, scratch, lib, farm, logs):
+    profile = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=scratch))
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("WAYLAND", "HYPRLAND", "DISPLAY"))}
+    for key, folder in [("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                        ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"), ("XDG_PICTURES_DIR", "pictures"),
+                        ("XDG_RUNTIME_DIR", "run")]:
+        (profile / folder).mkdir(mode=0o700)
+        env[key] = str(profile / folder)
+    out = profile / "out"
+    out.mkdir()
+    env |= {"PINHOLE_BUILTIN_PLUGINS": str(farm), "PINHOLED": str(ROOT / "core/target/release/pinholed"),
+            "PINHOLE_SOCKET": str(profile / "run/p.sock"), "QT_QPA_PLATFORM": "xcb", "QT_QPA_PLATFORMTHEME": "generic",
+            "LIBGL_ALWAYS_SOFTWARE": "1", "QSG_RHI_BACKEND": "opengl", "QT_FORCE_STDERR_LOGGING": "1",
+            "PINHOLE_MAP_TILES": "http://127.0.0.1:1/"}
+    given = lib
+    if mode == "stacks":
+        # It changes the library: a copy of its own.
+        given = profile / "library"
+        shutil.copytree(lib, given)
+    command = ["xvfb-run", "-a", "-s", "-screen 0 1600x1000x24", str(APP / "build/pinhole"), "--library", str(given)]
+    if mode == "hidden":
+        # Screenshots hiding, what it found kept from a run before.
+        (profile / "config/pinhole").mkdir(parents=True)
+        (profile / "config/pinhole/plugins.json").write_text('{"settings": {"pinhole.screenshots": {"hide": true}}}')
+        subprocess.run(["timeout", "25", *command], env=env | {"PINHOLE_SELFTEST": "lazyplugins:" + str(out)},
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
+    with (logs / f"{mode}.log").open("w") as log:
+        code = subprocess.run(["timeout", "300", *command], env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+    text = (logs / f"{mode}.log").read_text(errors="replace")
+    failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
+    print(f"{mode}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code}")
+    for line in failed[:12]:
+        print("    " + line)
+    return code == 0 and not failed
+
+
+def main():
+    modes = sys.argv[1:] or MODES
+    logs = APP / "build/selftests"
+    logs.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="pinhole-selftests-") as temporary:
+        scratch = Path(temporary)
+        lib, farm = library(scratch), plugins(scratch)
+        results = [run(mode, scratch, lib, farm, logs) for mode in modes]
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

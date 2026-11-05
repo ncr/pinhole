@@ -479,7 +479,11 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
         probe(QStringLiteral("the side panel's margins and gaps, ") + wide, panelBare, presses(), panelItem);
         // What scrolls the panel lies over it all, and a click still
         // reaches its controls: a switch clicked turns, and back.
-        add(QStringLiteral("a switch in the panel, %1").arg(wide), [=] { scroller()->setProperty("contentY", 0); }, 300);
+        // The switches are on the Photos tab.
+        add(QStringLiteral("a switch in the panel, %1").arg(wide), [=] {
+            item("sidePanel")->setProperty("section", QStringLiteral("photos"));
+            scroller()->setProperty("contentY", 0);
+        }, 300);
         add(QStringLiteral("a switch in the panel clicked, %1").arg(wide), [=] {
             QQuickItem *toggle = item("markSwitch:pinhole/video");
             if (!toggle) {
@@ -800,7 +804,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                      QMetaObject::invokeMethod(icloud, "openSignIn", Q_ARG(QVariant, QString()));
              }},
             {"the new plugins card", "newPluginsCard",
-             [=] { QMetaObject::invokeMethod(item("newPlugins"), "open", Q_ARG(QVariant, QVariant(QStringList{"pinhole.series", "pinhole.colour"}))); }},
+             [=] { QMetaObject::invokeMethod(window, "showNewPlugins", Q_ARG(QVariant, QVariant(QStringList{"pinhole.series", "pinhole.colour"}))); }},
             {"select mode's Copy menu", "selectCopyGroupCard",
              [=] {
                  grid->setSelecting(true);

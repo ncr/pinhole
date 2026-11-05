@@ -1128,6 +1128,11 @@ ApplicationWindow {
     }
     // The help over the card, as ? on it takes the keys.
     readonly property bool newPluginsShown: newPluginsView.item?.shown ?? false
+    // The card of plugins new to tour, made the first time (a self-test's).
+    function showNewPlugins(ids) {
+        newPluginsView.active = true
+        newPluginsView.item.open(ids)
+    }
     Loader {
         id: newPluginsView
         anchors.fill: parent
@@ -1524,7 +1529,8 @@ ApplicationWindow {
         text: qsTr("Newest")
         section: "library"
         keys: ["N", "End"]
-        keysText: "N End"
+        // End works too, as in any list; the button names N alone.
+        keysText: "N"
         keyLayer: "grid"
         when: grid.count > 0
         onTriggered: grid.cursorToEnd()
