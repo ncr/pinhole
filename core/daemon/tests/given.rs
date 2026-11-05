@@ -182,6 +182,9 @@ fn a_library_given_is_only_read_and_its_service_ends_with_its_windows() {
     assert!(!given.join("library.sqlite-wal").exists(), "the library given was put in WAL mode");
     let status = window.ask("status", json!({}));
     assert_eq!(status["result"]["windows"], 1, "{status:#}");
+    // No plugin's worker runs for it.
+    let workers = window.ask("workers", json!({}));
+    assert_eq!(workers["result"], json!({"workers": []}), "{workers:#}");
 
     // A second window, then both gone: the service stays while one is
     // there, and ends a while after the last.

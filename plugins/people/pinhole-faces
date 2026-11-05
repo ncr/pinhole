@@ -671,11 +671,12 @@ def run_index(db, library, source, settings):
             catalog.close()
 
 
-def daemon(library, source, settings):
-    # Match PluginHost::cacheDir so existing face groups and labels carry over.
+def daemon(library, source, settings, cache=None):
+    # pinholed gives the plugin's cache for this library (PluginHost::cacheDir),
+    # so existing face groups and labels carry over; the same when run by hand.
     library = library.absolute()
-    cache = (xdg("XDG_CACHE_HOME", ".cache") / "pinhole/plugins/me.people"
-             / f"{library.parent.name}-{library.name}")
+    cache = cache or (xdg("XDG_CACHE_HOME", ".cache") / "pinhole/plugins/me.people"
+                      / f"{library.parent.name}-{library.name}")
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (cache / (RECIPE + "-scan.lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -697,6 +698,7 @@ def main():
     parser.add_argument("--library", type=Path)
     parser.add_argument("--library-key")
     parser.add_argument("--managed-plugins", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
     os.umask(0o077)
     if args.operation == "daemon":
@@ -706,7 +708,7 @@ def main():
         os.nice(10)
         os.environ.update(OPENBLAS_NUM_THREADS="2", OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
         settings = args.managed_plugins or xdg("XDG_CONFIG_HOME", ".config") / "pinhole/plugins.json"
-        daemon(args.library, args.library_key, settings)
+        daemon(args.library, args.library_key, settings, args.cache_dir)
         return
     if args.cache is None:
         parser.error("--cache is required for this operation")

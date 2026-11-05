@@ -5,5 +5,8 @@
   "name": "Photo content search",
   "version": "0.7.0",
   "description": "Local English and Polish text search over photo thumbnails.",
-  "entryPoints": { "main": "SemanticSearch.qml" }
+  "entryPoints": { "main": "SemanticSearch.qml" },
+  "workers": [
+    { "name": "index", "program": "pinhole-semantic", "args": ["daemon"], "per": "source" }
+  ]
 }

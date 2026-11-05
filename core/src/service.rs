@@ -232,6 +232,9 @@ struct Shared {
     /// How many connections there are, and since when there have been
     /// none: a service of a library given ends after a while of none.
     connections: Mutex<(usize, std::time::Instant)>,
+    /// The plugins' workers, run for the source shown (workers.rs): none
+    /// in a service of a library given.
+    workers: crate::workers::Workers,
 }
 
 /// When each source was last looked at for changes (the end of its last
@@ -620,6 +623,17 @@ impl Shared {
         self.source.read().unwrap().clone()
     }
 
+    /// The source shown, as the plugins' workers are run for it: once it
+    /// has a library to read.
+    fn workers_shown(&self) -> Option<crate::workers::Shown> {
+        let source = self.source();
+        if source.kind() == "none" {
+            return None;
+        }
+        let library = self.storage.library();
+        library.join("library.sqlite").is_file().then(|| crate::workers::Shown { library, key: source.id() })
+    }
+
     /// The settings, as the kinds read them.
     fn settings(&self) -> crate::storage::Settings {
         crate::storage::read_settings(&self.config.settings, &self.config.kinds)
@@ -786,6 +800,11 @@ pub fn run(config: Config) -> Result<()> {
     ));
     let shared = Arc::new(Shared {
         source: RwLock::new(config.source.clone()),
+        workers: crate::workers::Workers::new(
+            config.kinds.places().cloned(),
+            config.plugins.clone(),
+            crate::workers::cache_root(),
+        ),
         config,
         storage,
         lookups: Mutex::new(lookup_tx),
@@ -862,20 +881,9 @@ pub fn run(config: Config) -> Result<()> {
             std::thread::spawn(move || sync_loop(shared, sync_rx));
         }
         watch(&shared, &*shared.source());
-        for index in [crate::local_index::Index::Semantic, crate::local_index::Index::People] {
+        {
             let shared = shared.clone();
-            let builtin = crate::plugins::Places::found().builtin;
-            std::thread::spawn(move || crate::local_index::supervise(&shared.config.plugins, || {
-                let helper = index.helper(&shared.config.plugins, &builtin)?;
-                let source = shared.source();
-                if source.kind() == "none" {
-                    return None;
-                }
-                let library = shared.storage.library();
-                library.join("library.sqlite").is_file().then(|| crate::local_index::Job {
-                    helper, library, key: source.id(),
-                })
-            }));
+            std::thread::spawn(move || shared.workers.supervise(|| shared.workers_shown(), |event| shared.broadcast(event)));
         }
     }
     {
@@ -1080,14 +1088,9 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
         }
         match request["method"].as_str() {
             Some("ping") => reply.send(Ok(json!({}))),
-            Some("semantic_index") => {
-                let params = &request["params"];
-                let managed = shared.config.given.is_none()
-                    && params["key"].as_str() == Some(shared.source().id().as_str())
-                    && params["library"].as_str().is_some_and(|library| Path::new(library) == shared.storage.library())
-                    && crate::local_index::semantic_helper(&shared.config.plugins).is_some();
-                reply.send(Ok(json!({"managed": managed})));
-            }
+            // A service of a library given runs none.
+            Some("workers") if shared.config.given.is_some() => reply.send(Ok(json!({"workers": []}))),
+            Some("workers") => reply.send(Ok(shared.workers.report_now(shared.workers_shown().as_ref()))),
             Some("sync") => {
                 let _ = shared.sync_now.lock().unwrap().send(());
                 reply.send(Ok(json!({})))

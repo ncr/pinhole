@@ -32,6 +32,7 @@ def main():
     for option in ('checkout', 'library', 'managed-plugins'):
         daemon.add_argument('--' + option, type=Path, required=True)
     daemon.add_argument('--library-key', required=True)
+    daemon.add_argument('--cache-dir', type=Path)
     server = commands.add_parser('serve')
     for option in ('index', 'models', 'library'):
         server.add_argument('--' + option, type=Path, required=True)
@@ -65,8 +66,10 @@ def main():
                 print(json.dumps(profile | {"worker": script, "managed": managed}))
                 return 0
             python = profile["python"]
+            # pinholed gives the plugin's cache for this library, the window's pinhole.cacheDir.
+            index = args.cache_dir / profile["indexFile"] if args.cache_dir else index_path(args.library, profile["indexFile"])
             os.execv(python, [python, script, "serve", "--background", "--index",
-                             str(index_path(args.library, profile["indexFile"])), "--library", str(args.library),
+                             str(index), "--library", str(args.library),
                              "--library-key", args.library_key, "--managed-plugins", str(args.managed_plugins),
                              *profile["args"]])
         if args.socket is None:

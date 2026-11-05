@@ -16,6 +16,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 kamadak-exif = "0.6"
+libc = "0.2"
 p256 = { version = "0.13", features = ["ecdsa"] }
 rand = { version = "0.8", features = ["small_rng"] }
 rayon = "1"
@@ -40,6 +41,8 @@ description = "Pinhole's core: the service, the library index and the cache, wha
 anyhow.workspace = true
 clap.workspace = true
 image.workspace = true
+# setpriority, for the plugins' workers (workers.rs).
+libc.workspace = true
 rand.workspace = true
 rayon.workspace = true
 # Nothing in the core fetches with it yet: the URL tickets of sources of

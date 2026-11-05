@@ -578,7 +578,7 @@ fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
     log_lines(plugin, stderr, &mut std::io::stderr());
 }
 
-fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
+pub(crate) fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
     let mut stderr = BufReader::new(from);
     let mut buf = Vec::new();
     let (mut since, mut said, mut left_out) = (Instant::now(), 0u32, 0u32);

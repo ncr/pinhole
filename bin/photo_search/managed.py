@@ -6,15 +6,18 @@ import socket
 import sqlite3
 import time
 
+PLUGIN = "me.semantic-search"
+
 
 def service_manages(library, key):
+    """Whether the shared service runs this plugin's worker for this library and source."""
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or Path.home() / ".cache")
     path = os.environ.get("PINHOLE_SOCKET") or runtime / "pinhole.sock"
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(1)
             connection.connect(str(path))
-            request = {"id": 1, "method": "semantic_index", "params": {"library": str(library), "key": key}}
+            request = {"id": 1, "method": "workers", "params": {}}
             connection.sendall((json.dumps(request) + "\n").encode())
             with connection.makefile("rb") as lines:
                 for _ in range(32):
@@ -23,8 +26,11 @@ def service_manages(library, key):
                         return False
                     reply = json.loads(line)
                     if reply.get("id") == 1:
-                        return reply.get("result", {}).get("managed") is True
-    except (OSError, ValueError):
+                        workers = (reply.get("result") or {}).get("workers") or []
+                        return any(isinstance(worker, dict) and worker.get("plugin") == PLUGIN
+                                   and worker.get("key") == key and isinstance(worker.get("library"), str)
+                                   and Path(worker["library"]) == Path(library) for worker in workers)
+    except (OSError, ValueError, TypeError, AttributeError):
         pass
     return False
 

@@ -1,5 +1,8 @@
 """Read-only catalog updates for the daemon-owned search worker."""
 import json
+import os
+import socket
+import threading
 from pathlib import Path
 import sqlite3
 import sys
@@ -9,7 +12,7 @@ import unittest
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from photo_search.managed import Catalog
+from photo_search.managed import Catalog, service_manages
 
 
 class ManagedCatalogTests(unittest.TestCase):
@@ -53,3 +56,56 @@ class ManagedCatalogTests(unittest.TestCase):
             self.assertFalse(worker.catalog_ready)
             worker.stop.assert_called_once()
             self.assertEqual(worker.request.call_count, 2)
+
+
+class ServiceManagesTests(unittest.TestCase):
+    """The worker is the service's when its `workers` say it runs for this library."""
+
+    def serve(self, directory, workers):
+        path = Path(directory) / 's.sock'
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(path))
+        server.listen()
+        self.addCleanup(server.close)
+        asked = []
+
+        def answer():
+            connection, _ = server.accept()
+            with connection, connection.makefile('rwb') as lines:
+                lines.write(b'{"event": "hello", "protocol": 1}\n')
+                lines.flush()
+                request = json.loads(lines.readline())
+                asked.append(request)
+                lines.write((json.dumps({'id': request['id'], 'ok': True, 'result': {'workers': workers}}) + '\n').encode())
+                lines.flush()
+
+        thread = threading.Thread(target=answer, daemon=True)
+        thread.start()
+        old = os.environ.get('PINHOLE_SOCKET')
+        os.environ['PINHOLE_SOCKET'] = str(path)
+        self.addCleanup(lambda: os.environ.pop('PINHOLE_SOCKET') if old is None else os.environ.update(PINHOLE_SOCKET=old))
+        return asked
+
+    def test_only_its_own_worker_for_this_library_and_source(self):
+        library = '/data/library/folder/Pictures'
+        mine = {'plugin': 'me.semantic-search', 'name': 'index', 'library': library, 'key': 'folder:/p', 'running': False}
+        cases = [([mine], True),
+                 ([dict(mine, plugin='me.people')], False),
+                 ([dict(mine, key='folder:/other')], False),
+                 ([dict(mine, library='/data/library/folder/Other')], False),
+                 ([dict(mine, library=None, key=None)], False),
+                 ([], False)]
+        for workers, managed in cases:
+            with self.subTest(workers=workers), tempfile.TemporaryDirectory() as directory:
+                asked = self.serve(directory, workers)
+                self.assertIs(service_manages(Path(library), 'folder:/p'), managed)
+                self.assertEqual(asked[0]['method'], 'workers')
+
+    def test_no_service_is_not_managed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = os.environ.get('PINHOLE_SOCKET')
+            os.environ['PINHOLE_SOCKET'] = str(Path(directory) / 'none.sock')
+            try:
+                self.assertFalse(service_manages(Path('/x'), 'folder:/p'))
+            finally:
+                os.environ.pop('PINHOLE_SOCKET') if old is None else os.environ.update(PINHOLE_SOCKET=old)

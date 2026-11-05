@@ -228,6 +228,11 @@ impl Kinds {
         true
     }
 
+    /// Where the plugins are, if their providers are looked for.
+    pub fn places(&self) -> Option<&Places> {
+        self.places.as_ref().map(|(places, _)| places)
+    }
+
     /// The kind of that name, on or not.
     pub fn of(&self, kind: &str) -> Option<Arc<dyn Kind>> {
         self.all().into_iter().find(|k| k.kind() == kind)
