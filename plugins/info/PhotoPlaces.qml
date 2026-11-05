@@ -87,7 +87,7 @@ FocusScope {
                 return
             pending = null
             loading = false
-            failed = error.code !== "cancelled"
+            failed = error.code !== "cancelled" && error.code !== "reloaded"
         })
     }
     function byDate(a, b) {

@@ -52,7 +52,7 @@ Item {
             : message
     }
     function report(error) {
-        if (error.code === "cancelled") return
+        if (error.code === "cancelled" || error.code === "reloaded") return
         let message = error.message || String(error)
         if (error.stdout) {
             try { message = JSON.parse(error.stdout).error || message } catch (_) {}

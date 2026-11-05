@@ -49,7 +49,7 @@ Item {
                 return
             pending = null
             loading = false
-            if (error.code !== "cancelled")
+            if (error.code !== "cancelled" && error.code !== "reloaded")
                 problem = qsTr("Could not read recent additions. Try opening this view again.")
         })
     }

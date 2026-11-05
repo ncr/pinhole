@@ -1289,12 +1289,21 @@ void Plugins::scan() {
             for (const QFileInfo &entry : dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Unsorted)) {
                 const QString path = entry.filePath();
                 if (entry.isDir()) {
-                    // Skip a helper's build tree before walking it.
-                    if (entry.fileName() == QLatin1String("target"))
+                    // What a helper makes as it runs or builds is not the
+                    // plugin: a build tree, Python's caches, an environment,
+                    // anything hidden. Changed, it would load the plugin
+                    // again, and stop the helper that changed it.
+                    static const QStringList made = {"target", "node_modules", "__pycache__", "venv", "build", "dist"};
+                    if (made.contains(entry.fileName()) || entry.fileName().startsWith('.'))
                         continue;
                     if (!entry.isSymLink())
                         directories << path;
                 } else {
+                    // What Pinhole loads of it: its QML, its JavaScript, its
+                    // manifest and words.
+                    static const QStringList loaded = {"qml", "js", "mjs", "json"};
+                    if (!loaded.contains(entry.suffix()) && entry.fileName() != QLatin1String("qmldir"))
+                        continue;
                     parts << path + QString::number(entry.lastModified().toMSecsSinceEpoch()) + QString::number(entry.size());
                 }
                 paths << path;

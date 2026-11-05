@@ -5466,6 +5466,20 @@ private slots:
         QTRY_COMPARE(bench.said(), QStringList({"second cancelled"}));
     }
 
+    void aProgramWithNoInputSeesItsEndAndAQueryCutByAReloadSaysSo() {
+        PluginBench bench({{"t", {}}});
+        QVERIFY(bench.host);
+        // Reading stdin to its end: it ends at once, rather than waiting.
+        bench.js(R"(pinhole.run("cat", [], { timeout: 3000 }).then(r => said.push("cat '" + r.stdout + "'"), e => said.push(e.code)))");
+        QTRY_COMPARE(bench.said(), QStringList({"cat ''"}));
+        // Cut short by the library read again: not the plugin's cancel.
+        bench.js(R"(said.length = 0
+            pinhole.query("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 100000000) SELECT count(*) AS n FROM c")
+                .then(r => said.push("rows"), e => said.push(e.code)))");
+        emit bench.plugins->library()->changed();
+        QTRY_COMPARE(bench.said(), QStringList({"reloaded"}));
+    }
+
     void whatAPluginStartedEndsWithItAndAnswersNoMore() {
         PluginBench bench({{"t", {}}});
         const QString marker = bench.dir.path() + "/marker";
@@ -5556,6 +5570,17 @@ private slots:
         write(build, "new compiler output");
         QTest::qWait(450);
         QCOMPARE(changed.count(), 0);
+        // What a helper makes as it runs, and a helper's own files, are not
+        // what Pinhole loads.
+        QVERIFY(QDir().mkpath(root + "/__pycache__"));
+        QVERIFY(QDir().mkpath(root + "/.venv/bin"));
+        write(root + "/__pycache__/helper.cpython-314.pyc", "cache");
+        write(root + "/.venv/bin/python", "env");
+        write(root + "/helper.py", "print('changed helper')");
+        write(root + "/output.png", "made");
+        QTest::qWait(450);
+        // Looked over again (a new folder) maybe, but not loaded again.
+        QCOMPARE(bench.plugins->at("t").value("main").toString(), main);
         write(source, "new plugin source");
         QTRY_VERIFY(bench.plugins->at("t").value("main").toString() != main);
     }

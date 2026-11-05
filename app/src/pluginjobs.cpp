@@ -528,10 +528,11 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
         process->deleteLater();
     });
     process->start(path, arguments);
-    if (const QJSValue input = options.property("input"); !input.isUndefined() && !input.isNull()) {
+    // Its stdin ends after what it is given, or at once: a program that
+    // reads it to the end (jq, cat) never waits for more that cannot come.
+    if (const QJSValue input = options.property("input"); !input.isUndefined() && !input.isNull())
         process->write(input.toString().toUtf8());
-        process->closeWriteChannel();
-    }
+    process->closeWriteChannel();
     return deferred.promise;
 }
 

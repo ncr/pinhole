@@ -228,11 +228,17 @@ QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
     // A stopped/reloaded plugin must stop computation too, not merely drop
     // its eventual callback. A catalog reload invalidates old answers.
     track(watcher, [control] { control->cancel(); });
-    connect(m_plugins->library(), &PluginLibrary::changed, watcher, [control] { control->cancel(); });
-    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, deferred, generation, control] {
+    // Stopped by the library read again, not by the plugin: `reloaded`, so a
+    // view that ignores what it cancelled itself still asks again.
+    const auto reloaded = std::make_shared<bool>(false);
+    connect(m_plugins->library(), &PluginLibrary::changed, watcher, [control, reloaded] {
+        *reloaded = true;
+        control->cancel();
+    });
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, deferred, generation, control, reloaded] {
         watcher->deleteLater();
         auto answer = watcher->result();
-        if (control->cancelled()) answer = {{}, QStringLiteral("cancelled"), {}};
+        if (control->cancelled()) answer = {{}, *reloaded ? QStringLiteral("reloaded") : QStringLiteral("cancelled"), {}};
         if (!answer.code.isEmpty()) {
             QString message = answer.message;
             if (answer.code == QLatin1String("query_timeout"))
@@ -243,6 +249,8 @@ QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
                 message = tr("Too many queries are running. Wait for one to finish.");
             else if (answer.code == QLatin1String("cancelled"))
                 message = tr("cancelled");
+            else if (answer.code == QLatin1String("reloaded"))
+                message = tr("The library was read again while this was asked. Ask again.");
             settle(generation, deferred->reject, error(answer.code, message));
         } else if (QJSEngine *js = engine()) {
             settle(generation, deferred->resolve, js->toScriptValue(answer.rows));
