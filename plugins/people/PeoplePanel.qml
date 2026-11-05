@@ -666,10 +666,12 @@ Panel {
         visible: !panel.picking && (panel.view === "group" || panel.view === "check")
         anchors.top: titlebar.bottom
         width: parent.width
-        height: visible ? nameButtons.height + 12 : 0
+        // As far below the title's bar as the names are from the photos.
+        height: visible ? nameButtons.height + 24 : 0
         Flow {
             id: nameButtons
             x: 12
+            y: 12
             width: parent.width - 24
             spacing: 6
             Repeater {
