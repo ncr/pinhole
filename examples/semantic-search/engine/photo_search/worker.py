@@ -93,6 +93,10 @@ class Worker:
         self.pending = []
         self.running = False
         self.waiting = False
+        # Waiting for the person to step away from the screen: indexing on
+        # the GPU that draws it makes the desktop stutter (away.py).
+        self.yielding = False
+        self.yielded_at = None
         self.catalog_ready = False
         self.last_error = ''
         self.processed = self.skipped = 0
@@ -104,6 +108,20 @@ class Worker:
         finally:
             self.store.close()
 
+    def yield_to_person(self, here):
+        """Background indexing waits while someone uses the screen, the
+        model let go after a minute of that, its memory the desktop's."""
+        if not here:
+            self.yielding, self.yielded_at = False, None
+            return False
+        if not self.yielding:
+            self.yielding, self.yielded_at = True, time.monotonic()
+        elif (self.engine.idle_seconds is not None and self.last_inference is not None
+                and time.monotonic() - self.yielded_at >= self.engine.idle_seconds):
+            self.engine.close()
+            self.last_inference = None
+        return True
+
     def release_idle(self):
         delay = self.engine.idle_seconds
         if (delay is not None and not self.running and self.last_inference is not None
@@ -113,6 +131,7 @@ class Worker:
 
     def status(self):
         return self.store.status() | {"running": self.running, "waiting": self.waiting, "pending": len(self.pending),
+                                      "yielding": self.yielding and self.running,
                                       "catalog_ready": self.catalog_ready, "managed": bool(getattr(self.args, "managed_plugins", None)),
                                       "processed": self.processed, "skipped": self.skipped,
                                       "error": self.last_error, "backend": self.args.backend}
@@ -363,6 +382,8 @@ def serve(args):
                 listener.settimeout(.025)
                 print(json.dumps({"event": "ready", "status": worker.status()}), flush=True)
                 next_step = 0
+                from .away import Away
+                away = Away()
                 while not stopping:
                     if catalog is not None:
                         if select.select([0], [], [], 0)[0] and not os.read(0, 1):
@@ -373,7 +394,10 @@ def serve(args):
                         connection, _ = listener.accept()
                     except socket.timeout:
                         started = time.monotonic()
-                        if worker.running and started >= next_step:
+                        if (worker.running and started >= next_step and args.background
+                                and worker.yield_to_person(away() is False)):
+                            next_step = started + 5
+                        elif worker.running and started >= next_step:
                             try:
                                 worker.step()
                             except Exception as error:

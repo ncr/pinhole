@@ -31,6 +31,7 @@ Item {
         : !catalogReady ? qsTr("Reading the library…")
         : complete ? qsTr("All %1 photos can be found.").arg(count(status.total))
         : paused ? qsTr("Indexing is paused: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
+        : status.yielding ? qsTr("Indexing while you are away from the screen, so the desktop stays smooth: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
         : status.waiting ? qsTr("Waiting for the graphics card: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
         : qsTr("Looking through your photos: %1 of %2 can be found so far.").arg(count(status.indexed)).arg(count(status.total))
 
