@@ -5435,6 +5435,27 @@ private slots:
         QCOMPARE(bench.said().last(), QString("old 2 old"));
     }
 
+    void aChainOfAPluginsPromisesCancelsWhatItWaitsOn() {
+        PluginBench bench({{"t", {}}});
+        QVERIFY(bench.host);
+        // Kept after then() and catch(): cancel() is there, and stops the
+        // first program.
+        bench.js(R"(
+            var first = pinhole.run("sleep", ["5"]).then(r => said.push("ran")).catch(e => said.push("first " + e.code))
+            first.cancel()
+        )");
+        QTRY_COMPARE(bench.said(), QStringList({"first cancelled"}));
+        // Waiting on the second program a step returned: that one stops.
+        bench.js(R"(
+            said.length = 0
+            var second = pinhole.run("true", []).then(() => pinhole.run("sleep", ["5"]))
+            second.then(r => said.push("ran"), e => said.push("second " + e.code))
+        )");
+        QTest::qWait(300);
+        bench.js("second.cancel()");
+        QTRY_COMPARE(bench.said(), QStringList({"second cancelled"}));
+    }
+
     void whatAPluginStartedEndsWithItAndAnswersNoMore() {
         PluginBench bench({{"t", {}}});
         const QString marker = bench.dir.path() + "/marker";

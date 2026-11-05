@@ -734,7 +734,11 @@ once: Screenshots' `found:` lists to its cache, Series' `edits`, Info's
 ### Promises
 
 What takes a while (`fetch`, `query`, `run`, `record`, `copyFile`) gives a
-promise, which also has `cancel()` (`copyFile`'s does nothing):
+promise, which also has `cancel()` (`copyFile`'s does nothing). So does
+every promise made from it with `then` and `catch`, and cancelling any of
+them stops the whole chain: the first job and any Pinhole job a step
+returned, so keeping `pinhole.run(…).then(…).then(…)` to cancel later is
+fine:
 
 ```js
 const steadying = pinhole.run("pinhole-series", ["steady", dir].concat(ids), { timeout: 30000 })

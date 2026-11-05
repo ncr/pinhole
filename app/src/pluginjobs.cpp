@@ -215,11 +215,33 @@ PluginHost::Deferred PluginHost::defer(const std::function<void()> &cancel) {
         connect(js, &QObject::destroyed, js, [js] { factories.remove(js); });
     QJSValue &factory = factories[js];
     if (factory.isUndefined())
+        // Every promise made from it with then() and catch() can cancel too,
+        // and cancels the whole chain: this job and any Pinhole job a step
+        // of it returned, so `job.then(…).then(…)` kept and cancelled later
+        // stops what it is waiting on, rather than throwing.
         factory = js->evaluate(QStringLiteral(R"((function (job) {
             let resolve, reject
             const promise = new Promise(function (a, b) { resolve = a; reject = b })
-            promise.cancel = function () { job.cancel() }
-            return { promise: promise, resolve: resolve, reject: reject }
+            const jobs = [job]
+            const cancel = function () { for (const each of jobs.splice(0)) each.cancel() }
+            const follow = function (step) {
+                if (typeof step !== "function") return step
+                return function (value) {
+                    const next = step(value)
+                    if (next && typeof next.cancel === "function") jobs.push(next)
+                    return next
+                }
+            }
+            // A promise's own then can't be replaced here (V4 keeps the
+            // prototype's), so each step is a thenable around the promise.
+            const carry = function (made) {
+                return {
+                    then: function (done, failed) { return carry(made.then(follow(done), follow(failed))) },
+                    catch: function (failed) { return carry(made.then(undefined, follow(failed))) },
+                    cancel: cancel
+                }
+            }
+            return { promise: carry(promise), resolve: resolve, reject: reject }
         }))"));
     const QJSValue made = factory.call({js->newQObject(new PluginJob(cancel))});
     return {made.property("promise"), made.property("resolve"), made.property("reject")};
