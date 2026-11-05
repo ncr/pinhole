@@ -29,7 +29,9 @@ Rectangle {
         anchors.right: tick.left
         anchors.leftMargin: Math.round(theme.fontSize * 0.833)
         anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
+        // Centred on the capital height, as a button's label is
+        // (UiText.centredIn), so a field and the buttons beside it line up.
+        y: Math.round((field.height + capital.tightBoundingRect("H").height) / 2 - capital.ascent)
         font.family: theme.font
         font.pixelSize: theme.fontSize
         color: field.done ? theme.darkForeground : theme.brightForeground
@@ -51,9 +53,10 @@ Rectangle {
         }
         onAccepted: field.accepted()
     }
+    FontMetrics { id: capital; font: input.font }
     UiText {
         anchors.left: input.left
-        anchors.verticalCenter: parent.verticalCenter
+        y: centredIn(field.height)
         visible: input.text === "" && !input.preeditText
         anchors.right: input.right
         elide: Text.ElideRight
@@ -65,7 +68,7 @@ Rectangle {
         id: tick
         anchors.right: parent.right
         anchors.rightMargin: Math.round(theme.fontSize * 0.833)
-        anchors.verticalCenter: parent.verticalCenter
+        y: centredIn(field.height)
         text: field.done ? "✓" : ""
         color: theme.accent
         Accessible.ignored: true

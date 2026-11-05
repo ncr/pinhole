@@ -13,7 +13,9 @@ scroll. Arrows move across both, ⏎ opens, Esc goes back.
 
 A group opens to its photos with the names already given above them, the
 likeliest first, each on a number key: 1 names the whole group, and the
-next group to name opens. Type a new name in **New name…** (N). X (or the
+next group to name opens. Type a new name in **New name…** (N). 0
+(**Don't know**) skips a face you do not recognise: it waits under **Not
+known yet** at the end of the page, to be named whenever you remember. X (or the
 ✕ on a photo under the pointer) takes a photo that is someone else out of
 the group.
 

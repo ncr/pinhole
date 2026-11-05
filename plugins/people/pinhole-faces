@@ -403,6 +403,10 @@ def review_labels(db, edits):
     db.execute("CREATE TEMP TABLE refused (anchor TEXT, name TEXT, PRIMARY KEY (anchor, name))")
     db.executemany("INSERT OR IGNORE INTO refused VALUES (?,?)",
                    ((key, name) for key, edit in edits.items() for name in edit.get("not", ())))
+    # Groups the person did not recognise: kept apart, at the end.
+    db.execute("CREATE TEMP TABLE unknown (anchor TEXT PRIMARY KEY)")
+    db.executemany("INSERT OR IGNORE INTO unknown VALUES (?)",
+                   ((key,) for key, edit in edits.items() if edit.get("unknown")))
     db.execute("INSERT OR IGNORE INTO labels SELECT anchor, name FROM legacy")
     db.execute("""
         INSERT OR IGNORE INTO labels
@@ -510,7 +514,7 @@ def likely_rows(db, person, offset, limit=48):
     return rows
 
 
-def review_rows(db, operation, target, offset, only=None, limit=48):
+def review_rows(db, operation, target, offset, only=None, limit=48, known=None):
     if only == []:
         return []
     if operation == "groups":
@@ -522,10 +526,12 @@ def review_rows(db, operation, target, offset, only=None, limit=48):
                        row_number() OVER (PARTITION BY anchor ORDER BY score DESC, member) AS rank
                 FROM pending
             )
-            SELECT f.key, f.photo, f.box, p.path, c.count, c.anchor, NULL
+            SELECT f.key, f.photo, f.box, p.path, c.count, c.anchor, NULL, u.anchor IS NOT NULL
             FROM covers c JOIN faces f ON f.key=c.member JOIN photos p ON p.id=f.photo
-            WHERE c.rank=1 {} ORDER BY c.count DESC, c.anchor LIMIT ? OFFSET ?
-        """.format("" if only is None else "AND c.anchor IN ({})".format(",".join("?" * len(only))))
+            LEFT JOIN unknown u ON u.anchor=c.anchor
+            WHERE c.rank=1 {} {} ORDER BY u.anchor IS NOT NULL, c.count DESC, c.anchor LIMIT ? OFFSET ?
+        """.format("" if only is None else "AND c.anchor IN ({})".format(",".join("?" * len(only))),
+                   "" if known is None else "AND u.anchor IS {} NULL".format("" if known else "NOT"))
         params = (*(only or ()), limit + 1, offset)
     elif operation == "people":
         query = """
@@ -533,7 +539,7 @@ def review_rows(db, operation, target, offset, only=None, limit=48):
                 SELECT l.name, min(f.key) AS key, count(DISTINCT f.photo) AS count
                 FROM labels l JOIN faces f USING (key) GROUP BY l.name
             )
-            SELECT f.key, f.photo, f.box, p.path, c.count, NULL, c.name
+            SELECT f.key, f.photo, f.box, p.path, c.count, NULL, c.name, 0
             FROM covers c JOIN faces f USING (key) JOIN photos p ON p.id=f.photo
             ORDER BY c.name COLLATE NOCASE, c.name LIMIT ? OFFSET ?
         """
@@ -546,12 +552,13 @@ def review_rows(db, operation, target, offset, only=None, limit=48):
             source = "labels l JOIN faces f USING (key)"
             where = "l.name=? ORDER BY f.photo, f.key"
         query = f"""
-            SELECT f.key, f.photo, f.box, p.path, NULL, NULL, NULL
+            SELECT f.key, f.photo, f.box, p.path, NULL, NULL, NULL, 0
             FROM {source} JOIN photos p ON p.id=f.photo WHERE {where} LIMIT ? OFFSET ?
         """
         params = (target, limit + 1, offset)
-    return [dict(key=key, id=photo, box=json.loads(box), path=path, count=count, anchor=anchor, name=name)
-            for key, photo, box, path, count, anchor, name in db.execute(query, params)]
+    return [dict(key=key, id=photo, box=json.loads(box), path=path, count=count, anchor=anchor, name=name,
+                 unknown=bool(unknown))
+            for key, photo, box, path, count, anchor, name, unknown in db.execute(query, params)]
 
 
 def assignment_keys(db, anchor):
@@ -565,7 +572,10 @@ def readonly(path):
 def load_edits(path, source, previous):
     try:
         entries = json.loads(path.read_text()).get("people:" + source, {})
-        names = sorted(key for key, edit in entries.items() if edit.get("name"))
+        # Groups with a saved word about them keep their anchor through
+        # regrouping, so the word stays with the faces it was said of.
+        names = sorted(key for key, edit in entries.items()
+                       if edit.get("name") or edit.get("unknown") or edit.get("not"))
         excluded = {key: edit["rejected"] for key, edit in entries.items() if edit.get("rejected")}
         return names, excluded
     except FileNotFoundError:
@@ -717,8 +727,9 @@ def main():
         elif args.operation == "likely":
             emit(args.operation, rows=likely_rows(db, request["person"], request["offset"], limit), status=status(db))
         else:
+            known = {"known": True, "unknown": False}.get(request.get("which"))
             rows = review_rows(db, args.operation, request.get("anchor") or request.get("person"), request["offset"],
-                               limit=limit)
+                               limit=limit, known=known)
             if args.operation == "groups":
                 rows = with_guesses(db, rows)
             elif args.operation == "people":

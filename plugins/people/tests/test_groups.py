@@ -143,6 +143,15 @@ class Guesses(unittest.TestCase):
             worker.review_labels(db, {"anna": {"person": "Anna"}, "a1": {"not": ["Anna"]}})
             self.assertEqual(worker.likely_rows(db, "Anna", 0), [])
 
+    def test_a_group_not_known_comes_apart_from_those_to_name(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"a1": {"unknown": True}})
+            rows = worker.review_rows(db, "groups", None, 0)
+            self.assertEqual([(row["anchor"], row["unknown"]) for row in rows][-1], ("a1", True))
+            self.assertEqual([row["anchor"] for row in worker.review_rows(db, "groups", None, 0, known=False)], ["a1"])
+            self.assertNotIn("a1", [row["anchor"] for row in worker.review_rows(db, "groups", None, 0, known=True)])
+
     def test_no_named_people_gives_no_guesses(self):
         with sqlite3.connect(":memory:") as db:
             self.library(db)

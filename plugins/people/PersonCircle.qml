@@ -10,6 +10,7 @@ Item {
     property string detail
     property bool guessed: false
     property bool chosen: false
+    readonly property bool hovered: face.hovered
     signal selected()
     height: width + theme.fontSize * 2.8
     Accessible.role: Accessible.Button

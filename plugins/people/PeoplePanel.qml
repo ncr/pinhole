@@ -37,7 +37,13 @@ Panel {
     property var assignmentJob: null
     property string picking: ""
     readonly property int columns: Math.max(3, Math.floor((width - 24) / (theme.fontSize * (view === "home" ? 10 : 11))))
-    readonly property var tiles: view === "home" ? people.concat(groups) : faces
+    // At home, in this order: named people, faces to name, faces not known
+    // (the service sends those last).
+    readonly property var known: groups
+    property var unknown: []
+    // At home: named people, faces not known yet (kept for later), then
+    // the faces to name.
+    readonly property var tiles: view === "home" ? people.concat(unknown, known) : faces
     readonly property var selection: tiles[selected] ?? null
     readonly property var personRow: people.find(row => row.name === person) ?? null
     readonly property var names: {
@@ -120,7 +126,10 @@ Panel {
         if (view === "home") {
             job = read(token, "people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read(token, "groups", { limit: groupLimit })
+                return read(token, "groups", { which: "unknown", limit: 500 })
+            }).then(rows => {
+                unknown = rows.slice(0, 500)
+                return read(token, "groups", { which: "known", limit: groupLimit })
             }).then(rows => {
                 moreGroups = rows.length > groupLimit
                 groups = rows.slice(0, groupLimit)
@@ -239,7 +248,7 @@ Panel {
         const saved = Object.assign({}, pinhole.state[key] || {})
         for (const face of Object.keys(patch)) {
             const edit = patch[face]
-            if (edit.name || edit.person || edit.rejected?.length || edit.not?.length) saved[face] = edit
+            if (edit.name || edit.person || edit.rejected?.length || edit.not?.length || edit.unknown) saved[face] = edit
             else delete saved[face]
         }
         pinhole.state[key] = saved
@@ -257,6 +266,31 @@ Panel {
         pinhole.did(label, () => panel.writeEdits(key, before), () => panel.writeEdits(key, patch))
     }
     // The whole group `row` is `name`; then on to the next one to name.
+    // After a group is dealt with: the next one still to name, else home.
+    function nextGroup(row) {
+        const at = groups.findIndex(group => group.anchor === row.anchor)
+        const next = row.unknown ? null : groups[at + 1] ?? null
+        if (next) {
+            anchor = next
+            faces = []
+            selected = 0
+        } else {
+            view = "home"
+            anchor = null
+        }
+    }
+    // Not known for now: on to the next, this one kept apart at the end of
+    // home, to name whenever its name comes back. Again: known after all.
+    function markUnknown() {
+        const row = anchor
+        if (view !== "group" || !row) return
+        const previous = edits[row.anchor] || {}
+        const now = !row.unknown
+        if (now) nextGroup(row)
+        else anchor = Object.assign({}, row, { unknown: false })
+        edit({ [row.anchor]: Object.assign({}, previous, { unknown: now || undefined }) },
+             now ? qsTr("marking a face as not known") : qsTr("unmarking a face as not known"))
+    }
     function nameGroup(row, name) {
         if (!row || !name || assignmentJob) return
         const job = request("assignment", { anchor: row.anchor })
@@ -268,18 +302,8 @@ Panel {
             for (const face of JSON.parse(result.stdout).keys)
                 patch[face] = Object.assign({}, edits[face], { person: name })
             const added = Object.keys(patch).length
-            if (view === "group" && anchor?.anchor === row.anchor) {
-                const at = groups.findIndex(group => group.anchor === row.anchor)
-                const next = groups[at + 1] ?? null
-                if (next) {
-                    anchor = next
-                    faces = []
-                    selected = 0
-                } else {
-                    view = "home"
-                    anchor = null
-                }
-            }
+            if (view === "group" && anchor?.anchor === row.anchor)
+                nextGroup(row)
             if (added) {
                 edit(patch, qsTr("naming a group"))
                 pinhole.notify(qsTr("%1: %n photo(s) added", "", added).arg(name))
@@ -368,29 +392,37 @@ Panel {
     }
     // Arrows across both of home's grids: down from a named person to the
     // groups below in the same column.
+    // Arrows across home's grids: down from a named person to the faces
+    // below in the same column, and on to those not known.
     function move(dx, dy) {
         if (!tiles.length) return
         let next = selected + dx
         if (dy !== 0) {
-            const named = view === "home" ? people.length : 0
-            const inNamed = selected < named
-            const start = inNamed ? 0 : named
-            const end = inNamed ? named : tiles.length
+            const bounds = view === "home"
+                ? [0, people.length, people.length + unknown.length, tiles.length].filter((b, i, all) => i === 0 || b > all[i - 1])
+                : [0, tiles.length]
+            let section = 0
+            while (section + 2 < bounds.length && selected >= bounds[section + 1]) ++section
+            const start = bounds[section], end = bounds[section + 1]
             const column = (selected - start) % columns
             next = selected + dy * columns
-            if (next < start && !inNamed && named > 0)
-                next = Math.min(named - 1, Math.floor((named - 1) / columns) * columns + column)
-            else if (next >= end && inNamed && tiles.length > named)
-                next = Math.min(tiles.length - 1, named + column)
+            if (next < start && section > 0) {
+                const from = bounds[section - 1], last = start - 1
+                next = Math.min(last, from + Math.floor((last - from) / columns) * columns + column)
+            } else if (next >= end && section + 2 < bounds.length) {
+                next = Math.min(bounds[section + 2] - 1, end + column)
+            }
         }
         selected = Math.max(0, Math.min(tiles.length - 1, next))
         reveal(selected)
-        if (view === "home" && selected >= groups.length + people.length - columns * 2 && moreGroups) more()
+        if (view === "home" && selected >= tiles.length - columns * 2 && moreGroups) more()
         if (view !== "home" && selected >= faces.length - columns * 2 && moreFaces) more()
     }
     function reveal(index) {
-        const item = view === "home" ? (index < people.length ? namedTiles.itemAt(index) : groupTiles.itemAt(index - people.length))
-                                     : faceTiles.itemAt(index)
+        const item = view !== "home" ? faceTiles.itemAt(index)
+            : index < people.length ? namedTiles.itemAt(index)
+            : index < people.length + unknown.length ? unknownTiles.itemAt(index - people.length)
+            : groupTiles.itemAt(index - people.length - unknown.length)
         if (!item) return
         const top = item.mapToItem(content, 0, 0).y
         const bottom = top + item.height + theme.fontSize * 2.4
@@ -467,6 +499,15 @@ Panel {
         keyLayer: "plugin"
         when: panel.shown && !panel.picking && panel.view === "person" && (panel.personRow?.likely ?? 0) > 0
         onTriggered: panel.go("check", panel.person)
+    }
+    Command {
+        id: unknownCommand
+        name: "people.unknown"
+        text: qsTr("Don't know")
+        keys: ["0"]
+        keyLayer: "plugin"
+        when: panel.shown && !panel.picking && panel.view === "group" && !newName.input.activeFocus
+        onTriggered: panel.markUnknown()
     }
     Command {
         id: refuseCommand
@@ -618,20 +659,18 @@ Panel {
     }
 
     // A group's or a checked group's names: the likeliest first, each with
-    // its number's key, and a new one.
+    // its number's key, then a new one, all on one row of controls of one
+    // height, wrapping as a sentence does.
     Item {
         id: namebar
         visible: !panel.picking && (panel.view === "group" || panel.view === "check")
         anchors.top: titlebar.bottom
         width: parent.width
-        height: visible ? Math.max(nameButtons.height, newName.height) + 16 : 0
+        height: visible ? nameButtons.height + 12 : 0
         Flow {
             id: nameButtons
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.right: newName.left
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
+            x: 12
+            width: parent.width - 24
             spacing: 6
             Repeater {
                 model: panel.choices
@@ -647,6 +686,15 @@ Panel {
                 }
             }
             ShellButton {
+                visible: panel.view === "group"
+                objectName: "peopleUnknown"
+                text: unknownCommand.text
+                hint: unknownCommand.keyName
+                active: !!panel.anchor?.unknown
+                checkable: true
+                onTapped: panel.markUnknown()
+            }
+            ShellButton {
                 visible: panel.view === "check"
                 objectName: "peopleRefuse"
                 text: refuseCommand.text
@@ -659,32 +707,32 @@ Panel {
                 hint: skipCommand.keyName
                 onTapped: panel.skip()
             }
-        }
-        FieldInput {
-            id: newName
-            objectName: "peopleNewName"
-            visible: panel.view === "group"
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            width: visible ? Math.min(theme.fontSize * 18, parent.width / 3) : 0
-            placeholder: qsTr("New name…")
-            input.maximumLength: 100
-            onAccepted: {
-                const typed = text.trim()
-                if (!typed) return
-                const existing = panel.names.find(name => name.toLowerCase() === typed.toLowerCase())
-                text = ""
-                grid.forceActiveFocus()
-                panel.choose(existing || typed)
+            FieldInput {
+                id: newName
+                objectName: "peopleNewName"
+                visible: panel.view === "group"
+                width: Math.min(theme.fontSize * 16, nameButtons.width)
+                height: closeButton.height
+                placeholder: qsTr("New name…")
+                input.maximumLength: 100
+                onAccepted: {
+                    const typed = text.trim()
+                    if (!typed) return
+                    const existing = panel.names.find(name => name.toLowerCase() === typed.toLowerCase())
+                    text = ""
+                    grid.forceActiveFocus()
+                    panel.choose(existing || typed)
+                }
+                Keys.onEscapePressed: { text = ""; grid.forceActiveFocus() }
             }
-            Keys.onEscapePressed: { text = ""; grid.forceActiveFocus() }
         }
     }
 
     Item {
         id: statusLine
-        visible: !panel.picking && statusText.text !== ""
+        // How far the faces are found, at home; a group's page shows only
+        // the bar under its title.
+        visible: !panel.picking && statusText.text !== "" && (panel.view === "home" || panel.failure !== "")
         anchors.top: namebar.bottom
         width: parent.width
         height: visible ? statusText.implicitHeight + 10 : 0
@@ -743,7 +791,37 @@ Panel {
                 }
             }
             UiText {
-                visible: panel.view === "home" && panel.groups.length > 0
+                visible: panel.view === "home" && panel.unknown.length > 0
+                topPadding: 8
+                color: theme.brightForeground
+                text: qsTr("Not known yet")
+                width: parent.width
+            }
+            Grid {
+                visible: panel.view === "home"
+                columns: panel.columns
+                Repeater {
+                    id: unknownTiles
+                    model: panel.view === "home" ? panel.unknown : []
+                    delegate: PersonCircle {
+                        required property var modelData
+                        required property int index
+                        readonly property int at: panel.people.length + index
+                        width: content.cell
+                        row: modelData
+                        opacity: chosen || hovered ? 1 : 0.6
+                        caption: qsTr("%n photo(s)", "", modelData.count)
+                        chosen: panel.selected === at && grid.activeFocus && keymap.input === "keyboard"
+                        onSelected: {
+                            panel.selected = at
+                            grid.forceActiveFocus()
+                            panel.enter(modelData)
+                        }
+                    }
+                }
+            }
+            UiText {
+                visible: panel.view === "home" && panel.known.length > 0
                 topPadding: panel.people.length ? 8 : 0
                 color: theme.brightForeground
                 text: panel.people.length ? qsTr("Not named yet") : qsTr("Name the faces Pinhole found to see each person's photos together.")
@@ -755,7 +833,7 @@ Panel {
                 columns: panel.columns
                 Repeater {
                     id: groupTiles
-                    model: panel.view === "home" ? panel.groups : []
+                    model: panel.view === "home" ? panel.known : []
                     delegate: PersonCircle {
                         required property var modelData
                         required property int index
@@ -764,9 +842,9 @@ Panel {
                         caption: modelData.guess ? qsTr("%1?").arg(modelData.guess) : qsTr("%n photo(s)", "", modelData.count)
                         detail: modelData.guess ? qsTr("%n photo(s)", "", modelData.count) : ""
                         guessed: !!modelData.guess
-                        chosen: panel.selected === panel.people.length + index && grid.activeFocus && keymap.input === "keyboard"
+                        chosen: panel.selected === panel.people.length + panel.unknown.length + index && grid.activeFocus && keymap.input === "keyboard"
                         onSelected: {
-                            panel.selected = panel.people.length + index
+                            panel.selected = panel.people.length + panel.unknown.length + index
                             grid.forceActiveFocus()
                             panel.enter(modelData)
                         }

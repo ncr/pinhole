@@ -14,6 +14,7 @@ PinholePlugin {
         }
     }]
     help: [["Shift+F", qsTr("People")], ["1–9", qsTr("Name the group shown")], ["X", qsTr("Take the photo out")],
+           ["0", qsTr("Skip a face you do not know, for later")],
            ["C", qsTr("Check the groups that look like the person shown")]]
     settings: Component {
         Column {
