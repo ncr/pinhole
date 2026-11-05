@@ -59,6 +59,7 @@ Window {
     property int globalSpace: 0
     property int globalUndo: 0
     property int underneath: 0
+    property int tileTaps: 0
     property int wheels: 0
     property bool menus: false
     property bool longMenu: false
@@ -93,6 +94,13 @@ Window {
         CopyButton { objectName: "copy"; x: 24; y: 600; floating: true; photos: () => ["one"] }
     }
     ShellButton { objectName: "outside"; visible: !window.menus; x: 760; y: 24; text: "Behind the dialog" }
+    // A photo that opens on a tap, with a button over its corner (People's ✕).
+    Item {
+        visible: !window.menus
+        x: 760; y: 400; width: 220; height: 220
+        Item { anchors.fill: parent; TapHandler { onTapped: window.tileTaps++ } }
+        ShellButton { objectName: "overTile"; x: 150; y: 10; text: "✕"; helpText: "Someone else"; floating: true; onTapped: window.fires++ }
+    }
     MoreGroup {
         id: more
         objectName: "more"
@@ -298,6 +306,18 @@ private slots:
         QCOMPARE(f.root->property("underneath").toInt(), 0);
         QCOMPARE(f.root->property("wheels").toInt(), 0);
         QVERIFY2(f.warnings.isEmpty(), qPrintable(f.warnings.join('\n')));
+    }
+
+    void aButtonOverATappableItemTakesTheClickAlone() {
+        Fixture f; QVERIFY2(f.root, qPrintable(f.warnings.join('\n')));
+        QVERIFY(QTest::qWaitForWindowActive(f.window()));
+        QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, f.centre(f.item("overTile")));
+        QTRY_COMPARE(f.root->property("fires").toInt(), 1);
+        QTest::qWait(50);
+        QCOMPARE(f.root->property("tileTaps").toInt(), 0);
+        QTest::mouseClick(f.window(), Qt::LeftButton, Qt::NoModifier, QPoint(800, 560));
+        QTRY_COMPARE(f.root->property("tileTaps").toInt(), 1);
+        QCOMPARE(f.root->property("fires").toInt(), 1);
     }
 
     void menuPointerOpeningDoesNotSelectAnActionAndOpenerClosesIt_data() {

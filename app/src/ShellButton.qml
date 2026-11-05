@@ -201,6 +201,10 @@ ControlSurface {
     }
     TapHandler {
         id: tap
+        // The press is the button's alone: a button over something that
+        // takes taps itself (✕ on a photo) does not press that too. A
+        // list it is in can still take a drag over.
+        gesturePolicy: TapHandler.WithinBounds
         onTapped: {
             if (control.usable) control.forceActiveFocus(Qt.MouseFocusReason)
             control.press()
