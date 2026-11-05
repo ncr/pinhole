@@ -25,13 +25,12 @@
             verify(field !== null)
             compare(field.placeholder, "Opisz zdjęcie lub wpisz #tag…")
             compare(field.height, findChild(panel, "semanticSearchClose").height)
-            verify(findChild(panel, "semanticSearchCard").width < panel.width)
+            verify(field.width > panel.width / 2, "the question spans the window")
             stage = "query"
             field.text = @QUERY@
             panel.lookup()
-            tryVerify(() => panel.results.length === Math.min(100, @PHOTO_COUNT@), 60000)
+            tryVerify(() => panel.results.length === Math.min(240, @PHOTO_COUNT@), 60000)
             compare(panel.results[0].id, @EXPECTED@)
-            tryVerify(() => panel.suggestedPreview.length > 0, 30000)
             verify(panel.failure === "", panel.failure)
             stage = "keyboard"
             keyClick(Qt.Key_Down)
@@ -42,7 +41,19 @@
             keyClick(Qt.Key_Return)
             tryCompare(pinhole.viewer, "open", true, 5000)
             compare(viewer.origin.width, 0)
+            compare(viewer.count, panel.results.length, "← → go through the results alone")
+            compare(viewer.place, 1)
+            keyClick(Qt.Key_Right)
             compare(panel.shown, false)
+            keyClick(Qt.Key_Escape)
+            tryCompare(panel, "shown", true, 5000)
+            compare(panel.selected, 2, "back on the photo last looked at")
+            stage = "return-opens-best"
+            field.input.forceActiveFocus()
+            keyClick(Qt.Key_End)
+            keyClick(Qt.Key_Return)
+            tryCompare(pinhole.viewer, "open", true, 5000)
+            compare(pinhole.viewer.index, pinhole.library.indexOf(panel.results[panel.selected].id))
             keyClick(Qt.Key_Escape)
             tryCompare(panel, "shown", true, 5000)
             stage = "latest-query"
@@ -68,7 +79,7 @@
             stage = "tag-suggestions"
             const tagButton = findChild(panel, "semanticTagButton")
             verify(tagButton && tagButton.visible)
-            compare(tagButton.text, "Otaguj wybrane zdjęcie")
+            compare(tagButton.text, "Tagi")
             const tagged = panel.results[panel.selected].id
             tagButton.forceActiveFocus()
             keyClick(Qt.Key_Return)
@@ -83,8 +94,8 @@
             const saved = panel.savedTags[0].id
             keyClick(Qt.Key_Escape)
             tryCompare(panel, "tagAsset", "")
-            tryCompare(tagButton, "activeFocus", true)
-            keyClick(Qt.Key_Return)
+            tryCompare(findChild(panel, "semanticSearchResults"), "activeFocus", true)
+            keyClick(Qt.Key_T)
             tryCompare(panel, "tagAsset", tagged)
             tryVerify(() => panel.tagSuggestions.length === 5, 30000)
             compare(panel.savedTags[0].id, saved)
@@ -106,18 +117,18 @@
             stage = "exact-tags"
             field.input.forceActiveFocus()
             field.text = "# " + savedTag.tag.label.toUpperCase()
-            keyClick(Qt.Key_Return)
+            panel.lookup()
             tryVerify(() => panel.tagQuery && panel.results.length === 1)
             compare(panel.results[0].id, tagged)
             field.text = "# taki tag nie istnieje"
-            keyClick(Qt.Key_Return)
+            panel.lookup()
             tryCompare(panel, "results", [])
             field.text = "#"
-            keyClick(Qt.Key_Return)
+            panel.lookup()
             tryVerify(() => panel.results.length === 1)
             compare(panel.results[0].id, tagged)
             field.text = @SECOND@
-            keyClick(Qt.Key_Return)
+            panel.lookup()
             tryVerify(() => !panel.tagQuery && panel.results.length > 0, 30000)
             compare(panel.results[0].id, @EXPECTED_SECOND@)
             stage = "mouse"
@@ -175,7 +186,7 @@
             compare(panel.catalogReady, false)
             field.input.forceActiveFocus()
             field.text = "#"
-            keyClick(Qt.Key_Return)
+            panel.lookup()
             tryVerify(() => panel.tagQuery && panel.results.length === 1)
             compare(panel.results[0].id, tagged)
             compare(panel.queryJob, null)

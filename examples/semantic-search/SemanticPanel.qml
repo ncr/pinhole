@@ -1,6 +1,9 @@
 import QtQuick
 import Pinhole.Plugin
 
+// The whole window, as the map is: the question at the top, the photos
+// that answer it below, best first, and ⏎ opens the one chosen with ← →
+// going through the answers alone.
 Panel {
     id: panel
     required property Item indexer
@@ -25,23 +28,20 @@ Panel {
     property string tagName: ""
     property bool hadIndex: false
     property bool wasIndexing: false
-    property string hoveredAsset: ""
-    readonly property string selectedAsset: browsing ? hoveredAsset || results[selected]?.id || "" : ""
-    property var previewJob: null
-    property var previewTags: []
-    readonly property var approvedPreview: selectedAsset
-        ? (pinhole.state["tags:" + sourceKey] || {})["photo:" + selectedAsset] || [] : []
-    readonly property var suggestedPreview: previewTags.filter(tag => !approvedPreview.some(saved => saved.id === tag.id))
-    visible: shown
-    color: Qt.rgba(0, 0, 0, 0.36)
-    onClicked: close()
-    onSelectedAssetChanged: schedulePreview()
-    onCatalogReadyChanged: {
-        if (shown && catalogReady) {
-            lookup()
-            schedulePreview()
-        }
+    // ⏎ in the field before the answer came: open the best one once it does.
+    property bool openWhenReady: false
+    readonly property string query: search.text.trim()
+    readonly property bool browsing: shown && tagAsset === ""
+    readonly property var tagLabels: {
+        const entries = sourceKey ? pinhole.state["tags:" + sourceKey] || {} : {}
+        const found = new Map()
+        for (const [key, tags] of Object.entries(entries))
+            if (key.startsWith("photo:"))
+                for (const tag of tags) found.set(tag.label, (found.get(tag.label) || 0) + 1)
+        return Array.from(found.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(entry => entry[0])
     }
+    visible: shown
+    onCatalogReadyChanged: if (shown && catalogReady) lookup()
     onStatusChanged: {
         const refresh = (wasIndexing && !status.running) || (!hadIndex && status.indexed > 0)
         wasIndexing = status.running
@@ -51,7 +51,7 @@ Panel {
     onSourceKeyChanged: {
         resetResults()
         returning = false
-        if (shown && search.text.trim().startsWith("#")) lookup()
+        if (shown && query.startsWith("#")) lookup()
     }
 
     function show() {
@@ -59,20 +59,19 @@ Panel {
         returning = false
         indexer.ensureStarted()
         lookup()
-        Qt.callLater(() => search.input.forceActiveFocus())
+        Qt.callLater(() => { search.input.forceActiveFocus(); search.input.selectAll() })
     }
     function resetResults() {
         indexer.cancel(queryJob); queryJob = null
-        indexer.cancel(previewJob); previewJob = null
         closeTags(false)
-        results = []; allResults = []; selected = -1; previewTags = []; hoveredAsset = ""
+        results = []; allResults = []; selected = -1
         tagQuery = false; tagName = ""
         localFailure = ""
+        openWhenReady = false
     }
     function close() {
         shown = false; returning = false
         debounce.stop()
-        previewDelay.stop()
         resetResults()
     }
     function report(error) {
@@ -85,29 +84,17 @@ Panel {
     }
     function request(message) { return indexer.request(message) }
     function unpack(result) { return indexer.unpack(result) }
-    function schedulePreview() {
-        indexer.cancel(previewJob); previewJob = null
-        previewTags = []
-        previewDelay.stop()
-        if (selectedAsset && catalogReady) previewDelay.restart()
-    }
-    function preview() {
-        const asset = selectedAsset
-        if (!asset || !catalogReady) return
-        const job = request({ op: "suggest_tags", id: asset })
-        previewJob = job
-        job.then(result => {
-            if (previewJob !== job || selectedAsset !== asset) return
-            previewJob = null
-            previewTags = unpack(result)
-        }).catch(() => { if (previewJob === job) previewJob = null })
+    function ask(text) {
+        search.text = text
+        search.input.cursorPosition = text.length
+        search.input.forceActiveFocus()
+        lookup()
     }
     function lookup() {
         debounce.stop()
         indexer.cancel(queryJob); queryJob = null
         localFailure = ""
-        const text = search.text.trim()
-        hoveredAsset = ""
+        const text = query
         results = []; allResults = []; selected = -1
         tagQuery = text.startsWith("#")
         tagName = tagQuery ? text.slice(1).trim().normalize("NFC").toLowerCase() : ""
@@ -115,7 +102,10 @@ Panel {
             findTags()
             return
         }
-        if (!shown || !catalogReady || !text) return
+        if (!shown || !catalogReady || !text) {
+            openWhenReady = false
+            return
+        }
         const job = request({ op: "query", text: text, limit: 500 })
         queryJob = job
         job.then(result => {
@@ -128,6 +118,7 @@ Panel {
         }).catch(error => {
             if (queryJob !== job) return
             queryJob = null
+            openWhenReady = false
             report(error)
         })
     }
@@ -141,7 +132,7 @@ Panel {
             const position = pinhole.library.indexOf(id)
             if (position >= 0) matches.push({ id: id, position: position })
         }
-        matches.sort((a, b) => a.position - b.position)
+        matches.sort((a, b) => b.position - a.position)
         allResults = matches
         filterResults()
     }
@@ -151,24 +142,28 @@ Panel {
             const position = pinhole.library.indexOf(row.id)
             return position >= 0 && !pinhole.isHidden(position)
         })
-        results = tagQuery ? visibleResults : visibleResults.slice(0, 100)
+        results = tagQuery ? visibleResults : visibleResults.slice(0, 240)
         const retained = results.findIndex(row => row.id === previous)
         selected = retained >= 0 ? retained : results.length ? 0 : -1
         if (tagAsset) {
             const taggedPosition = pinhole.library.indexOf(tagAsset)
             if (taggedPosition < 0 || pinhole.isHidden(taggedPosition)) closeTags(true)
         }
+        if (openWhenReady) {
+            openWhenReady = false
+            openResult(selected)
+        }
+    }
+    function accept() {
+        if (debounce.running || queryJob) {
+            openWhenReady = true
+            if (debounce.running) lookup()
+        } else {
+            openResult(selected)
+        }
     }
     function importBenchmark() {
-        const benchmark = indexer.profile?.benchmark
-        if (!benchmark) return
-        localFailure = ""
-        const source = sourceKey
-        request({ op: "import", run: benchmark.run, corpus: benchmark.corpus }).then(result => {
-            if (source !== sourceKey) return
-            indexer.status = unpack(result)
-            if (shown) lookup()
-        }).catch(error => { if (source === sourceKey && shown) report(error) })
+        indexer.importBenchmark().then(() => { if (shown) lookup() })
     }
     function openResult(index) {
         if (index < 0 || index >= results.length) return
@@ -176,7 +171,7 @@ Panel {
         if (pinhole.library.indexOf(id) < 0) return
         selected = index
         returning = true
-        pinhole.openPhotoDirect(id)
+        pinhole.openPhotos(results.map(row => row.id), id)
     }
 
     function openTags() {
@@ -207,7 +202,7 @@ Panel {
         tagAsset = ""; tagSuggestions = []; savedTags = []; tagError = ""
         if (wasOpen && restoreFocus) Qt.callLater(() => {
             if (!shown || tagAsset) return
-            if (tagButton.visible && tagButton.usable) tagButton.forceActiveFocus()
+            if (results.length) grid.forceActiveFocus()
             else search.input.forceActiveFocus()
         })
     }
@@ -237,25 +232,36 @@ Panel {
         pinhole.did(removing ? qsTr("removing a photo tag") : qsTr("adding a photo tag"),
             () => writeTags(key, asset, before), () => writeTags(key, asset, after))
     }
-    readonly property bool browsing: shown && tagAsset === ""
-    Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.tagAsset ? panel.closeTags(true) : panel.close() }
-    Command { name: "semantic.open"; keys: ["Return"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.openResult(panel.selected) }
-    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && (search.input.activeFocus || grid.activeFocus); onTriggered: panel.move(search.input.activeFocus ? 0 : Math.max(1, Math.round(grid.width / grid.cellWidth))) }
-    Command { name: "semantic.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-Math.max(1, Math.round(grid.width / grid.cellWidth))) }
-    Command { name: "semantic.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(1) }
-    Command { name: "semantic.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-1) }
     function move(delta) {
         if (!results.length) return
+        if (delta < 0 && selected + delta < 0 && delta <= -grid.columns) {
+            search.input.forceActiveFocus()
+            return
+        }
         selected = Math.max(0, Math.min(results.length - 1, selected + delta))
         grid.positionViewAtIndex(selected, GridView.Contain)
         grid.forceActiveFocus()
+    }
+    Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.tagAsset ? panel.closeTags(true) : panel.close() }
+    Command { name: "semantic.open"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.openResult(panel.selected) }
+    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && (search.input.activeFocus || grid.activeFocus); onTriggered: panel.move(search.input.activeFocus ? 0 : grid.columns) }
+    Command { name: "semantic.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-grid.columns) }
+    Command { name: "semantic.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(1) }
+    Command { name: "semantic.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-1) }
+    Command {
+        id: tagCommand
+        name: "semantic.tags"
+        text: qsTr("Tags")
+        keys: ["T"]
+        keyLayer: "plugin"
+        when: panel.browsing && grid.activeFocus && panel.selected >= 0 && (panel.tagQuery || panel.catalogReady)
+        onTriggered: panel.openTags()
     }
     Connections {
         target: search.input
         function onTextChanged() { debounce.restart() }
     }
-    Timer { id: debounce; interval: 300; onTriggered: panel.lookup() }
-    Timer { id: previewDelay; interval: 220; onTriggered: panel.preview() }
+    Timer { id: debounce; interval: 250; onTriggered: panel.lookup() }
     Connections {
         target: pinhole
         function onDismissed() { panel.close() }
@@ -271,183 +277,225 @@ Panel {
             panel.shown = !pinhole.viewer.open
             if (panel.shown) {
                 panel.returning = false
+                // On the photo last looked at.
+                const seen = pinhole.library.item(pinhole.viewer.index).id
+                const at = panel.results.findIndex(row => row.id === seen)
+                if (at >= 0) panel.selected = at
+                grid.positionViewAtIndex(panel.selected, GridView.Contain)
                 grid.forceActiveFocus()
-                panel.schedulePreview()
-            } else {
-                panel.indexer.cancel(panel.previewJob)
-                panel.previewJob = null
-                previewDelay.stop()
             }
         }
     }
-    Card {
-        id: card
-        objectName: "semanticSearchCard"
-        anchors.centerIn: parent
-        width: Math.max(0, Math.min(840, parent.width - 24))
-        height: Math.max(0, Math.min(630, parent.height - 32))
 
-        Column {
-            id: header
-            visible: panel.browsing
-            anchors.top: parent.top
+    Item {
+        id: titlebar
+        visible: panel.browsing
+        width: parent.width
+        height: search.height + 16
+        FieldInput {
+            id: search
+            objectName: "semanticSearchInput"
             anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.right: toolbar.left
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            height: closeButton.height
+            placeholder: qsTr("Describe a photo or enter #tag…")
+            input.maximumLength: 2048
+            onAccepted: panel.accept()
+        }
+        Row {
+            id: toolbar
             anchors.right: parent.right
-            anchors.margins: 16
-            spacing: 12
-            Row {
-                width: parent.width
-                spacing: 12
-                FieldInput {
-                    id: search
-                    objectName: "semanticSearchInput"
-                    width: Math.max(0, parent.width - closeButton.width - parent.spacing)
-                    height: closeButton.height
-                    placeholder: qsTr("Describe a photo or enter #tag…")
-                    input.maximumLength: 2048
-                    onAccepted: panel.lookup()
-                }
-                ShellButton { id: closeButton; objectName: "semanticSearchClose"; text: "✕"; hint: "Esc"; onTapped: panel.close() }
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            ShellButton {
+                id: tagButton
+                objectName: "semanticTagButton"
+                text: tagCommand.text
+                hint: tagCommand.keyName
+                visible: panel.selected >= 0 && panel.sourceKey !== ""
+                usable: panel.tagQuery || panel.catalogReady
+                onTapped: panel.openTags()
             }
-            Flow {
-                width: parent.width
-                spacing: 12
-                ShellButton {
-                    text: panel.indexer.paused ? qsTr("Resume indexing")
-                        : panel.status.error ? qsTr("Retry indexing") : qsTr("Pause indexing")
-                    usable: panel.catalogReady && !panel.indexer.indexingJob
-                    onTapped: panel.indexer.toggleIndexing()
-                }
-                ShellButton {
-                    text: qsTr("Use the 384-photo benchmark")
-                    visible: Boolean(panel.indexer.profile?.benchmark)
-                    usable: panel.catalogReady && !panel.status.running
-                    onTapped: panel.importBenchmark()
-                }
-                ShellButton {
-                    id: tagButton
-                    objectName: "semanticTagButton"
-                    text: qsTr("Tag selected photo")
-                    visible: panel.selected >= 0 && panel.sourceKey !== ""
-                    usable: panel.tagQuery || panel.catalogReady
-                    onTapped: panel.openTags()
-                }
-            }
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: panel.tagQuery ? qsTr("Showing photos with saved tags.")
-                    : !panel.ready ? qsTr("Starting local search…")
-                    : !panel.catalogReady ? qsTr("Reading the photo catalog…")
-                    : qsTr("Indexed: %1 of %2. Results cover indexed photos only.").arg(panel.status.indexed).arg(panel.status.total)
-            }
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: panel.tagQuery ? qsTr("Enter # and the full tag name. Enter # alone to see all tagged photos.")
-                    : panel.status.waiting ? qsTr("Waiting for available GPU memory.")
-                    : panel.indexer.profile?.name || ""
-                color: theme.darkForeground
-            }
-            UiText {
-                width: parent.width
-                visible: !panel.tagQuery && panel.failure !== ""
-                wrapMode: Text.WrapAnywhere
-                color: theme.red
-                text: panel.failure
+            ShellButton { id: closeButton; objectName: "semanticSearchClose"; text: "✕"; hint: "Esc"; onTapped: panel.close() }
+        }
+        // How much of the library can be found yet, along its foot.
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: 2
+            visible: panel.catalogReady && !panel.indexer.complete && !panel.tagQuery
+            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12)
+            Rectangle {
+                height: parent.height
+                width: parent.width * panel.indexer.progress
+                color: panel.indexer.paused ? theme.darkForeground : theme.accent
+                Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
             }
         }
-        ScrollGrid {
-            id: grid
-            objectName: "semanticSearchResults"
-            visible: panel.browsing
-            anchors.top: header.bottom
-            anchors.bottom: tagsPreview.visible ? tagsPreview.top : parent.bottom
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.margins: 12
-            cellWidth: width / Math.max(1, Math.floor(width / 155))
-            cellHeight: cellWidth * .8
-            model: panel.results
-            delegate: Item {
-                id: cell
-                required property int index
-                required property var modelData
-                width: grid.cellWidth
-                height: grid.cellHeight
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    source: pinhole.library.item(modelData.id).thumbnail || ""
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 2
-                    color: "transparent"
-                    border.width: panel.selected === cell.index ? 2 : 0
-                    border.color: theme.accent
-                }
-                HoverHandler {
-                    cursorShape: Qt.PointingHandCursor
-                    onHoveredChanged: {
-                        if (hovered) panel.hoveredAsset = cell.modelData.id
-                        else if (panel.hoveredAsset === cell.modelData.id) panel.hoveredAsset = ""
-                    }
-                }
-                TapHandler { objectName: "semanticResultTap"; onTapped: panel.openResult(cell.index) }
-                Accessible.role: Accessible.Button
-                Accessible.name: qsTr("Search result %1").arg(index + 1)
-                Accessible.onPressAction: panel.openResult(index)
+    }
+    Item {
+        id: statusRow
+        visible: panel.browsing && statusText.text !== ""
+        anchors.top: titlebar.bottom
+        width: parent.width
+        height: visible ? statusText.implicitHeight + 12 : 0
+        UiText {
+            id: statusText
+            x: 14
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - 28
+            wrapMode: Text.WordWrap
+            color: panel.failure !== "" ? theme.red : theme.darkForeground
+            text: panel.failure !== "" ? panel.failure
+                : panel.tagQuery ? (panel.tagName ? qsTr("Photos tagged #%1").arg(panel.tagName) : qsTr("Every tagged photo"))
+                : !panel.indexer.complete ? panel.indexer.summary
+                : ""
+        }
+    }
+    ScrollGrid {
+        id: grid
+        objectName: "semanticSearchResults"
+        readonly property int columns: Math.max(2, Math.floor(width / (theme.fontSize * 11)))
+        visible: panel.browsing && count > 0
+        anchors.top: statusRow.bottom
+        anchors.topMargin: 2
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        clip: true
+        cellWidth: width / columns
+        cellHeight: cellWidth
+        model: panel.results
+        keyNavigationEnabled: false
+        activeFocusOnTab: count > 0
+        Accessible.role: Accessible.List
+        Accessible.name: qsTr("Search results")
+        Keys.onPressed: event => {
+            // Typing goes on with the question.
+            if (event.text.length === 1 && event.text >= " " && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                    && !(event.text === " " || event.text.toUpperCase() === "T")) {
+                search.input.forceActiveFocus()
+                search.input.insert(search.input.cursorPosition, event.text)
+                event.accepted = true
             }
+        }
+        delegate: Item {
+            id: cell
+            required property int index
+            required property var modelData
+            readonly property bool chosen: panel.selected === index
+                && (grid.activeFocus || search.input.activeFocus) && keymap.input === "keyboard"
+            width: grid.cellWidth - 5
+            height: grid.cellHeight - 5
+            Accessible.role: Accessible.Button
+            Accessible.name: (pinhole.library.revision, pinhole.library.item(modelData.id).filename) || qsTr("Search result %1").arg(index + 1)
+            Accessible.onPressAction: panel.openResult(index)
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.06)
+            }
+            Image {
+                anchors.fill: parent
+                source: (pinhole.library.revision, pinhole.library.item(cell.modelData.id).thumbnail) || ""
+                sourceSize: Qt.size(width * 1.5, height * 1.5)
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.width: hover.hovered && !cell.chosen ? 1 : 2
+                border.color: theme.accent
+                visible: hover.hovered || cell.chosen
+            }
+            HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+            TapHandler {
+                objectName: "semanticResultTap"
+                onTapped: panel.openResult(cell.index)
+            }
+        }
+    }
+
+    // Before a question, or with none answered: what to ask.
+    Column {
+        id: invitation
+        objectName: "semanticInvitation"
+        visible: panel.browsing && grid.count === 0
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: titlebar.height / 2
+        width: Math.min(parent.width - 48, theme.fontSize * 46)
+        spacing: 14
+        readonly property bool asking: panel.query === "" && panel.catalogReady
+        readonly property var examples: [qsTr("beach at sunset"), qsTr("dog in the snow"), qsTr("birthday cake"),
+            qsTr("mountains"), qsTr("city at night"), qsTr("bicycle"), qsTr("food on a plate"), qsTr("old car")]
+        UiText {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            font.pixelSize: Math.round(theme.fontSize * 1.35)
+            color: theme.brightForeground
+            text: !panel.catalogReady ? panel.indexer.summary
+                : panel.tagQuery ? qsTr("No visible photos with this tag.")
+                : panel.queryJob || debounce.running ? qsTr("Searching…")
+                : panel.status.indexed === 0 ? qsTr("Search will be available as thumbnails are indexed.")
+                : panel.query !== "" ? qsTr("Nothing here looks like that.")
+                : qsTr("Find photos by what is in them")
         }
         UiText {
-            anchors.centerIn: grid
-            visible: panel.browsing && (panel.tagQuery || panel.catalogReady) && panel.results.length === 0
-            text: panel.tagQuery ? qsTr("No visible photos with this tag.")
-                : panel.queryJob ? qsTr("Searching…") : panel.status.indexed === 0
-                ? (panel.indexer.paused ? qsTr("Indexing is paused.") : qsTr("Search will be available as thumbnails are indexed."))
-                : search.text.trim() ? qsTr("No visible results.") : qsTr("Type a description to search.")
-            width: Math.min(grid.width, 500)
-            wrapMode: Text.WordWrap
+            width: parent.width
+            visible: invitation.asking && panel.status.indexed > 0
             horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            text: qsTr("Describe it in a few words, in English or Polish, or try one of these:")
         }
         Column {
-            id: tagsPreview
-            visible: panel.browsing && panel.selectedAsset !== ""
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: 12
-            spacing: 4
-            UiText {
-                width: parent.width
-                elide: Text.ElideRight
-                text: panel.approvedPreview.length
-                    ? qsTr("Saved tags: %1").arg(panel.approvedPreview.map(tag => tag.label).join(", "))
-                    : qsTr("No saved tags")
-            }
-            UiText {
-                width: parent.width
-                visible: panel.suggestedPreview.length > 0
-                elide: Text.ElideRight
-                color: theme.darkForeground
-                text: qsTr("Suggested tags: %1").arg(panel.suggestedPreview.map(tag => tag.label).join(", "))
+            id: examples
+            visible: invitation.asking && panel.status.indexed > 0
+            width: parent.width
+            spacing: 6
+            // Rows of four, each centred under the words above.
+            readonly property var words: invitation.examples.concat(panel.tagLabels.map(label => "#" + label))
+            Repeater {
+                model: Math.ceil(examples.words.length / 4)
+                delegate: Row {
+                    required property int index
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 6
+                    Repeater {
+                        model: examples.words.slice(index * 4, index * 4 + 4)
+                        delegate: ShellButton {
+                            required property string modelData
+                            objectName: "semanticExample"
+                            text: modelData
+                            hint: ""
+                            onTapped: panel.ask(modelData)
+                        }
+                    }
+                }
             }
         }
-        Loader {
-            anchors.fill: parent
-            active: panel.tagAsset !== ""
-            sourceComponent: SemanticTags {
-                photo: pinhole.library.item(panel.tagAsset).thumbnail || ""
-                pending: panel.tagJob !== null
-                suggestions: panel.tagSuggestions
-                saved: panel.savedTags
-                errorText: panel.tagError
-                onClosed: panel.closeTags(true)
-                onToggled: tag => panel.toggleTag(tag)
-            }
+    }
+
+    Loader {
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width, theme.fontSize * 52)
+        active: panel.tagAsset !== ""
+        sourceComponent: SemanticTags {
+            photo: pinhole.library.item(panel.tagAsset).thumbnail || ""
+            pending: panel.tagJob !== null
+            suggestions: panel.tagSuggestions
+            saved: panel.savedTags
+            errorText: panel.tagError
+            onClosed: panel.closeTags(true)
+            onToggled: tag => panel.toggleTag(tag)
         }
     }
 }

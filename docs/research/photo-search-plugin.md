@@ -34,7 +34,7 @@ against an existing index. It waits for about 11 GiB of free GPU memory
 before loading WeMM for background indexing, and unloads the model on
 pause or after one minute without inference when indexing is finished.
 
-The host must support plugin API 8. On an Apple Silicon Mac running Linux, use the
+The host must support plugin API 9. On an Apple Silicon Mac running Linux, use the
 environment and pinned models described in the full-encoder notes.
 Both environments live under the checkout's ignored `.tools/photo-search`
 directory. The plugin does not install packages or download models.

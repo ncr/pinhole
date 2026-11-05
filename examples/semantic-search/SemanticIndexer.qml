@@ -21,6 +21,18 @@ Item {
     property var indexingJob: null
     property int generation: 0
     property int catalogRevision: 0
+    readonly property bool complete: catalogReady && status.total > 0 && status.indexed >= status.total
+    readonly property real progress: status.total > 0 ? Math.min(1, status.indexed / status.total) : 0
+    function count(n) { return Number(n || 0).toLocaleString(Qt.locale(), "f", 0) }
+    // What can be found now, in a sentence: the search view's and the side
+    // panel's.
+    readonly property string summary: failure !== "" ? failure
+        : !ready ? qsTr("Starting search…")
+        : !catalogReady ? qsTr("Reading the library…")
+        : complete ? qsTr("All %1 photos can be found.").arg(count(status.total))
+        : paused ? qsTr("Indexing is paused: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
+        : status.waiting ? qsTr("Waiting for the graphics card: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
+        : qsTr("Looking through your photos: %1 of %2 can be found so far.").arg(count(status.indexed)).arg(count(status.total))
 
     function cancel(job) { if (job) job.cancel() }
     function reset() {
@@ -161,6 +173,17 @@ Item {
                     failure = qsTr("Waiting for Pinhole's background search service.")
             } else report(error)
         })
+    }
+    // A finished benchmark run's vectors, for the Apple Neural Engine
+    // profile: the index without indexing.
+    function importBenchmark() {
+        const benchmark = profile?.benchmark
+        if (!benchmark) return Promise.resolve()
+        failure = ""
+        const source = sourceKey
+        return request({ op: "import", run: benchmark.run, corpus: benchmark.corpus }).then(result => {
+            if (source === sourceKey) status = unpack(result)
+        }).catch(error => { if (source === sourceKey) report(error) })
     }
     function toggleIndexing() {
         if (!catalogReady || indexingJob) return
