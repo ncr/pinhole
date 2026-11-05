@@ -1458,7 +1458,8 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(3).contains("pinhole.cache"));
         QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(2).contains("hidden"));
         QVERIFY(Plugins::apiUses(builtIn + "/send").value(2).contains("run's output"));
-        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("pinhole.coveredBy"));
+        // Coming back from a photo is Pinhole's now (API 11), not coveredBy's.
+        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(11).contains("comeBack, away or returned"));
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("pinhole.dismissed"));
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("avgColor"));
         QVERIFY(Plugins::apiUses(builtIn + "/frame").value(2).contains("pinhole.keepAwake"));
