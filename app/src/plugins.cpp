@@ -35,6 +35,7 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QMap>
+#include <QDirIterator>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
@@ -1224,6 +1225,12 @@ void Plugins::sourceRefused(const QString &id, const QString &kind) {
             p->host->report(tr("sources: %1 is not among the kinds its manifest's \"sources\" names").arg(kind));
 }
 
+void Plugins::keyClashed(const QString &id, const QString &message) {
+    for (const auto &p : m_plugins)
+        if (p->id == id && p->host)
+            p->host->report(message);
+}
+
 void Plugins::layerFailed(const QString &id, const QString &message) {
     for (const auto &p : m_plugins)
         if (p->id == id && p->host)
@@ -1403,6 +1410,27 @@ int newPlugin(const QString &id) {
         {"description", "What it does, in a sentence."},
         {"entryPoints", QJsonObject{{"main", "Main.qml"}}},
     };
+    // Its key: an F key no plugin here names, so two new plugins do not
+    // share one (two shortcuts on one key: neither works).
+    QString key = QStringLiteral("F2");
+    {
+        QSet<QString> used;
+        static const QRegularExpression named(QStringLiteral("[\"'](F(?:[2-9]|1[0-2]))[\"']"));
+        for (const QString &root : {Plugins::builtInDir(), Plugins::personalDir()}) {
+            QDirIterator files(root, {"*.qml"}, QDir::Files, QDirIterator::Subdirectories);
+            while (files.hasNext()) {
+                QFile file(files.next());
+                if (file.open(QIODevice::ReadOnly))
+                    for (auto m = named.globalMatch(QString::fromUtf8(file.readAll())); m.hasNext();)
+                        used.insert(m.next().captured(1));
+            }
+        }
+        for (int n = 2; n <= 12; ++n)
+            if (!used.contains(QStringLiteral("F%1").arg(n))) {
+                key = QStringLiteral("F%1").arg(n);
+                break;
+            }
+    }
     // A screen of its own over the photos, as most plugins have: on its
     // key, the newest photos in a grid that scrolls and pinches as
     // Pinhole's own, Esc to close. What `pinhole plugin check` asks of a
@@ -1449,7 +1477,7 @@ PinholePlugin {
         }
     }
 }
-)").arg(name, id).toUtf8();
+)").arg(name, id).replace(QStringLiteral("\"F2\""), QStringLiteral("\"%1\"").arg(key)).toUtf8();
     // Its words in Polish, as Pinhole's own have theirs.
     const QByteArray polish = QJsonDocument(QJsonObject{{"Newest", QString::fromUtf8("Najnowsze")},
                                                         {"The newest photos", QString::fromUtf8("Najnowsze zdjęcia")},

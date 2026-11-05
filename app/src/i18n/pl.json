@@ -441,5 +441,8 @@
   "Photos": "Zdjęcia",
   "Copying…": "Kopiowanie…",
   "Use %1": "Użyj: %1",
-  "More options": "Więcej opcji"
+  "More options": "Więcej opcji",
+  "%1 is Pinhole's own key for %2 there: neither works. Give \"%3\" another key": "%1 to klawisz Pinhole dla „%2”: nie działa żaden z nich. Daj „%3” inny klawisz",
+  "%1 is %2's key there too: neither works. Give \"%3\" another key": "%1 to też klawisz wtyczki %2: nie działa żaden z nich. Daj „%3” inny klawisz",
+  "The library was read again while this was asked. Ask again.": "Biblioteka została odczytana ponownie w trakcie pytania. Zapytaj jeszcze raz."
 }

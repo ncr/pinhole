@@ -150,6 +150,34 @@ Item {
     // stacks were just given (or which just loaded); the others' follow
     // their photos through a reload until they give theirs again
     // (plugins.hiddenOf, plugins.stacksOf).
+    // A plugin action's key that is another's too, in the same place, or
+    // one of Pinhole's own there: two shortcuts on one key, neither works.
+    // Said under the plugin, as a problem.
+    function findClashes(actions, owners) {
+        const layersOf = place => place === "viewer" ? ["viewer", "chrome", "any"] : ["grid", "chrome", "any"]
+        // Pinhole's own: written in its own files (qrc:), not a plugin's, and
+        // not the Command a button or a plugin's action makes for its key.
+        const own = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length
+            && String(c.file).startsWith("qrc:") && !/\/(PluginAction|ShellButton|Choices|MenuGroup|MoreGroup|MenuRow)\.qml$/.test(String(c.file)))
+        const taken = {}
+        for (let i = 0; i < actions.length; ++i) {
+            const action = actions[i]
+            if (!action.key) continue
+            const key = keymap.portable(action.key)
+            const place = action.place === "viewer" ? "viewer" : "grid"
+            const clash = own.find(c => layersOf(place).indexOf(c.keyLayer) >= 0
+                && c.keys.some(k => keymap.portable(k) === key))
+            const other = taken[place + " " + key]
+            if (clash)
+                plugins.keyClashed(owners[i], qsTr("%1 is Pinhole's own key for %2 there: neither works. Give \"%3\" another key")
+                    .arg(action.key).arg(clash.text || clash.name).arg(action.text))
+            else if (other && other.owner !== owners[i])
+                plugins.keyClashed(owners[i], qsTr("%1 is %2's key there too: neither works. Give \"%3\" another key")
+                    .arg(action.key).arg(plugins.at(other.owner).name || other.owner).arg(action.text))
+            else
+                taken[place + " " + key] = { owner: owners[i] }
+        }
+    }
     function collectPlugins(freshHidden, freshStacks) {
         freshHidden = freshHidden || []
         freshStacks = freshStacks || []
@@ -159,15 +187,17 @@ Item {
                     loadedMeanwhile.push(id)
             return
         }
-        const actions = [], help = [], covering = [], layers = [], kinds = {}
+        const actions = [], owners = [], help = [], covering = [], layers = [], kinds = {}
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
             const item = loader ? loader.item : null
             if (!item)
                 continue
-            for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k)
+            for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k) {
                 actions.push(item.actions[k])
+                owners.push(loader.modelData)
+            }
             if (item.help && item.help.length > 0)
                 help.push({ plugin: loader.modelData, keys: item.help })
             if (item.viewerLayer)
@@ -191,6 +221,7 @@ Item {
             if (item.covering === true)
                 covering.push(loader.modelData)
         }
+        findClashes(actions, owners)
         // By their order, then as the plugins list them (V4's sort is not
         // stable: by position too).
         pluginActions = actions.map((a, i) => ({ a: a, i: i }))

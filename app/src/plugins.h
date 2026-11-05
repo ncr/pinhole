@@ -675,6 +675,9 @@ public:
     // A PluginSource of a kind its manifest does not name: left out, and
     // said under it.
     Q_INVOKABLE void sourceRefused(const QString &id, const QString &kind);
+    // One of its actions' keys is another's too: neither works (two
+    // shortcuts on one key are ambiguous), so it is said under it.
+    Q_INVOKABLE void keyClashed(const QString &id, const QString &message);
     // Its viewerLayer could not be made: why, under it.
     Q_INVOKABLE void layerFailed(const QString &id, const QString &message);
     // A QML error as a plugin's author reads it: the file in its folder,

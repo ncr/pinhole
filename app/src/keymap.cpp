@@ -86,6 +86,10 @@ QStringList Keymap::clashes() const {
     return clashes;
 }
 
+QString Keymap::portable(const QString &key) const {
+    return QKeySequence(key).toString(QKeySequence::PortableText);
+}
+
 QStringList Keymap::uncovered() const {
     QStringList missing;
     for (const QPointer<QObject> &action : m_actions) {

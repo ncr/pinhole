@@ -50,6 +50,8 @@ public:
     // Keys more than one live action answers to now, "Escape: help.close,
     // side.close": Qt then runs neither. Empty when all is well.
     Q_INVOKABLE QStringList clashes() const;
+    // A key as one spelling of it, to compare: "shift+f" and "Shift+F" alike.
+    Q_INVOKABLE QString portable(const QString &key) const;
     // Actions some input cannot do, "grid.zoom-in: mouse", not counting
     // those that say why not (`noKeyboard`, `noMouse`, `noTouchpad`).
     Q_INVOKABLE QStringList uncovered() const;

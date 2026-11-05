@@ -390,6 +390,9 @@ its settings, is there as the window first shows. It sets:
   button for four seconds, the button shaking, as Copy does (under More ▾
   while it is folded there).
   `key` is a sequence as Qt writes one ("F2", "Shift+S", "Ctrl+Return"),
+  one no other plugin's action and none of Pinhole's own keys in that place
+  has: two shortcuts on one key are ambiguous and neither works, so a key
+  already taken is said in red under the plugin;
   and the button and the help show it as Pinhole names keys: F2, ⇧ S,
   Ctrl ⏎. In
   the viewer and select mode, actions with the same `group` are one button,
