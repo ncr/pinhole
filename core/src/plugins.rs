@@ -150,13 +150,10 @@ pub struct Provided {
     pub rounds_every: Option<u64>,
 }
 
-/// Every provider the plugins declare, and why any declared was refused,
-/// one line each. A plugin of your own with a built-in's id takes its
-/// place, as in the window. `compiled` are the kinds pinholed has in
-/// process, which none may claim.
-pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<String>) {
-    // (id, folder, manifest, built-in), a later one of an id replacing the
-    // one before.
+/// Every plugin in `places`: (id, folder, manifest, built-in), sorted by
+/// folder, a plugin of your own with a built-in's id in that one's place,
+/// as in the window.
+fn installed(places: &Places) -> Vec<(String, PathBuf, Value, bool)> {
     let mut plugins: Vec<(String, PathBuf, Value, bool)> = Vec::new();
     for (root, builtin) in [(&places.builtin, true), (&places.personal, false)] {
         let Ok(entries) = std::fs::read_dir(root) else { continue };
@@ -173,6 +170,22 @@ pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<Strin
             plugins.push((id, dir, manifest, builtin));
         }
     }
+    plugins
+}
+
+/// Whether a plugin is on, by its switch: a built-in one unless switched
+/// off, one of your own (your copy of a built-in too) only when switched
+/// on, as the window has them.
+pub fn turned_on(builtin: bool, switch: Option<bool>) -> bool {
+    if builtin { switch != Some(false) } else { switch == Some(true) }
+}
+
+/// Every provider the plugins declare, and why any declared was refused,
+/// one line each. A plugin of your own with a built-in's id takes its
+/// place, as in the window. `compiled` are the kinds pinholed has in
+/// process, which none may claim.
+pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<String>) {
+    let plugins = installed(places);
     let ids: Vec<String> = plugins.iter().map(|(id, ..)| id.clone()).collect();
     let mut found: Vec<Provided> = Vec::new();
     let mut problems = Vec::new();
@@ -191,6 +204,98 @@ pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<Strin
     (found, problems)
 }
 
+/// A program of a plugin's that pinholed keeps running for the source
+/// shown, while the plugin is on: one of its manifest's `workers`
+/// (docs/plugins.md, Workers).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Worker {
+    /// The plugin's id, whose switch it follows.
+    pub plugin: String,
+    /// The plugin is a built-in one: on unless switched off.
+    pub builtin: bool,
+    /// Its name, one of the plugin's own.
+    pub name: String,
+    /// The program, in the plugin's folder.
+    pub program: PathBuf,
+    /// What it is given before what pinholed gives every worker.
+    pub args: Vec<String>,
+}
+
+/// The plugin API that brought `workers` (Plugins::apiUses).
+pub const WORKERS_API: i64 = 10;
+
+/// Every worker the plugins declare, on or not, and why any declared was
+/// refused, one line each. A plugin of your own with a built-in's id
+/// takes its place, its workers too.
+pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
+    let mut found = Vec::new();
+    let mut problems = Vec::new();
+    for (id, dir, manifest, builtin) in installed(places) {
+        let declared = &manifest["workers"];
+        if declared.is_null() {
+            continue;
+        }
+        let Some(declared) = declared.as_array() else {
+            problems.push(format!("{id}: \"workers\" is a list"));
+            continue;
+        };
+        if let Err(why) = taken(&id, &dir, &manifest).and_then(|()| {
+            if manifest["api"].as_i64().unwrap_or(1) < WORKERS_API {
+                return Err(format!("workers need \"api\": {WORKERS_API}"));
+            }
+            Ok(())
+        }) {
+            problems.push(format!("{id}: workers: {why}"));
+            continue;
+        }
+        let mut names: Vec<String> = Vec::new();
+        for each in declared {
+            let name = each["name"].as_str().unwrap_or("");
+            match check_worker(&dir, each, &names) {
+                Ok((program, args)) => {
+                    names.push(name.to_owned());
+                    found.push(Worker { plugin: id.clone(), builtin, name: name.to_owned(), program, args });
+                }
+                Err(why) => problems.push(format!("{id}: worker {name:?}: {why}")),
+            }
+        }
+    }
+    (found, problems)
+}
+
+/// One worker as its manifest declares it, checked: its program and the
+/// arguments it is given first.
+fn check_worker(dir: &Path, declared: &Value, names: &[String]) -> Result<(PathBuf, Vec<String>), String> {
+    if !declared.is_object() {
+        return Err("a worker is an object with a \"name\" and a \"program\"".into());
+    }
+    let name = declared["name"].as_str().unwrap_or("");
+    let named = name.len() <= 64
+        && name.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !named {
+        return Err("a worker's \"name\" is letters, digits, '.', '_' and '-'".into());
+    }
+    if names.iter().any(|n| n == name) {
+        return Err("that name is the plugin's already".into());
+    }
+    match &declared["per"] {
+        Value::Null => {}
+        Value::String(per) if per == "source" => {}
+        _ => return Err("\"per\" is \"source\"".into()),
+    }
+    let args = match &declared["args"] {
+        Value::Null => Vec::new(),
+        Value::Array(list) if list.len() <= 64 => list
+            .iter()
+            .map(|a| a.as_str().filter(|a| a.len() <= 4096).map(str::to_owned).ok_or_else(|| "\"args\" is a list of strings".to_owned()))
+            .collect::<Result<_, _>>()?,
+        _ => return Err("\"args\" is a list of strings".into()),
+    };
+    let program = program_in(dir, "program", &declared["program"])?;
+    Ok((program, args))
+}
+
 /// One provider as its manifest declares it, checked (docs/source-providers.md).
 #[allow(clippy::too_many_arguments)]
 fn check(
@@ -204,19 +309,9 @@ fn check(
     ids: &[String],
     found: &[Provided],
 ) -> Result<Provided, String> {
-    // As the window takes a manifest at all (Plugins::manifestProblem).
-    if manifest["schemaVersion"].as_i64() != Some(1) {
-        return Err("manifest.json needs \"schemaVersion\": 1".into());
-    }
-    if id.is_empty() || id.contains('/') || id.contains("..") {
-        return Err("manifest.json has no usable \"id\"".into());
-    }
+    taken(id, dir, manifest)?;
     if manifest["api"].as_i64().unwrap_or(1) < 3 {
         return Err("sources need \"api\": 3".into());
-    }
-    let main = manifest["entryPoints"]["main"].as_str().unwrap_or("");
-    if !safe_relative(main) || !dir.join(main).is_file() {
-        return Err("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder".into());
     }
     let named = kind.len() <= 128
         && kind.starts_with(|c: char| c.is_ascii_alphanumeric())
@@ -239,15 +334,7 @@ fn check(
     if let Some(other) = found.iter().find(|p| p.kind == kind) {
         return Err(format!("{} has that kind already", other.plugin));
     }
-    let program = provider.as_str().unwrap_or("");
-    if !safe_relative(program) {
-        return Err("\"provider\" is a path in the plugin's folder, without \"..\"".into());
-    }
-    let path = dir.join(program);
-    use std::os::unix::fs::PermissionsExt;
-    if !std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0) {
-        return Err(format!("{} is not an executable file", path.display()));
-    }
+    let path = program_in(dir, "provider", provider)?;
     let accepts: Vec<String> = match &declared["accepts"] {
         Value::Null => Vec::new(),
         Value::Array(list) => list
@@ -274,6 +361,36 @@ fn check(
         accepts,
         rounds_every,
     })
+}
+
+/// As the window takes a manifest at all (Plugins::manifestProblem).
+fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
+    if manifest["schemaVersion"].as_i64() != Some(1) {
+        return Err("manifest.json needs \"schemaVersion\": 1".into());
+    }
+    if id.is_empty() || id.contains('/') || id.contains("..") {
+        return Err("manifest.json has no usable \"id\"".into());
+    }
+    let main = manifest["entryPoints"]["main"].as_str().unwrap_or("");
+    if !safe_relative(main) || !dir.join(main).is_file() {
+        return Err("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder".into());
+    }
+    Ok(())
+}
+
+/// A program a manifest names (its `field`): a path in the plugin's
+/// folder, never out of it, to a file that can be run.
+fn program_in(dir: &Path, field: &str, named: &Value) -> Result<PathBuf, String> {
+    let program = named.as_str().unwrap_or("");
+    if !safe_relative(program) {
+        return Err(format!("\"{field}\" is a path in the plugin's folder, without \"..\""));
+    }
+    let path = dir.join(program);
+    use std::os::unix::fs::PermissionsExt;
+    if !std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0) {
+        return Err(format!("{} is not an executable file", path.display()));
+    }
+    Ok(path)
 }
 
 /// The plugin a kind belongs to, of those installed: the one with the
@@ -427,6 +544,66 @@ mod tests {
             assert!(said.contains(why), "{why} not in:\n{said}");
         }
         assert_eq!(problems.len(), 12, "{said}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workers_are_found_and_checked_as_their_manifests_say() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("pinhole-workers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let places = Places { builtin: dir.join("builtin"), personal: dir.join("personal"), state: dir.join("state") };
+        let plugin = |root: &Path, folder: &str, id: &str, api: i64, workers: Value| {
+            let at = root.join(folder);
+            std::fs::create_dir_all(&at).unwrap();
+            std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
+            let manifest = serde_json::json!({"schemaVersion": 1, "api": api, "id": id, "entryPoints": {"main": "Main.qml"}, "workers": workers});
+            std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
+            for (name, mode) in [("run", 0o755), ("plain", 0o644)] {
+                std::fs::write(at.join(name), "#!/bin/sh\n").unwrap();
+                std::fs::set_permissions(at.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
+            }
+        };
+        plugin(&places.builtin, "people", "pinhole.people", 10,
+               serde_json::json!([{"name": "faces", "program": "run", "args": ["daemon"], "per": "source"}]));
+        // A built-in one your copy replaces, workers and all.
+        plugin(&places.builtin, "search", "pinhole.search", 10, serde_json::json!([{"name": "old", "program": "run"}]));
+        plugin(&places.personal, "my-search", "pinhole.search", 10, serde_json::json!([{"name": "new", "program": "./run"}]));
+        // Of your own: one right, and many wrong.
+        plugin(&places.personal, "mine", "me.mine", 10, serde_json::json!([
+            {"name": "index", "program": "run"},
+            {"name": "index", "program": "run"},
+            {"name": "up", "program": "../mine/run"},
+            {"name": "abs", "program": "/bin/sh"},
+            {"name": "plain", "program": "plain"},
+            {"name": "missing", "program": "nothing"},
+            {"name": "bad/name", "program": "run"},
+            {"name": "per", "program": "run", "per": "photo"},
+            {"name": "args", "program": "run", "args": ["a", 1]},
+            "run",
+        ]));
+        plugin(&places.personal, "old", "me.old", 9, serde_json::json!([{"name": "w", "program": "run"}]));
+        plugin(&places.personal, "odd", "me.odd", 10, serde_json::json!({"name": "w", "program": "run"}));
+
+        let (found, problems) = workers(&places);
+        let names: Vec<(&str, &str, bool)> = found.iter().map(|w| (w.plugin.as_str(), w.name.as_str(), w.builtin)).collect();
+        assert_eq!(names, [("pinhole.people", "faces", true), ("me.mine", "index", false), ("pinhole.search", "new", false)]);
+        assert_eq!(found[0].program, places.builtin.join("people/run"));
+        assert_eq!(found[0].args, ["daemon"]);
+        assert_eq!(found[2].program, places.personal.join("my-search/./run"));
+        let said = problems.join("\n");
+        for why in ["me.mine: worker \"index\": that name is the plugin's already", "me.mine: worker \"up\": \"program\" is a path",
+                    "me.mine: worker \"abs\": \"program\" is a path", "me.mine: worker \"plain\":", "me.mine: worker \"missing\":",
+                    "me.mine: worker \"bad/name\": a worker's \"name\"", "me.mine: worker \"per\": \"per\" is \"source\"",
+                    "me.mine: worker \"args\": \"args\" is a list of strings", "me.mine: worker \"\": a worker is an object",
+                    "me.old: workers: workers need \"api\": 10", "me.odd: \"workers\" is a list"] {
+            assert!(said.contains(why), "{why} not in:\n{said}");
+        }
+        assert_eq!(problems.len(), 11, "{said}");
+        // On as the window has them: a built-in unless turned off, one of
+        // your own (your copy of a built-in too) only when turned on.
+        assert!(turned_on(true, None) && turned_on(true, Some(true)) && !turned_on(true, Some(false)));
+        assert!(!turned_on(false, None) && turned_on(false, Some(true)) && !turned_on(false, Some(false)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
