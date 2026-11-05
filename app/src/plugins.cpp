@@ -703,7 +703,7 @@ void Plugins::registerTypes() {
     qmlRegisterType(QUrl(QStringLiteral("qrc:/MapGestures.qml")), "Pinhole.Internal", 1, 0, "MapGestures");
     for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner",
                              "Toggle", "FieldInput", "ScrollList", "ScrollGrid", "ScrollArea", "PinchZoom", "Panel", "Card",
-                             "Choices"})
+                             "Choices", "PhotoTiles"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
     // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).

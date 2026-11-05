@@ -15,7 +15,7 @@ Item {
     property string problem: ""
     property string source: ""
     property int limit: 300
-    property int cursor: 0
+    property alias cursor: photos.cursor
     visible: shown && !pinhole.away
 
     function refresh() {
@@ -59,7 +59,7 @@ Item {
         cursor = 0
         shown = true
         refresh()
-        photos.positionViewAtBeginning()
+        photos.view.positionViewAtBeginning()
     }
     function close() {
         shown = false
@@ -84,10 +84,6 @@ Item {
         close()
         pinhole.reveal(row.id)
     }
-    function move(by) {
-        cursor = Math.max(0, Math.min(Math.min(limit, rows.length) - 1, cursor + by))
-        photos.positionViewAtIndex(cursor, GridView.Contain)
-    }
     Connections {
         target: recent.pinhole
         function onHiddenChanged() { if (recent.shown) recent.refresh() }
@@ -105,8 +101,7 @@ Item {
         target: recent.pinhole
         function onDismissed() { recent.close() }
         function onReturned(photo) {
-            const at = recent.rows.findIndex(row => row.id === photo)
-            if (at >= 0) recent.move(at - recent.cursor)
+            photos.moveTo(photo)
             recent.refresh()
         }
     }
@@ -146,63 +141,37 @@ Item {
         text: problem || (loading ? qsTr("Reading the library…") : qsTr("No photos here yet."))
         color: theme.foreground
     }
-    readonly property int columns: Math.max(1, Math.floor(photos.width / (theme.fontSize * 15)))
-    ScrollGrid {
+    PhotoTiles {
         id: photos
         anchors.top: heading.bottom
         anchors.bottom: footer.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: 16
-        model: Math.min(recent.limit, recent.rows.length)
-        cellWidth: width / recent.columns
-        cellHeight: cellWidth + theme.fontSize * 3.8
-        delegate: Item {
-            id: tile
-            required property int index
+        library: recent.pinhole.library
+        photos: recent.rows.slice(0, recent.limit).map(row => row.id)
+        active: recent.shown && !recent.pinhole.away
+        minCell: theme.fontSize * 13
+        captionHeight: theme.fontSize * 3.8
+        caption: Column {
+            property string photo
+            property int index
             readonly property var row: recent.rows[index] ?? ({})
-            readonly property var photo: (recent.pinhole.library.revision, recent.pinhole.library.item(row.id ?? ""))
-            width: photos.cellWidth - 6
-            height: photos.cellHeight - 6
-            Rectangle {
+            UiText {
                 width: parent.width
-                height: width
-                color: theme.darkForeground
-                Image {
-                    anchors.fill: parent
-                    source: tile.photo.thumbnail ?? ""
-                    sourceSize: Qt.size(width * 1.5, height * 1.5)
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    color: "transparent"
-                    border.width: 2
-                    border.color: theme.accent
-                    visible: keymap.input === "keyboard" && recent.cursor === tile.index
-                }
+                elide: Text.ElideRight
+                text: qsTr("Added %1").arg(new Date(parent.row.added_date || parent.row.asset_date).toLocaleDateString(Qt.locale(), Locale.ShortFormat))
+                color: theme.brightForeground
             }
-            Column {
-                y: parent.width + 5
+            UiText {
                 width: parent.width
-                UiText {
-                    width: parent.width
-                    elide: Text.ElideRight
-                    text: qsTr("Added %1").arg(new Date(tile.row.added_date || tile.row.asset_date).toLocaleDateString(Qt.locale(), Locale.ShortFormat))
-                    color: theme.brightForeground
-                }
-                UiText {
-                    width: parent.width
-                    elide: Text.ElideRight
-                    text: qsTr("Taken %1").arg(new Date(tile.row.asset_date).toLocaleDateString(Qt.locale(), Locale.ShortFormat))
-                    color: theme.foreground
-                    font.pixelSize: Math.round(theme.fontSize * 0.857)
-                }
+                elide: Text.ElideRight
+                text: qsTr("Taken %1").arg(new Date(parent.row.asset_date).toLocaleDateString(Qt.locale(), Locale.ShortFormat))
+                color: theme.foreground
+                font.pixelSize: Math.round(theme.fontSize * 0.857)
             }
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: recent.openPhoto(tile.index) }
         }
+        onOpened: (photo, index) => recent.openPhoto(index)
     }
     Row {
         id: footer
@@ -229,27 +198,6 @@ Item {
         keyLayer: "plugin"
         when: recent.shown
         onTriggered: recent.close()
-    }
-    Repeater {
-        model: [["left", "Left", -1], ["right", "Right", 1], ["up", "Up", -recent.columns], ["down", "Down", recent.columns]]
-        delegate: Command {
-            required property var modelData
-            name: "recent." + modelData[0]
-            keys: [modelData[1]]
-            keyLayer: "plugin"
-            when: recent.shown
-            autoRepeat: true
-            onTriggered: recent.move(modelData[2])
-        }
-    }
-    Command {
-        name: "recent.open"
-        text: qsTr("Open the photo")
-        section: qsTr("Recent additions")
-        keys: ["Return", "Enter"]
-        keyLayer: "plugin"
-        when: recent.shown && recent.rows.length > 0
-        onTriggered: recent.openPhoto(recent.cursor)
     }
     Command {
         name: "recent.reveal"

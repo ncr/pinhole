@@ -134,11 +134,11 @@
             stage = "mouse"
             const grid = findChild(panel, "semanticSearchResults")
             verify(grid !== null)
-            grid.positionViewAtIndex(0, GridView.Beginning)
-            grid.forceLayout()
+            grid.view.positionViewAtIndex(0, GridView.Beginning)
+            grid.view.forceLayout()
             stage = "mouse-cell"
-            tryVerify(() => grid.itemAtIndex(0) !== null, 5000)
-            const cell = grid.itemAtIndex(0)
+            tryVerify(() => grid.view.itemAtIndex(0) !== null, 5000)
+            const cell = grid.view.itemAtIndex(0)
             details = {gridHeight: grid.height, gridWidth: grid.width, cellHeight: cell.height,
                        cellWidth: cell.width, position: cell.mapToItem(null, 0, 0),
                        shown: panel.shown, panelVisible: panel.visible, cellVisible: cell.visible,
@@ -146,14 +146,14 @@
             stage = "mouse-move"
             mouseMove(cell, cell.width / 2, cell.height / 2)
             stage = "mouse-click"
-            const tap = findChild(cell, "semanticResultTap")
+            const tap = findChild(cell, "photoTileTap")
             taps.target = tap
             opens.clear()
             mousePress(cell, cell.width / 2, cell.height / 2, Qt.LeftButton, Qt.NoModifier, 50)
             details = Object.assign({}, details, {pressed: tap.pressed})
             mouseRelease(cell, cell.width / 2, cell.height / 2, Qt.LeftButton, Qt.NoModifier, 50)
             details = Object.assign({}, details, {taps: taps.count, index: cell.index,
-                validId: pinhole.library.indexOf(cell.modelData.id), afterPressed: tap.pressed,
+                validId: pinhole.library.indexOf(cell.photo), afterPressed: tap.pressed,
                 changes: opens.count, away: pinhole.away})
             stage = "mouse-viewer"
             tryCompare(pinhole.viewer, "open", true, 5000)

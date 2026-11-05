@@ -27,12 +27,11 @@ FocusScope {
     property bool loading: false
     property bool fitted: false
     property bool failed: false
-    property int cursor: 0
+    property alias cursor: photos.cursor
     property real cx: 0.5
     property real cy: 0.5
     property real zoom: 1
     readonly property real scale: Geo.scale(zoom)
-    readonly property int columns: Math.max(1, Math.floor(photos.width / (theme.fontSize * 8)))
     // Not those hidden from the grid (Screenshots'), as the grid.
     property int hiddenRevision: 0
     readonly property var shownPoints: (hiddenRevision, points.filter(p => !pinhole.isHidden(p.id)))
@@ -253,7 +252,7 @@ FocusScope {
         gallery = next
         cursor = nextCursor >= 0 ? nextCursor : 0
         if (nextCursor < 0)
-            photos.positionViewAtBeginning()
+            photos.view.positionViewAtBeginning()
     }
     function showVisible() {
         if (areaOpen) {
@@ -308,15 +307,11 @@ FocusScope {
         const at = gallery.findIndex(p => p.id === photo)
         if (at >= 0) {
             cursor = at
-            photos.positionViewAtIndex(at, GridView.Contain)
+            photos.view.positionViewAtIndex(at, GridView.Contain)
             photos.forceActiveFocus()
         } else {
             map.forceActiveFocus()
         }
-    }
-    function moveCursor(by) {
-        cursor = Geo.clamp(cursor + by, 0, gallery.length - 1)
-        photos.positionViewAtIndex(cursor, GridView.Contain)
     }
     onViewWidthChanged: scheduleGroups()
     onViewHeightChanged: camera(cx, cy, zoom)
@@ -667,7 +662,7 @@ FocusScope {
             text: qsTr("No photos in this area")
             color: theme.foreground
         }
-        ScrollGrid {
+        PhotoTiles {
             id: photos
             objectName: "placesGallery"
             anchors.top: galleryBar.bottom
@@ -677,42 +672,14 @@ FocusScope {
             anchors.leftMargin: 12
             anchors.rightMargin: 12
             clip: true
-            model: places.gallery.length
-            visible: count > 0
+            visible: places.gallery.length > 0
             activeFocusOnTab: true
-            keyNavigationEnabled: false
-            Accessible.role: Accessible.List
-            Accessible.name: galleryBar.visible ? qsTr("%n photo(s) here", "", count) : ""
-            cellWidth: width / places.columns
-            cellHeight: cellWidth
-            delegate: Item {
-                id: thumb
-                objectName: "placesPhoto_" + index
-                required property int index
-                readonly property string photoId: places.gallery[index]?.id ?? ""
-                readonly property var photo: (places.pinhole.library.revision, places.pinhole.library.item(photoId))
-                width: photos.cellWidth - 5
-                height: photos.cellHeight - 5
-                Accessible.role: Accessible.Button
-                Accessible.name: photo.filename || qsTr("Open the photo")
-                Accessible.onPressAction: places.openGalleryPhoto(index)
-                Image {
-                    anchors.fill: parent
-                    source: thumb.photo.thumbnail || ""
-                    sourceSize: Qt.size(width * 1.5, height * 1.5)
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    color: "transparent"
-                    border.width: hover.hovered ? 1 : 2
-                    border.color: theme.accent
-                    visible: hover.hovered || (photos.activeFocus && keymap.input === "keyboard" && places.cursor === thumb.index)
-                }
-                HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: places.openGalleryPhoto(thumb.index) }
-            }
+            library: places.pinhole.library
+            photos: places.gallery.map(p => p.id)
+            active: places.visible && photos.activeFocus
+            minCell: theme.fontSize * 8
+            Accessible.name: galleryBar.visible ? qsTr("%n photo(s) here", "", places.gallery.length) : ""
+            onOpened: (photo, index) => places.openGalleryPhoto(index)
         }
     }
     Item {
@@ -745,7 +712,8 @@ FocusScope {
         section: qsTr("Map")
         keyLayer: "plugin"
         keys: ["Home"]
-        when: places.visible && places.hasPhotos
+        // Home is the gallery's first photo while it has the keys.
+        when: places.visible && places.hasPhotos && !photos.activeFocus
         onTriggered: places.fitAll()
     }
     Command {
@@ -777,11 +745,10 @@ FocusScope {
                 name: "places.choose." + modelData[0]
                 keyLayer: "plugin"
                 keys: [modelData[0]]
-                when: places.visible && (map.activeFocus || photos.activeFocus)
+                // The gallery's own keys while it has them (PhotoTiles).
+                when: places.visible && map.activeFocus
                 autoRepeat: true
-                onTriggered: photos.activeFocus
-                    ? places.moveCursor(modelData[1] + places.columns * modelData[2])
-                    : places.movePlace(modelData[1], modelData[2])
+                onTriggered: places.movePlace(modelData[1], modelData[2])
             }
             Command {
                 name: "places.pan." + modelData[0]
@@ -797,14 +764,8 @@ FocusScope {
         name: "places.open"
         keyLayer: "plugin"
         keys: ["Return", "Enter", "Space"]
-        when: places.visible && (photos.activeFocus && places.gallery.length > 0
-                                  || map.activeFocus && places.currentGroup !== null)
-        onTriggered: {
-            if (photos.activeFocus)
-                places.openGalleryPhoto(places.cursor)
-            else
-                places.showGroup(places.currentGroup)
-        }
+        when: places.visible && map.activeFocus && places.currentGroup !== null
+        onTriggered: places.showGroup(places.currentGroup)
     }
     Command {
         id: zoomIn

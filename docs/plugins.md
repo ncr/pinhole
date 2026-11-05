@@ -87,6 +87,15 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
   step, a swipe one), as the Photo frame and the Series editor step.
 - `Card`: a box in the theme, the same: nothing over it goes through. Over
   the photos for a moment, on a dimmed `Panel` whose click puts it away.
+- `PhotoTiles` (API 11): photos as square tiles, as a view shows what it
+  found: `library` (`pinhole.library`), `photos` (ids, in order), `active`
+  (its keys while true: ← → ↑ ↓, Home, End, PgUp, PgDn, ⏎, Space),
+  `cursor`, `minCell`, and `opened(photo, index)`; `moveTo(id)` puts the
+  cursor on one (as `returned(id)` says), `pastTop()` is ↑ from the first
+  row (to a field above), `caption` a Component under each tile
+  (`captionHeight` tall, given `photo` and `index`). Each drawn at the
+  display's own pixels, the ring on the cursor's and under the pointer as
+  Pinhole's own.
 - `Choices`: one of a few on a row of buttons, each also its number's key:
   `options` as `[{ value, text }]`, `value`, `chosen(value)`.
 - `ShellButton`'s `complain(text)`: what pressing it could not do, under it

@@ -21,7 +21,7 @@ Panel {
     property var savedTags: []
     property string tagError: ""
     property var results: []
-    property int selected: -1
+    property alias selected: grid.cursor
     property var allResults: []
     property bool tagQuery: false
     property string tagName: ""
@@ -233,22 +233,13 @@ Panel {
         pinhole.did(removing ? qsTr("removing a photo tag") : qsTr("adding a photo tag"),
             () => writeTags(key, asset, before), () => writeTags(key, asset, after))
     }
-    function move(delta) {
+    function toResults() {
         if (!results.length) return
-        if (delta < 0 && selected + delta < 0 && delta <= -grid.columns) {
-            search.input.forceActiveFocus()
-            return
-        }
-        selected = Math.max(0, Math.min(results.length - 1, selected + delta))
-        grid.positionViewAtIndex(selected, GridView.Contain)
+        grid.view.positionViewAtIndex(selected, GridView.Contain)
         grid.forceActiveFocus()
     }
     Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.tagAsset ? panel.closeTags(true) : panel.close() }
-    Command { name: "semantic.open"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.openResult(panel.selected) }
-    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && (search.input.activeFocus || grid.activeFocus); onTriggered: panel.move(search.input.activeFocus ? 0 : grid.columns) }
-    Command { name: "semantic.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-grid.columns) }
-    Command { name: "semantic.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(1) }
-    Command { name: "semantic.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.browsing && grid.activeFocus; onTriggered: panel.move(-1) }
+    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && search.input.activeFocus; onTriggered: panel.toResults() }
     Command {
         id: tagCommand
         name: "semantic.tags"
@@ -272,8 +263,7 @@ Panel {
         function onHiddenChanged() { panel.filterResults() }
         function onReturned(photo) {
             const at = panel.results.findIndex(row => row.id === photo)
-            if (at >= 0) panel.selected = at
-            grid.positionViewAtIndex(panel.selected, GridView.Contain)
+            grid.moveTo(photo)
             grid.forceActiveFocus()
         }
     }
@@ -347,11 +337,10 @@ Panel {
                 : ""
         }
     }
-    ScrollGrid {
+    PhotoTiles {
         id: grid
         objectName: "semanticSearchResults"
-        readonly property int columns: Math.max(2, Math.floor(width / (theme.fontSize * 11)))
-        visible: panel.browsing && count > 0
+        visible: panel.browsing && panel.results.length > 0
         anchors.top: statusRow.bottom
         anchors.topMargin: 2
         anchors.bottom: parent.bottom
@@ -359,14 +348,15 @@ Panel {
         anchors.right: parent.right
         anchors.leftMargin: 12
         anchors.rightMargin: 12
-        clip: true
-        cellWidth: width / columns
-        cellHeight: cellWidth
-        model: panel.results
-        keyNavigationEnabled: false
-        activeFocusOnTab: count > 0
-        Accessible.role: Accessible.List
+        library: pinhole.library
+        photos: panel.results.map(row => row.id)
+        active: panel.browsing && grid.activeFocus
+        // The best match ringed while the question has the keys: ⏎ opens it.
+        showCursor: panel.browsing && (grid.activeFocus || search.input.activeFocus)
+        activeFocusOnTab: panel.results.length > 0
         Accessible.name: qsTr("Search results")
+        onOpened: (photo, index) => panel.openResult(index)
+        onPastTop: search.input.forceActiveFocus()
         Keys.onPressed: event => {
             // Typing goes on with the question.
             if (event.text.length === 1 && event.text >= " " && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
@@ -376,48 +366,13 @@ Panel {
                 event.accepted = true
             }
         }
-        delegate: Item {
-            id: cell
-            required property int index
-            required property var modelData
-            readonly property bool chosen: panel.selected === index
-                && (grid.activeFocus || search.input.activeFocus) && keymap.input === "keyboard"
-            width: grid.cellWidth - 5
-            height: grid.cellHeight - 5
-            Accessible.role: Accessible.Button
-            Accessible.name: (pinhole.library.revision, pinhole.library.item(modelData.id).filename) || qsTr("Search result %1").arg(index + 1)
-            Accessible.onPressAction: panel.openResult(index)
-            Rectangle {
-                anchors.fill: parent
-                color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.06)
-            }
-            Image {
-                anchors.fill: parent
-                source: (pinhole.library.revision, pinhole.library.item(cell.modelData.id).thumbnail) || ""
-                sourceSize: Qt.size(width * 1.5, height * 1.5)
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-            }
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                border.width: hover.hovered && !cell.chosen ? 1 : 2
-                border.color: theme.accent
-                visible: hover.hovered || cell.chosen
-            }
-            HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-            TapHandler {
-                objectName: "semanticResultTap"
-                onTapped: panel.openResult(cell.index)
-            }
-        }
     }
 
     // Before a question, or with none answered: what to ask.
     Column {
         id: invitation
         objectName: "semanticInvitation"
-        visible: panel.browsing && grid.count === 0
+        visible: panel.browsing && panel.results.length === 0
         anchors.centerIn: parent
         anchors.verticalCenterOffset: titlebar.height / 2
         width: Math.min(parent.width - 48, theme.fontSize * 46)

@@ -213,7 +213,7 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 if (map->property("cursor").toInt() != 1)
                     return fail("Right did not advance in the gallery");
                 press(window, Qt::Key_Space);
-            } else if (auto *photo = named(gallery, "placesPhoto_1")) {
+            } else if (auto *photo = named(gallery, "photoTile_1")) {
                 click(window, device, photo);
             } else {
                 return;
