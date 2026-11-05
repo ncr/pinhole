@@ -237,7 +237,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
-        {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"}, {11, "comeBack, away or returned"}};
+        {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -378,10 +379,14 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
                 && code.contains(QRegularExpression("\\b" + QRegularExpression::escape(id.captured(2)) + "\\s*\\.\\s*hidden\\s*=(?!=)"))))
             uses << QStringLiteral("hidden");
     }
-    // Sources of its own, in its manifest.
-    if (QFile manifest(dir + "/manifest.json");
-        manifest.open(QIODevice::ReadOnly) && QJsonDocument::fromJson(manifest.readAll()).object().contains(QLatin1String("sources")))
-        uses << QStringLiteral("sources in the manifest");
+    // Sources and workers of its own, in its manifest.
+    if (QFile manifest(dir + "/manifest.json"); manifest.open(QIODevice::ReadOnly)) {
+        const QJsonObject declared = QJsonDocument::fromJson(manifest.readAll()).object();
+        if (declared.contains(QLatin1String("sources")))
+            uses << QStringLiteral("sources in the manifest");
+        if (declared.contains(QLatin1String("workers")))
+            uses << QStringLiteral("workers in the manifest");
+    }
     QMap<int, QStringList> byApi;
     for (const auto &[version, name] : order)
         if (uses.contains(name))
@@ -873,7 +878,49 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
         return tr("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder");
     if (const int wanted = manifest->value("api").toInt(1); wanted > api)
         return tr("It needs a newer Pinhole: plugin API %1, and this one has %2.").arg(wanted).arg(api);
-    return sourcesProblem(dir, id, *manifest);
+    if (const QString problem = sourcesProblem(dir, id, *manifest); !problem.isEmpty())
+        return problem;
+    return workersProblem(dir, *manifest);
+}
+
+QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest) {
+    // As pinholed takes them (core/src/plugins.rs, docs/plugins.md, Workers),
+    // so what it would refuse is said here.
+    const QJsonValue declared = manifest.value("workers");
+    if (declared.isUndefined())
+        return {};
+    if (!declared.isArray())
+        return tr("manifest.json's \"workers\" is a list");
+    if (manifest.value("api").toInt(1) < 11)
+        return tr("workers need \"api\": 10");
+    static const QRegularExpression named(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"));
+    QStringList seen;
+    for (const QJsonValue &each : declared.toArray()) {
+        const QJsonObject worker = each.toObject();
+        const QString name = worker.value("name").toString();
+        if (!each.isObject() || !named.match(name).hasMatch())
+            return tr("each of manifest.json's \"workers\" has a \"name\" of letters, digits, '.', '_' and '-'");
+        if (seen.contains(name))
+            return tr("\"workers\": %1 is named twice").arg(name);
+        seen << name;
+        const auto wrong = [&name](const QString &why) { return tr("\"workers\": %1: %2").arg(name, why); };
+        if (worker.contains("per") && worker.value("per") != QJsonValue(QStringLiteral("source")))
+            return wrong(tr("\"per\" is \"source\""));
+        if (worker.contains("args")) {
+            const QJsonValue args = worker.value("args");
+            bool fine = args.isArray() && args.toArray().size() <= 64;
+            for (const QJsonValue &a : args.toArray())
+                fine = fine && a.isString() && a.toString().toUtf8().size() <= 4096;
+            if (!fine)
+                return wrong(tr("\"args\" is a list of strings"));
+        }
+        const QString program = worker.value("program").toString();
+        if (!safeEntry(program))
+            return wrong(tr("\"program\" is a path in the plugin's folder, without \"..\""));
+        if (const QFileInfo file(dir + '/' + program); !file.isFile() || !file.isExecutable())
+            return wrong(tr("%1 is not a program in the plugin's folder (a file it can run)").arg(program));
+    }
+    return {};
 }
 
 QStringList Plugins::sourceKinds(const QJsonObject &manifest) {

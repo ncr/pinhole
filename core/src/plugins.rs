@@ -222,7 +222,7 @@ pub struct Worker {
 }
 
 /// The plugin API that brought `workers` (Plugins::apiUses).
-pub const WORKERS_API: i64 = 10;
+pub const WORKERS_API: i64 = 11;
 
 /// Every worker the plugins declare, on or not, and why any declared was
 /// refused, one line each. A plugin of your own with a built-in's id

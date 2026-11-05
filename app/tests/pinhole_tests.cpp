@@ -4872,6 +4872,56 @@ private slots:
         QVERIFY(Plugins::sourcesProblem(dir.path(), "me.jpegs", {{"api", 3}, {"sources", QJsonArray{fine, fine}}}).contains("twice"));
     }
 
+    // A plugin's workers (docs/plugins.md, Workers): what pinholed would
+    // refuse (core/src/plugins.rs) is said as the plugin is read, and by
+    // `pinhole plugin check`, and they need API 10. People's and the photo
+    // search example's are fine.
+    void aWorkerIsCheckedAsPinholedTakesIt() {
+        for (const char *folder : {"/../../../plugins/people", "/../../../examples/semantic-search"}) {
+            QJsonObject manifest;
+            QString main;
+            QCOMPARE(Plugins::manifestProblem(QStringLiteral(PINHOLE_I18N) + folder, &manifest, &main), QString());
+            QVERIFY(manifest.value("workers").isArray());
+            QVERIFY(Plugins::apiUses(QStringLiteral(PINHOLE_I18N) + folder).value(10).contains("workers in the manifest"));
+        }
+        QTemporaryDir dir;
+        write(dir.path() + "/run", "#!/bin/sh\n");
+        write(dir.path() + "/data", "");
+        QFile(dir.path() + "/run").setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        const auto problem = [&dir](const QJsonValue &workers, int api = 10) {
+            return Plugins::workersProblem(dir.path(), {{"api", api}, {"workers", workers}});
+        };
+        const QJsonObject fine{{"name", "faces"}, {"program", "run"}, {"args", QJsonArray{"daemon"}}, {"per", "source"}};
+        QCOMPARE(problem(QJsonArray{fine}), QString());
+        QCOMPARE(problem(QJsonArray{QJsonObject{{"name", "index"}, {"program", "./run"}}}), QString());
+        QCOMPARE(Plugins::workersProblem(dir.path(), {{"api", 3}}), QString());
+        const auto with = [&fine](const QString &key, const QJsonValue &value) {
+            QJsonObject changed = fine;
+            changed.insert(key, value);
+            return QJsonArray{changed};
+        };
+        const QList<std::pair<QString, QJsonValue>> wrong = {
+            {"\"api\": 10", QJsonArray{fine}},
+            {"is a list", fine},
+            {"twice", QJsonArray{fine, fine}},
+            {"\"name\"", QJsonArray{"run"}},
+            {"\"name\"", with("name", "a/b")},
+            {"\"name\"", with("name", "")},
+            {"\"per\"", with("per", "photo")},
+            {"list of strings", with("args", QJsonArray{"a", 1})},
+            {"list of strings", with("args", "daemon")},
+            {"a path in the plugin's folder", with("program", "../run")},
+            {"a path in the plugin's folder", with("program", "/bin/sh")},
+            {"a path in the plugin's folder", with("program", QJsonValue())},
+            {"not a program", with("program", "data")},
+            {"not a program", with("program", "gone")},
+        };
+        for (const auto &[said, workers] : wrong) {
+            const QString why = problem(workers, said == QLatin1String("\"api\": 10") ? 9 : 10);
+            QVERIFY2(why.contains(said), qPrintable(said + " not in: " + why));
+        }
+    }
+
     // A step that did not happen after all is dropped: Ctrl Z undoes what was
     // done before it, and the window no longer offers it.
     void aStepDroppedIsAsIfNeverDone() {
