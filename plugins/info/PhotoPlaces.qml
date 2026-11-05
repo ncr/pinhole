@@ -258,14 +258,39 @@ FocusScope {
         if (photo) {
             cursor = at
             returnToGallery = true
-            owner.viewMapPhoto(photo.id)
+            owner.viewMapPhoto(photo.id, gallery.map(p => p.id))
         }
     }
     property bool returnToGallery: false
+    // When the photos shown were taken: a month, months of a year, or years.
+    readonly property string galleryTime: {
+        let first = Infinity, last = 0
+        for (const p of gallery) {
+            if (!p.date) continue
+            first = Math.min(first, p.date)
+            last = Math.max(last, p.date)
+        }
+        if (!last) return ""
+        const from = new Date(first), to = new Date(last)
+        const locale = Qt.locale()
+        if (from.getFullYear() !== to.getFullYear())
+            return qsTr("%1 – %2").arg(from.getFullYear()).arg(to.getFullYear())
+        if (from.getMonth() !== to.getMonth())
+            return qsTr("%1 – %2 %3").arg(locale.standaloneMonthName(from.getMonth())).arg(locale.standaloneMonthName(to.getMonth())).arg(to.getFullYear())
+        return qsTr("%1 %2").arg(locale.standaloneMonthName(to.getMonth())).arg(to.getFullYear())
+    }
     onVisibleChanged: {
         if (visible) {
-            if (returnToGallery && gallery.length)
+            if (returnToGallery && gallery.length) {
+                // On the photo last looked at.
+                const seen = pinhole.library.item(pinhole.viewer.index).id
+                const at = gallery.findIndex(p => p.id === seen)
+                if (at >= 0) {
+                    cursor = at
+                    photos.positionViewAtIndex(at, GridView.Contain)
+                }
                 photos.forceActiveFocus()
+            }
             else
                 map.forceActiveFocus()
             returnToGallery = false
@@ -333,41 +358,28 @@ FocusScope {
         }
     }
 
-    Item {
-        id: hintRow
-        anchors.top: titlebar.bottom
-        width: parent.width
-        height: visible ? Math.ceil(theme.fontSize * 1.8) : 0
-        visible: places.hasPhotos && width >= theme.fontSize * 32
-        UiText {
-            id: inputHint
-            x: 14
-            width: Math.max(0, parent.width - 28)
-            elide: Text.ElideRight
-            color: theme.foreground
-            text: {
-                if (keymap.input === "keyboard")
-                    return photos.activeFocus
-                        ? qsTr("Arrows browse photos · ⏎ opens · Esc goes back")
-                        : qsTr("Arrows choose a place · ⇧ + arrows move · ⏎ opens")
-                if (keymap.input === "touchpad")
-                    return qsTr("Two fingers move · Pinch to zoom")
-                return qsTr("Drag to move · Scroll to zoom")
-            }
-        }
+    // How to get about, for a screen reader: the help (?) lists the keys.
+    readonly property string inputHint: {
+        if (keymap.input === "keyboard")
+            return photos.activeFocus
+                ? qsTr("Arrows browse photos · ⏎ opens · Esc goes back")
+                : qsTr("Arrows choose a place · ⇧ + arrows move · ⏎ opens")
+        if (keymap.input === "touchpad")
+            return qsTr("Two fingers move · Pinch to zoom")
+        return qsTr("Drag to move · Scroll to zoom")
     }
 
     Rectangle {
         id: map
         objectName: "placesViewport"
-        anchors.top: hintRow.bottom
+        anchors.top: titlebar.bottom
         anchors.bottom: parent.bottom
         width: parent.width
         activeFocusOnTab: true
         Accessible.role: Accessible.Pane
         Accessible.name: places.currentGroup
             ? qsTr("%n photo(s) here", "", places.currentGroup.points.length) : qsTr("Map")
-        Accessible.description: inputHint.text
+        Accessible.description: places.inputHint
         color: Qt.tint(theme.background, Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.08))
         clip: true
 
@@ -557,15 +569,29 @@ FocusScope {
             id: galleryBar
             width: parent.width
             height: galleryControls.height + 12
-            UiText {
+            Column {
                 anchors.left: parent.left
                 anchors.leftMargin: 14
                 anchors.right: galleryControls.left
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
-                color: theme.brightForeground
-                elide: Text.ElideRight
-                text: qsTr("%n photo(s) here", "", places.gallery.length)
+                UiText {
+                    width: parent.width
+                    color: theme.brightForeground
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: Math.round(theme.fontSize * 0.75)
+                    font.pixelSize: theme.fontSize
+                    text: qsTr("%n photo(s) here", "", places.gallery.length)
+                }
+                UiText {
+                    width: parent.width
+                    visible: text !== ""
+                    color: theme.darkForeground
+                    font.pixelSize: Math.round(theme.fontSize * 0.857)
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: Math.round(theme.fontSize * 0.7)
+                    text: places.galleryTime
+                }
             }
             Row {
                 id: galleryControls

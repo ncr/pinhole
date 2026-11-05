@@ -337,11 +337,15 @@ PinholePlugin {
         mapOpen = false
         mapReturning = false
     }
-    function viewMapPhoto(id) {
+    // ← → go through `among`, the place's photos, when given.
+    function viewMapPhoto(id, among) {
         if (pinhole.library.indexOf(id) < 0)
             return
         mapReturning = true
-        pinhole.openPhotoDirect(id)
+        if (among && among.length > 1)
+            pinhole.openPhotos(among, id)
+        else
+            pinhole.openPhotoDirect(id)
     }
     Loader {
         id: mapLoader

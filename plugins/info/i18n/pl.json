@@ -1,6 +1,9 @@
 {
+  "%1 %2": "%1 %2",
   "%1 (RAW)": "%1 (RAW)",
   "%1 · %2 mm in 35 mm": "%1 · %2 mm (ekw. 35 mm)",
+  "%1 – %2": "%1–%2",
+  "%1 – %2 %3": "%1 – %2 %3",
   "%n photo(s) here": {
     "few": "%n zdjęcia w tym miejscu",
     "many": "%n zdjęć w tym miejscu",
@@ -29,6 +32,7 @@
   "Lens": "Obiektyw",
   "Live Photo": "Live Photo",
   "Location": "Miejsce",
+  "M shows this photo and nearby photos on the map.": "M pokazuje na mapie to zdjęcie i inne zdjęcia z okolicy.",
   "Map": "Mapa",
   "No photos in this area": "Brak zdjęć w tym obszarze",
   "No photos with a location in this library yet.": "W tej bibliotece nie ma jeszcze zdjęć z lokalizacją.",
@@ -48,7 +52,6 @@
   "The original could not be fetched: %1": "Nie udało się pobrać oryginału: %1",
   "The original could not be read: %1": "Nie udało się odczytać oryginału: %1",
   "Two fingers move · Pinch to zoom": "Dwa palce przesuwają · Szczypanie przybliża",
-  "M shows this photo and nearby photos on the map.": "M pokazuje na mapie to zdjęcie i inne zdjęcia z okolicy.",
   "Where": "Gdzie",
   "Yes": "Tak",
   "Yes; where, once the original is here": "Tak; gdzie, gdy dotrze oryginał",

@@ -57,9 +57,10 @@ to photo. A video's original over 50 MB is read only when asked (⇧ I).
 Map (M in the grid or in a located photo's Info panel) shows the current
 library's photos and videos on an OpenStreetMap background. Drag or slide
 two fingers to move, and pinch or turn the wheel to zoom. Click or tap a
-marker to open a photo or see its group. Use **Zoom to group** to look
-closer, or double click the map to zoom at the pointer. **Photos in view**
-follows the visible area as you move.
+marker to open a photo or see its group, with the years it was taken in;
+a photo opened there steps ← → through that place alone. Use **Zoom to
+group** to look closer, or double click the map to zoom at the pointer.
+**Photos in view** follows the visible area as you move.
 
 With the keyboard, arrows choose a place or navigate its photo grid, Shift
 with arrows moves the map, and Enter opens. Home fits all places, + and −
@@ -99,14 +100,20 @@ installed API version and the same bundled documents to tools. Start with
 [the quick start](docs/plugin-quickstart.md) or [the agent contract](docs/plugin-agents.md).
 
 The [local photo-content search plugin](docs/research/photo-search-plugin.md)
-indexes thumbnails automatically in pinholed, even after the window closes. Ctrl F opens the
-search card and accepts photo descriptions in English or Polish. The local
+indexes thumbnails automatically in pinholed, even after the window closes. Ctrl F opens
+search over the whole window: describe a photo in English or Polish and the
+best matches come first. ⏎ opens the best one, and ← → go through the
+answers alone; Esc comes back to them. A line under the question says how
+much of the library can be found yet. The local
 profiles use WeMM 4B on NVIDIA CUDA, CLIP on Apple Silicon with ANE,
 or WeMM 4B on Apple GPUs with Asahi Vulkan when explicitly enabled.
 
 [People](plugins/people/README.md) groups similar faces in thumbnails
 automatically in pinholed, even after the window closes. Shift+F shows the
-suggestions, where you can name groups and remove incorrect matches.
+people named so far and the faces not named yet. A group opens with every
+name a key away (1–9), the likeliest first; once a few photos have a name,
+groups that look like that person say so, and C on the person checks them
+one after another.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
