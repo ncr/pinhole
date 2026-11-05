@@ -74,6 +74,7 @@
 #include "theme.h"
 #include "translator.h"
 #include "viewer.h"
+#include "vectortile.h"
 #include "viewermotion.h"
 #include "zoomer.h"
 
@@ -424,6 +425,61 @@ private slots:
         QCOMPARE(timeline.dateOf(0), library.at(0).date);
         timeline.setMode("unknown");
         QCOMPARE(timeline.mode(), "taken");
+    }
+
+    // A vector tile written by hand: water, a road and a city's names.
+    void aVectorTileGivesItsShapesAndTheNameInTheLanguageAsked() {
+        const auto varint = [](QByteArray &out, quint64 v) {
+            do { quint8 b = v & 0x7f; v >>= 7; out.append(char(v ? b | 0x80 : b)); } while (v);
+        };
+        const auto field = [&](QByteArray &out, int number, const QByteArray &bytes) {
+            varint(out, quint64(number) << 3 | 2); varint(out, quint64(bytes.size())); out.append(bytes);
+        };
+        const auto zig = [](qint32 n) { return quint32((n << 1) ^ (n >> 31)); };
+        const auto packed = [&](const QList<quint32> &values) {
+            QByteArray out; for (quint32 v : values) varint(out, v); return out;
+        };
+        const auto text = [&](const QString &s) { QByteArray v; field(v, 1, s.toUtf8()); return v; };
+        const auto feature = [&](int type, const QList<quint32> &tags, const QList<quint32> &geometry) {
+            QByteArray f;
+            field(f, 2, packed(tags));
+            varint(f, 3 << 3); varint(f, quint64(type));
+            field(f, 4, packed(geometry));
+            return f;
+        };
+        const auto layer = [&](const QString &name, const QList<QByteArray> &features, const QStringList &keys,
+                               const QList<QByteArray> &values) {
+            QByteArray l;
+            field(l, 1, name.toUtf8());
+            for (const auto &f : features) field(l, 2, f);
+            for (const auto &k : keys) field(l, 3, k.toUtf8());
+            for (const auto &v : values) field(l, 4, v);
+            varint(l, 5 << 3); varint(l, 4096);
+            return l;
+        };
+        QByteArray tile;
+        // A square of water, 0..2048 both ways.
+        field(tile, 3, layer("water", {feature(3, {0, 0}, {9, zig(0), zig(0), 26, zig(2048), zig(0), zig(0), zig(2048),
+                                                            zig(-2048), zig(0), 15})}, {"class"}, {text("ocean")}));
+        field(tile, 3, layer("transportation", {feature(2, {0, 0}, {9, zig(0), zig(100), 10, zig(4000), zig(0)})},
+                             {"class"}, {text("motorway")}));
+        field(tile, 3, layer("place", {feature(1, {0, 0, 1, 1, 2, 2, 3, 3}, {9, zig(1000), zig(3000)})},
+                             {"class", "name", "name:pl", "rank"},
+                             {text("city"), text("Москва"), text("Moskwa"), [&] { QByteArray v; varint(v, 4 << 3); varint(v, 2); return v; }()}));
+        const auto decoded = decodeVectorTile(tile, {"name:pl", "name:latin"});
+        QVERIFY(decoded);
+        QCOMPARE(decoded->extent, 4096);
+        QVERIFY(decoded->water.contains(QPointF(1000, 1000)));
+        QVERIFY(!decoded->water.contains(QPointF(3000, 3000)));
+        QCOMPARE(decoded->roads[VectorTile::Motorway].boundingRect(), QRectF(0, 100, 4000, 0));
+        QCOMPARE(decoded->labels.size(), 1);
+        QCOMPARE(decoded->labels[0].text, QStringLiteral("Moskwa"));
+        QCOMPARE(decoded->labels[0].kind, VectorTile::City);
+        QCOMPARE(decoded->labels[0].rank, 2);
+        QCOMPARE(decoded->labels[0].at, QPointF(1000, 3000));
+        // Without the language, the name as written there.
+        QCOMPARE(decodeVectorTile(tile, {"name:de"})->labels[0].text, QStringLiteral("Москва"));
+        QVERIFY(!decodeVectorTile(QByteArray("\x1a\xff", 2), {}));
     }
 
     void viewerStepsThroughAPluginsPhotosInTheirOrder() {

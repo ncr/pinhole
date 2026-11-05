@@ -55,7 +55,10 @@ video's codec, frame rate and length), and where. It stays open from photo
 to photo. A video's original over 50 MB is read only when asked (⇧ I).
 
 Map (M in the grid or in a located photo's Info panel) shows the current
-library's photos and videos on an OpenStreetMap background. Drag or slide
+library's photos and videos on a map Pinhole draws itself from
+OpenFreeMap's vector tiles of OpenStreetMap: in the theme's colours, sharp
+at any scale, with names in your language where the map has them and in
+Latin letters elsewhere. Drag or slide
 two fingers to move, and pinch or turn the wheel to zoom. Click or tap a
 marker to open a photo or see its group, with the years it was taken in;
 a photo opened there steps ← → through that place alone. Use **Zoom to
@@ -68,7 +71,7 @@ zoom, Z looks closer at the selected group, and G toggles **Photos in view**.
 Escape goes back one view, and M closes the map.
 GPS comes from iCloud or local metadata without fetching originals. Existing
 libraries fill in their GPS data on the next catalog refresh. Pinhole sends
-only the requested map tile coordinates to OpenStreetMap; the photo index
+only the requested map tile coordinates to OpenFreeMap; the photo index
 and thumbnails stay local. Cached tiles and photo markers work offline.
 
 Colours finds photos by colour (H): pick one on a wheel, or on a photo the

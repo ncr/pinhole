@@ -214,8 +214,30 @@ FocusScope {
         if (!group)
             return
         const view = Geo.fit(group.points, viewWidth, viewHeight)
+        const level = Math.min(Geo.maxZoom, zoom + 3, Math.max(zoom + 1, view.zoom))
         choosePlace(group)
-        centerOn(view.x, view.y, Math.min(Geo.maxZoom, zoom + 3, Math.max(zoom + 1, view.zoom)))
+        if (level <= view.zoom + 0.01) {
+            centerOn(view.x, view.y, level)
+            return
+        }
+        // Closer than the whole group fits: towards where most of it is,
+        // not the empty middle between its ends.
+        const radius = Math.min(viewWidth, viewHeight) / (2.5 * Geo.scale(level))
+        const apart = (a, b) => Math.abs(a - b - Math.round(a - b))
+        let best = group.points[0], most = 0
+        for (const p of group.points) {
+            let near = 0
+            for (const q of group.points)
+                if (apart(q.x, p.x) < radius && Math.abs(q.y - p.y) < radius)
+                    ++near
+            if (near > most) {
+                most = near
+                best = p
+            }
+        }
+        const around = group.points.filter(q => apart(q.x, best.x) < radius && Math.abs(q.y - best.y) < radius)
+        const middle = Geo.fit(around, viewWidth, viewHeight)
+        centerOn(middle.x, middle.y, level)
     }
     function setGallery(items, keepCursor) {
         const previous = keepCursor ? gallery[cursor]?.id : undefined
@@ -380,7 +402,7 @@ FocusScope {
         Accessible.name: places.currentGroup
             ? qsTr("%n photo(s) here", "", places.currentGroup.points.length) : qsTr("Map")
         Accessible.description: places.inputHint
-        color: Qt.tint(theme.background, Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.08))
+        color: tiles.land
         clip: true
 
         MapTiles {
@@ -391,6 +413,15 @@ FocusScope {
             centerX: Geo.wrap(places.viewCenterX)
             centerY: places.viewCenterY
             zoom: places.zoom
+            // The theme's colours: the window's background is the land.
+            background: theme.background
+            foreground: theme.foreground
+            brightForeground: theme.brightForeground
+            blue: theme.blue
+            green: theme.green
+            light: theme.light
+            fontFamily: theme.font
+            fontSize: theme.fontSize
         }
         MapWheel {
             width: places.viewWidth
@@ -530,11 +561,11 @@ FocusScope {
                 onTapped: tiles.retry()
             }
             ShellButton {
-                text: qsTr("© OpenStreetMap")
-                helpText: qsTr("OpenStreetMap attribution")
+                text: "OpenFreeMap © OpenMapTiles © OpenStreetMap"
+                helpText: qsTr("Map data attribution")
                 floating: true
                 visible: tiles.visible
-                onTapped: Qt.openUrlExternally("https://www.openstreetmap.org/copyright")
+                onTapped: Qt.openUrlExternally("https://openfreemap.org/")
             }
         }
         UiText {

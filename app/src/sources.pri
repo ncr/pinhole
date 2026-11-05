@@ -54,6 +54,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
 
 HEADERS += \
     $$PWD/maptiles.h \
+    $$PWD/vectortile.h \
     $$PWD/library.h \
     $$PWD/timeline.h \
     $$PWD/libraryreloader.h \
@@ -101,6 +102,7 @@ HEADERS += \
 
 SOURCES += \
     $$PWD/maptiles.cpp \
+    $$PWD/vectortile.cpp \
     $$PWD/library.cpp \
     $$PWD/pluginguide.cpp \
     $$PWD/timeline.cpp \
