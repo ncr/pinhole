@@ -258,8 +258,9 @@ footgun Pinhole's own plugins hit):
   it as a signal's handler;
 - a file imported from outside the plugin (`import "../screenshots/…"`):
   another plugin's file changes, or is replaced, without it;
-- `import Pinhole.Internal` in a plugin whose id is not `pinhole.…`: it is
-  Pinhole's own plugins', with no promise it stays;
+- `import Pinhole.Internal` (or one of its modules, `Pinhole.Internal.Info`)
+  in a plugin whose id is not `pinhole.…`: it is Pinhole's own plugins',
+  with no promise it stays;
 - a `VideoOutput` or QtMultimedia's `Video` (`VideoView`): they show HDR
   video wrong;
 - `sqlite3` (`pinhole.query`), named anywhere in a string: by its path,
@@ -912,6 +913,16 @@ sign in, Folders', that it reads the photos of every source shown with
 it). It is off, iCloud's sources with it, until you turn it on: the middle
 of the window then says so, and its button there opens the side panel at
 its switch rather than turning it on.
+
+A plugin's code is QML and JavaScript, and programs of its own that run
+apart (`pinhole.run`, Workers): none loads native code into the window.
+Pinhole's own plugins alone may bring a native QML module, for what QML
+cannot do fast enough (Info's map, `Pinhole.Internal.Info`): its source in
+the plugin's `module/`, built with the window against its Qt into the
+plugin's `qml/`, which the window looks in only in Pinhole's own plugins
+folder. A copy of Info in your folder imports the module installed with
+Pinhole, as any `Pinhole.Internal` import of a `pinhole.…` id does; one of
+another id cannot import it at all.
 
 What every plugin can see of the sources follows from that. Reading
 `pinhole.sources` is open to every plugin, whatever kinds its manifest

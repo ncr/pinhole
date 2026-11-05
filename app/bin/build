@@ -8,4 +8,12 @@ cd "$ROOT/build"
 qmake6 "$ROOT/pinhole.pro"
 make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}"
 
+# Pinhole's own plugins' native QML modules, against the window's Qt, each
+# into its plugin's qml/ (docs/plugins.md, Trust).
+for module in "$ROOT"/../plugins/*/module/module.pro; do
+    [ -f "$module" ] || continue
+    mkdir -p "$(dirname -- "$module")/build"
+    (cd "$(dirname -- "$module")/build" && qmake6 "$module" && make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}")
+done
+
 echo "Built $ROOT/build/pinhole"

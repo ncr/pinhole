@@ -1,6 +1,6 @@
 import QtQuick
 import Pinhole.Plugin
-import Pinhole.Internal
+import Pinhole.Internal.Info
 import "Places.js" as Geo
 
 FocusScope {

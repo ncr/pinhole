@@ -636,6 +636,10 @@ public:
     // The engine plugins load in: what it keeps of a plugin's files is
     // dropped when they change, and what it warns of in them is theirs.
     void setEngine(QQmlEngine *engine);
+    // Pinhole's own plugins' native QML modules, each built into its
+    // plugin's qml/ (Pinhole.Internal.Info is Info's): found there only, never
+    // in a plugin of one's own (docs/plugins.md, Trust).
+    static void addModules(QQmlEngine *engine);
     QJSEngine *engine() const;
     // The library has been read the first time (or is not there yet).
     void libraryOpened();

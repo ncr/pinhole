@@ -10,3 +10,4 @@ __pycache__/
 .ci-results/
 /plugins/series/pinhole-series
 /plugins/send/pinhole-send
+/plugins/*/qml/

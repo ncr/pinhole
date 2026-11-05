@@ -3890,6 +3890,21 @@ Item {
         QVERIFY(bench.plugins->at("pinhole.map").value("main").toString().contains("Main.qml"));
     }
 
+    // A native module's QML (Info's map gestures) is compiled into it, and
+    // only Pinhole's own plugins have one: another's module/ is looked over.
+    void checkLooksOverModuleOnlyInAPluginOfAnotherId() {
+        for (const QString id : {"me.map", "pinhole.map"}) {
+            QTemporaryDir root;
+            const QString dir = root.path() + "/" + id;
+            QDir().mkpath(dir + "/module");
+            write(dir + "/manifest.json", QStringLiteral(R"({"schemaVersion": 1, "id": "%1", "name": "Map", "entryPoints": {"main": "Main.qml"}})").arg(id).toUtf8());
+            write(dir + "/Main.qml", "import QtQuick\nItem {}\n");
+            write(dir + "/module/Gestures.qml", "import QtQuick\nItem {\n    PinchHandler {}\n}\n");
+            const QString errors = Plugins::footguns(dir).errors.join('\n');
+            QCOMPARE(errors.contains("module/Gestures.qml:3: a PinchHandler"), id == QLatin1String("me.map"));
+        }
+    }
+
     void aPluginHidesAndStacksPhotosByIdAsByPosition() {
         PluginBench bench({{"me.a", {}}});
         // Ids are photos, as marks and fetch take them: never photo 0 by

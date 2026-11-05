@@ -1,0 +1,3 @@
+module Pinhole.Internal.Info
+plugin pinholeinfo
+classname InfoModule

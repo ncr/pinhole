@@ -1,5 +1,4 @@
 #include "plugins.h"
-#include "maptiles.h"
 #include "pluginguide.h"
 #include "sdrvideo.h"
 #include "videoview.h"
@@ -752,10 +751,6 @@ QJsonObject Plugins::unmoved(QJsonObject config) const {
 }
 
 void Plugins::registerTypes() {
-    // Used only by the bundled Info plugin.
-    qmlRegisterType<MapTiles>("Pinhole.Internal", 1, 0, "MapTiles");
-    qmlRegisterType<MapWheel>("Pinhole.Internal", 1, 0, "MapWheel");
-    qmlRegisterType(QUrl(QStringLiteral("qrc:/MapGestures.qml")), "Pinhole.Internal", 1, 0, "MapGestures");
     for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner",
                              "Toggle", "FieldInput", "ScrollList", "ScrollGrid", "ScrollArea", "PinchZoom", "Panel", "Card",
                              "Choices", "PhotoTiles", "PanelHeader", "SettingNote", "SettingSwitch"})
@@ -991,10 +986,17 @@ void Plugins::updateMarkBits() {
 
 void Plugins::setEngine(QQmlEngine *engine) {
     m_engine = engine;
+    addModules(engine);
     connect(engine, &QQmlEngine::warnings, this, &Plugins::warned);
 }
 
 QJSEngine *Plugins::engine() const { return m_engine; }
+
+void Plugins::addModules(QQmlEngine *engine) {
+    for (const QFileInfo &plugin : QDir(builtInDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        if (QFileInfo(plugin.filePath() + "/qml").isDir())
+            engine->addImportPath(plugin.filePath() + "/qml");
+}
 
 QString Plugins::personalDir() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins";
@@ -1636,6 +1638,7 @@ int checkPlugin(const QString &target) {
     // Its QML as the window would compile it: every file it uses, and the
     // JavaScript they import.
     QQmlEngine engine;
+    Plugins::addModules(&engine);
     QQmlComponent component(&engine, QUrl::fromLocalFile(dir + '/' + main), QQmlComponent::PreferSynchronous);
     for (const QQmlError &error : component.errors())
         problems << Plugins::describe(error, dir);

@@ -1,5 +1,4 @@
 #include "maptiles.h"
-#include "keymap.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -28,6 +27,13 @@ constexpr int dataZoom = 14;
 const QString planet = QStringLiteral("https://tiles.openfreemap.org/planet");
 int wrap(int x, int n) { return ((x % n) + n) % n; }
 qreal delta(qreal x, qreal centre) { return x - centre - std::floor(x - centre + 0.5); }
+// A touchpad's two fingers, as the window's Keymap::isTouchpadScroll tells
+// them (app/src/keymap.cpp): the module has only Qt to link with.
+bool touchpadScroll(const QWheelEvent &event) {
+    return event.phase() != Qt::NoScrollPhase
+        || event.source() == Qt::MouseEventSynthesizedBySystem
+        || (event.angleDelta().isNull() && !event.pixelDelta().isNull());
+}
 }
 
 MapTiles::MapTiles(QQuickItem *parent) : QQuickPaintedItem(parent) {
@@ -441,7 +447,7 @@ bool MapWheel::eventFilter(QObject *watched, QEvent *event) {
     if (!contains(at))
         return false;
     const QPoint pixels = wheel->pixelDelta(), angle = wheel->angleDelta();
-    if (Keymap::isTouchpadScroll(*wheel) && !(wheel->modifiers() & Qt::ControlModifier)) {
+    if (touchpadScroll(*wheel) && !(wheel->modifiers() & Qt::ControlModifier)) {
         const QPointF delta = pixels.isNull() ? QPointF(angle) / 8 : QPointF(pixels);
         if (!delta.isNull())
             emit pan(delta.x(), delta.y());

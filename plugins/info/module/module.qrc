@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/pinhole-info">
+        <file>MapGestures.qml</file>
+    </qresource>
+</RCC>

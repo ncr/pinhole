@@ -680,6 +680,10 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         if (file.startsWith(QLatin1String("check/")) || file.startsWith(QLatin1String("tests/"))
             || file.contains(QLatin1String("target/")))
             continue;
+        // The source of one of Pinhole's own plugins' native modules: its QML
+        // is compiled into the module, Pinhole's code as the window's is.
+        if (builtinId && file.startsWith(QLatin1String("module/")))
+            continue;
         QFile f(path);
         if (!f.open(QIODevice::ReadOnly))
             continue;

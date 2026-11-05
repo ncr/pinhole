@@ -259,6 +259,7 @@ plugins/recent/           Recent additions: received photos by when they joined 
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             photo details and the library map; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files
+plugins/info/module/      Info's native QML module, Pinhole.Internal.Info: the map drawn from vector tiles, built with the window
 plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
