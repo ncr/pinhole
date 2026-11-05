@@ -624,7 +624,7 @@ Item {
                     color: "transparent"
                     border.width: 2
                     border.color: theme.brightForeground
-                    visible: keymap.input === "keyboard" && studio.all[studio.shotCursor]?.index === modelData.index
+                    visible: pinhole.keyboardInUse && studio.all[studio.shotCursor]?.index === modelData.index
                 }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: studio.toggle(modelData.index) }

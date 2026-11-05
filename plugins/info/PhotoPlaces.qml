@@ -124,7 +124,7 @@ FocusScope {
                cy + (y - map.height / 2) * (1 / before - 1 / after), level)
     }
     function stepZoom(amount) {
-        const group = map.activeFocus && keymap.input === "keyboard" ? currentGroup : null
+        const group = map.activeFocus && pinhole.keyboardInUse ? currentGroup : null
         zoomAt(group ? screenX(group) : viewWidth / 2, group ? screenY(group) : viewHeight / 2,
                zoom + amount)
     }
@@ -262,7 +262,7 @@ FocusScope {
         openedGroup = null
         areaOpen = true
         setGallery(availablePoints.filter(isInView), false)
-        if (keymap.input === "keyboard" && gallery.length)
+        if (pinhole.keyboardInUse && gallery.length)
             photos.forceActiveFocus()
     }
     function hidePhotos() {
@@ -357,7 +357,7 @@ FocusScope {
 
     // How to get about, for a screen reader: the help (?) lists the keys.
     readonly property string inputHint: {
-        if (keymap.input === "keyboard")
+        if (pinhole.keyboardInUse)
             return photos.activeFocus
                 ? qsTr("Arrows browse photos · ⏎ opens · Esc goes back")
                 : qsTr("Arrows choose a place · ⇧ + arrows move · ⏎ opens")
@@ -434,7 +434,7 @@ FocusScope {
                         && modelData.points.some(p => p.id === places.selectedPlace))
                     readonly property var photo: (places.pinhole.library.revision,
                         places.pinhole.library.item(focusedPhoto ? places.focusPoint.id : modelData.cover.id))
-                    readonly property bool keyboardFocus: map.activeFocus && keymap.input === "keyboard"
+                    readonly property bool keyboardFocus: map.activeFocus && pinhole.keyboardInUse
                         && places.currentGroup === modelData
                     x: places.screenX(modelData) - width / 2
                     y: places.screenY(modelData) - height / 2

@@ -34,7 +34,7 @@ FocusScope {
     readonly property int count: photos.length
     readonly property int columns: Math.max(1, Math.floor(width / minCell))
     readonly property real cell: width / columns
-    readonly property bool keyboard: keymap.input === "keyboard"
+    readonly property bool keyboard: keymap.input === "keyboard" // Pinhole's own: plugins have pinhole.keyboardInUse
     property alias view: grid
     // Each with the photo's id and its place among `photos`.
     signal opened(string photo, int index)

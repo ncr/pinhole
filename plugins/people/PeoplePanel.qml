@@ -739,7 +739,7 @@ Panel {
                         row: modelData
                         caption: modelData.name
                         detail: qsTr("%n photo(s)", "", modelData.count)
-                        chosen: panel.selected === index && grid.activeFocus && keymap.input === "keyboard"
+                        chosen: panel.selected === index && grid.activeFocus && pinhole.keyboardInUse
                         onSelected: {
                             panel.selected = index
                             grid.forceActiveFocus()
@@ -769,7 +769,7 @@ Panel {
                         row: modelData
                         opacity: chosen || hovered ? 1 : 0.6
                         caption: qsTr("%n photo(s)", "", modelData.count)
-                        chosen: panel.selected === at && grid.activeFocus && keymap.input === "keyboard"
+                        chosen: panel.selected === at && grid.activeFocus && pinhole.keyboardInUse
                         onSelected: {
                             panel.selected = at
                             grid.forceActiveFocus()
@@ -800,7 +800,7 @@ Panel {
                         caption: modelData.guess ? qsTr("%1?").arg(modelData.guess) : qsTr("%n photo(s)", "", modelData.count)
                         detail: modelData.guess ? qsTr("%n photo(s)", "", modelData.count) : ""
                         guessed: !!modelData.guess
-                        chosen: panel.selected === panel.people.length + panel.unknown.length + index && grid.activeFocus && keymap.input === "keyboard"
+                        chosen: panel.selected === panel.people.length + panel.unknown.length + index && grid.activeFocus && pinhole.keyboardInUse
                         onSelected: {
                             panel.selected = panel.people.length + panel.unknown.length + index
                             grid.forceActiveFocus()
@@ -826,7 +826,7 @@ Panel {
                             anchors.margins: 2.5
                             row: modelData
                             round: false
-                            chosen: panel.selected === index && grid.activeFocus && keymap.input === "keyboard"
+                            chosen: panel.selected === index && grid.activeFocus && pinhole.keyboardInUse
                             Accessible.name: pinhole.library.item(modelData.id).filename || qsTr("Photo %1").arg(index + 1)
                             onSelected: {
                                 panel.selected = index
@@ -840,7 +840,7 @@ Panel {
                             anchors.right: parent.right
                             anchors.margins: 8
                             spacing: 4
-                            visible: (photoTile.hovered || tileButtons.hovered) && keymap.input !== "keyboard"
+                            visible: (photoTile.hovered || tileButtons.hovered) && !pinhole.keyboardInUse
                             HoverHandler { id: tileButtons }
                             ShellButton {
                                 visible: panel.view === "person" && panel.names.length > 1

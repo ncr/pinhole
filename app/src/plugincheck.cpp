@@ -238,7 +238,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -296,6 +296,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"PanelHeader", QRegularExpression(QStringLiteral("\\bPanelHeader\\s*\\{"))},
         {"SettingNote or SettingSwitch", QRegularExpression(QStringLiteral("\\bSetting(Note|Switch)\\s*\\{"))},
         {"Choices.numbered", QRegularExpression(QStringLiteral("\\bnumbered\\s*:"))},
+        {"pinhole.keyboardInUse", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keyboardInUse\\b"))},
         {"comeBack, away or returned", QRegularExpression(QStringLiteral("\\bcomeBack\\s*:|\\bpinhole\\s*\\.\\s*away\\b|\\bonReturned\\b"))},
         {"VideoView", QRegularExpression(QStringLiteral("\\bVideoView\\s*\\{"))},
         // Its root's, kept at SDR while true.

@@ -389,7 +389,7 @@ Item {
                         // The one the keys are on, and the one under the
                         // pointer, as PhotoTiles rings them.
                         Rectangle {
-                            readonly property bool chosen: keymap.input === "keyboard" && days.cursor === tile.at
+                            readonly property bool chosen: pinhole.keyboardInUse && days.cursor === tile.at
                             anchors.fill: parent
                             color: "transparent"
                             border.width: chosen ? 2 : 1

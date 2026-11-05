@@ -15,6 +15,7 @@
 #include "sources.h"
 #include "storage.h"
 #include "translator.h"
+#include "keymap.h"
 #include "viewer.h"
 
 #include <QColor>
@@ -321,6 +322,19 @@ bool PluginHost::isHidden(const QJSValue &photo) const {
 }
 
 int PluginHost::hiddenCount() const { return m_plugins->grid() ? m_plugins->grid()->hiddenCount() : 0; }
+
+void Plugins::setKeymap(Keymap *keymap) {
+    m_keymap = keymap;
+    connect(keymap, &Keymap::inputChanged, this, [this] {
+        for (const auto &p : m_plugins)
+            if (p->host)
+                emit p->host->keyboardInUseChanged();
+    });
+}
+
+bool PluginHost::keyboardInUse() const {
+    return m_plugins->keymap() && m_plugins->keymap()->input() == QLatin1String("keyboard");
+}
 
 void Plugins::setGrid(PhotoGrid *grid) {
     m_grid = grid;

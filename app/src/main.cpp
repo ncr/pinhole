@@ -337,6 +337,7 @@ int main(int argc, char *argv[]) {
     viewer.setTimeline(&timeline);
     grid->setSources(&library, &loader, &stats);
     plugins.setGrid(grid);
+    plugins.setKeymap(&keymap);
     // What the display the window is on can show, and what the compositor
     // would have the window's surface be, as it changes.
     plugins.display()->setScreen(window->screen());

@@ -23,6 +23,7 @@
 #include "pluginstore.h"
 
 class Favourites;
+class Keymap;
 class History;
 class QProcess;
 class Library;
@@ -248,6 +249,9 @@ class PluginHost : public QObject {
     // A photo it opened to come back from (openPhotos' comeBack) is shown:
     // its view waits unseen, without the keys (API 11).
     Q_PROPERTY(bool away READ away NOTIFY awayChanged)
+    // The keys are what was last used, not a pointer: show the ring on the
+    // one they are on (API 11).
+    Q_PROPERTY(bool keyboardInUse READ keyboardInUse NOTIFY keyboardInUseChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -292,6 +296,7 @@ public:
     // told `returned(id)` of the one last shown when it closes (API 11).
     Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options = {});
     bool away() const { return m_away; }
+    bool keyboardInUse() const;
     // The viewer closed, or another plugin covered meanwhile.
     void cameBack(const QString &photo);
     void coveredMeanwhile() { if (m_away) m_awayInterrupted = true; }
@@ -420,6 +425,7 @@ signals:
     // back once the photo is closed.
     void dismissed();
     void awayChanged();
+    void keyboardInUseChanged();
     // Back from the photos it opened (openPhotos' comeBack): `photo` is the
     // id of the one shown last.
     void returned(const QString &photo);
@@ -617,6 +623,8 @@ public:
 
     // The grid, once the window is there.
     void setGrid(PhotoGrid *grid);
+    void setKeymap(Keymap *keymap);
+    Keymap *keymap() const { return m_keymap; }
     // The window's sources, which pinhole.sources mirrors and asks.
     void setSources(Sources *sources);
     Sources *sourcesObject() const { return m_sources; }
@@ -779,6 +787,7 @@ private:
     const Library *m_library;
     ServiceClient *m_service;
     Viewer *m_viewer;
+    Keymap *m_keymap = nullptr;
     Translator *m_translator;
     History *m_history;
     PhotoGrid *m_grid = nullptr;
