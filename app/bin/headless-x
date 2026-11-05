@@ -26,7 +26,10 @@ fi
 dir="$(mktemp -d)"
 n=90
 while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ]; do n=$((n + 1)); done
-printf 'echo $$ > %s/pid\nexec Xwayland :%s -geometry %s -nolisten tcp > %s/log 2>&1\n' "$dir" "$n" "$size" "$dir" > "$dir/run.sh"
+# Fullscreen: its screen stays the size asked for. Tiled, Xwayland makes
+# its screen the tile's size, which halves when another window shares
+# workspace 5 (a test of another session's, say), smaller than the window.
+printf 'echo $$ > %s/pid\nexec Xwayland :%s -fullscreen -geometry %s -nolisten tcp > %s/log 2>&1\n' "$dir" "$n" "$size" "$dir" > "$dir/run.sh"
 stop() {
     [ -s "$dir/pid" ] && kill "$(cat "$dir/pid")" 2>/dev/null || true
     rm -rf "$dir"

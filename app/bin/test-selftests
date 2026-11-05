@@ -6,7 +6,8 @@ each in a scratch profile on an X display of its own, never on the desktop
     app/bin/test-selftests                 # covering through physics stacks hidden layers colour
     app/bin/test-selftests through layers  # some of them
 
-A fake library (core/target/release/pinhole-fake) with screenshots and
+The window, the service, the fake library and the plugins' helpers built
+first (a few seconds when they are up to date). A fake library (pinhole-fake) with screenshots and
 photos taken on this day in earlier years; Pinhole's plugins and the test
 plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Each
 mode's log is kept in build/selftests/<mode>.log. Exits 1 if any fails.
@@ -28,9 +29,6 @@ TEST_PLUGINS = ["scrolls", "layers"]
 
 def library(scratch):
     fake = ROOT / "core/target/release/pinhole-fake"
-    if not fake.exists():
-        subprocess.run(["cargo", "build", "--release", "--locked", "--manifest-path", str(ROOT / "core/Cargo.toml"),
-                        "--bin", "pinhole-fake"], check=True)
     out = scratch / "library"
     subprocess.run([str(fake), "--count", "512", "--out", str(out)], check=True, stdout=subprocess.DEVNULL)
     db = sqlite3.connect(out / "library.sqlite")
@@ -57,6 +55,17 @@ def library(scratch):
     db.commit()
     db.close()
     return out
+
+
+def build():
+    """The window (and Info's module), the service, the fake library and the
+    plugins' helpers, as this checkout has them: a pinholed left from an
+    older checkout answers another protocol, and the window waits for
+    sources that never come. A few seconds when they are up to date."""
+    subprocess.run([str(APP / "bin/build")], check=True, stdout=subprocess.DEVNULL)
+    for manifest in ["core/Cargo.toml", "plugins/series/finder/Cargo.toml", "plugins/send/sender/Cargo.toml"]:
+        subprocess.run(["cargo", "build", "--release", "--locked", "--quiet", "--manifest-path", str(ROOT / manifest)],
+                       check=True)
 
 
 def plugins(scratch):
@@ -115,6 +124,7 @@ def main():
     modes = sys.argv[1:] or MODES
     logs = APP / "build/selftests"
     logs.mkdir(parents=True, exist_ok=True)
+    build()
     with tempfile.TemporaryDirectory(prefix="pinhole-selftests-") as temporary:
         scratch = Path(temporary)
         lib, farm = library(scratch), plugins(scratch)
