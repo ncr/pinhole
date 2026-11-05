@@ -321,61 +321,33 @@ PinholePlugin {
             Component.onCompleted: plugin.fresh()
             width: parent ? parent.width : 0
             spacing: 6
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.foreground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
+            SettingNote {
                 text: !plugin.indexed ? qsTr("Reading the library…")
                     : plugin.years.length === 0 ? qsTr("Nothing from this day in earlier years.")
                     : qsTr("This day in %n earlier years: D in the grid.", "", plugin.years.length)
             }
-            Flow {
-                width: parent.width
-                spacing: 4
-                Repeater {
-                    model: [[0, qsTr("The day")], [1, qsTr("± 1 day")], [3, qsTr("± 3 days")], [7, qsTr("± a week")]]
-                    delegate: ShellButton {
-                        required property var modelData
-                        flat: true
-                        text: modelData[1]
-                        active: plugin.span === modelData[0]
-                        onTapped: plugin.set("span", modelData[0])
-                    }
-                }
+            Choices {
+                numbered: false
+                options: [{ value: 0, text: qsTr("The day") }, { value: 1, text: qsTr("± 1 day") }, { value: 3, text: qsTr("± 3 days") }, { value: 7, text: qsTr("± a week") }]
+                value: plugin.span
+                onChosen: value => plugin.set("span", value)
             }
             Repeater {
                 model: [["videos", qsTr("Videos")], ["screenshots", qsTr("Screenshots")]]
-                delegate: Item {
-                    id: row
+                delegate: SettingSwitch {
                     required property var modelData
                     // Screenshots hidden from the grid stay out whatever
                     // this says.
                     readonly property bool held: modelData[0] === "screenshots" && plugin.shotsHidden
-                    width: parent.width
-                    height: toggle.implicitHeight
-                    UiText {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: row.modelData[1]
-                        color: row.held ? theme.darkForeground : theme.foreground
-                    }
-                    Toggle {
-                        id: toggle
-                        Accessible.name: row.modelData[1]
-                        anchors.right: parent.right
-                        enabled: !row.held
-                        opacity: row.held ? 0.4 : 1
-                        checked: plugin[row.modelData[0]] && !row.held
-                        onToggled: if (!row.held) plugin.set(row.modelData[0], !checked)
-                    }
+                    text: modelData[1]
+                    usable: !held
+                    checked: plugin[modelData[0]] && !held
+                    onToggled: plugin.set(modelData[0], !checked)
                 }
             }
-            UiText {
+            SettingNote {
+                dim: true
                 visible: plugin.shotsHidden
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.darkForeground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
                 text: qsTr("Screenshots are hidden from the grid (Screenshots, ⇧\u00a0S), so not here either.")
             }
         }

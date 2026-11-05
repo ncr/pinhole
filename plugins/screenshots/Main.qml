@@ -219,34 +219,13 @@ PinholePlugin {
         Column {
             width: parent ? parent.width : 0
             spacing: Math.round(theme.fontSize * 0.571)
-            Item {
-                width: parent.width
-                height: Math.max(hideText.implicitHeight, hideSwitch.height)
-                UiText {
-                    id: hideText
-                    anchors.left: parent.left
-                    anchors.right: hideSwitch.left
-                    anchors.rightMargin: theme.fontSize
-                    anchors.verticalCenter: parent.verticalCenter
-                    wrapMode: Text.WordWrap
-                    color: theme.foreground
-                    text: qsTr("Hide them from the grid")
-                }
-                Toggle {
-                    id: hideSwitch
-                    Accessible.name: hideText.text
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    hint: "⇧ S"
-                    checked: plugin.hiding
-                    onToggled: plugin.setHiding(!checked)
-                }
+            SettingSwitch {
+                text: qsTr("Hide them from the grid")
+                hint: "⇧ S"
+                checked: plugin.hiding
+                onToggled: plugin.setHiding(!checked)
             }
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.foreground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
+            SettingNote {
                 text: plugin.shots.length === 0 ? (plugin.found ? qsTr("No screenshots here.") : qsTr("Looking for screenshots…"))
                     : plugin.hiding ? qsTr("%n screenshots hidden", "", plugin.shots.length)
                     : qsTr("%n screenshots, each day's one card.", "", plugin.shots.length)

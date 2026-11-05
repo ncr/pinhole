@@ -348,11 +348,8 @@ PinholePlugin {
     ]
 
     settings: Component {
-        UiText {
+        SettingNote {
             width: parent ? parent.width : 0
-            wrapMode: Text.WordWrap
-            color: theme.foreground
-            font.pixelSize: Math.round(theme.fontSize * 0.857)
             text: !plugin.found ? qsTr("Looking for series…")
                 : plugin.series.length === 0 ? qsTr("No series here yet.")
                 : qsTr("%n series here: G in the grid, or on a photo of one.", "", plugin.series.length)

@@ -157,11 +157,8 @@ PinholePlugin {
     ]
 
     settings: Component {
-        UiText {
+        SettingNote {
             width: parent ? parent.width : 0
-            wrapMode: Text.WordWrap
-            color: theme.foreground
-            font.pixelSize: Math.round(theme.fontSize * 0.857)
             Component.onCompleted: if (pinhole.library.count > 0) plugin.ensure()
             text: pinhole.library.count === 0 ? qsTr("No photos here yet.")
                 : plugin.colours === null ? qsTr("Reading the photos' colours…")

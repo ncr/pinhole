@@ -13,6 +13,9 @@ Row {
     property string section
     property string helpText
     property bool flat: true
+    // Each its number's key (1, 2, 3…), shown on it; false for a setting's
+    // row in the side panel, where the numbers are other things' keys.
+    property bool numbered: true
     signal chosen(var value)
     Accessible.role: Accessible.Grouping
     Accessible.name: helpText
@@ -24,7 +27,7 @@ Row {
             required property int index
             flat: choices.flat
             text: modelData.text
-            hint: index < 9 ? String(index + 1) : ""
+            hint: choices.numbered && index < 9 ? String(index + 1) : ""
             active: choices.value === modelData.value
             checkable: true
             Accessible.role: Accessible.RadioButton
@@ -32,7 +35,7 @@ Row {
         }
     }
     Repeater {
-        model: Math.min(9, choices.options.length)
+        model: choices.numbered ? Math.min(9, choices.options.length) : 0
         delegate: Item {
             required property int index
             Command {

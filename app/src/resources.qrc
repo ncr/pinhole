@@ -49,6 +49,8 @@
         <file alias="ScrollGrid.qml">ScrollGrid.qml</file>
         <file alias="PhotoTiles.qml">PhotoTiles.qml</file>
         <file alias="PanelHeader.qml">PanelHeader.qml</file>
+        <file alias="SettingNote.qml">SettingNote.qml</file>
+        <file alias="SettingSwitch.qml">SettingSwitch.qml</file>
         <file alias="ScrollArea.qml">ScrollArea.qml</file>
         <file alias="PinchZoom.qml">PinchZoom.qml</file>
         <file alias="MapGestures.qml">MapGestures.qml</file>

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 4,
+  "api": 11,
   "id": "pinhole.background",
   "name": "Background",
   "version": "1.0.0",

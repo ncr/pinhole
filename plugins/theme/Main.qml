@@ -157,43 +157,19 @@ PinholePlugin {
         Column {
             width: parent ? parent.width : 0
             spacing: Math.round(theme.fontSize * 0.5)
-            Item {
-                width: parent.width
-                height: strongSwitch.height
-                UiText {
-                    anchors.left: parent.left
-                    anchors.right: strongSwitch.left
-                    anchors.rightMargin: theme.fontSize
-                    y: Math.round((parent.height - height) / 2)
-                    elide: Text.ElideRight
-                    color: theme.foreground
-                    text: qsTr("The photo's colours strong")
-                }
-                Toggle {
-                    id: strongSwitch
-                    Accessible.name: qsTr("The photo's colours strong")
-                    anchors.right: parent.right
-                    checked: plugin.strong
-                    onToggled: pinhole.settings.strong = !plugin.strong
-                }
+            SettingSwitch {
+                text: qsTr("The photo's colours strong")
+                checked: plugin.strong
+                onToggled: pinhole.settings.strong = !plugin.strong
             }
-            Row {
-                spacing: Math.round(theme.fontSize * 0.5)
-                Repeater {
-                    model: [["auto", qsTr("As the photo")], ["dark", qsTr("Dark")], ["light", qsTr("Light")]]
-                    ShellButton {
-                        required property var modelData
-                        text: modelData[1]
-                        active: plugin.mode === modelData[0]
-                        onTapped: pinhole.settings.mode = modelData[0]
-                    }
-                }
+            Choices {
+                numbered: false
+                options: [{ value: "auto", text: qsTr("As the photo") }, { value: "dark", text: qsTr("Dark") }, { value: "light", text: qsTr("Light") }]
+                value: plugin.mode
+                onChosen: value => pinhole.settings.mode = value
             }
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.darkForeground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
+            SettingNote {
+                dim: true
                 text: qsTr("The last 12 themes made or used are kept in Omarchy's theme picker; older ones are removed, never the one set.")
             }
         }

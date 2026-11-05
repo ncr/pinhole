@@ -109,12 +109,9 @@ PinholePlugin {
     help: [["Y", qsTr("Every day's photos")]]
 
     settings: Component {
-        UiText {
+        SettingNote {
             Component.onCompleted: plugin.fresh()
             width: parent ? parent.width : 0
-            wrapMode: Text.WordWrap
-            color: theme.foreground
-            font.pixelSize: Math.round(theme.fontSize * 0.857)
             text: !plugin.counted ? qsTr("Counting the days…")
                 : plugin.years.length === 0 ? qsTr("No photos with a date yet.")
                 : qsTr("%Ln days with photos, from %1 to %2: Y in the grid.", "", plugin.dayCount)

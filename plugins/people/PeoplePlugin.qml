@@ -21,27 +21,14 @@ PinholePlugin {
             width: parent ? parent.width : 0
             spacing: 6
             readonly property string grouping: pinhole.settings.grouping || "careful"
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
+            SettingNote {
                 text: qsTr("How readily similar faces are put in one group. Fewer groups to name, or fewer mistakes in them.")
             }
-            Flow {
-                width: parent.width
-                spacing: 4
-                Repeater {
-                    model: [["off", qsTr("Apart")], ["careful", qsTr("Careful")], ["wider", qsTr("Wider")]]
-                    delegate: ShellButton {
-                        required property var modelData
-                        objectName: "peopleGrouping_" + modelData[0]
-                        flat: true
-                        checkable: true
-                        text: modelData[1]
-                        active: parent.parent.grouping === modelData[0]
-                        onTapped: pinhole.settings.grouping = modelData[0]
-                    }
-                }
+            Choices {
+                numbered: false
+                options: [{ value: "off", text: qsTr("Apart") }, { value: "careful", text: qsTr("Careful") }, { value: "wider", text: qsTr("Wider") }]
+                value: parent.grouping
+                onChosen: value => pinhole.settings.grouping = value
             }
         }
     }

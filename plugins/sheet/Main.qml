@@ -48,11 +48,8 @@ PinholePlugin {
     ]
 
     settings: Component {
-        UiText {
+        SettingNote {
             width: parent ? parent.width : 0
-            wrapMode: Text.WordWrap
-            color: theme.foreground
-            font.pixelSize: Math.round(theme.fontSize * 0.857)
             text: qsTr("In select mode, tick two photos or more, then K.")
         }
     }

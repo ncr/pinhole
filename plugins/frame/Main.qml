@@ -182,42 +182,13 @@ PinholePlugin {
                 color: theme.darkForeground
                 font.pixelSize: form.small
             }
-            component Switch: Item {
-                id: row
-                property string text
-                property bool checked
-                signal toggled()
-                width: form.width
-                height: toggle.height
-                UiText {
-                    width: parent.width - toggle.width - theme.fontSize
-                    y: Math.round((parent.height - implicitHeight) / 2)
-                    text: row.text
-                    color: theme.brightForeground
-                    elide: Text.ElideRight
-                }
-                Toggle {
-                    id: toggle
-                    anchors.right: parent.right
-                    Accessible.name: row.text
-                    checked: row.checked
-                    onToggled: row.toggled()
-                }
-            }
 
             Label { text: qsTr("Photos") }
-            Flow {
-                width: form.width
-                Repeater {
-                    model: [["favourites", qsTr("Favourites")], ["all", qsTr("All")], ["onthisday", qsTr("On this day")]]
-                    delegate: ShellButton {
-                        required property var modelData
-                        flat: true
-                        text: modelData[1]
-                        active: plugin.photos === modelData[0]
-                        onTapped: plugin.keep("photos", modelData[0])
-                    }
-                }
+            Choices {
+                numbered: false
+                options: [{ value: "favourites", text: qsTr("Favourites") }, { value: "all", text: qsTr("All") }, { value: "onthisday", text: qsTr("On this day") }]
+                value: plugin.photos
+                onChosen: value => plugin.keep("photos", value)
             }
             Label { text: qsTr("Seconds each") }
             Flow {
@@ -233,17 +204,17 @@ PinholePlugin {
                     }
                 }
             }
-            Switch {
+            SettingSwitch {
                 text: qsTr("Shuffle")
                 checked: plugin.shuffle
                 onToggled: plugin.keep("shuffle", !plugin.shuffle)
             }
-            Switch {
+            SettingSwitch {
                 text: qsTr("Date on each photo")
                 checked: plugin.caption
                 onToggled: plugin.keep("caption", !plugin.caption)
             }
-            Switch {
+            SettingSwitch {
                 text: qsTr("Videos and Live Photos move")
                 checked: plugin.motion
                 onToggled: plugin.keep("motion", !plugin.motion)

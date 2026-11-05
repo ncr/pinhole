@@ -216,11 +216,7 @@ PinholePlugin {
                 const counted = result.stdout.trim().split(" ").map(Number)
                 held = counted[0] > 0 ? qsTr("%n kept there now, %1.", "", counted[0]).arg(pinhole.sizeText(counted[1])) : ""
             }, () => {})
-            UiText {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: theme.foreground
-                font.pixelSize: Math.round(theme.fontSize * 0.857)
+            SettingNote {
                 text: qsTr("B on a photo shown full window. Each background is kept in Pictures/Pinhole/.backgrounds: the newest 12, and any in use or a theme will bring back.")
                       + (settingsColumn.held !== "" ? " " + settingsColumn.held : "")
             }
