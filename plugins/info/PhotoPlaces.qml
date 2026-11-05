@@ -282,11 +282,9 @@ FocusScope {
         const photo = gallery[at]
         if (photo) {
             cursor = at
-            returnToGallery = true
             owner.viewMapPhoto(photo.id, gallery.map(p => p.id))
         }
     }
-    property bool returnToGallery: false
     // When the photos shown were taken: a month, months of a year, or years.
     readonly property string galleryTime: {
         let first = Infinity, last = 0
@@ -304,21 +302,16 @@ FocusScope {
             return qsTr("%1 – %2 %3").arg(locale.standaloneMonthName(from.getMonth())).arg(locale.standaloneMonthName(to.getMonth())).arg(to.getFullYear())
         return qsTr("%1 %2").arg(locale.standaloneMonthName(to.getMonth())).arg(to.getFullYear())
     }
-    onVisibleChanged: {
-        if (visible) {
-            if (returnToGallery && gallery.length) {
-                // On the photo last looked at.
-                const seen = pinhole.library.item(pinhole.viewer.index).id
-                const at = gallery.findIndex(p => p.id === seen)
-                if (at >= 0) {
-                    cursor = at
-                    photos.positionViewAtIndex(at, GridView.Contain)
-                }
-                photos.forceActiveFocus()
-            }
-            else
-                map.forceActiveFocus()
-            returnToGallery = false
+    // Back from the photos: on the one last looked at, in the gallery it
+    // was opened from, or the map.
+    function cameBack(photo) {
+        const at = gallery.findIndex(p => p.id === photo)
+        if (at >= 0) {
+            cursor = at
+            photos.positionViewAtIndex(at, GridView.Contain)
+            photos.forceActiveFocus()
+        } else {
+            map.forceActiveFocus()
         }
     }
     function moveCursor(by) {

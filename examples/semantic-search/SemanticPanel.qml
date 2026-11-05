@@ -8,7 +8,6 @@ Panel {
     id: panel
     required property Item indexer
     property bool shown: false
-    property bool returning: false
     readonly property string sourceKey: indexer.sourceKey
     readonly property bool ready: indexer.ready
     readonly property bool catalogReady: indexer.catalogReady
@@ -40,7 +39,7 @@ Panel {
                 for (const tag of tags) found.set(tag.label, (found.get(tag.label) || 0) + 1)
         return Array.from(found.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(entry => entry[0])
     }
-    visible: shown
+    visible: shown && !pinhole.away
     onCatalogReadyChanged: if (shown && catalogReady) lookup()
     onStatusChanged: {
         const refresh = (wasIndexing && !status.running) || (!hadIndex && status.indexed > 0)
@@ -50,13 +49,11 @@ Panel {
     }
     onSourceKeyChanged: {
         resetResults()
-        returning = false
         if (shown && query.startsWith("#")) lookup()
     }
 
     function show() {
         shown = true
-        returning = false
         indexer.ensureStarted()
         lookup()
         Qt.callLater(() => { search.input.forceActiveFocus(); search.input.selectAll() })
@@ -70,7 +67,7 @@ Panel {
         openWhenReady = false
     }
     function close() {
-        shown = false; returning = false
+        shown = false
         debounce.stop()
         resetResults()
     }
@@ -174,8 +171,8 @@ Panel {
         const id = results[index].id
         if (pinhole.library.indexOf(id) < 0) return
         selected = index
-        returning = true
-        pinhole.openPhotos(results.map(row => row.id), id)
+        // Away while it shows, back on the one last looked at (onReturned).
+        pinhole.openPhotos(results.map(row => row.id), id, { comeBack: true })
     }
 
     function openTags() {
@@ -273,24 +270,11 @@ Panel {
         target: pinhole
         function onDismissed() { panel.close() }
         function onHiddenChanged() { panel.filterResults() }
-        function onCoveredByChanged() {
-            if (pinhole.coveredBy && pinhole.coveredBy !== pinhole.id) panel.returning = false
-        }
-    }
-    Connections {
-        target: pinhole.viewer
-        function onOpenChanged() {
-            if (!panel.returning) return
-            panel.shown = !pinhole.viewer.open
-            if (panel.shown) {
-                panel.returning = false
-                // On the photo last looked at.
-                const seen = pinhole.library.item(pinhole.viewer.index).id
-                const at = panel.results.findIndex(row => row.id === seen)
-                if (at >= 0) panel.selected = at
-                grid.positionViewAtIndex(panel.selected, GridView.Contain)
-                grid.forceActiveFocus()
-            }
+        function onReturned(photo) {
+            const at = panel.results.findIndex(row => row.id === photo)
+            if (at >= 0) panel.selected = at
+            grid.positionViewAtIndex(panel.selected, GridView.Contain)
+            grid.forceActiveFocus()
         }
     }
 

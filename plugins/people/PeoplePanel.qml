@@ -9,7 +9,6 @@ import Pinhole.Plugin
 Panel {
     id: panel
     property bool shown: false
-    property bool returning: false
     property string source: ""
     property string stateKey: ""
     property var edits: ({})
@@ -61,7 +60,7 @@ Panel {
         return (guess ? [guess] : []).concat(rest).slice(0, 9)
     }
     readonly property bool working: ["scanning", "grouping", "models"].includes(status.phase)
-    visible: shown
+    visible: shown && !pinhole.away
 
     function count(n) { return Number(n || 0).toLocaleString(Qt.locale(), "f", 0) }
     function show() {
@@ -86,7 +85,6 @@ Panel {
         stopReading()
         closePicker(false)
         shown = false
-        returning = false
         anchor = null
         person = ""
         people = []; groups = []; faces = []; likely = []
@@ -189,7 +187,7 @@ Panel {
     Timer {
         interval: 3000
         repeat: true
-        running: panel.shown && !panel.picking && !panel.returning
+        running: panel.shown && !panel.picking && !pinhole.away
         onTriggered: { if (!panel.readJob && !panel.assignmentJob) panel.load() }
     }
 
@@ -210,8 +208,7 @@ Panel {
             if (pinhole.library.indexOf(row.id) < 0) return
             const open = rows => {
                 const ids = rows.map(face => face.id).filter((id, i, all) => all.indexOf(id) === i && pinhole.library.indexOf(id) >= 0)
-                returning = true
-                pinhole.openPhotos(ids.includes(row.id) ? ids : [row.id], row.id)
+                pinhole.openPhotos(ids.includes(row.id) ? ids : [row.id], row.id, { comeBack: true })
             }
             if (!moreFaces) {
                 open(faces)
@@ -221,8 +218,8 @@ Panel {
             const operation = view === "person" ? "person" : "members"
             const owner = view === "group" ? anchor?.anchor : view === "check" ? likely[checking]?.anchor : null
             request(operation, { anchor: owner, person: person, limit: 2000 })
-                .then(result => { if (shown && !returning) open(JSON.parse(result.stdout).rows) })
-                .catch(() => { if (shown && !returning) open(faces) })
+                .then(result => { if (shown && !pinhole.away) open(JSON.parse(result.stdout).rows) })
+                .catch(() => { if (shown && !pinhole.away) open(faces) })
         } else if (row.name) {
             go("person", row)
         } else {
@@ -546,36 +543,22 @@ Panel {
     Connections {
         target: pinhole
         function onDismissed() { panel.close() }
-        // Another plugin over the photos meanwhile: not coming back on top
-        // of it when the photo closes.
-        function onCoveredByChanged() {
-            if (pinhole.coveredBy && pinhole.coveredBy !== pinhole.id) panel.returning = false
-        }
         function onHiddenChanged() { if (panel.shown) panel.load() }
+        // Back from the photos, on the one last looked at.
+        function onReturned(photo) {
+            const at = panel.faces.findIndex(face => face.id === photo)
+            if (at >= 0) panel.selected = at
+            grid.forceActiveFocus()
+            Qt.callLater(() => panel.reveal(panel.selected))
+        }
     }
     Connections {
         target: pinhole.library
         function onChanged() {
-            if ((panel.shown || panel.returning) && (pinhole.library.key || pinhole.library.dir) !== panel.source)
+            if (panel.shown && (pinhole.library.key || pinhole.library.dir) !== panel.source)
                 panel.close()
         }
     }
-    Connections {
-        target: pinhole.viewer
-        function onOpenChanged() {
-            if (!panel.returning) return
-            panel.shown = !pinhole.viewer.open
-            if (panel.shown) {
-                panel.returning = false
-                const seen = pinhole.library.item(pinhole.viewer.index).id
-                const at = panel.faces.findIndex(face => face.id === seen)
-                if (at >= 0) panel.selected = at
-                grid.forceActiveFocus()
-                Qt.callLater(() => panel.reveal(panel.selected))
-            }
-        }
-    }
-
     Item {
         id: titlebar
         visible: !panel.picking

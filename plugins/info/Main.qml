@@ -323,51 +323,37 @@ PinholePlugin {
         [qsTr("Location"), placeText()]
     ].filter(row => row[1] !== ""))
     property bool mapOpen: false
-    property bool mapReturning: false
     property var mapFocus: null
-    covering: mapOpen && !mapReturning
-    holdSdr: covering
+    covering: mapOpen
+    holdSdr: covering && !pinhole.away
 
     function openMap(photo) {
         mapFocus = photo || null
-        mapReturning = false
         mapOpen = true
     }
     function closeMap() {
         mapOpen = false
-        mapReturning = false
     }
     // ← → go through `among`, the place's photos, or the one alone.
     function viewMapPhoto(id, among) {
         if (pinhole.library.indexOf(id) < 0)
             return
-        mapReturning = true
-        pinhole.openPhotos(among && among.length ? among : [id], id)
+        pinhole.openPhotos(among && among.length ? among : [id], id, { comeBack: true })
     }
     Loader {
         id: mapLoader
         anchors.fill: parent
         active: plugin.mapOpen
-        visible: plugin.covering
+        visible: plugin.mapOpen && !plugin.pinhole.away
         sourceComponent: PhotoPlaces { owner: plugin }
         onLoaded: item.start(plugin.mapFocus)
-    }
-    Connections {
-        target: plugin.pinhole.viewer
-        function onOpenChanged() {
-            if (!plugin.pinhole.viewer.open && plugin.mapReturning) {
-                if (plugin.pinhole.coveredBy === "" || plugin.pinhole.coveredBy === plugin.pinhole.id)
-                    plugin.mapReturning = false
-                else
-                    plugin.closeMap()
-            }
-        }
     }
     readonly property string mapSource: pinhole.library.key
     onMapSourceChanged: closeMap()
     Connections {
         target: plugin.pinhole
         function onDismissed() { plugin.closeMap() }
+        function onReturned(photo) { if (mapLoader.item) mapLoader.item.cameBack(photo) }
     }
 
     actions: [

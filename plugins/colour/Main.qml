@@ -48,7 +48,7 @@ PinholePlugin {
         colours = Colour.withHidden(data, hiddenTest())
         return colours
     }
-    readonly property bool finding: finder !== null && (finder.shown || finder.returning)
+    readonly property bool finding: finder !== null && finder.shown
     function warm() {
         if (stale && !finding && !warming.running)
             warming.start()

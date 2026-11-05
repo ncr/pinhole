@@ -81,6 +81,9 @@ void overCovering(QQuickWindow *window, std::function<void(bool, const QString &
     QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
     QObject *history = qmlEngine(window)->rootContext()->contextProperty("history").value<QObject *>();
     auto item = [window](const char *name) { return window->findChild<QQuickItem *>(QString::fromLatin1(name)); };
+    // How much of its place each changes at least: the help and the side
+    // panel are see-through, so their words and lines (about a tenth and a
+    // twentieth of it in a software-rendered 1600 × 1000 window).
     struct Over {
         QString name;
         const char *item;
@@ -88,10 +91,11 @@ void overCovering(QQuickWindow *window, std::function<void(bool, const QString &
         double least;
     };
     auto overs = std::make_shared<QList<Over>>(QList<Over>{
-        {"the help (?)", "help", [=] { item("help")->setProperty("shown", true); },
-         [=] { item("help")->setProperty("shown", false); }, 0.3},
+        // Made the first time it is asked for (Main.qml's showHelp).
+        {"the help (?)", "help", [=] { QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, true)); },
+         [=] { QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, false)); }, 0.05},
         {"the side panel (Tab)", "sidePanel", [=] { item("sidePanel")->setProperty("shown", true); },
-         [=] { item("sidePanel")->setProperty("shown", false); }, 0.1},
+         [=] { item("sidePanel")->setProperty("shown", false); }, 0.03},
         {"the undo notice (Ctrl+Z)", "historyNotice", [=] { QMetaObject::invokeMethod(history, "undo"); },
          [=] { item("historyNotice")->setProperty("opacity", 0); }, 0.02},
         {"a plugin's notice (pinhole.notify)", "historyNotice",
@@ -145,7 +149,9 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap) {
     auto shown = [window](const char *id) {
         QQuickItem *loader = loaderOf(window->contentItem(), QString::fromLatin1(id));
         QObject *plugin = loader ? loader->property("item").value<QObject *>() : nullptr;
-        return plugin && plugin->property("covering").toBool();
+        // Away while a photo it opened to come back from shows: covering
+        // then counts for nothing (PluginPlane).
+        return plugin && plugin->property("covering").toBool() && !loader->property("away").toBool();
     };
     auto seen = [window](const char *id) {
         QQuickItem *loader = loaderOf(window->contentItem(), QString::fromLatin1(id));

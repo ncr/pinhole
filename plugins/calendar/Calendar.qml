@@ -98,7 +98,11 @@ Item {
     // rows out again as their height changes (the window resized while the
     // calendar was closed), so they are made anew as it opens.
     property real madeHeight: 0
+    // Where the pointer was over the squares last, in the window: null
+    // since the calendar opened.
+    property var pointerAt: null
     function open() {
+        pointerAt = null
         plugin.fresh()
         // The first time, its rows made now, at the calendar's size (not
         // as it is made, before the Loader has given it one).
@@ -470,6 +474,14 @@ Item {
                     return d >= 0 && d < yearRow.info.days ? d : -1
                 }
                 onPositionChanged: mouse => {
+                    // Only a pointer that moves: one resting where the
+                    // calendar opens (hovered as it appears) leaves the
+                    // day the keys are on.
+                    const at = mapToItem(null, mouse.x, mouse.y)
+                    const moved = calendar.pointerAt !== null && (Math.abs(at.x - calendar.pointerAt.x) > 1 || Math.abs(at.y - calendar.pointerAt.y) > 1)
+                    calendar.pointerAt = at
+                    if (!moved)
+                        return
                     const d = dayAt(mouse)
                     if (d >= 0 && (calendar.cursorYear !== yearRow.info.year || calendar.day !== d)) {
                         calendar.cursorYear = yearRow.info.year

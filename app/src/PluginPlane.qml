@@ -31,6 +31,11 @@ Item {
             // above the rest, and while it does, the others (an overlay
             // as Info's, one that covered before it) unseen beneath.
             z: root.coveringPlugin === modelData ? 1 : 0
+            // Away while a photo it opened to come back from shows (API 11):
+            // not covering, so the viewer has the keys. What it shows over
+            // the photo (Info's details) stays; its view hides by itself.
+            readonly property bool away: info.host ? info.host.away === true : false
+            onAwayChanged: root.collectPlugins()
             visible: root.coveringPlugin === "" || root.coveringPlugin === modelData
             property bool completed: false
             function load() {
@@ -218,7 +223,7 @@ Item {
                 hidden = hidden.concat(away)
                 hiders.push(loader.info.name)
             }
-            if (item.covering === true)
+            if (item.covering === true && !loader.away)
                 covering.push(loader.modelData)
         }
         findClashes(actions, owners)

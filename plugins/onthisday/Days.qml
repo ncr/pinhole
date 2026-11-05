@@ -13,11 +13,11 @@ Item {
 
     property bool shown: false
     visible: opacity > 0
-    opacity: shown ? 1 : 0
+    opacity: shown && !away ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
-    // A photo opened from here: closing it comes back.
-    property bool away: false
+    // A photo opened from here shows: closing it comes back (onReturned).
+    readonly property bool away: pinhole.away
 
     readonly property var years: plugin.years
     // Where each year's photos start among them all, in the order shown,
@@ -127,40 +127,28 @@ Item {
     }
     function close() {
         shown = false
-        away = false
     }
+    // ← → through these years' photos, as they are laid out here.
     function openPhoto(at) {
         if (at < 0 || at >= total)
             return
         cursor = at
-        away = true
-        shown = false
-        pinhole.openPhoto(photoAt(at))
+        pinhole.openPhotos(years.reduce((all, year) => all.concat(year.photos), []), photoAt(at), { comeBack: true })
     }
     function reveal(i) {
         close()
         pinhole.reveal(i)
     }
     Connections {
-        target: days.pinhole.viewer
-        function onOpenChanged() {
-            if (!days.pinhole.viewer.open && days.away) {
-                // Its lines kept meanwhile, the list where it was.
-                days.plugin.fresh()
-                // Not while another plugin is over the photos.
-                days.shown = days.pinhole.coveredBy === ""
-                days.away = false
-                days.keepInView()
-            }
-        }
-    }
-    // Another plugin over the photos meanwhile (Colours' Same colour on
-    // the photo opened from here): it is where the way back leads now.
-    Connections {
         target: days.pinhole
-        function onCoveredByChanged() {
-            if (days.pinhole.coveredBy !== "" && days.pinhole.coveredBy !== days.pinhole.id)
-                days.away = false
+        // Back on the photo last looked at, its lines kept meanwhile.
+        function onReturned(photo) {
+            days.plugin.fresh()
+            const position = days.pinhole.library.indexOf(photo)
+            const all = days.years.reduce((list, year) => list.concat(year.photos), [])
+            const at = all.indexOf(position)
+            if (at >= 0) days.cursor = at
+            days.keepInView()
         }
         // The plugin over it handed a photo over: closed for good.
         function onDismissed() { days.close() }

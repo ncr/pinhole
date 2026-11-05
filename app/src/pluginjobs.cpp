@@ -276,6 +276,9 @@ void PluginHost::track(QObject *job, std::function<void()> stop) {
 
 void PluginHost::stop() {
     ++m_generation;
+    if (std::exchange(m_away, false))
+        emit awayChanged();
+    m_awayInterrupted = false;
     m_plugins->keepAwake()->hold(this, false);
     for (auto &[job, stop] : std::exchange(m_running, {}))
         if (job)

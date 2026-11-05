@@ -382,7 +382,7 @@ void PluginHost::openPhotoDirect(const QJSValue &photo) const {
     m_plugins->viewerObject()->openAt(index, {});
 }
 
-void PluginHost::openPhotos(const QJSValue &photos, const QJSValue &photo) const {
+void PluginHost::openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options) {
     const PluginLibrary *library = m_plugins->library();
     const int index = library->positionOf(photo);
     if (!m_plugins->grid() || index < 0)
@@ -393,7 +393,26 @@ void PluginHost::openPhotos(const QJSValue &photos, const QJSValue &photo) const
     for (int i = 0; i < n; ++i)
         among.push_back(library->positionOf(photos.property(quint32(i))));
     m_plugins->handedOver(m_id);
+    if (options.property(QStringLiteral("comeBack")).toBool() && !m_away) {
+        m_away = true;
+        m_awayInterrupted = false;
+        emit awayChanged();
+    }
     m_plugins->viewerObject()->openAmong(among, index);
+}
+
+void PluginHost::cameBack(const QString &photo) {
+    if (!m_away)
+        return;
+    m_away = false;
+    const bool interrupted = std::exchange(m_awayInterrupted, false);
+    emit awayChanged();
+    // Another plugin went over the photos meanwhile: the way back leads to
+    // it now, and this one closes for good.
+    if (interrupted)
+        emit dismissed();
+    else
+        emit returned(photo);
 }
 
 void PluginHost::report(const QString &problem, bool print) {
@@ -491,6 +510,17 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
       m_libraryApi(std::make_unique<PluginLibrary>(library)), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
       m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files), m_toured(readToured()) {
+    // The photo a plugin opened to come back from closed: back to it, on
+    // the one shown last.
+    if (m_viewer)
+        connect(m_viewer, &Viewer::openChanged, this, [this] {
+            if (m_viewer->isOpen())
+                return;
+            const QString photo = m_libraryApi->item(m_viewer->index()).value(QStringLiteral("id")).toString();
+            for (const auto &p : m_plugins)
+                if (p->host)
+                    p->host->cameBack(photo);
+        });
     // What a plugin keeps that could not be written, said under it.
     const auto failed = [this](const QString &what) {
         return [this, what](const QString &id) {
@@ -1064,6 +1094,11 @@ void Plugins::setCovering(const QStringList &ids) {
     m_covering = ids;
     if (coveredBy() == was)
         return;
+    // One waiting away for its photo to close, under another now: it does
+    // not come back over that one.
+    for (const auto &p : m_plugins)
+        if (p->host && !coveredBy().isEmpty() && coveredBy() != p->id)
+            p->host->coveredMeanwhile();
     emit coveredByChanged();
     for (const auto &p : m_plugins)
         emit p->host->coveredByChanged();

@@ -9,7 +9,6 @@ Item {
     required property var plugin
     readonly property var pinhole: plugin.pinhole
     property bool shown: false
-    property bool returning: false
     property bool loading: false
     property var rows: []
     property var pending: null
@@ -17,7 +16,7 @@ Item {
     property string source: ""
     property int limit: 300
     property int cursor: 0
-    visible: shown
+    visible: shown && !pinhole.away
 
     function refresh() {
         if (pending)
@@ -59,13 +58,11 @@ Item {
         limit = 300
         cursor = 0
         shown = true
-        returning = false
         refresh()
         photos.positionViewAtBeginning()
     }
     function close() {
         shown = false
-        returning = false
         if (pending)
             pending.cancel()
         pending = null
@@ -76,9 +73,9 @@ Item {
         if (!row || pinhole.library.indexOf(row.id) < 0)
             return
         cursor = at
-        returning = true
-        shown = false
-        pinhole.openPhoto(row.id)
+        // ← → through what it shows, newest addition first; back on the
+        // one last looked at.
+        pinhole.openPhotos(rows.slice(0, limit).map(r => r.id), row.id, { comeBack: true })
     }
     function reveal() {
         const row = rows[cursor]
@@ -98,31 +95,19 @@ Item {
     Connections {
         target: recent.pinhole.library
         function onChanged() {
-            if (recent.source !== recent.pinhole.library.key) {
+            if (recent.source !== recent.pinhole.library.key)
                 recent.rows = []
-                recent.returning = false
-            }
             if (recent.shown)
                 recent.refresh()
         }
     }
     Connections {
-        target: recent.pinhole.viewer
-        function onOpenChanged() {
-            if (!recent.pinhole.viewer.open && recent.returning) {
-                recent.shown = recent.pinhole.coveredBy === ""
-                recent.returning = false
-                if (recent.shown)
-                    recent.refresh()
-            }
-        }
-    }
-    Connections {
         target: recent.pinhole
         function onDismissed() { recent.close() }
-        function onCoveredByChanged() {
-            if (recent.pinhole.coveredBy !== "" && recent.pinhole.coveredBy !== recent.pinhole.id)
-                recent.returning = false
+        function onReturned(photo) {
+            const at = recent.rows.findIndex(row => row.id === photo)
+            if (at >= 0) recent.move(at - recent.cursor)
+            recent.refresh()
         }
     }
     Component.onDestruction: { if (pending) pending.cancel() }

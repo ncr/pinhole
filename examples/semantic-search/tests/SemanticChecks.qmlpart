@@ -44,9 +44,9 @@
             compare(viewer.count, panel.results.length, "← → go through the results alone")
             compare(viewer.place, 1)
             keyClick(Qt.Key_Right)
-            compare(panel.shown, false)
+            verify(pinhole.away, "the view waits away while the photo shows")
             keyClick(Qt.Key_Escape)
-            tryCompare(panel, "shown", true, 5000)
+            tryVerify(() => !pinhole.away && panel.shown, 5000)
             compare(panel.selected, 2, "back on the photo last looked at")
             stage = "return-opens-best"
             field.input.forceActiveFocus()
@@ -55,7 +55,7 @@
             tryCompare(pinhole.viewer, "open", true, 5000)
             compare(pinhole.viewer.index, pinhole.library.indexOf(panel.results[panel.selected].id))
             keyClick(Qt.Key_Escape)
-            tryCompare(panel, "shown", true, 5000)
+            tryVerify(() => !pinhole.away && panel.shown, 5000)
             stage = "latest-query"
             field.text = @QUERY@
             panel.lookup()
@@ -154,7 +154,7 @@
             mouseRelease(cell, cell.width / 2, cell.height / 2, Qt.LeftButton, Qt.NoModifier, 50)
             details = Object.assign({}, details, {taps: taps.count, index: cell.index,
                 validId: pinhole.library.indexOf(cell.modelData.id), afterPressed: tap.pressed,
-                changes: opens.count, returning: panel.returning})
+                changes: opens.count, away: pinhole.away})
             stage = "mouse-viewer"
             tryCompare(pinhole.viewer, "open", true, 5000)
             compare(viewer.origin.width, 0)
@@ -164,7 +164,7 @@
             keyClick(Qt.Key_Escape)
             details = Object.assign({}, details, {layerAfterEscape: keymap.layer,
                 shownAfterEscape: panel.shown, openAfterEscape: pinhole.viewer.open})
-            tryCompare(panel, "shown", true, 5000)
+            tryVerify(() => !pinhole.away && panel.shown, 5000)
             stage = "mouse-close-search"
             window.width = oldWidth
             keyClick(Qt.Key_Escape)

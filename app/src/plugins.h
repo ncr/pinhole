@@ -245,6 +245,9 @@ class PluginHost : public QObject {
     // this one's own when it is): one that would come back by itself
     // stays away while another's is.
     Q_PROPERTY(QString coveredBy READ coveredBy NOTIFY coveredByChanged)
+    // A photo it opened to come back from (openPhotos' comeBack) is shown:
+    // its view waits unseen, without the keys (API 11).
+    Q_PROPERTY(bool away READ away NOTIFY awayChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -285,7 +288,13 @@ public:
     Q_INVOKABLE void openPhotoDirect(const QJSValue &photo) const;
     // As openPhotoDirect, with only `photos` (ids or positions) to step
     // through, in their order, until the viewer closes.
-    Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo) const;
+    // `options.comeBack`: its view waits away while the photo shows, and is
+    // told `returned(id)` of the one last shown when it closes (API 11).
+    Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options = {});
+    bool away() const { return m_away; }
+    // The viewer closed, or another plugin covered meanwhile.
+    void cameBack(const QString &photo);
+    void coveredMeanwhile() { if (m_away) m_awayInterrupted = true; }
     // A photo's file of `kind` (medium, full, original, video, live, and
     // a Live Photo's loop, bounce or long_exposure) from the service: a
     // promise of its path, rejected with an Error whose `code` is the
@@ -410,6 +419,10 @@ signals:
     // reveal): this one, covering beneath it, closes for good, not coming
     // back once the photo is closed.
     void dismissed();
+    void awayChanged();
+    // Back from the photos it opened (openPhotos' comeBack): `photo` is the
+    // id of the one shown last.
+    void returned(const QString &photo);
 
 private:
     friend class PluginSettings;
@@ -431,6 +444,8 @@ private:
     mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
     mutable std::unique_ptr<PluginSources> m_sources;
     QString m_problem;
+    bool m_away = false;
+    bool m_awayInterrupted = false;
     // Bumped by stop(): what was started before it does not answer.
     int m_generation = 0;
     // Programs and recordings under way, each with how to stop it, stopped
@@ -550,8 +565,9 @@ public:
     // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
     // 7: ShellButton.checkable for accessible selected buttons.
     // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos. 10: ids in hidden
-    // and stacks, pinhole.selectionIds, pinhole.screenshots.
-    static constexpr int api = 10;
+    // and stacks, pinhole.selectionIds, pinhole.screenshots. 11: coming back
+    // from the photos (openPhotos' comeBack, away, returned).
+    static constexpr int api = 11;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

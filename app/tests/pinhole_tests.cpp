@@ -3700,6 +3700,41 @@ Item {
         QCOMPARE(grid.currentIndex(), 0);
     }
 
+    void aPluginComesBackFromThePhotosItOpenedUnlessAnotherCoveredMeanwhile() {
+        PluginBench bench({{"me.a", {}}, {"me.b", {}}});
+        ThumbnailLoader loader(&bench.library, 1);
+        PhotoGrid grid;
+        grid.setSize(QSizeF(700, 700));
+        grid.setSources(&bench.library, &loader, nullptr);
+        bench.plugins->setGrid(&grid);
+        bench.plugins->setCovering({"me.a"});
+        bench.js("pinhole.returned.connect(id => said.push('back ' + id)); pinhole.dismissed.connect(() => said.push('dismissed'))");
+        // Away while the photo shows, back on the one shown last.
+        bench.js("pinhole.openPhotos(['a', 'c'], 'a', { comeBack: true })");
+        QVERIFY(bench.host->away());
+        QVERIFY(bench.viewer->isOpen());
+        bench.plugins->setCovering({});
+        bench.viewer->step(1);
+        bench.viewer->close();
+        QVERIFY(!bench.host->away());
+        QCOMPARE(bench.said(), QStringList({"back c"}));
+        // Another plugin over the photos meanwhile: dismissed, not back.
+        bench.js("said.length = 0");
+        bench.plugins->setCovering({"me.a"});
+        bench.js("pinhole.openPhotos(['a', 'b'], 'b', { comeBack: true })");
+        bench.plugins->setCovering({});
+        bench.plugins->setCovering({"me.b"});
+        bench.viewer->close();
+        QCOMPARE(bench.said(), QStringList({"dismissed"}));
+        // Without comeBack, as before: not away, nothing said.
+        bench.js("said.length = 0");
+        bench.plugins->setCovering({"me.a"});
+        bench.js("pinhole.openPhotos(['a'], 'a')");
+        QVERIFY(!bench.host->away());
+        bench.viewer->close();
+        QCOMPARE(bench.said(), QStringList());
+    }
+
     void aPluginHearsWhatIsHiddenOnceItHasTheLibraryReadAgain() {
         PluginBench bench({{"me.a", {}}});
         ThumbnailLoader loader(&bench.library, 1);

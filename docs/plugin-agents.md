@@ -61,7 +61,9 @@ it is not a substitute for running the interaction in the app.
 - Persist photo ids. Library positions are capture-date order, independent
   of the main grid's Automatic/Date taken/Date added timeline. Reloads move
   positions. Use `openPhoto` and `reveal` to navigate. From a covering search
-  or results panel, `openPhotos(results, photo)` (API 9) opens the viewer
+  or results panel, `openPhotos(results, photo, { comeBack: true })` (API
+  11) shows it, Pinhole keeping the view to come back to (`away`, then
+  `returned(id)`); without `comeBack`, `openPhotos(results, photo)` (API 9) opens the viewer
   without a transition to or from the library grid and steps through the
   results alone; `openPhotoDirect` (API 8) does the same over the library.
 - Originals and the library database are read-only to the UI. Fetch with

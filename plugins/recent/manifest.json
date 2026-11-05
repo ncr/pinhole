@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 11,
   "id": "pinhole.recent",
   "name": "Recent additions",
   "version": "1.0.0",

@@ -16,7 +16,7 @@ Item {
 
     property bool shown: false
     visible: opacity > 0
-    opacity: shown ? 1 : 0
+    opacity: shown && !pinhole.away ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
     // "find" or "wall".
@@ -41,14 +41,11 @@ Item {
     readonly property int resultCount: 300
     // The photos found, closest first, by id.
     property var results: []
-    // A photo opened from here: shown again when it closes.
-    property bool returning: false
 
     function openFinder() {
         plugin.ensure()
         mode = "find"
         fromId = ""
-        returning = false
         shown = true
         search()
         photos.positionViewAtBeginning()
@@ -66,23 +63,22 @@ Item {
             hue = targetH
         fromId = pinhole.library.item(index).id
         mode = "find"
-        returning = false
         shown = true
         search()
         photos.positionViewAtBeginning()
     }
     function close() {
         shown = false
-        returning = false
     }
     // A photo found, by its id.
     function open(id) {
         const index = pinhole.library.indexOf(id)
         if (index < 0)
             return
-        returning = true
-        shown = false
-        pinhole.openPhoto(index)
+        // ← → through what was found here (the wall's photos, or those
+        // nearest the colour); back here when it closes (onReturned).
+        const among = (mode === "wall" ? wall.tiles.filter(tile => tile !== "") : results).filter(found => !pinhole.isHidden(found))
+        pinhole.openPhotos(among.indexOf(id) >= 0 ? among : [id], id, { comeBack: true })
     }
     // The same photos found again (opened again on the same colour) leave
     // the grid as it is: a list given anew makes every tile again.
@@ -106,7 +102,7 @@ Item {
     // again until it next opens (as for any change): what is hidden now
     // only leaves.
     function hiddenMoved() {
-        if ((shown || returning) && mode === "find" && plugin.colours) {
+        if (shown && mode === "find" && plugin.colours) {
             const found = plugin.stale ? results.filter(id => !pinhole.isHidden(id))
                 : Colour.nearest(plugin.colours, targetL, targetA, targetB, resultCount, fromId)
             if (found.length !== results.length || found.some((id, i) => id !== results[i])) {
@@ -153,28 +149,14 @@ Item {
     Timer { id: searching; interval: 60; onTriggered: finder.search() }
 
     Connections {
-        target: finder.pinhole.viewer
-        function onOpenChanged() {
-            if (!finder.pinhole.viewer.open && finder.returning) {
-                finder.returning = false
-                // As it was left: the photos found stay, by their ids, and
-                // the library's colours are read again if it has changed,
-                // for what is looked for next.
-                finder.plugin.ensure()
-                finder.keepFound()
-                wall.keepFound()
-                // Not while another plugin is over the photos.
-                finder.shown = finder.pinhole.coveredBy === ""
-            }
-        }
-    }
-    // Another plugin over the photos meanwhile: it is where the way back
-    // leads now.
-    Connections {
         target: finder.pinhole
-        function onCoveredByChanged() {
-            if (finder.pinhole.coveredBy !== "" && finder.pinhole.coveredBy !== finder.pinhole.id)
-                finder.returning = false
+        // As it was left: the photos found stay, by their ids, and the
+        // library's colours are read again if it has changed, for what is
+        // looked for next.
+        function onReturned(photo) {
+            finder.plugin.ensure()
+            finder.keepFound()
+            wall.keepFound()
         }
         // The plugin over it handed a photo over: closed for good.
         function onDismissed() { finder.close() }
