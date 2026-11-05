@@ -106,5 +106,49 @@ class Review(unittest.TestCase):
             self.assertEqual(set(worker.assignment_keys(db, "group")), {str(i) for i in range(1, 65)})
 
 
+class Guesses(unittest.TestCase):
+    def library(self, db):
+        db.executescript("""
+            CREATE TABLE photos (id TEXT PRIMARY KEY, path TEXT);
+            CREATE TABLE faces (key TEXT PRIMARY KEY, photo TEXT, box TEXT, vector BLOB);
+            CREATE TABLE suggestions (anchor TEXT, member TEXT, score REAL);
+        """)
+        # Anna looks one way, Ola at right angles to her; the groups lean
+        # towards one, or (far) towards neither.
+        angles = {"anna": 0, "anna2": 4, "ola": 90, "a1": 6, "a2": 10, "o1": 85, "far": None}
+        for key, angle in angles.items():
+            vector = np.zeros(128, dtype="<f4")
+            if angle is None:
+                vector[2] = 1
+            else:
+                vector[0], vector[1] = np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))
+            db.execute("INSERT INTO photos VALUES (?, ?)", (key, key + ".jpg"))
+            db.execute("INSERT INTO faces VALUES (?, ?, '[0, 0, 1, 1]', ?)", (key, key, vector.tobytes()))
+        db.executemany("INSERT INTO suggestions VALUES (?,?,?)", [
+            ("a1", "a1", 1.0), ("a1", "a2", 0.9), ("o1", "o1", 1.0), ("far", "far", 1.0)])
+
+    def test_a_group_is_guessed_to_be_the_named_person_it_looks_like(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"anna": {"person": "Anna"}, "anna2": {"person": "Anna"}, "ola": {"person": "Ola"}})
+            rows = worker.with_guesses(db, worker.review_rows(db, "groups", None, 0))
+            self.assertEqual({row["anchor"]: row["guess"] for row in rows}, {"a1": "Anna", "o1": "Ola", "far": None})
+            self.assertEqual([row["anchor"] for row in worker.likely_rows(db, "Anna", 0)], ["a1"])
+            people = worker.with_likely(db, worker.review_rows(db, "people", None, 0))
+            self.assertEqual({row["name"]: row["likely"] for row in people}, {"Anna": 1, "Ola": 1})
+
+    def test_a_group_said_to_be_someone_else_is_not_guessed_again(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"anna": {"person": "Anna"}, "a1": {"not": ["Anna"]}})
+            self.assertEqual(worker.likely_rows(db, "Anna", 0), [])
+
+    def test_no_named_people_gives_no_guesses(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {})
+            self.assertEqual(worker.guesses(db, ["a1", "o1"]), {})
+
+
 if __name__ == "__main__":
     unittest.main()

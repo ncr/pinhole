@@ -1,0 +1,14 @@
+{
+  "%1: %n photo(s) added": {
+    "one": "%1: %n photo added",
+    "other": "%1: %n photos added"
+  },
+  "%n more to check": {
+    "one": "%n more to check",
+    "other": "%n more to check"
+  },
+  "%n photo(s)": {
+    "one": "%n photo",
+    "other": "%n photos"
+  }
+}

@@ -32,6 +32,12 @@ WIDER_REVISION = 2
 WIDER_EXEMPLARS = 32
 CENTROID_SCREEN = 0.45
 EXEMPLARS = 6
+# A suggested group is shown as probably someone already named when its
+# typical face is at least this close to one of theirs.
+GUESS_SIMILARITY = 0.5
+GUESS_SAMPLES = 6
+PERSON_SAMPLES = 48
+GUESS_GROUPS = 1000
 
 
 def verified(path, digest):
@@ -393,6 +399,10 @@ def review_labels(db, edits):
                    ((key, edit["name"]) for key, edit in edits.items() if edit.get("name")))
     db.executemany("INSERT OR IGNORE INTO rejected VALUES (?,?)",
                    ((key, face) for key, edit in edits.items() for face in edit.get("rejected", ())))
+    # A group someone said is not a person is not guessed to be them again.
+    db.execute("CREATE TEMP TABLE refused (anchor TEXT, name TEXT, PRIMARY KEY (anchor, name))")
+    db.executemany("INSERT OR IGNORE INTO refused VALUES (?,?)",
+                   ((key, name) for key, edit in edits.items() for name in edit.get("not", ())))
     db.execute("INSERT OR IGNORE INTO labels SELECT anchor, name FROM legacy")
     db.execute("""
         INSERT OR IGNORE INTO labels
@@ -408,7 +418,101 @@ def review_labels(db, edits):
         """)
 
 
-def review_rows(db, operation, target, offset):
+def guesses(db, anchors):
+    """The named person each group most likely is: {anchor: (name, score)}.
+
+    A group's score for a person is the median, over a few of its best
+    faces, of their closest match among that person's faces.
+    """
+    import numpy as np
+    if not anchors:
+        return {}
+    people = db.execute("""
+        SELECT name, vector FROM (
+            SELECT l.name, f.vector, row_number() OVER (PARTITION BY l.name ORDER BY f.key) AS n
+            FROM labels l JOIN faces f USING (key)
+        ) WHERE n <= ?
+        """, (PERSON_SAMPLES,)).fetchall()
+    if not people:
+        return {}
+    names = sorted({name for name, _ in people})
+    refused = set(db.execute("SELECT anchor, name FROM refused"))
+    owner = np.array([names.index(name) for name, _ in people])
+    known = np.frombuffer(b"".join(vector for _, vector in people), dtype="<f4").reshape(-1, 128)
+    db.execute("CREATE TEMP TABLE IF NOT EXISTS wanted (anchor TEXT PRIMARY KEY)")
+    db.execute("DELETE FROM wanted")
+    db.executemany("INSERT OR IGNORE INTO wanted VALUES (?)", ((anchor,) for anchor in anchors))
+    rows = db.execute("""
+        SELECT anchor, vector FROM (
+            SELECT p.anchor, p.member, row_number() OVER (PARTITION BY p.anchor ORDER BY p.score DESC, p.member) AS n
+            FROM pending p JOIN wanted USING (anchor)
+        ) s JOIN faces f ON f.key=s.member WHERE n <= ? ORDER BY anchor
+        """, (GUESS_SAMPLES,)).fetchall()
+    if not rows:
+        return {}
+    group_of = [anchor for anchor, _ in rows]
+    vectors = np.frombuffer(b"".join(vector for _, vector in rows), dtype="<f4").reshape(-1, 128)
+    similarity = vectors @ known.T
+    best = np.full((len(rows), len(names)), -1.0, dtype=np.float32)
+    for person in range(len(names)):
+        best[:, person] = similarity[:, owner == person].max(axis=1)
+    found = {}
+    start = 0
+    while start < len(rows):
+        end = start
+        while end < len(rows) and group_of[end] == group_of[start]:
+            end += 1
+        scores = np.median(best[start:end], axis=0)
+        for i, name in enumerate(names):
+            if (group_of[start], name) in refused:
+                scores[i] = -1
+        person = int(np.argmax(scores))
+        if scores[person] >= GUESS_SIMILARITY:
+            found[group_of[start]] = (names[person], float(scores[person]))
+        start = end
+    return found
+
+
+def with_guesses(db, rows):
+    found = guesses(db, [row["anchor"] for row in rows if row["anchor"]])
+    for row in rows:
+        guess = found.get(row["anchor"])
+        row["guess"] = guess[0] if guess else None
+    return rows
+
+
+def all_guesses(db):
+    anchors = [anchor for (anchor,) in db.execute(
+        "SELECT anchor FROM pending GROUP BY anchor ORDER BY count(*) DESC, anchor LIMIT ?", (GUESS_GROUPS,))]
+    return guesses(db, anchors)
+
+
+def with_likely(db, rows):
+    """Each named person's count of suggested groups that look like them."""
+    counts = {}
+    for name, _ in all_guesses(db).values():
+        counts[name] = counts.get(name, 0) + 1
+    for row in rows:
+        row["likely"] = counts.get(row["name"], 0)
+    return rows
+
+
+def likely_rows(db, person, offset, limit=48):
+    """Suggested groups that are probably `person`, the likeliest first."""
+    found = all_guesses(db)
+    chosen = sorted((score, anchor) for anchor, (name, score) in found.items() if name == person)
+    chosen = [anchor for _, anchor in reversed(chosen)][offset:offset + limit + 1]
+    rows = review_rows(db, "groups", None, 0, only=chosen, limit=limit)
+    order = {anchor: i for i, anchor in enumerate(chosen)}
+    rows.sort(key=lambda row: order[row["anchor"]])
+    for row in rows:
+        row["guess"] = person
+    return rows
+
+
+def review_rows(db, operation, target, offset, only=None, limit=48):
+    if only == []:
+        return []
     if operation == "groups":
         # Use a still-unassigned face as the cover if the original anchor
         # already belongs to a person. Keep the anchor as the group identity.
@@ -420,9 +524,9 @@ def review_rows(db, operation, target, offset):
             )
             SELECT f.key, f.photo, f.box, p.path, c.count, c.anchor, NULL
             FROM covers c JOIN faces f ON f.key=c.member JOIN photos p ON p.id=f.photo
-            WHERE c.rank=1 ORDER BY c.count DESC, c.anchor LIMIT 49 OFFSET ?
-        """
-        params = (offset,)
+            WHERE c.rank=1 {} ORDER BY c.count DESC, c.anchor LIMIT ? OFFSET ?
+        """.format("" if only is None else "AND c.anchor IN ({})".format(",".join("?" * len(only))))
+        params = (*(only or ()), limit + 1, offset)
     elif operation == "people":
         query = """
             WITH covers AS (
@@ -431,9 +535,9 @@ def review_rows(db, operation, target, offset):
             )
             SELECT f.key, f.photo, f.box, p.path, c.count, NULL, c.name
             FROM covers c JOIN faces f USING (key) JOIN photos p ON p.id=f.photo
-            ORDER BY c.name COLLATE NOCASE, c.name LIMIT 49 OFFSET ?
+            ORDER BY c.name COLLATE NOCASE, c.name LIMIT ? OFFSET ?
         """
-        params = (offset,)
+        params = (limit + 1, offset)
     else:
         if operation == "members":
             source = "pending s JOIN faces f ON f.key=s.member"
@@ -443,9 +547,9 @@ def review_rows(db, operation, target, offset):
             where = "l.name=? ORDER BY f.photo, f.key"
         query = f"""
             SELECT f.key, f.photo, f.box, p.path, NULL, NULL, NULL
-            FROM {source} JOIN photos p ON p.id=f.photo WHERE {where} LIMIT 49 OFFSET ?
+            FROM {source} JOIN photos p ON p.id=f.photo WHERE {where} LIMIT ? OFFSET ?
         """
-        params = (target, offset)
+        params = (target, limit + 1, offset)
     return [dict(key=key, id=photo, box=json.loads(box), path=path, count=count, anchor=anchor, name=name)
             for key, photo, box, path, count, anchor, name in db.execute(query, params)]
 
@@ -578,7 +682,7 @@ def exit_with_parent():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "assignment"))
+    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment"))
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--library", type=Path)
     parser.add_argument("--library-key")
@@ -607,10 +711,18 @@ def main():
     with closing(readonly(path)) as db, db:
         db.execute("BEGIN")
         review_labels(db, request.get("edits", {}))
+        limit = max(1, min(2000, int(request.get("limit", 48))))
         if args.operation == "assignment":
             emit(args.operation, keys=assignment_keys(db, request["anchor"]))
+        elif args.operation == "likely":
+            emit(args.operation, rows=likely_rows(db, request["person"], request["offset"], limit), status=status(db))
         else:
-            rows = review_rows(db, args.operation, request.get("anchor") or request.get("person"), request["offset"])
+            rows = review_rows(db, args.operation, request.get("anchor") or request.get("person"), request["offset"],
+                               limit=limit)
+            if args.operation == "groups":
+                rows = with_guesses(db, rows)
+            elif args.operation == "people":
+                rows = with_likely(db, rows)
             emit(args.operation, rows=rows, status=status(db))
 
 

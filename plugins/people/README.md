@@ -6,24 +6,26 @@ It uses Python 3 with OpenCV and NumPy, two CPU threads and lower
 scheduling priority. On the first scan it downloads and verifies the
 two public model files (39 MB). Photo data stays on the computer.
 
-Choose **People** in the grid actions or press Shift+F to see progress
-and browse results. The worker resumes from the local cache and handles
-additions, edits and removals. Settings → Plugins → People controls both
-the worker and the view. A library explicitly opened with `--library`
-can display existing suggestions in its cache.
+Choose **People** in the grid actions or press Shift+F. The people named
+so far come first, each a round face with their photo count, then the
+faces not named yet, the largest groups first; the list grows as you
+scroll. Arrows move across both, ⏎ opens, Esc goes back.
 
-Open a suggestion in **To review**. Choose **Assign group** or select a
-photo and choose **Assign selected photo**. Pick a saved person from the
-list or type a new name. **Named people** collects photos from every group
-assigned to the same person. Open a named person to move a selected photo
-or merge the person with another one. Names saved by older versions appear
-in the same list.
+A group opens to its photos with the names already given above them, the
+likeliest first, each on a number key: 1 names the whole group, and the
+next group to name opens. Type a new name in **New name…** (N). X (or the
+✕ on a photo under the pointer) takes a photo that is someone else out of
+the group.
 
-Choose **Different person** to remove an incorrect face from a suggestion.
-Assignments, merges and rejections support Pinhole's undo. Tab and Shift+Tab
-move through controls, arrow keys move through the focused results, Enter
-opens the selection, and Escape goes back one level. Scroll results with a
-wheel or two fingers.
+Once someone has a name, groups that look like them are marked
+**Name?** at home, and their page offers **N more to check** (C): one group
+at a time, 1 says yes, 0 says no and is not asked again, S skips. On a
+person's page X takes a photo away from them, M (or …) gives it to
+someone else, and **Merge with…** joins two names. Every step can be undone
+with Ctrl Z. A photo opened from a group or a person steps ← → through
+those photos alone.
+
+Settings → Plugins → People sets how readily similar faces share a group.
 
 The pinned YuNet and SFace weights come from
 [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/48b10fa505aeb51fbd127fc60a5c660040e823b7/models).
@@ -32,11 +34,13 @@ and the [SFace weights are Apache 2.0](https://github.com/opencv/opencv_zoo/blob
 The helper verifies their SHA-256 digests before loading them.
 
 The first pass groups around exemplar faces at a cosine similarity of
-0.60. **Join groups** in **To review** sets how the second pass works.
+0.60. The setting in the side panel sets how the second pass works.
 **Careful** (the default) compares up to six faces per group and requires
 two independent matches at 0.62. **Wider** compares up to 32 faces per
 group, checks two independent matches at 0.58 and considers stronger
-pairs first. **Off** keeps the first-pass groups.
+pairs first. **Apart** keeps the first-pass groups. A group is shown as
+probably someone named when the median of its six best faces' closest
+matches among 48 of theirs is at least 0.5.
 Groups that share a photo or have saved edits stay separate during this
 pass. Changing the setting regroups the existing index in the background.
 Inspect groups before naming them.

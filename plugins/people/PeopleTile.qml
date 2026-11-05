@@ -1,69 +1,83 @@
 import QtQuick
+import QtQuick.Effects
 import Pinhole.Plugin
 
+// A face from its thumbnail, centred and filling `fraction` of the tile:
+// round for a person or a group, square with some of the photo around it
+// for one of their photos.
 Item {
     id: tile
     required property var row
-    required property bool group
-    required property bool chosen
-    required property string label
+    property bool round: true
+    property real fraction: round ? 0.5 : 0.36
+    property bool chosen: false
+    property bool hovered: hover.hovered
     signal selected()
 
     Accessible.role: Accessible.Button
-    Accessible.name: label
     Accessible.onPressAction: selected()
-    Rectangle {
+
+    Item {
+        id: picture
         anchors.fill: parent
-        anchors.margins: 3
-        color: theme.background
-        border.color: theme.accent
-        border.width: tile.chosen ? 2 : 0
-        Item {
-            id: picture
-            anchors.fill: parent
-            anchors.margins: 3
-            anchors.bottomMargin: tile.group ? caption.height + 4 : 3
-            clip: true
-            Image {
-                id: image
-                readonly property var photo: pinhole.library.item(tile.row.id)
-                readonly property real ratio: Math.max(1, photo.width || 1) / Math.max(1, photo.height || 1)
-                readonly property var box: tile.row.box
-                // Fit the face into its group tile. Match photos show the
-                // whole thumbnail and outline the particular face.
-                readonly property real cropWidth: Math.min(picture.width / Math.max(0.01, box[2]),
-                    picture.height * ratio / Math.max(0.01, box[3])) * 0.8
-                x: tile.group ? (picture.width - width * (2 * box[0] + box[2])) / 2 : 0
-                y: tile.group ? (picture.height - height * (2 * box[1] + box[3])) / 2 : 0
-                width: tile.group ? cropWidth : picture.width
-                height: tile.group ? cropWidth / ratio : picture.height
-                source: photo.thumbnail || ""
-                asynchronous: true
-                fillMode: Image.PreserveAspectFit
-                Rectangle {
-                    visible: !tile.group && image.status === Image.Ready
-                    color: "transparent"
-                    border.color: theme.accent
-                    border.width: 2
-                    x: (image.width - image.paintedWidth) / 2 + image.box[0] * image.paintedWidth
-                    y: (image.height - image.paintedHeight) / 2 + image.box[1] * image.paintedHeight
-                    width: image.box[2] * image.paintedWidth
-                    height: image.box[3] * image.paintedHeight
-                }
-            }
+        clip: !tile.round
+        layer.enabled: tile.round
+        layer.smooth: true
+        layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: mask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 1
         }
-        UiText {
-            id: caption
-            visible: tile.group
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: 4
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
-            text: tile.label
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.08)
+        }
+        Image {
+            id: image
+            readonly property var photo: (pinhole.library.revision, pinhole.library.item(tile.row.id))
+            readonly property real ratio: Math.max(1, photo.width || 1) / Math.max(1, photo.height || 1)
+            readonly property var box: tile.row.box || [0, 0, 1, 1]
+            readonly property real side: Math.max(1, picture.width)
+            // The width the whole thumbnail is drawn at, for the face to
+            // take `fraction` of the tile.
+            readonly property real drawn: Math.max(side, side * ratio, tile.fraction * side / Math.max(0.01, box[2], box[3] / ratio))
+            readonly property real centreX: box[0] + box[2] / 2
+            readonly property real centreY: box[1] + box[3] / 2
+            function placed(at, length) {
+                // Keep the tile covered where the photo allows it.
+                return length <= side ? (side - length) / 2 : Math.min(0, Math.max(side - length, at))
+            }
+            width: drawn
+            height: drawn / ratio
+            x: placed(side / 2 - centreX * width, width)
+            y: placed(side / 2 - centreY * height, height)
+            source: photo.thumbnail || ""
+            sourceSize: Qt.size(Math.min(1024, width * 1.5), Math.min(1024, height * 1.5))
+            asynchronous: true
+            smooth: true
         }
     }
-    HoverHandler { cursorShape: Qt.PointingHandCursor }
+    Item {
+        id: mask
+        anchors.fill: parent
+        visible: false
+        layer.enabled: tile.round
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "black"
+        }
+    }
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: tile.round ? -4 : 0
+        radius: tile.round ? width / 2 : 0
+        color: "transparent"
+        border.color: theme.accent
+        border.width: tile.chosen ? 2 : 1
+        visible: tile.chosen || hover.hovered
+    }
+    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: tile.selected() }
 }
