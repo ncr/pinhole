@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Restart only windows belonging to this install, after successful activation."""
 import os
-import json
 from pathlib import Path
 import signal
 import subprocess
@@ -52,21 +51,6 @@ def launch(program, args, env, cwd, logfile):
                          start_new_session=True, close_fds=True)
 
 
-def background_index_enabled(prefix, env):
-    home = Path(env.get('HOME') or Path.home())
-    config = Path(env.get('XDG_CONFIG_HOME') or home / '.config') / 'pinhole'
-    builtin = Path(env.get('PINHOLE_BUILTIN_PLUGINS') or prefix / 'lib/pinhole/plugins')
-    try:
-        settings = json.loads((config / 'plugins.json').read_text())
-        switches = settings.get('enabled') or {}
-    except (OSError, ValueError, AttributeError):
-        switches = {}
-    if not isinstance(switches, dict):
-        switches = {}
-    return (switches.get('me.semantic-search') is True
-            or (switches.get('me.people') is not False and (builtin / 'people/pinhole-faces').is_file()))
-
-
 def restart(prefix, checkout):
     prefix, checkout = Path(prefix).resolve(), Path(checkout).resolve()
     executables = {str(prefix / 'bin/pinhole'), str(checkout / 'app/build/pinhole')}
@@ -102,10 +86,14 @@ def restart(prefix, checkout):
     if windows:
         print('Restarted Pinhole after installation.')
     else:
+        # With no window, the shared service may still run the plugins'
+        # workers: it starts again and decides itself which (core/src/workers.rs).
+        # One of a library given ends with its window.
+        service = prefix / 'bin/pinholed'
         for _, _, _, args, env, cwd in daemons:
-            if '--given' not in args and background_index_enabled(prefix, env):
-                launch(prefix / 'bin/pinholed', args, env, cwd, 'pinholed.log')
-                print('Restarted Pinhole background indexing service.')
+            if '--given' not in args and service.exists():
+                launch(service, args, env, cwd, 'pinholed.log')
+                print('Restarted the Pinhole service.')
 
 
 if __name__ == '__main__':

@@ -126,11 +126,8 @@ int main(int argc, char **argv) {
         self.assertIn(f'stop|{service.pid}', self.lines())
         self.assertEqual(len([line for line in self.lines() if line.startswith('start|')]), 1)
 
-    def test_closed_app_stays_closed_and_background_search_service_restarts(self):
-        config = self.root / 'config' / 'pinhole'
-        config.mkdir(parents=True)
-        (config / 'plugins.json').write_text('{"enabled":{"me.semantic-search":true}}')
-        self.env['XDG_CONFIG_HOME'] = str(config.parent)
+    def test_closed_app_stays_closed_and_its_service_restarts_to_run_the_workers(self):
+        # Whatever the plugins' switches: the service decides which workers run.
         (self.prefix / 'bin/pinholed').symlink_to(self.daemon)
         service = self.start(self.daemon, '--socket', self.socket)
         result = self.restart()
@@ -139,17 +136,13 @@ int main(int argc, char **argv) {
         self.assertIn(f'stop|{service.pid}', self.lines())
         self.assertTrue(self.lines()[-1].endswith(f'|--socket|{self.socket}'))
 
-    def test_closed_app_restarts_for_default_people_indexing(self):
-        helper = self.prefix / 'lib/pinhole/plugins/people/pinhole-faces'
-        helper.parent.mkdir(parents=True)
-        helper.touch()
+    def test_closed_app_stays_closed_and_a_given_librarys_service_is_not_restarted(self):
         (self.prefix / 'bin/pinholed').symlink_to(self.daemon)
-        service = self.start(self.daemon, '--socket', self.socket)
+        service = self.start(self.daemon, '--socket', self.socket, '--library', str(self.root), '--given')
         result = self.restart()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 2)
         self.assertIn(f'stop|{service.pid}', self.lines())
-        self.assertTrue(self.lines()[-1].endswith(f'|--socket|{self.socket}'))
+        self.assertEqual(len([line for line in self.lines() if line.startswith('start|')]), 1)
 
     def test_other_installation_and_other_library_service_are_untouched(self):
         other = self.root / 'other/pinhole'
