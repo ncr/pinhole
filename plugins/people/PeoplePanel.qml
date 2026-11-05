@@ -118,9 +118,11 @@ Panel {
         const kept = selection?.key
         const token = {}
         readJob = token
+        // Faces of photos still as they were read, and not hidden from the
+        // grid (Screenshots').
         const keep = rows => rows.filter(row => {
             const photo = pinhole.library.item(row.id)
-            return photo.thumbPath === pinhole.library.dir + "/" + row.path
+            return photo.thumbPath === pinhole.library.dir + "/" + row.path && !pinhole.isHidden(row.id)
         })
         let job
         if (view === "home") {
@@ -544,6 +546,12 @@ Panel {
     Connections {
         target: pinhole
         function onDismissed() { panel.close() }
+        // Another plugin over the photos meanwhile: not coming back on top
+        // of it when the photo closes.
+        function onCoveredByChanged() {
+            if (pinhole.coveredBy && pinhole.coveredBy !== pinhole.id) panel.returning = false
+        }
+        function onHiddenChanged() { if (panel.shown) panel.load() }
     }
     Connections {
         target: pinhole.library

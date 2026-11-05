@@ -33,11 +33,14 @@ FocusScope {
     property real zoom: 1
     readonly property real scale: Geo.scale(zoom)
     readonly property int columns: Math.max(1, Math.floor(photos.width / (theme.fontSize * 8)))
+    // Not those hidden from the grid (Screenshots'), as the grid.
+    property int hiddenRevision: 0
+    readonly property var shownPoints: (hiddenRevision, points.filter(p => !pinhole.isHidden(p.id)))
     readonly property var availablePoints: {
         // Info can have EXIF coordinates for a source that supplies no pair.
-        if (focusPoint && !points.some(p => p.id === focusPoint.id))
-            return points.concat([focusPoint]).sort(byDate)
-        return points
+        if (focusPoint && !shownPoints.some(p => p.id === focusPoint.id))
+            return shownPoints.concat([focusPoint]).sort(byDate)
+        return shownPoints
     }
     readonly property bool hasPhotos: availablePoints.length > 0
 
@@ -330,6 +333,13 @@ FocusScope {
         target: places.pinhole.library
         function onChanged() { reload.restart() }
     }
+    Connections {
+        target: places.pinhole
+        function onHiddenChanged() {
+            ++places.hiddenRevision
+            places.scheduleGroups()
+        }
+    }
     Component.onDestruction: { if (pending) pending.cancel() }
     Panel {}
 
@@ -574,7 +584,7 @@ FocusScope {
                 onTapped: tiles.retry()
             }
             ShellButton {
-                text: "OpenFreeMap © OpenMapTiles © OpenStreetMap"
+                text: qsTr("OpenFreeMap © OpenMapTiles © OpenStreetMap")
                 helpText: qsTr("Map data attribution")
                 floating: true
                 visible: tiles.visible

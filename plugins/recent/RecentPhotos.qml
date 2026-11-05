@@ -41,7 +41,8 @@ Item {
             pending = null
             loading = false
             const id = rows[cursor] ? rows[cursor].id : ""
-            rows = found
+            // Not those hidden from the grid (Screenshots'), as the grid.
+            rows = found.filter(row => !pinhole.isHidden(row.id))
             const next = rows.findIndex(row => row.id === id)
             cursor = next >= 0 ? next : 0
         }).catch(error => {
@@ -89,6 +90,10 @@ Item {
     function move(by) {
         cursor = Math.max(0, Math.min(Math.min(limit, rows.length) - 1, cursor + by))
         photos.positionViewAtIndex(cursor, GridView.Contain)
+    }
+    Connections {
+        target: recent.pinhole
+        function onHiddenChanged() { if (recent.shown) recent.refresh() }
     }
     Connections {
         target: recent.pinhole.library
