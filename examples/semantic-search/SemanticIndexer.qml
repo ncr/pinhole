@@ -166,17 +166,17 @@ Item {
         }
     }
     // Search ready from the start: the model loaded as soon as the library
-    // is read, in the worker's idle time, and kept while Pinhole is open
-    // (asked again each `keeper` interval; the worker lets it go a minute
-    // after the last ask, or when memory runs short). What it answers is no
-    // matter; a search says the rest.
+    // is read and held while Pinhole is open, whatever else wants the
+    // memory (asked again each `keeper` interval, which also starts it
+    // again if it stopped; the worker holds it 90 seconds past each ask).
+    // What it answers is no matter; a search says the rest.
     function warm() {
         if (!catalogReady || warmer.busy) return
         warmer.start(() => request({ op: "warm" }))
     }
     Job { id: warmer }
     onCatalogReadyChanged: if (catalogReady) warm()
-    Timer { id: keeper; interval: 40000; repeat: true; running: indexer.catalogReady; onTriggered: indexer.warm() }
+    Timer { id: keeper; interval: 20000; repeat: true; running: indexer.catalogReady; onTriggered: indexer.warm() }
     // Pinhole's worker, as pinholed says it runs: asked how far it is, or,
     // gone (or pinholed with it), waited for.
     function watch() {
@@ -217,9 +217,9 @@ Item {
         }
     }
 
-    // Opening search can start the worker sooner. The normal launch path
-    // leaves the first frame to Pinhole; the worker loads at idle priority.
-    Timer { id: startup; interval: 1500; running: true; onTriggered: indexer.ensureStarted() }
+    // As Pinhole starts, just after its first frame: the worker loads the
+    // model at idle priority, away from the window.
+    Timer { id: startup; interval: 250; running: true; onTriggered: indexer.ensureStarted() }
     Timer { id: changes; interval: 900; onTriggered: indexer.catalog() }
     // Its own helper, asked every two seconds while it indexes; Pinhole's
     // worker says when it got further (workerSaid), and pinholed when it

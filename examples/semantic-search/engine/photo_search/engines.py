@@ -52,9 +52,6 @@ class LegacyEngine:
     def loaded(self):
         return self.text_model is not None
 
-    def short_of_memory(self):
-        return False
-
     def close(self):
         if self.image_model is not None:
             self.image_model.restore()
@@ -117,10 +114,7 @@ class CudaEngine:
 
         free, _ = torch.cuda.mem_get_info()
         if self.model is not None:
-            if free >= 768 * 1024 ** 2:
-                return True
-            self.close()
-            return False
+            return free >= 768 * 1024 ** 2
         return free >= 11 * 1024 ** 3
 
     def encoder(self):
@@ -138,9 +132,6 @@ class CudaEngine:
 
     def loaded(self):
         return self.model is not None
-
-    def short_of_memory(self):
-        return False
 
     def close(self):
         if self.model is not None:
@@ -176,24 +167,23 @@ class VulkanEngine:
         available = available_memory_kib()
         if self.model is None:
             return available >= START_MEMORY_KIB
-        if available >= KEEP_MEMORY_KIB:
-            return True
-        self.close()
-        return False
+        return available >= KEEP_MEMORY_KIB
 
-    def encoder(self):
+    # Indexing starts the model only with room for it (can_index); search
+    # starts it whatever the memory, as search must always answer.
+    def encoder(self, indexing=False):
         if self.model is not None and self.model.process.poll() is not None:
             self.close()
         if self.model is None:
             from .wemm_vulkan import START_MEMORY_KIB, WeMMVulkan, available_memory_kib
 
-            if available_memory_kib() < START_MEMORY_KIB:
+            if indexing and available_memory_kib() < START_MEMORY_KIB:
                 raise RuntimeError("WeMM Vulkan is waiting for 7 GiB of available memory")
             self.model = WeMMVulkan(self.args.models, self.args.threads)
         return self.model
 
     def encode_image(self, image):
-        return self.encoder().image(image)
+        return self.encoder(indexing=True).image(image)
 
     def encode_text(self, texts):
         import numpy as np
@@ -203,13 +193,6 @@ class VulkanEngine:
 
     def loaded(self):
         return self.model is not None and self.model.process.poll() is None
-
-    # Kept while Pinhole is open, the model gives way when the desktop
-    # runs short, as indexing does (can_index).
-    def short_of_memory(self):
-        from .wemm_vulkan import KEEP_MEMORY_KIB, available_memory_kib
-
-        return self.model is not None and available_memory_kib() < KEEP_MEMORY_KIB
 
     def close(self):
         if self.model is not None:

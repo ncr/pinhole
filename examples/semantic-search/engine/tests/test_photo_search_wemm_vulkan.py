@@ -45,9 +45,31 @@ class WeightsTests(unittest.TestCase):
             path.write_bytes(b"weights")
             hashing = Mock(return_value="pinned")
             wemm_vulkan.verify(path, "pinned", hashing)
+            # A new worker trusts what the last one checked.
             wemm_vulkan.verify(path, "pinned", hashing)
             self.assertEqual(hashing.call_count, 1)
             path.write_bytes(b"other weights")
             hashing.return_value = "other"
             with self.assertRaisesRegex(ValueError, "pinned hash"):
                 wemm_vulkan.verify(path, "pinned", hashing)
+            self.assertEqual(hashing.call_count, 2)
+
+
+class MemoryTests(unittest.TestCase):
+    def test_search_starts_the_model_whatever_the_memory_and_indexing_waits(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from photo_search.engines import VulkanEngine
+
+        engine = VulkanEngine(SimpleNamespace(models=Path("/models"), threads=2))
+        with patch("photo_search.wemm_vulkan.available_memory_kib", return_value=1024), \
+                patch("photo_search.wemm_vulkan.WeMMVulkan") as model:
+            model.return_value.process.poll.return_value = None
+            self.assertFalse(engine.can_index())
+            with self.assertRaisesRegex(RuntimeError, "waiting"):
+                engine.encoder(indexing=True)
+            self.assertIs(engine.encoder(), model.return_value)
+            # Loaded and short of memory: indexing waits, the model stays.
+            self.assertFalse(engine.can_index())
+            model.return_value.close.assert_not_called()
+            self.assertTrue(engine.loaded())

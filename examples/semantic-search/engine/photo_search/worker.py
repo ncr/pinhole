@@ -16,6 +16,9 @@ from .engines import create_engine
 from .store import Store
 
 MAX_MESSAGE = 24 << 20
+# Pinhole open asks for the model every 20 seconds (warm); it is held this
+# long past each ask, so a window that is busy a moment does not lose it.
+HOLD_SECONDS = 90
 
 # Stable ids and Polish prompts for the prototype's fixed vocabulary.
 TAGS = (
@@ -89,7 +92,7 @@ class Worker:
         self.identity = self.engine.identity()
         self.store = Store(args.index, args.library_key, self.identity, self.engine.dimensions[args.model])
         self.last_inference = None
-        self.memory_checked = 0
+        self.held_until = 0
         self.tag_vectors = None
         self.pending = []
         self.running = False
@@ -109,35 +112,37 @@ class Worker:
         finally:
             self.store.close()
 
+    def held(self):
+        """Pinhole is open: search must answer at once, so the model stays
+        loaded whatever else wants the memory."""
+        return time.monotonic() < self.held_until
+
+    def release(self):
+        """The model let go, its memory the desktop's, unless Pinhole holds it."""
+        if self.held() or self.engine.idle_seconds is None:
+            return False
+        self.engine.close()
+        self.last_inference = None
+        return True
+
     def yield_to_person(self, here):
         """Background indexing waits while someone uses the screen, the
-        model let go after a minute of that, its memory the desktop's."""
+        model let go after a minute of that unless Pinhole holds it."""
         if not here:
             self.yielding, self.yielded_at = False, None
             return False
         if not self.yielding:
             self.yielding, self.yielded_at = True, time.monotonic()
-        # A search counts as use too: the model stays a minute past the
-        # last one, so the next question does not wait for it to load.
         elif (self.engine.idle_seconds is not None and self.last_inference is not None
                 and time.monotonic() - max(self.yielded_at, self.last_inference) >= self.engine.idle_seconds):
-            self.engine.close()
-            self.last_inference = None
+            self.release()
         return True
 
     def release_idle(self):
         delay = self.engine.idle_seconds
         if (delay is not None and not self.running and self.last_inference is not None
                 and time.monotonic() - self.last_inference >= delay):
-            self.engine.close()
-            self.last_inference = None
-            return
-        now = time.monotonic()
-        if self.last_inference is not None and now - self.memory_checked >= 5:
-            self.memory_checked = now
-            if self.engine.short_of_memory():
-                self.engine.close()
-                self.last_inference = None
+            self.release()
 
     def status(self):
         return self.store.status() | {"running": self.running, "waiting": self.waiting, "pending": len(self.pending),
@@ -214,9 +219,7 @@ class Worker:
 
     def stop(self):
         self.pending, self.running, self.waiting = [], False, False
-        if self.engine.idle_seconds is not None:
-            self.engine.close()
-            self.last_inference = None
+        self.release()
 
     def request(self, message):
         op = message.get('op')
@@ -282,10 +285,12 @@ class Worker:
             return {"results": self.store.search(vector, limit), "seconds": time.perf_counter() - started,
                     "status": self.status()}
         if op == 'warm':
-            # Pinhole open: the text model loaded, and kept a minute past
-            # each ask (the window asks again while it is open), so a question
-            # never waits for it. Too little memory now is said, not raised.
+            # Pinhole open: the model loaded and held while it asks again,
+            # and the index read into memory, so a question waits for
+            # neither. A model that cannot start is said, not raised.
+            self.held_until = time.monotonic() + HOLD_SECONDS
             if self.store.status()['indexed']:
+                self.store.prepare()
                 if self.engine.loaded():
                     self.last_inference = time.monotonic()
                 else:
@@ -361,6 +366,8 @@ class Worker:
             if not self.engine.can_index():
                 self.pending.appendleft((asset, relative))
                 self.waiting = True
+                # Short of memory: given back, unless Pinhole holds it.
+                self.release()
                 return
             vector = self.engine.encode_image(image)
             self.last_inference = time.monotonic()
@@ -373,6 +380,10 @@ class Worker:
             # substituting a CPU backend or labelling a partial run complete.
             self.last_error = str(error)
             self.stop()
+            # Broken, not idle: let go even if held, to start afresh.
+            if self.engine.idle_seconds is not None:
+                self.engine.close()
+                self.last_inference = None
             raise
         finally:
             if not self.pending:

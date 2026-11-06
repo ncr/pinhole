@@ -8,6 +8,7 @@ import time
 import numpy as np
 
 KIND = "pinhole-semantic-index-v1"
+CHUNK = 4096
 
 
 class Store:
@@ -130,17 +131,29 @@ class Store:
         vector = np.asarray(vector, dtype=np.float32)
         if vector.shape != (self.dimension,) or not np.isfinite(vector).all() or abs(float(np.linalg.norm(vector)) - 1) > 1e-5:
             raise ValueError("invalid normalized query vector")
-        if self.snapshot is None:
-            rows = self.db.execute('''SELECT e.asset_id,e.vector FROM embeddings e JOIN catalog c USING(asset_id)
-                WHERE e.fingerprint=c.fingerprint AND c.active=1 ORDER BY e.asset_id''').fetchall()
-            ids = [row[0] for row in rows]
-            if len(ids) > 100000 or any(len(row[1]) != self.dimension * 4 for row in rows):
-                raise ValueError("corrupt or excessive embedding index")
-            matrix = np.stack([np.frombuffer(row[1], dtype="<f4") for row in rows]) if rows else np.empty((0, self.dimension), dtype=np.float32)
-            if not np.isfinite(matrix).all() or np.any(np.abs(np.linalg.norm(matrix, axis=1) - 1) > 1e-5):
-                raise ValueError("invalid stored embedding")
-            self.snapshot = ids, matrix
-        ids, matrix = self.snapshot
-        scores = matrix @ vector
+        ids, matrix = self.prepare()
+        scores = np.empty(len(ids), dtype=np.float32)
+        for start in range(0, len(ids), CHUNK):
+            scores[start:start + CHUNK] = matrix[start:start + CHUNK].astype(np.float32) @ vector
         order = np.argsort(-scores, kind="stable")[:limit]
         return [{"id": ids[i], "score": float(scores[i])} for i in order]
+
+    def prepare(self):
+        """The index in memory, half its stored size: half-precision vectors
+        rank as the stored ones do, read a chunk at a time."""
+        if self.snapshot is not None:
+            return self.snapshot
+        rows = self.db.execute('''SELECT e.asset_id,e.vector FROM embeddings e JOIN catalog c USING(asset_id)
+            WHERE e.fingerprint=c.fingerprint AND c.active=1 ORDER BY e.asset_id''')
+        ids, chunks = [], []
+        while block := rows.fetchmany(CHUNK):
+            if len(ids) + len(block) > 100000 or any(len(row[1]) != self.dimension * 4 for row in block):
+                raise ValueError("corrupt or excessive embedding index")
+            matrix = np.frombuffer(b"".join(row[1] for row in block), dtype="<f4").reshape(len(block), self.dimension)
+            if not np.isfinite(matrix).all() or np.any(np.abs(np.linalg.norm(matrix, axis=1) - 1) > 1e-5):
+                raise ValueError("invalid stored embedding")
+            ids.extend(row[0] for row in block)
+            chunks.append(matrix.astype(np.float16))
+        matrix = np.concatenate(chunks) if chunks else np.empty((0, self.dimension), dtype=np.float16)
+        self.snapshot = ids, matrix
+        return self.snapshot

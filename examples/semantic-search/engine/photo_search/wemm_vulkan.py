@@ -51,19 +51,30 @@ def check_installation(directory):
         raise RuntimeError("The pinned WeMM Vulkan weights are missing")
 
 
-# Weights hashed once per worker: 5 GB read again at every load made each
-# search after an idle minute wait seconds. A changed file has a new stamp.
-VERIFIED = {}
-
-
+# Weights hashed once, not at every start: 5 GB read again made search
+# seconds later to be ready. What was checked is kept beside them, so a new
+# worker trusts it too; a changed file has another stamp and is hashed again.
 def verify(path, expected, hash_file):
     info = path.stat()
-    stamp = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev)
-    if VERIFIED.get(str(path)) == (stamp, expected):
+    stamp = [info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev, expected]
+    record = path.parent / ".verified.json"
+    try:
+        known = json.loads(record.read_text())
+    except (OSError, ValueError):
+        known = {}
+    if not isinstance(known, dict):
+        known = {}
+    if known.get(path.name) == stamp:
         return
     if hash_file(path) != expected:
         raise ValueError(f"WeMM Vulkan file differs from its pinned hash: {path.name}")
-    VERIFIED[str(path)] = stamp, expected
+    known[path.name] = stamp
+    try:
+        partial = record.with_suffix(".tmp")
+        partial.write_text(json.dumps(known))
+        partial.replace(record)
+    except OSError:
+        pass
 
 
 class UnixHTTP(http.client.HTTPConnection):

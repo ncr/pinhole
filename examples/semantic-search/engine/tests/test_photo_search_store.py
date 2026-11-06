@@ -299,6 +299,8 @@ class WorkerTests(unittest.TestCase):
         model.encode.return_value = self.vector()[None, :], {}
         with patch('photo_search.models.TextModel', return_value=model) as load:
             self.assertTrue(self.worker.request({'op': 'warm'})['warm'])
+            self.assertTrue(self.worker.held())
+            self.assertIsNotNone(self.worker.store.snapshot)
             # Asked again while Pinhole is open: kept, not encoded again.
             self.worker.last_inference = None
             self.assertTrue(self.worker.request({'op': 'warm'})['warm'])

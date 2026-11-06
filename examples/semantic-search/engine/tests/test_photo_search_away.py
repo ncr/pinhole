@@ -75,6 +75,7 @@ class Yielding(unittest.TestCase):
 
         worker = Worker.__new__(Worker)
         worker.yielding, worker.yielded_at, worker.last_inference = False, None, 1.0
+        worker.held_until = 0
         worker.engine = mock.Mock(idle_seconds=60)
         with mock.patch("photo_search.worker.time.monotonic", return_value=100.0):
             self.assertTrue(worker.yield_to_person(True))
@@ -85,30 +86,31 @@ class Yielding(unittest.TestCase):
         self.assertFalse(worker.yield_to_person(False))
         self.assertFalse(worker.yielding)
 
-    def test_a_kept_model_gives_way_when_memory_runs_short(self):
+    def test_pinhole_open_holds_the_model_whatever_else(self):
+        from photo_search import worker as module
         from photo_search.worker import Worker
 
         worker = Worker.__new__(Worker)
-        worker.running, worker.memory_checked, worker.last_inference = False, 0, 100.0
+        worker.running, worker.pending, worker.waiting = False, [], False
+        worker.yielding, worker.yielded_at, worker.last_inference = False, None, 100.0
         worker.engine = mock.Mock(idle_seconds=60)
-        worker.engine.short_of_memory.return_value = False
-        with mock.patch("photo_search.worker.time.monotonic", return_value=110.0):
+        worker.held_until = 100.0 + module.HOLD_SECONDS
+        with mock.patch("photo_search.worker.time.monotonic", return_value=170.0):
             worker.release_idle()
+            worker.yield_to_person(True)
+            worker.yield_to_person(True)
+            worker.stop()
         worker.engine.close.assert_not_called()
-        worker.engine.short_of_memory.return_value = True
-        with mock.patch("photo_search.worker.time.monotonic", return_value=112.0):
-            worker.release_idle()
-        worker.engine.close.assert_not_called()
-        with mock.patch("photo_search.worker.time.monotonic", return_value=116.0):
+        with mock.patch("photo_search.worker.time.monotonic", return_value=100.0 + module.HOLD_SECONDS + 1):
             worker.release_idle()
         worker.engine.close.assert_called_once()
-        self.assertIsNone(worker.last_inference)
 
     def test_a_search_keeps_the_model_a_minute_past_it(self):
         from photo_search.worker import Worker
 
         worker = Worker.__new__(Worker)
         worker.yielding, worker.yielded_at, worker.last_inference = False, None, None
+        worker.held_until = 0
         worker.engine = mock.Mock(idle_seconds=60)
         with mock.patch("photo_search.worker.time.monotonic", return_value=100.0):
             worker.yield_to_person(True)
