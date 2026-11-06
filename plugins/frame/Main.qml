@@ -13,28 +13,16 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
     objectName: "photoFramePlugin"
-    readonly property var frame: view.item
-    covering: frame !== null && frame.shown
-    function ensureFrame() {
-        if (!view.item) view.setSource("Frame.qml", { plugin: plugin, objectName: "photoFrame" })
-        return view.item
-    }
-
-    // Its settings, kept as they change.
-    readonly property string photos: pinhole.settings.photos ?? "favourites"
-    readonly property int seconds: pinhole.settings.seconds ?? 8
-    readonly property bool shuffle: pinhole.settings.shuffle ?? true
-    readonly property bool caption: pinhole.settings.caption ?? true
-    readonly property bool motion: pinhole.settings.motion ?? true
-    function keep(name, value) { pinhole.settings[name] = value }
-    readonly property var secondsChoices: [5, 8, 12, 20, 30]
+    readonly property var frame: frameView.item
+    // Made without being shown, for its self-tests.
+    function ensureFrame() { return frameView.make() }
 
     // The photos its settings choose, by id, oldest first, none hidden
     // from the grid (Screenshots' screenshots): a few milliseconds over the
     // whole library. On this day: its month and day in the years before;
     // failing any, the week around it.
     function choose(kind) {
-        kind = kind ?? photos
+        kind = kind ?? pinhole.settings.photos
         const library = pinhole.library
         const ids = library.field("id")
         const shown = pinhole.hiddenCount > 0 ? i => !pinhole.isHidden(i) : i => true
@@ -65,7 +53,7 @@ PinholePlugin {
         return list.length > 0 ? list : week
     }
     function nothing() {
-        say(photos === "onthisday" ? qsTr("Nothing taken on this day in other years") : qsTr("No favourites to show"))
+        say(pinhole.settings.photos === "onthisday" ? qsTr("Nothing taken on this day in other years") : qsTr("No favourites to show"))
     }
     // Of `list` (ids, oldest first), the first taken at `position` in the
     // library or after it; round to the first.
@@ -94,7 +82,7 @@ PinholePlugin {
             return
         }
         ticked = false
-        ensureFrame().start(shuffle ? "" : from(list, pinhole.currentIndex()), list, false, () => choose(kind))
+        ensureFrame().play(pinhole.settings.shuffle ? "" : from(list, pinhole.currentIndex()), list, false, () => choose(kind))
     }
 
     // A word on the photos when nothing could be shown.
@@ -125,7 +113,7 @@ PinholePlugin {
                     return
                 }
                 plugin.ticked = false
-                plugin.ensureFrame().start(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
+                plugin.ensureFrame().play(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
             }
         },
         PluginAction {
@@ -138,7 +126,7 @@ PinholePlugin {
                 const ticked = Array.from(pinhole.selection()).map(i => library.item(i).id)
                 plugin.ticked = true
                 // Those still there and not hidden since.
-                plugin.ensureFrame().start(plugin.shuffle ? "" : ticked[0], ticked, false, () => ticked.filter(id => {
+                plugin.ensureFrame().play(pinhole.settings.shuffle ? "" : ticked[0], ticked, false, () => ticked.filter(id => {
                     const i = library.indexOf(id)
                     return i >= 0 && !pinhole.isHidden(i)
                 }))
@@ -186,39 +174,26 @@ PinholePlugin {
             Label { text: qsTr("Photos") }
             Choices {
                 numbered: false
+                setting: "photos"
                 options: [{ value: "favourites", text: qsTr("Favourites") }, { value: "all", text: qsTr("All") }, { value: "onthisday", text: qsTr("On this day") }]
-                value: plugin.photos
-                onChosen: value => plugin.keep("photos", value)
             }
             Label { text: qsTr("Seconds each") }
             Flow {
                 width: form.width
                 Repeater {
-                    model: plugin.secondsChoices
+                    model: [5, 8, 12, 20, 30]
                     delegate: ShellButton {
                         required property int modelData
                         flat: true
                         text: Number(modelData).toLocaleString(Qt.locale(), "f", 0)
-                        active: plugin.seconds === modelData
-                        onTapped: plugin.keep("seconds", modelData)
+                        active: pinhole.settings.seconds === modelData
+                        onTapped: pinhole.settings.seconds = modelData
                     }
                 }
             }
-            SettingSwitch {
-                text: qsTr("Shuffle")
-                checked: plugin.shuffle
-                onToggled: plugin.keep("shuffle", !plugin.shuffle)
-            }
-            SettingSwitch {
-                text: qsTr("Date on each photo")
-                checked: plugin.caption
-                onToggled: plugin.keep("caption", !plugin.caption)
-            }
-            SettingSwitch {
-                text: qsTr("Videos and Live Photos move")
-                checked: plugin.motion
-                onToggled: plugin.keep("motion", !plugin.motion)
-            }
+            SettingSwitch { setting: "shuffle"; text: qsTr("Shuffle") }
+            SettingSwitch { setting: "caption"; text: qsTr("Date on each photo") }
+            SettingSwitch { setting: "motion"; text: qsTr("Videos and Live Photos move") }
             Label {
                 topPadding: 4
                 text: qsTr("Frame (P) in the grid starts it; P on a photo starts from it; in select mode, P shows what is ticked. While it shows, the screen stays on.")
@@ -228,9 +203,13 @@ PinholePlugin {
 
     // Creating slides also creates media players and waits for the GPU's
     // multimedia probe. Keep that work off the app's first-frame path.
-    Loader {
-        id: view
-        anchors.fill: parent
+    PluginView {
+        id: frameView
+        source: "Frame.qml"
+        toggleKey: "P"
+        closeText: qsTr("Stop the photo frame")
+        closeCommand.mouse: qsTr("Click")
+        closeCommand.touchpad: qsTr("Tap")
     }
     Connections {
         target: plugin.frame

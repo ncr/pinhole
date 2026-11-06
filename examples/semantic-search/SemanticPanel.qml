@@ -6,16 +6,19 @@ import Pinhole.Plugin
 // going through the answers alone.
 Panel {
     id: panel
-    required property Item indexer
-    property bool shown: false
+    // The plugin's indexer, which outlives this view (SemanticSearch.qml).
+    readonly property Item indexer: view.plugin.indexer
+    // Its PluginView's: open now.
+    readonly property bool shown: view.shown
     readonly property string sourceKey: indexer.sourceKey
     readonly property bool ready: indexer.ready
     readonly property bool catalogReady: indexer.catalogReady
     readonly property var status: indexer.status
     readonly property string failure: localFailure || indexer.failure
     property string localFailure: ""
-    property var queryJob: null
-    property var tagJob: null
+    // A question asked and not yet answered; a photo's tags likewise.
+    readonly property bool searching: querier.busy
+    readonly property bool suggesting: suggester.busy
     property string tagAsset: ""
     property var tagSuggestions: []
     property var savedTags: []
@@ -39,37 +42,44 @@ Panel {
                 for (const tag of tags) found.set(tag.label, (found.get(tag.label) || 0) + 1)
         return Array.from(found.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(entry => entry[0])
     }
-    visible: shown && !pinhole.away
     onCatalogReadyChanged: if (shown && catalogReady) lookup()
     onStatusChanged: {
         const refresh = (wasIndexing && !status.running) || (!hadIndex && status.indexed > 0)
         wasIndexing = status.running
         hadIndex = status.indexed > 0
-        if (shown && refresh && !tagQuery && !queryJob) lookup()
+        if (shown && refresh && !tagQuery && !searching) lookup()
     }
     onSourceKeyChanged: {
         resetResults()
         if (shown && query.startsWith("#")) lookup()
     }
 
-    function show() {
-        shown = true
+    function show() { view.open() }
+    // As its view opens and closes (PluginView calls them).
+    function start() {
         indexer.ensureStarted()
         lookup()
         Qt.callLater(() => { search.input.forceActiveFocus(); search.input.selectAll() })
     }
     function resetResults() {
-        indexer.cancel(queryJob); queryJob = null
+        querier.cancel()
         closeTags(false)
         results = []; allResults = []; selected = -1
         tagQuery = false; tagName = ""
         localFailure = ""
         openWhenReady = false
     }
-    function close() {
-        shown = false
+    function close() { view.close() }
+    function stop() {
         debounce.stop()
         resetResults()
+    }
+    // Esc: a photo's tags closed first, then the view.
+    function back() {
+        if (!tagAsset)
+            return false
+        closeTags(true)
+        return true
     }
     function report(error) {
         if (error.code === "cancelled") return
@@ -89,7 +99,7 @@ Panel {
     }
     function lookup() {
         debounce.stop()
-        indexer.cancel(queryJob); queryJob = null
+        querier.cancel()
         localFailure = ""
         const text = query
         results = []; allResults = []; selected = -1
@@ -103,22 +113,20 @@ Panel {
             openWhenReady = false
             return
         }
-        const job = request({ op: "query", text: text, limit: 500 })
-        queryJob = job
-        job.then(result => {
-            if (queryJob !== job) return
-            queryJob = null
-            const value = unpack(result)
-            allResults = value.results
-            indexer.status = value.status
-            filterResults()
-            openIfAsked()
-        }).catch(error => {
-            if (queryJob !== job) return
-            queryJob = null
-            openWhenReady = false
-            report(error)
-        })
+        querier.start(() => request({ op: "query", text: text, limit: 500 }).then(result => unpack(result)))
+    }
+    Job {
+        id: querier
+        onDone: value => {
+            panel.allResults = value.results
+            panel.indexer.status = value.status
+            panel.filterResults()
+            panel.openIfAsked()
+        }
+        onFailed: error => {
+            panel.openWhenReady = false
+            panel.report(error)
+        }
     }
     function findTags() {
         const entries = sourceKey ? pinhole.state["tags:" + sourceKey] || {} : {}
@@ -156,7 +164,7 @@ Panel {
         openResult(selected)
     }
     function accept() {
-        if (debounce.running || queryJob) {
+        if (debounce.running || searching) {
             openWhenReady = true
             if (debounce.running) lookup()
         } else {
@@ -182,24 +190,19 @@ Panel {
         tagAsset = asset
         tagError = ""
         if (!catalogReady) return
-        const job = request({ op: "suggest_tags", id: asset })
-        tagJob = job
-        job.then(result => {
-            if (tagJob !== job) return
-            tagSuggestions = unpack(result)
-            tagJob = null
-        }).catch(error => {
-            if (tagJob !== job) return
-            tagJob = null
-            if (error.code !== "cancelled") {
-                tagError = qsTr("Tag suggestions could not be loaded.")
-                pinhole.warn(error)
-            }
-        })
+        suggester.start(() => request({ op: "suggest_tags", id: asset }).then(result => unpack(result)))
+    }
+    Job {
+        id: suggester
+        onDone: tags => panel.tagSuggestions = tags
+        onFailed: error => {
+            panel.tagError = qsTr("Tag suggestions could not be loaded.")
+            pinhole.warn(error)
+        }
     }
     function closeTags(restoreFocus) {
         const wasOpen = tagAsset !== ""
-        indexer.cancel(tagJob); tagJob = null
+        suggester.cancel()
         tagAsset = ""; tagSuggestions = []; savedTags = []; tagError = ""
         if (wasOpen && restoreFocus) Qt.callLater(() => {
             if (!shown || tagAsset) return
@@ -238,7 +241,6 @@ Panel {
         grid.view.positionViewAtIndex(selected, GridView.Contain)
         grid.forceActiveFocus()
     }
-    Command { name: "semantic.close"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.tagAsset ? panel.closeTags(true) : panel.close() }
     Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && search.input.activeFocus; onTriggered: panel.toResults() }
     Command {
         id: tagCommand
@@ -259,7 +261,6 @@ Panel {
     Timer { id: debounce; interval: 250; onTriggered: panel.lookup() }
     Connections {
         target: pinhole
-        function onDismissed() { panel.close() }
         function onHiddenChanged() { panel.filterResults() }
         function onReturned(photo) {
             const at = panel.results.findIndex(row => row.id === photo)
@@ -271,7 +272,6 @@ Panel {
     PanelHeader {
         id: titlebar
         visible: panel.browsing
-        onClosed: panel.close()
         // How much of the library can be found yet, along its foot.
         progress: panel.catalogReady && !panel.indexer.complete && !panel.tagQuery ? panel.indexer.progress : -1
         progressColor: panel.indexer.paused ? theme.darkForeground : theme.accent
@@ -367,7 +367,7 @@ Panel {
             color: theme.brightForeground
             text: !panel.catalogReady ? panel.indexer.summary
                 : panel.tagQuery ? qsTr("No visible photos with this tag.")
-                : panel.queryJob || debounce.running ? qsTr("Searching…")
+                : panel.searching || debounce.running ? qsTr("Searching…")
                 : panel.status.indexed === 0 ? qsTr("Search will be available as thumbnails are indexed.")
                 : panel.query !== "" ? qsTr("Nothing here looks like that.")
                 : qsTr("Find photos by what is in them")
@@ -415,7 +415,7 @@ Panel {
         active: panel.tagAsset !== ""
         sourceComponent: SemanticTags {
             photo: pinhole.library.item(panel.tagAsset).thumbnail || ""
-            pending: panel.tagJob !== null
+            pending: panel.suggesting
             suggestions: panel.tagSuggestions
             saved: panel.savedTags
             errorText: panel.tagError

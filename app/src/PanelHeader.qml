@@ -11,11 +11,13 @@ Item {
     property string title
     property string detail
     // The Command that closes the view: ✕ presses it and shows its key.
-    // In a PluginView, its own, unless another is given.
-    property QtObject closeCommand: {
+    property QtObject closeCommand: null
+    // The PluginView it is in, if any: ✕ closes that, from any level of
+    // it (Esc may mean back there, its back()).
+    readonly property Item pluginView: {
         for (let at = header.parent; at; at = at.parent)
             if (at.closeCommand !== undefined && at.toggleKey !== undefined)
-                return at.closeCommand
+                return at
         return null
     }
     // ✕'s key without a closeCommand: "" where Esc means back, not close.
@@ -75,7 +77,13 @@ Item {
             text: "✕"
             action: header.closeCommand
             hint: header.closeCommand ? header.closeCommand.keyName : header.closeHint
-            onTapped: if (!header.closeCommand) header.closed()
+            onTapped: {
+                if (header.closeCommand)
+                    return
+                if (header.pluginView)
+                    header.pluginView.close()
+                header.closed()
+            }
         }
     }
     Rectangle {

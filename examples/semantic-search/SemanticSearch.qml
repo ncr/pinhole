@@ -4,16 +4,13 @@ import Pinhole.Plugin
 // Indexing and the on-demand search view have independent lifetimes.
 PinholePlugin {
     id: plugin
-    covering: view.item !== null && view.item.shown
+    readonly property Item indexer: backgroundIndex
     actions: [PluginAction {
         place: "grid"
         text: qsTr("Search photos")
         key: "Ctrl+F"
         shown: pinhole.library.count > 0
-        onTriggered: {
-            view.active = true
-            view.item.show()
-        }
+        onTriggered: view.open()
     }]
     help: [["Ctrl+F", qsTr("Search photo content")]]
     settings: Component {
@@ -31,7 +28,7 @@ PinholePlugin {
             }
             SettingSwitch {
                 text: qsTr("Index new photos")
-                usable: backgroundIndex.catalogReady && !backgroundIndex.indexingJob
+                usable: backgroundIndex.catalogReady && !backgroundIndex.toggling
                 checked: !backgroundIndex.paused
                 onToggled: backgroundIndex.toggleIndexing()
             }
@@ -44,10 +41,5 @@ PinholePlugin {
         }
     }
     SemanticIndexer { id: backgroundIndex }
-    Loader {
-        id: view
-        anchors.fill: parent
-        active: false
-        sourceComponent: SemanticPanel { indexer: backgroundIndex }
-    }
+    PluginView { id: view; source: "SemanticPanel.qml"; toggleKey: "Ctrl+F" }
 }

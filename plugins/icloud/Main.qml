@@ -11,20 +11,17 @@ import Pinhole.Plugin
 // made the first time it is needed.
 PinholePlugin {
     id: plugin
-    covering: signIn.item !== null && signIn.item.shown
     // The sign-in, once made (for the tests).
     readonly property var signInPanel: signIn.item
 
     // Signing in, over the window: the Apple ID filled in for one added
     // already, else typed.
     function openSignIn(appleId) {
-        signIn.active = true
-        signIn.item.open(appleId)
+        if (signIn.shown)
+            return
+        signIn.open(appleId)
     }
-    function closeSignIn() {
-        if (signIn.item)
-            signIn.item.shown = false
-    }
+    function closeSignIn() { signIn.close() }
     // Whether the source shown is this one, and Apple wants it signed in to
     // again (or it was signed out of).
     function needsSignIn(source) { return source.shown === true && source.health === "needs_sign_in" }
@@ -61,12 +58,7 @@ PinholePlugin {
         }
     ]
 
-    // By its file, read only when it is first needed: not as the plugin
-    // loads, before the first frame.
-    Loader {
-        id: signIn
-        anchors.fill: parent
-        active: false
-        source: active ? "ICloudSignIn.qml" : ""
-    }
+    // Made the first time it opens: not as the plugin loads, before the
+    // first frame.
+    PluginView { id: signIn; source: "ICloudSignIn.qml" }
 }

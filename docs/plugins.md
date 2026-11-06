@@ -79,9 +79,20 @@ of each is in [the kit, member by member](plugin-kit.md)
   photo opened from it with `comeBack` shows, it is hidden and still open.
   `open()`, `close()`, `toggle()`, `shown`, `opened()`, `closed()`, and
   `item`, what `source` (a file beside the main one) or `content` (a
-  Component) made. That item reaches its view through a `property var
-  view` it declares, and a `PanelHeader` in it closes it with ✕ by
-  itself.
+  Component) made. In a `source` file `view` is its view from the first
+  binding on (`view.shown`, `view.close()`, `view.plugin`, the plugin's
+  root), as `pinhole` is the plugin's: declare neither. `open(…)` hands
+  what it is given to the item's `start(…)` before it shows (an Apple ID,
+  the photos to send) and `close()` calls its `stop()`, so a view that
+  reads something as it opens needs no handler in the main file.
+  `keep: false` lets go of the item as it closes, made afresh the next
+  time. A `PanelHeader` in it closes it with ✕ by itself. Esc goes to what it shows first: a `function back()` there that
+  returns true has taken it (a close-up left, a making stopped) and the
+  view stays open. A plugin's views open at once (a studio over its
+  editor) stack: only the last opened has its keys (`onTop`), and Esc
+  closes it alone. `make()` makes what it shows without opening it, and
+  gives it. `closeText` is Esc's line in the help; `closeCommand.mouse`
+  and `.touchpad` say how else it closes.
 - `Job` (API 13): one thing asked at a time, the latest winning. It
   cancels the one before, drops an answer that came too late, has `busy`,
   asks again by itself when the library was read meanwhile (`reloaded`),
@@ -93,7 +104,13 @@ of each is in [the kit, member by member](plugin-kit.md)
   ```
 
   `coalesce: true` waits for the one running and then asks once more with
-  the latest instead of cancelling it (a search typed into).
+  the latest instead of cancelling it (a search typed into). `ask` may
+  return a list of promises asked together (a page of previews): `done`
+  has their answers in order, the first to fail fails them all, and a
+  cancel cancels each. `start(ask, answered)` gives this one answer to
+  `answered` instead of `done`, for an answer that needs what it was
+  asked with: `motion.start(() => pinhole.fetch(id, kind), file =>
+  play(kind, file))`.
 
 - `ScrollList`, `ScrollGrid`, `ScrollArea`: a `ListView`, a `GridView` and
   a `Flickable` (anything larger than its room: give it a `contentWidth`

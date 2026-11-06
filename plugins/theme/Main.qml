@@ -19,11 +19,6 @@ PinholePlugin {
     // the one before it.
     property var replaced: ({})
 
-    // The photo's colours kept strong, or muted; the theme dark, light or
-    // as the photo is.
-    readonly property bool strong: pinhole.settings.strong !== false
-    readonly property string mode: pinhole.settings.mode || "auto"
-
     readonly property bool photoShown: pinhole.viewer.open && pinhole.viewer.index >= 0
                                        && !pinhole.library.item(pinhole.viewer.index).video
 
@@ -75,7 +70,9 @@ PinholePlugin {
                 return step(pinhole.run("magick", Palette.magickArgs(path, pinhole.srgbProfile)))
             })
             .then(result => {
-                palette = Palette.make(Palette.parseHistogram(result.stdout), strong, mode)
+                // The photo's colours kept strong, or muted; the theme dark,
+                // light or as the photo is ("auto").
+                palette = Palette.make(Palette.parseHistogram(result.stdout), pinhole.settings.strong, pinhole.settings.mode)
                 return step(pinhole.run("pinhole-theme", ["current"]))
             })
             .then(result => {
@@ -157,16 +154,11 @@ PinholePlugin {
         Column {
             width: parent ? parent.width : 0
             spacing: Math.round(theme.fontSize * 0.5)
-            SettingSwitch {
-                text: qsTr("The photo's colours strong")
-                checked: plugin.strong
-                onToggled: pinhole.settings.strong = !plugin.strong
-            }
+            SettingSwitch { setting: "strong"; text: qsTr("The photo's colours strong") }
             Choices {
+                setting: "mode"
                 numbered: false
                 options: [{ value: "auto", text: qsTr("As the photo") }, { value: "dark", text: qsTr("Dark") }, { value: "light", text: qsTr("Light") }]
-                value: plugin.mode
-                onChosen: value => pinhole.settings.mode = value
             }
             SettingNote {
                 dim: true

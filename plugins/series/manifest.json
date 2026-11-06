@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 11,
+  "api": 13,
   "id": "pinhole.series",
   "name": "Series",
   "version": "1.0.0",

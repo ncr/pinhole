@@ -20,12 +20,10 @@ import "CalendarDays.js" as Days
 PinholePlugin {
     id: plugin
     // The calendar once made (Calendar.qml), null before.
-    readonly property var calendar: view.item
-    covering: calendar !== null && calendar.shown
+    readonly property var calendar: calendarView.item
     function open() {
         fresh()
-        view.active = true
-        view.item.open()
+        calendarView.open()
     }
 
     // What was counted (CalendarDays.js finish): every year with a photo,
@@ -61,7 +59,7 @@ PinholePlugin {
     // what is hidden; else when it is next needed.
     property bool stale: true
     function recount() {
-        if (calendar && calendar.shown) {
+        if (calendarView.shown) {
             Qt.callLater(plugin.count)
         } else {
             stale = true
@@ -119,13 +117,114 @@ PinholePlugin {
         }
     }
 
-    Loader {
-        id: view
-        anchors.fill: parent
-        active: false
-        // Its `plugin` is this one, the Loader's parent: within the Calendar,
-        // `plugin` would be its own property.
-        sourceComponent: Calendar { plugin: view.parent }
+    // Made the first time it opens, and kept.
+    PluginView {
+        id: calendarView
+        // The Calendar is given its view as it is made: its bindings read
+        // the plugin through it from the first.
+        content: Component { Calendar { view: calendarView } }
+        toggleKey: "Y"
     }
-    CalendarKeys { calendar: plugin.calendar }
+
+    // Its keys, here rather than in Calendar.qml, so that they are in the
+    // help before it is first made.
+    Command {
+        name: "calendar.show"
+        text: qsTr("There: that day in the grid")
+        section: "Year calendar"
+        keys: ["Return", "Enter", "Space"]
+        keysText: "⏎"
+        keyLayer: "plugin"
+        when: calendarView.shown
+        mouse: qsTr("Click a day")
+        touchpad: qsTr("Tap a day")
+        onTriggered: calendarView.item.jump()
+    }
+    Command {
+        name: "calendar.previousDay"
+        text: qsTr("A day, a week")
+        section: "Year calendar"
+        keys: ["Up"]
+        keysText: "↑ ↓ ← →"
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Point")
+        touchpad: qsTr("Point")
+        onTriggered: calendarView.item.move(-1)
+    }
+    Command {
+        name: "calendar.nextDay"
+        keys: ["Down"]
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Point")
+        touchpad: qsTr("Point")
+        onTriggered: calendarView.item.move(1)
+    }
+    Command {
+        name: "calendar.previousWeek"
+        keys: ["Left"]
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Point")
+        touchpad: qsTr("Point")
+        onTriggered: calendarView.item.move(-7)
+    }
+    Command {
+        name: "calendar.nextWeek"
+        keys: ["Right"]
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Point")
+        touchpad: qsTr("Point")
+        onTriggered: calendarView.item.move(7)
+    }
+    Command {
+        name: "calendar.previousYear"
+        text: qsTr("A year")
+        section: "Year calendar"
+        keys: ["PgUp"]
+        keysText: "PgUp PgDn"
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
+        onTriggered: calendarView.item.moveYear(-1)
+    }
+    Command {
+        name: "calendar.nextYear"
+        keys: ["PgDown"]
+        keyLayer: "plugin"
+        when: calendarView.shown
+        autoRepeat: true
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
+        onTriggered: calendarView.item.moveYear(1)
+    }
+    Command {
+        name: "calendar.first"
+        text: qsTr("First, last day with photos")
+        section: "Year calendar"
+        keys: ["Home"]
+        keysText: "Home End"
+        keyLayer: "plugin"
+        when: calendarView.shown
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
+        onTriggered: calendarView.item.end(-1)
+    }
+    Command {
+        name: "calendar.last"
+        keys: ["End"]
+        keyLayer: "plugin"
+        when: calendarView.shown
+        mouse: qsTr("Wheel, then point")
+        touchpad: qsTr("Two fingers, then point")
+        onTriggered: calendarView.item.end(1)
+    }
 }

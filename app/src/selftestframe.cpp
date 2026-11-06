@@ -126,7 +126,7 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
             const int index = found.isEmpty() ? -1 : found[0];
             if (index >= 0) {
                 const QString id = QString::fromUtf8(library.at(index).id);
-                QMetaObject::invokeMethod(frame, "start", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
+                QMetaObject::invokeMethod(frame, "play", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
                                           Q_ARG(QVariant, false), Q_ARG(QVariant, QVariant()));
             }
             QObject *first = slide("current");
@@ -260,7 +260,7 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
                 return (*fromViewer)();
             }
             const QString id = QString::fromUtf8(library.at(index).id);
-            QMetaObject::invokeMethod(frame, "start", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
+            QMetaObject::invokeMethod(frame, "play", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
                                       Q_ARG(QVariant, false), Q_ARG(QVariant, QVariant()));
             QObject *shown = slide("current");
             (*waitFor)([=] { return shown->property("ready").toBool() && shown->property("sharpest").toString() == "full"; },
@@ -284,7 +284,7 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library) {
             QMetaObject::invokeMethod(viewer, "openAt", Q_ARG(int, 0), Q_ARG(QRectF, QRectF(0, 0, 100, 100)));
             (*waitFor)([=] { return photoViewer() && photoViewer()->property("progress").toReal() == 1; }, 5000,
                        "a photo opens full window", [=] {
-                QMetaObject::invokeMethod(frame, "start", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
+                QMetaObject::invokeMethod(frame, "play", Q_ARG(QVariant, id), Q_ARG(QVariant, QVariantList{id}),
                                           Q_ARG(QVariant, true), Q_ARG(QVariant, QVariant()));
                 check(frame->property("shown").toBool() && !viewer->property("open").toBool(),
                       "started from the viewer, the frame shows and the viewer closes");

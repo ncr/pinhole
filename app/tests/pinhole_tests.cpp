@@ -1476,7 +1476,8 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/send").value(2).contains("run's output"));
         // Coming back from a photo is Pinhole's now (API 11), not coveredBy's.
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(11).contains("comeBack, away or returned"));
-        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("pinhole.dismissed"));
+        // Closed when a photo is handed over by its PluginView (API 13), not by onDismissed.
+        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(13).contains("PluginView"));
         QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("avgColor"));
         QVERIFY(Plugins::apiUses(builtIn + "/frame").value(2).contains("pinhole.keepAwake"));
         QVERIFY(Plugins::apiUses(builtIn + "/background").value(3).contains("fetch's loop, bounce, long_exposure or jpeg"));
@@ -5090,7 +5091,7 @@ private slots:
         QTRY_VERIFY(!plugin->property("covering").toBool());
         QCOMPARE(switched.size(), 1);
         // Closed while Apple is asked: its answer is not waited for.
-        bench.js("kind.signIn({}); panel.signIn('me@example.com', 'secret'); panel.shown = false");
+        bench.js("kind.signIn({}); panel.signIn('me@example.com', 'secret'); plugin.closeSignIn()");
         QTRY_COMPARE(askedFor(bench.fake, "sign_in").size(), 3);
         bench.fake.send({{"id", askedFor(bench.fake, "sign_in")[2].value("id")}, {"ok", false},
                          {"error", QJsonObject{{"code", "try_again"}, {"message", "no"}}}});
@@ -5244,7 +5245,13 @@ private slots:
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
         Plugins::registerTypes();
         const QString dir = bench.dir.path() + "/plugins/t";
-        write(dir + "/View.qml", "import QtQuick\nItem { property var view; readonly property bool open: view ? view.shown : false }\n");
+        write(dir + "/View.qml", "import QtQuick\nItem { property var view; readonly property bool open: view ? view.shown : false\n"
+                                "property bool goBack: false; function back() { return goBack } }\n");
+        // One that declares nothing: `view` is in scope from the start, and
+        // open(…) hands its start(…) what it is given; close() its stop().
+        write(dir + "/Plain.qml", "import QtQuick\nItem { readonly property bool open: view.shown; readonly property var root: view.plugin\n"
+                                 "property var got: null; property bool stopped: false\n"
+                                 "function start(what) { got = what; stopped = false } function stop() { stopped = true } }\n");
         write(dir + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 PinholePlugin {
@@ -5259,6 +5266,17 @@ PinholePlugin {
         onFailed: error => plugin.failures = plugin.failures.concat([error.code])
     }
     function ask(sql) { job.start(() => pinhole.query(sql)) }
+    property var both: []
+    Job { id: together; onDone: results => plugin.both = [results[0].length, results[1].length] }
+    function askBoth() {
+        together.start(() => [pinhole.query("SELECT id FROM assets"), pinhole.query("SELECT id FROM assets LIMIT 1")])
+    }
+    PluginView { id: over; content: Component { Item {} } }
+    readonly property var over: over
+    PluginView { id: never; source: "View.qml" }
+    PluginView { id: plain; source: "Plain.qml"; keep: false }
+    readonly property var plain: plain
+    function made() { return never.make() }
     readonly property bool busy: job.busy
     SettingSwitch { id: shuffle; setting: "shuffle"; text: "Shuffle" }
     readonly property var shuffleSwitch: shuffle
@@ -5277,15 +5295,42 @@ PinholePlugin {
         bench.js("plugin.view.open()");
         QCOMPARE(bench.js("plugin.covering").toBool(), true);
         QCOMPARE(bench.js("plugin.view.item.open").toBool(), true);
-        QCOMPARE(bench.js("plugin.view.closeCommand.keys.join()").toString(), QString("Escape,Y"));
+        QCOMPARE(bench.js("plugin.view.closeCommand.keys.join()").toString(), QString("Escape"));
         // Away (a photo opened from it with comeBack): hidden, still open.
         QMetaObject::invokeMethod(bench.host, "dismissed");
         QCOMPARE(bench.js("plugin.covering").toBool(), false);
         QCOMPARE(bench.js("plugin.view.shown").toBool(), false);
         bench.js("plugin.view.toggle()");
         QCOMPARE(bench.js("plugin.view.shown").toBool(), true);
+        // Esc goes to what it shows first: taken there, the view stays.
+        bench.js("plugin.view.item.goBack = true");
+        bench.js("plugin.view.closeCommand.trigger()");
+        QCOMPARE(bench.js("plugin.view.shown").toBool(), true);
+        bench.js("plugin.view.item.goBack = false");
         bench.js("plugin.view.closeCommand.trigger()");
         QCOMPARE(bench.js("plugin.view.shown").toBool(), false);
+        // Two open stack: the last has the keys, and closes alone.
+        bench.js("plugin.view.open(); plugin.over.open()");
+        QCOMPARE(bench.js("plugin.view.onTop").toBool(), false);
+        QCOMPARE(bench.js("plugin.over.onTop").toBool(), true);
+        bench.js("plugin.over.close()");
+        QCOMPARE(bench.js("plugin.view.onTop").toBool(), true);
+        QCOMPARE(bench.js("plugin.covering").toBool(), true);
+        bench.js("plugin.view.close()");
+        QCOMPARE(bench.js("plugin.covering").toBool(), false);
+        QCOMPARE(bench.js("plugin.made().open").toBool(), false);
+
+        bench.js("plugin.plain.open('me@example.com')");
+        QCOMPARE(bench.js("plugin.plain.item.open").toBool(), true);
+        QCOMPARE(bench.js("plugin.plain.item.root === plugin").toBool(), true);
+        QCOMPARE(bench.js("plugin.plain.item.got").toString(), QString("me@example.com"));
+        bench.js("plugin.plain.close()");
+        // keep: false: let go as it closes.
+        QTRY_COMPARE(bench.js("plugin.plain.item === null").toBool(), true);
+
+        // Several asked together: their answers in order.
+        bench.js("plugin.askBoth()");
+        QTRY_COMPARE(bench.js("plugin.both.join()").toString(), QString("3,1"));
 
         // The latest answer only; a failure said, a cancel not.
         bench.js("plugin.ask('SELECT id FROM assets'); plugin.ask('SELECT id FROM assets LIMIT 2')");
@@ -5304,6 +5349,46 @@ PinholePlugin {
         QCOMPARE(bench.plugins->settingsOf("t").value("shuffle"), QJsonValue(false));
         bench.js("pinhole.settings.shuffle = null");
         QCOMPARE(bench.js("plugin.shuffleSwitch.checked").toBool(), true);
+    }
+
+    // People on PluginView: it covers while open, Esc goes a level back
+    // first (its back()) and closes at home, ✕ closes from any level.
+    void peoplesViewGoesBackOnEscAndClosesOnTheCross() {
+        PluginBench bench({{"pinhole.people", {{"api", 13}, {"settings", QJsonObject{{"grouping", "careful"}}}}}});
+        Keymap keymap;
+        Theme theme;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/PeoplePlugin.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.people&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        bench.js("plugin.actions[0].triggered()");
+        QCOMPARE(bench.js("plugin.covering").toBool(), true);
+        bench.engine.globalObject().setProperty("people", bench.engine.newQObject(
+            [&] { for (QObject *o : plugin->findChildren<QObject *>()) if (o->property("toggleKey").isValid()) return o; return (QObject *)nullptr; }()));
+        QCOMPARE(bench.js("people.item.page").toString(), QString("home"));
+        bench.js("people.item.go('person', 'Ala')");
+        bench.js("people.closeCommand.trigger()");
+        QCOMPARE(bench.js("people.shown").toBool(), true);
+        QCOMPARE(bench.js("people.item.page").toString(), QString("home"));
+        bench.js("people.closeCommand.trigger()");
+        QCOMPARE(bench.js("people.shown").toBool(), false);
+        QCOMPARE(bench.js("plugin.covering").toBool(), false);
+        // Again, a level in: the header's ✕ closes it at once.
+        bench.js("plugin.actions[0].triggered(); people.item.go('person', 'Ala')");
+        QCOMPARE(bench.js("people.shown").toBool(), true);
+        auto *header = [&] { for (QObject *o : plugin->findChildren<QObject *>()) if (o->property("pluginView").isValid()) return o; return (QObject *)nullptr; }();
+        QVERIFY(header);
+        QCOMPARE(header->property("pluginView").value<QObject *>(), bench.js("people").toQObject());
+        bench.engine.globalObject().setProperty("header", bench.engine.newQObject(header));
+        bench.js("header.pluginView.close()");
+        QCOMPARE(bench.js("people.shown").toBool(), false);
+        QCOMPARE(bench.plugins->settingsOf("pinhole.people").isEmpty(), true);
+        QCOMPARE(bench.js("pinhole.settings.grouping").toString(), QString("careful"));
     }
 
     void theFavouritesPluginsHeartSetsAndUndoesAndSaysWhyNot() {
@@ -6579,7 +6664,7 @@ PinholePlugin {
     // asks for one, and never once it is closed, or asked while closed;
     // opened again on the same photos, it still asks.
     void sendToPhonesPinLetsGoOfTheKeys() {
-        PluginBench bench({{"pinhole.send", {}}});
+        PluginBench bench({{"pinhole.send", {{"settings", QJsonObject{{"compatible", false}}}}}});
         // No pinhole-send beside the bench's plugin: opening it finds no
         // device, and nothing goes on any network.
         QVERIFY(!QFile::exists(bench.host->property("dir").toString() + "/sender/target/release/pinhole-send"));

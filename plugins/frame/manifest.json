@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 11,
+  "api": 13,
   "id": "pinhole.frame",
   "name": "Photo frame",
   "version": "1.0.0",
@@ -9,5 +9,6 @@
   "description": "Your photos one after another, full window, slowly moving and fading into each other: a frame for a laptop left open.",
   "entryPoints": {
     "main": "Main.qml"
-  }
+  },
+  "settings": { "photos": "favourites", "seconds": 8, "shuffle": true, "caption": true, "motion": true }
 }

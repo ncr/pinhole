@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 13,
   "id": "pinhole.icloud",
   "name": "iCloud",
   "version": "1.0.0",

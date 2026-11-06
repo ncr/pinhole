@@ -16,10 +16,21 @@ import QtQuick
 // with comeBack shows (pinhole.away).
 //
 // What it shows is `source`, a QML file of the plugin's, or `content`, a
-// Component; `item` is that, once made. In it, `pinhole` is the plugin's,
-// as anywhere in the plugin's files, and a `view` property, if it declares
-// one (`property var view`), is this view: `view.shown`, `view.close()`.
-// A PanelHeader in it closes it with ✕.
+// Component; `item` is that, once made. In a `source` file, `view` is this
+// view from its first binding on (`view.shown`, `view.close()`,
+// `view.plugin`, the plugin's root), and `pinhole` the plugin's, as
+// anywhere in its files; declare neither. A PanelHeader in it closes it
+// with ✕.
+//
+// `open(…)` hands what it is given to a `start(…)` the item has, before
+// it shows (an Apple ID, the photos to send); `close()` calls its `stop()`.
+// `keep: false` lets go of the item as it closes, to be made afresh.
+//
+// Esc goes to what it shows first: a function `back()` there that
+// returns true has taken it (a close-up left, a making stopped), and the
+// view stays open. Two of a plugin's views open at once (a studio over an
+// editor) stack: only the last opened has its keys, and Esc closes it
+// alone. `make()` makes what it shows without opening it.
 Item {
     id: view
     // A QML file of the plugin's, relative to its main file ("Calendar.qml").
@@ -28,12 +39,15 @@ Item {
     property Component content
     // Made the first time it opens (true), or at once.
     property bool lazy: true
+    // Kept once made (true), or let go as it closes.
+    property bool keep: true
     // Open now.
     readonly property bool shown: _open
     // The key that opens it (its action's), which closes it too, beside
     // Esc.
     property string toggleKey
-    // Esc's words in the help.
+    // Esc's words in the help; `closeCommand.mouse` and `.touchpad` say
+    // how else it closes ("Click"), as a Command's.
     property string closeText: qsTr("Close")
     // What `source` or `content` made; null before it first opens.
     readonly property Item item: loader.item
@@ -47,16 +61,21 @@ Item {
         return null
     }
     readonly property var pinhole: plugin ? plugin.pinhole : null
+    // The last opened of the plugin's open views: the one with the keys.
+    readonly property bool onTop: _open && (!plugin || plugin.viewStack[plugin.viewStack.length - 1] === view)
     signal opened()
     signal closed()
 
     property bool _open: false
     property bool _made: !lazy
 
-    function open() {
+    function open(...given) {
+        _made = true
+        const shown = loader.item
+        if (shown && typeof shown.start === "function")
+            shown.start(...given)
         if (_open)
             return
-        _made = true
         _open = true
         opened()
     }
@@ -64,7 +83,12 @@ Item {
         if (!_open)
             return
         _open = false
+        const shown = loader.item
+        if (shown && typeof shown.stop === "function")
+            shown.stop()
         closed()
+        if (!keep)
+            _made = !lazy
     }
     function toggle() {
         if (_open)
@@ -72,15 +96,32 @@ Item {
         else
             open()
     }
+    // What it shows, made now if it was not, without opening it.
+    function make() {
+        _made = true
+        return loader.item
+    }
+    // Esc: back in what it shows first (its back()), else closed.
+    function back() {
+        const shown = loader.item
+        if (shown && typeof shown.back === "function" && shown.back() === true)
+            return
+        close()
+    }
 
     anchors.fill: parent
     opacity: _open ? 1 : 0
     visible: opacity > 0 && !(pinhole && pinhole.away)
     Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-    // Counted in the plugin's root, whose `covering` follows.
-    on_OpenChanged: if (plugin) plugin.openViews += _open ? 1 : -1
-    Component.onDestruction: if (plugin && _open) plugin.openViews -= 1
+    // On the plugin root's stack of open views, whose `covering` follows.
+    on_OpenChanged: {
+        if (!plugin)
+            return
+        const others = plugin.viewStack.filter(v => v !== view)
+        plugin.viewStack = _open ? others.concat([view]) : others
+    }
+    Component.onDestruction: if (plugin && _open) plugin.viewStack = plugin.viewStack.filter(v => v !== view)
 
     Loader {
         id: loader
@@ -91,16 +132,28 @@ Item {
         // that tells one load of it from the next), not to this one.
         source: view.content || String(view.source) === "" ? ""
               : view.plugin ? Qt.resolvedUrl(view.source, view.plugin) : view.source
-        onLoaded: if ("view" in item) item.view = view
+        // A file of an older plugin that declares `view` has it too.
+        onLoaded: if ("view" in item && item.view !== view) item.view = view
     }
     Command {
         id: closer
         name: "view.close"
         text: view.closeText
         section: "plugin"
-        keys: view.toggleKey !== "" ? ["Escape", view.toggleKey] : ["Escape"]
+        keys: ["Escape"]
         keyLayer: "plugin"
-        when: view._open
+        when: view.onTop
+        onTriggered: view.back()
+    }
+    // Its own key closes it at once (the action lists that key).
+    Command {
+        name: "view.toggle"
+        keys: view.toggleKey !== "" ? [view.toggleKey] : []
+        keyHelp: false
+        noMouse: "its action's button"
+        noTouchpad: "its action's button"
+        keyLayer: "plugin"
+        when: view.onTop && view.toggleKey !== ""
         onTriggered: view.close()
     }
     Connections {

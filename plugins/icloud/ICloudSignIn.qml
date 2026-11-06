@@ -5,29 +5,20 @@ import Pinhole.Plugin
 // none, when icloudpd is signed in to that Apple ID here), then the code
 // Apple sends to the person's devices, in six boxes that go on by
 // themselves after the sixth digit. Signed in, the Apple ID is added and
-// its photos shown (pinhole.sources.signIn, submitCode).
+// its photos shown (pinhole.sources.signIn, submitCode). Shown in a
+// PluginView (Main.qml), which start()s it as it opens.
 Item {
     id: root
-    anchors.fill: parent
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 120 } }
-
-    property bool shown: false
+    // Its PluginView.
+    property var view
+    readonly property bool shown: view ? view.shown : false
     // Filled in already: signing in again to an Apple ID added before.
     property string appleId
-    function open(id) {
-        appleId = id
-        shown = true
-    }
 
     // "" (nothing under way), "busy" (Apple is asked), "needs_code"; and
     // what went wrong, said for people.
     property string stage: ""
     property string error: ""
-    // Each request made; an answer to one before the last is not waited
-    // for (closed meanwhile, or asked again).
-    property int asked: 0
     readonly property bool busy: stage === "busy"
     readonly property bool needsCode: stage === "needs_code"
     // Past the password: the code is what is asked for.
@@ -64,43 +55,42 @@ Item {
         root.error = said(code || "")
     }
     function cancel() {
-        ++asked
+        asking.cancel()
         settle("")
+    }
+    // Apple asked: only the last request's answer is waited for (not one
+    // closed meanwhile, or asked again).
+    Job {
+        id: asking
+        // A code sent, or the Apple ID and password; and the stage a
+        // failure goes back to.
+        property bool sentCode
+        property string back
+        onDone: result => {
+            if (!sentCode && result.state === "needs_code") {
+                root.settle("needs_code")
+            } else {
+                root.settle("")
+                root.view.close()
+            }
+        }
+        onFailed: error => root.settle(back, error.code)
     }
     function signIn(id, secret) {
         // A code asked for again keeps the code boxes up.
-        const back = stage === "needs_code" ? stage : ""
+        asking.back = stage === "needs_code" ? stage : ""
+        asking.sentCode = false
         settle("busy")
-        const mine = ++asked
         const params = { apple_id: id.trim() }
         if (secret !== "")
             params.password = secret
-        pinhole.sources.signIn("icloud", params).then(result => {
-            if (mine !== asked)
-                return
-            if (result.state === "needs_code") {
-                settle("needs_code")
-            } else {
-                settle("")
-                root.shown = false
-            }
-        }, error => {
-            if (mine === asked && error.code !== "cancelled")
-                settle(back, error.code)
-        })
+        asking.start(() => pinhole.sources.signIn("icloud", params))
     }
     function submitCode(id, digits) {
+        asking.back = "needs_code"
+        asking.sentCode = true
         settle("busy")
-        const mine = ++asked
-        pinhole.sources.submitCode("icloud", { apple_id: id.trim(), code: digits }).then(() => {
-            if (mine !== asked)
-                return
-            settle("")
-            root.shown = false
-        }, error => {
-            if (mine === asked && error.code !== "cancelled")
-                settle("needs_code", error.code)
-        })
+        asking.start(() => pinhole.sources.submitCode("icloud", { apple_id: id.trim(), code: digits }))
     }
 
     onNeedsCodeChanged: if (needsCode) {
@@ -109,27 +99,28 @@ Item {
         if (shown)
             code.forceActiveFocus()
     }
-    onShownChanged: {
-        if (shown) {
-            cancel()
-            // Whether icloudpd is signed in here, afresh.
-            pinhole.sources.discover()
-            codeStage = false
-            account.text = appleId
-            password.text = ""
-            code.text = ""
-            Qt.callLater(() => {
-                if (shown)
-                    (appleId === "" ? account.input : password.input).forceActiveFocus()
-            })
-        } else {
-            cancel()
-            appleId = ""
-            // Its fields let go of the keys: one hidden with them would
-            // take Pinhole's (each a shortcut a field takes first).
-            for (const field of [account.input, password.input, code])
-                field.focus = false
-        }
+    // Opened, for this Apple ID ("" to type one).
+    function start(id) {
+        appleId = id
+        cancel()
+        // Whether icloudpd is signed in here, afresh.
+        pinhole.sources.discover()
+        codeStage = false
+        account.text = appleId
+        password.text = ""
+        code.text = ""
+        Qt.callLater(() => {
+            if (shown)
+                (appleId === "" ? account.input : password.input).forceActiveFocus()
+        })
+    }
+    onShownChanged: if (!shown) {
+        cancel()
+        appleId = ""
+        // Its fields let go of the keys: one hidden with them would
+        // take Pinhole's (each a shortcut a field takes first).
+        for (const field of [account.input, password.input, code])
+            field.focus = false
     }
 
     function submit() {
@@ -155,14 +146,6 @@ Item {
         keyLayer: "plugin"
         when: root.shown
         onTriggered: root.submit()
-    }
-    Command {
-        id: closeAction
-        name: "signIn.close"
-        keys: ["Escape"]
-        keyLayer: "plugin"
-        when: root.shown
-        onTriggered: root.shown = false
     }
     // Tab and ⇧ Tab between the Apple ID and the password, as anywhere.
     function nextField(direction) {
@@ -215,7 +198,7 @@ Item {
     // it (the photos, the side panel): no button, no wheel.
     Panel {
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
-        onClicked: if (!root.busy) root.shown = false
+        onClicked: if (!root.busy) root.view.close()
     }
 
     Card {
@@ -248,7 +231,7 @@ Item {
                     anchors.right: parent.right
                     flat: true
                     text: "✕"
-                    action: closeAction
+                    action: root.view ? root.view.closeCommand : null
                 }
             }
 

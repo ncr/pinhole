@@ -18,7 +18,8 @@ Properties:
 - `list<PluginAction> actions`: Buttons, each a PluginAction.
 - `Component settings`: Under the plugin's switch in the side panel, while it is on.
 - `bool covering`: Over the photos and taking the keys: the grid's controls fade and its keys rest, as for Pinhole's own panels. One plugin at a time, the last to start covering: the others wait beneath, unseen and without keys (pinhole.coveredBy says whose it is). By itself while one of its PluginViews is open.
-- `int openViews`: How many of its PluginViews are open (they count themselves).
+- `var viewStack`: Its PluginViews open, the last opened last (they keep it), and how many.
+- `int openViews` (readonly)
 - `var help`: Its keys, as the help (?) lists them: [["G", "Series"], ...].
 - `var stacks`: Photos shown in the grid as one card, each a list of library positions: the card stands where the first is and shows it, with the mark for several photos. Opening it opens that photo.
 - `var hidden`: Photos not shown in the grid at all, library positions: no cell, out of any stack, and passed over by the viewer's ← and → and its strip.
@@ -420,7 +421,8 @@ Properties:
 
 - `string title`
 - `string detail`
-- `QtObject closeCommand`: The Command that closes the view: ✕ presses it and shows its key. In a PluginView, its own, unless another is given.
+- `QtObject closeCommand`: The Command that closes the view: ✕ presses it and shows its key.
+- `Item pluginView` (readonly): The PluginView it is in, if any: ✕ closes that, from any level of it (Esc may mean back there, its back()).
 - `string closeHint`: ✕'s key without a closeCommand: "" where Esc means back, not close.
 - `real controlHeight` (readonly): A control's height here, for what stands beside the buttons.
 - `real room` (readonly): What a field in place of the title (search's question) may take.
@@ -482,7 +484,11 @@ PluginAction { place: "grid"; text: qsTr("Calendar"); key: "Y"; onTriggered: cal
 
 While it is open the plugin covers the photos (its root's `covering`, unless the plugin binds that itself), and it fades in and out. It is made the first time it opens and kept after, so a launch that never shows it pays nothing; `lazy: false` makes it at once. It closes on Esc and on its `toggleKey`, when a photo is handed over from it (pinhole's dismissed()), and is hidden, still open, while a photo opened from it with comeBack shows (pinhole.away).
 
-What it shows is `source`, a QML file of the plugin's, or `content`, a Component; `item` is that, once made. In it, `pinhole` is the plugin's, as anywhere in the plugin's files, and a `view` property, if it declares one (`property var view`), is this view: `view.shown`, `view.close()`. A PanelHeader in it closes it with ✕.
+What it shows is `source`, a QML file of the plugin's, or `content`, a Component; `item` is that, once made. In a `source` file, `view` is this view from its first binding on (`view.shown`, `view.close()`, `view.plugin`, the plugin's root), and `pinhole` the plugin's, as anywhere in its files; declare neither. A PanelHeader in it closes it with ✕.
+
+`open(…)` hands what it is given to a `start(…)` the item has, before it shows (an Apple ID, the photos to send); `close()` calls its `stop()`. `keep: false` lets go of the item as it closes, to be made afresh.
+
+Esc goes to what it shows first: a function `back()` there that returns true has taken it (a close-up left, a making stopped), and the view stays open. Two of a plugin's views open at once (a studio over an editor) stack: only the last opened has its keys, and Esc closes it alone. `make()` makes what it shows without opening it.
 
 Its root is a `Item` (Qt Quick's: its properties too).
 
@@ -491,13 +497,15 @@ Properties:
 - `url source`: A QML file of the plugin's, relative to its main file ("Calendar.qml").
 - `Component content`: Or what to show, written in place.
 - `bool lazy`: Made the first time it opens (true), or at once.
+- `bool keep`: Kept once made (true), or let go as it closes.
 - `bool shown` (readonly): Open now.
 - `string toggleKey`: The key that opens it (its action's), which closes it too, beside Esc.
-- `string closeText`: Esc's words in the help.
+- `string closeText`: Esc's words in the help; `closeCommand.mouse` and `.touchpad` say how else it closes ("Click"), as a Command's.
 - `Item item` (readonly): What `source` or `content` made; null before it first opens.
 - `alias closeCommand` (readonly): Its Esc: what a PanelHeader's ✕ presses.
 - `Item plugin` (readonly): The plugin's root and what Pinhole gives it.
 - `var pinhole` (readonly)
+- `bool onTop` (readonly): The last opened of the plugin's open views: the one with the keys.
 
 Signals:
 
@@ -506,9 +514,11 @@ Signals:
 
 Functions:
 
-- `open()`
+- `open(...given)`
 - `close()`
 - `toggle()`
+- `make()`: What it shows, made now if it was not, without opening it.
+- `back()`: Esc: back in what it shows first (its back()), else closed.
 
 Its handler in QML: `onOpened`.
 
@@ -525,7 +535,13 @@ Job {
 reading.start(() => pinhole.query(sql, [limit]))
 ```
 
-`start(ask)` cancels what runs and calls `ask`, which returns the promise. Only its answer is said: `done(result)`, or `failed(error)`. Cancelled is no failure and says nothing. Stopped by the library read again (`reloaded`), it asks again by itself, once.
+`start(ask, answered)` cancels what runs and calls `ask`, which returns the promise, or a list of them asked together (a page of previews): then `done` has their answers in order, the first to fail fails them all, and a cancel cancels each. Only its answer is said: `done(result)`, or `failed(error)`. Given `answered`, that has the answer instead of done(), for an answer that needs what it was asked with:
+
+```qml
+motion.start(() => pinhole.fetch(photo, kind), file => play(kind, file))
+```
+
+Cancelled is no failure and says nothing. Stopped by the library read again (`reloaded`), it asks again by itself, once.
 
 Its root is a `QtObject` (Qt Quick's: its properties too).
 
@@ -541,7 +557,7 @@ Signals:
 
 Functions:
 
-- `start(ask)`
+- `start(ask, answered)`
 - `cancel()`: Stop what runs; its answer is never said.
 
 Its handler in QML: `onDone`.

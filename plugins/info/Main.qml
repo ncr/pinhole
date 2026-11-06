@@ -384,35 +384,32 @@ PinholePlugin {
     // too, as the panel reads them, for the button to be there as the step
     // comes, not seconds after.
     property string placeId
-    // Looked for still; and the step on the place come before it was
-    // found, which then opens it once it is.
-    property bool findingPlace: false
+    // The step on the place come before it was found, which then opens it
+    // once it is.
     property bool placeWanted: false
-    property int placeAsked: 0
     function findPlace(index) {
-        const asked = ++placeAsked
         placeId = ""
         placeWanted = false
-        findingPlace = false
         const date = pinhole.library.item(index).date
         if (date === undefined)
-            return
-        findingPlace = true
-        pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))]).then(result => {
-            if (asked !== placeAsked)
-                return
-            placeId = result.stdout.trim()
-            if (placeId !== "")
-                readAhead(placeId)
-            const at = placeId !== "" ? pinhole.library.indexOf(placeId) : -1
-            if (placeWanted && touring && pinhole.viewer.open && at >= 0 && pinhole.viewer.index !== at)
+            return finding.cancel()
+        finding.start(() => pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))]))
+    }
+    Job {
+        id: finding
+        onDone: result => {
+            plugin.placeId = result.stdout.trim()
+            if (plugin.placeId !== "")
+                plugin.readAhead(plugin.placeId)
+            const at = plugin.placeId !== "" ? pinhole.library.indexOf(plugin.placeId) : -1
+            if (plugin.placeWanted && plugin.touring && pinhole.viewer.open && at >= 0 && pinhole.viewer.index !== at)
                 pinhole.openPhoto(at)
-        }).catch(pinhole.warn).then(() => {
-            if (asked !== placeAsked)
-                return
-            findingPlace = false
-            placeWanted = false
-        })
+            plugin.placeWanted = false
+        }
+        onFailed: error => {
+            pinhole.warn(error)
+            plugin.placeWanted = false
+        }
     }
     // The tour's step on the place: the photo found, or until it is, the
     // one shown.
@@ -421,7 +418,7 @@ PinholePlugin {
         const at = placeId !== "" ? pinhole.library.indexOf(placeId) : -1
         if (at >= 0)
             return at
-        placeWanted = findingPlace
+        placeWanted = finding.busy
         return pinhole.viewer.open ? pinhole.viewer.index : pinhole.currentIndex()
     }
     function readAhead(id) {

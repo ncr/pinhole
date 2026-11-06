@@ -5,16 +5,15 @@ import Pinhole.Plugin
 // answer, each on its number. Picking one fetches the files, asks its
 // owner, and the files go once they say yes, the bar filling as they do.
 // A send goes on with the panel closed; the button turns while it does,
-// and says how it ended at the foot of the window.
+// and says how it ended at the foot of the window. Shown in a PluginView
+// (Main.qml), made with the plugin.
 Item {
     id: panel
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    objectName: "sendPanel"
+    // Its PluginView, and the plugin (Main.qml).
+    property var view
+    readonly property var plugin: view ? view.plugin : null
+    readonly property bool shown: view ? view.shown : false
 
     // The photos, as they were when it opened: {id, filename, video, live}.
     property var chosen: []
@@ -70,17 +69,18 @@ Item {
             if (!askingPin)
                 phase = ""
         }
-        shown = true
+        view.open()
         look()
     }
-    function close() {
-        shown = false
-        stopLooking()
-    }
+    function close() { view.close() }
     // The PIN's field has the keys only while it shows and asks: left with
     // them, hidden, Pinhole's keys would type into it (each a shortcut a
     // field takes first).
-    onShownChanged: pinFocus()
+    onShownChanged: {
+        pinFocus()
+        if (!shown)
+            stopLooking()
+    }
     onAskingPinChanged: pinFocus()
     function pinFocus() {
         if (shown && askingPin)
@@ -99,7 +99,7 @@ Item {
     // Videos as they are. Those fetched before, if all of them were and
     // are still there; else all of them again.
     function prepare(done) {
-        const compatible = plugin.compatible
+        const compatible = pinhole.settings.compatible
         if (files.length > 0 && filesCompatible === compatible && missing === 0 && unconverted === 0
                 && files.every(file => pinhole.exists(file.path)))
             return done(files)
@@ -256,9 +256,9 @@ Item {
         detail = ""
         plugin.remember(device)
         phase = "fetching"
-        prepare(list => start(list, pin || ""))
+        prepare(list => deliver(list, pin || ""))
     }
-    function start(list, pin) {
+    function deliver(list, pin) {
         if (phase !== "fetching")
             return
         if (list.length === 0)
@@ -442,8 +442,7 @@ Item {
                     id: closeButton
                     anchors.right: parent.right
                     text: "✕"
-                    action: closeCommand
-                    onTapped: if (!closeCommand.when) panel.close()
+                    action: panel.view ? panel.view.closeCommand : null
                 }
             }
 
@@ -592,7 +591,7 @@ Item {
                     Accessible.name: qsTr("HEIC as JPEG")
                     anchors.right: parent.right
                     hint: jpegCommand.keyName
-                    checked: plugin.compatible
+                    checked: pinhole.settings.compatible
                     // Not while a PIN is typed or a send goes.
                     usable: jpegCommand.when
                     onToggled: jpegCommand.trigger()
@@ -615,14 +614,6 @@ Item {
     }
 
     Command {
-        id: closeCommand
-        name: "send.close"
-        keys: ["Escape", "O"]
-        keyLayer: "plugin"
-        when: panel.shown && !panel.typing
-        onTriggered: panel.close()
-    }
-    Command {
         id: jpegCommand
         name: "send.jpeg"
         text: qsTr("HEIC as JPEG, or originals")
@@ -633,7 +624,7 @@ Item {
         mouse: qsTr("The switch")
         touchpad: qsTr("The switch")
         onTriggered: {
-            plugin.setCompatible(!plugin.compatible)
+            plugin.setCompatible(!pinhole.settings.compatible)
             panel.phase = ""
         }
     }

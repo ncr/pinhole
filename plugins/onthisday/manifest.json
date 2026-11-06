@@ -1,12 +1,17 @@
 {
   "schemaVersion": 1,
-  "api": 11,
+  "api": 13,
   "id": "pinhole.onthisday",
   "name": "On this day",
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
   "description": "The photos taken on today's date in earlier years, a year at a time.",
+  "settings": {
+    "span": 0,
+    "videos": true,
+    "screenshots": false
+  },
   "entryPoints": {
     "main": "Main.qml"
   }

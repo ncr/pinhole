@@ -13,14 +13,12 @@ import Pinhole.Plugin
 // Nothing is fetched or sent but on a press of a device.
 PinholePlugin {
     id: plugin
-    covering: panel.shown
 
     // Installed beside this file; in a checkout, where cargo builds it.
     readonly property string sender: pinhole.exists(pinhole.dir + "/pinhole-send")
                                      ? "pinhole-send" : pinhole.dir + "/sender/target/release/pinhole-send"
 
-    // HEIC as JPEG rather than the originals: kept.
-    readonly property bool compatible: pinhole.settings.compatible === true
+    // HEIC as JPEG rather than the originals (settings.compatible): kept.
     function setCompatible(on) {
         pinhole.settings.compatible = on
     }
@@ -42,7 +40,7 @@ PinholePlugin {
     // them, at once); each source's, as it loads, every hour and when
     // another source is shown. Not while a send may be taking from it.
     function tidy() {
-        if (!panel.running)
+        if (!running)
             pinhole.run(sender, ["tidy", pinhole.cacheDir]).catch(pinhole.warn)
     }
     Component.onCompleted: tidy()
@@ -57,7 +55,11 @@ PinholePlugin {
         onTriggered: plugin.tidy()
     }
 
-    readonly property string label: panel.running ? qsTr("Sending") : qsTr("Send")
+    // The panel (SendPanel.qml), made with the plugin; a send goes on with
+    // it closed.
+    readonly property var panel: sendView.item
+    readonly property bool running: panel !== null && panel.running
+    readonly property string label: running ? qsTr("Sending") : qsTr("Send")
 
     actions: [
         PluginAction {
@@ -65,17 +67,17 @@ PinholePlugin {
             place: "viewer"
             text: plugin.label
             key: "O"
-            busy: panel.running
-            onTriggered: panel.open([pinhole.viewer.index])
+            busy: plugin.running
+            onTriggered: plugin.panel.open([pinhole.viewer.index])
         },
         PluginAction {
             id: selectionAction
             place: "selection"
             text: plugin.label
             key: "O"
-            busy: panel.running
-            usable: pinhole.selectionCount > 0 || panel.running
-            onTriggered: panel.open(Array.from(pinhole.selection()))
+            busy: plugin.running
+            usable: pinhole.selectionCount > 0 || plugin.running
+            onTriggered: plugin.panel.open(Array.from(pinhole.selection()))
         }
     ]
 
@@ -109,14 +111,9 @@ PinholePlugin {
         SettingNote {
             width: parent ? parent.width : 0
             text: qsTr("LocalSend has to be open on the phone, on the same network. Sends %1.")
-                  .arg(plugin.compatible ? qsTr("HEIC as JPEG") : qsTr("originals"))
+                  .arg(pinhole.settings.compatible ? qsTr("HEIC as JPEG") : qsTr("originals"))
         }
     }
 
-    SendPanel {
-        id: panel
-        objectName: "sendPanel"
-        anchors.fill: parent
-        plugin: plugin
-    }
+    PluginView { id: sendView; source: "SendPanel.qml"; toggleKey: "O"; lazy: false }
 }

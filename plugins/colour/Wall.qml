@@ -12,7 +12,6 @@ import "Colour.js" as Colour
 Item {
     id: wall
     required property var finder
-    readonly property var pinhole: finder.pinhole
 
     // The tile's size, by step: a pinch, + and -, as the grid zooms.
     readonly property var densities: [36, 48, 64, 88, 120]
@@ -103,14 +102,14 @@ Item {
                 property string photo: ""
                 readonly property int column: Math.floor(index / wall.rows)
                 readonly property int row: index % wall.rows
-                readonly property int position: (wall.finder.plugin.revision, photo !== "" ? wall.pinhole.library.indexOf(photo) : -1)
-                readonly property var item: position >= 0 ? wall.pinhole.library.item(position) : null
+                readonly property int position: (wall.finder.plugin.revision, photo !== "" ? pinhole.library.indexOf(photo) : -1)
+                readonly property var item: position >= 0 ? pinhole.library.item(position) : null
                 x: column * wall.tile
                 y: row * wall.tile
                 width: wall.tile
                 height: wall.tile
                 z: hover.hovered ? 2 : 0
-                visible: item !== null && !(wall.finder.plugin.hiddenRevision, wall.pinhole.isHidden(position))
+                visible: item !== null && !(wall.finder.plugin.hiddenRevision, pinhole.isHidden(position))
 
                 Rectangle {
                     id: face

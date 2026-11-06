@@ -10,13 +10,11 @@ import "CalendarDays.js" as Days
 // year of the photo the grid is on, its squares sweeping in from there.
 Item {
     id: calendar
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    // Its PluginView (Main.qml), and the plugin through it.
+    required property var view
+    readonly property var plugin: view.plugin
+    readonly property bool shown: view.shown
+    onShownChanged: if (!shown) waiting = false
 
     // The cursor: a day of a year. Its row follows the year as the library
     // is counted again; if the year goes (another source is shown), the
@@ -34,7 +32,7 @@ Item {
             if (!calendar.shown)
                 return
             if (calendar.plugin.years.length === 0)
-                calendar.close()
+                calendar.view.close()
             else if (calendar.waiting)
                 calendar.place()
             else if (calendar.row < 0) {
@@ -42,12 +40,6 @@ Item {
                 calendar.set(y.year, Math.min(calendar.day, y.days - 1))
             }
         }
-    }
-
-    // The plugin over it handed a photo over: closed for good.
-    Connections {
-        target: calendar.pinhole
-        function onDismissed() { calendar.close() }
     }
 
     // The list's rows: as many as there are years, each drawing its own
@@ -101,7 +93,8 @@ Item {
     // Where the pointer was over the squares last, in the window: null
     // since the calendar opened.
     property var pointerAt: null
-    function open() {
+    // Opened (its view's opened()).
+    function start() {
         pointerAt = null
         plugin.fresh()
         // The first time, its rows made now, at the calendar's size (not
@@ -114,7 +107,6 @@ Item {
             madeHeight = rowHeight
         }
         today = new Date()
-        shown = true
         waiting = !plugin.counted
         if (!waiting)
             place()
@@ -123,7 +115,7 @@ Item {
     function place() {
         waiting = false
         if (plugin.years.length === 0) {
-            close()
+            view.close()
             return
         }
         const at = pinhole.currentIndex()
@@ -140,10 +132,6 @@ Item {
             years.positionViewAtIndex(row, ListView.Center)
         })
     }
-    function close() {
-        shown = false
-        waiting = false
-    }
     // That day's first photo, in the grid.
     function jump() {
         const id = year ? year.first[day] : ""
@@ -152,7 +140,7 @@ Item {
             nudge.restart()
             return
         }
-        close()
+        view.close()
         pinhole.reveal(at)
     }
 
@@ -341,7 +329,7 @@ Item {
             floating: true
             text: "✕"
             hint: "Esc"
-            onTapped: calendar.close()
+            onTapped: calendar.view.close()
         }
     }
 

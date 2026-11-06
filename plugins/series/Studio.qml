@@ -94,21 +94,20 @@ Item {
         }
         // How each is moved against the first, for Steady: the last
         // series' no longer wanted.
-        if (steadying)
-            steadying.cancel()
-        steadying = pinhole.run(plugin.finder, ["steady", pinhole.library.dir].concat(all.map(s => s.id)))
-        steadying.then(result => {
+        const ids = all.map(s => s.id)
+        steadying.start(() => pinhole.run(plugin.finder, ["steady", pinhole.library.dir].concat(ids)))
+    }
+    Job {
+        id: steadying
+        onDone: result => {
             const lines = result.stdout.trim().split("\n")
             studio.all = studio.all.map((s, n) => {
                 const parts = (lines[n] || "0 0").split(" ")
                 return Object.assign({}, s, { shift: { x: Number(parts[0]) || 0, y: Number(parts[1]) || 0 } })
             })
-        }, error => {
-            if (error.code !== "cancelled")
-                throw error
-        }).catch(pinhole.warn)
+        }
+        onFailed: error => pinhole.warn(error)
     }
-    property var steadying: null
     function step(delta) {
         const next = k + delta
         if (next >= 0 && next < plugin.series.length)

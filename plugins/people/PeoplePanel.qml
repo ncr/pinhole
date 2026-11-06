@@ -8,13 +8,14 @@ import Pinhole.Plugin
 // that look like them to check one after another.
 Panel {
     id: panel
-    property bool shown: false
+    // Its PluginView's (PeoplePlugin.qml): open now.
+    readonly property bool shown: view.shown
     property string source: ""
     property string stateKey: ""
     property var edits: ({})
     // "home", "group" (a suggestion, `anchor` its row), "person" (`person`
     // its name) or "check" (the groups that look like `person`, one by one).
-    property string view: "home"
+    property string page: "home"
     property var anchor: null
     property string person: ""
     property var people: []
@@ -29,20 +30,18 @@ Panel {
     property int selected: 0
     property var status: ({ phase: "waiting" })
     property string failure: ""
-    // The read now wanted (any object: a chain's token) and the program it
-    // waits on, which is what can be cancelled.
-    property var readJob: null
-    property var running: null
-    property var assignmentJob: null
+    // Reading what the view shows, and a group's faces asked for to name it.
+    readonly property bool reading: reader.busy
+    readonly property bool naming: namer.busy
     property string picking: ""
-    readonly property int columns: Math.max(3, Math.floor((width - 24) / (theme.fontSize * (view === "home" ? 10 : 11))))
+    readonly property int columns: Math.max(3, Math.floor((width - 24) / (theme.fontSize * (page === "home" ? 10 : 11))))
     // At home, in this order: named people, faces to name, faces not known
     // (the service sends those last).
     readonly property var known: groups
     property var unknown: []
     // At home: named people, faces not known yet (kept for later), then
     // the faces to name.
-    readonly property var tiles: view === "home" ? people.concat(unknown, known) : faces
+    readonly property var tiles: page === "home" ? people.concat(unknown, known) : faces
     readonly property var selection: tiles[selected] ?? null
     readonly property var personRow: people.find(row => row.name === person) ?? null
     readonly property var names: {
@@ -55,36 +54,32 @@ Panel {
     }
     // The names a group can be given with a key, its likeliest first.
     readonly property var choices: {
-        const guess = view === "group" ? anchor?.guess : view === "check" ? person : null
-        const rest = names.filter(name => name !== guess && name !== (view === "person" ? person : null))
+        const guess = page === "group" ? anchor?.guess : page === "check" ? person : null
+        const rest = names.filter(name => name !== guess && name !== (page === "person" ? person : null))
         return (guess ? [guess] : []).concat(rest).slice(0, 9)
     }
     readonly property bool working: ["scanning", "grouping", "models"].includes(status.phase)
-    visible: shown && !pinhole.away
 
     function count(n) { return Number(n || 0).toLocaleString(Qt.locale(), "f", 0) }
-    function show() {
+    // As its view opens (PluginView calls it).
+    function start() {
         if (shown) return
         source = pinhole.library.key || pinhole.library.dir
         stateKey = "people:" + source
         edits = pinhole.state[stateKey] || {}
-        shown = true
-        view = "home"
+        page = "home"
         selected = 0
         groupLimit = 48
-        status = { phase: "waiting" }
+        // How far the face finder is, as it last said, at once.
+        const finder = pinhole.workers.find(worker => worker.name === "faces")
+        status = finder?.running && finder.said?.event === "status" ? finder.said : { phase: "waiting" }
         Qt.callLater(() => grid.forceActiveFocus())
         load()
     }
-    function stopReading() {
-        running?.cancel()
-        running = null
-        readJob = null
-    }
-    function close() {
-        stopReading()
+    // As its view closes.
+    function stop() {
+        reader.cancel()
         closePicker(false)
-        shown = false
         anchor = null
         person = ""
         people = []; groups = []; faces = []; likely = []
@@ -96,26 +91,21 @@ Panel {
             timeout: 10000
         })
     }
-    // One step of the chain `token` is, or nothing once another is wanted.
-    function read(token, operation, options) {
-        if (readJob !== token) return Promise.reject({ code: "cancelled" })
-        const job = request(operation, options)
-        running = job
-        return job.then(result => {
-            if (readJob !== token) throw { code: "cancelled" }
+    // One step of a read: its rows, and how far the face finder is.
+    function read(operation, options) {
+        return request(operation, options).then(result => {
             const response = JSON.parse(result.stdout)
             status = response.status
             failure = ""
             return response.rows
         })
     }
-    // Everything the view shows, again: after a change, and every few
-    // seconds while the faces are still being found.
-    function load() {
-        stopReading()
+    // Everything the view shows, again: after a change, and as the face
+    // finder gets further. A read asked for again stops the one before,
+    // whose later steps never run.
+    function load() { reader.start(() => readView()) }
+    function readView() {
         const kept = selection?.key
-        const token = {}
-        readJob = token
         // Faces of photos still as they were read, and not hidden from the
         // grid (Screenshots').
         const keep = rows => rows.filter(row => {
@@ -123,55 +113,54 @@ Panel {
             return photo.thumbPath === pinhole.library.dir + "/" + row.path && !pinhole.isHidden(row.id)
         })
         let job
-        if (view === "home") {
-            job = read(token, "people", { limit: 500 }).then(rows => {
+        if (page === "home") {
+            job = read("people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read(token, "groups", { which: "unknown", limit: 500 })
+                return read("groups", { which: "unknown", limit: 500 })
             }).then(rows => {
                 unknown = rows.slice(0, 500)
-                return read(token, "groups", { which: "known", limit: groupLimit })
+                return read("groups", { which: "known", limit: groupLimit })
             }).then(rows => {
                 moreGroups = rows.length > groupLimit
                 groups = rows.slice(0, groupLimit)
             })
-        } else if (view === "check") {
-            job = read(token, "people", { limit: 500 }).then(rows => {
+        } else if (page === "check") {
+            job = read("people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read(token, "likely", { person: person, limit: 200 })
+                return read("likely", { person: person, limit: 200 })
             }).then(rows => {
                 likely = rows.slice(0, 200)
                 checking = Math.min(checking, Math.max(0, likely.length - 1))
                 if (!likely.length) return []
-                return read(token, "members", { anchor: likely[checking].anchor, limit: 60 })
+                return read("members", { anchor: likely[checking].anchor, limit: 60 })
             }).then(rows => {
                 faces = keep(rows.slice(0, 60))
                 moreFaces = rows.length > 60
             })
         } else {
-            const operation = view === "group" ? "members" : "person"
-            job = read(token, "people", { limit: 500 }).then(rows => {
+            const operation = page === "group" ? "members" : "person"
+            job = read("people", { limit: 500 }).then(rows => {
                 people = rows.slice(0, 500)
-                return read(token, operation, { anchor: anchor?.anchor, person: person, limit: faceLimit })
+                return read(operation, { anchor: anchor?.anchor, person: person, limit: faceLimit })
             }).then(rows => {
                 moreFaces = rows.length > faceLimit
                 faces = keep(rows.slice(0, faceLimit))
             })
         }
-        job.then(() => {
-            if (readJob !== token) return
-            readJob = null; running = null
-            const at = tiles.findIndex(row => row.key === kept)
-            selected = at >= 0 ? at : Math.min(selected, Math.max(0, tiles.length - 1))
-            if (view === "group" && !faces.length) back()
-            if (view === "check" && !likely.length) go("person", person)
-        }).catch(error => {
-            if (readJob !== token) return
-            readJob = null; running = null
-            if (error.code !== "cancelled") {
-                failure = qsTr("People could not load the face groups.")
-                pinhole.warn(error)
-            }
-        })
+        return job.then(() => kept)
+    }
+    Job {
+        id: reader
+        onDone: kept => {
+            const at = panel.tiles.findIndex(row => row.key === kept)
+            panel.selected = at >= 0 ? at : Math.min(panel.selected, Math.max(0, panel.tiles.length - 1))
+            if (panel.page === "group" && !panel.faces.length) panel.back()
+            if (panel.page === "check" && !panel.likely.length) panel.go("person", panel.person)
+        }
+        onFailed: error => {
+            panel.failure = qsTr("People could not load the face groups.")
+            pinhole.warn(error)
+        }
     }
     function statusText() {
         switch (status.phase) {
@@ -190,13 +179,14 @@ Panel {
         target: pinhole
         enabled: panel.shown && !panel.picking && !pinhole.away
         function onWorkerSaid(name, said) {
-            if (name === "faces" && !panel.readJob && !panel.assignmentJob)
-                panel.load()
+            if (name !== "faces") return
+            if (said.event === "status") panel.status = said
+            if (!panel.reading && !panel.naming) panel.load()
         }
     }
 
     function go(next, row) {
-        view = next
+        page = next
         anchor = next === "group" ? row : null
         person = next === "person" || next === "check" ? (typeof row === "string" ? row : row.name) : ""
         faces = []; likely = []
@@ -208,7 +198,7 @@ Panel {
     }
     function enter(row) {
         if (!row) return
-        if (view !== "home") {
+        if (page !== "home") {
             if (pinhole.library.indexOf(row.id) < 0) return
             const open = rows => {
                 const ids = rows.map(face => face.id).filter((id, i, all) => all.indexOf(id) === i && pinhole.library.indexOf(id) >= 0)
@@ -219,8 +209,8 @@ Panel {
                 return
             }
             // All of them for ← →, not only those scrolled to yet.
-            const operation = view === "person" ? "person" : "members"
-            const owner = view === "group" ? anchor?.anchor : view === "check" ? likely[checking]?.anchor : null
+            const operation = page === "person" ? "person" : "members"
+            const owner = page === "group" ? anchor?.anchor : page === "check" ? likely[checking]?.anchor : null
             request(operation, { anchor: owner, person: person, limit: 2000 })
                 .then(result => { if (shown && !pinhole.away) open(JSON.parse(result.stdout).rows) })
                 .catch(() => { if (shown && !pinhole.away) open(faces) })
@@ -230,20 +220,21 @@ Panel {
             go("group", row)
         }
     }
+    // Esc: a level back; at home, nothing taken, and the view closes.
     function back() {
         if (picking) closePicker()
-        else if (view === "home") close()
-        else go("home")
+        else if (page !== "home") go("home")
+        else return false
+        return true
     }
     function openPicker(mode) {
-        stopReading()
+        reader.cancel()
         picking = mode
         failure = ""
         picker.reset()
     }
     function closePicker(restoreFocus = true) {
-        assignmentJob?.cancel()
-        assignmentJob = null
+        namer.cancel()
         picking = ""
         if (restoreFocus) grid.forceActiveFocus()
     }
@@ -278,7 +269,7 @@ Panel {
             faces = []
             selected = 0
         } else {
-            view = "home"
+            page = "home"
             anchor = null
         }
     }
@@ -286,7 +277,7 @@ Panel {
     // home, to name whenever its name comes back. Again: known after all.
     function markUnknown() {
         const row = anchor
-        if (view !== "group" || !row) return
+        if (page !== "group" || !row) return
         const previous = edits[row.anchor] || {}
         const now = !row.unknown
         if (now) nextGroup(row)
@@ -295,30 +286,30 @@ Panel {
              now ? qsTr("marking a face as not known") : qsTr("unmarking a face as not known"))
     }
     function nameGroup(row, name) {
-        if (!row || !name || assignmentJob) return
-        const job = request("assignment", { anchor: row.anchor })
-        assignmentJob = job
-        job.then(result => {
-            if (assignmentJob !== job) return
-            assignmentJob = null
+        if (!row || !name || naming) return
+        namer.start(() => request("assignment", { anchor: row.anchor })
+            .then(result => ({ row: row, name: name, keys: JSON.parse(result.stdout).keys })))
+    }
+    Job {
+        id: namer
+        onDone: named => {
             const patch = {}
-            for (const face of JSON.parse(result.stdout).keys)
-                patch[face] = Object.assign({}, edits[face], { person: name })
+            for (const face of named.keys)
+                patch[face] = Object.assign({}, panel.edits[face], { person: named.name })
             const added = Object.keys(patch).length
-            if (view === "group" && anchor?.anchor === row.anchor)
-                nextGroup(row)
+            if (panel.page === "group" && panel.anchor?.anchor === named.row.anchor)
+                panel.nextGroup(named.row)
             if (added) {
-                edit(patch, qsTr("naming a group"))
-                pinhole.notify(qsTr("%1: %n photo(s) added", "", added).arg(name))
+                panel.edit(patch, qsTr("naming a group"))
+                pinhole.notify(qsTr("%1: %n photo(s) added", "", added).arg(named.name))
             } else {
-                load()
+                panel.load()
             }
-        }).catch(error => {
-            if (assignmentJob !== job) return
-            assignmentJob = null
-            failure = qsTr("People could not load the face groups.")
+        }
+        onFailed: error => {
+            panel.failure = qsTr("People could not load the face groups.")
             pinhole.warn(error)
-        })
+        }
     }
     // While checking: this group is not `person`, ask about the next.
     function refuse() {
@@ -339,15 +330,15 @@ Panel {
         }
     }
     function choose(name) {
-        if (view === "group") nameGroup(anchor, name)
-        else if (view === "check") nameGroup(likely[checking], name)
+        if (page === "group") nameGroup(anchor, name)
+        else if (page === "check") nameGroup(likely[checking], name)
     }
     // One photo out of what is shown: not this group's person, or not the
     // named person.
     function removeSelected() {
         const face = selection
-        if (!face || view === "home") return
-        if (view === "person") {
+        if (!face || page === "home") return
+        if (page === "person") {
             const previous = edits[face.key] || {}
             if (previous.person) {
                 edit({ [face.key]: Object.assign({}, previous, { person: undefined }) }, qsTr("taking a photo from a person"))
@@ -362,7 +353,7 @@ Panel {
             if (Object.keys(patch).length) edit(patch, qsTr("taking a photo from a person"))
             return
         }
-        const owner = view === "group" ? anchor : likely[checking]
+        const owner = page === "group" ? anchor : likely[checking]
         if (!owner || face.key === owner.anchor) return
         const previous = edits[owner.anchor] || {}
         edit({ [owner.anchor]: Object.assign({}, previous, {
@@ -401,7 +392,7 @@ Panel {
         if (!tiles.length) return
         let next = selected + dx
         if (dy !== 0) {
-            const bounds = view === "home"
+            const bounds = page === "home"
                 ? [0, people.length, people.length + unknown.length, tiles.length].filter((b, i, all) => i === 0 || b > all[i - 1])
                 : [0, tiles.length]
             let section = 0
@@ -418,11 +409,11 @@ Panel {
         }
         selected = Math.max(0, Math.min(tiles.length - 1, next))
         reveal(selected)
-        if (view === "home" && selected >= tiles.length - columns * 2 && moreGroups) more()
-        if (view !== "home" && selected >= faces.length - columns * 2 && moreFaces) more()
+        if (page === "home" && selected >= tiles.length - columns * 2 && moreGroups) more()
+        if (page !== "home" && selected >= faces.length - columns * 2 && moreFaces) more()
     }
     function reveal(index) {
-        const item = view !== "home" ? faceTiles.itemAt(index)
+        const item = page !== "home" ? faceTiles.itemAt(index)
             : index < people.length ? namedTiles.itemAt(index)
             : index < people.length + unknown.length ? unknownTiles.itemAt(index - people.length)
             : groupTiles.itemAt(index - people.length - unknown.length)
@@ -433,8 +424,8 @@ Panel {
         else if (bottom > grid.contentY + grid.height) grid.contentY = bottom - grid.height
     }
     function more() {
-        if (readJob) return
-        if (view === "home") groupLimit += 48
+        if (reading) return
+        if (page === "home") groupLimit += 48
         else faceLimit += 96
         load()
     }
@@ -460,7 +451,6 @@ Panel {
         event.accepted = true
     }
     readonly property bool keysOnTiles: shown && !picking && grid.activeFocus
-    Command { name: "people.back"; keys: ["Escape"]; keyLayer: "plugin"; when: panel.shown; onTriggered: panel.back() }
     Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
     Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
     Command { name: "people.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(1, 0) }
@@ -469,11 +459,11 @@ Panel {
     Command {
         id: removeCommand
         name: "people.remove"
-        text: panel.view === "person" ? qsTr("Not %1").arg(panel.person) : qsTr("Someone else")
+        text: panel.page === "person" ? qsTr("Not %1").arg(panel.person) : qsTr("Someone else")
         keys: ["X", "Delete"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.view !== "home" && panel.selection !== null
-            && (panel.view === "person" || panel.selection.key !== (panel.view === "group" ? panel.anchor?.anchor : panel.likely[panel.checking]?.anchor))
+        when: panel.keysOnTiles && panel.page !== "home" && panel.selection !== null
+            && (panel.page === "person" || panel.selection.key !== (panel.page === "group" ? panel.anchor?.anchor : panel.likely[panel.checking]?.anchor))
         onTriggered: panel.removeSelected()
     }
     Command {
@@ -482,7 +472,7 @@ Panel {
         text: qsTr("Someone named…")
         keys: ["M"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.view === "person" && panel.selection !== null && panel.names.length > 1
+        when: panel.keysOnTiles && panel.page === "person" && panel.selection !== null && panel.names.length > 1
         onTriggered: panel.openPicker("photo")
     }
     Command {
@@ -491,7 +481,7 @@ Panel {
         text: qsTr("New name")
         keys: ["N"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.view === "group"
+        when: panel.keysOnTiles && panel.page === "group"
         onTriggered: newName.input.forceActiveFocus()
     }
     Command {
@@ -500,7 +490,7 @@ Panel {
         text: qsTr("Check them")
         keys: ["C"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.view === "person" && (panel.personRow?.likely ?? 0) > 0
+        when: panel.shown && !panel.picking && panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
         onTriggered: panel.go("check", panel.person)
     }
     Command {
@@ -509,7 +499,7 @@ Panel {
         text: qsTr("Don't know")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.view === "group" && !newName.input.activeFocus
+        when: panel.shown && !panel.picking && panel.page === "group" && !newName.input.activeFocus
         onTriggered: panel.markUnknown()
     }
     Command {
@@ -518,7 +508,7 @@ Panel {
         text: qsTr("No")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.view === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        when: panel.shown && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.refuse()
     }
     Command {
@@ -527,7 +517,7 @@ Panel {
         text: qsTr("Skip")
         keys: ["S"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.view === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        when: panel.shown && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.skip()
     }
     Repeater {
@@ -538,7 +528,7 @@ Panel {
                 name: "people.choose." + (index + 1)
                 keys: [String(index + 1)]
                 keyLayer: "plugin"
-                when: panel.shown && !panel.picking && (panel.view === "group" || panel.view === "check")
+                when: panel.shown && !panel.picking && (panel.page === "group" || panel.page === "check")
                     && index < panel.choices.length && !newName.input.activeFocus
                 onTriggered: panel.choose(panel.choices[index])
             }
@@ -546,7 +536,6 @@ Panel {
     }
     Connections {
         target: pinhole
-        function onDismissed() { panel.close() }
         function onHiddenChanged() { if (panel.shown) panel.load() }
         // Back from the photos, on the one last looked at.
         function onReturned(photo) {
@@ -560,23 +549,22 @@ Panel {
         target: pinhole.library
         function onChanged() {
             if (panel.shown && (pinhole.library.key || pinhole.library.dir) !== panel.source)
-                panel.close()
+                view.close()
         }
     }
     PanelHeader {
         id: titlebar
         visible: !panel.picking
-        title: panel.view === "home" ? qsTr("People")
-            : panel.view === "group" ? qsTr("Who is this?")
-            : panel.view === "check" ? qsTr("Is this %1?").arg(panel.person)
+        title: panel.page === "home" ? qsTr("People")
+            : panel.page === "group" ? qsTr("Who is this?")
+            : panel.page === "check" ? qsTr("Is this %1?").arg(panel.person)
             : panel.person
-        detail: panel.view === "group" && panel.anchor ? qsTr("%n photo(s)", "", panel.anchor.count)
-            : panel.view === "person" && panel.personRow ? qsTr("%n photo(s)", "", panel.personRow.count)
-            : panel.view === "check" && panel.likely.length ? qsTr("%1 of %2").arg(panel.checking + 1).arg(panel.likely.length)
+        detail: panel.page === "group" && panel.anchor ? qsTr("%n photo(s)", "", panel.anchor.count)
+            : panel.page === "person" && panel.personRow ? qsTr("%n photo(s)", "", panel.personRow.count)
+            : panel.page === "check" && panel.likely.length ? qsTr("%1 of %2").arg(panel.checking + 1).arg(panel.likely.length)
             : ""
         // Esc goes back a level; ✕ closes from any.
-        closeHint: panel.view === "home" ? "Esc" : ""
-        onClosed: panel.close()
+        closeHint: panel.page === "home" ? "Esc" : ""
         // Faces found so far, while they are being found.
         progress: panel.status.phase === "scanning" && panel.status.total > 0
             ? Math.min(1, (panel.status.done || 0) / Math.max(1, panel.status.total)) : -1
@@ -584,7 +572,7 @@ Panel {
             ShellButton {
                 id: checkButton
                 objectName: "peopleCheck"
-                visible: panel.view === "person" && (panel.personRow?.likely ?? 0) > 0
+                visible: panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
                 text: qsTr("%n more to check", "", panel.personRow?.likely ?? 0)
                 hint: checkCommand.keyName
                 onTapped: panel.go("check", panel.person)
@@ -592,7 +580,7 @@ Panel {
             ShellButton {
                 id: mergeButton
                 objectName: "peopleMerge"
-                visible: panel.view === "person"
+                visible: panel.page === "person"
                 usable: panel.names.length > 1
                 text: qsTr("Merge with…")
                 hint: ""
@@ -602,7 +590,7 @@ Panel {
         ShellButton {
             id: backButton
             objectName: "peopleBack"
-            visible: panel.view !== "home"
+            visible: panel.page !== "home"
             text: "‹ " + qsTr("People")
             hint: "Esc"
             onTapped: panel.back()
@@ -610,7 +598,7 @@ Panel {
         // Whom the faces below are compared with.
         PeopleTile {
             anchors.verticalCenter: parent.verticalCenter
-            visible: (panel.view === "check" || panel.view === "person") && panel.personRow !== null
+            visible: (panel.page === "check" || panel.page === "person") && panel.personRow !== null
             width: visible ? titlebar.controlHeight : 0
             height: width
             row: panel.personRow ?? { id: "", box: [0, 0, 1, 1] }
@@ -623,7 +611,7 @@ Panel {
     // height, wrapping as a sentence does.
     Item {
         id: namebar
-        visible: !panel.picking && (panel.view === "group" || panel.view === "check")
+        visible: !panel.picking && (panel.page === "group" || panel.page === "check")
         anchors.top: titlebar.bottom
         width: parent.width
         // As far below the title's bar as the names are from the photos.
@@ -640,15 +628,15 @@ Panel {
                     required property string modelData
                     required property int index
                     objectName: "peopleChoice"
-                    text: panel.view === "check" && index === 0 ? qsTr("Yes") : modelData
+                    text: panel.page === "check" && index === 0 ? qsTr("Yes") : modelData
                     hint: String(index + 1)
-                    active: index === 0 && (panel.view === "check" || !!panel.anchor?.guess)
-                    busy: !!panel.assignmentJob
+                    active: index === 0 && (panel.page === "check" || !!panel.anchor?.guess)
+                    busy: panel.naming
                     onTapped: panel.choose(modelData)
                 }
             }
             ShellButton {
-                visible: panel.view === "group"
+                visible: panel.page === "group"
                 objectName: "peopleUnknown"
                 text: unknownCommand.text
                 hint: unknownCommand.keyName
@@ -657,14 +645,14 @@ Panel {
                 onTapped: panel.markUnknown()
             }
             ShellButton {
-                visible: panel.view === "check"
+                visible: panel.page === "check"
                 objectName: "peopleRefuse"
                 text: refuseCommand.text
                 hint: refuseCommand.keyName
                 onTapped: panel.refuse()
             }
             ShellButton {
-                visible: panel.view === "check"
+                visible: panel.page === "check"
                 text: skipCommand.text
                 hint: skipCommand.keyName
                 onTapped: panel.skip()
@@ -672,7 +660,7 @@ Panel {
             FieldInput {
                 id: newName
                 objectName: "peopleNewName"
-                visible: panel.view === "group"
+                visible: panel.page === "group"
                 width: Math.min(theme.fontSize * 16, nameButtons.width)
                 height: titlebar.controlHeight
                 placeholder: qsTr("New name…")
@@ -694,7 +682,7 @@ Panel {
         id: statusLine
         // How far the faces are found, at home; a group's page shows only
         // the bar under its title.
-        visible: !panel.picking && statusText.text !== "" && (panel.view === "home" || panel.failure !== "")
+        visible: !panel.picking && statusText.text !== "" && (panel.page === "home" || panel.failure !== "")
         anchors.top: namebar.bottom
         width: parent.width
         height: visible ? statusText.implicitHeight + 10 : 0
@@ -720,7 +708,7 @@ Panel {
         contentWidth: width
         contentHeight: content.height + 24
         onContentYChanged: {
-            if (contentY + height > contentHeight - height / 2 && (panel.view === "home" ? panel.moreGroups : panel.moreFaces))
+            if (contentY + height > contentHeight - height / 2 && (panel.page === "home" ? panel.moreGroups : panel.moreFaces))
                 panel.more()
         }
         Column {
@@ -731,11 +719,11 @@ Panel {
             readonly property real cell: width / panel.columns
 
             Grid {
-                visible: panel.view === "home" && panel.people.length > 0
+                visible: panel.page === "home" && panel.people.length > 0
                 columns: panel.columns
                 Repeater {
                     id: namedTiles
-                    model: panel.view === "home" ? panel.people : []
+                    model: panel.page === "home" ? panel.people : []
                     delegate: PersonCircle {
                         required property var modelData
                         required property int index
@@ -753,18 +741,18 @@ Panel {
                 }
             }
             UiText {
-                visible: panel.view === "home" && panel.unknown.length > 0
+                visible: panel.page === "home" && panel.unknown.length > 0
                 topPadding: 8
                 color: theme.brightForeground
                 text: qsTr("Not known yet")
                 width: parent.width
             }
             Grid {
-                visible: panel.view === "home"
+                visible: panel.page === "home"
                 columns: panel.columns
                 Repeater {
                     id: unknownTiles
-                    model: panel.view === "home" ? panel.unknown : []
+                    model: panel.page === "home" ? panel.unknown : []
                     delegate: PersonCircle {
                         required property var modelData
                         required property int index
@@ -783,7 +771,7 @@ Panel {
                 }
             }
             UiText {
-                visible: panel.view === "home" && panel.known.length > 0
+                visible: panel.page === "home" && panel.known.length > 0
                 topPadding: panel.people.length ? 8 : 0
                 color: theme.brightForeground
                 text: panel.people.length ? qsTr("Not named yet") : qsTr("Name the faces Pinhole found to see each person's photos together.")
@@ -791,11 +779,11 @@ Panel {
                 wrapMode: Text.WordWrap
             }
             Grid {
-                visible: panel.view === "home"
+                visible: panel.page === "home"
                 columns: panel.columns
                 Repeater {
                     id: groupTiles
-                    model: panel.view === "home" ? panel.known : []
+                    model: panel.page === "home" ? panel.known : []
                     delegate: PersonCircle {
                         required property var modelData
                         required property int index
@@ -814,11 +802,11 @@ Panel {
                 }
             }
             Grid {
-                visible: panel.view !== "home"
+                visible: panel.page !== "home"
                 columns: panel.columns
                 Repeater {
                     id: faceTiles
-                    model: panel.view !== "home" ? panel.faces : []
+                    model: panel.page !== "home" ? panel.faces : []
                     delegate: Item {
                         required property var modelData
                         required property int index
@@ -847,7 +835,7 @@ Panel {
                             visible: (photoTile.hovered || tileButtons.hovered) && !pinhole.keyboardInUse
                             HoverHandler { id: tileButtons }
                             ShellButton {
-                                visible: panel.view === "person" && panel.names.length > 1
+                                visible: panel.page === "person" && panel.names.length > 1
                                 floating: true
                                 text: "…"
                                 helpText: moveCommand.text
@@ -858,7 +846,7 @@ Panel {
                                 }
                             }
                             ShellButton {
-                                visible: panel.view === "person" || modelData.key !== (panel.view === "group" ? panel.anchor?.anchor : panel.likely[panel.checking]?.anchor)
+                                visible: panel.page === "person" || modelData.key !== (panel.page === "group" ? panel.anchor?.anchor : panel.likely[panel.checking]?.anchor)
                                 floating: true
                                 text: "✕"
                                 helpText: removeCommand.text
@@ -877,12 +865,12 @@ Panel {
     UiText {
         anchors.centerIn: grid
         width: Math.min(grid.width - 48, 460)
-        visible: !panel.picking && !panel.readJob && panel.tiles.length === 0 && panel.status.phase === "ready"
+        visible: !panel.picking && !panel.reading && panel.tiles.length === 0 && panel.status.phase === "ready"
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
         font.pixelSize: Math.round(theme.fontSize * 1.35)
         color: theme.brightForeground
-        text: panel.view === "home" ? qsTr("No faces found in this library yet.") : qsTr("No photos here any more.")
+        text: panel.page === "home" ? qsTr("No faces found in this library yet.") : qsTr("No photos here any more.")
     }
 
     PeoplePicker {
@@ -891,8 +879,8 @@ Panel {
         width: Math.min(parent.width - 24, theme.fontSize * 34)
         height: Math.min(parent.height - 24, theme.fontSize * 36)
         visible: !!panel.picking
-        names: panel.names.filter(name => name !== (panel.view === "person" ? panel.person : ""))
-        busy: !!panel.assignmentJob
+        names: panel.names.filter(name => name !== (panel.page === "person" ? panel.person : ""))
+        busy: panel.naming
         allowCreate: panel.picking !== "merge"
         title: panel.failure || (panel.picking === "merge" ? qsTr("Merge %1 with").arg(panel.person)
             : qsTr("Who is in this photo?"))

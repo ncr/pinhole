@@ -13,7 +13,6 @@ import Pinhole.Plugin
 // `begin()` starts its slow pan and zoom.
 Item {
     id: slide
-    required property var pinhole
     // Videos and Live Photos play their motion.
     property bool motion: true
 
@@ -107,7 +106,7 @@ Item {
                 return
             // No medium, the photo still in the library: its full size
             // instead (a video stays its thumbnail, and plays).
-            if (error.code === "not_found" && slide.pinhole.library.indexOf(slide.photoId) >= 0) {
+            if (error.code === "not_found" && pinhole.library.indexOf(slide.photoId) >= 0) {
                 if (slide.item && slide.item.video)
                     slide.settled = true
                 else

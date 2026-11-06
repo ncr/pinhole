@@ -15,22 +15,20 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
     readonly property var days: daysView.item
-    covering: days !== null && days.shown
     function openDays() {
-        daysView.active = true
-        days.open()
+        fresh()
+        daysView.open()
     }
 
     // How many days either side of the date count, each year: 0 is the
-    // day itself, more for the years with few photos.
-    property int span: pinhole.setting("span", 0)
-    property bool videos: pinhole.setting("videos", true)
-    property bool screenshots: pinhole.setting("screenshots", false)
-    function set(name, value) {
-        plugin[name] = value
-        pinhole.setSetting(name, value)
-        recount()
-    }
+    // day itself, more for the years with few photos. Its settings, their
+    // defaults the manifest's; counted again as one changes.
+    readonly property int span: pinhole.settings.span
+    readonly property bool videos: pinhole.settings.videos
+    readonly property bool screenshots: pinhole.settings.screenshots
+    onSpanChanged: recount()
+    onVideosChanged: recount()
+    onScreenshotsChanged: recount()
 
     // The library's positions by the day they were taken on, in local
     // time (yyyymmdd), as runs: [from, to, from, to, ...], one run a day
@@ -97,35 +95,27 @@ PinholePlugin {
 
     // The screenshots, as the Screenshots plugin finds them in the
     // library (pinhole.screenshots), whether or not it is on.
-    property var finding: null
+    Job {
+        id: finding
+        onDone: ids => plugin.foundShots(ids)
+        onFailed: error => pinhole.warn(error)
+    }
     function findShots() {
-        if (finding)
-            finding.cancel()
-        finding = null
         // No photos, no screenshots: and with no source shown (a first
         // run, every source's plugin off) no library to ask either.
         if (pinhole.library.count === 0) {
-            shotIds = []
-            placeShots()
-            recount()
+            finding.cancel()
+            foundShots([])
             return
         }
         // Read only, away from the window; while the service writes the
         // index (as a round starts), waited for rather than failed.
-        const found = pinhole.screenshots()
-        finding = found
-        found.then(ids => {
-            if (finding !== found)
-                return
-            finding = null
-            shotIds = ids
-            placeShots()
-            recount()
-        }).catch(error => {
-            if (finding === found)
-                finding = null
-            pinhole.warn(error)
-        })
+        finding.start(() => pinhole.screenshots())
+    }
+    function foundShots(ids) {
+        shotIds = ids
+        placeShots()
+        recount()
     }
 
     function placeShots() {
@@ -221,7 +211,7 @@ PinholePlugin {
     Connections {
         target: pinhole.library
         function onChanged() {
-            if (plugin.days !== null && plugin.days.shown) {
+            if (daysView.shown) {
                 plugin.index()
             } else {
                 plugin.stale = true
@@ -327,9 +317,8 @@ PinholePlugin {
             }
             Choices {
                 numbered: false
+                setting: "span"
                 options: [{ value: 0, text: qsTr("The day") }, { value: 1, text: qsTr("± 1 day") }, { value: 3, text: qsTr("± 3 days") }, { value: 7, text: qsTr("± a week") }]
-                value: plugin.span
-                onChosen: value => plugin.set("span", value)
             }
             Repeater {
                 model: [["videos", qsTr("Videos")], ["screenshots", qsTr("Screenshots")]]
@@ -338,10 +327,10 @@ PinholePlugin {
                     // Screenshots hidden from the grid stay out whatever
                     // this says.
                     readonly property bool held: modelData[0] === "screenshots" && plugin.shotsHidden
+                    setting: modelData[0]
                     text: modelData[1]
                     usable: !held
                     checked: plugin[modelData[0]] && !held
-                    onToggled: plugin.set(modelData[0], !checked)
                 }
             }
             SettingNote {
@@ -354,10 +343,11 @@ PinholePlugin {
 
     // The count belongs to the first frame; the large view is only needed
     // after D. Retain it after closing so returning from a photo is instant.
-    Loader {
+    PluginView {
         id: daysView
-        anchors.fill: parent
-        active: false
-        sourceComponent: Days { plugin: daysView.parent }
+        // Days is given its view as it is made: its bindings read the
+        // plugin through it from the first.
+        content: Component { Days { view: daysView } }
+        toggleKey: "D"
     }
 }

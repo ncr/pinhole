@@ -17,8 +17,10 @@ Item {
     // (pinhole.coveredBy says whose it is). By itself while one of its
     // PluginViews is open.
     property bool covering: openViews > 0
-    // How many of its PluginViews are open (they count themselves).
-    property int openViews: 0
+    // Its PluginViews open, the last opened last (they keep it), and how
+    // many.
+    property var viewStack: []
+    readonly property int openViews: viewStack.length
     // Its keys, as the help (?) lists them: [["G", "Series"], ...].
     property var help: []
     // Photos shown in the grid as one card, each a list of library

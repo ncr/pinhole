@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 11,
+  "api": 13,
   "id": "pinhole.theme",
   "name": "Theme",
   "version": "1.0.0",
@@ -9,5 +9,6 @@
   "description": "Makes an Omarchy theme from the photo shown full window, and the whole desktop takes its colours.",
   "entryPoints": {
     "main": "Main.qml"
-  }
+  },
+  "settings": { "strong": true, "mode": "auto" }
 }

@@ -1,4 +1,5 @@
 import QtQuick
+import Pinhole.Plugin
 
 // The shared library uses pinholed's worker; isolated libraries own theirs.
 Item {
@@ -16,11 +17,9 @@ Item {
     property var profile: null
     property var status: ({ indexed: 0, total: 0, running: false, waiting: false, errors: 0 })
     property var server: null
-    property var catalogJob: null
-    property var statusJob: null
-    property var indexingJob: null
+    // Indexing turned on or off, asked of the helper and not yet answered.
+    readonly property bool toggling: toggler.busy
     property int generation: 0
-    property int catalogRevision: 0
     readonly property bool complete: catalogReady && status.total > 0 && status.indexed >= status.total
     readonly property real progress: status.total > 0 ? Math.min(1, status.indexed / status.total) : 0
     function count(n) { return Number(n || 0).toLocaleString(Qt.locale(), "f", 0) }
@@ -38,10 +37,9 @@ Item {
     function cancel(job) { if (job) job.cancel() }
     function reset() {
         ++generation
-        ++catalogRevision
-        cancel(catalogJob); catalogJob = null
-        cancel(statusJob); statusJob = null
-        cancel(indexingJob); indexingJob = null
+        cataloguer.cancel()
+        poller.cancel()
+        toggler.cancel()
         cancel(server); server = null
         managed = false; missedStatus = 0
         ready = false; catalogReady = false; failure = ""; indexPath = ""
@@ -127,53 +125,55 @@ Item {
     }
     function catalog() {
         if (!ready || managed) return
-        const revision = ++catalogRevision
-        const current = generation
-        cancel(catalogJob)
         catalogReady = false
-        const job = pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001")
-        catalogJob = job
-        job.then(assets => {
-            if (current !== generation || revision !== catalogRevision || catalogJob !== job) return
-            const sync = request({ op: "catalog", assets: assets, auto_index: !paused })
-            catalogJob = sync
-            return sync.then(result => {
-                if (current !== generation || revision !== catalogRevision || catalogJob !== sync) return
-                catalogJob = null
-                status = unpack(result)
-                if (status.error) failure = friendly(status.error)
-                catalogReady = true
-            })
-        }).catch(error => {
-            if (current !== generation || revision !== catalogRevision) return
-            catalogJob = null
-            report(error)
-        })
+        cataloguer.start(() => pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001")
+            .then(assets => request({ op: "catalog", assets: assets, auto_index: !paused }))
+            .then(result => unpack(result)))
     }
+    Job {
+        id: cataloguer
+        onDone: value => {
+            indexer.status = value
+            if (value.error) indexer.failure = indexer.friendly(value.error)
+            indexer.catalogReady = true
+        }
+        onFailed: error => indexer.report(error)
+    }
+    // Asked while one is asked: that one's answer will do.
     function poll() {
-        if ((!managed && (!ready || !catalogReady)) || statusJob) return
-        const current = generation
-        const job = request({ op: "status" })
-        statusJob = job
-        job.then(result => {
-            if (current !== generation || statusJob !== job) return
-            statusJob = null
-            status = unpack(result)
-            if (managed) {
-                missedStatus = 0
-                ready = true
-                catalogReady = status.catalog_ready
-                failure = status.error ? friendly(status.error) : ""
-            } else if (status.error) failure = friendly(status.error)
-        }).catch(error => {
-            if (current !== generation || statusJob !== job) return
-            statusJob = null
-            if (managed) {
-                ready = false; catalogReady = false
-                if (++missedStatus >= 2)
-                    failure = qsTr("Waiting for Pinhole's background search service.")
-            } else report(error)
-        })
+        if ((!managed && (!ready || !catalogReady)) || poller.busy) return
+        poller.start(() => request({ op: "status" }).then(result => unpack(result)))
+    }
+    Job {
+        id: poller
+        onDone: value => {
+            indexer.status = value
+            if (indexer.managed) {
+                indexer.missedStatus = 0
+                indexer.ready = true
+                indexer.catalogReady = value.catalog_ready
+                indexer.failure = value.error ? indexer.friendly(value.error) : ""
+            } else if (value.error) indexer.failure = indexer.friendly(value.error)
+        }
+        onFailed: error => {
+            if (indexer.managed) {
+                indexer.ready = false; indexer.catalogReady = false
+                if (++indexer.missedStatus >= 2)
+                    indexer.failure = qsTr("Waiting for Pinhole's background search service.")
+            } else indexer.report(error)
+        }
+    }
+    // Pinhole's worker, as pinholed says it runs: asked how far it is, or,
+    // gone (or pinholed with it), waited for.
+    function watch() {
+        const worker = pinhole.workers.find(each => each.name === "index")
+        if (worker?.running && pinhole.sources.health !== "no_service") {
+            poll()
+            return
+        }
+        poller.cancel()
+        ready = false; catalogReady = false
+        failure = qsTr("Waiting for Pinhole's background search service.")
     }
     // A finished benchmark run's vectors, for the Apple Neural Engine
     // profile: the index without indexing.
@@ -187,23 +187,20 @@ Item {
         }).catch(error => { if (source === sourceKey) report(error) })
     }
     function toggleIndexing() {
-        if (!catalogReady || indexingJob) return
+        if (!catalogReady || toggling) return
         failure = ""
         const resume = paused || status.error !== ""
         pinhole.settings.indexingPaused = !resume
-        const current = generation
-        const job = request(resume ? { op: "start", missing_only: true } : { op: "stop" })
-        indexingJob = job
-        job.then(result => {
-            if (current !== generation || indexingJob !== job) return
-            indexingJob = null
-            status = unpack(result)
-        }).catch(error => {
-            if (current !== generation || indexingJob !== job) return
-            indexingJob = null
-            if (resume) pinhole.settings.indexingPaused = true
-            report(error)
-        })
+        toggler.start(() => request(resume ? { op: "start", missing_only: true } : { op: "stop" }).then(result => unpack(result)))
+    }
+    Job {
+        id: toggler
+        onDone: value => indexer.status = value
+        onFailed: error => {
+            // Not started after all: paused, as it was.
+            if (!indexer.paused) pinhole.settings.indexingPaused = true
+            indexer.report(error)
+        }
     }
 
     // Opening search can start the worker sooner. The normal launch path
@@ -211,14 +208,17 @@ Item {
     Timer { id: startup; interval: 4000; running: true; onTriggered: indexer.ensureStarted() }
     Timer { id: changes; interval: 900; onTriggered: indexer.catalog() }
     // Its own helper, asked every two seconds while it indexes; Pinhole's
-    // worker says when it got further (workerSaid), asked besides every
-    // ten seconds, to notice one that is gone.
+    // worker says when it got further (workerSaid), and pinholed when it
+    // starts or ends (workersChanged) or is gone itself (health).
     Timer { interval: 2000; repeat: true; running: !indexer.managed && indexer.ready && indexer.status.running; onTriggered: indexer.poll() }
-    Timer { interval: 10000; repeat: true; running: indexer.managed; onTriggered: indexer.poll() }
     Connections {
         target: pinhole
         function onWorkerSaid(name, said) { if (name === "index" && indexer.managed) indexer.poll() }
-        function onWorkersChanged() { if (indexer.managed) indexer.poll() }
+        function onWorkersChanged() { if (indexer.managed) indexer.watch() }
+    }
+    Connections {
+        target: pinhole.sources
+        function onHealthChanged() { if (indexer.managed) indexer.watch() }
     }
     Connections {
         target: pinhole.library

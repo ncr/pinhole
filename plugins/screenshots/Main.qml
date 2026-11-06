@@ -15,15 +15,15 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
 
-    // Hidden from the grid, or each day's one card.
-    property bool hiding: pinhole.setting("hide", false) === true
+    // Hidden from the grid, or each day's one card (false until chosen:
+    // the manifest's "settings").
+    readonly property bool hiding: pinhole.settings.hide === true
     // The screenshots' ids, as last found; their library positions in
     // order, and each day's, those with two or more.
     property var ids: []
     property var shots: []
     property var days: []
-    property bool finding: false
-    property bool findAgain: false
+    readonly property bool finding: finder.busy
     // Looked for in this library since it was shown (not only kept from
     // before).
     property bool found: false
@@ -42,7 +42,6 @@ PinholePlugin {
     function keepHiding(hide) {
         if (!pinhole.setSetting("hide", hide))
             pinhole.warn(qsTr("The setting could not be kept"))
-        hiding = hide
         // Never quietly: how many went, and the way back.
         if (hide && shots.length > 0)
             pinhole.notify(qsTr("%n screenshots hidden: ⇧\u00a0S shows them again", "", shots.length))
@@ -83,42 +82,33 @@ PinholePlugin {
                 pinhole.cache[other] = null
     }
 
+    // Asked while it looks: once more after, in what is shown then.
     function find() {
-        if (finding) {
-            findAgain = true
-            return
+        finder.start(() => {
+            const key = keptKey, showing = shown, dir = pinhole.library.dir
+            if (pinhole.library.count === 0)
+                return { ids: [], key: "", showing: showing, dir: dir }
+            // Read only, away from the window; while the service writes the
+            // index (as a round starts), waited for rather than failed.
+            return pinhole.screenshots().then(ids => ({ ids: ids, key: key, showing: showing, dir: dir }))
+        })
+    }
+    Job {
+        id: finder
+        coalesce: true
+        onDone: result => {
+            // Another library shown meanwhile: these are the last one's,
+            // neither kept as this one's nor shown; it is looked at next.
+            if (result.showing !== plugin.shown || result.dir !== pinhole.library.dir) {
+                plugin.find()
+                return
+            }
+            if (result.key !== "")
+                plugin.keep(result.key, result.ids)
+            plugin.take(result.ids)
+            plugin.found = true
         }
-        if (pinhole.library.count === 0) {
-            take([])
-            found = true
-            return
-        }
-        finding = true
-        const key = keptKey, showing = shown, dir = pinhole.library.dir
-        // Read only, away from the window; while the service writes the
-        // index (as a round starts), waited for rather than failed.
-        pinhole.screenshots()
-            .then(ids => {
-                // Another library shown meanwhile: these are the last one's,
-                // neither kept as this one's nor shown; it is looked at next.
-                if (showing !== shown || dir !== pinhole.library.dir) {
-                    findAgain = true
-                    return
-                }
-                const list = ids
-                if (key !== "")
-                    keep(key, list)
-                take(list)
-                found = true
-            })
-            .catch(pinhole.warn)
-            .then(() => {
-                finding = false
-                if (findAgain) {
-                    findAgain = false
-                    find()
-                }
-            })
+        onFailed: error => pinhole.warn(error)
     }
     // The ids, as positions, and each day's together.
     function take(list) {

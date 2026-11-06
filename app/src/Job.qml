@@ -13,8 +13,16 @@ import QtQml
 //     }
 //     reading.start(() => pinhole.query(sql, [limit]))
 //
-// `start(ask)` cancels what runs and calls `ask`, which returns the
-// promise. Only its answer is said: `done(result)`, or `failed(error)`.
+// `start(ask, answered)` cancels what runs and calls `ask`, which returns the
+// promise, or a list of them asked together (a page of previews): then
+// `done` has their answers in order, the first to fail fails them all, and
+// a cancel cancels each. Only its answer is said: `done(result)`, or
+// `failed(error)`.
+// Given `answered`, that has the answer instead of done(), for an answer
+// that needs what it was asked with:
+//
+//     motion.start(() => pinhole.fetch(photo, kind), file => play(kind, file))
+//
 // Cancelled is no failure and says nothing. Stopped by the library read
 // again (`reloaded`), it asks again by itself, once.
 QtObject {
@@ -28,16 +36,16 @@ QtObject {
     signal failed(var error)
 
     property var _current: null
-    property var _ask: null
     property var _again: null
 
-    function start(ask) {
+    function start(ask, answered) {
+        const asking = answered ? { ask: ask, answered: answered } : { ask: ask }
         if (_current !== null && coalesce) {
-            _again = ask
+            _again = asking
             return
         }
         cancel()
-        _run(ask, true)
+        _run(asking, true)
     }
     // Stop what runs; its answer is never said.
     function cancel() {
@@ -48,25 +56,27 @@ QtObject {
             running.cancel()
     }
 
-    function _run(ask, retry) {
+    function _run(asking, retry) {
+        const answer = result => asking.answered ? asking.answered(result) : done(result)
         let promise
         try {
-            promise = ask()
+            promise = asking.ask()
         } catch (error) {
             failed(error)
             return
         }
+        if (Array.isArray(promise))
+            promise = _together(promise)
         if (!promise || typeof promise.then !== "function") {
-            done(promise)
+            answer(promise)
             return
         }
         _current = promise
-        _ask = ask
         promise.then(result => {
             if (_current !== promise)
                 return
             _current = null
-            done(result)
+            answer(result)
             _next()
         }, error => {
             if (_current !== promise)
@@ -74,7 +84,7 @@ QtObject {
             _current = null
             const code = error ? error.code : undefined
             if (code === "reloaded" && retry && _again === null) {
-                _run(ask, false)
+                _run(asking, false)
                 return
             }
             if (code !== "cancelled" && code !== "reloaded")
@@ -82,12 +92,37 @@ QtObject {
             _next()
         })
     }
+    // Several as one: answered when all are, failed with the first that
+    // fails, each cancelled with it.
+    function _together(promises) {
+        let cancelled = false
+        const together = new Promise((resolve, reject) => {
+            const results = new Array(promises.length)
+            let left = promises.length
+            if (left === 0)
+                resolve(results)
+            promises.forEach((p, i) => Promise.resolve(p).then(value => {
+                results[i] = value
+                if (--left === 0)
+                    resolve(results)
+            }, reject))
+        })
+        together.cancel = () => {
+            if (cancelled)
+                return
+            cancelled = true
+            for (const p of promises)
+                if (p && typeof p.cancel === "function")
+                    p.cancel()
+        }
+        return together
+    }
     function _next() {
         if (_again === null)
             return
-        const ask = _again
+        const asking = _again
         _again = null
-        _run(ask, true)
+        _run(asking, true)
     }
 
     Component.onDestruction: cancel()

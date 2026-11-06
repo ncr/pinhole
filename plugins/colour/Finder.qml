@@ -11,13 +11,10 @@ import "Colour.js" as Colour
 // opens full window; closing it comes back here.
 Item {
     id: finder
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown && !pinhole.away ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    // Its PluginView (Main.qml), and the plugin through it.
+    required property var view
+    readonly property var plugin: view.plugin
+    readonly property bool shown: view.shown
 
     // "find" or "wall".
     property string mode: "find"
@@ -42,11 +39,11 @@ Item {
     // The photos found, closest first, by id.
     property var results: []
 
+    // Opened (Main.qml): on the colour picked last.
     function openFinder() {
         plugin.ensure()
         mode = "find"
         fromId = ""
-        shown = true
         search()
         photos.positionViewAtBeginning()
     }
@@ -63,12 +60,8 @@ Item {
             hue = targetH
         fromId = pinhole.library.item(index).id
         mode = "find"
-        shown = true
         search()
         photos.positionViewAtBeginning()
-    }
-    function close() {
-        shown = false
     }
     // A photo found, by its id.
     function open(id) {
@@ -129,7 +122,7 @@ Item {
         const p = Colour.fromPolar(targetL, Math.max(0, Math.min(rimChroma, C)), hue)
         pick(targetL, p[1], p[2])
     }
-    // The keys' steps (FinderKeys.qml): round the wheel, out from its grey
+    // The keys' steps (Main.qml): round the wheel, out from its grey
     // middle or in, lighter or darker.
     function turn(degrees) { pickPolar(Math.max(targetC, 0.04), targetH + degrees) }
     function strengthen(step) {
@@ -149,7 +142,7 @@ Item {
     Timer { id: searching; interval: 60; onTriggered: finder.search() }
 
     Connections {
-        target: finder.pinhole
+        target: pinhole
         // As it was left: the photos found stay, by their ids, and the
         // library's colours are read again if it has changed, for what is
         // looked for next.
@@ -158,8 +151,6 @@ Item {
             finder.keepFound()
             wall.keepFound()
         }
-        // The plugin over it handed a photo over: closed for good.
-        function onDismissed() { finder.close() }
     }
 
     // Nothing over it reaches the photos beneath.
@@ -241,7 +232,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: finder.close()
+        onTapped: finder.view.close()
     }
 
     // Finding: the wheel and the strip at the left, the photos beside.
@@ -465,7 +456,7 @@ Item {
                     clip: true
                     Image {
                         anchors.fill: parent
-                        source: finder.from >= 0 ? finder.pinhole.library.item(finder.from).thumbnail : ""
+                        source: finder.from >= 0 ? pinhole.library.item(finder.from).thumbnail : ""
                         sourceSize: Qt.size(Math.round(width * Screen.devicePixelRatio), Math.round(height * Screen.devicePixelRatio))
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
@@ -519,9 +510,9 @@ Item {
                 id: cell
                 // A photo's id; where it is now, as the library changes.
                 required property string modelData
-                readonly property int position: (finder.plugin.revision, finder.pinhole.library.indexOf(modelData))
-                readonly property var item: finder.pinhole.library.item(position)
-                visible: position >= 0 && !(finder.plugin.hiddenRevision, finder.pinhole.isHidden(position))
+                readonly property int position: (finder.plugin.revision, pinhole.library.indexOf(modelData))
+                readonly property var item: pinhole.library.item(position)
+                visible: position >= 0 && !(finder.plugin.hiddenRevision, pinhole.isHidden(position))
                 width: photos.cellWidth
                 height: photos.cellHeight
                 Rectangle {

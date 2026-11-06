@@ -18,7 +18,5 @@ PinholePlugin {
         id: recent
         source: "RecentPhotos.qml"
         toggleKey: "Shift+N"
-        onOpened: item.start()
-        onClosed: item.stop()
     }
 }

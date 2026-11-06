@@ -61,7 +61,7 @@
             panel.lookup()
             field.text = @SECOND@
             panel.lookup()
-            tryVerify(() => panel.queryJob === null && panel.results.length > 0, 30000)
+            tryVerify(() => !panel.searching && panel.results.length > 0, 30000)
             compare(panel.results[0].id, @EXPECTED_SECOND@)
             stage = "catalog-cancellation"
             panel.indexer.catalog()
@@ -189,7 +189,7 @@
             panel.lookup()
             tryVerify(() => panel.tagQuery && panel.results.length === 1)
             compare(panel.results[0].id, tagged)
-            compare(panel.queryJob, null)
+            compare(panel.searching, false)
             panel.close()
             stage = "complete"
         }

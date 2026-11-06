@@ -46,8 +46,6 @@ PinholePlugin {
     property string editsKey: ""
     // Bumped when the series or the edits change, for bindings to follow.
     property int revision: 0
-    property bool finding: false
-    property bool findAgain: false
     property bool found: false
     // Each series one card in the grid.
     stacks: series
@@ -56,24 +54,18 @@ PinholePlugin {
     readonly property string finder: pinhole.exists(pinhole.dir + "/pinhole-series")
                                      ? "pinhole-series" : pinhole.dir + "/finder/target/release/pinhole-series"
 
+    // Asked again while it looks: once more after, with the library then.
     function find() {
-        if (finding) {
-            findAgain = true
+        if (pinhole.library.count === 0 && !finding.busy)
             return
-        }
-        if (pinhole.library.count === 0)
-            return
-        finding = true
-        pinhole.run(finder, ["find", pinhole.library.dir, pinhole.cacheDir])
-            .then(result => take(result.stdout))
-            .catch(pinhole.warn)
-            .then(() => {
-                finding = false
-                if (findAgain) {
-                    findAgain = false
-                    find()
-                }
-            })
+        finding.start(() => pinhole.library.count === 0 ? null
+                           : pinhole.run(finder, ["find", pinhole.library.dir, pinhole.cacheDir]))
+    }
+    Job {
+        id: finding
+        coalesce: true
+        onDone: result => { if (result) plugin.take(result.stdout) }
+        onFailed: error => pinhole.warn(error)
     }
     // The finder's lines, each a series' ids.
     function take(out) {

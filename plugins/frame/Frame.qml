@@ -7,16 +7,19 @@ import Pinhole.Plugin
 // loads the photo after.
 Item {
     id: frame
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+    objectName: "photoFrame"
+    // Its PluginView (Main.qml), and the plugin's root.
+    property var view
+    readonly property var plugin: view ? view.plugin : null
+    readonly property bool shown: view ? view.shown : false
     // Asleep, the screen would put a screensaver over it, then lock.
     // Let go by Pinhole too when the plugin is turned off or loaded again.
-    onShownChanged: pinhole.keepAwake(shown)
+    // Closed (Esc, P, a click, ✕), it hands its photo back.
+    onShownChanged: {
+        pinhole.keepAwake(shown)
+        if (!shown)
+            stopped()
+    }
 
     // The photos chosen, by id, oldest first; how to choose them again when
     // the library is read again (the ids of those still there); and the
@@ -41,12 +44,12 @@ Item {
 
     readonly property int fadeMs: 1400
     // A slide moves through its time and its fades.
-    readonly property real span: plugin.seconds + 2 * fadeMs / 1000
+    readonly property real span: pinhole.settings.seconds + 2 * fadeMs / 1000
 
     // From `first` (an id, of `chosen` or not; "" for the round's own
     // first), then round and round `chosen`. `choose()` gives them again
     // as the library changes.
-    function start(first, list, fromViewer, again) {
+    function play(first, list, fromViewer, again) {
         if (list.length === 0 && first === "")
             return
         emptyLater.stop()
@@ -69,8 +72,8 @@ Item {
         current.begin(span)
         next.load(distinct > 1 ? idAt(1) : "")
         prefetch(2)
-        advance.begin(plugin.seconds * 1000)
-        shown = true
+        advance.begin(pinhole.settings.seconds * 1000)
+        view.open()
         pointer.wake()
         // A video open in the viewer would go on beneath, heard.
         if (fromViewer)
@@ -85,7 +88,7 @@ Item {
         const list = chosen
         if (list.length === 0)
             return []
-        if (plugin.shuffle) {
+        if (pinhole.settings.shuffle) {
             const rest = fresh ? list.filter(id => id !== after) : list.slice()
             for (let k = rest.length - 1; k > 0; --k) {
                 const j = Math.floor(Math.random() * (k + 1))
@@ -128,9 +131,9 @@ Item {
     }
 
     function stop() {
-        if (!shown)
-            return
-        shown = false
+        view.close()
+    }
+    function stopped() {
         changedLater = false
         advance.stop()
         // A wait held still is over with it: shown again, it begins anew.
@@ -291,7 +294,7 @@ Item {
         fade.duration = waiting.byHand ? 450 : fadeMs
         fade.target = current
         fade.restart()
-        advance.begin(plugin.seconds * 1000)
+        advance.begin(pinhole.settings.seconds * 1000)
     }
     NumberAnimation {
         id: fade
@@ -397,7 +400,7 @@ Item {
         if (list.length !== was.length || list.some((id, i) => id !== was[i])) {
             const before = new Set(was), now = new Set(list)
             const added = list.filter(id => !before.has(id))
-            if (plugin.shuffle && added.length <= 50) {
+            if (pinhole.settings.shuffle && added.length <= 50) {
                 const rest = order.slice(at + 1).filter(id => now.has(id))
                 for (const id of added)
                     rest.splice(Math.floor(Math.random() * (rest.length + 1)), 0, id)
@@ -419,12 +422,12 @@ Item {
             go(1, false)
     }
     Connections {
-        target: frame.pinhole.library
+        target: pinhole.library
         function onChanged() { frame.libraryChanged() }
     }
     // Photos hidden from the grid, or shown again: chosen again too.
     Connections {
-        target: frame.pinhole
+        target: pinhole
         function onHiddenChanged() { frame.libraryChanged() }
     }
 
@@ -438,18 +441,16 @@ Item {
     Slide {
         id: slideA
         anchors.fill: parent
-        pinhole: frame.pinhole
-        motion: frame.plugin.motion
-        caption: frame.plugin.caption
-        yearsAgo: frame.plugin.photos === "onthisday"
+        motion: pinhole.settings.motion
+        caption: pinhole.settings.caption
+        yearsAgo: pinhole.settings.photos === "onthisday"
     }
     Slide {
         id: slideB
         anchors.fill: parent
-        pinhole: frame.pinhole
-        motion: frame.plugin.motion
-        caption: frame.plugin.caption
-        yearsAgo: frame.plugin.photos === "onthisday"
+        motion: pinhole.settings.motion
+        caption: pinhole.settings.caption
+        yearsAgo: pinhole.settings.photos === "onthisday"
     }
 
     // A click stops it; a two-finger tap (the right button) holds it still,
@@ -510,23 +511,11 @@ Item {
         ShellButton {
             floating: true
             text: "✕"
-            action: stopCommand
+            action: frame.view.closeCommand
         }
     }
 
     // Its keys, while it is on top (Command.qml).
-    Command {
-        id: stopCommand
-        name: "frame.stop"
-        text: qsTr("Stop the photo frame")
-        section: "Photo frame"
-        keys: ["Escape", "P"]
-        keyLayer: "plugin"
-        when: frame.shown
-        mouse: qsTr("Click")
-        touchpad: qsTr("Tap")
-        onTriggered: frame.stop()
-    }
     Command {
         id: previousCommand
         name: "frame.previous"

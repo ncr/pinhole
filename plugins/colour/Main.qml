@@ -19,12 +19,7 @@ import "Colour.js" as Colour
 PinholePlugin {
     id: plugin
     // The finder once made (Finder.qml), null before.
-    readonly property var finder: view.item
-    covering: finder !== null && finder.shown
-    function made() {
-        view.active = true
-        return view.item
-    }
+    readonly property var finder: finderView.item
 
     // The library's colours (Colour.index), by the photos' ids: read when
     // the finder opens, from the library's columns at once, and while it is
@@ -48,7 +43,7 @@ PinholePlugin {
         colours = Colour.withHidden(data, hiddenTest())
         return colours
     }
-    readonly property bool finding: finder !== null && finder.shown
+    readonly property bool finding: finderView.shown
     function warm() {
         if (stale && !finding && !warming.running)
             warming.start()
@@ -104,7 +99,10 @@ PinholePlugin {
             text: qsTr("Colours")
             key: "H"
             shown: pinhole.library.count > 0
-            onTriggered: plugin.made().openFinder()
+            onTriggered: {
+                finderView.open()
+                finderView.item.openFinder()
+            }
         },
         PluginAction {
             id: viewerAction
@@ -113,7 +111,12 @@ PinholePlugin {
             text: qsTr("Same colour")
             key: "H"
             shown: colour !== ""
-            onTriggered: plugin.made().like(pinhole.viewer.index)
+            onTriggered: {
+                if (!plugin.colourOf(pinhole.viewer.index))
+                    return
+                finderView.open()
+                finderView.item.like(pinhole.viewer.index)
+            }
         }
     ]
 
@@ -168,13 +171,105 @@ PinholePlugin {
         }
     }
 
-    Loader {
-        id: view
-        anchors.fill: parent
-        active: false
-        // Its `plugin` is this one, the Loader's parent: within the Finder,
-        // `plugin` would be its own property.
-        sourceComponent: Finder { plugin: view.parent }
+    // Made the first time it opens, and kept.
+    PluginView {
+        id: finderView
+        // The Finder is given its view as it is made: its bindings read
+        // the plugin through it from the first.
+        content: Component { Finder { view: finderView } }
+        toggleKey: "H"
     }
-    FinderKeys { finder: plugin.finder }
+
+    // Its keys, here rather than in Finder.qml, so that they are in the
+    // help before it is first made.
+    Command {
+        name: "colour.hue"
+        text: qsTr("Hue round the wheel")
+        section: "Colours"
+        keys: ["Left"]
+        keysText: "← →"
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the wheel")
+        touchpad: qsTr("Tap the wheel")
+        onTriggered: finderView.item.turn(10)
+    }
+    Command {
+        name: "colour.hueBack"
+        keys: ["Right"]
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the wheel")
+        touchpad: qsTr("Tap the wheel")
+        onTriggered: finderView.item.turn(-10)
+    }
+    Command {
+        name: "colour.stronger"
+        text: qsTr("Stronger, greyer")
+        section: "Colours"
+        keys: ["Up"]
+        keysText: "↑ ↓"
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the wheel")
+        touchpad: qsTr("Tap the wheel")
+        onTriggered: finderView.item.strengthen(0.05)
+    }
+    Command {
+        name: "colour.greyer"
+        keys: ["Down"]
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the wheel")
+        touchpad: qsTr("Tap the wheel")
+        onTriggered: finderView.item.strengthen(-0.05)
+    }
+    Command {
+        name: "colour.darker"
+        text: qsTr("Darker, lighter")
+        section: "Colours"
+        keys: ["["]
+        keysText: "[ ]"
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the strip")
+        touchpad: qsTr("Tap the strip")
+        onTriggered: finderView.item.lighten(-0.04)
+    }
+    Command {
+        name: "colour.lighter"
+        keys: ["]"]
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find"
+        autoRepeat: true
+        mouse: qsTr("Click the strip")
+        touchpad: qsTr("Tap the strip")
+        onTriggered: finderView.item.lighten(0.04)
+    }
+    Command {
+        name: "colour.first"
+        text: qsTr("Open the closest")
+        section: "Colours"
+        keys: ["Return", "Enter"]
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "find" && finderView.item.results.length > 0
+        mouse: qsTr("Click a photo")
+        touchpad: qsTr("Tap a photo")
+        onTriggered: finderView.item.open(finderView.item.results[0])
+    }
+    // = as well as +, as for the grid's zoom.
+    Command {
+        name: "colour.bigger"
+        keys: ["="]
+        keyLayer: "plugin"
+        when: finderView.shown && finderView.item.mode === "wall" && finderView.item.canGrow
+        mouse: qsTr("The + button")
+        touchpad: qsTr("Pinch")
+        onTriggered: finderView.item.grow()
+    }
 }

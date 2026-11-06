@@ -9,13 +9,10 @@ import Pinhole.Plugin
 // the library is read again while they show, and on opening.
 Item {
     id: days
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown && !away ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    // Its PluginView (Main.qml), and the plugin through it.
+    required property var view
+    readonly property var plugin: view.plugin
+    readonly property bool shown: view.shown
 
     // A photo opened from here shows: closing it comes back (onReturned).
     readonly property bool away: pinhole.away
@@ -120,14 +117,10 @@ Item {
     onAwayChanged: relayout(null)
     onColumnsChanged: relayout(cursorLine())
 
-    function open() {
-        plugin.fresh()
+    // Opened (its view's opened()).
+    function start() {
         cursor = 0
-        shown = true
         list.positionViewAtBeginning()
-    }
-    function close() {
-        shown = false
     }
     // ← → through these years' photos, as they are laid out here.
     function openPhoto(at) {
@@ -137,22 +130,20 @@ Item {
         pinhole.openPhotos(years.reduce((all, year) => all.concat(year.photos), []), photoAt(at), { comeBack: true })
     }
     function reveal(i) {
-        close()
+        view.close()
         pinhole.reveal(i)
     }
     Connections {
-        target: days.pinhole
+        target: pinhole
         // Back on the photo last looked at, its lines kept meanwhile.
         function onReturned(photo) {
             days.plugin.fresh()
-            const position = days.pinhole.library.indexOf(photo)
+            const position = pinhole.library.indexOf(photo)
             const all = days.years.reduce((list, year) => list.concat(year.photos), [])
             const at = all.indexOf(position)
             if (at >= 0) days.cursor = at
             days.keepInView()
         }
-        // The plugin over it handed a photo over: closed for good.
-        function onDismissed() { days.close() }
     }
     // The years changed under it (the library read again, a setting,
     // photos hidden, or midnight): the cursor stays on its photo, by its
@@ -264,14 +255,6 @@ Item {
         touchpad: qsTr("In the grid, beside its year")
         onTriggered: days.reveal(days.photoAt(days.cursor))
     }
-    Command {
-        id: closeCommand
-        name: "onthisday.close"
-        keys: ["Escape", "D"]
-        keyLayer: "plugin"
-        when: days.shown
-        onTriggered: days.close()
-    }
 
     // Nothing over it reaches the photos beneath.
     Panel {}
@@ -294,7 +277,7 @@ Item {
         anchors.top: parent.top
         anchors.margins: 16
         text: "✕"
-        action: closeCommand
+        action: days.view.closeCommand
     }
 
     // Its years emptied while it showed: a setting, or midnight.
@@ -371,7 +354,7 @@ Item {
                         }
                         Image {
                             anchors.fill: parent
-                            source: days.pinhole.library.item(tile.modelData).thumbnail ?? ""
+                            source: pinhole.library.item(tile.modelData).thumbnail ?? ""
                             sourceSize.width: days.cell * Screen.devicePixelRatio
                             sourceSize.height: days.cell * Screen.devicePixelRatio
                             fillMode: Image.PreserveAspectCrop
