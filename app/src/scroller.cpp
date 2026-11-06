@@ -26,6 +26,7 @@ void registerScroller() {
 Q_COREAPP_STARTUP_FUNCTION(registerScroller)
 
 void Scroller::setTouchpadHold(TouchpadHold *hold) { theHold = hold; }
+TouchpadHold *Scroller::touchpadHold() { return theHold; }
 
 Scroller::Scroller(QQuickItem *parent) : QQuickItem(parent) {
     // The wheel only: presses and touches go on to what is beneath.

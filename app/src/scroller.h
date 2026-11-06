@@ -45,6 +45,7 @@ public:
 
     // Fingers coming to rest on the touchpad stop a coast, as on the grid.
     static void setTouchpadHold(TouchpadHold *hold);
+    static TouchpadHold *touchpadHold();
 
     QQuickItem *flickable() const { return m_flickable; }
     void setFlickable(QQuickItem *flickable);

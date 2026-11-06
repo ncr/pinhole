@@ -81,6 +81,19 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
   out, `size` that size: lay what it holds out at `size`, and it is drawn
   larger or smaller while it zooms. A `ScrollGrid` in it passes its
   pinches on, so a grid of cells scrolls and pinches as Pinhole's.
+- `PanZoom` (API 12): a surface moved and zoomed without levels (a map, a
+  picture larger than its room) on the grid's physics. It says how far,
+  the plugin moves its own camera: `panned(dx, dy)` (content pixels, right
+  and down positive), `zoomed(x, y, steps)` (steps of 2 around a point,
+  positive in), `tapped(x, y)`, `doubleTapped(x, y)`. A touchpad's swipe
+  pans and coasts on as the grid scrolls (fingers coming to rest stop it);
+  a mouse drag pans one to one and coasts on if let go moving; the wheel,
+  and Ctrl with a swipe, zoom around the pointer, gliding notch by notch
+  (`zoomPerNotch`, 0.5); a pinch zooms with the fingers. `moving`,
+  `dragging`, `stop()` (call it when the camera is put elsewhere: Fit all,
+  a key) and `zoomBy(x, y, steps)`. It takes every wheel turn, swipe and
+  pinch over it; its children (markers) take their own clicks. Info's map
+  is one.
 - `theme`: the window's colours and type, as Omarchy's theme sets them:
   `background`, `darkBackground`, `darkerBackground`, `lighterBackground`,
   `foreground`, `darkForeground`, `brightForeground`, `muted`, `accent`,
@@ -249,7 +262,8 @@ footgun Pinhole's own plugins hit):
   `ScrollGrid`, `ScrollArea`), and a `TableView`, `TreeView`, `PathView`,
   `Tumbler` or `SwipeView`: they scroll not as the grid does, and at
   their ends let the wheel through to the photos;
-- a `PinchHandler`, `PinchArea` or `MultiPointTouchArea` (`PinchZoom`), a
+- a `PinchHandler`, `PinchArea` or `MultiPointTouchArea` (`PinchZoom`, or
+  `PanZoom` for a surface without levels), a
   `WheelHandler`, and a `MouseArea`'s `onWheel` (a `Panel` or `Card` under
   the controls, a `Panel`'s `steps`): a pinch went through to the photos,
   and a `MouseArea` without `onWheel` lets the wheel through; so is one
@@ -389,7 +403,7 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `workers` in the manifest (Workers, below); `PhotoTiles`, `PanelHeader`,
 `SettingNote`, `SettingSwitch`, `Choices`' `numbered` and
 `pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input`,
-`hasKeys`, `workers` and `workerSaid`.
+`hasKeys`, `workers`, `workerSaid` and `PanZoom`.
 
 `Main.qml` beside it:
 

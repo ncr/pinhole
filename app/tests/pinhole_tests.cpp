@@ -1,3 +1,4 @@
+#include <QNativeGestureEvent>
 #include <QBuffer>
 #include <QClipboard>
 #include <QColorSpace>
@@ -64,6 +65,7 @@
 #include "pluginguide.h"
 #include "framestats.h"
 #include "plugins.h"
+#include "panzoom.h"
 #include "photoprovider.h"
 #include "thumbnailloader.h"
 #include "scrollphysics.h"
@@ -5831,6 +5833,49 @@ private slots:
             QVERIFY(::kill(pid, 0) != 0);
         QVERIFY(clock.elapsed() >= 900);
         QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
+    }
+
+    // PanZoom: the wheel glides to its notch's zoom, a swipe pans and
+    // coasts on as the fingers lift, a pinch zooms with them at once.
+    void panZoomMovesAsTheGridScrolls() {
+        PanZoom pan;
+        pan.setSize(QSizeF(800, 600));
+        double dx = 0, dy = 0, steps = 0;
+        QPointF around;
+        QObject::connect(&pan, &PanZoom::panned, [&](qreal x, qreal y) { dx += x; dy += y; });
+        QObject::connect(&pan, &PanZoom::zoomed, [&](qreal x, qreal y, qreal s) { steps += s; around = QPointF(x, y); });
+        const auto send = [&](QPoint pixels, QPoint angle, Qt::ScrollPhase phase, quint64 t) {
+            QWheelEvent wheel(QPointF(300, 200), QPointF(300, 200), pixels, angle, Qt::NoButton, Qt::NoModifier, phase, false);
+            wheel.setTimestamp(t);
+            QCoreApplication::sendEvent(&pan, &wheel);
+        };
+        // A notch: not at once, then all of it, around the pointer.
+        send({}, QPoint(0, 120), Qt::NoScrollPhase, 1000);
+        QVERIFY(steps < 0.5);
+        for (int i = 0; i < 120 && pan.advance(1 / 60.0); ++i) {}
+        QCOMPARE(qRound(steps * 1000), 500);
+        QCOMPARE(around, QPointF(300, 200));
+        // A swipe down, fast, lifted moving: the content goes down with the
+        // fingers, and on after they lift.
+        send({}, {}, Qt::ScrollBegin, 2000);
+        for (int i = 1; i <= 6; ++i)
+            send(QPoint(0, 40), {}, Qt::ScrollUpdate, 2000 + 8 * i);
+        const double lifted = dy;
+        QVERIFY2(lifted > 200, qPrintable(QString::number(lifted)));
+        send({}, {}, Qt::ScrollEnd, 2056);
+        for (int i = 0; i < 30; ++i)
+            pan.advance(1 / 60.0);
+        QVERIFY2(dy > lifted + 50, qPrintable(QString::number(dy)));
+        QVERIFY(pan.moving());
+        pan.stop();
+        QVERIFY(!pan.moving());
+        QCOMPARE(dx, 0.0);
+        // A pinch: with the fingers, at once.
+        const double before = steps;
+        QNativeGestureEvent pinch(Qt::ZoomNativeGesture, QPointingDevice::primaryPointingDevice(), 2, QPointF(100, 100),
+                                  QPointF(100, 100), QPointF(100, 100), 1.0, {}, 1);
+        QCoreApplication::sendEvent(&pan, &pinch);
+        QCOMPARE(qRound((steps - before) * 1000), 1000);
     }
 
     // What pinholed says of a plugin's workers reaches that plugin only:

@@ -27,13 +27,6 @@ constexpr int dataZoom = 14;
 const QString planet = QStringLiteral("https://tiles.openfreemap.org/planet");
 int wrap(int x, int n) { return ((x % n) + n) % n; }
 qreal delta(qreal x, qreal centre) { return x - centre - std::floor(x - centre + 0.5); }
-// A touchpad's two fingers, as the window's Keymap::isTouchpadScroll tells
-// them (app/src/keymap.cpp): the module has only Qt to link with.
-bool touchpadScroll(const QWheelEvent &event) {
-    return event.phase() != Qt::NoScrollPhase
-        || event.source() == Qt::MouseEventSynthesizedBySystem
-        || (event.angleDelta().isNull() && !event.pixelDelta().isNull());
-}
 }
 
 MapTiles::MapTiles(QQuickItem *parent) : QQuickPaintedItem(parent) {
@@ -427,35 +420,4 @@ void MapTiles::loadVisible() {
         m_unavailable = failed;
         emit unavailableChanged();
     }
-}
-
-MapWheel::MapWheel(QQuickItem *parent) : QQuickItem(parent) {
-    connect(this, &QQuickItem::windowChanged, this, [this](QQuickWindow *window) {
-        if (m_window)
-            m_window->removeEventFilter(this);
-        m_window = window;
-        if (m_window)
-            m_window->installEventFilter(this);
-    });
-}
-
-bool MapWheel::eventFilter(QObject *watched, QEvent *event) {
-    if (watched != m_window || event->type() != QEvent::Wheel || !isVisible() || !isEnabled())
-        return false;
-    const auto *wheel = static_cast<QWheelEvent *>(event);
-    const auto at = mapFromScene(wheel->position());
-    if (!contains(at))
-        return false;
-    const QPoint pixels = wheel->pixelDelta(), angle = wheel->angleDelta();
-    if (touchpadScroll(*wheel) && !(wheel->modifiers() & Qt::ControlModifier)) {
-        const QPointF delta = pixels.isNull() ? QPointF(angle) / 8 : QPointF(pixels);
-        if (!delta.isNull())
-            emit pan(delta.x(), delta.y());
-    } else if (const int dy = angle.y() ? angle.y() : pixels.y()) {
-        emit zoomAt(at.x(), at.y(), dy / 120.0 * 0.65);
-    } else if (angle.x()) {
-        emit pan(angle.x() / 2.0, 0);
-    }
-    event->accept();
-    return true;
 }

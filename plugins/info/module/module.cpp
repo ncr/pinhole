@@ -11,8 +11,6 @@ class InfoModule : public QQmlExtensionPlugin {
 public:
     void registerTypes(const char *uri) override {
         qmlRegisterType<MapTiles>(uri, 1, 0, "MapTiles");
-        qmlRegisterType<MapWheel>(uri, 1, 0, "MapWheel");
-        qmlRegisterType(QUrl(QStringLiteral("qrc:/pinhole-info/MapGestures.qml")), uri, 1, 0, "MapGestures");
     }
 };
 

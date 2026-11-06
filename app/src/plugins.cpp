@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "panzoom.h"
 #include "pluginguide.h"
 #include "sdrvideo.h"
 #include "videoview.h"
@@ -843,6 +844,9 @@ void Plugins::registerTypes() {
     // The grid's scrolling over a Flickable of one's own (scroller.h, API
     // 4): ScrollList, ScrollGrid and ScrollArea are each one with it.
     qmlRegisterType<Scroller>("Pinhole.Plugin", 1, 0, "Scroller");
+    // A surface panned and zoomed without levels, on the grid's physics
+    // (panzoom.h, API 12): a map, a picture larger than its room.
+    qmlRegisterType<PanZoom>("Pinhole.Plugin", 1, 0, "PanZoom");
 }
 
 namespace {

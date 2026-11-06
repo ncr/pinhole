@@ -108,6 +108,8 @@ FocusScope {
             settle.start()
     }
     function centerOn(x, y, level) {
+        // Put somewhere else (Fit all, a group, the keys): what glided stops.
+        gestures.stop()
         const nextScale = Geo.scale(level)
         camera(x + (map.width - viewWidth) / (2 * nextScale),
                y + (map.height - viewHeight) / (2 * nextScale), level)
@@ -124,6 +126,7 @@ FocusScope {
                cy + (y - map.height / 2) * (1 / before - 1 / after), level)
     }
     function stepZoom(amount) {
+        gestures.stop()
         const group = map.activeFocus && pinhole.keyboardInUse ? currentGroup : null
         zoomAt(group ? screenX(group) : viewWidth / 2, group ? screenY(group) : viewHeight / 2,
                zoom + amount)
@@ -401,25 +404,18 @@ FocusScope {
             avoid: places.groups.filter(g => places.isInView(g)).map(g =>
                 Qt.rect(places.screenX(g) - 34, places.screenY(g) - 34, 74, 74))
         }
-        MapWheel {
-            width: places.viewWidth
-            height: places.viewHeight
-            enabled: places.pinhole.hasKeys
-            onPan: (dx, dy) => {
-                map.forceActiveFocus()
-                places.pan(dx, dy)
-            }
-            onZoomAt: (x, y, amount) => {
-                map.forceActiveFocus()
-                places.zoomAt(x, y, places.zoom + amount)
-            }
-        }
-        MapGestures {
+        // The kit's continuous pan and zoom, on the grid's physics: a swipe
+        // or a drag coasts on, the wheel glides notch by notch.
+        PanZoom {
+            id: gestures
             anchors.fill: parent
-            onPan: (dx, dy) => places.pan(dx, dy)
-            onZoomAt: (x, y, amount) => places.zoomAt(x, y, places.zoom + amount)
-            onBackgroundTapped: map.forceActiveFocus()
-            onDragStarted: map.forceActiveFocus()
+            zoomPerNotch: 0.65
+            onPanned: (dx, dy) => places.pan(dx, dy)
+            onZoomed: (x, y, steps) => places.zoomAt(x, y, places.zoom + steps)
+            onMovingChanged: if (moving) map.forceActiveFocus()
+            onTapped: map.forceActiveFocus()
+            onDoubleTapped: (x, y) => zoomBy(x, y, 1)
+            HoverHandler { cursorShape: gestures.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
 
             Repeater {
                 model: places.groups
@@ -733,7 +729,7 @@ FocusScope {
                 keys: ["Shift+" + modelData[0]]
                 when: places.visible
                 autoRepeat: true
-                onTriggered: places.pan(-modelData[1] * 80, -modelData[2] * 80)
+                onTriggered: { gestures.stop(); places.pan(-modelData[1] * 80, -modelData[2] * 80) }
             }
         }
     }

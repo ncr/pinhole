@@ -66,6 +66,7 @@ HEADERS += \
     $$PWD/photogrid.h \
     $$PWD/scrollphysics.h \
     $$PWD/scroller.h \
+    $$PWD/panzoom.h \
     $$PWD/shield.h \
     $$PWD/zoomer.h \
     $$PWD/touchpadhold.h \
@@ -113,6 +114,7 @@ SOURCES += \
     $$PWD/photogrid.cpp \
     $$PWD/scrollphysics.cpp \
     $$PWD/scroller.cpp \
+    $$PWD/panzoom.cpp \
     $$PWD/shield.cpp \
     $$PWD/zoomer.cpp \
     $$PWD/touchpadhold.cpp \

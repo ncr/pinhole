@@ -10,7 +10,6 @@ DESTDIR = $$PWD/../qml/Pinhole/Internal/Info
 
 HEADERS += maptiles.h vectortile.h
 SOURCES += maptiles.cpp vectortile.cpp module.cpp
-RESOURCES += module.qrc
 
 # Its qmldir beside the library.
 COPIES += qmldir

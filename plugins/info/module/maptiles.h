@@ -91,21 +91,3 @@ private:
     QVariantList m_avoid;
     bool m_unavailable = false;
 };
-
-// A map has two scroll axes. Read the window's wheel events before Qt Quick
-// discards updates whose angle delta is empty but whose pixel delta is not.
-class MapWheel : public QQuickItem {
-    Q_OBJECT
-public:
-    explicit MapWheel(QQuickItem *parent = nullptr);
-
-signals:
-    void pan(qreal dx, qreal dy);
-    void zoomAt(qreal x, qreal y, qreal amount);
-
-protected:
-    bool eventFilter(QObject *watched, QEvent *event) override;
-
-private:
-    QPointer<QQuickWindow> m_window;
-};

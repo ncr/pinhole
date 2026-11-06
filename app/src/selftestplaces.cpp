@@ -1,3 +1,4 @@
+#include "panzoom.h"
 #include "viewer.h"
 
 #include <QCoreApplication>
@@ -62,6 +63,20 @@ QQuickItem *groupMarker(QQuickItem *root) {
     });
 }
 
+int markers(QQuickItem *root) {
+    int count = 0;
+    std::function<void(QQuickItem *)> look = [&](QQuickItem *item) {
+        if (!item || !item->isVisible())
+            return;
+        if (item->objectName() == "placesMarker")
+            ++count;
+        for (auto *child : item->childItems())
+            look(child);
+    };
+    look(root);
+    return count;
+}
+
 QQuickItem *mapAction(QQuickItem *root) {
     return findItem(root, [](QQuickItem *item) {
         if (item->property("key").toString() == "M" && item->metaObject()->indexOfSignal("tapped()") >= 0)
@@ -100,6 +115,10 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
         int input = 0;
         int phase = 0;
         double previous = 0;
+        double before = 0;
+        // Zoomed in by the wheel, which glides there over a few frames:
+        // waited for before Fit all.
+        bool gliding = false;
         QElapsedTimer clock;
     };
     const auto run = std::make_shared<Run>();
@@ -148,6 +167,23 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
             }
             break;
         case 1: {
+            // Zoomed in, Warsaw's two may be apart: waited for without them.
+            if (run->gliding) {
+                // Its frames, as the window would draw them (one on a hidden
+                // workspace may get none).
+                if (auto *pan = qobject_cast<PanZoom *>(findItem(map, [](QQuickItem *item) { return qobject_cast<PanZoom *>(item); })))
+                    for (int frame = 0; frame < 12 && pan->advance(1 / 60.0);)
+                        ++frame;
+                if (zoom() <= run->previous) return;
+                run->gliding = false;
+                if (keys)
+                    press(window, Qt::Key_Home);
+                else
+                    click(window, device, named(map, "placesFit"));
+                if (std::abs(zoom() - run->before) > 0.01)
+                    return fail("Fit all did not restore the overview");
+                break;
+            }
             if (!viewport || !group) return;
             const auto at = viewport->mapToScene(QPointF(viewport->width() * 0.65, viewport->height() / 2));
             const double before = longitude(), beforeZoom = zoom();
@@ -172,18 +208,17 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 wheel(window, touchpad, at, QPoint(0, 15), QPoint(0, 120), Qt::NoScrollPhase);
             else
                 pinch(window, device, at);
-            if (zoom() <= beforeZoom)
-                return fail("zoom did not move in");
-            if (keys)
-                press(window, Qt::Key_Home);
-            else
-                click(window, device, named(map, "placesFit"));
-            if (std::abs(zoom() - beforeZoom) > 0.01)
-                return fail("Fit all did not restore the overview");
-            break;
+            // The keys and a pinch zoom at once, the wheel glides: either
+            // way, in within a few frames.
+            run->previous = beforeZoom;
+            run->before = beforeZoom;
+            run->gliding = true;
+            return;
         }
         case 2:
-            if (!group) return;
+            // Both places, Warsaw's two and Lisbon, once the groups are made
+            // again for the view Fit all left (a moment after).
+            if (!group || markers(viewport) < 2) return;
             if (!folder.isEmpty() && run->input == 0)
                 window->grabWindow().save(folder + "/places.png");
             if (keys) {
