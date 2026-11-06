@@ -250,6 +250,7 @@ plugins/folder/           the Folders plugin: its sources' rows, the folders off
 plugins/folder/source/    a folder as a source (crate pinhole-folder)
 app/                      the window: Qt Quick, with the grid in C++; and `pinhole <command>` (commands.cpp)
 plugins/live/             the Live Photos plugin: the mark, L and ⇧ L, the motion and effects over the photo
+plugins/edit/             Turn and crop: R turns the photo shown, K crops it, kept in Pinhole (adjustment.h), undo
 plugins/favourites/       the Favourites plugin: the mark, F and its heart in the viewer and select mode, undo
 plugins/series/           the Series plugin; finder/ is pinhole-series, which finds them
 plugins/background/       the Background plugin: a photo or video as the desktop background

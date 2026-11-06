@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "adjustment.h"
 #include "encoder.h"
 #include "favourites.h"
 #include "library.h"
@@ -696,4 +697,66 @@ void PluginHost::warn(const QJSValue &error) {
     if (code == QLatin1String("cancelled") || code == QLatin1String("reloaded"))
         return;
     report(error.isError() ? thrown(error) : error.toString());
+}
+
+QList<QByteArray> PluginHost::idsOf(const QJSValue &photos) const {
+    const Library *data = m_plugins->libraryData();
+    QList<QByteArray> ids;
+    const auto add = [this, data, &ids](const QJSValue &photo) {
+        if (const int index = m_plugins->library()->positionOf(photo); index >= 0)
+            ids.append(data->at(index).id);
+    };
+    if (photos.isArray()) {
+        const int length = photos.property(QStringLiteral("length")).toInt();
+        for (int i = 0; i < length; ++i)
+            add(photos.property(quint32(i)));
+    } else {
+        add(photos);
+    }
+    return ids;
+}
+
+namespace {
+QVariantMap mapOf(const Adjustment &a) {
+    return {{"turn", a.turn},
+            {"crop", QVariantMap{{"x", a.crop.x()}, {"y", a.crop.y()}, {"width", a.crop.width()}, {"height", a.crop.height()}}}};
+}
+} // namespace
+
+QVariantMap PluginHost::adjustment(const QJSValue &photo) const {
+    AdjustmentStore *store = m_plugins->adjustments();
+    const QList<QByteArray> ids = idsOf(photo);
+    return mapOf(store && !ids.isEmpty() ? store->of(ids.first()) : Adjustment());
+}
+
+bool PluginHost::adjust(const QJSValue &photos, const QVariantMap &adjustment) {
+    AdjustmentStore *store = m_plugins->adjustments();
+    const QList<QByteArray> ids = idsOf(photos);
+    if (!store || ids.isEmpty())
+        return false;
+    Adjustments changes;
+    for (const QByteArray &id : ids) {
+        Adjustment a = store->of(id);
+        if (adjustment.contains("turn"))
+            a.turn = adjustment.value("turn").toInt();
+        if (adjustment.contains("crop")) {
+            const QVariantMap crop = adjustment.value("crop").toMap();
+            a.crop = crop.isEmpty() ? QRectF(0, 0, 1, 1)
+                                    : QRectF(crop.value("x").toDouble(), crop.value("y").toDouble(),
+                                             crop.value("width", 1).toDouble(), crop.value("height", 1).toDouble());
+        }
+        changes.insert(id, a.normalized());
+    }
+    return store->set(changes);
+}
+
+bool PluginHost::turn(const QJSValue &photos, int quarters) {
+    AdjustmentStore *store = m_plugins->adjustments();
+    const QList<QByteArray> ids = idsOf(photos);
+    if (!store || ids.isEmpty())
+        return false;
+    Adjustments changes;
+    for (const QByteArray &id : ids)
+        changes.insert(id, store->of(id).turned(quarters));
+    return store->set(changes);
 }

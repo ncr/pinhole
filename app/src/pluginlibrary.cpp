@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "adjustment.h"
 #include "pluginquery.h"
 #include "library.h"
 #include "photoprovider.h"
@@ -54,7 +55,10 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
         {"filename", item.filename},
         // For an Image, in sRGB (FileProvider); the file itself, to hand
         // to a program.
-        {"thumbnail", FileProvider::urlOf(QFile::decodeName(item.thumbPath))},
+        // As the person turned and cut it; `thumbnailAsIs`, as its file is
+        // (to cut it again).
+        {"thumbnail", Adjustment::withAdjustment(FileProvider::urlOf(QFile::decodeName(item.thumbPath)), item.adjust)},
+        {"thumbnailAsIs", FileProvider::urlOf(QFile::decodeName(item.thumbPath))},
         {"thumbPath", QFile::decodeName(item.thumbPath)},
         {"width", int(item.thumbW)},
         {"height", int(item.thumbH)},

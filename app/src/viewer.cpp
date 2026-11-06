@@ -35,6 +35,11 @@ Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
     connect(this, &Viewer::indexChanged, this, &Viewer::favoriteChanged);
+    // Another photo shown: its shape, and the adjustment drawn.
+    connect(this, &Viewer::indexChanged, this, [this] {
+        m_shownAdjust = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).adjust : Adjustment();
+        emit adjustChanged();
+    });
 }
 
 bool Viewer::loading() const {
@@ -47,6 +52,12 @@ bool Viewer::loading() const {
 
 QUrl Viewer::providerUrl(const QString &path) {
     return QUrl(QStringLiteral("image://photo/") + QString::fromUtf8(QUrl::toPercentEncoding(path)));
+}
+
+QUrl Viewer::image() const {
+    if (m_image.isEmpty() || m_index < 0 || m_index >= m_library->count())
+        return m_image;
+    return Adjustment::withAdjustment(m_image, m_library->at(m_index).adjust);
 }
 
 QUrl Viewer::thumbnail() const {
@@ -335,15 +346,18 @@ int Viewer::photoAt(int place) const {
 QUrl Viewer::thumbnailAt(int index) const {
     if (index < 0 || index >= m_library->count())
         return {};
-    // In sRGB, as the grid draws it (FileProvider).
-    return FileProvider::urlOf(QFile::decodeName(m_library->at(index).thumbPath));
+    // In sRGB, as the grid draws it (FileProvider), turned and cut as the
+    // person did.
+    return Adjustment::withAdjustment(FileProvider::urlOf(QFile::decodeName(m_library->at(index).thumbPath)),
+                                      m_library->at(index).adjust);
 }
 
 QUrl Viewer::imageFor(int index) const {
     if (index < 0 || index >= m_library->count())
         return {};
     const auto found = m_mediums.find(m_library->at(index).id);
-    return found != m_mediums.end() ? providerUrl(*found) : thumbnailAt(index);
+    return found != m_mediums.end() ? Adjustment::withAdjustment(providerUrl(*found), m_library->at(index).adjust)
+                                    : thumbnailAt(index);
 }
 
 qreal Viewer::aspectAt(int index) const {
@@ -690,6 +704,8 @@ void Viewer::setHdr(const QVariantMap &hdr) {
 
 void Viewer::libraryReloaded(const std::vector<int> &moved) {
     auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
+    // The photo shown turned or cut since: its pictures and its shape.
+    const Adjustment before = m_index >= 0 && m_index < m_library->count() ? m_shownAdjust : Adjustment();
     for (int &i : m_hiddenList)
         i = mapped(i);
     std::erase(m_hiddenList, -1);
@@ -714,4 +730,13 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     rebuildRow();
     if (m_hiddenGiven != hiddenBefore)
         emit hiddenChanged();
+    const Adjustment now = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).adjust : Adjustment();
+    if (now != before) {
+        m_shownAdjust = now;
+        emit imageChanged();
+        emit adjustChanged();
+    }
+    // Any photo's: what imageFor() and thumbnailAt() give follows.
+    m_revision += 1;
+    emit imagesChanged();
 }

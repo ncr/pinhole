@@ -1,0 +1,21 @@
+{
+  "Any": "Dowolne",
+  "As taken": "Jak zdjęcie",
+  "Cancel": "Anuluj",
+  "Crop": "Kadruj",
+  "Crop the photo": "Kadruj zdjęcie",
+  "Keep this crop": "Zatwierdź kadr",
+  "Keep to a shape": "Trzymaj proporcje",
+  "Leave it as it was": "Zostaw, jak było",
+  "R turns the photo shown a quarter, Shift R back; K crops it. Kept in Pinhole, never in the photo's file: the grid, the viewer, exports as JPEG and copies show it so, and Ctrl Z undoes it.": "R obraca pokazane zdjęcie o ćwierć obrotu, Shift R z powrotem; K je kadruje. Zapisane w Pinhole, nigdy w pliku zdjęcia: tak pokazują je siatka, podgląd, eksport do JPEG i kopia, a Ctrl Z cofa.",
+  "The whole photo again": "Znów całe zdjęcie",
+  "Turn": "Obróć",
+  "Turn and crop": "Obrót i kadr",
+  "Turn back": "Obróć z powrotem",
+  "Turn it a quarter": "Obróć o ćwierć obrotu",
+  "Turn the photo a quarter; ⇧ R back": "Obróć zdjęcie o ćwierć obrotu; ⇧ R z powrotem",
+  "Turn three times": "Obróć trzy razy",
+  "Whole photo": "Całe zdjęcie",
+  "cropping": "kadrowanie",
+  "turning": "obrót"
+}

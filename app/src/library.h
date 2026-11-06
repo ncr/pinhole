@@ -1,5 +1,7 @@
 #pragma once
 
+#include "adjustment.h"
+
 #include <QByteArray>
 #include <QString>
 #include <vector>
@@ -14,8 +16,13 @@ struct LibraryItem {
     QByteArray thumbPath; // absolute, ready for fopen
     QString filename;     // as it was on the camera: IMG_1234.HEIC
     quint32 avgColor = 0x303030;
+    // The thumbnail's size as the photo is drawn: turned and cut as its
+    // adjustment says; rawW and rawH, as its file is.
     quint16 thumbW = 0;
     quint16 thumbH = 0;
+    quint16 rawW = 0;
+    quint16 rawH = 0;
+    Adjustment adjust;
     float duration = 0;
     qint64 date = 0;
     qint64 added = 0; // source's added date (ms); 0 when unknown, never index/import time
@@ -39,6 +46,9 @@ public:
     // A favourite set from the window, before the index has it
     // (favourites.h).
     void setFavorite(int i, bool favorite) { m_items[size_t(i)].favorite = favorite; }
+    // What the person did to its photos (adjustment.h): each one's
+    // adjustment, and its size drawn so. Those not named, none.
+    void applyAdjustments(const Adjustments &all);
     // Take another library's items (a fresh read of the same index). Only
     // while nothing else reads this one: see ThumbnailLoader::reload.
     void swap(Library &other) {

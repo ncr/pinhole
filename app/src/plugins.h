@@ -385,6 +385,18 @@ public:
     // once it has them (API 12). In a self-test the clipboard is the
     // window's own, as for copyFile.
     Q_INVOKABLE QJSValue copyText(const QString &text);
+    // What the person did to a photo in Pinhole (API 13, adjustment.h):
+    // { turn: quarters clockwise, crop: { x, y, width, height } as fractions
+    // of the photo turned }. Never to its file: the grid, the viewer, an
+    // export as JPEG and a copy show it so.
+    Q_INVOKABLE QVariantMap adjustment(const QJSValue &photo) const;
+    // Photos (positions or ids, or one) given this `turn` and/or `crop`;
+    // { turn: 0, crop: null } takes it all back. False when there is no
+    // library, or it could not be kept.
+    Q_INVOKABLE bool adjust(const QJSValue &photos, const QVariantMap &adjustment);
+    // Turned `quarters` more clockwise (-1: a quarter back), each from
+    // where it is, its crop turning with it.
+    Q_INVOKABLE bool turn(const QJSValue &photos, int quarters);
     // A file in its own folder or its cache (a worker's), read whole away
     // from the window (API 13): a promise of its text, or of what its JSON
     // says; rejected "not_found", "not_yours" (another's file), "too_large"
@@ -508,6 +520,7 @@ private:
     // `generation`.
     void settle(int generation, const QJSValue &how, const QJSValue &value);
     QJSValue readFile(const QString &path, bool json);
+    QList<QByteArray> idsOf(const QJSValue &photos) const;
     // query(), and for Pinhole's own asking with a source's tables too.
     QJSValue ask(const QString &sql, const QVariantList &values, bool privateTables);
 
@@ -807,6 +820,9 @@ public:
     PluginLibrary *library() const { return m_libraryApi.get(); }
     PluginViewer *viewerApi() const { return m_viewerApi.get(); }
     // pinholed's workers, as its `workers` event last said: every plugin's.
+    // Where what the person did to the photos is kept (adjustment.h).
+    void setAdjustments(class AdjustmentStore *store) { m_adjustmentStore = store; }
+    class AdjustmentStore *adjustments() const { return m_adjustmentStore; }
     const QJsonArray &serviceWorkers() const { return m_workers; }
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
@@ -901,6 +917,7 @@ private:
     std::unique_ptr<PluginLibrary> m_libraryApi;
     std::unique_ptr<PluginViewer> m_viewerApi;
     QJsonArray m_workers;
+    class AdjustmentStore *m_adjustmentStore = nullptr;
     // Before the plugins, so it outlives their hosts, which let it go.
     KeepAwake m_keepAwake;
     ColourDisplay m_display;

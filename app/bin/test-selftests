@@ -23,7 +23,7 @@ import tempfile
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
-MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour"]
+MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit"]
 TEST_PLUGINS = ["scrolls", "layers"]
 
 
@@ -112,6 +112,10 @@ def run(mode, scratch, lib, farm, logs):
     with (logs / f"{mode}.log").open("w") as log:
         code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
                               stderr=subprocess.STDOUT).returncode
+    # The pictures a mode took, kept beside its log (edit's: its photo turned
+    # and cropped).
+    for picture in out.glob("*.png"):
+        shutil.copy(picture, logs / f"{mode}-{picture.name}")
     text = (logs / f"{mode}.log").read_text(errors="replace")
     failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
     print(f"{mode}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code}")

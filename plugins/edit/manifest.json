@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "api": 13,
+  "id": "pinhole.edit",
+  "name": "Turn and crop",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "R turns the photo shown a quarter, Shift R back; K crops it. Kept in Pinhole, never in the photo's file: the grid, the viewer, exports as JPEG and copies show it so, and Ctrl Z undoes it.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}

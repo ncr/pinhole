@@ -1,5 +1,7 @@
 #pragma once
 
+#include "adjustment.h"
+
 #include "viewermotion.h"
 
 #include <QElapsedTimer>
@@ -29,7 +31,7 @@ class Viewer : public QObject {
     Q_PROPERTY(QUrl thumbnail READ thumbnail NOTIFY indexChanged)
     Q_PROPERTY(QUrl image READ image NOTIFY imageChanged)
     Q_PROPERTY(QString stage READ stage NOTIFY imageChanged)
-    Q_PROPERTY(qreal aspect READ aspect NOTIFY indexChanged)
+    Q_PROPERTY(qreal aspect READ aspect NOTIFY adjustChanged)
     Q_PROPERTY(bool video READ isVideo NOTIFY indexChanged)
     Q_PROPERTY(QUrl videoSource READ videoSource NOTIFY videoChanged)
     Q_PROPERTY(bool favorite READ isFavorite NOTIFY favoriteChanged)
@@ -79,7 +81,8 @@ public:
     int index() const { return m_index; }
     QRectF origin() const { return m_origin; }
     QUrl thumbnail() const;
-    QUrl image() const { return m_image; }
+    // As the person turned and cut it (adjustment.h).
+    QUrl image() const;
     QString stage() const { return m_stage; }
     bool loading() const;
     qreal aspect() const;
@@ -159,6 +162,8 @@ public:
     void libraryReloaded(const std::vector<int> &moved);
 
 signals:
+    // The photo shown is turned or cut otherwise (aspect, image).
+    void adjustChanged();
     void takesInputChanged();
     void hiddenChanged();
     void openChanged();
@@ -249,6 +254,8 @@ private:
     // Medium renditions fetched, by photo, while the viewer is open.
     QHash<QByteArray, QString> m_mediums;
     int m_revision = 0;
+    // The adjustment of the photo shown, as last drawn.
+    Adjustment m_shownAdjust;
     int m_jumpFrom = -1;
     int m_jumpSide = 0;
     // Photos passing quicker than a person looks at them (a held key, the

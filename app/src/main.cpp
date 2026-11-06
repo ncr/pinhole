@@ -26,6 +26,7 @@
 #include "library.h"
 #include "timeline.h"
 #include "libraryreloader.h"
+#include "adjustment.h"
 #include "photogrid.h"
 #include "scroller.h"
 #include "incoming.h"
@@ -223,6 +224,8 @@ int main(int argc, char *argv[]) {
     bool haveLibrary = false;
     std::thread opening([&] {
         haveLibrary = library.open(libraryDir, &error);
+        if (haveLibrary)
+            library.applyAdjustments(AdjustmentStore::load(libraryDir));
         startup.mark(QStringLiteral("index_read"));
     });
 
@@ -403,6 +406,10 @@ int main(int argc, char *argv[]) {
     // The service found changes in the source: read the library again and
     // let everything that holds positions follow its photos.
     LibraryReloader reloader(&library, &loader, libraryDir);
+    // What the person turned and cut, kept apart from the library.
+    AdjustmentStore adjustments;
+    reloader.setAdjustments(&adjustments);
+    plugins.setAdjustments(&adjustments);
     QObject::connect(&reloader, &LibraryReloader::aboutToSwap, grid, [grid] { grid->rememberAnchor(); });
     QObject::connect(&reloader, &LibraryReloader::reloaded, grid,
                      [&, grid](const std::vector<int> &moved, const std::vector<int> &textures, bool toNewest) {

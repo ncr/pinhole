@@ -1,4 +1,5 @@
 #include "libraryreloader.h"
+#include "adjustment.h"
 
 #include "library.h"
 #include "thumbnailloader.h"
@@ -93,6 +94,7 @@ void LibraryReloader::reload() {
             }, Qt::QueuedConnection);
             return;
         }
+        read->fresh.applyAdjustments(AdjustmentStore::load(dir));
         const Library &fresh = read->fresh;
         QHash<QByteArray, int> positions;
         positions.reserve(fresh.count());
@@ -112,7 +114,8 @@ void LibraryReloader::reload() {
         // A photo whose thumbnail is a new file is drawn afresh.
         read->textures = read->moved;
         for (int i = 0; i < library->count(); ++i)
-            if (const int now = read->moved[size_t(i)]; now >= 0 && fresh.at(now).thumbPath != library->at(i).thumbPath)
+            if (const int now = read->moved[size_t(i)];
+                now >= 0 && (fresh.at(now).thumbPath != library->at(i).thumbPath || fresh.at(now).adjust != library->at(i).adjust))
                 read->textures[size_t(i)] = -1;
         read->readMs = took.elapsed();
         QMetaObject::invokeMethod(this, [this, read] { swapIn(read); }, Qt::QueuedConnection);
@@ -145,4 +148,13 @@ void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
     m_reading = false;
     if (std::exchange(m_again, false))
         reload();
+}
+
+void LibraryReloader::setAdjustments(AdjustmentStore *store) {
+    m_adjustments = store;
+    if (!store)
+        return;
+    store->setLibrary(m_dir);
+    connect(store, &AdjustmentStore::changed, this, &LibraryReloader::reload);
+    connect(this, &LibraryReloader::reloaded, store, [this] { m_adjustments->setLibrary(m_dir); });
 }

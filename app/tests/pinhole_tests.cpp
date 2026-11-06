@@ -44,6 +44,7 @@
 
 #include <qpa/qwindowsysteminterface.h>
 
+#include "adjustment.h"
 #include "colour.h"
 #include "display.h"
 #include "stage.h"
@@ -5239,6 +5240,59 @@ private slots:
     // what pinhole.settings says until chosen (the manifest's "settings"),
     // and a SettingSwitch with a
     // setting flips and keeps it.
+    // A photo turned and cut in Pinhole: its picture and its size, the
+    // frame turning with it, kept per library, and given to plugins.
+    void aPhotoTurnedAndCutIsDrawnSoAndKeptApart() {
+        Adjustment turned;
+        turned.turn = 1;
+        QCOMPARE(turned.applied(QSize(400, 300)), QSize(300, 400));
+        // A picture 2x1, red then blue: turned a quarter clockwise, red on top.
+        QImage two(2, 1, QImage::Format_RGB32);
+        two.setPixel(0, 0, qRgb(255, 0, 0));
+        two.setPixel(1, 0, qRgb(0, 0, 255));
+        const QImage upright = turned.applied(two);
+        QCOMPARE(upright.size(), QSize(1, 2));
+        QCOMPARE(QColor(upright.pixel(0, 0)), QColor(Qt::red));
+        // Its left half kept, then turned: the top half.
+        Adjustment left;
+        left.crop = QRectF(0, 0, 0.5, 1);
+        QCOMPARE(left.turned(1).crop, QRectF(0, 0, 1, 0.5));
+        QCOMPARE(left.turned(1).turned(3), left);
+        QCOMPARE(left.applied(QSize(400, 300)), QSize(200, 300));
+        QCOMPARE(Adjustment::fromQuery(left.turned(1).query()), left.turned(1));
+        QString bare;
+        QCOMPARE(Adjustment::ofUrl("a%20b.jpg?adjust=" + turned.query(), &bare), turned);
+        QCOMPARE(bare, QString("a%20b.jpg"));
+        QVERIFY(Adjustment().query().isEmpty());
+
+        // Kept apart from the library, per library, and read into it.
+        PluginBench bench({{"t", {{"api", 13}}}});
+        AdjustmentStore store;
+        store.setLibrary(bench.dir.path());
+        QVERIFY(AdjustmentStore::fileFor(bench.dir.path()).endsWith(".json"));
+        QVERIFY(store.set({{"a", turned}}));
+        QVERIFY(QFileInfo::exists(AdjustmentStore::fileFor(bench.dir.path())));
+        QCOMPARE(AdjustmentStore::load(bench.dir.path()).value("a"), turned);
+        Library library;
+        QString error;
+        QVERIFY(library.open(bench.dir.path(), &error));
+        library.applyAdjustments(AdjustmentStore::load(bench.dir.path()));
+        QCOMPARE(library.at(0).adjust, turned);
+        QCOMPARE(library.at(1).adjust, Adjustment());
+
+        // A plugin's: turned from where it is, cut, taken back.
+        bench.plugins->setAdjustments(&store);
+        QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 1);
+        QVERIFY(bench.js("pinhole.turn(['a', 'b'], 1)").toBool());
+        QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 2);
+        QCOMPARE(bench.js("pinhole.adjustment('b').turn").toInt(), 1);
+        QVERIFY(bench.js("pinhole.adjust('b', { crop: { x: 0.25, y: 0, width: 0.5, height: 1 } })").toBool());
+        QCOMPARE(bench.js("pinhole.adjustment('b').crop.width").toNumber(), 0.5);
+        QCOMPARE(bench.js("pinhole.adjustment('b').turn").toInt(), 1);
+        QVERIFY(bench.js("pinhole.adjust(['a', 'b'], { turn: 0, crop: null })").toBool());
+        QVERIFY(store.snapshot().isEmpty());
+    }
+
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {
         PluginBench bench({{"t", {{"api", 13}, {"settings", QJsonObject{{"shuffle", true}, {"seconds", 8}}}}}});
         Keymap keymap;

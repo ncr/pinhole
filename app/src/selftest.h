@@ -328,6 +328,9 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
 // starting afresh; a photo with no medium rendition shown sharp, as its
 // full size. Exits 1 if any step fails.
 void runFrameSelfTest(QQuickWindow *window, const Library &library);
+// PINHOLE_SELFTEST=edit:<dir>: Turn and crop: a photo turned (its shape
+// follows), cropped and kept; pictures in <dir> (selftestedit.cpp).
+void runEditSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
 
 // PINHOLE_SELFTEST=hidden:<dir> (selftesthidden.cpp): with a plugin hiding
 // photos (Screenshots, in hide mode, what it found kept: run it on a

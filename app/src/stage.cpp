@@ -353,26 +353,34 @@ qreal StagePhoto::gainMapWeight() const {
     return m_hdrWeight * m_gainMap.weight(m_headroom);
 }
 
-QString StagePhoto::pathOf(const QUrl &url) {
+QString StagePhoto::pathOf(const QUrl &url, Adjustment *adjust) {
     const QString s = url.toString(QUrl::FullyEncoded);
     for (const QLatin1String prefix : {QLatin1String("image://photo/"), QLatin1String("image://file/")})
-        if (s.startsWith(prefix))
-            return QUrl::fromPercentEncoding(s.mid(prefix.size()).toUtf8());
+        if (s.startsWith(prefix)) {
+            QString path;
+            const Adjustment a = Adjustment::ofUrl(QUrl::fromPercentEncoding(s.mid(prefix.size()).toUtf8()), &path);
+            if (adjust)
+                *adjust = a;
+            return path;
+        }
     return url.isLocalFile() ? url.toLocalFile() : QString();
 }
 
 QImage StagePhoto::decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled,
-                          GainMap *map) {
+                          GainMap *map, const Adjustment &adjust) {
     QByteArray profile;
-    QImage image = decodePhoto(path, size.isValid() && !size.isEmpty() ? size : QSize(), cancelled, &profile);
+    // Turned and cut as the person did, its gain map alike.
+    QImage image = adjust.applied(decodePhoto(path, size.isValid() && !size.isEmpty() ? size : QSize(), cancelled, &profile));
     if (image.isNull())
         return {};
     // A profile of tables (rare): made sRGB here, as the window's is.
     if (!stageColourOf(profile, colour))
         toSrgb(image, profile);
     // Its gain map: a quarter to a half of its size, decoded after it.
-    if (map && !(cancelled && *cancelled))
+    if (map && !(cancelled && *cancelled)) {
         *map = readGainMap(path, cancelled);
+        map->image = adjust.applied(map->image);
+    }
     return image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888_Premultiplied : QImage::Format_RGBX8888);
 }
 
@@ -381,7 +389,8 @@ void StagePhoto::load() {
         *m_cancel = true;
     m_cancel.reset();
     const quint64 serial = ++m_serial;
-    const QString path = pathOf(m_source);
+    Adjustment adjust;
+    const QString path = pathOf(m_source, &adjust);
     if (path.isEmpty()) {
         // Nothing to show: what it held let go.
         const bool had = !m_shown.isEmpty() || m_colour;
@@ -403,12 +412,12 @@ void StagePhoto::load() {
     const QUrl source = m_source;
     const QSize size = m_sourceSize;
     const bool withMap = m_linear;
-    decoding()->start([self, serial, path, source, size, cancel, withMap] {
+    decoding()->start([self, serial, path, source, size, cancel, withMap, adjust] {
         if (*cancel)
             return;
         auto colour = std::make_shared<StageColour>();
         auto map = std::make_shared<GainMap>();
-        const QImage image = decode(path, size, *colour, cancel.get(), withMap ? map.get() : nullptr);
+        const QImage image = decode(path, size, *colour, cancel.get(), withMap ? map.get() : nullptr, adjust);
         if (*cancel || image.isNull())
             return;
         QMetaObject::invokeMethod(qApp, [self, serial, image, colour, map, source, size] {

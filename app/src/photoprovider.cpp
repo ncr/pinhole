@@ -1,4 +1,5 @@
 #include "photoprovider.h"
+#include "adjustment.h"
 
 #include "colour.h"
 
@@ -126,7 +127,9 @@ QImage decodeHeif(const QString &path, QSize maxSize, const std::atomic<bool> *c
 class Response : public QQuickImageResponse, public QRunnable {
 public:
     Response(PhotoProvider *provider, QString path, QSize size)
-        : m_provider(provider), m_path(std::move(path)), m_size(size) {
+        : m_provider(provider), m_size(size) {
+        // Turned and cut as the person did (`?adjust=`, Viewer).
+        m_adjust = Adjustment::ofUrl(path, &m_path);
         setAutoDelete(false);
     }
     QQuickTextureFactory *textureFactory() const override { return QQuickTextureFactory::textureFactoryForImage(m_image); }
@@ -135,7 +138,7 @@ public:
     void cancel() override { m_cancelled = true; }
     void run() override {
         if (!m_cancelled)
-            m_image = decodePhoto(m_path, m_size, &m_cancelled);
+            m_image = m_adjust.applied(decodePhoto(m_path, m_size, &m_cancelled));
         if (m_cancelled)
             m_image = QImage();
         m_provider->decoded();
@@ -145,6 +148,7 @@ public:
 private:
     PhotoProvider *m_provider;
     QString m_path;
+    Adjustment m_adjust;
     QSize m_size;
     QImage m_image;
     std::atomic<bool> m_cancelled{false};
@@ -236,10 +240,11 @@ QUrl FileProvider::urlOf(const QString &path) {
 
 QImage FileProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize,
                                   const QQuickImageProviderOptions &options) {
-    const QString path = QUrl::fromPercentEncoding(id.toUtf8());
+    QString path;
+    const Adjustment adjust = Adjustment::ofUrl(QUrl::fromPercentEncoding(id.toUtf8()), &path);
     // HEIC, which Qt does not read: as the photo provider decodes it.
     if (heifByName(path)) {
-        QImage image = decodePhoto(path, requestedSize.width() > 0 && requestedSize.height() > 0 ? requestedSize : QSize());
+        QImage image = adjust.applied(decodePhoto(path, requestedSize.width() > 0 && requestedSize.height() > 0 ? requestedSize : QSize()));
         if (!image.isNull()) {
             if (size)
                 *size = image.size();
@@ -257,9 +262,9 @@ QImage FileProvider::requestImage(const QString &id, QSize *size, const QSize &r
         reader.setScaledSize(scaled);
     if (!options.sourceClipRect().isNull())
         reader.setScaledClipRect(options.sourceClipRect().toRect());
-    QImage image = reader.read();
+    QImage image = adjust.applied(reader.read());
     if (size)
-        *size = original.isValid() ? original : image.size();
+        *size = original.isValid() && adjust.isIdentity() ? original : image.size();
     toSrgb(image);
     return image;
 }

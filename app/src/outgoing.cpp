@@ -1,4 +1,7 @@
 #include "outgoing.h"
+#include "colour.h"
+#include "photoprovider.h"
+#include "adjustment.h"
 
 #include "library.h"
 #include "selftest.h"
@@ -346,7 +349,28 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
 
     // A hard link where the cache and the target share a disk (free and
     // instant), a copy otherwise.
-    auto hand = [placed](const QString &from, const QString &out) {
+    // Turned or cut in Pinhole, the photo as it looks here: made afresh,
+    // away from the window, as a JPEG (its date and place are the file's,
+    // which this leaves behind). An original stays as it was taken.
+    const Adjustment adjust = compatible ? item.adjust : Adjustment();
+    auto hand = [placed, adjust, this](const QString &from, const QString &out) {
+        if (!adjust.isIdentity()) {
+            const QString jpeg = QFileInfo(out).path() + '/' + QFileInfo(out).completeBaseName() + QStringLiteral(".jpg");
+            const QString to = uniqueName(QFileInfo(out).path(), QFileInfo(jpeg).fileName());
+            auto *watcher = new QFutureWatcher<bool>(this);
+            connect(watcher, &QFutureWatcherBase::finished, this, [watcher, placed, to] {
+                watcher->deleteLater();
+                placed(watcher->result() ? to : QString());
+            });
+            watcher->setFuture(QtConcurrent::run([from, to, adjust] {
+                QImage image = adjust.applied(decodePhoto(from, QSize()));
+                if (image.isNull())
+                    return false;
+                toSrgb(image);
+                return image.save(to, "JPEG", 92);
+            }));
+            return;
+        }
         if (::link(QFile::encodeName(from).constData(), QFile::encodeName(out).constData()) == 0 ||
             QFile::copy(from, out))
             placed(out);

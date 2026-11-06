@@ -1,5 +1,7 @@
 #pragma once
 
+#include "adjustment.h"
+
 #include <QImage>
 #include <QObject>
 #include <QPointer>
@@ -163,12 +165,12 @@ public:
     void setGainMapOn(bool on);
     qreal gainMapWeight() const;
 
-    // The file an image URL of the viewer's is of.
-    static QString pathOf(const QUrl &url);
+    // The file of an image:// URL, and what it says the person did to it.
+    static QString pathOf(const QUrl &url, Adjustment *adjust = nullptr);
     // Decodes `path` as the stage draws it (any thread), and its gain map
     // if `map` is given.
     static QImage decode(const QString &path, QSize size, StageColour &colour, const std::atomic<bool> *cancelled,
-                         GainMap *map = nullptr);
+                         GainMap *map = nullptr, const Adjustment &adjust = {});
 
 signals:
     void sourceChanged();

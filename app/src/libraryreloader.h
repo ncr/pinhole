@@ -30,6 +30,9 @@ public:
     void moveTo(const QString &dir);
 
     void reload();
+    // Where what was done to the photos is kept: followed into each read,
+    // and a change there reads the library again (adjustment.h).
+    void setAdjustments(class AdjustmentStore *store);
     // The next reload is another source's library: shown from its newest
     // photos, not from where the last one was (see `reloaded`).
     void showNewestNext() { m_toNewest = true; }
@@ -58,6 +61,7 @@ private:
     Library *m_library;
     ThumbnailLoader *m_loader;
     QString m_dir;
+    class AdjustmentStore *m_adjustments = nullptr;
     std::thread m_reader;
     bool m_reading = false;
     bool m_again = false;

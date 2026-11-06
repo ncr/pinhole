@@ -77,11 +77,12 @@ QImage buildPage(tjhandle tj, const Library &library, int page, std::vector<unsi
         const int x = (j % kMosaicSide) * kMosaicTile;
         const int y = (j / kMosaicSide) * kMosaicTile;
         int level = 0;
-        const int shortEdge = std::min(item.thumbW, item.thumbH);
+        const int shortEdge = std::min(item.rawW, item.rawH);
         while (level < 3 && (shortEdge >> (level + 1)) >= kMosaicTile)
             level += 1;
         QByteArray icc;
-        const QImage image = decodeJpeg(tj, item.thumbPath, level, buffer, &icc);
+        // As the person turned and cut it.
+        const QImage image = item.adjust.applied(decodeJpeg(tj, item.thumbPath, level, buffer, &icc));
         if (image.isNull()) {
             const QRgb c = item.avgColor;
             for (int row = 0; row < kMosaicTile; ++row) {
@@ -284,12 +285,15 @@ void ThumbnailLoader::run(bool fullDecoder) {
             const int index = keyIndex(key);
             if (index >= 0 && index < m_library->count()) {
                 const auto &item = m_library->at(index);
-                const double shortEdge = std::max(1, int(std::min(item.thumbW, item.thumbH)));
+                // Of the photo as its file is; a part cut from it needs
+                // that much more to be as sharp.
+                const double kept = std::min(item.adjust.crop.width(), item.adjust.crop.height());
+                const double shortEdge = std::max(1.0, std::min(item.rawW, item.rawH) * kept);
                 const double scale = fullShortEdge(keyLevel(key)) / shortEdge;
                 // Cover the square crop, not a bounding square: a tall
                 // screenshot needs its short edge sharp, too.
-                const QSize bounds = item.thumbW && item.thumbH
-                    ? QSize(std::max(1, int(std::ceil(item.thumbW * scale))), std::max(1, int(std::ceil(item.thumbH * scale))))
+                const QSize bounds = item.rawW && item.rawH
+                    ? QSize(std::max(1, int(std::ceil(item.rawW * scale))), std::max(1, int(std::ceil(item.rawH * scale))))
                     : QSize(fullShortEdge(keyLevel(key)), fullShortEdge(keyLevel(key)));
                 image = decodePhoto(QFile::decodeName(path), bounds, &m_giveUp);
                 image = image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888_Premultiplied : QImage::Format_RGBX8888);
@@ -310,6 +314,12 @@ void ThumbnailLoader::run(bool fullDecoder) {
         } else if (const int index = keyIndex(key); index >= 0 && index < m_library->count()) {
             image = decodeJpeg(tj, m_library->at(index).thumbPath, keyLevel(key), buffer);
         }
+        // A photo's own picture (not a mosaic page, made turned already),
+        // as the person turned and cut it. The library is swapped only
+        // while every decoder is idle.
+        if (!isPageKey(key) && !image.isNull())
+            if (const int index = keyIndex(key); index >= 0 && index < m_library->count())
+                image = m_library->at(index).adjust.applied(image);
         const quint64 took = quint64(timer.nsecsElapsed());
         m_decodeNanos += took;
         m_decoded += 1;

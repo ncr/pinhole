@@ -1,6 +1,8 @@
 #include "library.h"
 
 #include <QDir>
+
+#include <algorithm>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -43,8 +45,8 @@ bool Library::open(const QString &dir, QString *error) {
                 item.thumbPath = base + q.value(0).toString().toUtf8();
             if (!q.value(1).isNull())
                 item.avgColor = q.value(1).toUInt();
-            item.thumbW = quint16(q.value(2).toUInt());
-            item.thumbH = quint16(q.value(3).toUInt());
+            item.thumbW = item.rawW = quint16(q.value(2).toUInt());
+            item.thumbH = item.rawH = quint16(q.value(3).toUInt());
             item.duration = q.value(4).toFloat();
             item.date = q.value(5).toLongLong();
             item.video = q.value(6).toBool();
@@ -67,4 +69,18 @@ bool Library::open(const QString &dir, QString *error) {
     }
     QSqlDatabase::removeDatabase("library");
     return true;
+}
+
+void Library::applyAdjustments(const Adjustments &all) {
+    for (LibraryItem &item : m_items) {
+        item.adjust = all.value(item.id);
+        if (item.adjust.isIdentity() || !item.rawW || !item.rawH) {
+            item.thumbW = item.rawW;
+            item.thumbH = item.rawH;
+            continue;
+        }
+        const QSize size = item.adjust.applied(QSize(item.rawW, item.rawH));
+        item.thumbW = quint16(std::min(size.width(), 65535));
+        item.thumbH = quint16(std::min(size.height(), 65535));
+    }
 }

@@ -456,7 +456,9 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `hasKeys`, `pinhole.workers`, `workerSaid` and `PanZoom`. API 13 adds
 `pinhole.readText(path)` and `readJson(path)`, a worker's `said` in
 `pinhole.workers`, `PluginView`, `Job`, the manifest's `settings` (each
-setting's default) and a `setting` for `SettingSwitch` and `Choices`.
+setting's default), a `setting` for `SettingSwitch` and `Choices`, and
+`pinhole.adjustment`, `adjust` and `turn`, with `library.item()`'s
+`thumbnailAsIs`.
 
 `Main.qml` beside it:
 
@@ -909,6 +911,7 @@ this API. A library position is not a visual grid position.
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
+| `adjustment(photo)`, `adjust(photos, adjustment)`, `turn(photos, quarters)` | what the person did to a photo in Pinhole, never to its file (API 13): `{ turn, crop: { x, y, width, height } }`, quarter turns clockwise and the part kept as fractions of the photo turned. The grid, the viewer, an export as JPEG and a copy show it so; the original exported is as taken. `adjust` sets `turn` and/or `crop` (`{ turn: 0, crop: null }` takes it all back); `turn` turns from where each is, its crop turning with it. Kept per library apart from it (`~/.local/state/pinhole/adjustments/`), followed by other windows; `library.item()` then says the size drawn, and `thumbnailAsIs` is the thumbnail as its file is (to crop again). No step to undo is made: record one with `did`, as Turn and crop does |
 | `readText(path)`, `readJson(path)` | a file of its own read whole, away from the window (API 13): one in its folder (`dir`) or its cache (`cacheDir`, what its worker writes). A promise of its text, or of what its JSON says; rejected `not_found`, `not_yours` (a file elsewhere), `too_large` (over 32 MB), `unreadable` or `json` |
 | `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |

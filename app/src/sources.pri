@@ -54,6 +54,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
 
 HEADERS += \
     $$PWD/library.h \
+    $$PWD/adjustment.h \
     $$PWD/timeline.h \
     $$PWD/libraryreloader.h \
     $$PWD/keymap.h \
@@ -101,6 +102,7 @@ HEADERS += \
 
 SOURCES += \
     $$PWD/library.cpp \
+    $$PWD/adjustment.cpp \
     $$PWD/pluginguide.cpp \
     $$PWD/timeline.cpp \
     $$PWD/libraryreloader.cpp \
@@ -152,6 +154,7 @@ SOURCES += \
     $$PWD/selftestsources.cpp \
     $$PWD/selftestlive.cpp \
     $$PWD/selftestframe.cpp \
+    $$PWD/selftestedit.cpp \
     $$PWD/selftesthidden.cpp \
     $$PWD/selfteststacks.cpp \
     $$PWD/selftestthrough.cpp \
