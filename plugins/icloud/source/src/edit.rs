@@ -141,10 +141,15 @@ pub fn recipe_json(upright: Upright, adjustment: &Adjustment, previous: Option<&
     // EXIF's codes for a picture turned 90, 180, 270 degrees clockwise.
     let orientation = [0, 6, 3, 8][(adjustment.turn % 4) as usize];
     let (shape_w, shape_h) = if adjustment.turn % 2 == 1 { (h, w) } else { (w, h) };
+    // A photo never edited: the camera's standard style, as Photos on an
+    // iPhone puts it first in every crop it writes.
     let mut adjustments: Vec<Value> = previous
         .and_then(|p| p["adjustments"].as_array())
         .map(|a| a.iter().filter(|j| j["identifier"] != "Crop").cloned().collect())
-        .unwrap_or_default();
+        .unwrap_or_else(|| vec![json!({
+            "formatVersion": 1, "enabled": true, "identifier": "SemanticStyle", "formatIdentifier": "com.apple.photo",
+            "settings": {"version": 1, "tone": 0, "enabled": true, "cast": "Standard", "intensity": 1, "color": 0},
+        })]);
     adjustments.push(json!({
         "formatVersion": 1, "enabled": true, "identifier": "Crop", "formatIdentifier": "com.apple.photo",
         "settings": {"xOrigin": x, "yOrigin": y, "width": w, "height": h,
@@ -154,7 +159,9 @@ pub fn recipe_json(upright: Upright, adjustment: &Adjustment, previous: Option<&
     let version = previous
         .map(|p| p["versionInfo"].clone())
         .filter(|v| v.is_object())
-        .unwrap_or_else(|| json!({"platform": "OSX", "appVersion": "Pinhole", "buildNumber": "1", "schemaRevision": 0}));
+        // As Photos on iOS 26 wrote Jacek's reference edit: Photos opens
+        // to edit again only a recipe it takes for its own.
+        .unwrap_or_else(|| json!({"platform": "iOS", "appVersion": "916.57.153", "buildNumber": "24B115", "schemaRevision": 0}));
     json!({
         "metadata": {"masterWidth": upright.width, "masterHeight": upright.height, "orientation": orientation},
         "formatVersion": 1,
@@ -205,7 +212,9 @@ pub fn fields(
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut fields = json!({
         "adjustmentType": {"value": "com.apple.photo"},
-        "adjustmentCreatorCode": {"value": "net.becela.pinhole"},
+        // Photos' own: an edit by any other app Photos only shows, and
+        // offers to revert.
+        "adjustmentCreatorCode": {"value": "com.apple.mobileslideshow"},
         "adjustmentCompoundVersion": {"value": "1.12"},
         "adjustmentSimpleDataEnc": {"value": b64.encode(recipe)},
         "adjustmentTimestampEnc": {"value": b64.encode(timestamp_plist(now_ms))},
@@ -366,7 +375,7 @@ mod tests {
         let data: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(data["metadata"]["orientation"], 6);
         assert_eq!(data["metadata"]["masterWidth"], 4032);
-        let crop = &data["adjustments"][0]["settings"];
+        let crop = &data["adjustments"].as_array().unwrap().iter().find(|j| j["identifier"] == "Crop").unwrap()["settings"];
         assert_eq!((crop["xOrigin"].as_u64(), crop["yOrigin"].as_u64(), crop["width"].as_u64(), crop["height"].as_u64()),
                    (Some(831), Some(295), Some(2874), Some(2155)));
         assert_eq!((crop["constraintWidth"].as_u64(), crop["constraintHeight"].as_u64()), (Some(2155), Some(2874)));
