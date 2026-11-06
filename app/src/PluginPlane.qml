@@ -182,6 +182,28 @@ Item {
             else
                 taken[place + " " + key] = { owner: owners[i] }
         }
+        // A plugin's Command on the grid or the viewer: the same, for each
+        // of its keys.
+        const commands = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length
+            && (c.keyLayer === "grid" || c.keyLayer === "viewer") && !String(c.file).startsWith("qrc:"))
+        for (const c of commands) {
+            const owner = c.plugin()
+            if (!owner) continue
+            for (const k of c.keys) {
+                const key = keymap.portable(k)
+                const clash = own.find(o => layersOf(c.keyLayer).indexOf(o.keyLayer) >= 0
+                    && o.keys.some(ok => keymap.portable(ok) === key))
+                const other = taken[c.keyLayer + " " + key]
+                if (clash)
+                    plugins.keyClashed(owner, qsTr("%1 is Pinhole's own key for %2 there: neither works. Give \"%3\" another key")
+                        .arg(k).arg(clash.text || clash.name).arg(c.text || c.name))
+                else if (other && other.owner !== owner)
+                    plugins.keyClashed(owner, qsTr("%1 is %2's key there too: neither works. Give \"%3\" another key")
+                        .arg(k).arg(plugins.at(other.owner).name || other.owner).arg(c.text || c.name))
+                else
+                    taken[c.keyLayer + " " + key] = { owner: owner }
+            }
+        }
     }
     function collectPlugins(freshHidden, freshStacks) {
         freshHidden = freshHidden || []

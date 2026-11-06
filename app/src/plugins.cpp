@@ -331,7 +331,18 @@ QString Plugins::cacheName() const {
 
 QObject *PluginHost::library() const { return m_plugins->library(); }
 
-QObject *PluginHost::viewer() const { return m_plugins->viewerObject(); }
+QObject *PluginHost::viewer() const { return m_plugins->viewerApi(); }
+
+PluginViewer::PluginViewer(Viewer *viewer, QObject *parent) : QObject(parent), m_viewer(viewer) {
+    connect(viewer, &Viewer::openChanged, this, &PluginViewer::openChanged);
+    connect(viewer, &Viewer::indexChanged, this, &PluginViewer::indexChanged);
+    connect(viewer, &Viewer::hdrChanged, this, &PluginViewer::hdrChanged);
+}
+
+bool PluginViewer::open() const { return m_viewer->isOpen(); }
+int PluginViewer::index() const { return m_viewer->index(); }
+QVariantMap PluginViewer::hdr() const { return m_viewer->hdr(); }
+void PluginViewer::close() { m_viewer->close(); }
 
 QObject *PluginHost::display() const { return m_plugins->display(); }
 
@@ -370,6 +381,22 @@ void Plugins::setKeymap(Keymap *keymap) {
             if (p->host)
                 emit p->host->keyboardInUseChanged();
     });
+    const auto keys = [this] {
+        for (const auto &p : m_plugins)
+            if (p->host)
+                emit p->host->hasKeysChanged();
+    };
+    connect(keymap, &Keymap::layerChanged, this, keys);
+    connect(keymap, &Keymap::pluginChanged, this, keys);
+}
+
+QString PluginHost::input() const {
+    return m_plugins->keymap() ? m_plugins->keymap()->input() : QString();
+}
+
+bool PluginHost::hasKeys() const {
+    const Keymap *keymap = m_plugins->keymap();
+    return keymap && keymap->layer() == QLatin1String("plugin") && keymap->plugin() == m_id;
 }
 
 bool PluginHost::keyboardInUse() const {
@@ -561,7 +588,8 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                  History *history, QObject *parent)
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
       m_history(history),
-      m_libraryApi(std::make_unique<PluginLibrary>(library)), m_config(readConfig()),
+      m_libraryApi(std::make_unique<PluginLibrary>(library)),
+      m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer) : nullptr), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
       m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files), m_toured(readToured()) {
     // The photo a plugin opened to come back from closed: back to it, on
@@ -593,6 +621,13 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     connect(&m_settle, &QTimer::timeout, this, &Plugins::rescan);
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_settle, qOverload<>(&QTimer::start));
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_settle, qOverload<>(&QTimer::start));
+    // Another window's switches and settings, as it writes them.
+    m_configSettle.setSingleShot(true);
+    m_configSettle.setInterval(150);
+    connect(&m_configSettle, &QTimer::timeout, this, &Plugins::configChangedElsewhere);
+    connect(&m_configWatcher, &QFileSystemWatcher::directoryChanged, &m_configSettle, qOverload<>(&QTimer::start));
+    if (const QString folder = QFileInfo(configPath()).absolutePath(); QDir().mkpath(folder))
+        m_configWatcher.addPath(folder);
     // Their names and descriptions are in the language too.
     if (m_translator)
         connect(m_translator, &Translator::changed, this, [this] {
@@ -1123,9 +1158,9 @@ QVariantMap Plugins::at(const QString &id) const {
 }
 
 void Plugins::setEnabled(const QString &id, bool on) {
-    QJsonObject config = m_config;
+    QJsonObject config = latestConfig();
     QJsonObject states = config.value("enabled").toObject();
-    states.insert(id, on);
+    states.insert(switchKey(id), on);
     config.insert("enabled", states);
     // pinholed reads the switches too (a source kind follows its plugin's):
     // told once the file says so, it lists and shows what is on at once.
@@ -1209,8 +1244,17 @@ void Plugins::showPersonalDir() const {
     QDesktopServices::openUrl(QUrl::fromLocalFile(personalDir()));
 }
 
+QString Plugins::switchKey(const QString &id) const {
+    for (const auto &p : m_plugins)
+        if (p->id == id && p->copy)
+            return "copy:" + id;
+    return id;
+}
+
 bool Plugins::enabled(const Plugin &plugin) const {
-    const QJsonValue state = m_config.value("enabled").toObject().value(plugin.id);
+    // A copy of one of Pinhole's own has a switch of its own (copy:<id>):
+    // the built-in's, turned on once, never turns on a copy half made.
+    const QJsonValue state = m_config.value("enabled").toObject().value(plugin.copy ? "copy:" + plugin.id : plugin.id);
     return state.isBool() ? state.toBool() : !plugin.personal;
 }
 
@@ -1234,12 +1278,46 @@ bool Plugins::writeConfig(QJsonObject config) {
     return false;
 }
 
+QJsonObject Plugins::latestConfig() {
+    m_files.wait();
+    // While what plugins.json kept elsewhere moves out of it, this window's
+    // is the one to go by.
+    if (m_moving || !QFileInfo::exists(configPath()))
+        return m_config;
+    return readConfig();
+}
+
+void Plugins::configChangedElsewhere() {
+    const QJsonObject fresh = latestConfig();
+    if (fresh == m_config)
+        return;
+    const QJsonObject was = m_config.value("enabled").toObject(), now = fresh.value("enabled").toObject();
+    m_config = fresh;
+    // Turned off there: gone here as setEnabled has it go. Turned on: this
+    // window loads it, as it reads the switch again (`changed`).
+    for (const auto &p : m_plugins) {
+        if (!p->host || (was.value(switchKey(p->id)) == now.value(switchKey(p->id))))
+            continue;
+        if (!enabled(*p)) {
+            m_history->forget(p->id);
+            p->host->stop();
+            setMarks(p->id, {});
+        }
+    }
+    for (const auto &p : m_plugins)
+        if (p->host)
+            p->host->settingsChanged();
+    updateCatalogs();
+    ++m_revision;
+    emit changed();
+}
+
 QJsonObject Plugins::settingsOf(const QString &id) const {
     return m_config.value("settings").toObject().value(id).toObject();
 }
 
 bool Plugins::setSettingOf(const QString &id, const QString &key, const QJsonValue &value) {
-    QJsonObject config = m_config;
+    QJsonObject config = latestConfig();
     QJsonObject all = config.value("settings").toObject();
     QJsonObject mine = all.value(id).toObject();
     // Null (or undefined) takes it out.
@@ -1471,9 +1549,10 @@ namespace {
 
 const char *kPluginUsage = R"(Usage: pinhole plugin <command>
 
-  new <id>               begin a plugin of your own in
-                         ~/.config/pinhole/plugins/<id>: a manifest.json and
-                         a Main.qml to start from
+  new <id> [folder]      begin a plugin of your own in
+                         ~/.config/pinhole/plugins/<id> (or the folder
+                         named, made for it): a manifest.json, a Main.qml
+                         and its Polish to start from
   check [folder | id]    look a plugin over as Pinhole would load it: its
                          manifest, its QML, its translations (the folder
                          here, if none is named)
@@ -1498,13 +1577,16 @@ QString tilde(const QString &path) {
     return path.startsWith(home + '/') ? '~' + path.mid(home.size()) : path;
 }
 
-int newPlugin(const QString &id) {
-    static const QRegularExpression usable(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]*$"));
-    if (!usable.match(id).hasMatch() || id.contains(QLatin1String(".."))) {
+int newPlugin(const QString &id, const QString &folder = {}) {
+    if (!Plugins::usableId(id)) {
         err(QStringLiteral("pinhole: a plugin's id is letters, digits, dots, dashes: me.favourites"));
         return 2;
     }
-    const QString dir = Plugins::personalDir() + '/' + id;
+    if (id.startsWith(QLatin1String("pinhole."))) {
+        err(QStringLiteral("pinhole: pinhole. ids are Pinhole's own plugins': give it one of yours (me.%1)").arg(id.mid(8)));
+        return 2;
+    }
+    const QString dir = folder.isEmpty() ? Plugins::personalDir() + '/' + id : QFileInfo(folder).absoluteFilePath();
     if (QFileInfo::exists(dir)) {
         err(QStringLiteral("pinhole: %1 is there already").arg(tilde(dir)));
         return 1;
@@ -1603,9 +1685,14 @@ PinholePlugin {
         err(QStringLiteral("pinhole: could not write %1").arg(tilde(dir)));
         return 1;
     }
-    out(QStringLiteral("Made %1. Turn it on in the side panel (Tab), then change Main.qml: it loads again as you save it.")
-            .arg(tilde(dir)));
-    out(QStringLiteral("pinhole plugin check %1 looks it over.").arg(id));
+    if (folder.isEmpty()) {
+        out(QStringLiteral("Made %1. Turn it on in the side panel (Tab), then change Main.qml: it loads again as you save it.")
+                .arg(tilde(dir)));
+        out(QStringLiteral("pinhole plugin check %1 looks it over.").arg(id));
+    } else {
+        out(QStringLiteral("Made %1. Pinhole loads it from ~/.config/pinhole/plugins/%2 once it is there.").arg(tilde(dir), id));
+        out(QStringLiteral("pinhole plugin check %1 looks it over.").arg(tilde(dir)));
+    }
     return 0;
 }
 
@@ -1642,6 +1729,27 @@ int checkPlugin(const QString &target) {
     QQmlComponent component(&engine, QUrl::fromLocalFile(dir + '/' + main), QQmlComponent::PreferSynchronous);
     for (const QQmlError &error : component.errors())
         problems << Plugins::describe(error, dir);
+    // And every other: one a Loader loads by its name is not among what
+    // the main file uses, until the window loads it.
+    const bool builtinId = manifest.value("id").toString().startsWith(QLatin1String("pinhole."));
+    QSet<QString> said;
+    for (const QQmlError &error : component.errors())
+        said << error.url().toLocalFile();
+    QDirIterator files(dir, {"*.qml"}, QDir::Files, QDirIterator::Subdirectories);
+    while (files.hasNext()) {
+        const QString path = QDir::cleanPath(files.next());
+        const QString file = QDir(dir).relativeFilePath(path);
+        if (file == main || said.contains(path) || file.startsWith(QLatin1String("check/"))
+            || file.startsWith(QLatin1String("tests/")) || file.contains(QLatin1String("target/"))
+            || (builtinId && file.startsWith(QLatin1String("module/"))))
+            continue;
+        QQmlComponent each(&engine, QUrl::fromLocalFile(path), QQmlComponent::PreferSynchronous);
+        for (const QQmlError &error : each.errors())
+            if (!said.contains(error.url().toLocalFile() + ':' + QString::number(error.line()))) {
+                said << error.url().toLocalFile() + ':' + QString::number(error.line());
+                problems << Plugins::describe(error, dir);
+            }
+    }
     // Its translations, each a JSON object.
     for (const QFileInfo &file : QDir(dir + "/i18n").entryInfoList({"*.json"}, QDir::Files)) {
         QFile json(file.filePath());
@@ -1672,7 +1780,10 @@ int checkPlugin(const QString &target) {
                             .arg(asked)
                             .arg(needed);
     // The footguns: refused, or warned of.
-    const Plugins::Findings findings = Plugins::footguns(dir);
+    Plugins::Findings findings = Plugins::footguns(dir);
+    // Its manifest's words, errors: a key never read is something it meant
+    // and does not have.
+    problems << Plugins::manifestWarnings(dir, manifest);
     problems << findings.errors;
     if (!problems.isEmpty()) {
         for (const QString &problem : problems)
@@ -1731,9 +1842,9 @@ int runPluginCommand(int argc, char *argv[]) {
         std::fwrite(text.constData(), 1, size_t(text.size()), stdout);
         return text.isEmpty() ? 1 : 0;
     }
-    if (command == QLatin1String("new") && argc == 4) {
+    if (command == QLatin1String("new") && (argc == 4 || argc == 5)) {
         QCoreApplication app(argc, argv);
-        return newPlugin(QString::fromLocal8Bit(argv[3]));
+        return newPlugin(QString::fromLocal8Bit(argv[3]), argc == 5 ? QString::fromLocal8Bit(argv[4]) : QString());
     }
     if (command == QLatin1String("check") && argc <= 4) {
         // A window system is not needed to compile QML.

@@ -196,9 +196,10 @@ impl Workers {
             *said = refused;
         }
         let switches = crate::plugins::switches_in(&self.plugins);
+        let builtins = crate::plugins::builtin_ids(places);
         found
             .into_iter()
-            .filter(|w| crate::plugins::turned_on(w.builtin, switches.get(&w.plugin).copied()))
+            .filter(|w| crate::plugins::is_on(&switches, &w.plugin, w.builtin, !w.builtin && builtins.contains(&w.plugin)))
             .map(|w| {
                 let job = shown.map(|s| Job {
                     program: w.program.clone(),
@@ -465,7 +466,10 @@ mod tests {
         let shown = s.shown("Pictures");
         let wanted = |s: &Scratch| -> Vec<String> { s.workers.wanted(Some(&shown)).into_iter().map(|(w, _)| w.plugin).collect() };
         assert_eq!(wanted(&s), ["pinhole.people"]);
+        // The built-in's switch (turned off and on once) is not the copy's.
         s.switches(json!({"me.mine": true, "pinhole.search": true}));
+        assert_eq!(wanted(&s), ["pinhole.people", "me.mine"]);
+        s.switches(json!({"me.mine": true, "copy:pinhole.search": true}));
         assert_eq!(wanted(&s), ["pinhole.people", "pinhole.search", "me.mine"]);
         s.switches(json!({"pinhole.people": false, "me.mine": false}));
         assert!(wanted(&s).is_empty());

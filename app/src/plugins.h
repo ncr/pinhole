@@ -37,6 +37,29 @@ class Translator;
 class Viewer;
 namespace PluginQuery { class Control; }
 
+// What a plugin sees of the photo shown full window (pinhole.viewer): read,
+// and closed, never changed otherwise (what it hides is the window's).
+class PluginViewer : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(bool open READ open NOTIFY openChanged)
+    Q_PROPERTY(int index READ index NOTIFY indexChanged)
+    Q_PROPERTY(QVariantMap hdr READ hdr NOTIFY hdrChanged)
+public:
+    explicit PluginViewer(Viewer *viewer, QObject *parent = nullptr);
+    bool open() const;
+    int index() const;
+    QVariantMap hdr() const;
+    // The photo closed, as Esc closes it.
+    Q_INVOKABLE void close();
+signals:
+    void openChanged();
+    void indexChanged();
+    void hdrChanged();
+
+private:
+    Viewer *m_viewer;
+};
+
 // What a plugin sees of the library: every photo by its position, oldest
 // first by capture date, independent of the grid's timeline order.
 class PluginLibrary : public QObject {
@@ -74,6 +97,8 @@ public:
     // the day each was taken, in local time, as yyyymmdd. Empty for a
     // name it has not.
     Q_INVOKABLE QVariantList field(const QString &name) const;
+    // The names field() knows, as `plugin check` holds a plugin to.
+    static const QStringList &fieldNames();
     // A photo's position from its id, -1 if the library has none.
     Q_INVOKABLE int indexOf(const QString &id) const;
     // A position, or an id, as a position; -1 if neither is one here.
@@ -252,6 +277,12 @@ class PluginHost : public QObject {
     // The keys are what was last used, not a pointer: show the ring on the
     // one they are on (API 11).
     Q_PROPERTY(bool keyboardInUse READ keyboardInUse NOTIFY keyboardInUseChanged)
+    // What was used last: "keyboard", "mouse" or "touchpad" (API 12), as a
+    // wheel's turn is told from a touchpad's swipe by it.
+    Q_PROPERTY(QString input READ input NOTIFY keyboardInUseChanged)
+    // Whether the keys are this plugin's now: it covers the photos, and no
+    // panel of Pinhole's is over it (API 12).
+    Q_PROPERTY(bool hasKeys READ hasKeys NOTIFY hasKeysChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -297,6 +328,8 @@ public:
     Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options = {});
     bool away() const { return m_away; }
     bool keyboardInUse() const;
+    QString input() const;
+    bool hasKeys() const;
     // The viewer closed, or another plugin covered meanwhile.
     void cameBack(const QString &photo);
     void coveredMeanwhile() { if (m_away) m_awayInterrupted = true; }
@@ -341,6 +374,10 @@ public:
     // made first, away from the window's thread); rejected with "not_found"
     // if there is no such file.
     Q_INVOKABLE QJSValue copyFile(const QString &path);
+    // Words on the clipboard, as text (paths, a link): a promise of them
+    // once it has them (API 12). In a self-test the clipboard is the
+    // window's own, as for copyFile.
+    Q_INVOKABLE QJSValue copyText(const QString &text);
     // The folder a file is in, in the file manager.
     Q_INVOKABLE void showFile(const QString &path) const;
     // ~/Pictures, or the desktop's own Pictures folder.
@@ -407,6 +444,10 @@ public:
     std::vector<QProcess *> close();
     // Programs asked to end, given a second all told, then killed.
     static void endPrograms(const std::vector<QProcess *> &programs);
+    // A program of a plugin's asked to end (SIGTERM), or killed, with all
+    // it started: its process group (run() gives it one of its own).
+    static void endProgram(QProcess *process);
+    static void killProgram(QProcess *process);
     // A callback of the plugin's, unless it has since stopped; what it
     // throws is reported.
     void call(const QJSValue &function, const QJSValueList &args = {});
@@ -427,6 +468,7 @@ signals:
     void dismissed();
     void awayChanged();
     void keyboardInUseChanged();
+    void hasKeysChanged();
     // Back from the photos it opened (openPhotos' comeBack): `photo` is the
     // id of the one shown last.
     void returned(const QString &photo);
@@ -573,8 +615,10 @@ public:
     // 7: ShellButton.checkable for accessible selected buttons.
     // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos. 10: ids in hidden
     // and stacks, pinhole.selectionIds, pinhole.screenshots. 11: coming back
-    // from the photos (openPhotos' comeBack, away, returned).
-    static constexpr int api = 11;
+    // from the photos (openPhotos' comeBack, away, returned), PhotoTiles,
+    // PanelHeader, SettingNote and SettingSwitch, Choices.numbered and
+    // keyboardInUse. 12: pinhole.copyText, input and hasKeys.
+    static constexpr int api = 12;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 
@@ -587,6 +631,11 @@ public:
     static void registerTypes();
     // What is wrong with the plugin in `dir`, if anything; its manifest.
     static QString manifestProblem(const QString &dir, QJsonObject *manifest, QString *main);
+    // What `plugin check` says of a manifest Pinhole loads all the same:
+    // keys it never reads, numbers that are not whole, a pinhole. id.
+    static QStringList manifestWarnings(const QString &dir, const QJsonObject &manifest);
+    // An id its folders and files can be named after (core's usable_id).
+    static bool usableId(const QString &id);
     // The source kinds a manifest names ("sources"), and what is wrong with
     // them: a kind of pinholed's own (no "provider") only in Pinhole's own
     // plugin of it, or one's own copy of that plugin.
@@ -719,6 +768,7 @@ public:
 
     const Library *libraryData() const { return m_library; }
     PluginLibrary *library() const { return m_libraryApi.get(); }
+    PluginViewer *viewerApi() const { return m_viewerApi.get(); }
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
     // What the display can show (pinhole.display).
@@ -775,7 +825,15 @@ private:
         std::unique_ptr<PluginHost> host;
     };
     void scan();
+    // The key of a plugin's switch in plugins.json: its id, or copy:<id>
+    // for one's own copy of one of Pinhole's (core's is_on, the same).
+    QString switchKey(const QString &id) const;
     bool writeConfig(QJsonObject config);
+    // plugins.json as it is now, another window's changes in it: what a
+    // change starts from, so that writing it loses none of theirs.
+    QJsonObject latestConfig();
+    // Another window changed plugins.json: its switches and settings here.
+    void configChangedElsewhere();
     // What plugins kept in their settings that is not one (a list found,
     // the user's edits, a panel left open), and the tours seen: moved out
     // of plugins.json to where it belongs, once, as Pinhole starts.
@@ -800,6 +858,7 @@ private:
     Sources *m_sources = nullptr;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
+    std::unique_ptr<PluginViewer> m_viewerApi;
     // Before the plugins, so it outlives their hosts, which let it go.
     KeepAwake m_keepAwake;
     ColourDisplay m_display;
@@ -854,6 +913,9 @@ private:
     std::vector<int> markPhotos(const QVariantList &photos) const;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
+    // plugins.json's folder (it is replaced, not written in place).
+    QFileSystemWatcher m_configWatcher;
+    QTimer m_configSettle;
 };
 
 // pinhole plugin new <id> | check [folder]: a plugin begun, or looked over

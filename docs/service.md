@@ -29,7 +29,8 @@ its file is left as it was. Nothing is synced into it (no rounds, the source nei
 followed nor watched: `rounds` names no source), nothing of the cache is
 evicted (the shared service's to do), and a window asking it to change
 anything (`set_source`, `remove_source`, `sign_in`, `submit_code`,
-`sign_out`, `add`, `set_favorite`, `set_storage`) is answered `read_only`.
+`sign_out`, `add`, `set_favorite`, `set_storage`, `plugins_changed`) is
+answered `read_only`.
 A library of another source than the settings' (pinhole-fake's) has
 nothing fetched either (`other_source`); a copy of that source's own has
 its photos fetched as the shared service would, into the same cache. It
@@ -493,6 +494,16 @@ A cached file is answered with `path` alone.
 | `bad_request` | unknown method or missing params |
 | `read_only` | a change asked of the service of a library given to a window (`--given`) |
 | `turned_off` | a source kind whose plugin is off (see Kinds) |
+| `other_source` | a change or a fetch for a source other than the library shown's |
+| `unsupported` | the source keeps no such thing (favourites, for one) |
+
+A window says two more of its own, never the service: `no_service` when
+none answers (none could be started), and `incompatible` when the one that
+answers speaks another protocol (`hello`'s `protocol`).
+
+The shared service ends by itself, once no window is connected, after an
+upgrade has replaced its program; on SIGTERM or SIGINT it stops what it is
+making, removes its part files and its socket, and ends.
 
 ## Storage
 

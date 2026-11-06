@@ -228,7 +228,9 @@ void ThumbnailLoader::reload(const std::function<void()> &swap) {
     std::unique_lock lock(m_mutex);
     m_paused = true;
     m_queue.clear();
+    m_giveUp = true;
     m_idle.wait(lock, [this] { return m_inFlight.empty(); });
+    m_giveUp = false;
     swap();
     m_ready.clear();
     m_readyKeys.clear();
@@ -289,7 +291,7 @@ void ThumbnailLoader::run(bool fullDecoder) {
                 const QSize bounds = item.thumbW && item.thumbH
                     ? QSize(std::max(1, int(std::ceil(item.thumbW * scale))), std::max(1, int(std::ceil(item.thumbH * scale))))
                     : QSize(fullShortEdge(keyLevel(key)), fullShortEdge(keyLevel(key)));
-                image = decodePhoto(QFile::decodeName(path), bounds);
+                image = decodePhoto(QFile::decodeName(path), bounds, &m_giveUp);
                 image = image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888_Premultiplied : QImage::Format_RGBX8888);
             }
         } else if (isMediumKey(key)) {
@@ -300,7 +302,7 @@ void ThumbnailLoader::run(bool fullDecoder) {
             }
             image = decodeJpeg(tj, path, keyLevel(key), buffer);
             if (image.isNull()) {
-                image = decodePhoto(QFile::decodeName(path), QSize());
+                image = decodePhoto(QFile::decodeName(path), QSize(), &m_giveUp);
                 if (!image.isNull() && keyLevel(key) > 0)
                     image = image.scaled(std::max(1, image.width() >> keyLevel(key)), std::max(1, image.height() >> keyLevel(key)),
                                          Qt::IgnoreAspectRatio, Qt::SmoothTransformation);

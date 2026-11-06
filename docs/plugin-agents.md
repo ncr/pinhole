@@ -27,7 +27,9 @@ pinhole plugin new me.descriptive-name
 pinhole plugin check me.descriptive-name
 ```
 
-Edit the generated folder under `~/.config/pinhole/plugins/`. Personal
+Edit the generated folder under `~/.config/pinhole/plugins/`
+(`pinhole plugin new me.name ./folder` writes it elsewhere, to work on
+before it goes there). Personal
 plugins start disabled; the user enables them in Settings (Tab) → Plugins.
 Saving reloads an enabled plugin. Use the installed scaffold's manifest API
 and check `pinhole plugin docs --json` for the installed version. A manifest's
@@ -48,7 +50,13 @@ it is not a substitute for running the interaction in the app.
   selected state.
 - Use `PluginAction` for discoverable actions. Set `covering` while a view
   covers the photos. Scope its `Command`s to `keyLayer: "plugin"` and its
-  open state. Escape closes it. Do not leave global `Shortcut`s active.
+  open state (`"grid"` or `"viewer"` for a key there; never `"any"` or
+  none, which `plugin check` refuses). Escape closes it. Do not leave
+  global `Shortcut`s active.
+- Touch idioms, not context menus: no right-click menus, `Menu`, `Popup`,
+  `ComboBox`, `Dialog` or `Drawer` (check refuses them). Every action is
+  on a control one can see. A touchpad's two-finger tap arrives as a right
+  click, and in Pinhole it stops what moves (a slideshow pauses).
 - Keep the root cheap: it loads before the first frame. Load large views
   on demand and do expensive work asynchronously. Do not fetch a whole
   library's originals. Use `field()` for columns and `query()` for SQL.
@@ -76,8 +84,9 @@ it is not a substitute for running the interaction in the app.
 - Show files through `image://file/` or `image://photo/` as documented, so
   orientation and colours are correct. Video uses `VideoView`. A plugin's
   SDR overlay in the HDR viewer uses `holdSdr` (API 6) when appropriate.
-- Wait for promises to finish before confirming success. Use `copyFile`
-  for the clipboard, `notify` for quiet success, `complain` and `warn` for
+- Wait for promises to finish before confirming success. Use `copyText`
+  (API 12) and `copyFile` for the clipboard, never a text field's `copy()`
+  or `wl-copy`, `notify` for quiet success, `complain` and `warn` for
   failures. Handle cancellation and missing/offline files. Record reversible
   edits with `did`, and drop a refused step with `dropStep`.
   Declare external executable dependencies and show a useful error if one

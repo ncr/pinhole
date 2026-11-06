@@ -867,6 +867,24 @@ pub fn run(config: Config) -> Result<()> {
         let cache = shared.config.cache.clone();
         std::thread::spawn(move || crate::storage::forget_parts(&cache, Duration::from_secs(3600)));
     }
+    // Replaced by an upgrade (the package manager's, which restarts no
+    // one's service): ended once no window is connected, so the next one
+    // starts the new pinholed rather than talk to this one until logout.
+    if given.is_none() {
+        let weak = Arc::downgrade(&shared);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(60));
+            let Some(shared) = weak.upgrade() else { return };
+            let replaced = std::fs::read_link("/proc/self/exe").is_ok_and(|exe| exe.to_string_lossy().ends_with(" (deleted)"));
+            let alone = shared.connections.lock().unwrap_or_else(PoisonError::into_inner).0 == 0;
+            if replaced && alone && shared.in_flight.load(Ordering::Relaxed) == 0 {
+                eprintln!("pinholed: replaced by a newer one, and no window: done");
+                let _ = std::fs::remove_file(&shared.config.socket);
+                shared.abandon();
+                std::process::exit(0);
+            }
+        });
+    }
     // Ended (an install, a logout): what is under way stopped and its part
     // files gone, the socket too, rather than left for the next service.
     {

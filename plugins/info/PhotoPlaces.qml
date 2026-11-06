@@ -361,7 +361,7 @@ FocusScope {
             return photos.activeFocus
                 ? qsTr("Arrows browse photos · ⏎ opens · Esc goes back")
                 : qsTr("Arrows choose a place · ⇧ + arrows move · ⏎ opens")
-        if (keymap.input === "touchpad")
+        if (pinhole.input === "touchpad")
             return qsTr("Two fingers move · Pinch to zoom")
         return qsTr("Drag to move · Scroll to zoom")
     }
@@ -404,7 +404,7 @@ FocusScope {
         MapWheel {
             width: places.viewWidth
             height: places.viewHeight
-            enabled: keymap.layer === "plugin" && keymap.plugin === places.pinhole.id
+            enabled: places.pinhole.hasKeys
             onPan: (dx, dy) => {
                 map.forceActiveFocus()
                 places.pan(dx, dy)

@@ -11,7 +11,7 @@ Item {
     property string title
     property string detail
     // The Command that closes the view: ✕ presses it and shows its key.
-    property var closeCommand: null
+    property QtObject closeCommand: null
     // ✕'s key without a closeCommand: "" where Esc means back, not close.
     property string closeHint: "Esc"
     // A control's height here, for what stands beside the buttons.

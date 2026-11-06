@@ -67,6 +67,12 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
     };
 }
 
+const QStringList &PluginLibrary::fieldNames() {
+    static const QStringList names = {"date", "day", "id", "filename", "width", "height",
+                                      "video", "live", "favorite", "effect", "avgColor"};
+    return names;
+}
+
 QVariantList PluginLibrary::field(const QString &name) const {
     const auto column = [this](auto value) {
         QVariantList list;
@@ -112,6 +118,10 @@ QVariantList PluginLibrary::field(const QString &name) const {
         return column([](const LibraryItem &item) {
             return item.thumbPath.isEmpty() ? QString() : QColor(QRgb(item.avgColor)).name();
         });
+    // A name it does not know (`plugin check` refuses it): said, not an
+    // empty list nobody notices.
+    qWarning("pinhole: library.field(\"%s\"): no such field; it has %s", qPrintable(name),
+             qPrintable(fieldNames().join(QStringLiteral(", "))));
     return {};
 }
 

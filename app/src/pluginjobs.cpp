@@ -4,6 +4,7 @@
 #include "library.h"
 #include "outgoing.h"
 #include "portal.h"
+#include "selftest.h"
 #include "serviceclient.h"
 #include "storage.h"
 
@@ -13,6 +14,7 @@
 #include <QFileInfo>
 #include <QJSEngine>
 #include <QJSValueIterator>
+#include <QMimeData>
 #include <QProcess>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -22,6 +24,9 @@
 
 #include <algorithm>
 #include <utility>
+
+#include <signal.h>
+#include <unistd.h>
 
 namespace {
 
@@ -171,7 +176,7 @@ void PluginHost::endPrograms(const std::vector<QProcess *> &programs) {
         process->waitForFinished(int(std::max<qint64>(0, second.remainingTime())));
     for (QProcess *process : programs)
         if (process->state() != QProcess::NotRunning)
-            process->kill();
+            killProgram(process);
     for (QProcess *process : programs) {
         if (process->state() != QProcess::NotRunning)
             process->waitForFinished(1000);
@@ -393,6 +398,23 @@ QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
     return promise;
 }
 
+namespace {
+// A plugin's program runs in a process group of its own, so that what it
+// starts (a shell's magick or ffmpeg) is asked to end and killed with it,
+// never left running when it is cancelled, times out or the plugin goes.
+void ownGroup(QProcess *process) {
+    process->setChildProcessModifier([] { ::setpgid(0, 0); });
+}
+
+void signalGroup(QProcess *process, int signal) {
+    if (const qint64 pid = process->processId(); pid > 0)
+        ::kill(-pid_t(pid), signal);
+}
+} // namespace
+
+void PluginHost::endProgram(QProcess *process) { signalGroup(process, SIGTERM); }
+void PluginHost::killProgram(QProcess *process) { signalGroup(process, SIGKILL); }
+
 QJSValue PluginHost::run(const QString &program, const QStringList &arguments, const QJSValue &options) {
     // What check refuses, however its name was made: not run.
     if (const QString refused = Plugins::refusedRun(program, arguments); !refused.isEmpty()) {
@@ -410,6 +432,7 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
         path = m_dir + '/' + program;
     auto *process = new QProcess(this);
     process->setWorkingDirectory(m_dir);
+    ownGroup(process);
     track(process, [this, process] {
         // Nothing more said of it, and it goes once it has ended: asked to
         // end (SIGTERM) and given a second to tidy up, as cancel() does,
@@ -423,14 +446,14 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
             return;
         }
         process->setParent(nullptr);
-        process->terminate();
+        endProgram(process);
         if (m_closing) {
             disconnect(process, &QProcess::finished, process, &QObject::deleteLater);
             return m_ending.push_back(process);
         }
         QTimer::singleShot(1000, process, [process] {
             if (process->state() != QProcess::NotRunning)
-                process->kill();
+                killProgram(process);
         });
     });
 
@@ -448,6 +471,8 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
             process->deleteLater();
         });
         process->start(path, arguments);
+        // As with a promise: its stdin ends at once.
+        process->closeWriteChannel();
         return {};
     }
 
@@ -460,10 +485,10 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     const Deferred deferred = defer([running, why] {
         if (running && running->state() != QProcess::NotRunning) {
             *why = QStringLiteral("cancelled");
-            running->terminate();
+            endProgram(running);
             QTimer::singleShot(1000, running.data(), [running] {
                 if (running->state() != QProcess::NotRunning)
-                    running->kill();
+                    killProgram(running);
             });
         }
     });
@@ -492,7 +517,7 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
         QTimer::singleShot(timeout, process, [process, why] {
             if (process->state() != QProcess::NotRunning) {
                 *why = QStringLiteral("timeout");
-                process->kill();
+                killProgram(process);
             }
         });
     connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path, output, lines](int code, QProcess::ExitStatus status) {
@@ -583,6 +608,15 @@ QJSValue PluginHost::copyFile(const QString &path) {
         [this, deferred, generation] {
             settle(generation, deferred.reject, error(QStringLiteral("cancelled"), tr("another copy came after it")));
         });
+    return deferred.promise;
+}
+
+QJSValue PluginHost::copyText(const QString &text) {
+    const Deferred deferred = defer([] {});
+    auto *data = new QMimeData;
+    data->setText(text);
+    setClipboard(data);
+    settle(m_generation, deferred.resolve, text);
     return deferred.promise;
 }
 

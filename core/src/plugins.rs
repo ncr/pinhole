@@ -180,6 +180,32 @@ pub fn turned_on(builtin: bool, switch: Option<bool>) -> bool {
     if builtin { switch != Some(false) } else { switch == Some(true) }
 }
 
+/// Whether the plugin `id` is on, by its switch in `switches`. Your own
+/// copy of a built-in (`copy`) has a switch of its own, `copy:<id>`: the
+/// built-in's, turned on once, never turns on a copy half made
+/// (Plugins::switchKey in the window, the same).
+pub fn is_on(switches: &HashMap<String, bool>, id: &str, builtin: bool, copy: bool) -> bool {
+    let switch = if copy { switches.get(&format!("copy:{id}")) } else { switches.get(id) };
+    turned_on(builtin && !copy, switch.copied())
+}
+
+/// The ids of Pinhole's own plugins (`builtin`).
+pub fn builtin_ids(places: &Places) -> std::collections::HashSet<String> {
+    let Ok(entries) = std::fs::read_dir(&places.builtin) else { return Default::default() };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|dir| dir.join("manifest.json").is_file())
+        .map(|dir| {
+            let manifest = std::fs::read_to_string(dir.join("manifest.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .unwrap_or(Value::Null);
+            manifest["id"].as_str().map(str::to_owned).unwrap_or_else(|| dir.file_name().unwrap_or_default().to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 /// Every provider the plugins declare, and why any declared was refused,
 /// one line each. A plugin of your own with a built-in's id takes its
 /// place, as in the window. `compiled` are the kinds pinholed has in
@@ -240,7 +266,7 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
             continue;
         };
         if let Err(why) = taken(&id, &dir, &manifest).and_then(|()| {
-            if manifest["api"].as_i64().unwrap_or(1) < WORKERS_API {
+            if whole(&manifest["api"]).unwrap_or(1) < WORKERS_API {
                 return Err(format!("workers need \"api\": {WORKERS_API}"));
             }
             Ok(())
@@ -310,7 +336,7 @@ fn check(
     found: &[Provided],
 ) -> Result<Provided, String> {
     taken(id, dir, manifest)?;
-    if manifest["api"].as_i64().unwrap_or(1) < 3 {
+    if whole(&manifest["api"]).unwrap_or(1) < 3 {
         return Err("sources need \"api\": 3".into());
     }
     let named = kind.len() <= 128
@@ -350,7 +376,7 @@ fn check(
     };
     let rounds_every = match &declared["rounds_every_secs"] {
         Value::Null => None,
-        v => Some(v.as_u64().filter(|s| (5..=86_400).contains(s)).ok_or("\"rounds_every_secs\" is 5 to 86400")?),
+        v => Some(whole(v).and_then(|s| u64::try_from(s).ok()).filter(|s| (5..=86_400).contains(s)).ok_or("\"rounds_every_secs\" is 5 to 86400")?),
     };
     Ok(Provided {
         plugin: id.to_owned(),
@@ -363,12 +389,28 @@ fn check(
     })
 }
 
+/// A whole number, written `11` or `11.0` (as the window's Qt reads both).
+fn whole(value: &Value) -> Option<i64> {
+    value.as_i64().or_else(|| value.as_f64().filter(|f| f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15).map(|f| f as i64))
+}
+
+/// An id a plugin can have: what its folders and files are named after
+/// (state, cache, logs), so letters, digits, `.`, `_` and `-`, beginning
+/// with a letter or digit, and no `..` (Plugins::usableId, the same).
+pub fn usable_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && !id.contains("..")
+}
+
 /// As the window takes a manifest at all (Plugins::manifestProblem).
 fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
-    if manifest["schemaVersion"].as_i64() != Some(1) {
+    if whole(&manifest["schemaVersion"]) != Some(1) {
         return Err("manifest.json needs \"schemaVersion\": 1".into());
     }
-    if id.is_empty() || id.contains('/') || id.contains("..") {
+    if !usable_id(id) {
         return Err("manifest.json has no usable \"id\"".into());
     }
     let main = manifest["entryPoints"]["main"].as_str().unwrap_or("");
@@ -411,6 +453,20 @@ fn safe_relative(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_id_names_folders_safely_and_numbers_may_be_written_as_decimals() {
+        for id in ["pinhole.series", "me.night", "t", "a_b-c.1"] {
+            assert!(usable_id(id), "{id}");
+        }
+        for id in ["", ".", "..", "a/b", "a..b", ".hidden", "my plugin", "x\nY", "pinhole.\u{e9}"] {
+            assert!(!usable_id(id), "{id:?}");
+        }
+        assert_eq!(whole(&serde_json::json!(11)), Some(11));
+        assert_eq!(whole(&serde_json::json!(11.0)), Some(11));
+        assert_eq!(whole(&serde_json::json!(11.5)), None);
+        assert_eq!(whole(&serde_json::json!("11")), None);
+    }
 
     #[test]
     fn switches_are_what_enabled_says_and_nothing_else() {
@@ -604,6 +660,12 @@ mod tests {
         // your own (your copy of a built-in too) only when turned on.
         assert!(turned_on(true, None) && turned_on(true, Some(true)) && !turned_on(true, Some(false)));
         assert!(!turned_on(false, None) && turned_on(false, Some(true)) && !turned_on(false, Some(false)));
+        // A copy of a built-in: its own switch, never the built-in's.
+        let switches: HashMap<String, bool> = [("pinhole.icloud".to_owned(), true)].into();
+        assert!(is_on(&switches, "pinhole.icloud", true, false));
+        assert!(!is_on(&switches, "pinhole.icloud", false, true));
+        let switches: HashMap<String, bool> = [("copy:pinhole.icloud".to_owned(), true)].into();
+        assert!(is_on(&switches, "pinhole.icloud", false, true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

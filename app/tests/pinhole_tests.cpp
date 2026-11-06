@@ -5833,6 +5833,82 @@ private slots:
         QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
     }
 
+    // One's own copy of a built-in plugin: off until it is turned on
+    // itself, whatever the built-in's switch says.
+    void aCopyOfABuiltInPluginHasASwitchOfItsOwn() {
+        QStandardPaths::setTestModeEnabled(true);
+        const QString copy = Plugins::personalDir() + "/t-copy";
+        QDir(copy).removeRecursively();
+        QVERIFY(QDir().mkpath(copy));
+        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
+        QDir().mkpath(QFileInfo(config).absolutePath());
+        QFile::remove(config);
+        write(config, R"({"enabled": {"t": true}})");
+        write(copy + "/manifest.json", R"({"schemaVersion": 1, "id": "t", "name": "t", "entryPoints": {"main": "Main.qml"}})");
+        write(copy + "/Main.qml", "import QtQuick\nItem {}\n");
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
+                                                   QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
+        QVERIFY(bench->plugins->at("t").value("copy").toBool());
+        QVERIFY(!bench->plugins->at("t").value("enabled").toBool());
+        bench->plugins->setEnabled("t", true);
+        QVERIFY(bench->plugins->at("t").value("enabled").toBool());
+        QFile file(config);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("enabled").toObject().value("copy:t"), QJsonValue(true));
+        bench.reset();
+        QDir(copy).removeRecursively();
+        QFile::remove(config);
+    }
+
+    // Two windows: neither loses the other's switches and settings as it
+    // writes its own, and each follows what the other changed.
+    void twoWindowsKeepEachOthersPluginChoices() {
+        auto first = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}, {"u", {}}});
+        auto second = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}, {"u", {}}},
+                                                    QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
+        QVERIFY(second->plugins->at("u").value("enabled").toBool());
+        first->plugins->setEnabled("u", false);
+        QVERIFY(second->plugins->setSettingOf("t", "k", 1));
+        QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QJsonObject kept = QJsonDocument::fromJson(file.readAll()).object();
+        QCOMPARE(kept.value("enabled").toObject().value("u"), QJsonValue(false));
+        QCOMPARE(kept.value("settings").toObject().value("t").toObject().value("k"), QJsonValue(1));
+        // The first hears of the second's setting, the second of the switch.
+        QTRY_COMPARE(first->plugins->settingsOf("t").value("k"), QJsonValue(1));
+        QTRY_COMPARE(second->plugins->at("u").value("enabled").toBool(), false);
+    }
+
+    // What a plugin's program started goes with it, cancelled: its whole
+    // process group is asked to end, not only the shell.
+    void aCancelledProgramTakesWhatItStartedWithIt() {
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}});
+        const QString pidFile = bench->dir.path() + "/child";
+        bench->js(QStringLiteral(R"(var job = pinhole.run("sh", ["-c", "sleep 30 & echo $! > %1; wait"]); var why = "";
+                                    job.catch(e => why = e.code))").arg(pidFile));
+        QTRY_VERIFY(QFileInfo(pidFile).size() > 0);
+        QFile file(pidFile);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const pid_t child = file.readAll().trimmed().toInt();
+        QVERIFY(child > 0 && ::kill(child, 0) == 0);
+        bench->js(QStringLiteral("job.cancel()"));
+        QTRY_COMPARE(bench->js(QStringLiteral("why")).toString(), QStringLiteral("cancelled"));
+        // Ended: gone, or a zombie for the moment before whoever took it
+        // in reaps it.
+        const auto ended = [child] {
+            QFile stat(QStringLiteral("/proc/%1/stat").arg(child));
+            return !stat.open(QIODevice::ReadOnly) || stat.readAll().split(' ').value(2) == "Z";
+        };
+        QTRY_VERIFY(ended());
+    }
+
+    // Given a callback, a program's stdin ends at once too: cat ends.
+    void aProgramRunWithACallbackHasItsInputEnded() {
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}});
+        bench->js(QStringLiteral(R"(var ended = -2; pinhole.run("cat", [], (code, out) => ended = code))"));
+        QTRY_COMPARE_WITH_TIMEOUT(bench->js(QStringLiteral("ended")).toInt(), 0, 3000);
+    }
+
 private:
     // A panel the Scroller scrolls (SidePanel.qml), with a list of its own
     // in it, as a plugin's settings may have, and a switch: shown, and the
@@ -6102,6 +6178,58 @@ PinholePlugin {
         write(dir.path() + "/i18n/pl.json", "{ \"Row\": \"Wiersz\" }\n");
         const Plugins::Findings clean = Plugins::footguns(dir.path());
         QVERIFY2(clean.errors.isEmpty() && clean.warnings.isEmpty(), qPrintable((clean.errors + clean.warnings).join('\n')));
+    }
+
+    // What the reviews found check let through: names Pinhole does not
+    // have, the window's own objects, menus, keys over Pinhole's, words
+    // put together in qsTr, and a manifest's misspelt key.
+    void checkRefusesWhatOnlyFailsAsItRuns() {
+        QTemporaryDir dir;
+        write(dir.path() + "/manifest.json", R"({"schemaVersion": 1, "verison": "1", "api": "3", "id": "me.probe", "entryPoints": {"main": "Main.qml"}})");
+        write(dir.path() + "/Main.qml", R"(import QtQuick
+import QtQuick.Controls
+import Pinhole.Plugin
+PinholePlugin {
+    id: plugin
+    property int seen: pinhole.libary.count
+    property color c: theme.acent
+    property var days: pinhole.library.field("dayz")
+    Command { name: "probe.go"; keys: ["Escape"]; onTriggered: plugin.seen = 1 }
+    Command { name: "probe.all"; keys: ["["]; keyLayer: "any"; onTriggered: plugin.seen = 2 }
+    Command { name: "probe.fine"; keys: ["]"]; keyLayer: "plugin"; when: plugin.covering; onTriggered: plugin.seen = 3 }
+    Menu { }
+    marks: [ PluginMark { name: "n"; icon: "moon"; colour: "purple" } ]
+    actions: [ PluginAction { place: "select"; text: qsTr("Go") } ]
+    Loader { source: "../series/Studio.qml" }
+    Component.onCompleted: {
+        sources.show("x")
+        copier.copy()
+        pinhole.notify(qsTr("Copied " + seen))
+    }
+    TextEdit { id: copier }
+}
+)");
+        const Plugins::Findings found = Plugins::footguns(dir.path());
+        const QString errors = found.errors.join('\n'), warnings = found.warnings.join('\n');
+        QVERIFY2(errors.contains("Main.qml:6: pinhole has no libary (library?)"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:7: theme has no acent (accent?)"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:8: library.field has no \"dayz\" (day"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:9: a Command without a keyLayer"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:10: keyLayer \"any\""), qPrintable(errors));
+        QVERIFY2(!errors.contains("Main.qml:11:"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:12: a Menu opens over the whole window"), qPrintable(errors));
+        QVERIFY2(errors.contains("icon \"moon\"") && errors.contains("colour \"purple\""), qPrintable(errors));
+        QVERIFY2(errors.contains("place \"select\" is none of Pinhole's (selection?)"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:15: ../series/Studio.qml is outside the plugin"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:17: sources is the window's own"), qPrintable(errors));
+        QVERIFY2(errors.contains("Main.qml:18: copy() sets the session's clipboard") && errors.contains("pinhole.copyText"),
+                 qPrintable(errors));
+        QVERIFY2(warnings.contains("Main.qml:19: words put together inside qsTr"), qPrintable(warnings));
+        const QString manifest = Plugins::manifestWarnings(dir.path(), QJsonDocument::fromJson(
+            R"({"schemaVersion": 1, "verison": "1", "api": "3", "id": "me.probe"})").object()).join('\n');
+        QVERIFY2(manifest.contains("\"verison\" is not a manifest's key (version?)"), qPrintable(manifest));
+        QVERIFY2(manifest.contains("\"api\" is a whole number"), qPrintable(manifest));
+        QVERIFY(Plugins::usableId("me.night") && !Plugins::usableId(".") && !Plugins::usableId("my plugin"));
     }
 
     // What compiles and looks right, but loses work or never runs.

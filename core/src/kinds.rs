@@ -207,14 +207,15 @@ impl Kinds {
             .builtin
             .iter()
             .filter(|k| {
-                let switch = switches.get(k.plugin()).copied();
-                if copies.contains(k.plugin()) { switch == Some(true) } else { switch != Some(false) }
+                crate::plugins::is_on(&switches, k.plugin(), true, copies.contains(k.plugin()))
             })
             .map(|k| k.kind().to_owned())
             .collect();
+        let builtins = self.places.as_ref().map(|(places, _)| crate::plugins::builtin_ids(places)).unwrap_or_default();
         for p in providers.iter() {
-            let switch = switches.get(&p.provided().plugin).copied();
-            let turned_on = if p.provided().builtin { switch != Some(false) } else { switch == Some(true) };
+            let plugin = &p.provided().plugin;
+            let copy = !p.provided().builtin && builtins.contains(plugin);
+            let turned_on = crate::plugins::is_on(&switches, plugin, p.provided().builtin, copy);
             p.set_on(turned_on);
             if turned_on {
                 on.insert(p.kind().to_owned());

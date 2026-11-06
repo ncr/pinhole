@@ -84,7 +84,7 @@
   "Live Photos": "Zdjęcia Live",
   "Look around first": "Najpierw się rozejrzę",
   "Making thumbnails": "Robię miniatury",
-  "manifest.json has no usable \"id\"": "manifest.json nie ma poprawnego \"id\"",
+  "manifest.json has no usable \"id\": letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit (me.night)": "manifest.json nie ma poprawnego \"id\": litery, cyfry, \".\", \"_\" i \"-\", zaczynające się literą lub cyfrą (me.night)",
   "manifest.json is not JSON: %1": "manifest.json to nie jest JSON: %1",
   "manifest.json needs \"schemaVersion\": 1": "manifest.json potrzebuje \"schemaVersion\": 1",
   "manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder": "W \"entryPoints\" w manifest.json brakuje pliku \"main\" z folderu wtyczki",

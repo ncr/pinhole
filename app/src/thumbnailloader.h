@@ -117,6 +117,9 @@ private:
     std::condition_variable m_wake;
     std::condition_variable m_idle;
     bool m_paused = false;
+    // Set while reload() waits for what is in flight: a full photo's decode
+    // (a 48 MP HEIC, hundreds of ms) gives up rather than hold the window.
+    std::atomic<bool> m_giveUp{false};
     std::deque<quint64> m_queue;
     std::unordered_set<quint64> m_inFlight;
     std::unordered_set<quint64> m_readyKeys;

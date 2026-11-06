@@ -26,13 +26,17 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent)
     });
     connect(&m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
         // Nothing listening: start the service once, then keep trying for a
-        // little while as it comes up.
+        // little while as it comes up. Still none once that while is over
+        // (it ended as it started): started again, and again each time
+        // trying slowly has found none for a while (twelve tries, a minute).
         if (!m_started) {
             startService();
             m_started = true;
         }
-        if (m_attempts++ == 40)
+        if (++m_attempts == 41)
             giveUp();
+        if (m_attempts > 41 && (m_attempts - 41) % 12 == 0)
+            m_started = false;
         // Then on trying, more slowly, for one started later.
         m_retry.start();
     });
