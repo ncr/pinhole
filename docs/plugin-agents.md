@@ -56,8 +56,8 @@ it is not a substitute for running the interaction in the app.
   cell, two per plugin and eight globally; aggregate or page larger results.
   `LIKE`/`GLOB` patterns have a 1,024-byte limit (an oversized pattern is `sql`).
   Handle `query_timeout`, `query_limit` and `query_busy`. Cancel a pending
-  query when closing its view; a library reload rejects it with `cancelled`.
-  Ignore cancellation in the error UI. SQL `NULL` returns as an empty string;
+  query when closing its view; a library reload rejects it with `reloaded`
+  (ask again). `pinhole.warn` already ignores `cancelled` and `reloaded`. SQL `NULL` returns as an empty string;
   use `IS NULL` in SQL when missing and empty values must be distinguished.
   For a map, use the nullable catalog coordinates (schema 2) and page by
   photo id. `has_location` alone does not guarantee coordinates.

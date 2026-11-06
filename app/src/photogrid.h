@@ -133,6 +133,9 @@ public:
     // unless a photo's thumbnail changed (an edit, a video's cover), whose
     // old one must not stay on screen; none means as `moved`.
     void libraryReloaded(const std::vector<int> &moved, const std::vector<int> *textures = nullptr);
+    // Old positions through `first`, then `then`: where a texture kept from
+    // before both reloads is now (-1: its photo went in either).
+    static std::vector<int> throughBoth(const std::vector<int> &first, const std::vector<int> &then);
     // Where the view is, for keeping it across a reload: the photo at the
     // top-left and how far from the top it is, and whether it is at the end.
     struct Anchor { int index; double offset; bool atEnd; };

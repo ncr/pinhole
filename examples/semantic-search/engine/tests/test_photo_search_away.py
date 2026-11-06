@@ -1,3 +1,4 @@
+import importlib.util
 import os
 from pathlib import Path
 import socket
@@ -9,7 +10,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from photo_search import away  # noqa: E402
-from photo_search.worker import Worker  # noqa: E402
+
+NUMPY = importlib.util.find_spec("numpy") is not None
 
 
 class Hyprland:
@@ -66,8 +68,11 @@ class Away(unittest.TestCase):
             self.assertIsNone(away.away())
 
 
+@unittest.skipUnless(NUMPY, "the search worker requires NumPy")
 class Yielding(unittest.TestCase):
     def test_indexing_waits_while_someone_is_there_and_lets_the_model_go_after_a_minute(self):
+        from photo_search.worker import Worker
+
         worker = Worker.__new__(Worker)
         worker.yielding, worker.yielded_at, worker.last_inference = False, None, 1.0
         worker.engine = mock.Mock(idle_seconds=60)

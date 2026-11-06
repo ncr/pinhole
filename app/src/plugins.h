@@ -392,7 +392,8 @@ public:
     // Something gone wrong, said under the plugin in the side panel and on
     // stderr: an Error (where it was thrown is said too) or a few words.
     // A promise's chain ends with .catch(pinhole.warn), as what a then()
-    // throws is otherwise never said.
+    // throws is otherwise never said. An error coded `cancelled` or
+    // `reloaded` is not said: neither is a fault.
     Q_INVOKABLE void warn(const QJSValue &error);
 
     // What went wrong, said in the side panel (and on stderr, unless the

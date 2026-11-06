@@ -108,6 +108,29 @@ pub fn forget_making() {
     }
 }
 
+/// Part files (`is_part`) under `cache` nothing has written to for `idle`:
+/// left by a service that ended mid-download, never finished or counted.
+pub fn forget_parts(cache: &Path, idle: std::time::Duration) {
+    let mut folders = vec![cache.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else { continue };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            let path = entry.path();
+            if kind.is_dir() {
+                folders.push(path);
+            } else if kind.is_file() && is_part(&path) {
+                let stale = entry.metadata().and_then(|m| m.modified()).ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age >= idle);
+                if stale {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
+}
+
 /// Whether a file is one being written: a download (`<name>.part`), or a
 /// file being made, which keeps its extension for the program making it
 /// (`<name>.part.jpg`, `<name>.part.mp4`, and what such a program writes
@@ -328,7 +351,8 @@ pub struct Storage {
     /// Bumped as the library moves: whoever holds it open opens it again.
     pub library_generation: AtomicU64,
     /// Written for a moment (a favourite, fresh links) under its read side;
-    /// copied elsewhere under its write side, which waits for those.
+    /// copied elsewhere under its write side, which waits for those. Taken
+    /// to write only by `hold_still`, never `write()`.
     pub library_moving: std::sync::RwLock<()>,
     /// Told where the library went once it has moved.
     on_library_moved: Mutex<Option<Box<dyn Fn(&Path, Option<(&Path, &Path)>) + Send>>>,
@@ -710,6 +734,21 @@ impl Storage {
         })
     }
 
+    /// `library_moving` to write, once no reader has it. Asked for with
+    /// `write()`, a writer waiting (for a lookup on a slow network, say)
+    /// would stop every new reader behind it, every window's fetch of a
+    /// file at hand among them; this waits for a moment with no reader
+    /// instead, and lets them by meanwhile.
+    pub fn hold_still(&self) -> std::sync::RwLockWriteGuard<'_, ()> {
+        loop {
+            match self.library_moving.try_write() {
+                Ok(guard) => return guard,
+                Err(std::sync::TryLockError::Poisoned(e)) => return e.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(std::time::Duration::from_millis(5)),
+            }
+        }
+    }
+
     /// The libraries over, with nothing writing them meanwhile: renamed on
     /// one disk, else copied beside their new place and renamed into it.
     /// Whoever reads the one in use (`library`, there now) is told, and the
@@ -719,7 +758,7 @@ impl Storage {
         // favourite or a lookup (library_moving). Nothing else writes them
         // at all: the window and pinhole's commands ask this service.
         let _writing = self.library_lock.lock().unwrap();
-        let _moving = self.library_moving.write().unwrap();
+        let _moving = self.hold_still();
         // The library in use now, under these locks (another source's may
         // have been shown since the move was asked for): its place there.
         let library = {
@@ -927,6 +966,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Temp(dir)
+    }
+
+    #[test]
+    fn part_files_left_by_an_ended_service_go_once_nothing_writes_them() {
+        let cache = temp("parts");
+        let deep = cache.join("renditions/ab");
+        std::fs::create_dir_all(&deep).unwrap();
+        let old = deep.join("video.part.mp4");
+        let download = deep.join("photo.part");
+        let kept = deep.join("photo.jpg");
+        for file in [&old, &download, &kept] {
+            std::fs::write(file, b"x").unwrap();
+        }
+        let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        for file in [&old, &kept] {
+            std::fs::File::options().write(true).open(file).unwrap().set_modified(hour_ago).unwrap();
+        }
+        forget_parts(&cache, std::time::Duration::from_secs(3600));
+        assert!(!old.exists(), "an old part stays");
+        assert!(download.exists(), "one being written went");
+        assert!(kept.exists(), "a finished file went");
     }
 
     /// Where only the location and limit are read: no kind needed.

@@ -78,13 +78,31 @@ protected:
         if (!m_ready && !m_started)
             return QVariantList();
         if (!m_ready) {
+            // The answer may come after the wait gave up (or never): it then
+            // finds neither this loop nor this object, both perhaps gone by
+            // then, only the state they shared, and leaves it be.
+            struct Waiting {
+                QEventLoop *loop = nullptr;
+                QStringList files;
+                bool done = false;
+            };
+            const auto waiting = std::make_shared<Waiting>();
             QEventLoop wait;
+            waiting->loop = &wait;
             QTimer::singleShot(120000, &wait, &QEventLoop::quit);
-            m_outgoing->prepare(m_items, true, {}, [this, &wait](const QStringList &files, int) {
-                m_files = files;
-                wait.quit();
+            m_outgoing->prepare(m_items, true, {}, [waiting](const QStringList &files, int) {
+                if (!waiting->loop)
+                    return;
+                waiting->files = files;
+                waiting->done = true;
+                waiting->loop->quit();
             });
-            wait.exec();
+            // Answered at once (all of them at hand): no wait, as a quit
+            // before exec() would not end it.
+            if (!waiting->done)
+                wait.exec();
+            waiting->loop = nullptr;
+            m_files = waiting->files;
             m_ready = true;
         }
         QList<QUrl> urls;

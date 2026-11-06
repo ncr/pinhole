@@ -306,6 +306,14 @@ PhotoGrid::Anchor PhotoGrid::anchor() const {
     return {index, index >= 0 ? rectOf(index).top() : 0, m_scroll >= maxScroll(m_columns) - stride()};
 }
 
+std::vector<int> PhotoGrid::throughBoth(const std::vector<int> &first, const std::vector<int> &then) {
+    std::vector<int> through(first.size(), -1);
+    for (size_t old = 0; old < first.size(); ++old)
+        if (const int mid = first[old]; mid >= 0 && mid < int(then.size()))
+            through[old] = then[size_t(mid)];
+    return through;
+}
+
 void PhotoGrid::libraryReloaded(const std::vector<int> &moved, const std::vector<int> *textures) {
     const Anchor before = m_reloadAnchor;
     auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
@@ -324,7 +332,11 @@ void PhotoGrid::libraryReloaded(const std::vector<int> &moved, const std::vector
     if (m_stacksGiven != stacksBefore)
         emit stacksChanged();
     const bool selectionChanged = selectedBefore != selection();
-    m_pendingMoves = std::make_shared<std::vector<int>>(textures ? *textures : moved);
+    // Read again before a frame used the last moves (a window not drawn,
+    // two rounds in one frame): the textures are still where the moves
+    // before these left them, so they go through both.
+    const std::vector<int> &now = textures ? *textures : moved;
+    m_pendingMoves = std::make_shared<std::vector<int>>(m_pendingMoves ? throughBoth(*m_pendingMoves, now) : now);
     emit libraryChanged();
     emit cellsChanged();
 

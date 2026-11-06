@@ -5,13 +5,13 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, PoisonError, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
@@ -219,6 +219,10 @@ struct Shared {
     /// is the first since a source was shown, and finishes what an earlier
     /// round of it gave up (thumbnails still missing).
     rounds_shown: std::sync::atomic::AtomicU64,
+    /// Thumbnails a round could not make (the network gone for a moment):
+    /// when a round looks for them again, and how long it waits the time
+    /// after, doubling to an hour. None while none are owed.
+    thumbs_owed: Mutex<Option<(Instant, Duration)>>,
     /// When sync rounds ran and run next: the `rounds` event.
     rounds: Mutex<Rounds>,
     /// The source shown, watched for changes as they happen, if it can be.
@@ -508,7 +512,7 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         let _writing = shared.storage.library_lock.lock().unwrap();
         // The source and its library change together for whoever reads
         // both (a fetch taking them for its job).
-        let _context = shared.storage.library_moving.write().unwrap();
+        let _context = shared.storage.hold_still();
         *shared.source.write().unwrap() = source.clone();
         *shared.watch.lock().unwrap() = None;
         shared.rounds.lock().unwrap().push = false;
@@ -601,7 +605,7 @@ fn follow(shared: &Arc<Shared>, switches: bool) {
         // afresh of the new one, quietly, as after a panic.
         Ok(source) if turned && kinds.provided(source.kind()) => {
             {
-                let _context = shared.storage.library_moving.write().unwrap();
+                let _context = shared.storage.hold_still();
                 *shared.source.write().unwrap() = source.clone();
             }
             watch(shared, &*source);
@@ -820,6 +824,7 @@ pub fn run(config: Config) -> Result<()> {
         plugins_seen: Mutex::new(None),
         shown: std::sync::atomic::AtomicU64::new(0),
         rounds_shown: std::sync::atomic::AtomicU64::new(u64::MAX),
+        thumbs_owed: Mutex::new(None),
         rounds: Mutex::new(Rounds::default()),
         watch: Mutex::new(None),
         adding: Mutex::new(()),
@@ -856,6 +861,23 @@ pub fn run(config: Config) -> Result<()> {
     if given.is_none() {
         let storage = shared.storage.clone();
         std::thread::spawn(move || storage.evict_loop());
+        // What a service ended by a signal mid-download left (any service's:
+        // they share the cache, so only what nothing has written to in an
+        // hour).
+        let cache = shared.config.cache.clone();
+        std::thread::spawn(move || crate::storage::forget_parts(&cache, Duration::from_secs(3600)));
+    }
+    // Ended (an install, a logout): what is under way stopped and its part
+    // files gone, the socket too, rather than left for the next service.
+    {
+        let weak = Arc::downgrade(&shared);
+        on_terminate(move || {
+            if let Some(shared) = weak.upgrade() {
+                eprintln!("pinholed: asked to end: done");
+                let _ = std::fs::remove_file(&shared.config.socket);
+                shared.abandon();
+            }
+        });
     }
     {
         if let Some(old) = shared.config.adopt.clone().filter(|_| given.is_none()) {
@@ -996,17 +1018,48 @@ impl Drop for Present {
     }
 }
 
+/// `then`, once, and the process ended, as SIGTERM or SIGINT comes. The
+/// handler only notes it; a thread of its own does the rest.
+fn on_terminate(then: impl FnOnce() + Send + 'static) {
+    static ASKED: AtomicBool = AtomicBool::new(false);
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    extern "C" fn noted(_: libc::c_int) {
+        ASKED.store(true, Ordering::SeqCst);
+    }
+    // One service a process (tests run several: the first one's).
+    ONCE.call_once(|| {
+        unsafe {
+            libc::signal(libc::SIGTERM, noted as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGINT, noted as *const () as libc::sighandler_t);
+        }
+        std::thread::spawn(move || {
+            while !ASKED.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            then();
+            std::process::exit(0);
+        });
+    });
+}
+
 /// Bind the socket, replacing one left behind by a service that is gone,
-/// but never one that still answers.
+/// but never one that still answers. Two services starting at once (two
+/// windows on a stale socket) take turns, so the second finds the first's.
 fn bind(socket: &Path) -> Result<UnixListener> {
+    if let Some(dir) = socket.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut lock_name = socket.as_os_str().to_owned();
+    lock_name.push(".lock");
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(&lock_name)?;
+    if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) } != 0 {
+        return Err(anyhow!("locking {}: {}", Path::new(&lock_name).display(), std::io::Error::last_os_error()));
+    }
     if socket.exists() {
         if UnixStream::connect(socket).is_ok() {
             return Err(anyhow!("another pinholed is already running on {}", socket.display()));
         }
         std::fs::remove_file(socket)?;
-    }
-    if let Some(dir) = socket.parent() {
-        std::fs::create_dir_all(dir)?;
     }
     let listener = UnixListener::bind(socket).with_context(|| format!("binding {}", socket.display()))?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
@@ -1820,7 +1873,7 @@ fn panicked(shared: &Arc<Shared>, source: &dyn Source, shown: u64, panic: &(dyn 
     let kinds = &shared.config.kinds;
     let Some(entry) = kinds.shown(&shared.settings()).filter(|e| kinds.id_of(e) == source.id()) else { return };
     let Ok(fresh) = kinds.source_for(Some(&entry)) else { return };
-    let _context = shared.storage.library_moving.write().unwrap_or_else(|e| e.into_inner());
+    let _context = shared.storage.hold_still();
     if shared.shown.load(Ordering::SeqCst) == shown {
         *shared.source.write().unwrap_or_else(|e| e.into_inner()) = fresh;
     }
@@ -1908,7 +1961,9 @@ fn sync_round(shared: &Shared) -> Result<()> {
         // one (it gave up when another source was shown). Not every round,
         // and never again for a file turned down until it changes
         // (source::unreadable).
-        let fresh = added > 0 || report.changes.reasons.contains_key("edited") || first;
+        // Also once those a round failed to make are due again.
+        let owed = shared.thumbs_owed.lock().unwrap().is_some_and(|(due, _)| Instant::now() >= due);
+        let fresh = added > 0 || report.changes.reasons.contains_key("edited") || first || owed;
         let missing: i64 = if fresh {
             db.query_row(
                 "SELECT count(*) FROM assets a JOIN renditions r ON r.asset_id = a.id AND r.kind = 'thumb'
@@ -1936,12 +1991,15 @@ fn sync_round(shared: &Shared) -> Result<()> {
             // up left): windows hear how it goes and see the photos as they
             // come, every four seconds.
             let telling = report.listed || missing > 100;
-            made = crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|done, total| {
+            let thumbs = crate::sync::make_thumbs(source.as_ref(), &mut db, &library, 16, &|done, total| {
                 if telling {
                     building.step("thumbs", done as u64, total as u64);
                 }
-            }, &stop)?
-            .made;
+            }, &stop)?;
+            made = thumbs.made;
+            owe_thumbs(shared, thumbs.failed > 0);
+        } else if fresh {
+            owe_thumbs(shared, false);
         }
         // A video whose thumbnail shows next to nothing gets a cover of its
         // own (cover.rs), looked for as thumbnails are.
@@ -1957,6 +2015,10 @@ fn sync_round(shared: &Shared) -> Result<()> {
         Ok(())
     })();
     building.finish();
+    // A round that failed after it took `first` has thumbnails to look for.
+    if result.as_ref().is_err_and(|e| e.downcast_ref::<crate::source::Stopped>().is_none()) {
+        owe_thumbs(shared, true);
+    }
     match result {
         // Another source is shown: what was made stays, and the rest is
         // made when this one is shown again.
@@ -1966,6 +2028,18 @@ fn sync_round(shared: &Shared) -> Result<()> {
         }
         other => other,
     }
+}
+
+/// Thumbnails still owed (some failed to be made) or not: owed, a round
+/// looks for them again a minute on, then two, … an hour at most.
+fn owe_thumbs(shared: &Shared, owed: bool) {
+    let mut owe = shared.thumbs_owed.lock().unwrap();
+    *owe = if owed {
+        let wait = owe.map_or(Duration::from_secs(60), |(_, wait)| (wait * 2).min(Duration::from_secs(3600)));
+        Some((Instant::now() + wait, wait))
+    } else {
+        None
+    };
 }
 
 #[cfg(test)]

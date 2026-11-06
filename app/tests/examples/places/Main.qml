@@ -32,7 +32,7 @@ PinholePlugin {
         }).catch(error => {
             if (pending !== job) return
             pending = null
-            if (error.code !== "cancelled") pinhole.warn(error)
+            pinhole.warn(error)
         })
     }
 

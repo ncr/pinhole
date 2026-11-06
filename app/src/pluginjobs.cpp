@@ -587,5 +587,11 @@ QJSValue PluginHost::copyFile(const QString &path) {
 }
 
 void PluginHost::warn(const QJSValue &error) {
+    // What the plugin cancelled itself, or what the library read again
+    // stopped, is no fault: .catch(pinhole.warn) at the end of every chain
+    // is right as it is, with no test for either code before it.
+    const QString code = error.isObject() ? error.property(QStringLiteral("code")).toString() : QString();
+    if (code == QLatin1String("cancelled") || code == QLatin1String("reloaded"))
+        return;
     report(error.isError() ? thrown(error) : error.toString());
 }

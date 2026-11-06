@@ -325,7 +325,10 @@ impl Workers {
             // service is replaced or killed. It never uses it for commands.
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // A group of its own, so what it starts (a shell's programs)
+            // ends with it: stop() signals the whole group.
+            .process_group(0);
         // Lower than pinholed by NICE, whatever it lowers itself to after.
         // SAFETY: nice(2) is async-signal-safe, and nothing else runs
         // between fork and exec.
@@ -371,9 +374,10 @@ fn stop(mut children: Vec<Child>) {
         std::thread::sleep(Duration::from_millis(50));
     }
     for child in children.iter_mut() {
-        if matches!(child.try_wait(), Ok(None)) {
-            let _ = child.kill();
-        }
+        // Its group, before it is waited for (its id not yet free for
+        // another): whatever it started and left running goes too.
+        // SAFETY: kill(2) with a negative pid signals that process group.
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
         let _ = child.wait();
     }
 }

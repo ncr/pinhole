@@ -65,6 +65,23 @@ impl Window {
         panic!("no answer to {method} within 30 s");
     }
 
+    /// An event heard already, or the next to come that `matches`, within ten seconds.
+    fn hear(&mut self, matches: impl Fn(&Value) -> bool) -> Option<Value> {
+        if let Some(event) = self.heard.iter().find(|e| matches(e)) {
+            return Some(event.clone());
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Some(line) = self.line() {
+                self.heard.push(line.clone());
+                if matches(&line) {
+                    return Some(line);
+                }
+            }
+        }
+        None
+    }
+
     /// `workers`, asked until `done` says it is so, within a minute.
     fn workers_until(&mut self, done: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -161,12 +178,15 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
     // Ten lower than the service's (this test's) own.
     let own: i32 = std::fs::read_to_string("/proc/self/stat").unwrap().rsplit(") ").next().unwrap().split(' ').nth(16).unwrap().parse().unwrap();
     assert_eq!(lines[1], format!("nice {}", (own + 10).min(19)));
-    let event = window.heard.iter().find(|e| e["event"] == "workers" && e["workers"][0]["running"] == true).cloned();
-    assert!(event.is_some(), "no workers event: {:#?}", window.heard);
 
-    // Turned off: it ends as its stdin closes, and is no longer listed.
+    // Turned off: it ends as its stdin closes, and is no longer listed. The
+    // window is surely listening by now, so it hears this change as an event
+    // (the start may have been told before it connected, as to any window,
+    // which asks `workers` for that).
     std::fs::write(&plugins, json!({"enabled": {"test.indexer": false}}).to_string()).unwrap();
     window.workers_until(|w| w.as_array().is_some_and(Vec::is_empty));
+    let event = window.hear(|e| e["event"] == "workers" && e["workers"].as_array().is_some_and(Vec::is_empty));
+    assert!(event.is_some(), "no workers event: {:#?}", window.heard);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !std::fs::read_to_string(&said).unwrap_or_default().contains("ended") {
         assert!(Instant::now() < deadline, "the worker did not end");

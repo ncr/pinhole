@@ -124,8 +124,7 @@ PinholePlugin {
         }).catch(error => {
             if (finding === found)
                 finding = null
-            if (error.code !== "cancelled")
-                pinhole.warn(error)
+            pinhole.warn(error)
         })
     }
 

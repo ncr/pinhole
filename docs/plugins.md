@@ -215,7 +215,7 @@ PinholePlugin {
         }).catch(error => {
             if (pending !== job) return
             pending = null
-            if (error.code !== "cancelled") pinhole.warn(error)
+            pinhole.warn(error)
         })
     }
 
@@ -796,15 +796,18 @@ Its safety limits apply to every plugin, including those with older manifests:
 An error has a stable `code`: `sql` carries SQLite's diagnostic,
 `no_library` means there is no current index, `query_timeout` exceeded the
 time budget, and `query_limit` exceeded the row/data budget. Structural SQL
-limits can also produce `sql`. `cancelled` means the caller cancelled the
-promise or the library reloaded while it ran. Turning a plugin off or
+limits can also produce `sql`. `query_busy` means two of the plugin's own
+(or eight in all) are already running. `cancelled` means the plugin
+cancelled the promise; `reloaded`, that the library was read again while
+it ran. Turning a plugin off or
 reloading its code stops computation and discards its old callbacks.
 Cancellation is checked inside SQLite and while waiting for locks, even
 for an aggregate that has not produced its first row.
 
-Keep the promise when opening a view, cancel it when closing, and ignore
-`cancelled` in a catch handler. `reloaded` is no cancel of yours: the
-library was read again, so ask again (on `library.changed()`). For paging, use a stable id and a bounded
+Keep the promise when opening a view and cancel it when closing.
+`.catch(pinhole.warn)` says neither `cancelled` nor `reloaded`: they are
+no faults. On `reloaded` the library was read again, so ask again (on
+`library.changed()`). For paging, use a stable id and a bounded
 `LIMIT` (for example, `WHERE id > ? ORDER BY id LIMIT 1000`) rather than
 fetching the entire library into JavaScript. The working Places example
 aggregates in SQL, so it returns at most four rows regardless of library size.
@@ -853,10 +856,7 @@ fine:
 
 ```js
 const steadying = pinhole.run("pinhole-series", ["steady", dir].concat(ids), { timeout: 30000 })
-steadying.then(result => use(result.stdout), error => {
-    if (error.code !== "cancelled")
-        throw error
-}).catch(pinhole.warn)
+steadying.then(result => use(result.stdout)).catch(pinhole.warn)
 // …another series shown in the meantime:
 steadying.cancel()
 ```
@@ -869,6 +869,12 @@ A promise is rejected with an `Error` whose `code` says why:
 | `copyFile` | `not_found` (no such file), `cancelled` (another copy supersedes it while its image is being prepared) |
 | `run` | `exit` (it ran and did not exit 0: `exitCode`, `stdout`, `stderr` too, and the message is what it wrote to stderr), `start` (it could not be started), `timeout`, `cancelled` |
 | `record` | `failed` (ffmpeg, or the item gone), `cancelled` |
+| `query` | `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled`, `reloaded` |
+| any | `refused` (`run` of a program Pinhole does the work of, with what to use instead) |
+
+`pinhole.warn` says nothing of `cancelled` (the plugin's own `cancel()`,
+or a newer copy) and `reloaded` (the library read again during a query),
+so a chain needs no test for them before its `.catch(pinhole.warn)`.
 
 End a chain with `.catch(pinhole.warn)`: what a `then` throws is otherwise
 said nowhere. There is no `finally` in Qt's JavaScript; a `.then()` after

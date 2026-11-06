@@ -64,7 +64,7 @@ void runQuerySelfTest(QQuickWindow *window) {
                 plugins->library()->reloaded();
                 ++*phase; return;
             case 4:
-                if (!answers.contains("reload:cancelled") || PluginQuery::outstanding() != 0) return;
+                if (!answers.contains("reload:reloaded") || PluginQuery::outstanding() != 0) return;
                 engine->evaluate(QStringLiteral("queryTestStart('one'); queryTestStart('two'); queryTestStart('three');"));
                 ++*phase; return;
             case 5:

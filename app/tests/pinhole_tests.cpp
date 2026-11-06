@@ -376,6 +376,17 @@ private slots:
     // from a test, whose socket a fake service holds.
     void initTestCase() { qputenv("PINHOLED", "/bin/false"); }
 
+    // Two reloads before one frame: a texture kept from before both goes
+    // through both moves, not only the last (a neighbour's picture else).
+    void texturesFollowEveryReloadBetweenFrames() {
+        // 0..5; the photo at 1 goes, then the one now at 3 (once 4).
+        const std::vector<int> first{0, -1, 1, 2, 3, 4};
+        const std::vector<int> then{0, 1, 2, -1, 3};
+        QCOMPARE(PhotoGrid::throughBoth(first, then), (std::vector<int>{0, -1, 1, 2, -1, 3}));
+        // Positions past what the second knew: gone.
+        QCOMPARE(PhotoGrid::throughBoth({0, 5}, {0, 1}), (std::vector<int>{0, -1}));
+    }
+
     // Source dates stay intact: only presentation order changes. An older
     // photo received yesterday belongs at the newest end for thirty days.
     void timelineKeepsRecentAdditionsTogetherThenReturnsThemToCaptureOrder() {
