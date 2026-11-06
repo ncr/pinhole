@@ -14,7 +14,6 @@ pub mod background;
 pub mod colour;
 pub mod cover;
 pub mod db;
-pub mod effects;
 pub mod gainmap;
 pub mod jpeg;
 pub mod kinds;

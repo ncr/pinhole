@@ -1,0 +1,59 @@
+#!/bin/sh
+# A Live Photo's effect made from its motion with ffmpeg, for the photos
+# whose source has no render of it: on iCloud the effects not set on the
+# iPhone, and every effect of a folder's Live Photos. pinholed runs it as
+# the manifest's "makes" says, while someone waits for it:
+#
+#   live-effect bounce|long_exposure <motion> <file to write>
+#
+# A loop needs nothing made: it is the motion played round and round.
+set -eu
+effect="$1"
+motion="$(realpath -- "$2")"
+out="$(realpath -- "$3")"
+
+run() {
+    ffmpeg -v error -nostdin -y "$@"
+}
+
+case "$effect" in
+bounce)
+    # The motion forward, then backward, as an MP4 that plays anywhere.
+    run -i "$motion" \
+        -filter_complex '[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0,format=yuv420p[v]' \
+        -map '[v]' -c:v libx264 -preset veryfast -crf 23 -movflags +faststart -f mp4 "$out"
+    ;;
+long_exposure)
+    # Every frame averaged into one JPEG, as the iPhone's long exposure:
+    # what moves blurs, what stands still stays sharp. The frames are first
+    # held to the first one's framing (vidstab's tripod mode), as a hand
+    # never holds still for three seconds. tmix averages at most 1024
+    # frames; a Live Photo has about 90.
+    frames="$(ffprobe -v error -count_packets -select_streams v:0 \
+        -show_entries stream=nb_read_packets -of csv=p=0 "$motion" </dev/null | tr -cd '0-9')"
+    if [ -z "$frames" ] || [ "$frames" -eq 0 ]; then
+        echo "live-effect: $motion has no frames ffprobe can count" >&2
+        exit 1
+    fi
+    [ "$frames" -gt 1024 ] && frames=1024
+    # The transforms beside the file made, named in the filter graph by
+    # their name alone, ffmpeg running in their folder: a folder's path is
+    # never read as the graph's syntax (`,`, `;`, `[`); in a filter's
+    # options `:`, `'` and `\` are escaped.
+    folder="$(dirname -- "$out")"
+    transforms="$(basename -- "${out%.*}").trf"
+    name="$(printf '%s' "$transforms" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g' -e "s/'/\\\\'/g")"
+    cd "$folder"
+    trap 'rm -f -- "$transforms"' EXIT
+    run -i "$motion" -vf "vidstabdetect=result=$name:shakiness=8:accuracy=15:tripod=1" -f null -
+    # One file, by its name as it is: without -update a %d in it would be
+    # the number of the frame.
+    run -i "$motion" \
+        -vf "vidstabtransform=input=$name:tripod=1:optzoom=0:crop=keep:interpol=bicubic,tmix=frames=$frames,select=eq(n\\,$((frames - 1)))" \
+        -frames:v 1 -q:v 2 -update 1 -f image2 -c:v mjpeg "$out"
+    ;;
+*)
+    echo "live-effect: no effect $effect: bounce or long_exposure" >&2
+    exit 2
+    ;;
+esac

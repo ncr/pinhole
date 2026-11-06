@@ -120,13 +120,15 @@ name for it. For iCloud:
 | `loop`, `bounce` | VidCompl, when that is the effect set on the iPhone |
 | `long_exposure` | JPEGFull, when that is the effect set on the iPhone |
 
-An effect the source has no file for is made from the motion
-(`effects.rs`): a `loop` is the `live` file itself, played round and round;
-a `bounce` is ffmpeg's MP4 of it forward then reversed (about a second); a
-`long_exposure` is every frame held to the first one's framing (vidstab's
-tripod mode) and averaged into a JPEG (about five seconds for a 1920x1440
-motion). They are answered with `rendition: "made"` and kept in the cache
-beside the motion, named after its key, so each is made once.
+An effect the source has no file for: a `loop` is the `live` file itself,
+played round and round; a `bounce` and a `long_exposure` are made by the
+plugin whose manifest `makes` them, the Live Photos plugin's `live-effect`
+(docs/plugins.md, What a plugin makes): ffmpeg's MP4 of the motion forward
+then reversed (about a second), and every frame held to the first one's
+framing (vidstab's tripod mode) and averaged into a JPEG (about five
+seconds for a 1920x1440 motion). They are answered with `rendition:
+"made"` and kept in the cache beside the motion, named after its key, so
+each is made once. With no plugin that makes it turned on, `turned_off`.
 
 A `jpeg` of a photo whose `full` is a JPEG is that `full`, answered as a
 `full` would be (its `rendition`, `cached`). Any other photo's is made

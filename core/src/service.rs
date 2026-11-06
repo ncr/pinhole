@@ -1557,8 +1557,51 @@ fn jpeg(shared: &Arc<Shared>, db: &Connection, asset: &str, reply: Reply) {
 /// motion (effects.rs, ffmpeg), a `jpeg` from `full` (jpeg.rs, ImageMagick).
 /// What it is made from is fetched as a window would, then it is made in a
 /// thread of its own. Requests for one being made wait for it.
+/// The plugin, switched on, that makes this kind (a Live Photo's Bounce:
+/// the Live Photos plugin's `makes`), if any.
+fn maker_of(shared: &Shared, kind: &str) -> Option<crate::plugins::Maker> {
+    let places = shared.config.kinds.places()?;
+    let switches = crate::plugins::switches_in(&shared.config.plugins);
+    let builtins = crate::plugins::builtin_ids(places);
+    crate::plugins::makers(places).0.into_iter().find(|m| {
+        m.kind == kind && crate::plugins::is_on(&switches, &m.plugin, m.builtin, !m.builtin && builtins.contains(&m.plugin))
+    })
+}
+
+/// A plugin's program making `out` from `from`, as its manifest's `makes`
+/// says: given its `args`, then the file it is made from and the file to
+/// write (its extension kept), in its plugin's folder. Someone waits for
+/// it: at normal priority, within the limits background work has, it and
+/// what it starts ended with it.
+fn run_maker(maker: &crate::plugins::Maker, from: &Path, out: &Path) -> Result<()> {
+    let mut command = std::process::Command::new(&maker.program);
+    command.args(&maker.args).arg(from).arg(out).stdin(std::process::Stdio::null());
+    if let Some(dir) = maker.program.parent() {
+        command.current_dir(dir);
+    }
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let output = crate::background::output(&mut command).with_context(|| format!("running {}", maker.program.display()))?;
+    if !output.status.success() || !out.is_file() {
+        let said = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("{} {}: {}", maker.plugin, maker.kind, said.lines().last().unwrap_or("made nothing")));
+    }
+    Ok(())
+}
+
 fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: Reply) {
-    let from = if want == Want::Jpeg { Want::Full } else { Want::Live };
+    // An effect: the plugin's that makes it (Live Photos'), if it is on.
+    let maker = if want == Want::Jpeg {
+        None
+    } else {
+        match maker_of(shared, want.name()) {
+            Some(maker) => Some(maker),
+            None => return reply.send(Err(("turned_off", format!("no plugin that makes a {} is on", want.name())))),
+        }
+    };
+    let from = match &maker {
+        Some(maker) => Want::parse(&maker.from).unwrap_or(Want::Live),
+        None => Want::Full,
+    };
     let made_from = db.query_row(
         "SELECT key FROM renditions WHERE asset_id = ?1 AND kind = ?2",
         params![asset, from.name()],
@@ -1567,10 +1610,11 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
     let Ok(key) = made_from else {
         return reply.send(Err(("not_found", format!("{asset} has no {} to make a {} of", from.name(), want.name()))));
     };
-    let (file_type, extension) = match want {
-        Want::Bounce => ("public.mpeg-4", "mp4"),
-        _ => ("public.jpeg", "jpg"),
+    let (file_type, extension) = match &maker {
+        Some(maker) => (maker.file_type.clone(), maker.extension.clone()),
+        None => ("public.jpeg".to_owned(), "jpg".to_owned()),
     };
+    let (file_type, extension) = (file_type.as_str(), extension.as_str());
     let relative = cached_path(want, &key, extension, true);
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
@@ -1590,7 +1634,9 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
     let (tx, rx) = mpsc::channel();
     fetch(shared, db, &json!({"asset": asset, "kind": from.name()}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
     let shared = shared.clone();
+    let extension = extension.to_owned();
     std::thread::spawn(move || {
+        let extension = extension.as_str();
         // A panic in making it fails it as an error would: answered, and
         // no longer under way.
         let made = catch_unwind(AssertUnwindSafe(|| -> std::result::Result<(), (String, String)> {
@@ -1601,10 +1647,9 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
             }
             // Made beside the target and renamed: a reader never sees half a file.
             let part = path.with_extension(format!("part.{extension}"));
-            let result = match want {
-                Want::Bounce => crate::effects::bounce(&source, &part),
-                Want::Jpeg => crate::jpeg::make(&source, &part),
-                _ => crate::effects::long_exposure(&source, &part),
+            let result = match &maker {
+                Some(maker) => run_maker(maker, &source, &part),
+                None => crate::jpeg::make(&source, &part),
             }
             .and_then(|()| Ok(std::fs::rename(&part, &path)?));
             if let Err(e) = result {

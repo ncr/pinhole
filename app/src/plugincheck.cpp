@@ -291,7 +291,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -447,6 +447,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             uses << QStringLiteral("sources in the manifest");
         if (declared.contains(QLatin1String("workers")))
             uses << QStringLiteral("workers in the manifest");
+        if (declared.contains(QLatin1String("makes")))
+            uses << QStringLiteral("makes in the manifest");
     }
     QMap<int, QStringList> byApi;
     for (const auto &[version, name] : order)
@@ -1170,7 +1172,7 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
     QStringList said;
     // What a manifest has: a key misspelt is never read, and nothing says so.
     static const QStringList keys = {"schemaVersion", "id", "name", "description", "version", "api", "entryPoints",
-                                     "sources", "workers", "author", "license"};
+                                     "sources", "workers", "makes", "author", "license"};
     for (auto it = manifest.begin(); it != manifest.end(); ++it)
         if (!keys.contains(it.key()))
             said << QStringLiteral("manifest.json: \"%1\" is not a manifest's key%2, and is never read")
@@ -1214,7 +1216,9 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
         return tr("It needs a newer Pinhole: plugin API %1, and this one has %2.").arg(wanted).arg(api);
     if (const QString problem = sourcesProblem(dir, id, *manifest); !problem.isEmpty())
         return problem;
-    return workersProblem(dir, *manifest);
+    if (const QString problem = workersProblem(dir, *manifest); !problem.isEmpty())
+        return problem;
+    return makesProblem(dir, *manifest);
 }
 
 QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest) {
@@ -1249,6 +1253,48 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
                 return wrong(tr("\"args\" is a list of strings"));
         }
         const QString program = worker.value("program").toString();
+        if (!safeEntry(program))
+            return wrong(tr("\"program\" is a path in the plugin's folder, without \"..\""));
+        if (const QFileInfo file(dir + '/' + program); !file.isFile() || !file.isExecutable())
+            return wrong(tr("%1 is not a program in the plugin's folder (a file it can run)").arg(program));
+    }
+    return {};
+}
+
+QString Plugins::makesProblem(const QString &dir, const QJsonObject &manifest) {
+    // As pinholed takes them (core/src/plugins.rs, check_maker).
+    const QJsonValue declared = manifest.value("makes");
+    if (declared.isUndefined())
+        return {};
+    if (!declared.isArray())
+        return tr("manifest.json's \"makes\" is a list");
+    if (manifest.value("api").toInt(1) < 12)
+        return tr("makes needs \"api\": 12");
+    static const QStringList kinds = {"bounce", "long_exposure"};
+    static const QStringList froms = {"live", "full", "original", "video"};
+    static const QRegularExpression type(QStringLiteral("^[A-Za-z0-9.-]{1,128}$"));
+    static const QRegularExpression extension(QStringLiteral("^[a-z0-9]{1,8}$"));
+    for (const QJsonValue &each : declared.toArray()) {
+        const QJsonObject made = each.toObject();
+        const QString kind = made.value("kind").toString();
+        if (!each.isObject() || !kinds.contains(kind))
+            return tr("each of manifest.json's \"makes\" has a \"kind\": bounce or long_exposure");
+        const auto wrong = [&kind](const QString &why) { return tr("\"makes\": %1: %2").arg(kind, why); };
+        if (!froms.contains(made.value("from").toString()))
+            return wrong(tr("\"from\" is live, full, original or video"));
+        if (!type.match(made.value("type").toString()).hasMatch())
+            return wrong(tr("\"type\" is its UTI, public.jpeg say"));
+        if (!extension.match(made.value("extension").toString()).hasMatch())
+            return wrong(tr("\"extension\" is its files', lowercase: jpg, mp4"));
+        if (made.contains("args")) {
+            const QJsonValue args = made.value("args");
+            bool fine = args.isArray() && args.toArray().size() <= 64;
+            for (const QJsonValue &a : args.toArray())
+                fine = fine && a.isString() && a.toString().toUtf8().size() <= 4096;
+            if (!fine)
+                return wrong(tr("\"args\" is a list of strings"));
+        }
+        const QString program = made.value("program").toString();
         if (!safeEntry(program))
             return wrong(tr("\"program\" is a path in the plugin's folder, without \"..\""));
         if (const QFileInfo file(dir + '/' + program); !file.isFile() || !file.isExecutable())

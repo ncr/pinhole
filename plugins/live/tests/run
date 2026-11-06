@@ -1,0 +1,24 @@
+#!/bin/sh
+# live-effect makes Bounce and Long exposure from a motion, into a folder
+# whose name a filter graph or an image sequence would read as its own
+# syntax were it given as it is, and leaves nothing else there.
+set -eu
+here="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+command -v ffmpeg >/dev/null || { echo "live tests: no ffmpeg, skipped"; exit 0; }
+top="$(mktemp -d)"
+trap 'rm -rf -- "$top"' EXIT
+dir="$top/Photos, 50%d [old]; 'x'"
+mkdir -p "$dir"
+motion="$dir/IMG 50%off [1].MOV"
+ffmpeg -v error -nostdin -y -f lavfi -i color=c=gray:s=160x120:d=1:r=30 \
+    -vf 'drawbox=x=t*120:y=40:w=30:h=30:c=white:t=fill' -c:v libx264 -pix_fmt yuv420p "$motion"
+frames() {
+    ffprobe -v error -count_packets -select_streams v:0 -show_entries stream=nb_read_packets -of csv=p=0 "$1" | tr -cd '0-9'
+}
+"$here/live-effect" bounce "$motion" "$dir/bounce.part.mp4"
+[ "$(frames "$dir/bounce.part.mp4")" = 60 ] || { echo "FAIL: the bounce is not twice the motion"; exit 1; }
+"$here/live-effect" long_exposure "$motion" "$dir/long 50%d.part.jpg"
+[ "$(head -c 2 "$dir/long 50%d.part.jpg" | od -An -tx1 | tr -d ' ')" = ffd8 ] || { echo "FAIL: no JPEG"; exit 1; }
+[ "$(ls -A "$dir" | wc -l)" = 3 ] || { echo "FAIL: left behind: $(ls -A "$dir")"; exit 1; }
+if "$here/live-effect" sparkle "$motion" "$dir/x.mp4" 2>/dev/null; then echo "FAIL: an unknown effect made"; exit 1; fi
+echo "live tests: bounce, long exposure, odd names, nothing left behind: PASS"

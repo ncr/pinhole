@@ -137,7 +137,15 @@ fn start(root: &Path, socket: &Path, library: &Path, source: Arc<dyn Source>, li
         location: root.join("location"),
         socket: socket.to_path_buf(),
         source,
-        kinds: pinholed::builtin_kinds(PathBuf::from("/nonexistent/pinhole-auth")),
+        // Pinhole's own plugins, here: what makes a bounce among them.
+        kinds: pinholed::builtin_kinds(PathBuf::from("/nonexistent/pinhole-auth")).with_providers(
+            pinhole_core::plugins::Places {
+                builtin: root.join("builtin"),
+                personal: root.join("config/pinhole/plugins"),
+                state: root.join("state/pinhole/sources"),
+            },
+            Default::default(),
+        ),
         limit: None,
         settings: root.join("config/pinhole/settings.json"),
         plugins: root.join("config/pinhole/plugins.json"),
@@ -316,21 +324,21 @@ fn a_service_of_a_library_given_ends_after_its_windows_whatever_went_on() {
         assert!(!socket.exists());
     }
 
-    // Making a bounce as its last window goes, with an ffmpeg that takes
-    // its time: once the half minute for what is under way is over, it is
-    // stopped and its part file gone, none written after; what the service
-    // was making thumbnails from goes too.
+    // Making a bounce as its last window goes, with a plugin's program
+    // that takes its time (as the Live Photos plugin's ffmpeg may): once the
+    // half minute for what is under way is over, it is stopped and its part
+    // file gone, none written after; what the service was making
+    // thumbnails from goes too.
     if ffmpeg {
-        let slow = root.join("slow-bin");
-        std::fs::create_dir_all(&slow).unwrap();
-        let program = slow.join("ffmpeg");
+        let live = root.join("builtin/live");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
+        std::fs::write(live.join("manifest.json"), json!({"schemaVersion": 1, "api": 12, "id": "pinhole.live",
+            "entryPoints": {"main": "Main.qml"}, "makes": [{"kind": "bounce", "from": "live", "type": "public.mpeg-4",
+            "extension": "mp4", "program": "slow-effect", "args": ["bounce"]}]}).to_string()).unwrap();
+        let program = live.join("slow-effect");
         std::fs::write(&program, "#!/bin/sh\nfor last; do :; done\necho partial > \"$last\"\nsleep 600\necho more >> \"$last\"\n").unwrap();
         std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let mut slow_path = std::ffi::OsString::from(&slow);
-        slow_path.push(":");
-        slow_path.push(&path);
-        std::env::set_var("PATH", &slow_path);
 
         let socket = socket("making");
         let ended = start(&root, &socket, &given, Arc::new(FolderSource::new(photos.clone())), linger);
@@ -348,7 +356,6 @@ fn a_service_of_a_library_given_ends_after_its_windows_whatever_went_on() {
         let gone = Instant::now();
         drop(window);
         let after = ended_after(&ended, gone, 45).expect("still running 45 s after its last window, making something");
-        std::env::set_var("PATH", &path);
         assert!(after >= linger + Duration::from_secs(29) && after < linger + Duration::from_secs(33), "ended {after:?} after its last window");
         let deadline = Instant::now() + Duration::from_secs(5);
         while !running(&program).is_empty() {

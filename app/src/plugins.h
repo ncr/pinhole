@@ -657,6 +657,9 @@ public:
     // pinholed would refuse them: a name, a program in the folder it can
     // run, its args, and API 10.
     static QString workersProblem(const QString &dir, const QJsonObject &manifest);
+    // What is wrong with the renditions a manifest says it makes ("makes"),
+    // as pinholed would refuse them.
+    static QString makesProblem(const QString &dir, const QJsonObject &manifest);
     // What the plugin in `dir` uses that came with an API after the first,
     // by the API that brought it, by its files' code, strings and comments
     // aside: pinhole's ("pinhole.notify"), a photo's avgColor, or its

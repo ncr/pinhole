@@ -68,8 +68,9 @@ pub enum Want {
     Live,
     /// A Live Photo's motion made to loop, to play back and forth, and its
     /// frames as one long exposure. The source's own when the effect was
-    /// set on the photo (iCloud's, rendered on the iPhone); otherwise the
-    /// service makes them from the motion (service.rs).
+    /// set on the photo (iCloud's, rendered on the iPhone); otherwise a
+    /// loop is the motion itself, and the others are made by the plugin
+    /// whose manifest `makes` them, the Live Photos plugin's (service.rs).
     Loop,
     Bounce,
     LongExposure,

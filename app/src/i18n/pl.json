@@ -454,5 +454,12 @@
   "%1 is %2's key there too: neither works. Give \"%3\" another key": "%1 to też klawisz wtyczki %2: nie działa żaden z nich. Daj „%3” inny klawisz",
   "The library was read again while this was asked. Ask again.": "Biblioteka została odczytana ponownie w trakcie pytania. Zapytaj jeszcze raz.",
   "Photo %1": "Zdjęcie %1",
-  "imports Pinhole.Internal, which is Pinhole's own plugins': use what Pinhole.Plugin gives": "importuje Pinhole.Internal, który należy do wtyczek samego Pinhole: użyj tego, co daje Pinhole.Plugin"
+  "imports Pinhole.Internal, which is Pinhole's own plugins': use what Pinhole.Plugin gives": "importuje Pinhole.Internal, który należy do wtyczek samego Pinhole: użyj tego, co daje Pinhole.Plugin",
+  "manifest.json's \"makes\" is a list": "\"makes\" w manifest.json to lista",
+  "makes needs \"api\": 12": "makes wymaga \"api\": 12",
+  "each of manifest.json's \"makes\" has a \"kind\": bounce or long_exposure": "każdy element \"makes\" w manifest.json ma \"kind\": bounce lub long_exposure",
+  "\"makes\": %1: %2": "\"makes\": %1: %2",
+  "\"from\" is live, full, original or video": "\"from\" to live, full, original lub video",
+  "\"type\" is its UTI, public.jpeg say": "\"type\" to jego UTI, np. public.jpeg",
+  "\"extension\" is its files', lowercase: jpg, mp4": "\"extension\" to rozszerzenie jego plików, małymi literami: jpg, mp4"
 }

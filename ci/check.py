@@ -119,6 +119,7 @@ class Checks:
             self.run('query-budgets', ['app/bin/test-queries'], env=env)
             self.run('accessibility', ['app/bin/test-accessibility'], env=env)
             self.run('calendar', ['plugins/calendar/tests/run'], env=env)
+            self.run('live-effects', ['plugins/live/tests/run'], env=env)
             self.run('installer-updater', [sys.executable, '-m', 'unittest', 'discover', '-s', 'bin/tests', '-v'], env=env)
             self.run('photo-search-engine', [sys.executable, '-m', 'unittest', 'discover', '-s',
                                              'examples/semantic-search/engine/tests', '-v'], env=env)

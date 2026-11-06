@@ -289,6 +289,111 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
     (found, problems)
 }
 
+/// The API from which a plugin can make renditions (`makes`).
+pub const MAKES_API: i64 = 12;
+
+/// A rendition a plugin makes from another of a photo's, while someone
+/// waits for it (a Live Photo's Bounce from its motion): its manifest's
+/// `makes`.
+#[derive(Debug, Clone)]
+pub struct Maker {
+    pub plugin: String,
+    pub builtin: bool,
+    /// The kind a window asks `fetch` for: `bounce`, `long_exposure`.
+    pub kind: String,
+    /// The rendition it is made from: `live`, `full`, `original`, `video`.
+    pub from: String,
+    /// What it is: its UTI, and its files' extension.
+    pub file_type: String,
+    pub extension: String,
+    pub program: PathBuf,
+    pub args: Vec<String>,
+}
+
+/// Every rendition the plugins declare they make, on or not, and why any
+/// declared was refused. A plugin of your own with a built-in's id takes
+/// its place, its makers too.
+pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
+    let mut found: Vec<Maker> = Vec::new();
+    let mut problems = Vec::new();
+    for (id, dir, manifest, builtin) in installed(places) {
+        let declared = &manifest["makes"];
+        if declared.is_null() {
+            continue;
+        }
+        let Some(declared) = declared.as_array() else {
+            problems.push(format!("{id}: \"makes\" is a list"));
+            continue;
+        };
+        if let Err(why) = taken(&id, &dir, &manifest).and_then(|()| {
+            if whole(&manifest["api"]).unwrap_or(1) < MAKES_API {
+                return Err(format!("makes needs \"api\": {MAKES_API}"));
+            }
+            Ok(())
+        }) {
+            problems.push(format!("{id}: makes: {why}"));
+            continue;
+        }
+        for each in declared {
+            let kind = each["kind"].as_str().unwrap_or("");
+            match check_maker(&dir, each) {
+                Ok(maker) if found.iter().any(|m| m.kind == maker.kind) => {
+                    problems.push(format!("{id}: makes {kind:?}: another plugin makes it already"))
+                }
+                Ok(maker) => found.push(Maker { plugin: id.clone(), builtin, ..maker }),
+                Err(why) => problems.push(format!("{id}: makes {kind:?}: {why}")),
+            }
+        }
+    }
+    (found, problems)
+}
+
+/// The kinds a plugin can make: the effects a source may have no render
+/// of. What the window asks for by these names it makes; nothing else.
+pub const MADE_KINDS: [&str; 2] = ["bounce", "long_exposure"];
+
+/// One rendition a manifest says it makes, checked.
+fn check_maker(dir: &Path, declared: &Value) -> Result<Maker, String> {
+    if !declared.is_object() {
+        return Err("each is an object: \"kind\", \"from\", \"type\", \"extension\", \"program\"".into());
+    }
+    let kind = declared["kind"].as_str().unwrap_or("");
+    if !MADE_KINDS.contains(&kind) {
+        return Err(format!("\"kind\" is one of {}", MADE_KINDS.join(", ")));
+    }
+    let from = declared["from"].as_str().unwrap_or("");
+    if !["live", "full", "original", "video"].contains(&from) {
+        return Err("\"from\" is live, full, original or video".into());
+    }
+    let file_type = declared["type"].as_str().unwrap_or("");
+    if file_type.is_empty() || file_type.len() > 128 || !file_type.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')) {
+        return Err("\"type\" is its UTI, public.jpeg say".into());
+    }
+    let extension = declared["extension"].as_str().unwrap_or("");
+    if extension.is_empty() || extension.len() > 8 || !extension.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+        return Err("\"extension\" is its files', lowercase: jpg, mp4".into());
+    }
+    let args = match &declared["args"] {
+        Value::Null => Vec::new(),
+        Value::Array(list) if list.len() <= 64 => list
+            .iter()
+            .map(|a| a.as_str().filter(|a| a.len() <= 4096).map(str::to_owned).ok_or_else(|| "\"args\" is a list of strings".to_owned()))
+            .collect::<Result<_, _>>()?,
+        _ => return Err("\"args\" is a list of strings".into()),
+    };
+    let program = program_in(dir, "program", &declared["program"])?;
+    Ok(Maker {
+        plugin: String::new(),
+        builtin: false,
+        kind: kind.to_owned(),
+        from: from.to_owned(),
+        file_type: file_type.to_owned(),
+        extension: extension.to_owned(),
+        program,
+        args,
+    })
+}
+
 /// One worker as its manifest declares it, checked: its program and the
 /// arguments it is given first.
 fn check_worker(dir: &Path, declared: &Value, names: &[String]) -> Result<(PathBuf, Vec<String>), String> {
@@ -453,6 +558,38 @@ fn safe_relative(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_a_plugin_makes_is_read_from_its_manifest_and_checked() {
+        let dir = std::env::temp_dir().join(format!("pinhole-makers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let places = Places { builtin: dir.join("builtin"), personal: dir.join("personal"), state: dir.join("state") };
+        let plugin = |root: &Path, folder: &str, manifest: Value| {
+            let at = root.join(folder);
+            std::fs::create_dir_all(&at).unwrap();
+            std::fs::write(at.join("Main.qml"), "").unwrap();
+            std::fs::write(at.join("make"), "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(at.join("make"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
+        };
+        let made = |kind: &str| serde_json::json!({"kind": kind, "from": "live", "type": "public.mpeg-4", "extension": "mp4",
+                                                   "program": "make", "args": [kind]});
+        let manifest = |id: &str, api: i64, makes: Value| serde_json::json!({"schemaVersion": 1, "api": api, "id": id,
+                                                                              "entryPoints": {"main": "Main.qml"}, "makes": makes});
+        plugin(&places.builtin, "live", manifest("pinhole.live", 12, serde_json::json!([made("bounce"), made("long_exposure")])));
+        plugin(&places.personal, "old", manifest("me.old", 11, serde_json::json!([made("bounce")])));
+        plugin(&places.personal, "odd", manifest("me.odd", 12, serde_json::json!([made("sparkle"),
+            {"kind": "bounce", "from": "live", "type": "public.mpeg-4", "extension": "MP4", "program": "make"}])));
+        let (found, refused) = makers(&places);
+        let kinds: Vec<(&str, &str)> = found.iter().map(|m| (m.plugin.as_str(), m.kind.as_str())).collect();
+        assert_eq!(kinds, [("pinhole.live", "bounce"), ("pinhole.live", "long_exposure")]);
+        assert!(found[0].builtin && found[0].program.ends_with("live/make") && found[0].args == ["bounce"]);
+        let refused = refused.join("\n");
+        assert!(refused.contains("me.old: makes: makes needs \"api\": 12"), "{refused}");
+        assert!(refused.contains("me.odd: makes \"sparkle\": \"kind\" is one of bounce, long_exposure"), "{refused}");
+        assert!(refused.contains("me.odd: makes \"bounce\": \"extension\""), "{refused}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn an_id_names_folders_safely_and_numbers_may_be_written_as_decimals() {

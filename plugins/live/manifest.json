@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 6,
+  "api": 12,
   "id": "pinhole.live",
   "name": "Live Photos",
   "version": "1.0.0",
@@ -9,5 +9,27 @@
   "description": "A Live Photo's motion over it on L, and its effects as on the iPhone on ⇧ L: Loop, Bounce and Long exposure; and a mark on Live Photos in the grid.",
   "entryPoints": {
     "main": "Main.qml"
-  }
+  },
+  "makes": [
+    {
+      "kind": "bounce",
+      "from": "live",
+      "type": "public.mpeg-4",
+      "extension": "mp4",
+      "program": "live-effect",
+      "args": [
+        "bounce"
+      ]
+    },
+    {
+      "kind": "long_exposure",
+      "from": "live",
+      "type": "public.jpeg",
+      "extension": "jpg",
+      "program": "live-effect",
+      "args": [
+        "long_exposure"
+      ]
+    }
+  ]
 }

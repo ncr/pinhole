@@ -12,7 +12,8 @@ For plugin work, read [the agent contract](docs/plugin-agents.md) and
 API version and the same bundled documents without a window. New public
 capabilities must update the contract, checker, examples and Polish strings.
 
-Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run` and
+Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run`,
+`plugins/live/tests/run` and
 `python3 -m unittest discover -s bin/tests` and
 `python3 -m unittest discover -s examples/semantic-search/engine/tests`. Core tests run with
 `cargo test --release --locked --workspace --no-fail-fast --manifest-path core/Cargo.toml`.

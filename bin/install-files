@@ -41,6 +41,8 @@ install -Dm755 plugins/series/finder/target/release/pinhole-series "$PREFIX/lib/
 install -d "$PREFIX/lib/pinhole/plugins/live/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/live" plugins/live/manifest.json plugins/live/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/live/i18n" plugins/live/i18n/*.json
+# Its effects, made with ffmpeg as its manifest's "makes" says.
+install -Dm755 plugins/live/live-effect "$PREFIX/lib/pinhole/plugins/live/live-effect"
 install -d "$PREFIX/lib/pinhole/plugins/favourites/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/favourites" plugins/favourites/manifest.json plugins/favourites/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/favourites/i18n" plugins/favourites/i18n/*.json

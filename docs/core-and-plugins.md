@@ -46,9 +46,10 @@ settings entry. Four paths use it:
 - **Effects** (`service::make`). A `loop` the source does not have is the
   `live` file itself. A `bounce` or `long_exposure` it does not have is
   made. pinholed fetches `live` through `fetch` with an `Out::Service`
-  reply, runs `effects::bounce` or `effects::long_exposure` (ffmpeg), and
-  keeps the result in `cache/live/` next to the motion. The source itself
-  knows nothing of this.
+  reply, runs the program of the plugin whose manifest `makes` that kind
+  (the Live Photos plugin's `live-effect`, ffmpeg), and keeps the result in
+  `cache/live/` next to the motion. The source itself knows nothing of
+  this, nor does the core of ffmpeg's filters.
 - **Upload** (`service::add`). `add::gather` pairs Live Photos. Then
   `source.accepts()` and `source.add(addition, sent)` run, one asset at a
   time. iCloud uploads (`icloud/upload.rs`), and a folder copies the file
