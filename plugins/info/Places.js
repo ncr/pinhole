@@ -40,14 +40,16 @@ function fit(points, width, height) {
 // Screen distance gives a consistent spacing between markers. Check the
 // neighbouring cells too, so a cell boundary doesn't split nearby photos.
 // Fixed seeds keep the result deterministic and bound each group's radius.
-function clusters(points, cx, cy, zoom, width, height) {
+//
+// The cells are the world's, not the view's: at one zoom the groups are the
+// same wherever the view is, so panning only shows more or fewer of them and
+// no marker jumps from one group to another under the fingers.
+function clusters(points, zoom) {
     const size = scale(zoom), radius = 74
     const bins = Object.create(null)
     const groups = []
     for (const p of points) {
-        const x = delta(p.x, cx) * size, y = (p.y - cy) * size
-        if (Math.abs(x) > width / 2 + 35 || Math.abs(y) > height / 2 + 35)
-            continue
+        const x = p.x * size, y = p.y * size
         const bx = Math.floor(x / radius), by = Math.floor(y / radius)
         let near = null, distance = radius * radius
         for (let j = by - 1; j <= by + 1; ++j) {
@@ -68,7 +70,7 @@ function clusters(points, cx, cy, zoom, width, height) {
             if (p.date > near.cover.date)
                 near.cover = p
         } else {
-            const group = { sx: x, sy: y, x: p.x, y: p.y, cover: p, points: [p] }
+            const group = { key: p.id, sx: x, sy: y, x: p.x, y: p.y, cover: p, points: [p] }
             const key = bx + ":" + by
             if (!bins[key])
                 bins[key] = []
@@ -77,6 +79,13 @@ function clusters(points, cx, cy, zoom, width, height) {
         }
     }
     return groups
+}
+
+// Those of `groups` around the view (a marker's width past its edges).
+function around(groups, cx, cy, zoom, width, height) {
+    const size = scale(zoom), margin = 74
+    return groups.filter(g => Math.abs(delta(g.x, cx) * size) <= width / 2 + margin
+                              && Math.abs((g.y - cy) * size) <= height / 2 + margin)
 }
 
 // Reuse the delegates while panning through the same set of places.

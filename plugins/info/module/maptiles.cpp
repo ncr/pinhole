@@ -13,6 +13,9 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QQuickWindow>
+#include <QSGSimpleRectNode>
+#include <QSGSimpleTextureNode>
+#include <QSGTexture>
 #include <QStandardPaths>
 #include <QWheelEvent>
 #include <QtConcurrent>
@@ -29,7 +32,8 @@ int wrap(int x, int n) { return ((x % n) + n) % n; }
 qreal delta(qreal x, qreal centre) { return x - centre - std::floor(x - centre + 0.5); }
 }
 
-MapTiles::MapTiles(QQuickItem *parent) : QQuickPaintedItem(parent) {
+MapTiles::MapTiles(QQuickItem *parent) : QQuickItem(parent) {
+    setFlag(ItemHasContents);
     // A local server instead, for tests: its tiles at {z}/{x}/{y}.pbf.
     QUrl base(QString::fromUtf8(qgetenv("PINHOLE_MAP_TILES")));
     if (!base.host().isEmpty() && (base.scheme() == QStringLiteral("https") ||
@@ -122,26 +126,99 @@ QList<MapTiles::Tile> MapTiles::viewport() const {
     return tiles;
 }
 
-void MapTiles::paint(QPainter *painter) {
-    painter->fillRect(QRectF(0, 0, width(), height()), m_style.land);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform);
+// What the view shows now: for each tile, its drawing, or while a sharper
+// one is drawn, the one drawn before or a larger tile's part; then the
+// names over them.
+QList<MapTiles::Quad> MapTiles::frame() const {
+    QList<Quad> quads;
     for (const auto &tile : viewport()) {
-        // While a sharper one is drawn, the one drawn before, or a larger
-        // tile's part.
         for (int z = tile.z; z >= std::max(0, tile.z - 4); --z) {
             const int shift = tile.z - z;
             const int parts = 1 << shift;
             if (const Drawn *drawn = m_drawn.object(key(z, tile.x >> shift, tile.y >> shift))) {
-                const QSizeF whole = drawn->image.deviceIndependentSize();
-                const qreal w = whole.width() / parts, h = whole.height() / parts;
-                const qreal ratio = drawn->image.devicePixelRatio();
-                painter->drawImage(tile.rect, drawn->image, QRectF((tile.x % parts) * w * ratio,
-                    (tile.y % parts) * h * ratio, w * ratio, h * ratio));
+                // The tile's own pixels: its image is rounded up to whole
+                // ones, and the last row and column are only partly its.
+                const qreal w = drawn->size * drawn->image.devicePixelRatio() / parts, h = w;
+                quads.append({drawn->image, QRectF((tile.x % parts) * w, (tile.y % parts) * h, w, h), tile.rect});
                 break;
             }
         }
     }
-    drawLabels(painter);
+    placeLabels(quads);
+    return quads;
+}
+
+namespace {
+// The textures of the images it shows, made once each and kept while
+// shown; let go a few seconds after they were last.
+class MapNode : public QSGNode {
+public:
+    ~MapNode() override {
+        for (const Kept &kept : std::as_const(textures))
+            delete kept.texture;
+    }
+    struct Kept { QSGTexture *texture; int frame; };
+    QHash<qint64, Kept> textures;
+    QSGSimpleRectNode *land = nullptr;
+    int frame = 0;
+};
+
+// Device pixels, so a tile's edges meet its neighbours' and its picture
+// stays sharp: each edge rounded on its own.
+QRectF snapped(const QRectF &r, qreal ratio) {
+    const qreal left = std::round(r.left() * ratio) / ratio, top = std::round(r.top() * ratio) / ratio;
+    const qreal right = std::round(r.right() * ratio) / ratio, bottom = std::round(r.bottom() * ratio) / ratio;
+    return QRectF(left, top, right - left, bottom - top);
+}
+} // namespace
+
+QSGNode *MapTiles::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
+    auto *root = static_cast<MapNode *>(old);
+    if (!root) {
+        root = new MapNode;
+        root->land = new QSGSimpleRectNode;
+        root->appendChildNode(root->land);
+    }
+    root->land->setRect(boundingRect());
+    root->land->setColor(m_style.land);
+    const qreal ratio = window() ? window()->effectiveDevicePixelRatio() : 1;
+    const QList<Quad> quads = isVisible() && width() > 0 && height() > 0 ? frame() : QList<Quad>{};
+    ++root->frame;
+    // The nodes after the land, one a quad, reused in order.
+    QSGNode *node = root->land->nextSibling();
+    for (const Quad &quad : quads) {
+        auto *texture = static_cast<QSGSimpleTextureNode *>(node);
+        if (!texture) {
+            texture = new QSGSimpleTextureNode;
+            texture->setFiltering(QSGTexture::Linear);
+            root->appendChildNode(texture);
+        }
+        node = texture->nextSibling();
+        auto kept = root->textures.find(quad.image.cacheKey());
+        if (kept == root->textures.end())
+            kept = root->textures.insert(quad.image.cacheKey(), {window()->createTextureFromImage(quad.image), 0});
+        kept->frame = root->frame;
+        if (texture->texture() != kept->texture)
+            texture->setTexture(kept->texture);
+        texture->setSourceRect(quad.source);
+        texture->setRect(snapped(quad.target, ratio));
+    }
+    while (node) {
+        QSGNode *next = node->nextSibling();
+        root->removeChildNode(node);
+        delete node;
+        node = next;
+    }
+    // Shown in none of the last few hundred frames: let go.
+    for (auto it = root->textures.begin(); it != root->textures.end();) {
+        if (root->frame - it->frame > 300) {
+            delete it->texture;
+            it = root->textures.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return root;
 }
 
 void MapTiles::schedule() {
@@ -234,14 +311,15 @@ void MapTiles::render(const Tile &tile, qreal size) {
         QImage image(pixels, pixels, QImage::Format_ARGB32_Premultiplied);
         image.setDevicePixelRatio(ratio);
         image.fill(style.land);
+        // Drawn to the image's edge, the part of a pixel past the tile
+        // included, so no line of land shows where two tiles meet.
         QPainter painter(&image);
-        painter.setClipRect(QRectF(0, 0, size, size));
         drawVectorTile(painter, *tile, style, target, zoom);
         return image;
     }));
 }
 
-const QImage *MapTiles::labelImage(const VectorTile::Label &label) {
+const QImage *MapTiles::labelImage(const VectorTile::Label &label) const {
     const qreal ratio = window() ? window()->effectiveDevicePixelRatio() : 1;
     const QString name = QStringLiteral("%1|%2|%3|%4").arg(int(label.kind)).arg(label.capital).arg(ratio).arg(label.text);
     if (const QImage *found = m_labels.object(name))
@@ -289,7 +367,7 @@ const QImage *MapTiles::labelImage(const VectorTile::Label &label) {
 
 // Names over the whole view at once, so none is cut at a tile's edge: the
 // most important first, the rest only where they fit.
-void MapTiles::drawLabels(QPainter *painter) {
+void MapTiles::placeLabels(QList<Quad> &quads) const {
     using K = VectorTile;
     const qreal level = std::clamp(m_zoom, 0.0, qreal(maxZoom));
     const int dz = std::min(int(std::floor(level)), dataZoom);
@@ -368,7 +446,7 @@ void MapTiles::drawLabels(QPainter *painter) {
                 || std::any_of(taken.cbegin(), taken.cend(), [&](const QRectF &other) { return other.intersects(rect); }))
             continue;
         placed.append(rect);
-        painter->drawImage(rect.topLeft(), *image);
+        quads.append({*image, QRectF(QPointF(0, 0), QSizeF(image->size())), rect});
     }
 }
 

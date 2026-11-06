@@ -8,7 +8,7 @@
 #include <QImage>
 #include <QNetworkAccessManager>
 #include <QPointer>
-#include <QQuickPaintedItem>
+#include <QQuickItem>
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
@@ -18,7 +18,12 @@
 // colours, with names in the language asked for, sharp at any scale. It
 // only requests the tiles intersecting its viewport. Coordinates are
 // fractions of the Mercator world; the horizontal axis wraps.
-class MapTiles : public QQuickPaintedItem {
+//
+// Each tile and each name is drawn once, away from the window, into an
+// image that becomes a texture of the scene graph: moving the map only
+// moves those, so a pan costs the GPU a few quads a frame, not a repaint
+// of the whole view on the CPU.
+class MapTiles : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(qreal centerX MEMBER m_x NOTIFY viewChanged)
     Q_PROPERTY(qreal centerY MEMBER m_y NOTIFY viewChanged)
@@ -41,7 +46,6 @@ class MapTiles : public QQuickPaintedItem {
     Q_PROPERTY(QVariantList avoid MEMBER m_avoid NOTIFY avoidChanged)
 public:
     explicit MapTiles(QQuickItem *parent = nullptr);
-    void paint(QPainter *painter) override;
     bool unavailable() const { return m_unavailable; }
     QColor land() const { return m_style.land; }
     Q_INVOKABLE void retry();
@@ -53,7 +57,13 @@ signals:
     void languageChanged();
     void avoidChanged();
 
+protected:
+    QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
+
 private:
+    // One image put somewhere in the view: its part `source` (in its own
+    // pixels) at `target` (in the item's).
+    struct Quad { QImage image; QRectF source, target; };
     struct Tile { int z, x, y; QRectF rect; };
     struct Data { std::shared_ptr<const VectorTile> tile; };
     struct Drawn { QImage image; qreal size; int generation; };
@@ -65,8 +75,9 @@ private:
     void requestTemplate(bool fromCache);
     void fetch(int z, int x, int y);
     void render(const Tile &tile, qreal size);
-    void drawLabels(QPainter *painter);
-    const QImage *labelImage(const VectorTile::Label &label);
+    QList<Quad> frame() const;
+    void placeLabels(QList<Quad> &quads) const;
+    const QImage *labelImage(const VectorTile::Label &label) const;
 
     QNetworkAccessManager m_network;
     QTimer m_delay;
@@ -77,7 +88,7 @@ private:
     QHash<QString, qint64> m_failed;
     QCache<QString, Data> m_data{96};
     QCache<QString, Drawn> m_drawn{192};
-    QCache<QString, QImage> m_labels{600};
+    mutable QCache<QString, QImage> m_labels{600};
     QStringList m_languages;
     MapStyle m_style;
     int m_generation = 0;

@@ -10,6 +10,17 @@ FocusScope {
     readonly property var pinhole: owner.pinhole
     property var points: []
     property var groups: []
+    // The world's groups at `clusteredAt` (Places.js clusters()), made
+    // again only when the zoom or the photos change: a pan takes those
+    // around the view from them.
+    property var clustered: []
+    property var clusteredFrom: null
+    property real clusteredAt: -1
+    // The markers' rows, by group key, so a pan adds and drops the markers
+    // at the edges and keeps the rest as they are.
+    property var groupByKey: ({})
+    ListModel { id: markerRows }
+    readonly property var noGroup: ({ key: "", x: 0, y: -10, cover: { id: "" }, points: [] })
     property var gallery: []
     property var pending: null
     property var focusPoint: null
@@ -141,13 +152,37 @@ FocusScope {
         return x >= 0 && x < viewWidth && y >= 0 && y < viewHeight
     }
     function regroup() {
-        const next = Geo.clusters(availablePoints, viewCenterX, viewCenterY, zoom, viewWidth, viewHeight)
+        // While a zoom glides, grouped again only every half a step (all
+        // the photos are gone through), and once more where it stops.
+        const zoomed = gestures.moving ? Math.abs(clusteredAt - zoom) >= 0.5 : clusteredAt !== zoom
+        if (clusteredFrom !== availablePoints || zoomed) {
+            clustered = Geo.clusters(availablePoints, zoom)
+            clusteredFrom = availablePoints
+            clusteredAt = zoom
+        }
+        const next = Geo.around(clustered, viewCenterX, viewCenterY, zoom, viewWidth, viewHeight)
         if (!Geo.sameGroups(groups, next))
-            groups = next
+            showGroups(next)
         if (!currentGroup || !isInView(currentGroup))
             choosePlace(nearestPlace())
         if (areaOpen)
             setGallery(availablePoints.filter(isInView), true)
+    }
+    function showGroups(next) {
+        const byKey = {}
+        for (const group of next)
+            byKey[group.key] = group
+        for (let i = markerRows.count - 1; i >= 0; --i)
+            if (!(markerRows.get(i).key in byKey))
+                markerRows.remove(i)
+        const shown = new Set()
+        for (let i = 0; i < markerRows.count; ++i)
+            shown.add(markerRows.get(i).key)
+        groupByKey = byKey
+        groups = next
+        for (const group of next)
+            if (!shown.has(group.key))
+                markerRows.append({ key: group.key })
     }
     function nearestPlace() {
         let closest = null, best = Infinity
@@ -412,17 +447,18 @@ FocusScope {
             zoomPerNotch: 0.65
             onPanned: (dx, dy) => places.pan(dx, dy)
             onZoomed: (x, y, steps) => places.zoomAt(x, y, places.zoom + steps)
-            onMovingChanged: if (moving) map.forceActiveFocus()
+            onMovingChanged: moving ? map.forceActiveFocus() : places.scheduleGroups()
             onTapped: map.forceActiveFocus()
             onDoubleTapped: (x, y) => zoomBy(x, y, 1)
             HoverHandler { cursorShape: gestures.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
 
             Repeater {
-                model: places.groups
+                model: markerRows
                 delegate: Item {
                     id: marker
                     objectName: "placesMarker"
-                    required property var modelData
+                    required property string key
+                    readonly property var modelData: places.groupByKey[key] ?? places.noGroup
                     readonly property int count: modelData.points.length
                     readonly property bool focusedPhoto: places.focusPoint !== null
                         && modelData.points.some(p => p.id === places.focusPoint.id)
