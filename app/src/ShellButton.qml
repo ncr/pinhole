@@ -68,6 +68,8 @@ ControlSurface {
     property int inset: Math.round(theme.fontSize * 0.833)
     // The pointer over it, while it shows.
     readonly property bool hovered: hover.hovered && visible
+    // Pressed: a click, a tap, its key (a click on a button is a tap here,
+    // not `clicked`).
     signal tapped()
     // As a tap does: from the keys of a panel it is a stop in.
     function press() {

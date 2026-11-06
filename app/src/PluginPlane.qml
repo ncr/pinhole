@@ -162,8 +162,10 @@ Item {
         const layersOf = place => place === "viewer" ? ["viewer", "chrome", "any"] : ["grid", "chrome", "any"]
         // Pinhole's own: written in its own files (qrc:), not a plugin's, and
         // not the Command a button or a plugin's action makes for its key.
+        // Pinhole's own menus' rows say so (Command.pinholes).
         const own = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length
-            && String(c.file).startsWith("qrc:") && !/\/(PluginAction|ShellButton|Choices|MenuGroup|MoreGroup|MenuRow)\.qml$/.test(String(c.file)))
+            && String(c.file).startsWith("qrc:") && (c.pinholes === true
+                || !/\/(PluginAction|ShellButton|Choices|MenuGroup|MoreGroup|MenuRow)\.qml$/.test(String(c.file))))
         const taken = {}
         for (let i = 0; i < actions.length; ++i) {
             const action = actions[i]
@@ -288,9 +290,11 @@ Item {
     }
 
 
-    // Any plugin asks for SDR (PinholePlugin.holdSdr).
+    // Any plugin asks for SDR (PinholePlugin.holdSdr), or one covers the
+    // photos: whatever it draws there is SDR, and the photo beneath at HDR
+    // brightness would glare through its edges and fades.
     readonly property bool holdSdr: {
-        let hold = false
+        let hold = pluginCovering
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
             if (loader && loader.item && loader.item.holdSdr === true)

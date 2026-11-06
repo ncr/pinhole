@@ -385,6 +385,12 @@ public:
     // once it has them (API 12). In a self-test the clipboard is the
     // window's own, as for copyFile.
     Q_INVOKABLE QJSValue copyText(const QString &text);
+    // A file in its own folder or its cache (a worker's), read whole away
+    // from the window (API 13): a promise of its text, or of what its JSON
+    // says; rejected "not_found", "not_yours" (another's file), "too_large"
+    // (over 32 MB), "unreadable" or "json".
+    Q_INVOKABLE QJSValue readText(const QString &path);
+    Q_INVOKABLE QJSValue readJson(const QString &path);
     // The folder a file is in, in the file manager.
     Q_INVOKABLE void showFile(const QString &path) const;
     // ~/Pictures, or the desktop's own Pictures folder.
@@ -497,6 +503,9 @@ private:
     // Settles a promise of the plugin's, unless it has stopped since
     // `generation`.
     void settle(int generation, const QJSValue &how, const QJSValue &value);
+    QJSValue readFile(const QString &path, bool json);
+    // query(), and for Pinhole's own asking with a source's tables too.
+    QJSValue ask(const QString &sql, const QVariantList &values, bool privateTables);
 
     QString m_id;
     QString m_dir;
@@ -629,8 +638,9 @@ public:
     // and stacks, pinhole.selectionIds, pinhole.screenshots. 11: coming back
     // from the photos (openPhotos' comeBack, away, returned), PhotoTiles,
     // PanelHeader, SettingNote and SettingSwitch, Choices.numbered and
-    // keyboardInUse. 12: pinhole.copyText, input and hasKeys.
-    static constexpr int api = 12;
+    // keyboardInUse. 12: pinhole.copyText, input and hasKeys. 13:
+    // pinhole.readText and readJson, a worker's `said` in pinhole.workers.
+    static constexpr int api = 13;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 
@@ -670,6 +680,13 @@ public:
     // The plugin in `dir`'s files named as one of Pinhole's own, or as one
     // of the `others`' (each its id and folder): a qsTr() in it may be
     // given that one's words (Translator). `pinhole plugin check` warns.
+    // Pinhole's own keys a plugin's could clash with, read from the
+    // window's QML: the key as Qt names it, "grid", "viewer" or "" (both),
+    // and what it does.
+    struct OwnKey { QString key, layer, what; };
+    static QList<OwnKey> pinholesKeys();
+    // What Pinhole's own `key` does in `layer` ("" for both), "" if none.
+    static QString pinholesKey(const QString &key, const QString &layer);
     static QStringList nameClashes(const QString &dir, const QList<std::pair<QString, QString>> &others);
     // What `pinhole plugin check` refuses in the plugin in `dir` (each
     // "file:line: what, and what to use instead"), and what it warns of:

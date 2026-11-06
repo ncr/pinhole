@@ -80,20 +80,20 @@ PinholePlugin {
             return "ticked " + pinhole.selectionCount + " " + pinhole.selection()[0]
         return ""
     }
-    // Why not, in Pinhole's words: the source's name from the library's
-    // key ("icloud" is iCloud, a folder its name).
+    // Why not, in Pinhole's words, with the shown source's name as the
+    // source picker says it.
     function whyNot(code) {
-        const key = pinhole.library.key
-        const name = key.split(":")[0] === "icloud" ? "iCloud" : key.substring(key.indexOf(":") + 1).split("/").pop()
+        const shown = pinhole.sources.list.find(source => source.id === pinhole.sources.current)
+        const name = shown?.name ?? ""
         // How the source shown is doing: no_service when no service runs.
         const health = pinhole.sources.health
         if (code === "read_only")
             return qsTr("This library is only being looked at here: its favourites cannot be changed")
         if (code === "needs_sign_in")
-            return qsTr("Not signed in to %1").arg(name)
+            return name ? qsTr("Not signed in to %1").arg(name) : qsTr("Not signed in")
         if (code === "no_service" || health === "no_service")
             return qsTr("The Pinhole service is not running")
-        return qsTr("Could not change favourites in %1").arg(name)
+        return name ? qsTr("Could not change favourites in %1").arg(name) : qsTr("Could not change favourites")
     }
     // Under the heart it was pressed on, while that is still what shows;
     // else (another photo shown since, or undone in the grid) at the foot

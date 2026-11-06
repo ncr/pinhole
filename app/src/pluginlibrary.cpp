@@ -194,7 +194,7 @@ QJSValue PluginHost::screenshots() {
         + named.join(QLatin1String(" OR "))
         + QStringLiteral(" OR (lower(a.filename) GLOB '*.png' AND NOT a.has_location AND a.thumb_w > 0 AND a.thumb_h > 0 AND (")
         + shaped.join(QLatin1String(" OR ")) + QStringLiteral(")));");
-    QJSValue rows = query(sql, {});
+    QJSValue rows = ask(sql, {}, /*privateTables=*/icloud);
     QJSEngine *js = engine();
     if (!js)
         return rows;
@@ -208,6 +208,10 @@ QJSValue PluginHost::screenshots() {
 }
 
 QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
+    return ask(sql, values, false);
+}
+
+QJSValue PluginHost::ask(const QString &sql, const QVariantList &values, bool privateTables) {
     const int generation = m_generation;
     const auto control = std::make_shared<PluginQuery::Control>();
     auto deferred = std::make_shared<Deferred>();
@@ -266,6 +270,8 @@ QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
             settle(generation, deferred->resolve, js->toScriptValue(answer.rows));
         }
     });
-    watcher->setFuture(PluginQuery::start(path, sql, values, control));
+    PluginQuery::Limits limits;
+    limits.privateTables = privateTables;
+    watcher->setFuture(PluginQuery::start(path, sql, values, control, limits));
     return deferred->promise;
 }

@@ -58,12 +58,12 @@ private slots:
     void sqlNullAndEmptyValuesKeepTheExistingQtSqlJavaScriptShape() {
         Library library;
         QCOMPARE(sqlite3_exec(library.writer,
-            "CREATE TABLE nullable(i INTEGER, t TEXT, b BLOB); INSERT INTO nullable VALUES(NULL,NULL,NULL)",
+            "CREATE TABLE renditions(i INTEGER, t TEXT, b BLOB); INSERT INTO renditions VALUES(NULL,NULL,NULL)",
             nullptr, nullptr, nullptr), SQLITE_OK);
         const QStringList queries{
             "SELECT NULL AS plain, CAST(NULL AS TEXT) AS text_null, CAST(NULL AS BLOB) AS blob_null, "
             "CAST(NULL AS INTEGER) AS int_null, '' AS empty_text, CAST('' AS BLOB) AS empty_blob",
-            "SELECT i AS int_null, t AS text_null, b AS blob_null FROM nullable"
+            "SELECT i AS int_null, t AS text_null, b AS blob_null FROM renditions"
         };
         QJSEngine js;
         for (const auto &sql : queries) {
@@ -121,6 +121,26 @@ private slots:
         QVERIFY(!QFile::exists(outside));
         QCOMPARE(read(library, "SELECT count(*) AS n FROM assets").rows[0].toMap().value("n").toInt(), 3);
         QCOMPARE(read(library, "PRAGMA table_info(assets)").rows.size(), 2);
+    }
+
+    void aSourcesOwnTablesAreItsProvidersNotAPlugins() {
+        Library library;
+        QCOMPARE(sqlite3_exec(library.writer,
+            "CREATE TABLE icloud_assets(asset_id TEXT, url TEXT); INSERT INTO icloud_assets VALUES ('a','https://x');"
+            "CREATE TABLE meta(key TEXT, value TEXT); INSERT INTO meta VALUES ('source','fake');"
+            "CREATE TABLE renditions(asset_id TEXT, kind TEXT)", nullptr, nullptr, nullptr), SQLITE_OK);
+        for (const char *sql : {"SELECT url FROM icloud_assets", "SELECT a.id FROM assets a JOIN icloud_assets i ON i.asset_id = a.id",
+                                "SELECT (SELECT url FROM icloud_assets LIMIT 1) AS u", "PRAGMA table_info(icloud_assets)",
+                                "WITH x AS (SELECT * FROM icloud_assets) SELECT count(*) FROM x"})
+            QCOMPARE(read(library, sql).code, QString("sql"));
+        QCOMPARE(read(library, "SELECT count(*) AS n FROM assets JOIN renditions ON asset_id = id").code, QString());
+        QCOMPARE(read(library, "SELECT value FROM meta WHERE key = 'source'").rows.value(0).toMap().value("value").toString(), QString("fake"));
+        QCOMPARE(read(library, "PRAGMA table_info(assets)").rows.size(), 2);
+        QCOMPARE(read(library, "SELECT name FROM sqlite_master").code, QString());
+        // Pinhole's own asking (screenshots()) reads them.
+        PluginQuery::Limits own;
+        own.privateTables = true;
+        QCOMPARE(read(library, "SELECT url FROM icloud_assets", {}, own).rows.size(), 1);
     }
 
     void onlyOneStatementButTrailingCommentsAreFine() {

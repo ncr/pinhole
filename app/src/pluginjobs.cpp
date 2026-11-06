@@ -9,6 +9,10 @@
 #include "storage.h"
 
 #include <QDeadlineTimer>
+#include <QFutureWatcher>
+#include <QJsonDocument>
+#include <QStandardPaths>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -617,6 +621,70 @@ QJSValue PluginHost::copyText(const QString &text) {
     data->setText(text);
     setClipboard(data);
     settle(m_generation, deferred.resolve, text);
+    return deferred.promise;
+}
+
+// A file of its own read, away from the window: one in its folder or its
+// cache (what its worker wrote there), whole, as text or as JSON (API 13).
+QJSValue PluginHost::readText(const QString &path) { return readFile(path, false); }
+QJSValue PluginHost::readJson(const QString &path) { return readFile(path, true); }
+
+QJSValue PluginHost::readFile(const QString &path, bool json) {
+    const int generation = m_generation;
+    const Deferred deferred = defer([] {});
+    const QString file = QFileInfo(path).canonicalFilePath();
+    const QString cache = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/"
+                               + m_id).canonicalPath();
+    const QString own = QDir(m_dir).canonicalPath();
+    const auto inside = [&file](const QString &root) { return !root.isEmpty() && file.startsWith(root + '/'); };
+    if (file.isEmpty() || !QFileInfo(file).isFile()) {
+        settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such file: %1").arg(path)));
+        return deferred.promise;
+    }
+    if (!inside(own) && !inside(cache)) {
+        settle(generation, deferred.reject,
+               error(QStringLiteral("not_yours"), tr("only a file in the plugin's folder or its cache: %1").arg(path)));
+        return deferred.promise;
+    }
+    // Whole, so bounded: a plugin's own state, not a library.
+    constexpr qint64 most = 32 * 1024 * 1024;
+    struct Read { QByteArray bytes; QString code; };
+    auto *watcher = new QFutureWatcher<Read>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, deferred, generation, json, path] {
+        watcher->deleteLater();
+        const Read read = watcher->result();
+        if (read.code == QLatin1String("too_large")) {
+            settle(generation, deferred.reject, error(read.code, tr("larger than 32 MB: %1").arg(path)));
+            return;
+        }
+        if (!read.code.isEmpty()) {
+            settle(generation, deferred.reject, error(read.code, tr("could not read %1").arg(path)));
+            return;
+        }
+        QJSEngine *js = engine();
+        if (!js)
+            return;
+        if (!json) {
+            settle(generation, deferred.resolve, QString::fromUtf8(read.bytes));
+            return;
+        }
+        QJsonParseError parsed;
+        const QJsonDocument document = QJsonDocument::fromJson(read.bytes, &parsed);
+        if (parsed.error != QJsonParseError::NoError) {
+            settle(generation, deferred.reject,
+                   error(QStringLiteral("json"), tr("%1 is not JSON: %2").arg(path, parsed.errorString())));
+            return;
+        }
+        settle(generation, deferred.resolve, js->toScriptValue(document.toVariant()));
+    });
+    watcher->setFuture(QtConcurrent::run([file] {
+        QFile f(file);
+        if (f.size() > most)
+            return Read{{}, QStringLiteral("too_large")};
+        if (!f.open(QIODevice::ReadOnly))
+            return Read{{}, QStringLiteral("unreadable")};
+        return Read{f.readAll(), {}};
+    }));
     return deferred.promise;
 }
 

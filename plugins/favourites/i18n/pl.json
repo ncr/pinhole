@@ -1,8 +1,10 @@
 {
   "A heart on F for the photo shown and for what is ticked, set where the photos are (iCloud too) and undone with Ctrl Z; and a mark on favourites in the grid.": "Serce pod F dla pokazanego zdjęcia i dla zaznaczonych, ustawiane tam, gdzie są zdjęcia (także w iCloud), cofane przez Ctrl Z; i znak na ulubionych w siatce.",
+  "Could not change favourites": "Nie udało się zmienić ulubionych",
   "Could not change favourites in %1": "Nie udało się zmienić ulubionych w %1",
   "Favourite": "Ulubione",
   "Favourites": "Ulubione",
+  "Not signed in": "Brak zalogowania",
   "This library is only being looked at here: its favourites cannot be changed": "Ta biblioteka jest tu tylko przeglądana: nie można zmienić jej ulubionych",
   "adding to favourites": "dodanie do ulubionych",
   "removing from favourites": "usunięcie z ulubionych"

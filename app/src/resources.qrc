@@ -7,6 +7,7 @@
         <file alias="docs/plugin-agents.md">../../docs/plugin-agents.md</file>
         <file alias="docs/plugins.md">../../docs/plugins.md</file>
         <file alias="docs/plugin-examples.md">../../docs/plugin-examples.md</file>
+        <file alias="docs/plugin-kit.md">../../docs/plugin-kit.md</file>
         <file alias="docs/source-providers.md">../../docs/source-providers.md</file>
         <file alias="PhotoViewer.qml">PhotoViewer.qml</file>
         <file alias="Stage.qml">Stage.qml</file>

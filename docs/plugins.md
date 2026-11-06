@@ -60,7 +60,9 @@ one of another plugin's or of Pinhole's own (see Translations).
 ## The kit
 
 What Pinhole's own plugins once wrote by hand, and got wrong, is in
-`Pinhole.Plugin`, right by default:
+`Pinhole.Plugin`, right by default. Every property, signal and function
+of each is in [the kit, member by member](plugin-kit.md)
+(`pinhole plugin docs plugin-kit`):
 
 - `ScrollList`, `ScrollGrid`, `ScrollArea`: a `ListView`, a `GridView` and
   a `Flickable` (anything larger than its room: give it a `contentWidth`
@@ -403,7 +405,9 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `workers` in the manifest (Workers, below); `PhotoTiles`, `PanelHeader`,
 `SettingNote`, `SettingSwitch`, `Choices`' `numbered` and
 `pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input`,
-`hasKeys`, `workers`, `workerSaid` and `PanZoom`.
+`hasKeys`, `pinhole.workers`, `workerSaid` and `PanZoom`. API 13 adds
+`pinhole.readText(path)` and `readJson(path)`, and a worker's `said` in
+`pinhole.workers`.
 
 `Main.qml` beside it:
 
@@ -496,9 +500,14 @@ shown. It is given, after `args`:
 ```
 
 `--cache-dir` is the plugin's `pinhole.cacheDir` for that library, made
-before it starts, so what the worker writes there the plugin's QML reads.
-`--managed-plugins` is where its settings are (`settings.<id>` in it), read
-again as they change. It starts ten points lower in CPU priority than
+before it starts, so what the worker writes there the plugin's QML reads
+(`pinhole.readText`, `readJson`). Its last part is the library's folder
+and the one it is in, joined: `icloud-me@example.com`,
+`folder-Pictures`. `--managed-plugins` is the plugins' switches and
+settings, a JSON file with the plugin's settings at `settings` → its id:
+`{"settings": {"me.dupes": {"videos": true}}}`. Nobody tells the worker
+when they change: read the file again when its modification time does
+(a look every few seconds is plenty). It starts ten points lower in CPU priority than
 pinholed (`nice`); lower it more, or its I/O, as it needs. Its stdout and
 stderr go into `~/.local/state/pinhole/pinholed.log`, each line after its
 plugin's id and name (at most 200 lines in ten seconds, 2,000 bytes a
@@ -514,8 +523,11 @@ seconds later. A service started for a library given (`--given`) runs
 none.
 
 Its plugin's QML has `pinhole.workers` (API 12): each of its workers'
-`{ name, running, since, lastExit, key }`, as pinholed runs them, with
-`workersChanged()`. A line the worker writes on its stdout that is a JSON
+`{ name, running, since, lastExit, key, said }`, as pinholed runs them,
+with `workersChanged()`; `said` (API 13) is what it said last while it
+runs, or null, so a panel opened halfway through a scan shows how far it
+is at once. A worker that ends, or is killed, is `running: false` with
+its `lastExit`: notice it with `onWorkersChanged`, not a timer. A line the worker writes on its stdout that is a JSON
 object with an `"event"` is not logged but told to the plugin's windows:
 `pinhole.workerSaid(name, said)`, `said` the object, the latest of each
 quarter second (what it wrote meanwhile is left out). Say there what it got
@@ -526,6 +538,16 @@ timer:
 Connections {
     target: pinhole
     function onWorkerSaid(name, said) { if (name === "faces") panel.load() }
+}
+```
+
+What it wrote in `cacheDir` the QML reads with `pinhole.readJson`:
+
+```qml
+function load() {
+    pinhole.readJson(pinhole.cacheDir + "/groups.json")
+        .then(groups => panel.groups = groups)
+        .catch(error => { if (error.code !== "not_found") pinhole.warn(error) })
 }
 ```
 
@@ -759,9 +781,11 @@ its settings, is there as the window first shows. It sets:
   plugin turned on in the side panel shows its own once the panel
   closes.
 - `holdSdr` (API 6): set true while drawing an SDR overlay over the
-  viewer's photo, so it uses the same brightness range as the overlay.
+  viewer's photo without covering it (a `viewerLayer`'s, as Live Photos'
+  motion), so the photo uses the same brightness range as the overlay.
   Pinhole restores the photo's wider range when no plugin holds it.
-  Use this only while the overlay is visible.
+  Use this only while the overlay is visible. A plugin that is `covering`
+  needs none: while one covers, Pinhole holds SDR itself.
 
 `Pinhole.Plugin` also has Pinhole's own `ShellButton`, `Chip`, `UiText`,
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
@@ -835,10 +859,11 @@ this API. A library position is not a visual grid position.
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
+| `readText(path)`, `readJson(path)` | a file of its own read whole, away from the window (API 13): one in its folder (`dir`) or its cache (`cacheDir`, what its worker writes). A promise of its text, or of what its JSON says; rejected `not_found`, `not_yours` (a file elsewhere), `too_large` (over 32 MB), `unreadable` or `json` |
 | `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
-| `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `sizeText`: "1.8 MB", with one decimal unless said |
+| `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `picturesDir()`: the desktop's Pictures folder (`~/Pictures`), for a folder of one's own in it (`picturesDir() + "/Exports"`); in a self-test, the scratch Pictures, never the person's. `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
 | `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled` (the plugin's own `cancel()`) or `reloaded` (the library read again meanwhile: ask again); see Bounded library queries below |
 | `screenshots()` | the ids of the photos the library says are screenshots (API 10), as Screenshots hides them: iCloud's mark for an iPhone's or an iPad's, a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
@@ -858,6 +883,7 @@ one in-memory column is enough. The public catalog tables are:
 |---|---|
 | `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read` |
 | `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
+| `meta` | `key`, `value`: `source` is the library's source key (as `library.key`), which a worker checks against `--library-key` |
 
 Dates are milliseconds since 1970, sizes are bytes, and flags are integers
 0/1. Optional metadata can be SQL `NULL`; `asset_date` is capture time and
@@ -889,7 +915,9 @@ using the last id from the previous page (omit the cursor condition on the
 first page). Keep locations and thumbnails local; loading a base map only
 needs tiles for its visible area.
 `query("PRAGMA user_version")` reads its schema version. Source-specific
-tables are private to their provider. Never write the database or change
+tables (`icloud_assets`…) are private to their provider: they change with
+it and hold what is not a plugin's, so a query that reads one, or its
+`PRAGMA table_info`, is refused `sql`. Never write the database or change
 its connection settings from a UI plugin.
 
 ### Bounded library queries

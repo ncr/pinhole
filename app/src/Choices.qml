@@ -6,16 +6,23 @@ import QtQuick
 // under `section`, as `helpText`.
 Row {
     id: choices
+    // [{ value, text }], in order.
     property var options: []
+    // The one chosen.
     property var value
+    // While true, the number keys choose.
     property bool when: visible
+    // Whose keys they are: the covering plugin's ("plugin"), or "grid" or
+    // "viewer".
     property string keyLayer: "plugin"
+    // Where the help lists the number keys, and in what words.
     property string section
     property string helpText
     property bool flat: true
     // Each its number's key (1, 2, 3…), shown on it; false for a setting's
     // row in the side panel, where the numbers are other things' keys.
     property bool numbered: true
+    // Another chosen, with its value (`value` is not set by itself).
     signal chosen(var value)
     Accessible.role: Accessible.Grouping
     Accessible.name: helpText

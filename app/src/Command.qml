@@ -52,6 +52,9 @@ Item {
     property int line: 0
     // ShellButtons showing it now (they count themselves).
     property int buttons: 0
+    // A row of one of Pinhole's own menus (MenuGroup): its key is
+    // Pinhole's, though written in the kit's file.
+    property bool pinholes: false
 
     // The key as a button or the help shows it: "⇧ E", "Esc".
     readonly property string keyName: keysText !== "" ? keysText : keys.length > 0 ? KeyNames.nameOf(keys[0]) : ""

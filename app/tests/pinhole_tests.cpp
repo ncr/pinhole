@@ -87,7 +87,7 @@ private:
     Q_SLOT void bundledPluginDocumentsAreReadableAndTheirLinksResolve() {
         PluginGuide guide;
         QCOMPARE(guide.api(), Plugins::api);
-        QCOMPARE(PluginGuide::documents(), (QStringList{"plugin-quickstart", "plugins", "plugin-examples", "source-providers", "plugin-agents"}));
+        QCOMPARE(PluginGuide::documents(), (QStringList{"plugin-quickstart", "plugins", "plugin-kit", "plugin-examples", "source-providers", "plugin-agents"}));
         QCOMPARE(guide.property("documentIds").toStringList(), PluginGuide::documents());
         for (const QString &internal : {QStringLiteral("hdr"), QStringLiteral("service"), QStringLiteral("sources")}) {
             QVERIFY(PluginGuide::document(internal).isEmpty());
@@ -5245,6 +5245,12 @@ private slots:
         QVERIFY2(plugin, qPrintable(component.errorString()));
         QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
         bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+        // Why not names the source shown, as the source picker does.
+        Sources sources(bench.service.get());
+        bench.plugins->setSources(&sources);
+        bench.fake.send(sourcesEvent({QJsonObject{{"id", "folder:/x"}, {"kind", "folder"}, {"plugin", "pinhole.folder"}, {"name", "x"}}},
+                                     "folder:/x"));
+        QTRY_COMPARE(bench.js("pinhole.sources.current").toString(), QString("folder:/x"));
         bench.js("plugin.shownAction.complained.connect(text => said.push('viewer ' + text));"
                  "plugin.tickedAction.complained.connect(text => said.push('ticked ' + text))");
         QSignalSpy notified(bench.host, &PluginHost::notified);

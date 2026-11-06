@@ -11,7 +11,7 @@
 int PluginGuide::api() const { return Plugins::api; }
 
 QStringList PluginGuide::documents() {
-    return {"plugin-quickstart", "plugins", "plugin-examples", "source-providers", "plugin-agents"};
+    return {"plugin-quickstart", "plugins", "plugin-kit", "plugin-examples", "source-providers", "plugin-agents"};
 }
 
 QString PluginGuide::document(const QString &name) {

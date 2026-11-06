@@ -11,6 +11,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -113,6 +114,9 @@ pub struct Workers {
     refused: Mutex<Vec<String>>,
     /// Who hears what a worker says (`worker_said`): every window.
     tell: Mutex<Option<Teller>>,
+    /// What each (plugin, name) said last while it runs, for a window or a
+    /// panel that opens after: `said` in its status.
+    said: Arc<Mutex<HashMap<(String, String), Value>>>,
 }
 
 /// What a worker says to its plugin's windows.
@@ -154,7 +158,15 @@ pub fn cache_name(library: &Path) -> String {
 
 impl Workers {
     pub fn new(places: Option<Places>, plugins: PathBuf, cache: PathBuf) -> Workers {
-        Workers { places, plugins, cache, status: Mutex::default(), refused: Mutex::default(), tell: Mutex::default() }
+        Workers {
+            places,
+            plugins,
+            cache,
+            status: Mutex::default(),
+            refused: Mutex::default(),
+            tell: Mutex::default(),
+            said: Arc::default(),
+        }
     }
 
     /// Who hears what the workers say, from now on.
@@ -165,7 +177,15 @@ impl Workers {
     /// The `workers` event: as the last round left them.
     pub fn report(&self) -> Value {
         let status = self.status.lock().unwrap_or_else(|e| e.into_inner());
-        json!({"workers": status.iter().map(Status::json).collect::<Vec<_>>()})
+        json!({"workers": status.iter().map(|s| self.with_said(s)).collect::<Vec<_>>()})
+    }
+
+    /// Its status, with what it said last while it runs (null if nothing).
+    fn with_said(&self, status: &Status) -> Value {
+        let mut json = status.json();
+        let said = self.said.lock().unwrap_or_else(|e| e.into_inner());
+        json["said"] = said.get(&(status.plugin.clone(), status.name.clone())).filter(|_| status.running).cloned().unwrap_or(Value::Null);
+        json
     }
 
     /// The `workers` method's answer: the workers wanted now, for the
@@ -183,15 +203,14 @@ impl Workers {
                 let shown = job.map(|j| Shown { library: j.library, key: j.key });
                 // Running for what it is wanted for now, else not (yet).
                 let running = last.is_some_and(|s| s.running && s.shown == shown);
-                Status {
+                self.with_said(&Status {
                     plugin: w.plugin,
                     name: w.name,
                     since: last.filter(|s| s.running == running).map_or_else(|| millis(SystemTime::now()), |s| s.since),
                     last_exit: last.and_then(|s| s.last_exit.clone()),
                     shown,
                     running,
-                }
-                .json()
+                })
             })
             .collect();
         json!({"workers": workers})
@@ -362,6 +381,9 @@ impl Workers {
             // the windows as `worker_said`, the latest of each quarter
             // second.
             let (said, heard) = std::sync::mpsc::channel::<Value>();
+            // A new run says its own: what the last one said is gone.
+            let kept = self.said.clone();
+            kept.lock().unwrap_or_else(|e| e.into_inner()).remove(&(plugin.to_owned(), name.to_owned()));
             if let Some(tell) = self.tell.lock().unwrap_or_else(|e| e.into_inner()).clone() {
                 let (plugin, name) = (plugin.to_owned(), name.to_owned());
                 std::thread::spawn(move || {
@@ -369,6 +391,7 @@ impl Workers {
                         while let Ok(newer) = heard.try_recv() {
                             latest = newer;
                         }
+                        kept.lock().unwrap_or_else(|e| e.into_inner()).insert((plugin.clone(), name.clone()), latest.clone());
                         tell(json!({"event": "worker_said", "plugin": plugin, "name": name, "said": latest}));
                         std::thread::sleep(SAID_EVERY);
                     }

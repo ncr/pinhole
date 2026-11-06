@@ -10,6 +10,8 @@ Item {
     property bool usable: true
     // The switch's key, shown beside it ("⇧ S").
     property alias hint: toggle.hint
+    // Pressed. It does not flip `checked` itself: set the setting, which
+    // `checked` is bound to.
     signal toggled()
     width: parent ? parent.width : 0
     height: Math.max(toggle.implicitHeight, label.implicitHeight)

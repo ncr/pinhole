@@ -330,6 +330,9 @@ QVariantList PluginHost::workers() const {
             {"since", worker.value("since").toDouble()},
             {"key", worker.value("key").toString()},
             {"lastExit", exit.isObject() ? exit.toObject().toVariantMap() : QVariant()},
+            // What it said last while it runs (API 13): a panel opened
+            // after shows how far it is at once.
+            {"said", worker.value("said").isObject() ? worker.value("said").toObject().toVariantMap() : QVariant()},
         });
     }
     return mine;
@@ -627,6 +630,16 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                 take(details.value("workers").toArray());
             else if (name == QLatin1String("worker_said")) {
                 const QString plugin = details.value("plugin").toString();
+                // Its `said` in pinhole.workers too, for what reads it later
+                // (no workersChanged: workerSaid is the news).
+                for (qsizetype i = 0; i < m_workers.size(); ++i) {
+                    QJsonObject worker = m_workers.at(i).toObject();
+                    if (worker.value("plugin").toString() == plugin
+                        && worker.value("name").toString() == details.value("name").toString()) {
+                        worker.insert(QStringLiteral("said"), details.value("said"));
+                        m_workers.replace(i, worker);
+                    }
+                }
                 for (const auto &p : m_plugins)
                     if (p->host && p->id == plugin)
                         emit p->host->workerSaid(details.value("name").toString(), details.value("said").toObject().toVariantMap());
@@ -1406,7 +1419,13 @@ QString Plugins::describe(const QQmlError &error, const QString &dir) {
     QString where = file;
     if (!where.isEmpty() && error.line() > 0)
         where += ':' + QString::number(error.line());
-    return where.isEmpty() ? error.description() : where + ": " + error.description();
+    QString description = error.description();
+    // A handler for a signal the type has not (onClicked for a button's
+    // tapped): where its signals are said.
+    if (description.startsWith(QLatin1String("Cannot assign to non-existent property \"on")))
+        description += QStringLiteral(": a handler is \"on\" and one of the type's signals (the kit's: "
+                                      "pinhole plugin docs plugin-kit)");
+    return where.isEmpty() ? description : where + ": " + description;
 }
 
 void Plugins::warned(const QList<QQmlError> &warnings) {
@@ -1500,9 +1519,14 @@ void Plugins::scan() {
             plugin->version = manifest.value("version").toString();
             plugin->author = manifest.value("author").toString();
             // Pinhole.Internal is Pinhole's own plugins' (and copies keeping
-            // their id): it may change with any version, so another's does
-            // not load with it, as check says.
-            if (plugin->error.isEmpty() && !plugin->id.startsWith(QLatin1String("pinhole.")) && importsInternal(plugin->dir))
+            // the id of one there is): it may change with any version, so
+            // another's does not load with it, as check says, a made-up
+            // pinhole.* id of one's own included.
+            const bool own = plugin->id.startsWith(QLatin1String("pinhole."))
+                && (!personal || std::any_of(found.begin(), found.end(), [&](const auto &p) {
+                       return !p->personal && p->id == plugin->id;
+                   }));
+            if (plugin->error.isEmpty() && !own && importsInternal(plugin->dir))
                 plugin->error = tr("imports Pinhole.Internal, which is Pinhole's own plugins': use what Pinhole.Plugin gives");
             if (plugin->error.isEmpty())
                 plugin->main = main;
@@ -1809,11 +1833,8 @@ int checkPlugin(const QString &target) {
     }
     const QString id = manifest.value("id").toString(QFileInfo(dir).fileName());
     const QString name = QStringLiteral("%1 %2").arg(id, manifest.value("version").toString()).trimmed();
-    if (!problems.isEmpty()) {
-        for (const QString &problem : problems)
-            err(QStringLiteral("%1: %2").arg(name, problem));
-        return 1;
-    }
+    // QML that does not compile is said, and what the rest of the check
+    // finds with it, so one run says all it can.
     const int asked = manifest.value("api").toInt(1);
     // What it uses of a newer API than it asks for works here, and not in a
     // Pinhole of the one it asks for, which would load it all the same and

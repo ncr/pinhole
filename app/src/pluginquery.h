@@ -19,6 +19,9 @@ struct Limits {
     int cellBytes = 1024 * 1024;
     int columns = 64;
     int sqlBytes = 64 * 1024;
+    // Pinhole's own asking (screenshots()): a source's own tables too.
+    // A plugin reads only the public ones: assets, renditions and meta.
+    bool privateTables = false;
 };
 
 class Control {
@@ -51,7 +54,7 @@ Answer read(const QString &path, const QString &sql, const QVariantList &values,
 // At most two workers and eight admitted jobs, independent of Qt's global
 // pool used for photo decoding/copying. Rejected admission is query_busy.
 QFuture<Answer> start(const QString &path, const QString &sql, const QVariantList &values,
-                      const std::shared_ptr<Control> &control);
+                      const std::shared_ptr<Control> &control, const Limits &limits = {});
 int outstanding();
 
 } // namespace PluginQuery

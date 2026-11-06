@@ -325,7 +325,6 @@ PinholePlugin {
     property bool mapOpen: false
     property var mapFocus: null
     covering: mapOpen
-    holdSdr: covering && !pinhole.away
 
     function openMap(photo) {
         mapFocus = photo || null

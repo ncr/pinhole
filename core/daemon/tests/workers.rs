@@ -190,6 +190,9 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
     assert_eq!((last["plugin"].as_str(), last["name"].as_str()), (Some("test.indexer"), Some("index")));
     let told = window.heard.iter().filter(|e| e["event"] == "worker_said").count();
     assert!(told < 20, "{told} of its 40 lines told");
+    // And kept: a window or a panel that asks after has its latest.
+    let workers = window.workers_until(|w| w[0]["said"]["done"] == 40);
+    assert_eq!(workers[0]["said"]["event"], "progress", "{workers:#}");
 
     // Turned off: it ends as its stdin closes, and is no longer listed. The
     // window is surely listening by now, so it hears this change as an event

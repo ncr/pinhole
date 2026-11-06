@@ -79,6 +79,17 @@ run_install() {
         bin/restart-installed "$PREFIX" "$ROOT"
     fi
     echo "Installed $(git rev-parse --short HEAD) into $PREFIX (source checkout)"
+    # Another Pinhole found first on PATH (a package's, an older install)
+    # runs in its place in a terminal: `pinhole plugin …` is that one's.
+    first="$(command -v pinhole 2>/dev/null || true)"
+    if [ -n "$first" ] && [ "$first" != "$PREFIX/bin/pinhole" ]; then
+        echo "Warning: $first comes before $PREFIX/bin/pinhole on PATH, so \`pinhole\` in a terminal runs that one." >&2
+        if owner="$(pacman -Qqo "$first" 2>/dev/null)"; then
+            echo "  It is the $owner package's: remove it with \`sudo pacman -R $owner\`." >&2
+        else
+            echo "  Remove it, or put $PREFIX/bin first on PATH." >&2
+        fi
+    fi
 }
 if [ "$ui" = 1 ]; then
     state="${XDG_STATE_HOME:-$HOME/.local/state}/pinhole"
@@ -87,6 +98,8 @@ if [ "$ui" = 1 ]; then
     gum spin --title 'Building Pinhole and linking this checkout…' --show-error -- \
         sh -c '"$1/bin/install" --non-interactive >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
     gum style --foreground 78 --bold '✓  Pinhole is ready.'
+    # Its warnings, which the spinner kept in the log.
+    grep -A1 '^Warning: ' "$log" | grep -v '^--$' >&2 || true
     gum style --faint "Build log: $log"
 else
     echo 'Installing Pinhole from source…'

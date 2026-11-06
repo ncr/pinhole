@@ -300,6 +300,9 @@ Item {
             // Without a key of its own, by keys through the menu.
             noKeyboard: keys.length === 0 && group.keyedMenu ? qsTr("Through its menu") : ""
             keyLayer: group.itemLayer
+            // A plain row ({ text, key, triggered }) is Pinhole's own; a
+            // plugin's action is an object of the plugin's.
+            pinholes: typeof modelData.objectName !== "string"
             when: group.visible && modelData.shown !== false && modelData.usable !== false
             // In the menu, or the button: a pointer's way either way.
             buttons: 1

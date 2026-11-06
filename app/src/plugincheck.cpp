@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QKeySequence>
 #include <QMetaMethod>
 #include <QMetaProperty>
 #include <QRegularExpression>
@@ -291,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -351,6 +352,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"Choices.numbered", QRegularExpression(QStringLiteral("\\bnumbered\\s*:"))},
         {"pinhole.keyboardInUse", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keyboardInUse\\b"))},
         {"PanZoom", QRegularExpression(QStringLiteral("\\bPanZoom\\s*\\{"))},
+        {"pinhole.readText or readJson", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*read(Text|Json)\\b"))},
         {"pinhole.workers or workerSaid", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*workers\\b|\\bonWorkerSaid\\b|\\bonWorkersChanged\\b"))},
         {"pinhole.copyText, input or hasKeys", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(copyText|input|hasKeys)\\b"))},
         {"comeBack, away or returned", QRegularExpression(QStringLiteral("\\bcomeBack\\s*:|\\bpinhole\\s*\\.\\s*away\\b|\\bonReturned\\b"))},
@@ -497,6 +499,45 @@ QString withoutComments(const QString &source) {
 }
 
 int lineAt(const QString &text, qsizetype position) { return int(text.left(position).count('\n')) + 1; }
+
+namespace {
+// A key as Qt names it whatever way it was written ("shift+e": "Shift+E").
+QString portableKey(const QString &key) { return QKeySequence(key).toString(QKeySequence::PortableText); }
+
+// The literal keys of a `key: "…"` or `keys: ["…", …]` at `at` in `text`.
+QStringList literalKeys(const QString &value) {
+    static const QRegularExpression literal(QStringLiteral("[\"']([^\"'\\n]+)[\"']"));
+    QStringList keys;
+    for (auto m = literal.globalMatch(value); m.hasNext();)
+        keys << m.next().captured(1);
+    return keys;
+}
+
+// Where the `{` around `at` opens, in text without comments (braces in
+// strings are rare enough in QML to count them); -1 at the top.
+qsizetype enclosing(const QString &text, qsizetype at) {
+    int depth = 0;
+    for (qsizetype k = at - 1; k >= 0; --k) {
+        if (text[k] == '}')
+            ++depth;
+        else if (text[k] == '{' && depth-- == 0)
+            return k;
+    }
+    return -1;
+}
+
+// The `keyLayer` an object at `open` says, of its own lines; "" if none, or
+// not as a word.
+QString layerOf(const QString &text, qsizetype open, bool *said) {
+    static const QRegularExpression layer(QStringLiteral("(?:^|[;\\s])keyLayer\\s*:\\s*([^;\\n]*)"));
+    const auto m = layer.match(ownLines(text, open));
+    *said = m.hasMatch();
+    static const QRegularExpression word(QStringLiteral("^[\"'](\\w+)[\"']$"));
+    const auto w = word.match(m.captured(1).trimmed());
+    return w.hasMatch() ? w.captured(1) : QString();
+}
+} // namespace
+
 
 // The text with the words given to qsTr() blanked, every character in its
 // place: words shown ("Kept in ~/Pictures/Pinhole") are not code.
@@ -892,6 +933,39 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         unknown(hostUse, hostMembers, QStringLiteral("pinhole"));
         unknown(libraryUse, libraryMembers, QStringLiteral("pinhole.library"));
         unknown(viewerUse, viewerMembers, QStringLiteral("pinhole.viewer"));
+        // A Connections' handler of what Pinhole gives: one of its signals,
+        // or it never runs (QML says nothing of a misspelt one).
+        {
+            static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
+            static const QRegularExpression target(QStringLiteral("(?:^|[;\\s])target\\s*:\\s*([\\w.]+)\\s*(?:$|[;\\n])"),
+                                                   QRegularExpression::MultilineOption);
+            static const QRegularExpression handler(QStringLiteral("\\bfunction\\s+on([A-Z]\\w*)\\s*\\("));
+            for (auto m = connections.globalMatch(code); m.hasNext();) {
+                const auto match = m.next();
+                const qsizetype open = match.capturedEnd() - 1, end = closing(code, open);
+                const QString whose = target.match(ownLines(code, open)).captured(1);
+                static const QHash<QString, const QSet<QString> *> given = {
+                    {QStringLiteral("pinhole"), &hostMembers},         {QStringLiteral("plugin.pinhole"), &hostMembers},
+                    {QStringLiteral("pinhole.library"), &libraryMembers}, {QStringLiteral("pinhole.viewer"), &viewerMembers},
+                    {QStringLiteral("theme"), &themeMembers}};
+                const QSet<QString> *names = given.value(whose);
+                if (!names)
+                    continue;
+                const QString body = code.mid(open, end - open);
+                for (auto h = handler.globalMatch(body); h.hasNext();) {
+                    const auto on = h.next();
+                    QString signal = on.captured(1);
+                    signal[0] = signal[0].toLower();
+                    if (names->contains(signal))
+                        continue;
+                    const QStringList known(names->begin(), names->end());
+                    found.errors << QStringLiteral("%1:%2: %3 has no signal %4%5: on%6 never runs")
+                                        .arg(file)
+                                        .arg(lineAt(code, open + on.capturedStart()))
+                                        .arg(whose, signal, didYouMean(signal, known), on.captured(1));
+                }
+            }
+        }
         if (!ownTheme.match(code).hasMatch())
             unknown(themeUse, themeMembers, QStringLiteral("theme"));
         for (auto m = fieldUse.globalMatch(text); m.hasNext();) {
@@ -978,6 +1052,43 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                     .arg(file)
                                     .arg(lineAt(code, match.capturedStart()))
                                     .arg(value);
+        }
+        // A key Pinhole already has there: two shortcuts on one key, and
+        // neither works (said in red under the plugin as it runs, too).
+        {
+            const QString plain = withoutComments(text);
+            static const QRegularExpression keyedObject(QStringLiteral("\\b(PluginAction|Command|ShellButton)\\s*\\{"));
+            static const QRegularExpression keyed(QStringLiteral("(?:^|[;\\s])(keys?)\\s*:\\s*(\\[[^\\]\\n]*\\]|\"[^\"\\n]*\"|'[^'\\n]*')"));
+            static const QRegularExpression placed(QStringLiteral("(?:^|[;\\s])place\\s*:\\s*[\"'](\\w+)[\"']"));
+            for (auto m = keyedObject.globalMatch(plain); m.hasNext();) {
+                const auto match = m.next();
+                const qsizetype open = match.capturedEnd() - 1;
+                const QString lines = ownLines(plain, open);
+                const auto keys = keyed.match(lines);
+                if (!keys.hasMatch())
+                    continue;
+                QString layer;
+                if (match.captured(1) == QLatin1String("PluginAction")) {
+                    layer = placed.match(lines).captured(1) == QLatin1String("viewer") ? QStringLiteral("viewer")
+                                                                                       : QStringLiteral("grid");
+                } else {
+                    // A Command or a button on the grid's or the viewer's
+                    // keys; the plugin layer's are its own while it covers.
+                    bool said = false;
+                    layer = layerOf(plain, open, &said);
+                    if (layer != QLatin1String("grid") && layer != QLatin1String("viewer"))
+                        continue;
+                }
+                for (const QString &key : literalKeys(keys.captured(2)))
+                    if (const QString does = pinholesKey(key, layer); !does.isEmpty())
+                        found.errors << QStringLiteral("%1:%2: %3 is Pinhole's own key in the %4 (%5): two shortcuts on "
+                                                       "one key, and neither works. Give it another")
+                                            .arg(file)
+                                            .arg(lineAt(plain, open))
+                                            .arg(key, layer == QLatin1String("viewer") ? QStringLiteral("viewer")
+                                                                                       : QStringLiteral("grid"),
+                                                 does);
+            }
         }
         // What a PluginMark and a PluginAction take as words: one Pinhole
         // knows, or nothing is drawn (said only as it runs).
@@ -1242,8 +1353,13 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
             return tr("\"workers\": %1 is named twice").arg(name);
         seen << name;
         const auto wrong = [&name](const QString &why) { return tr("\"workers\": %1: %2").arg(name, why); };
+        static const QStringList fields = {"name", "program", "args", "per"};
+        for (const QString &key : worker.keys())
+            if (!fields.contains(key))
+                return wrong(tr("\"%1\" is none of a worker's fields%2, and pinholed never reads it: %3")
+                                 .arg(key, didYouMean(key, fields), fields.join(QStringLiteral(", "))));
         if (worker.contains("per") && worker.value("per") != QJsonValue(QStringLiteral("source")))
-            return wrong(tr("\"per\" is \"source\""));
+            return wrong(tr("\"per\" must be \"source\" (or left out): the only one there is"));
         if (worker.contains("args")) {
             const QJsonValue args = worker.value("args");
             bool fine = args.isArray() && args.toArray().size() <= 64;
@@ -1384,5 +1500,77 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
                 return wrong(tr("\"rounds_every_secs\" is a whole number from 5 to 86400"));
         }
     }
+    return {};
+}
+
+// Pinhole's own keys a plugin's could take: those of the window's own QML
+// (its Commands, buttons and menus' rows), with where each holds ("grid",
+// "viewer", or "" for both) and what it does. Read from the files
+// themselves, so it follows them; the kit's own files, whose keys are
+// whoever uses them's, left out.
+QList<Plugins::OwnKey> Plugins::pinholesKeys() {
+    static const QList<OwnKey> keys = [] {
+        static const QSet<QString> kit = {
+            "Command.qml", "ShellButton.qml", "PluginAction.qml", "Choices.qml", "MenuGroup.qml", "MoreGroup.qml",
+            "MenuRow.qml", "MenuCard.qml", "PhotoTiles.qml", "PanelHeader.qml", "ScrollList.qml", "ScrollGrid.qml",
+            "ScrollArea.qml", "PinchZoom.qml", "SettingSwitch.qml", "SettingNote.qml", "FieldInput.qml", "Toggle.qml",
+            "PluginGroup.qml", "PinholePlugin.qml", "PluginSource.qml", "Card.qml", "Chip.qml", "Panel.qml"};
+        static const QRegularExpression keyed(QStringLiteral("(?:^|[\\s;{,])(keys?)\\s*:\\s*(\\[[^\\]\\n]*\\]|\"[^\"\\n]*\"|'[^'\\n]*')"));
+        static const QRegularExpression what(QStringLiteral("(?:^|[;\\s,{])(helpText|text)\\s*:\\s*qsTr\\(\\s*\"([^\"]+)\""));
+        QList<OwnKey> all;
+        QDirIterator files(QStringLiteral(":/"), {QStringLiteral("*.qml")}, QDir::Files);
+        while (files.hasNext()) {
+            const QString path = files.next();
+            if (kit.contains(QFileInfo(path).fileName()))
+                continue;
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            const QString text = withoutComments(QString::fromUtf8(file.readAll()));
+            for (auto m = keyed.globalMatch(text); m.hasNext();) {
+                const auto match = m.next();
+                const QStringList literal = literalKeys(match.captured(2));
+                if (literal.isEmpty())
+                    continue;
+                // The layer the nearest object that says one says; a
+                // button's own is the chrome (both).
+                const qsizetype own = enclosing(text, match.capturedStart(1));
+                QString layer;
+                bool said = false;
+                for (qsizetype open = own; open >= 0 && !said; open = enclosing(text, open))
+                    layer = layerOf(text, open, &said);
+                if (said && !layer.isEmpty() && layer != QLatin1String("grid") && layer != QLatin1String("viewer")
+                    && layer != QLatin1String("any") && layer != QLatin1String("chrome"))
+                    continue;
+                if (layer != QLatin1String("grid") && layer != QLatin1String("viewer"))
+                    layer.clear();
+                QString does;
+                if (own >= 0) {
+                    QString best;
+                    // Its own words, nearest first (ownLines would leave
+                    // out what is inside qsTr's brackets).
+                    const QString block = text.mid(own, closing(text, own) - own);
+                    for (auto w = what.globalMatch(block); w.hasNext();) {
+                        const auto found = w.next();
+                        if (best.isEmpty() || found.captured(1) == QLatin1String("helpText"))
+                            best = found.captured(2);
+                    }
+                    does = best;
+                }
+                for (const QString &key : literal)
+                    if (const QString portable = portableKey(key); !portable.isEmpty())
+                        all.append({portable, layer, does});
+            }
+        }
+        return all;
+    }();
+    return keys;
+}
+
+QString Plugins::pinholesKey(const QString &key, const QString &layer) {
+    const QString portable = portableKey(key);
+    for (const OwnKey &own : pinholesKeys())
+        if (own.key == portable && (own.layer.isEmpty() || layer.isEmpty() || own.layer == layer))
+            return own.what.isEmpty() ? QStringLiteral("one of its own") : own.what;
     return {};
 }

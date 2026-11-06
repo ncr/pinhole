@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Write docs/plugin-kit.md: what each of the kit's QML types has, from
+its own file.
+
+Every type Plugins::registerTypes gives `Pinhole.Plugin` from a QML file
+(app/src/plugins.cpp) is read: the comment above its root object, and the
+root object's own properties, signals and functions with the comments
+above each. Run it after changing one of them; `--check` says whether the
+document is out of date (bin/tests/test_kit_reference.py runs that).
+"""
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "app" / "src"
+DOCUMENT = ROOT / "docs" / "plugin-kit.md"
+
+# Types the kit has from C++ (plugins.cpp), and what their QML sees of them.
+NATIVE = {
+    "ControlSurface": [
+        ("property", "bool usable", "Whether it can be used now: not, and it is drawn faint and takes no press."),
+        ("signal", "activated()", "Pressed: a click, a tap, or Space or Return while it has the keys."),
+    ],
+}
+
+
+def kit_types():
+    plugins = (SOURCE / "plugins.cpp").read_text()
+    block = re.search(r"void Plugins::registerTypes\(\) \{\s*for \(const char \*type : \{(.*?)\}\)", plugins, re.S)
+    return re.findall(r'"(\w+)"', block.group(1))
+
+
+def strip_strings(line):
+    return re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', line)
+
+
+def parse(path):
+    """The header comment, the root type, and its own members in order."""
+    lines = path.read_text().splitlines()
+    header, comment, members, depth, root = [], [], [], 0, None
+    for line in lines:
+        stripped = line.strip()
+        code = strip_strings(line.split("//")[0] if not stripped.startswith("//") else "")
+        if depth == 0 and root is None:
+            if stripped.startswith("//"):
+                # An empty comment line parts two paragraphs.
+                comment.append(stripped[2:].strip() or "\n\n")
+                continue
+            match = re.match(r"^([A-Z][\w.]*)\s*\{", stripped)
+            if match:
+                root, header, comment = match.group(1), comment, []
+                header = " ".join(header).replace(" \n\n ", "\n\n").strip()
+                depth += code.count("{") - code.count("}")
+                continue
+            continue
+        if depth == 1:
+            if stripped.startswith("//"):
+                comment.append(stripped[2:].strip())
+            elif not stripped:
+                comment = []
+            else:
+                member = re.match(r"^(?:(readonly|required|default)\s+)?property\s+([\w<>.]+)\s+(\w+)", stripped)
+                signal = re.match(r"^signal\s+(\w+)\s*(\(([^)]*)\))?", stripped)
+                function = re.match(r"^function\s+(\w+)\s*\(([^)]*)\)", stripped)
+                if member and not member.group(3).startswith("_"):
+                    kind = member.group(1) or ""
+                    members.append(("property", f"{member.group(2)} {member.group(3)}", " ".join(comment), kind))
+                elif signal:
+                    members.append(("signal", f"{signal.group(1)}({signal.group(3) or ''})", " ".join(comment), ""))
+                elif function and not function.group(1).startswith("_"):
+                    members.append(("function", f"{function.group(1)}({function.group(2)})", " ".join(comment), ""))
+                comment = []
+        depth += code.count("{") - code.count("}")
+    return root, header, members
+
+
+def section(name):
+    path = SOURCE / f"{name}.qml"
+    root, about, members = parse(path)
+    out = [f"## {name}", ""]
+    if about:
+        out += [about, ""]
+    base = root if root and (SOURCE / f"{root}.qml").exists() and root != name else None
+    native = NATIVE.get(root, [])
+    if base:
+        out += [f"A `{root}`, with all it has (below), and:", ""]
+    elif root:
+        out += [f"Its root is a `{root}`" + (" (Qt Quick's: its properties too)." if not native else ":"), ""]
+    rows = [(k, sig, text, mod) for k, sig, text, mod in members]
+    rows += [(k, sig, text, "") for k, sig, text in native]
+    for title, kind in [("Properties", "property"), ("Signals", "signal"), ("Functions", "function")]:
+        chosen = [r for r in rows if r[0] == kind]
+        if not chosen:
+            continue
+        out += [f"{title}:", ""]
+        for _, sig, text, mod in chosen:
+            label = f"`{sig}`" + (f" ({mod})" if mod in ("readonly", "required") else "")
+            out.append(f"- {label}" + (f": {text}" if text else ""))
+        out.append("")
+    if kind_has_handlers := [r for r in rows if r[0] == "signal"]:
+        first = kind_has_handlers[0][1].split("(")[0]
+        out += [f"Its handler in QML: `on{first[0].upper()}{first[1:]}`.", ""]
+    return out
+
+
+def render():
+    out = [
+        "# The kit, member by member",
+        "",
+        "What each of `Pinhole.Plugin`'s QML types has: its properties, its",
+        "signals (a handler is `on` and the signal's name, capitalised:",
+        "`tapped` is `onTapped`) and its functions, with what their own source",
+        "says of them. Written from the files themselves by `bin/kit-reference`;",
+        "[plugins.md](plugins.md) says how to use them together.",
+        "",
+    ]
+    for name in kit_types():
+        if (SOURCE / f"{name}.qml").exists():
+            out += section(name)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def main():
+    text = render()
+    if "--check" in sys.argv[1:]:
+        if not DOCUMENT.exists() or DOCUMENT.read_text() != text:
+            print("docs/plugin-kit.md is out of date: run bin/kit-reference", file=sys.stderr)
+            return 1
+        return 0
+    DOCUMENT.write_text(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

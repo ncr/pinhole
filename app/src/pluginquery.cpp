@@ -63,12 +63,24 @@ int busy(void *context, int) {
     return !progress(context);
 }
 
-int authorize(void *, int action, const char *first, const char *second, const char *, const char *) {
+// The catalog's public tables (docs/plugins.md, Read-only SQL schema), and
+// SQLite's own. A source's own tables (icloud_assets…) are its provider's:
+// they change with it, and hold what is not a plugin's (download links).
+bool isPublic(const char *table) {
+    if (!table)
+        return true;
+    const QByteArray name = QByteArray(table).toLower();
+    return name == "assets" || name == "renditions" || name == "meta" || name.startsWith("sqlite_");
+}
+
+int authorize(void *data, int action, const char *first, const char *second, const char *, const char *) {
+    const bool everything = static_cast<const Limits *>(data)->privateTables;
     switch (action) {
     case SQLITE_SELECT:
-    case SQLITE_READ:
     case SQLITE_RECURSIVE:
         return SQLITE_OK;
+    case SQLITE_READ:
+        return everything || isPublic(first) ? SQLITE_OK : SQLITE_DENY;
     case SQLITE_FUNCTION:
         return second && qstricmp(second, "load_extension") == 0 ? SQLITE_DENY : SQLITE_OK;
     case SQLITE_PRAGMA: {
@@ -77,7 +89,9 @@ int authorize(void *, int action, const char *first, const char *second, const c
         const QByteArray name = first ? QByteArray(first).toLower() : QByteArray();
         static const QList<QByteArray> tableMetadata{"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list"};
         static const QList<QByteArray> metadata{"database_list", "schema_version", "user_version", "compile_options"};
-        return tableMetadata.contains(name) || (!second && metadata.contains(name)) ? SQLITE_OK : SQLITE_DENY;
+        if (tableMetadata.contains(name))
+            return everything || isPublic(second) ? SQLITE_OK : SQLITE_DENY;
+        return !second && metadata.contains(name) ? SQLITE_OK : SQLITE_DENY;
     }
     default:
         // In particular, ATTACH is nominally a "read-only statement" to
@@ -143,7 +157,7 @@ Answer read(const QString &path, const QString &sql, const QVariantList &values,
     // where SQLite's opcode progress handler cannot see the deadline.
     sqlite3_limit(db.value, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 1024);
     sqlite3_db_config(db.value, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr);
-    sqlite3_set_authorizer(db.value, authorize, nullptr);
+    sqlite3_set_authorizer(db.value, authorize, const_cast<Limits *>(&limits));
     Statement statement;
     const char *tail = nullptr;
     result = sqlite3_prepare_v3(db.value, source.constData(), int(source.size() + 1), 0, &statement.value, &tail);
@@ -225,7 +239,7 @@ Answer read(const QString &path, const QString &sql, const QVariantList &values,
 }
 
 QFuture<Answer> start(const QString &path, const QString &sql, const QVariantList &values,
-                      const std::shared_ptr<Control> &control) {
+                      const std::shared_ptr<Control> &control, const Limits &limits) {
     if (admitted.fetch_add(1) >= 8) {
         admitted.fetch_sub(1);
         control->finish();
@@ -233,8 +247,8 @@ QFuture<Answer> start(const QString &path, const QString &sql, const QVariantLis
         ready.start(); ready.addResult(failed(QStringLiteral("query_busy"))); ready.finish();
         return ready.future();
     }
-    return QtConcurrent::run(&pool(), [path, sql, values, control] {
-        const Answer answer = read(path, sql, values, control);
+    return QtConcurrent::run(&pool(), [path, sql, values, control, limits] {
+        const Answer answer = read(path, sql, values, control, limits);
         control->finish();
         admitted.fetch_sub(1);
         return answer;
