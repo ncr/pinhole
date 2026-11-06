@@ -163,6 +163,13 @@ Item {
             } else indexer.report(error)
         }
     }
+    // The search view open: the model loads while the question is typed,
+    // not after it. What it answers is no matter; a search says the rest.
+    function warm() {
+        if (!catalogReady || warmer.busy) return
+        warmer.start(() => request({ op: "warm" }))
+    }
+    Job { id: warmer }
     // Pinhole's worker, as pinholed says it runs: asked how far it is, or,
     // gone (or pinholed with it), waited for.
     function watch() {

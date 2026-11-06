@@ -289,6 +289,22 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'another index'):
             Worker(args)
 
+    def test_warm_loads_the_text_model_only_with_something_to_find(self):
+        from unittest.mock import Mock
+        from photo_search.ane import hash_file
+        self.assertTrue(self.worker.request({'op': 'warm'})['warm'])
+        self.assertIsNone(self.worker.engine.text_model)
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        model = Mock()
+        model.encode.return_value = self.vector()[None, :], {}
+        with patch('photo_search.models.TextModel', return_value=model) as load:
+            self.assertTrue(self.worker.request({'op': 'warm'})['warm'])
+            self.assertEqual(self.worker.request({'op': 'query', 'text': 'pies'})['results'][0]['id'], 'a')
+        load.assert_called_once()
+        with patch.object(self.worker.engine, 'encode_text', side_effect=RuntimeError('waiting for memory')):
+            answer = self.worker.request({'op': 'warm'})
+        self.assertEqual((answer['warm'], answer['reason']), (False, 'waiting for memory'))
+
     def test_same_path_thumbnail_replacement_is_excluded_before_query(self):
         from photo_search.ane import hash_file
         self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())

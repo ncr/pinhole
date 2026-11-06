@@ -3,9 +3,11 @@ import base64
 import sys
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from photo_search import wemm_vulkan
 from photo_search.wemm_vulkan import EMBEDDING_TOKEN, WeMMVulkan
 
 
@@ -34,3 +36,18 @@ class WeMMVulkanTests(unittest.TestCase):
             "prompt_string": "<|im_start|>user<image-marker><|im_end|><embedding>",
             "multimodal_data": [base64.b64encode(b"fixture-image").decode()],
         })
+
+
+class WeightsTests(unittest.TestCase):
+    def test_weights_are_hashed_once_until_they_change(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "model.gguf"
+            path.write_bytes(b"weights")
+            hashing = Mock(return_value="pinned")
+            wemm_vulkan.verify(path, "pinned", hashing)
+            wemm_vulkan.verify(path, "pinned", hashing)
+            self.assertEqual(hashing.call_count, 1)
+            path.write_bytes(b"other weights")
+            hashing.return_value = "other"
+            with self.assertRaisesRegex(ValueError, "pinned hash"):
+                wemm_vulkan.verify(path, "pinned", hashing)

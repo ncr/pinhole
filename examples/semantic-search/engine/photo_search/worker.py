@@ -116,8 +116,10 @@ class Worker:
             return False
         if not self.yielding:
             self.yielding, self.yielded_at = True, time.monotonic()
+        # A search counts as use too: the model stays a minute past the
+        # last one, so the next question does not wait for it to load.
         elif (self.engine.idle_seconds is not None and self.last_inference is not None
-                and time.monotonic() - self.yielded_at >= self.engine.idle_seconds):
+                and time.monotonic() - max(self.yielded_at, self.last_inference) >= self.engine.idle_seconds):
             self.engine.close()
             self.last_inference = None
         return True
@@ -149,10 +151,20 @@ class Worker:
         else:
             rows = self.store.db.execute(sql + ' AND c.asset_id=?', (asset_id,)).fetchall()
         for asset, relative, fingerprint in rows:
+            # The common case, every query: one stat of the file checked
+            # before, the same as then (any other file has another inode).
+            known = self.stamps.get(asset)
+            if known is not None and known[0] == relative:
+                try:
+                    info = os.stat(known[1])
+                    if known[2:] == (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev):
+                        continue
+                except OSError:
+                    pass
             try:
                 path = thumbnail(self.args.library, relative)
                 info = path.stat()
-                stamp = (str(path), info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+                stamp = (relative, str(path), info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev)
                 if self.stamps.get(asset) != stamp:
                     if hash_file(path) != fingerprint:
                         raise ValueError('thumbnail changed; index it again')
@@ -261,6 +273,15 @@ class Worker:
             vector = self.encode_text([text])[0]
             return {"results": self.store.search(vector, limit), "seconds": time.perf_counter() - started,
                     "status": self.status()}
+        if op == 'warm':
+            # The search view opened: load the text model while the question
+            # is typed. Too little memory now is said, not raised.
+            if self.store.status()['indexed']:
+                try:
+                    self.encode_text(['warm'])
+                except (OSError, RuntimeError, ValueError) as error:
+                    return self.status() | {"warm": False, "reason": str(error)}
+            return self.status() | {"warm": True}
         if op == 'suggest_tags':
             return self.suggest_tags(message.get('id'))
         if op == 'import':

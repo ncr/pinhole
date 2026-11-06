@@ -85,6 +85,22 @@ class Yielding(unittest.TestCase):
         self.assertFalse(worker.yield_to_person(False))
         self.assertFalse(worker.yielding)
 
+    def test_a_search_keeps_the_model_a_minute_past_it(self):
+        from photo_search.worker import Worker
+
+        worker = Worker.__new__(Worker)
+        worker.yielding, worker.yielded_at, worker.last_inference = False, None, None
+        worker.engine = mock.Mock(idle_seconds=60)
+        with mock.patch("photo_search.worker.time.monotonic", return_value=100.0):
+            worker.yield_to_person(True)
+        worker.last_inference = 150.0
+        with mock.patch("photo_search.worker.time.monotonic", return_value=200.0):
+            worker.yield_to_person(True)
+        worker.engine.close.assert_not_called()
+        with mock.patch("photo_search.worker.time.monotonic", return_value=211.0):
+            worker.yield_to_person(True)
+        worker.engine.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

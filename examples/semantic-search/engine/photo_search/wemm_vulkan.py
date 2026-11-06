@@ -51,6 +51,21 @@ def check_installation(directory):
         raise RuntimeError("The pinned WeMM Vulkan weights are missing")
 
 
+# Weights hashed once per worker: 5 GB read again at every load made each
+# search after an idle minute wait seconds. A changed file has a new stamp.
+VERIFIED = {}
+
+
+def verify(path, expected, hash_file):
+    info = path.stat()
+    stamp = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev)
+    if VERIFIED.get(str(path)) == (stamp, expected):
+        return
+    if hash_file(path) != expected:
+        raise ValueError(f"WeMM Vulkan file differs from its pinned hash: {path.name}")
+    VERIFIED[str(path)] = stamp, expected
+
+
 class UnixHTTP(http.client.HTTPConnection):
     def __init__(self, path, timeout):
         super().__init__("localhost", timeout=timeout)
@@ -70,8 +85,7 @@ class WeMMVulkan:
         server = directory / "bin/llama-server"
         weights = directory / "weights"
         for name, expected in FILES.items():
-            if hash_file(weights / name) != expected:
-                raise ValueError(f"WeMM Vulkan file differs from its pinned hash: {name}")
+            verify(weights / name, expected, hash_file)
 
         env = os.environ | {"VK_DRIVER_FILES": str(ICD)}
         version = subprocess.run([str(server), "--version"], env=env, stdout=subprocess.PIPE,

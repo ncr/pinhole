@@ -42,7 +42,7 @@ Panel {
                 for (const tag of tags) found.set(tag.label, (found.get(tag.label) || 0) + 1)
         return Array.from(found.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(entry => entry[0])
     }
-    onCatalogReadyChanged: if (shown && catalogReady) lookup()
+    onCatalogReadyChanged: if (shown && catalogReady) { indexer.warm(); lookup() }
     onStatusChanged: {
         const refresh = (wasIndexing && !status.running) || (!hadIndex && status.indexed > 0)
         wasIndexing = status.running
@@ -58,6 +58,7 @@ Panel {
     // As its view opens and closes (PluginView calls them).
     function start() {
         indexer.ensureStarted()
+        indexer.warm()
         lookup()
         Qt.callLater(() => { search.input.forceActiveFocus(); search.input.selectAll() })
     }
