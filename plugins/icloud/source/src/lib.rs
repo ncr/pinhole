@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod cloudkit;
 pub mod discover;
+pub mod edit;
 pub mod favorite;
 pub mod index;
 pub mod kind;

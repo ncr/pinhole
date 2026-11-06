@@ -90,6 +90,15 @@ enum Cmd {
         #[arg(long)]
         from: Option<PathBuf>,
     },
+    /// Send a file as one asset field of a record, as an edit would, and
+    /// print CloudKit's receipt. No records/modify follows: the record and
+    /// the library stay as they are, and the file is referenced by nothing.
+    UploadTest {
+        record: String,
+        file: PathBuf,
+        #[arg(long, default_value = "resJPEGThumbRes")]
+        field: String,
+    },
     /// Check whether videos can be streamed: ranged reads, latency, expiry.
     Stream {
         #[arg(long, default_value_t = 3)]
@@ -119,6 +128,12 @@ fn main() -> Result<()> {
         Cmd::Sample { kind, n, threads, out, pool } => sample(&mut client, &db_path, &kind, n, threads, out, &pool),
         Cmd::Stream { n } => stream(&mut client, &db_path, n),
         Cmd::Page { rank } => page(&mut client, rank),
+        Cmd::UploadTest { record, file, field } => {
+            let bytes = std::fs::read(&file)?;
+            let receipt = client.upload_asset(&record, &field, bytes)?;
+            println!("{receipt:#}");
+            Ok(())
+        }
         Cmd::Record { mut ids, from } => {
             if let Some(file) = from {
                 ids.extend(std::fs::read_to_string(file)?.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned));

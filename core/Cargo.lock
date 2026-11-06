@@ -1084,6 +1084,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "flate2",
  "p256",
  "pinhole-core",
  "rand 0.8.8",

@@ -248,6 +248,30 @@ impl PhotosClient {
         }))
     }
 
+    /// A file for one asset field of a record (`resJPEGFullRes`, say), as
+    /// CloudKit Web Services take one: a link asked for with
+    /// `assets/upload`, the bytes sent to it, and what it answers (its
+    /// `singleFile`: checksum, size, receipt) is the field's value in a
+    /// `records/modify`. Nothing in the library changes until that modify.
+    pub fn upload_asset(&mut self, record: &str, field: &str, bytes: Vec<u8>) -> Result<Value> {
+        let asked = self.post("private", "assets/upload", &json!({
+            "zoneID": {"zoneName": PRIMARY_ZONE},
+            "tokens": [{"recordType": "CPLAsset", "recordName": record, "fieldName": field}],
+        }))?;
+        let url = asked["tokens"][0]["url"].as_str().ok_or_else(|| anyhow!("assets/upload gave no link: {asked}"))?.to_owned();
+        let target = Url::parse(&url)?;
+        let mut headers = session_headers(&self.session, &target, false)?;
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+        let response = self.http.post(target).headers(headers).body(bytes).send()?;
+        let status = response.status();
+        let body = response.bytes()?;
+        if !status.is_success() {
+            return Err(anyhow!("uploading {field} answered {status}: {}", String::from_utf8_lossy(&body).chars().take(300).collect::<String>()));
+        }
+        let answer: Value = serde_json::from_slice(&body).context("the upload answered with something other than JSON")?;
+        Ok(answer["singleFile"].clone())
+    }
+
     /// CloudKit's change feed for the library zone. Without a token it
     /// starts from the beginning; with one, it returns what changed since.
     pub fn zone_changes(&mut self, sync_token: Option<&str>, results_limit: u32) -> Result<Value> {
