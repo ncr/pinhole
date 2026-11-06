@@ -5833,6 +5833,27 @@ private slots:
         QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
     }
 
+    // What pinholed says of a plugin's workers reaches that plugin only:
+    // its workers as they run, and what one said.
+    void aPluginHearsItsOwnWorkers() {
+        auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}, {"u", {}}},
+                                                   QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, true);
+        bench->js(QStringLiteral(R"(var heard = []; var changes = 0;
+            pinhole.workerSaid.connect((name, said) => heard.push(name + ":" + said.done));
+            pinhole.workersChanged.connect(() => ++changes))"));
+        bench->fake.send({{"event", "workers"}, {"workers", QJsonArray{
+            QJsonObject{{"plugin", "t"}, {"name", "index"}, {"running", true}, {"since", 5}, {"key", "folder:/x"}, {"last_exit", QJsonValue()}},
+            QJsonObject{{"plugin", "u"}, {"name", "other"}, {"running", false}}}}});
+        QTRY_COMPARE(bench->js(QStringLiteral("changes")).toInt(), 1);
+        const QVariantList workers = bench->host->workers();
+        QCOMPARE(workers.size(), 1);
+        QCOMPARE(workers[0].toMap().value("name").toString(), QStringLiteral("index"));
+        QVERIFY(workers[0].toMap().value("running").toBool());
+        bench->fake.send({{"event", "worker_said"}, {"plugin", "u"}, {"name", "other"}, {"said", QJsonObject{{"event", "x"}, {"done", 1}}}});
+        bench->fake.send({{"event", "worker_said"}, {"plugin", "t"}, {"name", "index"}, {"said", QJsonObject{{"event", "x"}, {"done", 2}}}});
+        QTRY_COMPARE(bench->js(QStringLiteral("heard.join(' ')")).toString(), QStringLiteral("index:2"));
+    }
+
     // One's own copy of a built-in plugin: off until it is turned on
     // itself, whatever the built-in's switch says.
     void aCopyOfABuiltInPluginHasASwitchOfItsOwn() {

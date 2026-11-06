@@ -184,11 +184,15 @@ Panel {
         default: return qsTr("Waiting for the face finder…")
         }
     }
-    Timer {
-        interval: 3000
-        repeat: true
-        running: panel.shown && !panel.picking && !pinhole.away
-        onTriggered: { if (!panel.readJob && !panel.assignmentJob) panel.load() }
+    // Read again as the face finder says it got further (its status on
+    // its stdout, told by pinholed), not on a timer.
+    Connections {
+        target: pinhole
+        enabled: panel.shown && !panel.picking && !pinhole.away
+        function onWorkerSaid(name, said) {
+            if (name === "faces" && !panel.readJob && !panel.assignmentJob)
+                panel.load()
+        }
     }
 
     function go(next, row) {

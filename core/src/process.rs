@@ -579,6 +579,12 @@ fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
 }
 
 pub(crate) fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
+    log_lines_telling(plugin, from, log, |_| {});
+}
+
+/// As `log_lines`, but a line that is a JSON object with an `"event"` (a
+/// worker's news for its plugin) goes to `tell` instead of the log.
+pub(crate) fn log_lines_telling(plugin: &str, from: impl Read, log: &mut impl Write, mut tell: impl FnMut(serde_json::Value)) {
     let mut stderr = BufReader::new(from);
     let mut buf = Vec::new();
     let (mut since, mut said, mut left_out) = (Instant::now(), 0u32, 0u32);
@@ -595,6 +601,14 @@ pub(crate) fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
                 format!("{text}…")
             }
         };
+        if line.trim_start().starts_with('{') {
+            if let Ok(said) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                if said.get("event").is_some_and(serde_json::Value::is_string) {
+                    tell(said);
+                    continue;
+                }
+            }
+        }
         if since.elapsed() >= Duration::from_secs(10) {
             if left_out > 0 {
                 let _ = writeln!(log, "pinholed: {plugin}: {left_out} lines of its log left out");

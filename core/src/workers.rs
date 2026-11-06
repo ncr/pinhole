@@ -11,7 +11,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{json, Value};
@@ -111,7 +111,16 @@ pub struct Workers {
     status: Mutex<Vec<Status>>,
     /// Why any declared were refused, as last said in the log.
     refused: Mutex<Vec<String>>,
+    /// Who hears what a worker says (`worker_said`): every window.
+    tell: Mutex<Option<Teller>>,
 }
+
+/// What a worker says to its plugin's windows.
+pub type Teller = Arc<dyn Fn(Value) + Send + Sync>;
+
+/// At most this often a worker's news goes to the windows; what it says
+/// meanwhile is left out but its latest.
+const SAID_EVERY: Duration = Duration::from_millis(250);
 
 /// A worker wanted, and its process if it runs.
 struct Slot {
@@ -145,7 +154,12 @@ pub fn cache_name(library: &Path) -> String {
 
 impl Workers {
     pub fn new(places: Option<Places>, plugins: PathBuf, cache: PathBuf) -> Workers {
-        Workers { places, plugins, cache, status: Mutex::default(), refused: Mutex::default() }
+        Workers { places, plugins, cache, status: Mutex::default(), refused: Mutex::default(), tell: Mutex::default() }
+    }
+
+    /// Who hears what the workers say, from now on.
+    pub fn tell_with(&self, tell: Teller) {
+        *self.tell.lock().unwrap_or_else(|e| e.into_inner()) = Some(tell);
     }
 
     /// The `workers` event: as the last round left them.
@@ -344,7 +358,27 @@ impl Workers {
         let label = format!("{plugin} {name}");
         if let Some(out) = child.stdout.take() {
             let label = label.clone();
-            std::thread::spawn(move || crate::process::log_lines(&label, out, &mut std::io::stderr()));
+            // A line of JSON with an "event": news for its plugin, told to
+            // the windows as `worker_said`, the latest of each quarter
+            // second.
+            let (said, heard) = std::sync::mpsc::channel::<Value>();
+            if let Some(tell) = self.tell.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+                let (plugin, name) = (plugin.to_owned(), name.to_owned());
+                std::thread::spawn(move || {
+                    while let Ok(mut latest) = heard.recv() {
+                        while let Ok(newer) = heard.try_recv() {
+                            latest = newer;
+                        }
+                        tell(json!({"event": "worker_said", "plugin": plugin, "name": name, "said": latest}));
+                        std::thread::sleep(SAID_EVERY);
+                    }
+                });
+            }
+            std::thread::spawn(move || {
+                crate::process::log_lines_telling(&label, out, &mut std::io::stderr(), |line| {
+                    let _ = said.send(line);
+                })
+            });
         }
         if let Some(err) = child.stderr.take() {
             std::thread::spawn(move || crate::process::log_lines(&label, err, &mut std::io::stderr()));

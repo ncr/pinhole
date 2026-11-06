@@ -885,6 +885,15 @@ pub fn run(config: Config) -> Result<()> {
             }
         });
     }
+    // What the plugins' workers say, to every window.
+    {
+        let weak = Arc::downgrade(&shared);
+        shared.workers.tell_with(Arc::new(move |event| {
+            if let Some(shared) = weak.upgrade() {
+                shared.broadcast(event);
+            }
+        }));
+    }
     // Ended (an install, a logout): what is under way stopped and its part
     // files gone, the socket too, rather than left for the next service.
     {

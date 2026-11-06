@@ -127,7 +127,9 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
     let said = root.join("said");
     std::fs::create_dir_all(plugin.join("bin")).unwrap();
     std::fs::write(plugin.join("bin/index"), format!(
-        "#!/bin/sh\necho \"$@\" >> '{0}'\necho \"nice $(cut -d' ' -f19 /proc/$$/stat)\" >> '{0}'\necho working >&2\ncat > /dev/null\necho ended >> '{0}'\n",
+        "#!/bin/sh\necho \"$@\" >> '{0}'\necho \"nice $(cut -d' ' -f19 /proc/$$/stat)\" >> '{0}'\necho working >&2\n\
+         (for i in $(seq 1 40); do echo '{{\"event\": \"progress\", \"done\": '$i'}}'; sleep 0.05; done) &\n\
+         cat > /dev/null\necho ended >> '{0}'\n",
         said.display())).unwrap();
     std::fs::set_permissions(plugin.join("bin/index"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let places = Places { builtin, personal: root.join("config/pinhole/plugins"), state: root.join("state/pinhole/sources") };
@@ -178,6 +180,16 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
     // Ten lower than the service's (this test's) own.
     let own: i32 = std::fs::read_to_string("/proc/self/stat").unwrap().rsplit(") ").next().unwrap().split(' ').nth(16).unwrap().parse().unwrap();
     assert_eq!(lines[1], format!("nice {}", (own + 10).min(19)));
+
+    // What it says on its stdout as JSON with an "event" is told to the
+    // windows, its latest of each quarter second, not every line.
+    let said_last = |e: &Value| e["event"] == "worker_said" && e["said"]["done"] == 40;
+    let last = window.hear(said_last);
+    assert!(last.is_some(), "its last news never came: {:#?}", window.heard);
+    let last = last.unwrap();
+    assert_eq!((last["plugin"].as_str(), last["name"].as_str()), (Some("test.indexer"), Some("index")));
+    let told = window.heard.iter().filter(|e| e["event"] == "worker_said").count();
+    assert!(told < 20, "{told} of its 40 lines told");
 
     // Turned off: it ends as its stdin closes, and is no longer listed. The
     // window is surely listening by now, so it hears this change as an event

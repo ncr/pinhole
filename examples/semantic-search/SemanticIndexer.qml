@@ -170,7 +170,7 @@ Item {
             statusJob = null
             if (managed) {
                 ready = false; catalogReady = false
-                if (++missedStatus >= 5)
+                if (++missedStatus >= 2)
                     failure = qsTr("Waiting for Pinhole's background search service.")
             } else report(error)
         })
@@ -210,7 +210,16 @@ Item {
     // leaves the first frame and settling of the photo grid to Pinhole.
     Timer { id: startup; interval: 4000; running: true; onTriggered: indexer.ensureStarted() }
     Timer { id: changes; interval: 900; onTriggered: indexer.catalog() }
-    Timer { interval: 2000; repeat: true; running: indexer.managed || (indexer.ready && indexer.status.running); onTriggered: indexer.poll() }
+    // Its own helper, asked every two seconds while it indexes; Pinhole's
+    // worker says when it got further (workerSaid), asked besides every
+    // ten seconds, to notice one that is gone.
+    Timer { interval: 2000; repeat: true; running: !indexer.managed && indexer.ready && indexer.status.running; onTriggered: indexer.poll() }
+    Timer { interval: 10000; repeat: true; running: indexer.managed; onTriggered: indexer.poll() }
+    Connections {
+        target: pinhole
+        function onWorkerSaid(name, said) { if (name === "index" && indexer.managed) indexer.poll() }
+        function onWorkersChanged() { if (indexer.managed) indexer.poll() }
+    }
     Connections {
         target: pinhole.library
         function onChanged() {

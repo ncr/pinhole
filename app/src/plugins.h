@@ -9,6 +9,7 @@
 #include <QPointer>
 #include <QQmlError>
 #include <QQmlPropertyMap>
+#include <QJsonArray>
 #include <QTimer>
 #include <QVariantList>
 
@@ -242,6 +243,11 @@ class PluginHost : public QObject {
     // A folder for what it keeps and can make again, one for each source's
     // library.
     Q_PROPERTY(QString cacheDir READ cacheDir NOTIFY cacheDirChanged)
+    // Its workers (the manifest's), as pinholed runs them (API 12): each
+    // { name, running, since (ms), lastExit: { code, signal, at } or null,
+    // key (the source's library it works for) }. workersChanged as they
+    // start and end.
+    Q_PROPERTY(QVariantList workers READ workers NOTIFY workersChanged)
     Q_PROPERTY(QObject *library READ library CONSTANT)
     Q_PROPERTY(QObject *viewer READ viewer CONSTANT)
     // The display the window is on (display.h): hdr, headroom, wide.
@@ -291,6 +297,7 @@ public:
     int api() const;
     QString dir() const { return m_dir; }
     QString cacheDir() const;
+    QVariantList workers() const;
     QObject *library() const;
     QObject *viewer() const;
     QObject *display() const;
@@ -469,6 +476,11 @@ signals:
     void awayChanged();
     void keyboardInUseChanged();
     void hasKeysChanged();
+    void workersChanged();
+    // What one of its workers said: a line of JSON with an "event" it wrote
+    // on its stdout (API 12), its latest of each quarter second. What it
+    // found, to read again from cacheDir, rather than ask on a timer.
+    void workerSaid(const QString &name, const QVariantMap &said);
     // Back from the photos it opened (openPhotos' comeBack): `photo` is the
     // id of the one shown last.
     void returned(const QString &photo);
@@ -769,6 +781,8 @@ public:
     const Library *libraryData() const { return m_library; }
     PluginLibrary *library() const { return m_libraryApi.get(); }
     PluginViewer *viewerApi() const { return m_viewerApi.get(); }
+    // pinholed's workers, as its `workers` event last said: every plugin's.
+    const QJsonArray &serviceWorkers() const { return m_workers; }
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
     // What the display can show (pinhole.display).
@@ -859,6 +873,7 @@ private:
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
     std::unique_ptr<PluginViewer> m_viewerApi;
+    QJsonArray m_workers;
     // Before the plugins, so it outlives their hosts, which let it go.
     KeepAwake m_keepAwake;
     ColourDisplay m_display;

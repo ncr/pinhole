@@ -388,8 +388,8 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `returned()`: Pinhole keeps a view to come back to while its photo shows;
 `workers` in the manifest (Workers, below); `PhotoTiles`, `PanelHeader`,
 `SettingNote`, `SettingSwitch`, `Choices`' `numbered` and
-`pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input` and
-`hasKeys`.
+`pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input`,
+`hasKeys`, `workers` and `workerSaid`.
 
 `Main.qml` beside it:
 
@@ -497,9 +497,23 @@ its manifest changes it, by closing its stdin: watch stdin and end at EOF
 (also how it ends with pinholed, however that ends). One still running
 five seconds later is killed. One that ends by itself is started again ten
 seconds later. A service started for a library given (`--given`) runs
-none. The window asks pinholed's `workers` (docs/service.md) for how each
-is doing; a plugin's QML can tell from the files the worker writes in its
-cache.
+none.
+
+Its plugin's QML has `pinhole.workers` (API 12): each of its workers'
+`{ name, running, since, lastExit, key }`, as pinholed runs them, with
+`workersChanged()`. A line the worker writes on its stdout that is a JSON
+object with an `"event"` is not logged but told to the plugin's windows:
+`pinhole.workerSaid(name, said)`, `said` the object, the latest of each
+quarter second (what it wrote meanwhile is left out). Say there what it got
+further with, and read it again from `cacheDir` then, rather than ask on a
+timer:
+
+```qml
+Connections {
+    target: pinhole
+    function onWorkerSaid(name, said) { if (name === "faces") panel.load() }
+}
+```
 
 ## What a plugin is given
 
@@ -758,6 +772,7 @@ this API. A library position is not a visual grid position.
 | `openPhotos(photos, photo, options)` | as `openPhotoDirect`, with `photos` (ids or positions, in the view's order: search results by relevance, a person's photos, a place's) as the only ones ← →, the strip, Home and End go through, until the viewer closes (API 9). `photo` must be one of them. `{ comeBack: true }` (API 11): its view comes back when the photo closes. Meanwhile `away` is true: it covers nothing, the viewer has the keys, and its view hides itself (`visible: shown && !pinhole.away`); then `returned(id)`, the id of the photo shown last, to put its cursor on. If another plugin went over the photos meanwhile, `dismissed()` instead: the way back leads to that one |
 | `away`, `returned(photo)` | see `openPhotos`' `comeBack` (API 11) |
 | `keyboardInUse` | the keys are what was used last, not a pointer (API 11): when to show the ring on the one they are on, as Pinhole's own lists do |
+| `workers`, `workerSaid(name, said)` | its manifest's workers as pinholed runs them, and what one said (API 12); see Workers |
 | `input` | what was used last: `"keyboard"`, `"mouse"` or `"touchpad"` (API 12), to say "Pinch to zoom" or "Scroll to zoom" |
 | `hasKeys` | whether the keys are the plugin's now: it covers the photos and no panel of Pinhole's is over it (API 12), for what takes keys or gestures of its own |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |

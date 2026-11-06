@@ -372,10 +372,18 @@ def rebuild(db, names, excluded, grouping, progress):
         db.execute("INSERT OR REPLACE INTO meta VALUES ('suggestion-settings', ?)", (settings,))
 
 
+# Run by pinholed (daemon): each status also said on stdout, which pinholed
+# tells the plugin's windows (workerSaid), so People reads again as it
+# changes rather than ask every few seconds.
+TELL = False
+
+
 def set_status(db, phase, **values):
     with db:
         db.execute("INSERT OR REPLACE INTO meta VALUES ('status', ?)",
                    (json.dumps(dict(phase=phase, **values)),))
+    if TELL:
+        emit("status", phase=phase, **values)
 
 
 def status(db):
@@ -672,6 +680,8 @@ def run_index(db, library, source, settings):
 
 
 def daemon(library, source, settings, cache=None):
+    global TELL
+    TELL = True
     # pinholed gives the plugin's cache for this library (PluginHost::cacheDir),
     # so existing face groups and labels carry over; the same when run by hand.
     library = library.absolute()

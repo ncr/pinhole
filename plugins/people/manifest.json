@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 11,
+  "api": 12,
   "id": "pinhole.people",
   "name": "People",
   "version": "0.5.0",

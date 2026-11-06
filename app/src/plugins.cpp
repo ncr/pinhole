@@ -316,6 +316,24 @@ QJSValue PluginSources::signOut(const QString &id) {
                [](const QJsonObject &result) { return QVariant(result.value("sources").toArray().toVariantList()); });
 }
 
+QVariantList PluginHost::workers() const {
+    QVariantList mine;
+    for (const QJsonValue &each : m_plugins->serviceWorkers()) {
+        const QJsonObject worker = each.toObject();
+        if (worker.value("plugin").toString() != m_id)
+            continue;
+        const QJsonValue exit = worker.value("last_exit");
+        mine.append(QVariantMap{
+            {"name", worker.value("name").toString()},
+            {"running", worker.value("running").toBool()},
+            {"since", worker.value("since").toDouble()},
+            {"key", worker.value("key").toString()},
+            {"lastExit", exit.isObject() ? exit.toObject().toVariantMap() : QVariant()},
+        });
+    }
+    return mine;
+}
+
 QString PluginHost::cacheDir() const {
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/plugins/" + m_id + '/'
          + m_plugins->cacheName();
@@ -592,6 +610,32 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
       m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer) : nullptr), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
       m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files), m_toured(readToured()) {
+    // pinholed's workers: as each window connects (it hears the source
+    // first), and as they change.
+    if (m_service)
+        connect(m_service, &ServiceClient::announced, this, [this](const QString &name, const QJsonObject &details) {
+            const auto take = [this](const QJsonArray &workers) {
+                if (workers == m_workers)
+                    return;
+                m_workers = workers;
+                for (const auto &p : m_plugins)
+                    if (p->host)
+                        emit p->host->workersChanged();
+            };
+            if (name == QLatin1String("workers"))
+                take(details.value("workers").toArray());
+            else if (name == QLatin1String("worker_said")) {
+                const QString plugin = details.value("plugin").toString();
+                for (const auto &p : m_plugins)
+                    if (p->host && p->id == plugin)
+                        emit p->host->workerSaid(details.value("name").toString(), details.value("said").toObject().toVariantMap());
+            }
+            else if (name == QLatin1String("source"))
+                m_service->call(QStringLiteral("workers"), {}, [take](bool ok, const QJsonObject &result, const QString &) {
+                    if (ok)
+                        take(result.value("workers").toArray());
+                });
+        });
     // The photo a plugin opened to come back from closed: back to it, on
     // the one shown last.
     if (m_viewer)

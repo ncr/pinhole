@@ -400,6 +400,9 @@ def serve(args):
                         elif worker.running and started >= next_step:
                             try:
                                 worker.step()
+                                # Pinhole tells the plugin (workerSaid), which
+                                # asks for the status then, not on a timer.
+                                print(json.dumps({"event": "progress"}), flush=True)
                             except Exception as error:
                                 print(json.dumps({"event": "error", "error": str(error)}), flush=True)
                             if args.background:
