@@ -810,7 +810,7 @@ one in-memory column is enough. The public catalog tables are:
 
 | Table | Columns |
 |---|---|
-| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color` |
+| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read` |
 | `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
 
 Dates are milliseconds since 1970, sizes are bytes, and flags are integers
@@ -825,6 +825,19 @@ Inspect the installed schema with `query("PRAGMA table_info(assets)")` or
 `query("PRAGMA table_info(renditions)")` before using an optional column.
 Catalog schema 2 adds nullable `latitude` and `longitude`: a pair of signed
 WGS 84 decimal degrees. `has_location` can be true without a readable pair.
+
+Catalog schema 3 adds the camera, as the photo's own EXIF says:
+`camera_make` ("Apple"), `camera_model` ("iPhone 15 Pro") and `lens_model`,
+each NULL when it does not say. pinholed reads them from the file of a
+photo that is on this computer: a folder's every photo, and of iCloud's
+those whose original has been fetched (opened full size, or its Info), a
+few thousand each round. `camera_read` is 1 once it has been read, found
+or not; 0 until then. Group by camera without fetching any originals:
+
+```js
+pinhole.query("SELECT camera_model AS model, count(*) AS n FROM assets " +
+              "WHERE camera_model IS NOT NULL GROUP BY 1 ORDER BY n DESC")
+```
 For a map, page `SELECT id, latitude, longitude FROM assets WHERE latitude IS NOT NULL AND id > ? ORDER BY id LIMIT ?`
 using the last id from the previous page (omit the cursor condition on the
 first page). Keep locations and thumbnails local; loading a base map only

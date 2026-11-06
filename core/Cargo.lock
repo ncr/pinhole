@@ -1053,6 +1053,7 @@ dependencies = [
  "anyhow",
  "clap",
  "image",
+ "kamadak-exif",
  "libc",
  "rand 0.8.8",
  "rayon",

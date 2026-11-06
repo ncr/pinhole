@@ -499,6 +499,82 @@ const COVER_MAX_BYTES: i64 = 1 << 30;
 /// Covers made before HDR video was tone mapped (cover::VERSION) are made
 /// again once, where that is cheap: those of an HLG or PQ video still on
 /// this computer, which need no fetching. The rest stay as they are.
+/// The camera of each photo not yet read for it whose original (or full
+/// size) is on this computer, a folder's file or one fetched into the cache
+/// (`at_hand`), from its EXIF: make, model and lens. Read once (found or
+/// not in its file); one with no file at hand is looked at again each
+/// round, as its original may have been fetched since. At most `most`
+/// files a round. How many were read.
+pub fn read_cameras(
+    conn: &mut Connection,
+    at_hand: &dyn Fn(&Stored) -> Option<PathBuf>,
+    most: usize,
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<usize> {
+    let waiting: Vec<Stored> = conn
+        .prepare(
+            "SELECT a.id, r.kind, r.name, r.key, coalesce(r.file_type, '') FROM assets a
+             JOIN renditions r ON r.asset_id = a.id AND r.kind IN ('original', 'full')
+             WHERE NOT a.is_video AND a.camera_read = 0
+             ORDER BY a.id, r.kind DESC",
+        )?
+        .query_map([], |r| {
+            let want = if r.get::<_, String>(1)? == "original" { Want::Original } else { Want::Full };
+            Ok(Stored { asset: r.get(0)?, want, name: r.get(2)?, key: r.get(3)?, file_type: r.get(4)? })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut read: Vec<(String, Camera)> = Vec::new();
+    let mut done = std::collections::HashSet::new();
+    for stored in waiting {
+        if read.len() >= most || stop() {
+            break;
+        }
+        // Its original first ("original" sorts after "full", DESC), then
+        // its full size if the original is not here.
+        if done.contains(&stored.asset) {
+            continue;
+        }
+        let Some(file) = at_hand(&stored) else { continue };
+        done.insert(stored.asset.clone());
+        read.push((stored.asset, camera_of(&file)));
+    }
+    let tx = conn.transaction()?;
+    {
+        let mut set = tx.prepare(
+            "UPDATE assets SET camera_make = ?2, camera_model = ?3, lens_model = ?4, camera_read = 1 WHERE id = ?1",
+        )?;
+        for (asset, camera) in &read {
+            set.execute(params![asset, camera.make, camera.model, camera.lens])?;
+        }
+    }
+    tx.commit()?;
+    Ok(read.len())
+}
+
+/// What a photo's EXIF says of its camera.
+#[derive(Debug, Default, PartialEq)]
+pub struct Camera {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens: Option<String>,
+}
+
+pub fn camera_of(file: &Path) -> Camera {
+    let Ok(f) = std::fs::File::open(file) else { return Camera::default() };
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(f)) else {
+        return Camera::default();
+    };
+    let text = |tag| {
+        exif.get_field(tag, exif::In::PRIMARY)
+            .and_then(|f| match &f.value {
+                exif::Value::Ascii(parts) => parts.first().map(|b| String::from_utf8_lossy(b).trim_matches(char::from(0)).trim().to_owned()),
+                _ => None,
+            })
+            .filter(|s| !s.is_empty())
+    };
+    Camera { make: text(exif::Tag::Make), model: text(exif::Tag::Model), lens: text(exif::Tag::LensModel) }
+}
+
 pub fn make_covers(source: &dyn Source, conn: &mut Connection, library: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<usize> {
     if db::meta(conn, "covers").as_deref() != Some(crate::cover::VERSION) {
         let made: Vec<(String, String, String, Stored)> = conn
@@ -638,6 +714,60 @@ mod tests {
         assert!(p.ends_with("/AQn-dI2mCHvNQz6vj_K4BvumTtZV.jpg"));
         assert_eq!(p.matches('/').count(), 2);
         assert_eq!(p, thumb_path("AQn+dI2mCHvNQz6vj/K4BvumTtZV"));
+    }
+
+    #[test]
+    fn a_photos_camera_is_read_from_its_file_at_hand_once() {
+        let dir = std::env::temp_dir().join(format!("pinhole-cameras-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A JPEG with the EXIF of a phone's camera.
+        let mut fields = Vec::new();
+        for (tag, text) in [(exif::Tag::Make, "Apple"), (exif::Tag::Model, "iPhone 15 Pro")] {
+            fields.push(exif::Field { tag, ifd_num: exif::In::PRIMARY, value: exif::Value::Ascii(vec![text.as_bytes().to_vec()]) });
+        }
+        let lens = exif::Field { tag: exif::Tag::LensModel, ifd_num: exif::In::PRIMARY,
+                                 value: exif::Value::Ascii(vec![b"iPhone 15 Pro back camera".to_vec()]) };
+        let mut writer = exif::experimental::Writer::new();
+        for field in fields.iter().chain([&lens]) {
+            writer.push_field(field);
+        }
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        writer.write(&mut tiff, false).unwrap();
+        let tiff = tiff.into_inner();
+        let mut plain = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut plain)
+            .encode(&[200, 30, 40].repeat(64), 8, 8, image::ExtendedColorType::Rgb8).unwrap();
+        let mut tagged = plain[..2].to_vec();
+        tagged.extend([0xff, 0xe1]);
+        tagged.extend(((2 + 6 + tiff.len()) as u16).to_be_bytes());
+        tagged.extend(b"Exif\0\0");
+        tagged.extend(&tiff);
+        tagged.extend(&plain[2..]);
+        std::fs::write(dir.join("phone.jpg"), &tagged).unwrap();
+        std::fs::write(dir.join("plain.jpg"), &plain).unwrap();
+        let mut conn = db::open(&dir.join("library.sqlite")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO assets (id) VALUES ('phone'), ('plain'), ('away');
+             INSERT INTO renditions (asset_id, kind, name, key) VALUES
+               ('phone', 'original', 'phone.jpg', 'k1'), ('plain', 'full', 'plain.jpg', 'k2'), ('away', 'original', 'x.jpg', 'k3');",
+        ).unwrap();
+        let here = |stored: &Stored| Some(dir.join(&stored.name)).filter(|p| p.exists());
+        assert_eq!(read_cameras(&mut conn, &here, 100, &|| false).unwrap(), 2);
+        let camera = |conn: &Connection, id: &str| -> (Option<String>, Option<String>, Option<String>, bool) {
+            conn.query_row("SELECT camera_make, camera_model, lens_model, camera_read FROM assets WHERE id = ?1", [id],
+                           |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap()
+        };
+        assert_eq!(camera(&conn, "phone"), (Some("Apple".into()), Some("iPhone 15 Pro".into()), Some("iPhone 15 Pro back camera".into()), true));
+        // Read, with nothing to say: not read again.
+        assert_eq!(camera(&conn, "plain"), (None, None, None, true));
+        // No file of it here: looked at again once there is one.
+        assert!(!camera(&conn, "away").3);
+        assert_eq!(read_cameras(&mut conn, &here, 100, &|| false).unwrap(), 0);
+        std::fs::copy(dir.join("phone.jpg"), dir.join("x.jpg")).unwrap();
+        assert_eq!(read_cameras(&mut conn, &here, 100, &|| false).unwrap(), 1);
+        assert_eq!(camera(&conn, "away").1.as_deref(), Some("iPhone 15 Pro"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

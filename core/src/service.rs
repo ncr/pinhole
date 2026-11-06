@@ -2031,6 +2031,18 @@ fn sync_round(shared: &Shared) -> Result<()> {
         // A video whose thumbnail shows next to nothing gets a cover of its
         // own (cover.rs), looked for as thumbnails are.
         let covers = if fresh { crate::sync::make_covers(source.as_ref(), &mut db, &library, &stop)? } else { 0 };
+        // Cameras, from the files at hand (a folder's, an original fetched
+        // since): a few thousand a round, nothing told, as only plugins'
+        // queries read them.
+        let at_hand = |stored: &Stored| {
+            source.local(stored).filter(|f| f.exists()).or_else(|| {
+                shared.storage.find(&cached_path(stored.want, &stored.key, extension(&stored.file_type), false))
+            })
+        };
+        let cameras = crate::sync::read_cameras(&mut db, &at_hand, 4000, &stop)?;
+        if cameras > 0 {
+            eprintln!("pinholed: sync: {cameras} photos' cameras read");
+        }
         if !report.changes.visible() && made == 0 && covers == 0 {
             return Ok(());
         }

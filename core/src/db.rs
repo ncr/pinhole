@@ -81,7 +81,7 @@ fn create(db: &Connection) -> Result<()> {
 /// plugins' helpers) may read a library of a later schema as long as the
 /// columns they read mean what they did; a writer never writes one later
 /// than its own. Each step up is a step in `migrate`.
-pub const SCHEMA: i64 = 2;
+pub const SCHEMA: i64 = 3;
 
 /// Bring a library up to `SCHEMA`, one step at a time, each in a
 /// transaction with the version it reaches.
@@ -110,6 +110,19 @@ fn migrate(db: &Connection) -> Result<()> {
              CREATE INDEX assets_with_location ON assets(id) WHERE latitude IS NOT NULL;
              DELETE FROM meta WHERE key = 'change_token';
              PRAGMA user_version = 2;",
+        )?;
+        tx.commit()?;
+    }
+    if version < 3 {
+        // The camera, as the photo's own file says, read where a file of it
+        // is on this computer (sync::read_cameras): no listing again.
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE assets ADD COLUMN camera_make TEXT;
+             ALTER TABLE assets ADD COLUMN camera_model TEXT;
+             ALTER TABLE assets ADD COLUMN lens_model TEXT;
+             ALTER TABLE assets ADD COLUMN camera_read INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 3;",
         )?;
         tx.commit()?;
     }

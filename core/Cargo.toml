@@ -41,6 +41,8 @@ description = "Pinhole's core: the service, the library index and the cache, wha
 anyhow.workspace = true
 clap.workspace = true
 image.workspace = true
+# A photo's camera, from the EXIF of its file at hand (sync::read_cameras).
+kamadak-exif.workspace = true
 # setpriority, for the plugins' workers (workers.rs).
 libc.workspace = true
 rand.workspace = true
