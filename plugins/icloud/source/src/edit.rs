@@ -221,10 +221,21 @@ pub fn fields(
         // As an iPhone's crop of a photo with the camera's style carries
         // (0x8200), or without one.
         "adjustmentRenderType": {"value": if styled { 33280 } else { 32768 }},
-        // What described the render before (its EXIF), not this one's.
-        "adjustedMediaMetaDataEnc": {"value": null},
-        "adjustedMediaMetaDataStrType": {"value": null},
+        // The render is upright: shown as it is, as an iPhone's edit says.
+        "orientation": {"value": 1},
     });
+    // What the render is, as Image I/O describes a picture
+    // (CGImageProperties): an iPhone's edit carries its own.
+    let full = &renders[0];
+    let properties = json!({
+        "PixelWidth": full.width, "PixelHeight": full.height, "Orientation": 1, "Depth": 8,
+        "ColorModel": "RGB", "ProfileName": "sRGB IEC61966-2.1", "DPIWidth": 72.0, "DPIHeight": 72.0,
+        "PrimaryImage": true,
+        "{TIFF}": {"Orientation": 1},
+        "{Exif}": {"PixelXDimension": full.width, "PixelYDimension": full.height, "ColorSpace": 1},
+    });
+    fields["adjustedMediaMetaDataEnc"] = json!({"value": b64.encode(bplist(&properties))});
+    fields["adjustedMediaMetaDataStrType"] = json!({"value": "CGImageProperties"});
     for (render, prefix) in renders.iter().zip(["resJPEGFull", "resJPEGMed", "resJPEGThumb"]) {
         let value = receipt(&format!("{prefix}Res"), &render.path)?;
         let size = std::fs::metadata(&render.path)?.len();
@@ -241,8 +252,9 @@ pub fn fields(
 
 /// The fields an edit has, each taken off again: the asset as it was
 /// before any edit, its original shown.
-pub fn revert_fields() -> Value {
-    let mut fields = json!({});
+pub fn revert_fields(original_orientation: i64) -> Value {
+    // Shown again as the original is turned.
+    let mut fields = json!({"orientation": {"value": original_orientation}});
     for name in ["adjustmentType", "adjustmentCreatorCode", "adjustmentCompoundVersion", "adjustmentSimpleDataEnc",
                  "adjustmentTimestampEnc", "adjustmentRenderType", "adjustedMediaMetaDataEnc", "adjustedMediaMetaDataStrType"] {
         fields[name] = json!({"value": null});
@@ -286,8 +298,12 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
         return Err(anyhow!("edited with {effect}, which only Photos renders: edit it on the iPhone"));
     }
     let tag = asset["recordChangeTag"].as_str().or(tag);
+    // The original's own orientation, from its master, to show it so again.
+    let master_name = asset["fields"]["masterRef"]["value"]["recordName"].as_str().unwrap_or_default().to_owned();
+    let master = if master_name.is_empty() { Value::Null } else { client.lookup_all(&[master_name.as_str()])? };
+    let original_orientation = master["records"][0]["fields"]["originalOrientation"]["value"].as_i64().unwrap_or(1);
     let fields = if adjustment.is_identity() {
-        revert_fields()
+        revert_fields(original_orientation)
     } else {
         let upright = upright_of(original)?;
         let renders = render(original, upright, adjustment, dir)?;
@@ -313,6 +329,73 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
         Some(tag) => Ok(tag.to_owned()),
         None => Err(anyhow!("iCloud would not take the edit: {first}")),
     }
+}
+
+/// A binary plist of a JSON value (objects, strings, numbers, booleans),
+/// as Apple's `…Enc` fields hold them.
+pub fn bplist(value: &Value) -> Vec<u8> {
+    // Every object flattened, each a reference by its index.
+    fn flatten(value: &Value, objects: &mut Vec<Vec<u8>>) -> usize {
+        let at = objects.len();
+        objects.push(Vec::new());
+        let encoded = match value {
+            Value::Object(map) => {
+                let keys: Vec<usize> = map.keys().map(|k| flatten(&Value::String(k.clone()), objects)).collect();
+                let values: Vec<usize> = map.values().map(|v| flatten(v, objects)).collect();
+                let mut out = marker(0xD0, map.len());
+                out.extend(keys.iter().chain(values.iter()).map(|&r| r as u8));
+                out
+            }
+            Value::String(s) => {
+                let mut out = marker(0x50, s.len());
+                out.extend_from_slice(s.as_bytes());
+                out
+            }
+            Value::Bool(b) => vec![if *b { 0x09 } else { 0x08 }],
+            Value::Number(n) if n.is_i64() || n.is_u64() => {
+                let mut out = vec![0x13];
+                out.extend_from_slice(&n.as_i64().unwrap_or(0).to_be_bytes());
+                out
+            }
+            Value::Number(n) => {
+                let mut out = vec![0x23];
+                out.extend_from_slice(&n.as_f64().unwrap_or(0.0).to_be_bytes());
+                out
+            }
+            _ => vec![0x00],
+        };
+        objects[at] = encoded;
+        at
+    }
+    // A marker with its count, or the count after it as an int.
+    fn marker(kind: u8, count: usize) -> Vec<u8> {
+        if count < 15 {
+            vec![kind | count as u8]
+        } else {
+            let mut out = vec![kind | 0x0F, 0x13];
+            out.extend_from_slice(&(count as u64).to_be_bytes());
+            out
+        }
+    }
+    let mut objects = Vec::new();
+    flatten(value, &mut objects);
+    let mut out = b"bplist00".to_vec();
+    let mut offsets = Vec::new();
+    for object in &objects {
+        offsets.push(out.len() as u64);
+        out.extend_from_slice(object);
+    }
+    let table = out.len() as u64;
+    for offset in &offsets {
+        out.extend_from_slice(&offset.to_be_bytes());
+    }
+    let mut trailer = vec![0u8; 6];
+    trailer.extend_from_slice(&[8, 1]); // offsets 8 bytes, references 1
+    trailer.extend_from_slice(&(objects.len() as u64).to_be_bytes());
+    trailer.extend_from_slice(&0u64.to_be_bytes());
+    trailer.extend_from_slice(&table.to_be_bytes());
+    out.extend_from_slice(&trailer);
+    out
 }
 
 /// A binary plist of one date, as `adjustmentTimestampEnc` is: seconds
@@ -419,7 +502,10 @@ mod tests {
         assert_eq!(fields["resJPEGMedRes"]["value"]["receipt"], "resJPEGMedRes");
         assert_eq!(fields["adjustmentType"]["value"], "com.apple.photo");
         assert_eq!(fields["adjustmentRenderType"]["value"], 33280);
-        assert!(revert_fields()["resJPEGFullRes"]["value"].is_null());
+        assert!(revert_fields(6)["resJPEGFullRes"]["value"].is_null());
+        assert_eq!(revert_fields(6)["orientation"]["value"], 6);
+        assert_eq!(fields["orientation"]["value"], 1);
+        assert_eq!(fields["adjustedMediaMetaDataStrType"]["value"], "CGImageProperties");
         assert_eq!(&timestamp_plist(978_307_200_000)[..8], b"bplist00");
         let _ = std::fs::remove_dir_all(&dir);
     }
