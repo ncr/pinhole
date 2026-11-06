@@ -136,6 +136,43 @@ uploaded for `resVidCompl`, `resJPEGFull`, `resJPEGMed` and `resJPEGThumb`
 recipe the iPhone cannot read, or renders that disagree with it, would
 show differently on every device, and nothing on the web can undo an edit.
 
+## Edits
+
+An edit made in Photos (2026-11-06, read from Jacek's library) leaves the
+CPLMaster as it was and puts on the CPLAsset:
+
+- `adjustmentType` (`com.apple.photo`; `ScreenshotServices` for a
+  screenshot's markup), `adjustmentCreatorCode` (the app:
+  `com.apple.mobileslideshow` is Photos on an iPhone, `com.apple.camera`
+  a crop made as it was taken), `adjustmentCompoundVersion` (`1.12`),
+  `adjustmentRenderType`, `adjustmentSourceType`, `adjustmentTimestampEnc`
+  (a binary plist of one date), fingerprints of the renders.
+- `adjustmentSimpleDataEnc`: the recipe, raw-deflated JSON: `metadata`
+  (`masterWidth`, `masterHeight`: the photo upright; `orientation`: the
+  person's turn as an EXIF code, 6 for a quarter right, 0 for none) and
+  `adjustments`, each with an `identifier`: `Crop`, `SemanticStyle`,
+  `DepthEffect` (portraits), `LivePhotoKeyFrame`. Of 600 recent photos, 38
+  were edited: 21 portraits, 10 crops, 2 crops with a style.
+- `Crop`'s `settings`: `xOrigin`, `yOrigin`, `width`, `height` in the
+  upright photo's pixels **before the turn**, `yOrigin` from the
+  **bottom** (Core Image's origin), `constraintWidth`/`Height` the shape
+  kept (as turned), `straightenAngle`, `pitch`, `yaw`, `auto`. A 4032x3024
+  photo turned a quarter right and cropped to x 831, y 295, 2874x2155
+  rendered 2155x2874; cropping the original so (y from the bottom) and
+  turning it matches that render to 0.4% RMSE, from the top 27%.
+- The renders: `resJPEGFull*` (HEIC from an iPhone; JPEG for a
+  screenshot), `resJPEGMed*` (2048x1536's pixels, its shape) and
+  `resJPEGThumb*` (480x360's).
+
+CloudKit Web Services' asset upload works for the library zone from the
+web session: `assets/upload` with `{zoneID, tokens: [{recordType:
+"CPLAsset", recordName, fieldName}]}` gives a link; the file POSTed to it
+answers `singleFile` (`fileChecksum`, `size`, `receipt`,
+`referenceChecksum`, `wrappingKey`), the field's value in a
+`records/modify`. A file sent and never put in a record changes nothing
+(`pinhole-probe upload-test`). Writing an edit is pinhole-icloud's
+`edit` module; icloud.com itself has no editor.
+
 ## Location
 
 `locationEnc` is a base64 binary plist with `lat`, `lon`, `alt`, `course`,

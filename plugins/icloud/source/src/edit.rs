@@ -104,13 +104,35 @@ pub fn render(original: &Path, upright: Upright, adjustment: &Adjustment, dir: &
     Ok(renders.try_into().map_err(|_| anyhow!("three renders"))?)
 }
 
-/// Apple's recipe for it: a `Crop` in the upright photo's pixels and the
-/// turn as an EXIF orientation in its metadata, deflated, as an iPhone's
-/// `adjustmentSimpleDataEnc` is.
+/// The part kept as Photos' `Crop` measures it: in the upright photo's
+/// pixels before the person's turn, its origin at the bottom left (Core
+/// Image's), as an iPhone wrote it for a photo turned a quarter right and
+/// cropped (docs/api-findings.md, Edits). x, y from the bottom, width,
+/// height.
+pub fn crop_in_master(upright: Upright, adjustment: &Adjustment) -> (u32, u32, u32, u32) {
+    // Back from the turned frame to the upright one, a quarter
+    // anticlockwise at a time: what is at the top went to the left.
+    let [mut x, mut y, mut w, mut h] = adjustment.crop;
+    for _ in 0..adjustment.turn % 4 {
+        (x, y, w, h) = (y, 1.0 - x - w, h, w);
+    }
+    let (uw, uh) = (upright.width as f64, upright.height as f64);
+    let px = (x * uw).round().clamp(0.0, uw - 1.0) as u32;
+    let top = (y * uh).round().clamp(0.0, uh - 1.0) as u32;
+    let pw = ((w * uw).round() as u32).clamp(1, upright.width - px);
+    let ph = ((h * uh).round() as u32).clamp(1, upright.height - top);
+    (px, upright.height - top - ph, pw, ph)
+}
+
+/// Apple's recipe for it, deflated, as an iPhone's
+/// `adjustmentSimpleDataEnc` is: the `Crop` in the upright photo's pixels
+/// (crop_in_master), the turn as an EXIF orientation in its metadata (0
+/// for none, as Photos writes), the shape kept as the crop's own turned.
 pub fn recipe(upright: Upright, adjustment: &Adjustment) -> Result<Vec<u8>> {
-    let (x, y, w, h) = crop_pixels(upright, adjustment);
-    // EXIF's codes for a picture turned 0, 90, 180, 270 degrees clockwise.
-    let orientation = [1, 6, 3, 8][(adjustment.turn % 4) as usize];
+    let (x, y, w, h) = crop_in_master(upright, adjustment);
+    // EXIF's codes for a picture turned 90, 180, 270 degrees clockwise.
+    let orientation = [0, 6, 3, 8][(adjustment.turn % 4) as usize];
+    let (shape_w, shape_h) = if adjustment.turn % 2 == 1 { (h, w) } else { (w, h) };
     let data = json!({
         "metadata": {"masterWidth": upright.width, "masterHeight": upright.height, "orientation": orientation},
         "formatVersion": 1,
@@ -118,7 +140,7 @@ pub fn recipe(upright: Upright, adjustment: &Adjustment) -> Result<Vec<u8>> {
         "adjustments": [{
             "formatVersion": 1, "enabled": true, "identifier": "Crop", "formatIdentifier": "com.apple.photo",
             "settings": {"xOrigin": x, "yOrigin": y, "width": w, "height": h,
-                         "constraintWidth": 0, "constraintHeight": 0,
+                         "constraintWidth": shape_w, "constraintHeight": shape_h,
                          "straightenAngle": 0, "pitch": 0, "yaw": 0, "auto": false},
         }],
     });
@@ -217,14 +239,34 @@ mod tests {
     }
 
     #[test]
-    fn the_recipe_is_apples_inflated_json() {
-        let bytes = recipe(Upright { width: 4032, height: 3024 }, &Adjustment { turn: 1, crop: [0.0, 0.0, 1.0, 0.5] }).unwrap();
+    fn the_recipe_is_what_an_iphone_wrote_for_the_same_edit() {
+        // The iPhone's: a 4032x3024 photo turned a quarter right, cropped
+        // to x 831, y 295 from the bottom, 2874 by 2155, rendered 2155x2874
+        // (Jacek's reference edit, 2026-11-06).
+        let upright = Upright { width: 4032, height: 3024 };
+        let turned = Adjustment {
+            turn: 1,
+            crop: [295.0 / 3024.0, 831.0 / 4032.0, 2155.0 / 3024.0, 2874.0 / 4032.0],
+        };
+        assert_eq!(crop_in_master(upright, &turned), (831, 295, 2874, 2155));
+        assert_eq!(crop_pixels(upright, &turned), (295, 831, 2155, 2874));
+        let bytes = recipe(upright, &turned).unwrap();
         let mut json = String::new();
         std::io::Read::read_to_string(&mut flate2::read::DeflateDecoder::new(&bytes[..]), &mut json).unwrap();
         let data: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(data["metadata"]["orientation"], 6);
-        assert_eq!(data["adjustments"][0]["identifier"], "Crop");
-        assert_eq!(data["adjustments"][0]["settings"]["height"], 2016);
+        assert_eq!(data["metadata"]["masterWidth"], 4032);
+        let crop = &data["adjustments"][0]["settings"];
+        assert_eq!((crop["xOrigin"].as_u64(), crop["yOrigin"].as_u64(), crop["width"].as_u64(), crop["height"].as_u64()),
+                   (Some(831), Some(295), Some(2874), Some(2155)));
+        assert_eq!((crop["constraintWidth"].as_u64(), crop["constraintHeight"].as_u64()), (Some(2155), Some(2874)));
+        // Untouched: the whole photo, no orientation.
+        let whole = Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] };
+        assert_eq!(crop_in_master(upright, &whole), (0, 0, 4032, 3024));
+        // Turned twice and cropped to its top half: the bottom half of the
+        // upright photo, which Core Image counts from 0.
+        let upside = Adjustment { turn: 2, crop: [0.0, 0.0, 1.0, 0.5] };
+        assert_eq!(crop_in_master(upright, &upside), (0, 0, 4032, 1512));
     }
 
     #[test]
