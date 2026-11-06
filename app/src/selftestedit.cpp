@@ -126,12 +126,19 @@ void runEditSelfTest(QQuickWindow *window, const Library &library, Viewer &viewe
                                       "kept: turned, the middle half");
                                 check(std::abs(library.at(i).thumbW - before.height() / 2) <= 1,
                                       QStringLiteral("its size is the part kept: %1x%2").arg(library.at(i).thumbW).arg(library.at(i).thumbH));
-                                QTimer::singleShot(800, window, [=, &viewer] {
+                                QTimer::singleShot(800, window, [=, &library, &viewer] {
                                     shoot("cropped");
-                                    viewer.close();
-                                    QTimer::singleShot(1500, window, [=] {
-                                        shoot("grid");
-                                        finish();
+                                    // ⇧ K: as it was taken again.
+                                    QMetaObject::invokeMethod(plugin, "original", Q_ARG(QVariant, QVariantList{QString::fromUtf8(id)}));
+                                    waitFor([=, &library] { const int i = position(); return i >= 0 && library.at(i).adjust.isIdentity(); },
+                                            5000, "Original takes it back", [=, &library, &viewer] {
+                                        const int i = position();
+                                        check(QSize(library.at(i).thumbW, library.at(i).thumbH) == before, "as taken, its size as before");
+                                        viewer.close();
+                                        QTimer::singleShot(1500, window, [=] {
+                                            shoot("grid");
+                                            finish();
+                                        });
                                     });
                                 });
                             });

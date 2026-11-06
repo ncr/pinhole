@@ -11,6 +11,17 @@ PinholePlugin {
     id: plugin
     readonly property bool viewing: pinhole.viewer.open && pinhole.viewer.index >= 0
     readonly property bool editable: viewing && !pinhole.library.item(pinhole.viewer.index).video
+    // The photo shown turned or cropped here: Original takes it back.
+    readonly property bool adjusted: (pinhole.library.revision, editable && (() => {
+        const now = pinhole.adjustment(pinhole.viewer.index)
+        return now.turn !== 0 || now.crop.x !== 0 || now.crop.y !== 0 || now.crop.width !== 1 || now.crop.height !== 1
+    })())
+    // As it was taken: the turn and the crop taken back, a step to undo.
+    function original(photos) {
+        const ids = idsOf(photos)
+        if (ids.length > 0)
+            step(qsTr("going back to the original"), ids, () => pinhole.adjust(ids, { turn: 0, crop: null }))
+    }
 
     function idsOf(photos) {
         return photos.map(photo => pinhole.library.item(photo).id).filter(id => id !== undefined)
@@ -54,13 +65,28 @@ PinholePlugin {
             onTriggered: cropping.open(pinhole.library.item(pinhole.viewer.index).id)
         },
         PluginAction {
+            place: "viewer"
+            order: 12
+            text: qsTr("Original")
+            key: "Shift+K"
+            shown: plugin.adjusted
+            onTriggered: plugin.original([pinhole.viewer.index])
+        },
+        PluginAction {
             place: "selection"
             text: qsTr("Turn")
             usable: pinhole.selectionCount > 0
             onTriggered: plugin.turn(Array.from(pinhole.selection()), 1)
+        },
+        PluginAction {
+            place: "selection"
+            text: qsTr("Original")
+            usable: pinhole.selectionCount > 0
+            onTriggered: plugin.original(Array.from(pinhole.selection()))
         }
     ]
-    help: [["R", qsTr("Turn the photo a quarter; ⇧ R back")], ["K", qsTr("Crop the photo")]]
+    help: [["R", qsTr("Turn the photo a quarter; ⇧ R back")], ["K", qsTr("Crop the photo")],
+           ["⇧ K", qsTr("The photo as it was taken again")]]
     // A quarter back: a key, beside Turn's button.
     Command {
         name: "edit.turnBack"
