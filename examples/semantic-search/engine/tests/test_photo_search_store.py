@@ -299,8 +299,14 @@ class WorkerTests(unittest.TestCase):
         model.encode.return_value = self.vector()[None, :], {}
         with patch('photo_search.models.TextModel', return_value=model) as load:
             self.assertTrue(self.worker.request({'op': 'warm'})['warm'])
+            # Asked again while Pinhole is open: kept, not encoded again.
+            self.worker.last_inference = None
+            self.assertTrue(self.worker.request({'op': 'warm'})['warm'])
+            self.assertIsNotNone(self.worker.last_inference)
+            self.assertEqual(model.encode.call_count, 1)
             self.assertEqual(self.worker.request({'op': 'query', 'text': 'pies'})['results'][0]['id'], 'a')
         load.assert_called_once()
+        self.worker.engine.close()
         with patch.object(self.worker.engine, 'encode_text', side_effect=RuntimeError('waiting for memory')):
             answer = self.worker.request({'op': 'warm'})
         self.assertEqual((answer['warm'], answer['reason']), (False, 'waiting for memory'))

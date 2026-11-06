@@ -21,6 +21,7 @@
   "adding a photo tag": "dodanie tagu zdjęcia",
   "No visible photos with this tag.": "Brak widocznych zdjęć z tym tagiem.",
   "Searching…": "Wyszukiwanie…",
+  "Getting search ready…": "Przygotowuję wyszukiwanie…",
   "Search will be available as thumbnails are indexed.": "Wyniki pojawią się w miarę indeksowania miniatur.",
   "Set up a local photo search engine for this computer.": "Skonfiguruj lokalny silnik wyszukiwania zdjęć na tym komputerze.",
   "Waiting for Pinhole's background search service.": "Czekam na usługę wyszukiwania Pinhole w tle.",

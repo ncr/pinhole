@@ -19,6 +19,8 @@ Item {
     property var server: null
     // Indexing turned on or off, asked of the helper and not yet answered.
     readonly property bool toggling: toggler.busy
+    // The model loading, so a question asked now waits for it.
+    readonly property bool loading: warmer.busy
     property int generation: 0
     readonly property bool complete: catalogReady && status.total > 0 && status.indexed >= status.total
     readonly property real progress: status.total > 0 ? Math.min(1, status.indexed / status.total) : 0
@@ -163,13 +165,18 @@ Item {
             } else indexer.report(error)
         }
     }
-    // The search view open: the model loads while the question is typed,
-    // not after it. What it answers is no matter; a search says the rest.
+    // Search ready from the start: the model loaded as soon as the library
+    // is read, in the worker's idle time, and kept while Pinhole is open
+    // (asked again each `keeper` interval; the worker lets it go a minute
+    // after the last ask, or when memory runs short). What it answers is no
+    // matter; a search says the rest.
     function warm() {
         if (!catalogReady || warmer.busy) return
         warmer.start(() => request({ op: "warm" }))
     }
     Job { id: warmer }
+    onCatalogReadyChanged: if (catalogReady) warm()
+    Timer { id: keeper; interval: 40000; repeat: true; running: indexer.catalogReady; onTriggered: indexer.warm() }
     // Pinhole's worker, as pinholed says it runs: asked how far it is, or,
     // gone (or pinholed with it), waited for.
     function watch() {
@@ -211,8 +218,8 @@ Item {
     }
 
     // Opening search can start the worker sooner. The normal launch path
-    // leaves the first frame and settling of the photo grid to Pinhole.
-    Timer { id: startup; interval: 4000; running: true; onTriggered: indexer.ensureStarted() }
+    // leaves the first frame to Pinhole; the worker loads at idle priority.
+    Timer { id: startup; interval: 1500; running: true; onTriggered: indexer.ensureStarted() }
     Timer { id: changes; interval: 900; onTriggered: indexer.catalog() }
     // Its own helper, asked every two seconds while it indexes; Pinhole's
     // worker says when it got further (workerSaid), and pinholed when it

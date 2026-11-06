@@ -49,6 +49,12 @@ class LegacyEngine:
             self.text_model = TextModel(self.args.model, self.args.models)
         return self.text_model.encode(texts)[0]
 
+    def loaded(self):
+        return self.text_model is not None
+
+    def short_of_memory(self):
+        return False
+
     def close(self):
         if self.image_model is not None:
             self.image_model.restore()
@@ -130,6 +136,12 @@ class CudaEngine:
     def encode_text(self, texts):
         return self.encoder().texts(texts)
 
+    def loaded(self):
+        return self.model is not None
+
+    def short_of_memory(self):
+        return False
+
     def close(self):
         if self.model is not None:
             torch = self.model.torch
@@ -188,6 +200,16 @@ class VulkanEngine:
 
         model = self.encoder()
         return np.stack([model.text(text) for text in texts])
+
+    def loaded(self):
+        return self.model is not None and self.model.process.poll() is None
+
+    # Kept while Pinhole is open, the model gives way when the desktop
+    # runs short, as indexing does (can_index).
+    def short_of_memory(self):
+        from .wemm_vulkan import KEEP_MEMORY_KIB, available_memory_kib
+
+        return self.model is not None and available_memory_kib() < KEEP_MEMORY_KIB
 
     def close(self):
         if self.model is not None:

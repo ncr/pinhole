@@ -19,6 +19,10 @@ Panel {
     // A question asked and not yet answered; a photo's tags likewise.
     readonly property bool searching: querier.busy
     readonly property bool suggesting: suggester.busy
+    // Something on its way: the worker starting, the model loading, an
+    // answer. Loading shows at once; an answer only once it takes a while.
+    readonly property bool waiting: failure === "" && !tagQuery
+        && (!catalogReady || indexer.loading || searching)
     property string tagAsset: ""
     property var tagSuggestions: []
     property var savedTags: []
@@ -296,6 +300,17 @@ Panel {
             placeholder: qsTr("Describe a photo or enter #tag…")
             input.maximumLength: 2048
             onAccepted: panel.accept()
+            Spinner {
+                objectName: "semanticSpinner"
+                anchors.right: parent.right
+                anchors.rightMargin: 2
+                anchors.verticalCenter: parent.verticalCenter
+                height: parent.height - 4
+                bare: true
+                ink: theme.accent
+                busy: panel.waiting
+                delay: panel.indexer.loading || !panel.catalogReady ? 0 : 400
+            }
         }
     }
     Item {
@@ -367,6 +382,7 @@ Panel {
             font.pixelSize: Math.round(theme.fontSize * 1.35)
             color: theme.brightForeground
             text: !panel.catalogReady ? panel.indexer.summary
+                : panel.indexer.loading && !panel.tagQuery ? qsTr("Getting search ready…")
                 : panel.tagQuery ? qsTr("No visible photos with this tag.")
                 : panel.searching || debounce.running ? qsTr("Searching…")
                 : panel.status.indexed === 0 ? qsTr("Search will be available as thumbnails are indexed.")

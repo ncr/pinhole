@@ -85,6 +85,25 @@ class Yielding(unittest.TestCase):
         self.assertFalse(worker.yield_to_person(False))
         self.assertFalse(worker.yielding)
 
+    def test_a_kept_model_gives_way_when_memory_runs_short(self):
+        from photo_search.worker import Worker
+
+        worker = Worker.__new__(Worker)
+        worker.running, worker.memory_checked, worker.last_inference = False, 0, 100.0
+        worker.engine = mock.Mock(idle_seconds=60)
+        worker.engine.short_of_memory.return_value = False
+        with mock.patch("photo_search.worker.time.monotonic", return_value=110.0):
+            worker.release_idle()
+        worker.engine.close.assert_not_called()
+        worker.engine.short_of_memory.return_value = True
+        with mock.patch("photo_search.worker.time.monotonic", return_value=112.0):
+            worker.release_idle()
+        worker.engine.close.assert_not_called()
+        with mock.patch("photo_search.worker.time.monotonic", return_value=116.0):
+            worker.release_idle()
+        worker.engine.close.assert_called_once()
+        self.assertIsNone(worker.last_inference)
+
     def test_a_search_keeps_the_model_a_minute_past_it(self):
         from photo_search.worker import Worker
 

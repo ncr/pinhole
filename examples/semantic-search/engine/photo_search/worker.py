@@ -89,6 +89,7 @@ class Worker:
         self.identity = self.engine.identity()
         self.store = Store(args.index, args.library_key, self.identity, self.engine.dimensions[args.model])
         self.last_inference = None
+        self.memory_checked = 0
         self.tag_vectors = None
         self.pending = []
         self.running = False
@@ -130,6 +131,13 @@ class Worker:
                 and time.monotonic() - self.last_inference >= delay):
             self.engine.close()
             self.last_inference = None
+            return
+        now = time.monotonic()
+        if self.last_inference is not None and now - self.memory_checked >= 5:
+            self.memory_checked = now
+            if self.engine.short_of_memory():
+                self.engine.close()
+                self.last_inference = None
 
     def status(self):
         return self.store.status() | {"running": self.running, "waiting": self.waiting, "pending": len(self.pending),
@@ -274,13 +282,17 @@ class Worker:
             return {"results": self.store.search(vector, limit), "seconds": time.perf_counter() - started,
                     "status": self.status()}
         if op == 'warm':
-            # The search view opened: load the text model while the question
-            # is typed. Too little memory now is said, not raised.
+            # Pinhole open: the text model loaded, and kept a minute past
+            # each ask (the window asks again while it is open), so a question
+            # never waits for it. Too little memory now is said, not raised.
             if self.store.status()['indexed']:
-                try:
-                    self.encode_text(['warm'])
-                except (OSError, RuntimeError, ValueError) as error:
-                    return self.status() | {"warm": False, "reason": str(error)}
+                if self.engine.loaded():
+                    self.last_inference = time.monotonic()
+                else:
+                    try:
+                        self.encode_text(['warm'])
+                    except (OSError, RuntimeError, ValueError) as error:
+                        return self.status() | {"warm": False, "reason": str(error)}
             return self.status() | {"warm": True}
         if op == 'suggest_tags':
             return self.suggest_tags(message.get('id'))
