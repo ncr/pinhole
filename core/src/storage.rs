@@ -754,6 +754,19 @@ impl Storage {
     /// Whoever reads the one in use (`library`, there now) is told, and the
     /// old copy goes a little later, once they have let go of it.
     fn move_library(&self, from: &Path, to: &Path, commit: impl FnOnce() -> Result<()>) -> Result<()> {
+        // To another disk: the bulk of it (49,000 thumbnails) copied first,
+        // with nothing held, so that fetches and rounds go on meanwhile;
+        // under the locks then, only what changed since.
+        let part = to.with_extension("part");
+        let across = {
+            use std::os::unix::fs::MetadataExt;
+            let disk = |p: &Path| p.ancestors().find_map(|a| std::fs::metadata(a).ok()).map(|m| m.dev());
+            disk(from) != disk(to.parent().unwrap_or(to))
+        };
+        if across {
+            let _ = std::fs::remove_dir_all(&part);
+            copy_tree(from, &part, &self.moved, false).with_context(|| format!("copying the libraries to {}", to.display()))?;
+        }
         // Nothing writes them meanwhile: not a round (library_lock), not a
         // favourite or a lookup (library_moving). Nothing else writes them
         // at all: the window and pinhole's commands ask this service.
@@ -766,12 +779,15 @@ impl Storage {
             current.strip_prefix(from).map(|inside| to.join(inside)).ok()
         };
         let bytes = size_of(from);
-        let copied = if std::fs::rename(from, to).is_ok() {
+        let copied = if !across && std::fs::rename(from, to).is_ok() {
             false
         } else {
-            let part = to.with_extension("part");
-            let _ = std::fs::remove_dir_all(&part);
-            copy_tree(from, &part, &self.moved).with_context(|| format!("copying the libraries to {}", to.display()))?;
+            // What changed since it was copied (the index, a round's new
+            // thumbnails), or all of it if it could not be renamed after all.
+            if !across {
+                let _ = std::fs::remove_dir_all(&part);
+            }
+            copy_tree(from, &part, &self.moved, across).with_context(|| format!("copying the libraries to {}", to.display()))?;
             std::fs::rename(&part, to)?;
             true
         };
@@ -908,15 +924,41 @@ fn size_of(dir: &Path) -> u64 {
 }
 
 /// A folder and everything in it, counting the bytes as they go.
-fn copy_tree(from: &Path, to: &Path, counted: &AtomicU64) -> Result<()> {
+/// `from` copied into `to`, each file keeping when it was changed. With
+/// `again`, over a copy made before: only what is not the same size and
+/// time is copied (counting nothing), and what `from` no longer has goes.
+fn copy_tree(from: &Path, to: &Path, counted: &AtomicU64, again: bool) -> Result<()> {
     std::fs::create_dir_all(to)?;
+    let mut kept = std::collections::HashSet::new();
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
+        kept.insert(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_tree(&entry.path(), &target, counted)?;
-        } else {
-            counted.fetch_add(std::fs::copy(entry.path(), &target)?, Ordering::Relaxed);
+            copy_tree(&entry.path(), &target, counted, again)?;
+            continue;
+        }
+        let source = entry.metadata()?;
+        if again {
+            let same = std::fs::metadata(&target)
+                .is_ok_and(|t| t.is_file() && t.len() == source.len() && t.modified().ok() == source.modified().ok());
+            if same {
+                continue;
+            }
+        }
+        let bytes = std::fs::copy(entry.path(), &target)?;
+        if let Ok(changed) = source.modified() {
+            let _ = std::fs::File::options().write(true).open(&target).and_then(|f| f.set_modified(changed));
+        }
+        if !again {
+            counted.fetch_add(bytes, Ordering::Relaxed);
+        }
+    }
+    if again {
+        for entry in std::fs::read_dir(to)?.flatten() {
+            if !kept.contains(&entry.file_name()) {
+                let _ = if entry.path().is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+            }
         }
     }
     Ok(())
@@ -1166,6 +1208,32 @@ mod tests {
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
         assert_eq!(read_settings(&settings, &no_kinds()).location, Some(to));
+    }
+
+    #[test]
+    fn a_copy_made_again_takes_only_what_changed_and_drops_what_went() {
+        let dir = temp("copy-again");
+        let (from, to) = (dir.join("from"), dir.join("to"));
+        file(&from.join("cloud/library.sqlite"), 50, 0);
+        file(&from.join("cloud/thumbs/a.jpg"), 10, 0);
+        file(&from.join("cloud/thumbs/b.jpg"), 10, 0);
+        let counted = AtomicU64::new(0);
+        copy_tree(&from, &to, &counted, false).unwrap();
+        assert_eq!(counted.load(Ordering::Relaxed), 70);
+        // Meanwhile: the index written, a thumbnail made, one gone.
+        std::fs::write(from.join("cloud/library.sqlite"), vec![1u8; 60]).unwrap();
+        file(&from.join("cloud/thumbs/c.jpg"), 10, 0);
+        std::fs::remove_file(from.join("cloud/thumbs/a.jpg")).unwrap();
+        // Unchanged, so not copied: a mark in the copy shows it stayed.
+        std::fs::write(to.join("cloud/thumbs/b.jpg"), vec![9u8; 10]).unwrap();
+        let b = std::fs::metadata(from.join("cloud/thumbs/b.jpg")).unwrap().modified().unwrap();
+        std::fs::File::options().write(true).open(to.join("cloud/thumbs/b.jpg")).unwrap().set_modified(b).unwrap();
+        copy_tree(&from, &to, &counted, true).unwrap();
+        assert_eq!(std::fs::read(to.join("cloud/library.sqlite")).unwrap(), vec![1u8; 60]);
+        assert!(to.join("cloud/thumbs/c.jpg").exists());
+        assert!(!to.join("cloud/thumbs/a.jpg").exists());
+        assert_eq!(std::fs::read(to.join("cloud/thumbs/b.jpg")).unwrap(), vec![9u8; 10]);
+        assert_eq!(counted.load(Ordering::Relaxed), 70);
     }
 
     #[test]
