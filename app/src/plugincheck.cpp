@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -352,6 +352,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"Choices.numbered", QRegularExpression(QStringLiteral("\\bnumbered\\s*:"))},
         {"pinhole.keyboardInUse", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keyboardInUse\\b"))},
         {"PanZoom", QRegularExpression(QStringLiteral("\\bPanZoom\\s*\\{"))},
+        {"Job", QRegularExpression(QStringLiteral("\\bJob\\s*\\{"))},
+        {"a setting of SettingSwitch or Choices",
+         QRegularExpression(QStringLiteral("(?:^|[;{]\\s*)setting\\s*:\\s*[\"']"), QRegularExpression::MultilineOption)},
+        {"PluginView", QRegularExpression(QStringLiteral("\\bPluginView\\s*\\{"))},
         {"pinhole.readText or readJson", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*read(Text|Json)\\b"))},
         {"pinhole.workers or workerSaid", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*workers\\b|\\bonWorkerSaid\\b|\\bonWorkersChanged\\b"))},
         {"pinhole.copyText, input or hasKeys", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(copyText|input|hasKeys)\\b"))},
@@ -451,6 +455,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             uses << QStringLiteral("workers in the manifest");
         if (declared.contains(QLatin1String("makes")))
             uses << QStringLiteral("makes in the manifest");
+        if (declared.contains(QLatin1String("settings")))
+            uses << QStringLiteral("settings in the manifest");
     }
     QMap<int, QStringList> byApi;
     for (const auto &[version, name] : order)
@@ -1283,7 +1289,9 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
     QStringList said;
     // What a manifest has: a key misspelt is never read, and nothing says so.
     static const QStringList keys = {"schemaVersion", "id", "name", "description", "version", "api", "entryPoints",
-                                     "sources", "workers", "makes", "author", "license"};
+                                     "sources", "workers", "makes", "settings", "author", "license"};
+    if (manifest.contains("settings") && !manifest.value("settings").isObject())
+        said << QStringLiteral("manifest.json: \"settings\" is an object of each setting's default: {\"shuffle\": true}");
     for (auto it = manifest.begin(); it != manifest.end(); ++it)
         if (!keys.contains(it.key()))
             said << QStringLiteral("manifest.json: \"%1\" is not a manifest's key%2, and is never read")

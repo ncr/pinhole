@@ -4,7 +4,6 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
     function openRecent() { recent.open() }
-    covering: recent.shown
     actions: [
         PluginAction {
             place: "grid"
@@ -15,5 +14,11 @@ PinholePlugin {
         }
     ]
     help: [["⇧ N", qsTr("Photos added recently, whatever their capture date")]]
-    RecentPhotos { id: recent; anchors.fill: parent; plugin: plugin }
+    PluginView {
+        id: recent
+        source: "RecentPhotos.qml"
+        toggleKey: "Shift+N"
+        onOpened: item.start()
+        onClosed: item.stop()
+    }
 }

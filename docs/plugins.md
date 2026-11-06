@@ -64,6 +64,37 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
 of each is in [the kit, member by member](plugin-kit.md)
 (`pinhole plugin docs plugin-kit`):
 
+- `PluginView` (API 13): a view of the plugin's own over the photos, the
+  calendar, a gallery, a studio, in one line:
+
+  ```qml
+  PluginView { id: calendar; source: "Calendar.qml"; toggleKey: "Y" }
+  PluginAction { place: "grid"; text: qsTr("Calendar"); key: "Y"; onTriggered: calendar.open() }
+  ```
+
+  While open the plugin covers the photos (`covering` follows it, unless
+  bound by hand), and it fades in and out. It is made the first time it
+  opens and kept (`lazy: false` makes it at once). Esc and its `toggleKey`
+  close it, as does a photo handed over from it (`dismissed()`); while a
+  photo opened from it with `comeBack` shows, it is hidden and still open.
+  `open()`, `close()`, `toggle()`, `shown`, `opened()`, `closed()`, and
+  `item`, what `source` (a file beside the main one) or `content` (a
+  Component) made. That item reaches its view through a `property var
+  view` it declares, and a `PanelHeader` in it closes it with ✕ by
+  itself.
+- `Job` (API 13): one thing asked at a time, the latest winning. It
+  cancels the one before, drops an answer that came too late, has `busy`,
+  asks again by itself when the library was read meanwhile (`reloaded`),
+  says nothing of a cancel, and stops with the plugin:
+
+  ```qml
+  Job { id: reading; onDone: rows => panel.rows = rows; onFailed: error => panel.problem = error.message }
+  reading.start(() => pinhole.query(sql, [limit]))
+  ```
+
+  `coalesce: true` waits for the one running and then asks once more with
+  the latest instead of cancelling it (a search typed into).
+
 - `ScrollList`, `ScrollGrid`, `ScrollArea`: a `ListView`, a `GridView` and
   a `Flickable` (anything larger than its room: give it a `contentWidth`
   and a `contentHeight`), each scrolled by the wheel and the touchpad
@@ -406,8 +437,9 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `SettingNote`, `SettingSwitch`, `Choices`' `numbered` and
 `pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input`,
 `hasKeys`, `pinhole.workers`, `workerSaid` and `PanZoom`. API 13 adds
-`pinhole.readText(path)` and `readJson(path)`, and a worker's `said` in
-`pinhole.workers`.
+`pinhole.readText(path)` and `readJson(path)`, a worker's `said` in
+`pinhole.workers`, `PluginView`, `Job`, the manifest's `settings` (each
+setting's default) and a `setting` for `SettingSwitch` and `Choices`.
 
 `Main.qml` beside it:
 
@@ -505,7 +537,8 @@ before it starts, so what the worker writes there the plugin's QML reads
 and the one it is in, joined: `icloud-me@example.com`,
 `folder-Pictures`. `--managed-plugins` is the plugins' switches and
 settings, a JSON file with the plugin's settings at `settings` → its id:
-`{"settings": {"me.dupes": {"videos": true}}}`. Nobody tells the worker
+`{"settings": {"me.dupes": {"videos": true}}}`; one never chosen is not
+there, and its default is the manifest's `settings`. Nobody tells the worker
 when they change: read the file again when its modification time does
 (a look every few seconds is plenty). It starts ten points lower in CPU priority than
 pinholed (`nice`); lower it more, or its I/O, as it needs. Its stdout and
@@ -976,7 +1009,27 @@ Keep each thing in the one it is:
 - `settings`: what the user chose, the switches and choices in its part of
   the side panel. `plugins.json` is theirs, and pinholed reads it again
   each time it changes, so a plugin writes there only when the user
-  changes a setting.
+  changes a setting. Its defaults are its manifest's (API 13), what
+  `pinhole.settings` says of one never chosen, from the first binding on:
+
+  ```json
+  "settings": { "shuffle": true, "seconds": 8, "photos": "favourites" }
+  ```
+
+  A `SettingSwitch` or `Choices` given a `setting` shows that one and
+  keeps what is chosen, with nothing more to write:
+
+  ```qml
+  settings: Component {
+      Column {
+          SettingSwitch { setting: "shuffle"; text: qsTr("Shuffle") }
+          Choices { setting: "photos"; options: [{ value: "favourites", text: qsTr("Favourites") },
+                                                 { value: "all", text: qsTr("All") }] }
+      }
+  }
+  ```
+
+  Setting one to `null` takes the choice back: its default again.
 - `state`: what the user made and would miss: their edits, a panel left
   open, the devices they sent to.
 - `cache`: what can be worked out again, and is kept only to be quick; it

@@ -422,6 +422,10 @@ public:
     Q_INVOKABLE QVariant setting(const QString &key, const QVariant &fallback = {}) const;
     // False if it could not be kept (the file could not be written).
     Q_INVOKABLE bool setSetting(const QString &key, const QVariant &value);
+    // What pinhole.settings says of a setting never set (the manifest's
+    // "settings", API 13): kept nowhere, so a later default reaches those
+    // who never chose.
+    void setSettingDefaults(const QVariantMap &defaults);
     // Done just now, to undo with Ctrl+Z: `name` in a word or two, and
     // functions that undo and redo it (history.h).
     // Its number, for dropStep (API 3).
@@ -511,6 +515,7 @@ private:
     QString m_dir;
     Plugins *m_plugins;
     std::unique_ptr<PluginSettings> m_settings;
+    QVariantMap m_settingDefaults;
     mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
     mutable std::unique_ptr<PluginSources> m_sources;
     QString m_problem;
@@ -850,6 +855,8 @@ private:
         QString id, name, description, version, author, dir, main, error;
         // The source kinds its manifest names.
         QStringList sources;
+        // Its manifest's "settings": each setting's default.
+        QVariantMap settingDefaults;
         // One's own with the id of one of Pinhole's own, which it replaces.
         bool copy = false;
         // Its files' names, times and sizes: a change loads it again.

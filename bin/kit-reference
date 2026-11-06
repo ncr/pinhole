@@ -35,6 +35,35 @@ def strip_strings(line):
     return re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', line)
 
 
+def markdown(lines):
+    """Comment lines as Markdown: paragraphs, and lines indented four
+    spaces (an example) as a QML block."""
+    out, words, code = [], [], []
+
+    def flush():
+        if words:
+            out.append(" ".join(words))
+            words.clear()
+        if code:
+            out.append("```qml\n" + "\n".join(code) + "\n```")
+            code.clear()
+
+    for line in lines:
+        text = line[1:] if line.startswith(" ") else line
+        if text.startswith("    "):
+            if words:
+                flush()
+            code.append(text[4:])
+        elif not text.strip():
+            flush()
+        else:
+            if code:
+                flush()
+            words.append(text.strip())
+    flush()
+    return "\n\n".join(out)
+
+
 def parse(path):
     """The header comment, the root type, and its own members in order."""
     lines = path.read_text().splitlines()
@@ -44,13 +73,11 @@ def parse(path):
         code = strip_strings(line.split("//")[0] if not stripped.startswith("//") else "")
         if depth == 0 and root is None:
             if stripped.startswith("//"):
-                # An empty comment line parts two paragraphs.
-                comment.append(stripped[2:].strip() or "\n\n")
+                comment.append(stripped[2:])
                 continue
             match = re.match(r"^([A-Z][\w.]*)\s*\{", stripped)
             if match:
-                root, header, comment = match.group(1), comment, []
-                header = " ".join(header).replace(" \n\n ", "\n\n").strip()
+                root, header, comment = match.group(1), markdown(comment), []
                 depth += code.count("{") - code.count("}")
                 continue
             continue

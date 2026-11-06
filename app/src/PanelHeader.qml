@@ -11,7 +11,13 @@ Item {
     property string title
     property string detail
     // The Command that closes the view: ✕ presses it and shows its key.
-    property QtObject closeCommand: null
+    // In a PluginView, its own, unless another is given.
+    property QtObject closeCommand: {
+        for (let at = header.parent; at; at = at.parent)
+            if (at.closeCommand !== undefined && at.toggleKey !== undefined)
+                return at.closeCommand
+        return null
+    }
     // ✕'s key without a closeCommand: "" where Esc means back, not close.
     property string closeHint: "Esc"
     // A control's height here, for what stands beside the buttons.

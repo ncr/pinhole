@@ -3,13 +3,17 @@ import QtQuick
 // One of a few, chosen on a row of buttons, each also its number's key (1,
 // 2, 3…) while `when`: `options` as [{ value, text }], the one chosen
 // `value`, and `chosen(value)` when another is. The keys are in the help
-// under `section`, as `helpText`.
+// under `section`, as `helpText`. Given a `setting` (API 13), it shows and
+// keeps that one of pinhole.settings, as a SettingSwitch does.
 Row {
     id: choices
     // [{ value, text }], in order.
     property var options: []
+    // The name of one of the plugin's settings, whose value it is.
+    property string setting
+    readonly property var _settings: setting !== "" && typeof pinhole !== "undefined" && pinhole ? pinhole.settings : null
     // The one chosen.
-    property var value
+    property var value: _settings ? _settings[setting] : undefined
     // While true, the number keys choose.
     property bool when: visible
     // Whose keys they are: the covering plugin's ("plugin"), or "grid" or
@@ -24,6 +28,7 @@ Row {
     property bool numbered: true
     // Another chosen, with its value (`value` is not set by itself).
     signal chosen(var value)
+    onChosen: value => { if (_settings) _settings[setting] = value }
     Accessible.role: Accessible.Grouping
     Accessible.name: helpText
 

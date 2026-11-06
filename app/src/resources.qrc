@@ -36,6 +36,8 @@
         <file alias="SidePanel.qml">SidePanel.qml</file>
         <file alias="UpdateStatus.qml">UpdateStatus.qml</file>
         <file alias="PinholePlugin.qml">PinholePlugin.qml</file>
+        <file alias="PluginView.qml">PluginView.qml</file>
+        <file alias="Job.qml">Job.qml</file>
         <file alias="PluginAction.qml">PluginAction.qml</file>
         <file alias="Toggle.qml">Toggle.qml</file>
         <file alias="BuildProgress.qml">BuildProgress.qml</file>

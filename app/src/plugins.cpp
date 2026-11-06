@@ -64,8 +64,10 @@ QVariant PluginSettings::updateValue(const QString &key, const QVariant &input) 
     const QJsonValue json = QJsonValue::fromVariant(value);
     if (!m_host->m_plugins->setSettingOf(m_host->id(), key, json))
         m_host->report(tr("Its setting “%1” could not be kept.").arg(key));
-    // Taken out: undefined, as one never set is.
-    return json.isNull() || json.isUndefined() ? QVariant() : value;
+    // Taken out: its default, or undefined, as one never set is.
+    if (json.isNull() || json.isUndefined())
+        return m_host->m_settingDefaults.value(key);
+    return value;
 }
 
 namespace {
@@ -536,10 +538,28 @@ void PluginHost::settingsChanged() {
             m_settings->insert(it.key(), value);
     }
     // One set to null is gone (every key the map has had: its own keys()
-    // are those kept).
+    // are those kept), back to its default if it has one.
     for (const QString &key : m_settings->QQmlPropertyMap::keys())
-        if (!kept.contains(key) && m_settings->value(key).isValid())
-            m_settings->clear(key);
+        if (!kept.contains(key) && m_settings->value(key) != m_settingDefaults.value(key)) {
+            if (m_settingDefaults.contains(key))
+                m_settings->insert(key, m_settingDefaults.value(key));
+            else
+                m_settings->clear(key);
+        }
+}
+
+void PluginHost::setSettingDefaults(const QVariantMap &defaults) {
+    QVariantMap plain;
+    for (auto it = defaults.begin(); it != defaults.end(); ++it)
+        plain.insert(it.key(), it.value().metaType() == QMetaType::fromType<QJSValue>()
+                                   ? it.value().value<QJSValue>().toVariant(QJSValue::ConvertJSObjects)
+                                   : it.value());
+    m_settingDefaults = plain;
+    const QJsonObject kept = m_plugins->settingsOf(m_id);
+    for (auto it = plain.begin(); it != plain.end(); ++it)
+        if (!kept.contains(it.key()) && m_settings->value(it.key()) != it.value())
+            m_settings->insert(it.key(), it.value());
+    settingsChanged();
 }
 
 void PluginHost::showFile(const QString &path) const {
@@ -578,7 +598,8 @@ QString PluginHost::sizeText(double bytes, int decimals) const {
 
 QVariant PluginHost::setting(const QString &key, const QVariant &fallback) const {
     const QJsonObject settings = m_plugins->settingsOf(m_id);
-    return settings.contains(key) ? settings.value(key).toVariant() : fallback;
+    return settings.contains(key) ? settings.value(key).toVariant()
+         : m_settingDefaults.contains(key) ? m_settingDefaults.value(key) : fallback;
 }
 
 bool PluginHost::setSetting(const QString &key, const QVariant &value) {
@@ -846,7 +867,7 @@ QJsonObject Plugins::unmoved(QJsonObject config) const {
 void Plugins::registerTypes() {
     for (const char *type : {"PinholePlugin", "PluginAction", "PluginSource", "Command", "ShellButton", "Chip", "UiText", "Spinner",
                              "Toggle", "FieldInput", "ScrollList", "ScrollGrid", "ScrollArea", "PinchZoom", "Panel", "Card",
-                             "Choices", "PhotoTiles", "PanelHeader", "SettingNote", "SettingSwitch"})
+                             "Choices", "PhotoTiles", "PanelHeader", "SettingNote", "SettingSwitch", "PluginView", "Job"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
     // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
@@ -1531,6 +1552,7 @@ void Plugins::scan() {
             if (plugin->error.isEmpty())
                 plugin->main = main;
             plugin->sources = sourceKinds(manifest);
+            plugin->settingDefaults = manifest.value("settings").toObject().toVariantMap();
             // One's own with a built-in's id takes its place.
             const auto same = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == plugin->id; });
             if (same != found.end()) {
@@ -1585,6 +1607,8 @@ void Plugins::scan() {
             plugin->host = std::move((*old)->host);
         if (!plugin->host)
             plugin->host = std::make_unique<PluginHost>(plugin->id, plugin->dir, this);
+        // Before its QML is made, so a binding on one never set has it.
+        plugin->host->setSettingDefaults(plugin->settingDefaults);
         plugin->loads = loads.value(plugin->id) + (stamps.contains(plugin->id) && stamps.value(plugin->id) != plugin->stamp ? 1 : 0);
         if (plugin->loads != loads.value(plugin->id))
             plugin->host->stop();

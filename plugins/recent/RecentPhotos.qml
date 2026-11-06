@@ -6,9 +6,9 @@ import Pinhole.Plugin
 Item {
     id: recent
     objectName: "recentPhotos"
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-    property bool shown: false
+    // Its PluginView (Main.qml).
+    property var view
+    readonly property bool shown: view ? view.shown : false
     property bool loading: false
     property var rows: []
     property var pending: null
@@ -16,7 +16,6 @@ Item {
     property string source: ""
     property int limit: 300
     property alias cursor: photos.cursor
-    visible: shown && !pinhole.away
 
     function refresh() {
         if (pending)
@@ -53,16 +52,14 @@ Item {
                 problem = qsTr("Could not read recent additions. Try opening this view again.")
         })
     }
-    function open() {
+    function start() {
         rows = []
         limit = 300
         cursor = 0
-        shown = true
         refresh()
         photos.view.positionViewAtBeginning()
     }
-    function close() {
-        shown = false
+    function stop() {
         if (pending)
             pending.cancel()
         pending = null
@@ -81,25 +78,24 @@ Item {
         const row = rows[cursor]
         if (!row)
             return
-        close()
+        view.close()
         pinhole.reveal(row.id)
     }
     Connections {
-        target: recent.pinhole
+        target: pinhole
         function onHiddenChanged() { if (recent.shown) recent.refresh() }
     }
     Connections {
-        target: recent.pinhole.library
+        target: pinhole.library
         function onChanged() {
-            if (recent.source !== recent.pinhole.library.key)
+            if (recent.source !== pinhole.library.key)
                 recent.rows = []
             if (recent.shown)
                 recent.refresh()
         }
     }
     Connections {
-        target: recent.pinhole
-        function onDismissed() { recent.close() }
+        target: pinhole
         function onReturned(photo) {
             photos.moveTo(photo)
             recent.refresh()
@@ -111,7 +107,6 @@ Item {
     PanelHeader {
         id: titlebar
         title: qsTr("Recent additions")
-        closeCommand: closeCommand
     }
     UiText {
         id: heading
@@ -135,9 +130,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: 16
-        library: recent.pinhole.library
+        library: pinhole.library
         photos: recent.rows.slice(0, recent.limit).map(row => row.id)
-        active: recent.shown && !recent.pinhole.away
+        active: recent.shown && !pinhole.away
         minCell: theme.fontSize * 13
         captionHeight: theme.fontSize * 3.8
         caption: Column {
@@ -177,14 +172,6 @@ Item {
             enabled: !recent.loading
             onTapped: { recent.limit += 300; recent.refresh() }
         }
-    }
-    Command {
-        id: closeCommand
-        name: "recent.close"
-        keys: ["Escape", "Shift+N"]
-        keyLayer: "plugin"
-        when: recent.shown
-        onTriggered: recent.close()
     }
     Command {
         name: "recent.reveal"

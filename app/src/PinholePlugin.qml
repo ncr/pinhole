@@ -14,8 +14,11 @@ Item {
     // Over the photos and taking the keys: the grid's controls fade and its
     // keys rest, as for Pinhole's own panels. One plugin at a time, the last
     // to start covering: the others wait beneath, unseen and without keys
-    // (pinhole.coveredBy says whose it is).
-    property bool covering: false
+    // (pinhole.coveredBy says whose it is). By itself while one of its
+    // PluginViews is open.
+    property bool covering: openViews > 0
+    // How many of its PluginViews are open (they count themselves).
+    property int openViews: 0
     // Its keys, as the help (?) lists them: [["G", "Series"], ...].
     property var help: []
     // Photos shown in the grid as one card, each a list of library

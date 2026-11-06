@@ -5232,6 +5232,80 @@ private slots:
     // with no heart showing), and put back; all of them made favourites,
     // or none when they all are, a few or hundreds; undone only on the
     // library it was done in.
+    // The API 13 kit: a PluginView covers while open, is made when first
+    // opened, gives its content `view`, closes on dismissed and is hidden
+    // while away; a Job says only the latest answer; settingDefaults are
+    // what pinhole.settings says until chosen (the manifest's "settings"),
+    // and a SettingSwitch with a
+    // setting flips and keeps it.
+    void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {
+        PluginBench bench({{"t", {{"api", 13}, {"settings", QJsonObject{{"shuffle", true}, {"seconds", 8}}}}}});
+        Keymap keymap;
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        Plugins::registerTypes();
+        const QString dir = bench.dir.path() + "/plugins/t";
+        write(dir + "/View.qml", "import QtQuick\nItem { property var view; readonly property bool open: view ? view.shown : false }\n");
+        write(dir + "/Main.qml", R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    id: plugin
+    property var answers: []
+    property var failures: []
+    PluginView { id: view; objectName: "view"; source: "View.qml"; toggleKey: "Y" }
+    readonly property var view: view
+    Job {
+        id: job
+        onDone: result => plugin.answers = plugin.answers.concat([result.length])
+        onFailed: error => plugin.failures = plugin.failures.concat([error.code])
+    }
+    function ask(sql) { job.start(() => pinhole.query(sql)) }
+    readonly property bool busy: job.busy
+    SettingSwitch { id: shuffle; setting: "shuffle"; text: "Shuffle" }
+    readonly property var shuffleSwitch: shuffle
+    function toggleShuffle() { shuffle.toggled() }
+}
+)");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(dir + "/Main.qml").toString() + "?plugin=t&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("plugin", bench.engine.newQObject(plugin.get()));
+
+        // Not made, not covering, until it opens.
+        QCOMPARE(bench.js("plugin.covering").toBool(), false);
+        QCOMPARE(bench.js("plugin.view.item === null").toBool(), true);
+        bench.js("plugin.view.open()");
+        QCOMPARE(bench.js("plugin.covering").toBool(), true);
+        QCOMPARE(bench.js("plugin.view.item.open").toBool(), true);
+        QCOMPARE(bench.js("plugin.view.closeCommand.keys.join()").toString(), QString("Escape,Y"));
+        // Away (a photo opened from it with comeBack): hidden, still open.
+        QMetaObject::invokeMethod(bench.host, "dismissed");
+        QCOMPARE(bench.js("plugin.covering").toBool(), false);
+        QCOMPARE(bench.js("plugin.view.shown").toBool(), false);
+        bench.js("plugin.view.toggle()");
+        QCOMPARE(bench.js("plugin.view.shown").toBool(), true);
+        bench.js("plugin.view.closeCommand.trigger()");
+        QCOMPARE(bench.js("plugin.view.shown").toBool(), false);
+
+        // The latest answer only; a failure said, a cancel not.
+        bench.js("plugin.ask('SELECT id FROM assets'); plugin.ask('SELECT id FROM assets LIMIT 2')");
+        QCOMPARE(bench.js("plugin.busy").toBool(), true);
+        QTRY_COMPARE(bench.js("plugin.answers.join()").toString(), QString("2"));
+        QCOMPARE(bench.js("plugin.busy").toBool(), false);
+        bench.js("plugin.ask('SELECT nothing FROM nowhere')");
+        QTRY_COMPARE(bench.js("plugin.failures.join()").toString(), QString("sql"));
+
+        // Defaults until chosen; chosen, kept.
+        QCOMPARE(bench.js("pinhole.settings.seconds").toInt(), 8);
+        QCOMPARE(bench.js("plugin.shuffleSwitch.checked").toBool(), true);
+        QVERIFY(bench.plugins->settingsOf("t").isEmpty());
+        bench.js("plugin.toggleShuffle()");
+        QCOMPARE(bench.js("plugin.shuffleSwitch.checked").toBool(), false);
+        QCOMPARE(bench.plugins->settingsOf("t").value("shuffle"), QJsonValue(false));
+        bench.js("pinhole.settings.shuffle = null");
+        QCOMPARE(bench.js("plugin.shuffleSwitch.checked").toBool(), true);
+    }
+
     void theFavouritesPluginsHeartSetsAndUndoesAndSaysWhyNot() {
         PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         Favourites favourites(&bench.library, bench.service.get());

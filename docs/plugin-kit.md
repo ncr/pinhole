@@ -17,7 +17,8 @@ Properties:
 - `var pinhole`: What Pinhole gives the plugin (plugins.h: PluginHost).
 - `list<PluginAction> actions`: Buttons, each a PluginAction.
 - `Component settings`: Under the plugin's switch in the side panel, while it is on.
-- `bool covering`: Over the photos and taking the keys: the grid's controls fade and its keys rest, as for Pinhole's own panels. One plugin at a time, the last to start covering: the others wait beneath, unseen and without keys (pinhole.coveredBy says whose it is).
+- `bool covering`: Over the photos and taking the keys: the grid's controls fade and its keys rest, as for Pinhole's own panels. One plugin at a time, the last to start covering: the others wait beneath, unseen and without keys (pinhole.coveredBy says whose it is). By itself while one of its PluginViews is open.
+- `int openViews`: How many of its PluginViews are open (they count themselves).
 - `var help`: Its keys, as the help (?) lists them: [["G", "Series"], ...].
 - `var stacks`: Photos shown in the grid as one card, each a list of library positions: the card stands where the first is and shows it, with the mark for several photos. Opening it opens that photo.
 - `var hidden`: Photos not shown in the grid at all, library positions: no cell, out of any stack, and passed over by the viewer's ← and → and its strip.
@@ -331,19 +332,23 @@ Its handler in QML: `onClicked`.
 
 A card: a box in the theme's background with a hairline round it, that lets nothing over it through to what is beneath (Shield). Its controls go in it. Over the photos for a moment (a sign-in, a question), on a dimmed Panel whose click puts it away:
 
-Panel { color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.close() } Card { anchors.centerIn: parent; width: 400; height: 300 }
+```qml
+Panel { color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.close() }
+Card { anchors.centerIn: parent; width: 400; height: 300 }
+```
 
 Its root is a `Rectangle` (Qt Quick's: its properties too).
 
 ## Choices
 
-One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `when`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`.
+One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `when`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`. Given a `setting` (API 13), it shows and keeps that one of pinhole.settings, as a SettingSwitch does.
 
 Its root is a `Row` (Qt Quick's: its properties too).
 
 Properties:
 
 - `var options`: [{ value, text }], in order.
+- `string setting`: The name of one of the plugin's settings, whose value it is.
 - `var value`: The one chosen.
 - `bool when`: While true, the number keys choose.
 - `string keyLayer`: Whose keys they are: the covering plugin's ("plugin"), or "grid" or "viewer".
@@ -362,7 +367,14 @@ Its handler in QML: `onChosen`.
 
 Photos as square tiles, as a plugin's view shows what it found (API 11): search results, a place's photos, the newest additions. Each cropped to fill its square at the display's own pixels, a ring in the accent on the one the keys are on and a fainter one under the pointer; ← → ↑ ↓, Home and End, PgUp and PgDn move, ⏎ and Space open, while `active`. The wheel and the touchpad scroll it as the grid does (ScrollGrid).
 
-PhotoTiles { library: pinhole.library photos: results.map(row => row.id) active: shown onOpened: (id, index) => pinhole.openPhotos(photos, id, { comeBack: true }) }
+```qml
+PhotoTiles {
+    library: pinhole.library
+    photos: results.map(row => row.id)
+    active: shown
+    onOpened: (id, index) => pinhole.openPhotos(photos, id, { comeBack: true })
+}
+```
 
 `caption`, a Component, goes under each tile, `captionHeight` tall: its root declares `property string photo` (the id) and `property int index`, which are set.
 
@@ -408,7 +420,7 @@ Properties:
 
 - `string title`
 - `string detail`
-- `QtObject closeCommand`: The Command that closes the view: ✕ presses it and shows its key.
+- `QtObject closeCommand`: The Command that closes the view: ✕ presses it and shows its key. In a PluginView, its own, unless another is given.
 - `string closeHint`: ✕'s key without a closeCommand: "" where Esc means back, not close.
 - `real controlHeight` (readonly): A control's height here, for what stands beside the buttons.
 - `real room` (readonly): What a field in place of the title (search's question) may take.
@@ -437,11 +449,18 @@ Properties:
 
 A plugin's setting that is on or off (API 11): its words, and a switch at the right that says `toggled()`; with `usable` false, dimmed and still. Pressing the words presses the switch.
 
+Given a `setting` (API 13), it is that one of pinhole.settings: shown as it is (its default from the manifest's "settings" until chosen), and flipped and kept when pressed, with nothing more to write:
+
+```qml
+SettingSwitch { setting: "shuffle"; text: qsTr("Shuffle") }
+```
+
 Its root is a `Item` (Qt Quick's: its properties too).
 
 Properties:
 
 - `string text`
+- `string setting`: The name of one of the plugin's settings, true or false.
 - `bool checked`
 - `bool usable`
 - `alias hint`: The switch's key, shown beside it ("⇧ S").
@@ -451,3 +470,78 @@ Signals:
 - `toggled()`: Pressed. It does not flip `checked` itself: set the setting, which `checked` is bound to.
 
 Its handler in QML: `onToggled`.
+
+## PluginView
+
+A view of the plugin's own over the photos (API 13): what a calendar, a gallery or a studio is drawn in. Put it in the plugin's root and open it from an action:
+
+```qml
+PluginView { id: calendar; source: "Calendar.qml"; toggleKey: "Y" }
+PluginAction { place: "grid"; text: qsTr("Calendar"); key: "Y"; onTriggered: calendar.open() }
+```
+
+While it is open the plugin covers the photos (its root's `covering`, unless the plugin binds that itself), and it fades in and out. It is made the first time it opens and kept after, so a launch that never shows it pays nothing; `lazy: false` makes it at once. It closes on Esc and on its `toggleKey`, when a photo is handed over from it (pinhole's dismissed()), and is hidden, still open, while a photo opened from it with comeBack shows (pinhole.away).
+
+What it shows is `source`, a QML file of the plugin's, or `content`, a Component; `item` is that, once made. In it, `pinhole` is the plugin's, as anywhere in the plugin's files, and a `view` property, if it declares one (`property var view`), is this view: `view.shown`, `view.close()`. A PanelHeader in it closes it with ✕.
+
+Its root is a `Item` (Qt Quick's: its properties too).
+
+Properties:
+
+- `url source`: A QML file of the plugin's, relative to its main file ("Calendar.qml").
+- `Component content`: Or what to show, written in place.
+- `bool lazy`: Made the first time it opens (true), or at once.
+- `bool shown` (readonly): Open now.
+- `string toggleKey`: The key that opens it (its action's), which closes it too, beside Esc.
+- `string closeText`: Esc's words in the help.
+- `Item item` (readonly): What `source` or `content` made; null before it first opens.
+- `alias closeCommand` (readonly): Its Esc: what a PanelHeader's ✕ presses.
+- `Item plugin` (readonly): The plugin's root and what Pinhole gives it.
+- `var pinhole` (readonly)
+
+Signals:
+
+- `opened()`
+- `closed()`
+
+Functions:
+
+- `open()`
+- `close()`
+- `toggle()`
+
+Its handler in QML: `onOpened`.
+
+## Job
+
+One thing the plugin asks for at a time, the latest winning (API 13): a query, a run, a fetch. What a plugin otherwise writes by hand around each promise: cancel the one before, drop an answer that came too late, keep a busy flag, ask again when the library was read meanwhile, and stop when the plugin does.
+
+```qml
+Job {
+    id: reading
+    onDone: rows => recent.rows = rows
+    onFailed: error => recent.problem = error.message
+}
+reading.start(() => pinhole.query(sql, [limit]))
+```
+
+`start(ask)` cancels what runs and calls `ask`, which returns the promise. Only its answer is said: `done(result)`, or `failed(error)`. Cancelled is no failure and says nothing. Stopped by the library read again (`reloaded`), it asks again by itself, once.
+
+Its root is a `QtObject` (Qt Quick's: its properties too).
+
+Properties:
+
+- `bool busy` (readonly): Something asked and not yet answered.
+- `bool coalesce`: Asked while busy: wait for the one running, then ask once more with the latest (a search typed into), instead of cancelling it.
+
+Signals:
+
+- `done(var result)`
+- `failed(var error)`
+
+Functions:
+
+- `start(ask)`
+- `cancel()`: Stop what runs; its answer is never said.
+
+Its handler in QML: `onDone`.
