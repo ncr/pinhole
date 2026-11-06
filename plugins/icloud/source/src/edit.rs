@@ -14,6 +14,8 @@ use anyhow::{anyhow, Context, Result};
 use base64::Engine;
 use serde_json::{json, Value};
 
+use crate::cloudkit::PhotosClient;
+
 /// What the person did: quarter turns clockwise, and the part kept as
 /// fractions of the photo as turned (x, y, width, height).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,21 +131,63 @@ pub fn crop_in_master(upright: Upright, adjustment: &Adjustment) -> (u32, u32, u
 /// (crop_in_master), the turn as an EXIF orientation in its metadata (0
 /// for none, as Photos writes), the shape kept as the crop's own turned.
 pub fn recipe(upright: Upright, adjustment: &Adjustment) -> Result<Vec<u8>> {
+    deflate(&recipe_json(upright, adjustment, None))
+}
+
+/// The recipe as JSON. What the photo's recipe had besides a crop (the
+/// camera's `SemanticStyle`) is kept, as Photos keeps it when one crops.
+pub fn recipe_json(upright: Upright, adjustment: &Adjustment, previous: Option<&Value>) -> Value {
     let (x, y, w, h) = crop_in_master(upright, adjustment);
     // EXIF's codes for a picture turned 90, 180, 270 degrees clockwise.
     let orientation = [0, 6, 3, 8][(adjustment.turn % 4) as usize];
     let (shape_w, shape_h) = if adjustment.turn % 2 == 1 { (h, w) } else { (w, h) };
-    let data = json!({
+    let mut adjustments: Vec<Value> = previous
+        .and_then(|p| p["adjustments"].as_array())
+        .map(|a| a.iter().filter(|j| j["identifier"] != "Crop").cloned().collect())
+        .unwrap_or_default();
+    adjustments.push(json!({
+        "formatVersion": 1, "enabled": true, "identifier": "Crop", "formatIdentifier": "com.apple.photo",
+        "settings": {"xOrigin": x, "yOrigin": y, "width": w, "height": h,
+                     "constraintWidth": shape_w, "constraintHeight": shape_h,
+                     "straightenAngle": 0, "pitch": 0, "yaw": 0, "auto": false},
+    }));
+    let version = previous
+        .map(|p| p["versionInfo"].clone())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| json!({"platform": "OSX", "appVersion": "Pinhole", "buildNumber": "1", "schemaRevision": 0}));
+    json!({
         "metadata": {"masterWidth": upright.width, "masterHeight": upright.height, "orientation": orientation},
         "formatVersion": 1,
-        "versionInfo": {"platform": "OSX", "appVersion": "Pinhole", "buildNumber": "1", "schemaRevision": 0},
-        "adjustments": [{
-            "formatVersion": 1, "enabled": true, "identifier": "Crop", "formatIdentifier": "com.apple.photo",
-            "settings": {"xOrigin": x, "yOrigin": y, "width": w, "height": h,
-                         "constraintWidth": shape_w, "constraintHeight": shape_h,
-                         "straightenAngle": 0, "pitch": 0, "yaw": 0, "auto": false},
-        }],
-    });
+        "versionInfo": version,
+        "adjustments": adjustments,
+    })
+}
+
+/// What a recipe besides a crop and a style would need Apple to render (a
+/// portrait's blur, a Live Photo's key frame): Pinhole's render would be
+/// without it, so such a photo is edited on the iPhone.
+pub fn needs_apple(previous: &Value) -> Option<String> {
+    previous["adjustments"].as_array().into_iter().flatten()
+        .filter_map(|j| j["identifier"].as_str())
+        .find(|id| !["Crop", "SemanticStyle"].contains(id))
+        .map(str::to_owned)
+}
+
+/// A photo's recipe as its asset has it (`adjustmentSimpleDataEnc`), if
+/// it is Photos' own.
+pub fn previous_recipe(asset: &Value) -> Option<Value> {
+    if asset["fields"]["adjustmentType"]["value"] != "com.apple.photo" {
+        return None;
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(asset["fields"]["adjustmentSimpleDataEnc"]["value"].as_str()?)
+        .ok()?;
+    let mut json = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::DeflateDecoder::new(&data[..]), &mut json).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+fn deflate(data: &Value) -> Result<Vec<u8>> {
     let mut deflated = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
     deflated.write_all(data.to_string().as_bytes())?;
     Ok(deflated.finish()?)
@@ -154,6 +198,7 @@ pub fn recipe(upright: Upright, adjustment: &Adjustment) -> Result<Vec<u8>> {
 pub fn fields(
     renders: &[Render; 3],
     recipe: &[u8],
+    styled: bool,
     now_ms: i64,
     mut receipt: impl FnMut(&str, &Path) -> Result<Value>,
 ) -> Result<Value> {
@@ -164,13 +209,18 @@ pub fn fields(
         "adjustmentCompoundVersion": {"value": "1.12"},
         "adjustmentSimpleDataEnc": {"value": b64.encode(recipe)},
         "adjustmentTimestampEnc": {"value": b64.encode(timestamp_plist(now_ms))},
-        // A render that is the photo turned and cropped: what an iPhone's
-        // crop edits carry.
-        "adjustmentRenderType": {"value": 0},
+        // As an iPhone's crop of a photo with the camera's style carries
+        // (0x8200), or without one.
+        "adjustmentRenderType": {"value": if styled { 33280 } else { 32768 }},
+        // What described the render before (its EXIF), not this one's.
+        "adjustedMediaMetaDataEnc": {"value": null},
+        "adjustedMediaMetaDataStrType": {"value": null},
     });
     for (render, prefix) in renders.iter().zip(["resJPEGFull", "resJPEGMed", "resJPEGThumb"]) {
         let value = receipt(&format!("{prefix}Res"), &render.path)?;
         let size = std::fs::metadata(&render.path)?.len();
+        // Its fingerprint is the file's checksum, as an iPhone's are.
+        fields[format!("{prefix}Fingerprint")] = json!({"value": value["fileChecksum"]});
         fields[format!("{prefix}Res")] = json!({"value": value});
         fields[format!("{prefix}Width")] = json!({"value": render.width});
         fields[format!("{prefix}Height")] = json!({"value": render.height});
@@ -194,6 +244,66 @@ pub fn revert_fields() -> Value {
         }
     }
     fields
+}
+
+/// The photo upright (its original's orientation applied, as ImageMagick
+/// and libheif read it), in pixels.
+pub fn upright_of(original: &Path) -> Result<Upright> {
+    let out = Command::new("magick")
+        .arg(format!("{}[0]", original.display()))
+        .args(["-auto-orient", "-format", "%w %h", "info:"])
+        .output()
+        .context("running ImageMagick")?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut parts = text.split_whitespace().filter_map(|n| n.parse::<u32>().ok());
+    match (parts.next(), parts.next()) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => Ok(Upright { width, height }),
+        _ => Err(anyhow!("could not read the size of {}", original.display())),
+    }
+}
+
+/// The edit written to the asset `record` (its change tag as last read):
+/// rendered from `original` in `dir`, the three renders sent, the recipe
+/// and them put on the asset in one modify. Changed since on a device, it
+/// is looked up for its tag now and written once more. Its new tag.
+pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, original: &Path, adjustment: &Adjustment,
+             dir: &Path) -> Result<String> {
+    // What the photo's recipe has now (the camera's style, an earlier
+    // crop), all its fields asked for.
+    let found = client.lookup_all(&[record])?;
+    let asset = found["records"].as_array().into_iter().flatten().find(|r| r["recordName"] == record).cloned().unwrap_or_default();
+    let previous = previous_recipe(&asset);
+    if let Some(effect) = previous.as_ref().and_then(needs_apple) {
+        return Err(anyhow!("edited with {effect}, which only Photos renders: edit it on the iPhone"));
+    }
+    let tag = asset["recordChangeTag"].as_str().or(tag);
+    let fields = if adjustment.is_identity() {
+        revert_fields()
+    } else {
+        let upright = upright_of(original)?;
+        let renders = render(original, upright, adjustment, dir)?;
+        let data = recipe_json(upright, adjustment, previous.as_ref());
+        let styled = data["adjustments"].as_array().is_some_and(|a| a.iter().any(|j| j["identifier"] == "SemanticStyle"));
+        let recipe = deflate(&data)?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+        fields(&renders, &recipe, styled, now, |field, path| client.upload_asset(record, field, std::fs::read(path)?))?
+    };
+    let answer = client.modify(&[(record, tag)], &fields)?;
+    let first = &answer["records"][0];
+    if let Some(tag) = first["recordChangeTag"].as_str().filter(|_| first["serverErrorCode"].is_null()) {
+        return Ok(tag.to_owned());
+    }
+    if first["serverErrorCode"] != "CONFLICT" {
+        return Err(anyhow!("iCloud would not take the edit: {first}"));
+    }
+    let now = client.lookup(&[record])?;
+    let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
+    let answer = client.modify(&[(record, tag.as_deref())], &fields)?;
+    let first = &answer["records"][0];
+    match first["recordChangeTag"].as_str().filter(|_| first["serverErrorCode"].is_null()) {
+        Some(tag) => Ok(tag.to_owned()),
+        None => Err(anyhow!("iCloud would not take the edit: {first}")),
+    }
 }
 
 /// A binary plist of one date, as `adjustmentTimestampEnc` is: seconds
@@ -270,6 +380,19 @@ mod tests {
     }
 
     #[test]
+    fn a_crop_keeps_the_cameras_style_and_refuses_what_only_apple_renders() {
+        let previous = json!({"versionInfo": {"platform": "iOS"}, "adjustments": [
+            {"identifier": "SemanticStyle", "settings": {"tone": 0}},
+            {"identifier": "Crop", "settings": {"xOrigin": 1}}]});
+        let data = recipe_json(Upright { width: 40, height: 30 }, &Adjustment { turn: 0, crop: [0.0, 0.0, 0.5, 1.0] }, Some(&previous));
+        let ids: Vec<&str> = data["adjustments"].as_array().unwrap().iter().map(|j| j["identifier"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["SemanticStyle", "Crop"]);
+        assert_eq!(data["versionInfo"]["platform"], "iOS");
+        assert_eq!(needs_apple(&previous), None);
+        assert_eq!(needs_apple(&json!({"adjustments": [{"identifier": "DepthEffect"}]})).as_deref(), Some("DepthEffect"));
+    }
+
+    #[test]
     fn its_fields_carry_each_render_and_revert_takes_them_off() {
         let dir = std::env::temp_dir().join(format!("pinhole-edit-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -279,13 +402,14 @@ mod tests {
             Render { path, width: 10, height: 20 }
         });
         let mut asked = Vec::new();
-        let fields = fields(&renders, b"r", 0, |field, _| {
+        let fields = fields(&renders, b"r", true, 0, |field, _| {
             asked.push(field.to_owned());
             Ok(json!({"receipt": field}))
         }).unwrap();
         assert_eq!(asked, ["resJPEGFullRes", "resJPEGMedRes", "resJPEGThumbRes"]);
         assert_eq!(fields["resJPEGMedRes"]["value"]["receipt"], "resJPEGMedRes");
         assert_eq!(fields["adjustmentType"]["value"], "com.apple.photo");
+        assert_eq!(fields["adjustmentRenderType"]["value"], 33280);
         assert!(revert_fields()["resJPEGFullRes"]["value"].is_null());
         assert_eq!(&timestamp_plist(978_307_200_000)[..8], b"bplist00");
         let _ = std::fs::remove_dir_all(&dir);

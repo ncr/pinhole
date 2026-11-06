@@ -99,6 +99,20 @@ enum Cmd {
         #[arg(long, default_value = "resJPEGThumbRes")]
         field: String,
     },
+    /// WRITES: an edit put on one asset, as Photos on an iPhone writes one
+    /// (pinhole_icloud::edit), from its original at `original`: turned
+    /// `turn` quarters right and cropped to `crop` (x,y,w,h fractions of
+    /// the photo as turned). `--revert` takes any edit off instead.
+    EditWrite {
+        record: String,
+        original: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        turn: u8,
+        #[arg(long, default_value = "0,0,1,1")]
+        crop: String,
+        #[arg(long)]
+        revert: bool,
+    },
     /// Check whether videos can be streamed: ranged reads, latency, expiry.
     Stream {
         #[arg(long, default_value_t = 3)]
@@ -128,6 +142,19 @@ fn main() -> Result<()> {
         Cmd::Sample { kind, n, threads, out, pool } => sample(&mut client, &db_path, &kind, n, threads, out, &pool),
         Cmd::Stream { n } => stream(&mut client, &db_path, n),
         Cmd::Page { rank } => page(&mut client, rank),
+        Cmd::EditWrite { record, original, turn, crop, revert } => {
+            let parts: Vec<f64> = crop.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            let crop: [f64; 4] = parts.try_into().map_err(|_| anyhow!("--crop is x,y,w,h"))?;
+            let adjustment = if revert { pinhole_icloud::edit::Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] } }
+                             else { pinhole_icloud::edit::Adjustment { turn, crop } };
+            let now = client.lookup(&[record.as_str()])?;
+            let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
+            let dir = std::env::temp_dir().join(format!("pinhole-edit-{}", std::process::id()));
+            let tag = pinhole_icloud::edit::write(&mut client, &record, tag.as_deref(), &original, &adjustment, &dir)?;
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("written: {record} now at tag {tag}");
+            Ok(())
+        }
         Cmd::UploadTest { record, file, field } => {
             let bytes = std::fs::read(&file)?;
             let receipt = client.upload_asset(&record, &field, bytes)?;

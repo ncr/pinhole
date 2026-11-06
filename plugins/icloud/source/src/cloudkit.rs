@@ -226,6 +226,16 @@ impl PhotosClient {
         }))
     }
 
+    /// Records looked up with every field they have (an edit's recipe
+    /// among them), not only those the walk reads.
+    pub fn lookup_all(&mut self, record_names: &[&str]) -> Result<Value> {
+        let records: Vec<Value> = record_names.iter().map(|n| json!({"recordName": n})).collect();
+        self.post("private", "records/lookup", &json!({
+            "records": records,
+            "zoneID": {"zoneName": PRIMARY_ZONE},
+        }))
+    }
+
     /// Change some fields of CPLAsset records, as icloud.com does (a
     /// favourite, a caption), leaving the rest as they are: each record by
     /// its name and the change tag it was last read with, in one request.
