@@ -74,6 +74,31 @@ PinholePlugin {
             pinhole.synced[key] = patch[key]
         edits = now
     }
+    // Worked out once for each `edits`, not each time asked: they are of
+    // thousands of faces. Kept where nothing binds to them.
+    readonly property var once: ({ edits: null, names: [], json: null })
+    function fresh() {
+        if (once.edits !== edits) {
+            const named = new Set(), all = Object.values(edits)
+            for (let i = 0; i < all.length; ++i) {
+                if (all[i].name) named.add(all[i].name)
+                if (all[i].person) named.add(all[i].person)
+            }
+            once.edits = edits
+            once.names = Array.from(named).sort((a, b) => a.localeCompare(b))
+            once.json = null
+        }
+        return once
+    }
+    // Every name said of a face, each once, by name.
+    function namesSaid() { return fresh().names }
+    // What pinhole-faces is given: `fields` and the edits, as JSON.
+    function input(fields) {
+        const made = fresh()
+        if (made.json === null) made.json = JSON.stringify(edits)
+        const rest = JSON.stringify(Object.assign({}, fields, { edits: undefined }))
+        return '{"edits":' + made.json + (rest === "{}" ? "}" : "," + rest.slice(1))
+    }
     // A step to undo.
     function edit(patch, label) {
         const before = {}
@@ -111,7 +136,7 @@ PinholePlugin {
         const id = shownId
         if (id === "") return
         looking.start(() => pinhole.run("pinhole-faces", ["photo", "--cache", pinhole.cacheDir], {
-            input: JSON.stringify({ source: plugin.source, edits: edits, photo: id, offset: 0 }),
+            input: plugin.input({ source: plugin.source, photo: id, offset: 0 }),
             timeout: 10000
         }), result => {
             if (id !== plugin.shownId) return

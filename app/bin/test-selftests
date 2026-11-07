@@ -3,7 +3,7 @@
 each in a scratch profile on an X display of its own, never on the desktop
 (bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
-    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people help
+    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people help clashes
     app/bin/test-selftests through layers  # some of them
 
 The window, the service, the fake library and the plugins' helpers built
@@ -28,8 +28,19 @@ import tempfile
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
-MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people", "help"]
+MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people", "help", "clashes"]
 TEST_PLUGINS = ["scrolls", "layers"]
+
+# clashes: what the window says of keys two have (app/tests/clashes), as
+# it starts. Each line that must be in its log, any of a group; and what
+# must not.
+CLASHES = [
+    ["test.clashes: Left is Pinhole's own key for"],
+    ["test.clashes: Shift+F is People's key there too", "pinhole.people: Shift+F is Clashes test's key there too"],
+    ["test.clashes: W is People's key there too", "pinhole.people: W is Clashes test's key there too"],
+    ["test.clashes: Right is Pinhole's own key for"],
+]
+NOT_CLASHES = ["Shift+J is", "Shift+Q is"]
 
 
 def library(scratch):
@@ -171,7 +182,18 @@ def run(mode, scratch, lib, farm, logs):
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if mode == "people":
         faces(profile, given, out)
-    env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
+    if mode == "clashes":
+        # Its plugin takes others' keys: there alone. Started, the plugins
+        # loaded, and quit: no test of its own.
+        own = profile / "plugins"
+        own.mkdir()
+        for plugin in farm.iterdir():
+            (own / plugin.name).symlink_to(plugin.resolve())
+        (own / "test-clashes").symlink_to(APP / "tests/clashes")
+        env["PINHOLE_BUILTIN_PLUGINS"] = str(own)
+        env["PINHOLE_SELFTEST"] = "startup"
+    else:
+        env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
     with (logs / f"{mode}.log").open("w") as log:
         code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
                               stderr=subprocess.STDOUT).returncode
@@ -181,6 +203,9 @@ def run(mode, scratch, lib, farm, logs):
         shutil.copy(picture, logs / f"{mode}-{picture.name}")
     text = (logs / f"{mode}.log").read_text(errors="replace")
     failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
+    if mode == "clashes":
+        failed += [f"FAIL not said: {' or '.join(group)}" for group in CLASHES if not any(line in text for line in group)]
+        failed += [f"FAIL said: {line.strip()}" for line in text.splitlines() if any(free in line for free in NOT_CLASHES)]
     print(f"{mode}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code}")
     for line in failed[:12]:
         print("    " + line)

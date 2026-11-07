@@ -382,7 +382,7 @@ PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObj
 
 QStringList PluginSyncedMap::keys() const { return m_store->values(m_plugin).keys(); }
 
-QVariantMap PluginSyncedMap::values() const { return m_store->values(m_plugin).toVariantMap(); }
+QJsonObject PluginSyncedMap::values() const { return m_store->values(m_plugin); }
 
 void PluginSyncedMap::adopt(const QVariantMap &values) {
     QJsonObject json;

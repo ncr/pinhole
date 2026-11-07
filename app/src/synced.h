@@ -116,8 +116,10 @@ public:
     // Those it has.
     Q_INVOKABLE QStringList keys() const;
     // All of them at once, as an object: for a plugin's worker or a
-    // question to a program.
-    Q_INVOKABLE QVariantMap values() const;
+    // question to a program. A plain one, made at once: a QVariantMap is
+    // one whose every key read goes back to it and makes its value again
+    // (20,000 of People's took 65 ms to go through).
+    Q_INVOKABLE QJsonObject values() const;
     // What it kept before it synced them (its state), taken in: only keys
     // the library has never had, and any set on any computer wins over
     // them, now or once heard of (API 14).

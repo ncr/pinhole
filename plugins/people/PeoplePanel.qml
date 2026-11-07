@@ -45,12 +45,20 @@ Panel {
     readonly property var selection: tiles[selected] ?? null
     readonly property var personRow: people.find(row => row.name === person) ?? null
     readonly property var names: {
+        // None while it is closed: what it closes with is not worked out.
+        if (!shown) return []
+        // By how many photos, then by name: the names come in that order
+        // (namesSaid), so only the counts are compared here.
         const counts = new Map(people.map(row => [row.name, row.count]))
-        for (const key of Object.keys(edits)) {
-            for (const name of [edits[key].name, edits[key].person])
-                if (name && !counts.has(name)) counts.set(name, 0)
-        }
-        return Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a) || a.localeCompare(b))
+        const said = view.plugin.namesSaid(), known = new Set(said)
+        const more = people.map(row => row.name).filter(name => !known.has(name)).sort((a, b) => a.localeCompare(b))
+        // The few the face finder knows that nothing said here names, in
+        // among them.
+        const all = []
+        for (let i = 0, j = 0; i < said.length || j < more.length;)
+            all.push(j >= more.length || (i < said.length && said[i].localeCompare(more[j]) <= 0) ? said[i++] : more[j++])
+        const place = new Map(all.map((name, i) => [name, i]))
+        return all.sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || place.get(a) - place.get(b))
     }
     // The names a group can be given with a key, its likeliest first.
     readonly property var choices: {
@@ -85,7 +93,7 @@ Panel {
     }
     function request(operation, options) {
         return pinhole.run("pinhole-faces", [operation, "--cache", pinhole.cacheDir], {
-            input: JSON.stringify(Object.assign({ source: source, edits: edits, offset: 0 }, options)),
+            input: view.plugin.input(Object.assign({ source: source, offset: 0 }, options)),
             timeout: 10000
         })
     }

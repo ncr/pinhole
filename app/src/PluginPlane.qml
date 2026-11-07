@@ -162,21 +162,47 @@ Item {
     // Said under the plugin, as a problem.
     function findClashes(actions, owners) {
         const layersOf = place => place === "viewer" ? ["viewer", "chrome", "any"] : ["grid", "chrome", "any"]
+        // Each key once, and each Command's keys read once: this runs as any
+        // view opens or closes and as the library is read again, and asking
+        // each Command for each key of each action took 70 ms.
+        const portables = new Map()
+        const portable = k => {
+            let p = portables.get(k)
+            if (p === undefined) { p = keymap.portable(k); portables.set(k, p) }
+            return p
+        }
+        const all = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length)
+            .map(c => ({ command: c, keys: Array.from(c.keys).map(portable), keyLayer: c.keyLayer, file: String(c.file) }))
         // Pinhole's own: written in its own files (qrc:), not a plugin's, and
         // not the Command a button or a plugin's action makes for its key.
-        // Pinhole's own menus' rows say so (Command.pinholes).
-        const own = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length
-            && String(c.file).startsWith("qrc:") && (c.pinholes === true
-                || !/\/(PluginAction|ShellButton|Choices|MenuGroup|MoreGroup|MenuRow)\.qml$/.test(String(c.file))))
+        // Pinhole's own menus' rows say so (Command.pinholes). By layer and
+        // key, the first of them.
+        const own = new Map()
+        all.forEach((c, at) => {
+            if (!c.file.startsWith("qrc:") || (c.command.pinholes !== true
+                    && /\/(PluginAction|ShellButton|Choices|MenuGroup|MoreGroup|MenuRow)\.qml$/.test(c.file)))
+                return
+            for (const key of c.keys)
+                if (!own.has(c.keyLayer + " " + key))
+                    own.set(c.keyLayer + " " + key, { command: c.command, at: at })
+        })
+        // The first of Pinhole's own in any of the place's layers.
+        const ownAt = (place, key) => {
+            let first = null
+            for (const layer of layersOf(place)) {
+                const found = own.get(layer + " " + key)
+                if (found && (!first || found.at < first.at)) first = found
+            }
+            return first ? first.command : null
+        }
         const taken = {}
         for (let i = 0; i < actions.length; ++i) {
             const action = actions[i]
             // A file's: pressed by the plugin that offers it, with its keys.
             if (!action.key || action.place === "file") continue
-            const key = keymap.portable(action.key)
+            const key = portable(action.key)
             const place = action.place === "viewer" ? "viewer" : "grid"
-            const clash = own.find(c => layersOf(place).indexOf(c.keyLayer) >= 0
-                && c.keys.some(k => keymap.portable(k) === key))
+            const clash = ownAt(place, key)
             const other = taken[place + " " + key]
             if (clash)
                 plugins.keyClashed(owners[i], qsTr("%1 is Pinhole's own key for %2 there: neither works. Give \"%3\" another key")
@@ -189,22 +215,21 @@ Item {
         }
         // A plugin's Command on the grid or the viewer: the same, for each
         // of its keys.
-        const commands = keymap.actions().filter(c => c.bound !== false && c.keys && c.keys.length
-            && (c.keyLayer === "grid" || c.keyLayer === "viewer") && !String(c.file).startsWith("qrc:"))
-        for (const c of commands) {
-            const owner = c.plugin()
+        for (const c of all) {
+            if ((c.keyLayer !== "grid" && c.keyLayer !== "viewer") || c.file.startsWith("qrc:")) continue
+            const owner = c.command.plugin()
             if (!owner) continue
-            for (const k of c.keys) {
-                const key = keymap.portable(k)
-                const clash = own.find(o => layersOf(c.keyLayer).indexOf(o.keyLayer) >= 0
-                    && o.keys.some(ok => keymap.portable(ok) === key))
+            const given = Array.from(c.command.keys)
+            for (let j = 0; j < given.length; ++j) {
+                const k = given[j], key = c.keys[j]
+                const clash = ownAt(c.keyLayer, key)
                 const other = taken[c.keyLayer + " " + key]
                 if (clash)
                     plugins.keyClashed(owner, qsTr("%1 is Pinhole's own key for %2 there: neither works. Give \"%3\" another key")
-                        .arg(k).arg(clash.text || clash.name).arg(c.text || c.name))
+                        .arg(k).arg(clash.text || clash.name).arg(c.command.text || c.command.name))
                 else if (other && other.owner !== owner)
                     plugins.keyClashed(owner, qsTr("%1 is %2's key there too: neither works. Give \"%3\" another key")
-                        .arg(k).arg(plugins.at(other.owner).name || other.owner).arg(c.text || c.name))
+                        .arg(k).arg(plugins.at(other.owner).name || other.owner).arg(c.command.text || c.command.name))
                 else
                     taken[c.keyLayer + " " + key] = { owner: owner }
             }

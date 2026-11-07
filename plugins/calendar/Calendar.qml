@@ -404,6 +404,10 @@ Item {
 
             Canvas {
                 id: squares
+                // Drawn on a thread of its own: a year's squares, the busiest
+                // glowing, again in every frame as the calendar opens and
+                // closes, stood the window still for 190 ms each time.
+                renderStrategy: Canvas.Threaded
                 x: calendar.squaresX
                 y: calendar.monthHeight
                 width: 54 * calendar.cell

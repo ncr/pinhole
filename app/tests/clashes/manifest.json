@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "api": 15,
+  "id": "test.clashes",
+  "name": "Clashes test",
+  "version": "1.0.0",
+  "description": "For test-selftests clashes: keys that are Pinhole's own or another plugin's, and some that are no one's.",
+  "entryPoints": {
+    "main": "Main.qml"
+  }
+}
