@@ -8,12 +8,6 @@
 
 namespace {
 
-// As core/src/add.rs and plugins/icloud/source/src/upload.rs have them, for a service from
-// before it said.
-const QStringList folderTakes{"jpg", "jpeg", "heic", "heif", "png", "gif", "tif", "tiff", "webp", "avif",
-                              "mov", "mp4", "m4v", "mkv", "webm", "avi"};
-const QStringList icloudTakes{"jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "mov", "mp4", "m4v"};
-
 // A Live Photo's motion counts as a file of its own here, as the person
 // dropped it; the service pairs it with its photo.
 int filesIn(const QStringList &paths, const QStringList &takes) {
@@ -47,15 +41,10 @@ Incoming::Incoming(ServiceClient *service, QObject *parent) : QObject(parent), m
 }
 
 QStringList Incoming::accepts() const {
-    const QJsonObject source = m_service->source();
-    if (source.contains("accepts")) {
-        QStringList takes;
-        for (const QJsonValue &v : source.value("accepts").toArray())
-            takes.append(v.toString());
-        return takes;
-    }
-    const QString kind = source.value("kind").toString();
-    return kind == QLatin1String("icloud") ? icloudTakes : kind == QLatin1String("folder") ? folderTakes : QStringList();
+    QStringList takes;
+    for (const QJsonValue &v : m_service->source().value("accepts").toArray())
+        takes.append(v.toString());
+    return takes;
 }
 
 QString Incoming::place() const {
@@ -106,9 +95,7 @@ void Incoming::add(const QList<QUrl> &urls) {
                             finished(result);
                             return;
                         }
-                        m_problems = {code == QLatin1String("bad_request")
-                                          ? tr("The Pinhole service running now is older than this window and has to be restarted.")
-                                          : reason(code, {})};
+                        m_problems = {reason(code, {})};
                         m_failed = std::max(1, m_files);
                         finished({});
                     });

@@ -373,10 +373,6 @@ footgun Pinhole's own plugins hit):
   programs as it runs them, however their names were made: by name or
   path, after `env` and the like, or in a shell's line (`sh -c`), with an
   error `refused` saying what to use;
-- an API newer than the manifest asks for: a Pinhole of that API would load
-  it and fail where nobody sees. `api` stays asked for by hand, since it
-  is what an older Pinhole reads to say it needs a newer one; check says
-  the number to give.
 
 And warns of:
 
@@ -953,7 +949,7 @@ this API. A library position is not a visual grid position.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `fileActions` | what the plugins on do with a file: their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
-| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `adopt(values)` takes in what the plugin kept before it synced them (its `state`): only keys the library has never had, and a key set on any computer wins over them, now or once heard of; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
+| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number, for `dropStep` |
@@ -1144,18 +1140,6 @@ its file under the folder's lock, so what pinholed brought from another
 computer meanwhile stays; a file changed elsewhere is read again, and
 `changed` says what it changed. A file that cannot be read is never
 written over: what was set is said under the plugin in the side panel.
-
-Before API 14 People's names and Series' edits were in their `state`,
-under the library's key: each takes those of the library shown into
-`synced` once with `adopt`, so what another computer synced wins even if it
-arrives after, and lets them go from its `state`.
-
-Before API 3, Pinhole's own plugins kept all of these in their settings.
-The first start of a Pinhole with API 3 moves them out of `plugins.json`,
-once: Screenshots' `found:` lists to its cache, Series' `edits`, Info's
-`shown` and Send's `devices` to their state, and the tours seen to
-`~/.local/state/pinhole/toured.json`, each written there before
-`plugins.json` is written without them.
 
 ### Promises
 

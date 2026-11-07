@@ -169,7 +169,6 @@ fn a_round_that_panics_is_one_that_failed_and_the_next_goes_on() {
         limit: None,
         settings,
         plugins: root.join("plugins.json"),
-        adopt: None,
         downloads: 2,
         sync_every: Some(3600),
         given: None,

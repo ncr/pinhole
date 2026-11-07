@@ -255,8 +255,7 @@ private:
 // it for plugin authors.
 //
 // What takes a while (fetch, run, record) gives a promise, with cancel()
-// to stop it; given a callback in its place, as before API 2, it calls
-// that instead. All of it ends with the plugin: turned off or loaded
+// to stop it. All of it ends with the plugin: turned off or loaded
 // again, nothing it started answers any more.
 class PluginHost : public QObject {
     Q_OBJECT
@@ -954,13 +953,6 @@ private:
     QJsonObject latestConfig();
     // Another window changed plugins.json: its switches and settings here.
     void configChangedElsewhere();
-    // What plugins kept in their settings that is not one (a list found,
-    // the user's edits, a panel left open), and the tours seen: moved out
-    // of plugins.json to where it belongs, once, as Pinhole starts.
-    void moveOutOfSettings();
-    // That move's keys back in `config`, if writing them where they now
-    // belong failed.
-    QJsonObject unmoved(QJsonObject config) const;
     bool enabled(const Plugin &plugin) const;
     // Each plugin, on or off, may bring its own translations (i18n/).
     void updateCatalogs();
@@ -1001,10 +993,6 @@ private:
     // The notice of new plugins put off (new-plugins.json): "until", in ms
     // since the epoch, and "ids".
     QJsonObject m_putOff;
-    // What moveOutOfSettings took out of plugins.json, until it is written
-    // where it now belongs: 0 while it is being, 1 written, 2 failed.
-    QJsonObject m_moved;
-    std::shared_ptr<std::atomic<int>> m_moving;
     bool m_touching = false;
     bool m_ready = false;
     bool m_loadingAll = false;

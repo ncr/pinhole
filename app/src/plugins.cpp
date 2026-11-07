@@ -136,35 +136,6 @@ QJsonObject readToured() {
     return readJson(Plugins::touredPath());
 }
 
-// What Pinhole's own plugins kept in their settings before they had a
-// state and a cache of their own (API 3), by plugin: a key, or each key
-// beginning with one that ends in ':'.
-struct Moved {
-    const char *plugin, *key;
-    bool cache;
-};
-const Moved movedKeys[] = {
-    // What it found in each library: worked out again.
-    {"pinhole.screenshots", "found:", true},
-    // The user's series made and taken apart, each library's, and from
-    // before they were.
-    {"pinhole.series", "edits:", false},
-    {"pinhole.series", "edits", false},
-    // Its panel left open.
-    {"pinhole.info", "shown", false},
-    // The devices sent to.
-    {"pinhole.send", "devices", false},
-};
-
-const Moved *movedKey(const QString &plugin, const QString &key) {
-    for (const Moved &moved : movedKeys) {
-        const QLatin1String wanted(moved.key);
-        if (plugin == QLatin1String(moved.plugin) && (wanted.endsWith(':') ? key.startsWith(wanted) : key == wanted))
-            return &moved;
-    }
-    return nullptr;
-}
-
 } // namespace
 
 PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
@@ -754,7 +725,6 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     connect(&m_stateStore, &PluginStore::failed, this, failed(tr("Its state could not be kept.")));
     connect(&m_cacheStore, &PluginStore::failed, this, failed(tr("Its cache could not be kept.")));
     connect(m_syncedStore.get(), &SyncedStore::failed, this, failed(tr("What it keeps of the library could not be kept.")));
-    moveOutOfSettings();
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
     m_settle.setSingleShot(true);
@@ -822,113 +792,6 @@ void Plugins::flush() {
     m_cacheStore.flush();
     m_syncedStore->flush();
     m_files.wait();
-}
-
-void Plugins::moveOutOfSettings() {
-    // plugins.json is the user's choices, which pinholed reads again
-    // whenever it changes: what plugins kept there that is not one goes to
-    // their state or their cache, and the tours seen to toured.json; all
-    // of it written there first, then plugins.json without it, once, away
-    // from the window's thread. Their settings are read without it from
-    // now on, and their state and cache with it.
-    QJsonObject config = m_config;
-    QJsonObject settings = config.value("settings").toObject();
-    QJsonObject moved, movedSettings;
-    QList<std::pair<QString, QByteArray>> files;
-    QStringList said;
-    const QStringList ids = settings.keys();
-    for (const QString &id : ids) {
-        QJsonObject mine = settings.value(id).toObject();
-        QJsonObject state, cache;
-        for (const QString &key : mine.keys())
-            if (const Moved *to = movedKey(id, key)) {
-                (to->cache ? cache : state).insert(key, mine.value(key));
-                mine.remove(key);
-                said << id + ' ' + key + (to->cache ? " (cache)" : " (state)");
-            }
-        if (state.isEmpty() && cache.isEmpty())
-            continue;
-        QJsonObject taken = state;
-        for (auto it = cache.begin(); it != cache.end(); ++it)
-            taken.insert(it.key(), it.value());
-        movedSettings.insert(id, taken);
-        if (mine.isEmpty())
-            settings.remove(id);
-        else
-            settings.insert(id, mine);
-        if (!state.isEmpty())
-            files.append({m_stateStore.path(id), m_stateStore.merged(id, state)});
-        if (!cache.isEmpty())
-            files.append({m_cacheStore.path(id), m_cacheStore.merged(id, cache)});
-    }
-    if (!movedSettings.isEmpty()) {
-        moved.insert("settings", movedSettings);
-        config.insert("settings", settings);
-    }
-    if (config.contains("toured")) {
-        const QJsonObject toured = config.value("toured").toObject();
-        for (auto it = toured.begin(); it != toured.end(); ++it)
-            if (it.value().toBool())
-                m_toured.insert(it.key(), true);
-        moved.insert("toured", config.value("toured"));
-        config.remove("toured");
-        files.append({touredPath(), QJsonDocument(m_toured).toJson()});
-        said << "toured";
-    }
-    if (files.isEmpty())
-        return;
-    std::fprintf(stderr, "pinhole: moving out of plugins.json: %s\n", qPrintable(said.join(", ")));
-    m_config = config;
-    m_moved = moved;
-    m_moving = std::make_shared<std::atomic<int>>(0);
-    const auto moving = m_moving;
-    const QString path = configPath();
-    const QByteArray bytes = QJsonDocument(config).toJson();
-    m_files.run(
-        [files, path, bytes, moving] {
-            // Where they belong first: only then out of plugins.json.
-            for (const auto &[file, contents] : files)
-                if (!KeptFiles::write(file, contents)) {
-                    moving->store(2);
-                    return false;
-                }
-            moving->store(1);
-            // If this fails, plugins.json is written without them the next
-            // time it is.
-            return KeptFiles::write(path, bytes);
-        },
-        [this](bool) {
-            if (!m_moving)
-                return;
-            if (m_moving->load() == 2) {
-                std::fprintf(stderr, "pinhole: left in plugins.json, as they could not be kept apart\n");
-                m_config = unmoved(m_config);
-            }
-            m_moving.reset();
-            m_moved = {};
-        });
-}
-
-QJsonObject Plugins::unmoved(QJsonObject config) const {
-    QJsonObject settings = config.value("settings").toObject();
-    const QJsonObject moved = m_moved.value("settings").toObject();
-    for (auto it = moved.begin(); it != moved.end(); ++it) {
-        QJsonObject mine = settings.value(it.key()).toObject();
-        const QJsonObject taken = it.value().toObject();
-        for (auto key = taken.begin(); key != taken.end(); ++key)
-            if (!mine.contains(key.key()))
-                mine.insert(key.key(), key.value());
-        settings.insert(it.key(), mine);
-    }
-    if (!moved.isEmpty())
-        config.insert("settings", settings);
-    if (m_moved.contains("toured")) {
-        QJsonObject toured = m_moved.value("toured").toObject();
-        for (auto it = m_toured.begin(); it != m_toured.end(); ++it)
-            toured.insert(it.key(), it.value());
-        config.insert("toured", toured);
-    }
-    return config;
 }
 
 void Plugins::registerTypes() {
@@ -1441,12 +1304,8 @@ bool Plugins::enabled(const Plugin &plugin) const {
 }
 
 bool Plugins::writeConfig(QJsonObject config) {
-    // After what is being written away from this thread (the move out of
-    // it, as Pinhole started): the keys it moved back in, if they could
-    // not be kept where they now belong.
+    // After what is being written away from this thread.
     m_files.wait();
-    if (m_moving && m_moving->load() == 2)
-        config = unmoved(config);
     // In place of the one there in one step (written beside it, then
     // renamed over it), so a failure leaves that one as it was, and what
     // is kept here with it.
@@ -1462,9 +1321,7 @@ bool Plugins::writeConfig(QJsonObject config) {
 
 QJsonObject Plugins::latestConfig() {
     m_files.wait();
-    // While what plugins.json kept elsewhere moves out of it, this window's
-    // is the one to go by.
-    if (m_moving || !QFileInfo::exists(configPath()))
+    if (!QFileInfo::exists(configPath()))
         return m_config;
     return readConfig();
 }

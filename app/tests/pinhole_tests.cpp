@@ -2925,6 +2925,67 @@ QtObject {
         }
     }
 
+    // Series' edits: the library's, synced; grouped, undone and done again;
+    // its editor and studio cover and give the keys back.
+    void seriesEditsAreTheLibrarysAndUndo() {
+        PluginBench bench({{"pinhole.series", {}}});
+        bench.plugins.reset();
+        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
+        write(config, R"({"settings": {"pinhole.series": {"recipe": {"look": "warm"}}}})");
+        bench.plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
+        bench.plugins->setEngine(&bench.engine);
+        bench.plugins->libraryOpened();
+        bench.plugins->syncedStore()->set("pinhole.series", "manual", QJsonArray{QJsonArray{"a", "c"}});
+        bench.plugins->flush();
+        QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
+        const QDateTime moved = QFileInfo(config).lastModified();
+        auto *host = qobject_cast<PluginHost *>(bench.plugins->at("pinhole.series").value("host").value<QObject *>());
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/series/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.series&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("series", bench.engine.newQObject(plugin.get()));
+        // As if its finder found nothing: what was made by hand, shown.
+        bench.js("series.take('')");
+        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
+        // What is synced of the library.
+        const auto kept = [&] {
+            bench.plugins->flush();
+            return SyncedStore::load(bench.dir.path(), "pinhole.series").value("manual").toArray();
+        };
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
+        // b grouped with them: kept, then undone and done again.
+        bench.js("series.group([1, 0])");
+        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,1,2]]"));
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
+        bench.history.undo();
+        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
+        bench.history.redo();
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
+        QTest::qWait(20);
+        bench.plugins->flush();
+        QCOMPARE(QFileInfo(config).lastModified(), moved);
+        QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
+        QVERIFY(!plugin->property("covering").toBool());
+        QVERIFY(bench.js("series.openEditor(0, 0); var editor = series.editor.item; editor.keys").toBool());
+        QVERIFY(plugin->property("covering").toBool());
+        bench.js("series.openStudio(0, false)");
+        QVERIFY(bench.js("series.studio.shown").toBool());
+        QVERIFY(!bench.js("editor.keys").toBool());
+        QVERIFY(bench.js("series.studio.close(); editor.keys").toBool());
+        QVERIFY(bench.js("series.editor.make() === editor").toBool());
+        bench.js("series.editor.close()");
+        QVERIFY(!plugin->property("covering").toBool());
+        plugin.reset();
+    }
+
     void whatDecodingAndColourCostOnRealPhotos() {
         // PINHOLE_DECODE_SAMPLE: a file listing real photos' files, one a
         // line (thumbnails, HEIC originals), for what decoding them and
@@ -3965,7 +4026,7 @@ QtObject {
     // and what it finds of one source's library is never another's.
     // The side panel's mark switches, kept in window.conf as markChoices;
     // the four of before taken from `marks` once, which stays as it was.
-    void theMarksSwitchesAreTakenFromTheFourOnceAndKept() {
+    void theMarksSwitchesAreEachAsItsDefaultUntilTurned() {
         QTemporaryDir dir;
         const QString path = dir.path() + "/window.conf";
         auto settings = [&] { return QSettings(path, QSettings::IniFormat); };
@@ -3976,22 +4037,9 @@ QtObject {
                 on << choices.shown(id, id != "pinhole.live/live");
             return on;
         };
-        // Jacek's: all but Live. What is not among the four takes its
-        // default either way.
-        write(path, "[grid]\nmarks=13\n");
+        // A switch turned is kept, once whatever it is turned to again.
         {
             MarkChoices choices(path);
-            QCOMPARE(shown(choices), (QList<bool>{true, false, true, true}));
-            QVERIFY(!choices.shown("pinhole.live/live", true));
-            QVERIFY(choices.shown("me.x/y", true) && !choices.shown("me.x/y", false));
-        }
-        QCOMPARE(settings().value("grid/marks").toInt(), 13);
-        QVERIFY(settings().contains("grid/markChoices"));
-        // Read again, the same; a switch turned is kept, and `marks` is not
-        // touched.
-        {
-            MarkChoices choices(path);
-            QCOMPARE(shown(choices), (QList<bool>{true, false, true, true}));
             QSignalSpy changed(&choices, &MarkChoices::changed);
             choices.setShown("pinhole.live/live", true);
             choices.setShown("pinhole.live/live", true);
@@ -4003,28 +4051,6 @@ QtObject {
             MarkChoices choices(path);
             QCOMPARE(shown(choices), (QList<bool>{true, true, true, true}));
             QVERIFY(!choices.shown("me.x/y", true));
-        }
-        QCOMPARE(settings().value("grid/marks").toInt(), 13);
-        // Once taken, `marks` changed by an older Pinhole is not taken again.
-        {
-            QSettings older(path, QSettings::IniFormat);
-            older.setValue("grid/marks", 0);
-        }
-        {
-            MarkChoices choices(path);
-            QCOMPARE(shown(choices), (QList<bool>{true, true, true, true}));
-        }
-        // All four, none.
-        write(path, "[grid]\nmarks=15\n");
-        {
-            MarkChoices choices(path);
-            QCOMPARE(shown(choices), (QList<bool>{true, true, true, true}));
-        }
-        write(path, "[grid]\nmarks=0\n");
-        {
-            MarkChoices choices(path);
-            QCOMPARE(shown(choices), (QList<bool>{false, false, false, false}));
-            QVERIFY(!choices.shown("pinhole/video", true));
         }
         // No marks kept: each as its default, and nothing written until a
         // switch is turned.
@@ -4038,9 +4064,8 @@ QtObject {
         {
             MarkChoices choices(path);
             QCOMPARE(shown(choices), (QList<bool>{true, false, true, false}));
-            QVERIFY(!settings().contains("grid/marks"));
         }
-        write(path, "[grid]\nother=1\n");
+        write(path, "[grid]\nmarks=13\n");
         {
             MarkChoices choices(path);
             QCOMPARE(shown(choices), (QList<bool>{true, false, true, true}));
@@ -7011,24 +7036,6 @@ PinholePlugin {
         QVERIFY(json().value("clock").toObject().value("face2").toArray().at(0).toDouble() > 4e12);
         QCOMPARE(json().value("values").toObject().value("face3").toObject().value("name").toString(), QString("Jan"));
 
-        // Taken in from before: only keys never had, and older than any
-        // set, so another computer's arriving later wins.
-        bench.js("pinhole.synced.adopt({ face1: { name: 'Before' }, face5: { name: 'Kept' }, face6: { name: 'Lost' } })");
-        QCOMPARE(bench.js("pinhole.synced.face1.name").toString(), QString("Anna"));
-        QCOMPARE(bench.js("pinhole.synced.face5.name").toString(), QString("Kept"));
-        bench.plugins->flush();
-        QCOMPARE(json().value("clock").toObject().value("face5").toArray().at(0).toDouble(), 0.0);
-        {
-            QJsonObject later = json();
-            QJsonObject v = later.value("values").toObject(), c = later.value("clock").toObject();
-            v.insert("face6", QJsonObject{{"name", "Elsewhere"}});
-            c.insert("face6", QJsonArray{1.0, "elsewhere"});
-            later.insert("values", v);
-            later.insert("clock", c);
-            QVERIFY(KeptFiles::write(file, QJsonDocument(later).toJson()));
-        }
-        QTRY_COMPARE(bench.js("pinhole.synced.face6.name").toString(), QString("Elsewhere"));
-        bench.js("pinhole.synced.face5 = null; pinhole.synced.face6 = null");
 
         // Another library shown: its own, told at once; back, these again.
         QTemporaryDir otherLibrary;
@@ -7051,12 +7058,11 @@ PinholePlugin {
     // People's names: taken in from its state once, and moved with their
     // faces to the keys a new thumbnail gives them, rejections too, with
     // nothing left under the old keys.
-    void peoplesNamesAreTakenInAndMoveWithTheirFaces() {
+    void peoplesNamesMoveWithTheirFaces() {
         PluginBench bench({{"pinhole.people", {{"api", Plugins::api}}}});
         auto *host = bench.host;
-        host->state()->setProperty("people:folder:/x",
-                                   QVariantMap{{"o", QVariantMap{{"person", "Anna"}, {"rejected", QVariantList{"r"}}}},
-                                               {"r", QVariantMap{{"person", "Ola"}}}});
+        bench.plugins->syncedStore()->set("pinhole.people", "o", QJsonObject{{"person", "Anna"}, {"rejected", QJsonArray{"r"}}});
+        bench.plugins->syncedStore()->set("pinhole.people", "r", QJsonObject{{"person", "Ola"}});
         Keymap keymap;
         Theme theme(bench.dir.path());
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
@@ -7068,9 +7074,7 @@ PinholePlugin {
         QVERIFY2(plugin, qPrintable(component.errorString()));
         QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
         bench.engine.globalObject().setProperty("people", bench.engine.newQObject(plugin.get()));
-        // Taken in, and gone from the state.
         QCOMPARE(bench.js("people.edits.o.person").toString(), QString("Anna"));
-        QVERIFY(!host->state()->property("people:folder:/x").isValid());
         bench.js("people.moveEdits({ o: 'n', r: 'r2' })");
         QCOMPARE(bench.js("JSON.stringify(people.edits)").toString(),
                  QString(R"({"n":{"person":"Anna","rejected":["r2"]},"r2":{"person":"Ola"}})"));
@@ -7078,204 +7082,6 @@ PinholePlugin {
         const QJsonObject kept = SyncedStore::load(bench.dir.path(), "pinhole.people");
         QCOMPARE(kept.keys(), (QStringList{"n", "r2"}));
         QCOMPARE(kept.value("n").toObject().value("rejected").toArray(), (QJsonArray{"r2"}));
-    }
-
-    // What Pinhole's own plugins kept in plugins.json that is not a choice
-    // of the user's moves out of it as Pinhole starts: Screenshots' lists
-    // to its cache, Series' edits, Info's panel and Send's devices to their
-    // state, the tours seen to toured.json; plugins.json written once,
-    // after them, with every switch and setting as it was; and never again.
-    void whatIsNotASettingMovesOutOfPluginsJsonOnce() {
-        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
-        const QJsonObject edits{{"manual", QJsonArray{QJsonArray{"a", "b"}}}, {"apart", QJsonArray{"c"}}};
-        const QJsonObject before{
-            {"enabled", QJsonObject{{"pinhole.frame", false}, {"me.mine", true}}},
-            {"settings", QJsonObject{
-                {"pinhole.screenshots", QJsonObject{{"hide", true}, {"found:icloud:me@example.com", QJsonArray{"s1", "s2"}},
-                                                    {"found:folder:/x", QJsonArray{"s3"}}}},
-                {"pinhole.series", QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}, {"edits:icloud:me@example.com", edits},
-                                               {"edits", QJsonObject{{"manual", QJsonArray{}}, {"apart", QJsonArray{"d"}}}}}},
-                {"pinhole.info", QJsonObject{{"shown", true}}},
-                {"pinhole.send", QJsonObject{{"compatible", true}, {"devices", QJsonArray{QJsonObject{{"fingerprint", "f"}}}}}},
-                {"pinhole.frame", QJsonObject{{"seconds", 5}}},
-                // Another plugin's keys of the same names are its own.
-                {"me.mine", QJsonObject{{"found:x", 1}, {"edits", 2}, {"shown", 3}}},
-            }},
-            {"toured", QJsonObject{{"pinhole.series", true}, {"pinhole.screenshots", false}}},
-        };
-        PluginBench bench({{"pinhole.series", {}}, {"pinhole.screenshots", {}}, {"pinhole.info", {}}, {"pinhole.send", {}}});
-        bench.plugins.reset();
-        write(config, QJsonDocument(before).toJson());
-        // A tour seen already in toured.json stays seen.
-        QDir().mkpath(QFileInfo(Plugins::touredPath()).absolutePath());
-        write(Plugins::touredPath(), R"({"pinhole.calendar": true})");
-        auto plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
-        // The settings as plugins read them: without it at once.
-        QCOMPARE(plugins->settingsOf("pinhole.screenshots"), (QJsonObject{{"hide", true}}));
-        QCOMPARE(plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
-        QCOMPARE(plugins->settingsOf("pinhole.info"), QJsonObject());
-        // And their state and cache with it.
-        QCOMPARE(plugins->stateStore()->values("pinhole.series").value("edits:icloud:me@example.com").toObject(), edits);
-        QCOMPARE(plugins->cacheStore()->values("pinhole.screenshots").value("found:folder:/x").toArray(), QJsonArray{"s3"});
-        plugins->flush();
-        const auto json = [](const QString &path) {
-            QFile file(path);
-            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
-        };
-        // plugins.json: the switches and the settings, nothing else.
-        const QJsonObject after{
-            {"enabled", QJsonObject{{"pinhole.frame", false}, {"me.mine", true}}},
-            {"settings", QJsonObject{
-                {"pinhole.screenshots", QJsonObject{{"hide", true}}},
-                {"pinhole.series", QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}},
-                {"pinhole.send", QJsonObject{{"compatible", true}}},
-                {"pinhole.frame", QJsonObject{{"seconds", 5}}},
-                {"me.mine", QJsonObject{{"found:x", 1}, {"edits", 2}, {"shown", 3}}},
-            }},
-        };
-        QCOMPARE(json(config), after);
-        QCOMPARE(json(Plugins::stateRoot() + "/pinhole.series/state.json"),
-                 (QJsonObject{{"edits:icloud:me@example.com", edits},
-                              {"edits", QJsonObject{{"manual", QJsonArray{}}, {"apart", QJsonArray{"d"}}}}}));
-        QCOMPARE(json(Plugins::stateRoot() + "/pinhole.info/state.json"), (QJsonObject{{"shown", true}}));
-        QCOMPARE(json(Plugins::stateRoot() + "/pinhole.send/state.json"),
-                 (QJsonObject{{"devices", QJsonArray{QJsonObject{{"fingerprint", "f"}}}}}));
-        QCOMPARE(json(Plugins::cacheRoot() + "/pinhole.screenshots/cache.json"),
-                 (QJsonObject{{"found:icloud:me@example.com", QJsonArray{"s1", "s2"}}, {"found:folder:/x", QJsonArray{"s3"}}}));
-        QCOMPARE(json(Plugins::touredPath()), (QJsonObject{{"pinhole.calendar", true}, {"pinhole.series", true}}));
-        QVERIFY(!QFileInfo::exists(Plugins::stateRoot() + "/me.mine"));
-        QVERIFY(!QFileInfo::exists(Plugins::cacheRoot() + "/me.mine"));
-        QVERIFY(plugins->at("pinhole.series").value("toured").toBool());
-        QVERIFY(!plugins->at("pinhole.screenshots").value("toured").toBool());
-
-        // The next start writes nothing, not plugins.json, not the rest.
-        const auto times = [&] {
-            QStringList all;
-            for (const QString &path : {config, Plugins::touredPath(), Plugins::stateRoot() + "/pinhole.series/state.json",
-                                        Plugins::cacheRoot() + "/pinhole.screenshots/cache.json"})
-                all << QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch()) + ' '
-                           + QString::number(QFileInfo(path).size());
-            return all;
-        };
-        const QStringList written = times();
-        plugins.reset();
-        QTest::qWait(20);
-        plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
-        QCOMPARE(plugins->stateStore()->values("pinhole.series").value("edits:icloud:me@example.com").toObject(), edits);
-        plugins->flush();
-        QCOMPARE(times(), written);
-
-        // A tour seen goes to toured.json, not plugins.json.
-        plugins->setToured("pinhole.screenshots");
-        plugins->flush();
-        QVERIFY(json(Plugins::touredPath()).value("pinhole.screenshots").toBool());
-        QCOMPARE(times().first(), written.first());
-        plugins.reset();
-    }
-
-    // Series' edits where an older Pinhole kept them, in plugins.json:
-    // moved to its state as Pinhole starts, shown, and each edit after
-    // kept there, undone and done again there; plugins.json, and its
-    // `recipe`, a setting, as they were after the move.
-    void seriesEditsMovedToItsStateStillApplyAndUndo() {
-        PluginBench bench({{"pinhole.series", {}}});
-        bench.plugins.reset();
-        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
-        write(config, R"({"settings": {"pinhole.series": {"recipe": {"look": "warm"},
-                          "edits:folder:/x": {"manual": [["a", "c"]], "apart": []}}}})");
-        bench.plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
-        bench.plugins->setEngine(&bench.engine);
-        bench.plugins->libraryOpened();
-        bench.plugins->flush();
-        QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
-        const QDateTime moved = QFileInfo(config).lastModified();
-        auto *host = qobject_cast<PluginHost *>(bench.plugins->at("pinhole.series").value("host").value<QObject *>());
-        Keymap keymap;
-        Theme theme(bench.dir.path());
-        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
-        bench.engine.rootContext()->setContextProperty("theme", &theme);
-        Plugins::registerTypes();
-        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/series/Main.qml");
-        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.series&load=0");
-        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(host)}}));
-        QVERIFY2(plugin, qPrintable(component.errorString()));
-        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
-        bench.engine.globalObject().setProperty("series", bench.engine.newQObject(plugin.get()));
-        // As if its finder found nothing: what was made by hand, shown.
-        bench.js("series.take('')");
-        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
-        // Taken from its state into what is synced of the library.
-        const auto kept = [&] {
-            bench.plugins->flush();
-            return SyncedStore::load(bench.dir.path(), "pinhole.series").value("manual").toArray();
-        };
-        QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
-        QVERIFY(!bench.plugins->stateStore()->values("pinhole.series").contains("edits:folder:/x"));
-        // b grouped with them: kept, then undone and done again.
-        bench.js("series.group([1, 0])");
-        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,1,2]]"));
-        QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
-        bench.history.undo();
-        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
-        QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
-        bench.history.redo();
-        QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
-        QTest::qWait(20);
-        bench.plugins->flush();
-        QCOMPARE(QFileInfo(config).lastModified(), moved);
-        QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
-        QVERIFY(!plugin->property("covering").toBool());
-        QVERIFY(bench.js("series.openEditor(0, 0); var editor = series.editor.item; editor.keys").toBool());
-        QVERIFY(plugin->property("covering").toBool());
-        bench.js("series.openStudio(0, false)");
-        QVERIFY(bench.js("series.studio.shown").toBool());
-        QVERIFY(!bench.js("editor.keys").toBool());
-        QVERIFY(bench.js("series.studio.close(); editor.keys").toBool());
-        QVERIFY(bench.js("series.editor.make() === editor").toBool());
-        bench.js("series.editor.close()");
-        QVERIFY(!plugin->property("covering").toBool());
-        plugin.reset();
-    }
-
-    // Where they belong cannot be written: they stay in plugins.json, and
-    // a setting changed meanwhile keeps them there too.
-    void whatCannotMoveOutOfPluginsJsonStaysThere() {
-        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json";
-        PluginBench bench({{"pinhole.series", {}}});
-        bench.plugins.reset();
-        const QJsonObject before{{"settings", QJsonObject{{"pinhole.series", QJsonObject{{"edits:folder:/x", QJsonObject{{"manual", QJsonArray{}}, {"apart", QJsonArray{"a"}}}}}}}},
-                                 {"toured", QJsonObject{{"pinhole.series", true}}}};
-        write(config, QJsonDocument(before).toJson());
-        // A file where its folder would be.
-        QDir().mkpath(QFileInfo(Plugins::stateRoot()).absolutePath());
-        write(Plugins::stateRoot(), "in the way");
-        auto plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
-        // A switch turned before it is known how the move went.
-        plugins->setEnabled("pinhole.series", true);
-        const auto json = [](const QString &path) {
-            QFile file(path);
-            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
-        };
-        QJsonObject expected = before;
-        expected.insert("enabled", QJsonObject{{"pinhole.series", true}});
-        QCOMPARE(json(config), expected);
-        QTRY_COMPARE(plugins->settingsOf("pinhole.series"), before["settings"]["pinhole.series"].toObject());
-        // And so after it, too.
-        plugins->setEnabled("pinhole.series", true);
-        plugins->setEnabled("pinhole.series", false);
-        expected.insert("enabled", QJsonObject{{"pinhole.series", false}});
-        QCOMPARE(json(config), expected);
-        plugins.reset();
-        QVERIFY(QFile::remove(Plugins::stateRoot()));
-        // The next start moves them.
-        plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
-        plugins->flush();
-        expected.remove("settings");
-        expected.remove("toured");
-        expected.insert("settings", QJsonObject{});
-        QCOMPARE(json(config), expected);
-        QCOMPARE(plugins->stateStore()->values("pinhole.series").value("edits:folder:/x")["apart"].toArray(), QJsonArray{"a"});
-        plugins.reset();
     }
 
     void aPluginAskingForANewerApiSaysSo() {

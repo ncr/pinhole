@@ -46,28 +46,6 @@ pub fn default_location() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".local/share")).join("pinhole")
 }
 
-/// Where the cache was before it moved in with the library.
-pub fn old_cache() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".cache")).join("pinhole")
-}
-
-/// Where the window kept JPEGs of HEICs it made itself (`compatible`),
-/// before it asked the service for them (`jpeg`, phase B5 of
-/// docs/core-and-plugins.md): nothing writes or reads there any more, so
-/// the folder goes as the shared service starts. JPEGs are made into the
-/// cache when asked for. Nothing else was in it.
-pub fn forget_compatible() {
-    let old = old_cache().join("compatible");
-    if !old.is_dir() {
-        return;
-    }
-    let count = std::fs::read_dir(&old).map(|entries| entries.count()).unwrap_or(0);
-    match std::fs::remove_dir_all(&old) {
-        Ok(()) => eprintln!("pinholed: removed {} ({count} files): JPEGs are made into the cache now", old.display()),
-        Err(err) => eprintln!("pinholed: could not remove {}: {err}", old.display()),
-    }
-}
-
 /// The cache in use, which `making` is in.
 static CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -682,34 +660,6 @@ impl Storage {
         let this = self.clone();
         std::thread::spawn(move || this.photos_over(&from, &to, &old_cache));
         Ok(())
-    }
-
-    /// Photos in a folder the cache used to be in (before it moved in with
-    /// the library): moved into the cache in the background.
-    pub fn adopt(self: &std::sync::Arc<Self>, old: PathBuf) {
-        let cache = self.cache();
-        if old == cache || !KINDS.iter().any(|k| old.join(k).is_dir()) {
-            return;
-        }
-        {
-            let mut state = self.state.lock().unwrap();
-            if state.moving {
-                return;
-            }
-            state.moving = true;
-            state.moving_from = Some(old.clone());
-            state.moving_total = KINDS.iter().map(|k| size_of(&old.join(k))).sum();
-        }
-        self.moved.store(0, Ordering::Relaxed);
-        let this = self.clone();
-        std::thread::spawn(move || {
-            this.move_files(&old, &cache);
-            let _ = std::fs::remove_dir(&old);
-            let mut state = this.state.lock().unwrap();
-            state.moving = false;
-            state.moving_from = None;
-            eprintln!("pinholed: photos moved from {} to {}", old.display(), cache.display());
-        });
     }
 
     fn save(&self) -> Result<()> {
@@ -1403,16 +1353,4 @@ mod tests {
         assert_eq!(read_settings(&settings, &no_kinds()).location, Some(from));
     }
 
-    #[test]
-    fn photos_from_where_the_cache_used_to_be_move_in() {
-        let dir = temp("adopt");
-        let old = dir.join("dot-cache/pinhole");
-        file(&old.join("medium/aa/one.jpg"), 100, 0);
-        let location = dir.join("pinhole");
-        let storage = storage_in(&location, &dir.join("settings.json"));
-        storage.adopt(old.clone());
-        until_moved(&storage);
-        assert!(location.join("cache/medium/aa/one.jpg").exists());
-        assert!(!old.exists());
-    }
 }

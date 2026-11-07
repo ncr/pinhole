@@ -72,22 +72,22 @@ class JoiningSuggestions(unittest.TestCase):
 
 
 class Review(unittest.TestCase):
-    def test_legacy_and_explicit_labels_share_one_person_without_hiding_pending_faces(self):
+    def test_named_faces_make_one_person_without_hiding_pending_faces(self):
         with sqlite3.connect(":memory:") as db:
             db.executescript("""
                 CREATE TABLE faces (key TEXT PRIMARY KEY, photo TEXT, box TEXT);
                 CREATE TABLE photos (id TEXT PRIMARY KEY, path TEXT);
                 CREATE TABLE suggestions (anchor TEXT, member TEXT, score REAL);
             """)
-            faces = ["old", "old-match", "rejected", "new", "pending"]
+            faces = ["old", "old-match", "new", "pending"]
             db.executemany("INSERT INTO faces VALUES (?, ?, '[0, 0, 1, 1]')", ((f, f) for f in faces))
             db.executemany("INSERT INTO photos VALUES (?, ?)", ((f, f) for f in faces))
             db.executemany("INSERT INTO suggestions VALUES (?,?,?)", [
-                ("old", "old", 1.0), ("old", "old-match", 0.9), ("old", "rejected", 0.8),
+                ("old", "old", 1.0), ("old", "old-match", 0.9),
                 ("new", "new", 1.0), ("new", "pending", 0.9),
             ])
             worker.review_labels(db, {
-                "old": {"name": "Anna", "rejected": ["rejected"]},
+                "old": {"person": "Anna"},
                 "new": {"person": "Anna"},
                 "old-match": {"person": "Ola"},
             })
@@ -178,17 +178,6 @@ class Guesses(unittest.TestCase):
             worker.review_labels(db, {"anna": {"person": "Anna"}, "a1": {"not": ["Anna"]}})
             self.assertEqual([face["guess"] for face in worker.photo_rows(db, "a2")], [None])
 
-    def test_a_face_named_with_an_old_group_says_which_to_take_it_from(self):
-        with sqlite3.connect(":memory:") as db:
-            self.library(db)
-            worker.review_labels(db, {"a1": {"name": "Anna"}})
-            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a2")], [("Anna", "a1")])
-            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a1")], [("Anna", "a1")])
-        with sqlite3.connect(":memory:") as db:
-            self.library(db)
-            worker.review_labels(db, {"a1": {"name": "Anna", "rejected": ["a2"]}})
-            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a2")], [(None, None)])
-
     def test_a_face_found_again_in_a_new_thumbnail_keeps_what_was_said_of_it(self):
         with sqlite3.connect(":memory:") as db:
             self.library(db)
@@ -236,23 +225,21 @@ class Guesses(unittest.TestCase):
 
 
 class Edits(unittest.TestCase):
-    def test_names_come_from_the_synced_file_over_what_was_kept_before(self):
+    def test_what_is_said_comes_from_the_synced_file(self):
         import json
         import tempfile
         with tempfile.TemporaryDirectory() as folder:
-            state, synced = Path(folder, "state.json"), Path(folder, "pinhole.people.json")
-            state.write_text(json.dumps({"people:icloud:a": {"old": {"name": "Ola"}, "both": {"name": "Ola"}}}))
-            synced.write_text(json.dumps({"values": {"both": {"name": "Anna"}, "new": {"rejected": ["x"]}},
-                                          "clock": {}}))
-            names, excluded = worker.load_edits(synced, state, "icloud:a", None)
-            self.assertEqual(names, ["both", "old"])
+            synced = Path(folder, "pinhole.people.json")
+            synced.write_text(json.dumps({"values": {"both": {"not": ["Anna"]}, "new": {"rejected": ["x"]},
+                                                     "named": {"person": "Ola"}}, "clock": {}}))
+            names, excluded = worker.load_edits(synced, None)
+            self.assertEqual(names, ["both"])
             self.assertEqual(excluded, {"new": ["x"]})
-            # Neither there yet: nothing said; a file that cannot be read
-            # keeps what was read before.
-            self.assertEqual(worker.load_edits(Path(folder, "none"), Path(folder, "none"), "icloud:a", None), ([], {}))
+            # Not there yet: nothing said; a file that cannot be read keeps
+            # what was read before.
+            self.assertEqual(worker.load_edits(Path(folder, "none"), None), ([], {}))
             synced.write_text("{not json")
-            self.assertEqual(worker.load_edits(synced, state, "icloud:a", "before"), "before")
-
+            self.assertEqual(worker.load_edits(synced, "before"), "before")
 
 if __name__ == "__main__":
     unittest.main()

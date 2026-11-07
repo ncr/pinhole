@@ -9,12 +9,7 @@
 // kept for this computer in window.conf's [grid] as markChoices, a JSON
 // object of the switches turned. A kind never turned is as its
 // defaultShown says.
-//
-// Before marks came from plugins, [grid] kept them as `marks`, the four of
-// them or-ed (video 1, Live 2, favourite 4, stack 8): read once, when
-// markChoices is not there yet, as those four's switches, and left as it is
-// for an older Pinhole. With neither, nothing is written until a switch is
-// turned.
+// None there, and nothing is written until a switch is turned.
 class MarkChoices : public QObject {
     Q_OBJECT
     // Counted up on every change: bind to it with shown().

@@ -7,7 +7,6 @@
 namespace {
 
 constexpr const char *kChoices = "grid/markChoices";
-constexpr const char *kOldMarks = "grid/marks";
 
 } // namespace
 
@@ -22,16 +21,6 @@ MarkChoices::MarkChoices(const QString &path, QObject *parent)
         m_choices = QJsonDocument::fromJson(settings.value(kChoices).toString().toUtf8()).object();
         return;
     }
-    if (!settings.contains(kOldMarks))
-        return;
-    // The four marks' bits, as the side panel kept them before (13: all
-    // but Live), by the ids they have now.
-    const int marks = settings.value(kOldMarks).toInt();
-    m_choices = {{"pinhole/video", (marks & 1) != 0},
-                 {"pinhole.live/live", (marks & 2) != 0},
-                 {"pinhole.favourites/favorite", (marks & 4) != 0},
-                 {"pinhole/stack", (marks & 8) != 0}};
-    write();
 }
 
 bool MarkChoices::shown(const QString &id, bool byDefault) const {

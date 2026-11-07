@@ -49,9 +49,6 @@ class Storage : public QObject {
     Q_PROPERTY(double moveTotal READ moveTotal NOTIFY changed)
     // What went wrong with the last change, for the panel to say.
     Q_PROPERTY(QString error READ error NOTIFY changed)
-    // The service running is from before these settings: it has to be
-    // restarted (an update installed while it ran leaves the old one).
-    Q_PROPERTY(bool outdated READ outdated NOTIFY changed)
     // The panel is open: what is under way is followed every second.
     Q_PROPERTY(bool watching READ watching WRITE setWatching NOTIFY watchingChanged)
 
@@ -101,7 +98,6 @@ public:
     double moved() const { return m_moved; }
     double moveTotal() const { return m_moveTotal; }
     QString error() const { return m_error; }
-    bool outdated() const { return m_outdated; }
     bool watching() const { return m_watching; }
     void setWatching(bool watching);
 
@@ -111,8 +107,6 @@ public:
     Q_INVOKABLE void setLimit(double bytes);
     // The desktop's folder picker, then everything moved to the folder chosen.
     Q_INVOKABLE void chooseLocation();
-    // Stops the service; the window starts the new one at once.
-    Q_INVOKABLE void restartService();
     // Bytes as people read them: "6.2 GB".
     Q_INVOKABLE QString size(double bytes) const;
 
@@ -136,5 +130,5 @@ private:
     double m_limit = 0, m_minLimit = 0, m_defaultLimit = 0, m_used = 0, m_free = 0, m_moved = 0, m_moveTotal = 0;
     bool m_limitSet = false;
     QVariantMap m_kinds;
-    bool m_freeing = false, m_moving = false, m_watching = false, m_outdated = false;
+    bool m_freeing = false, m_moving = false, m_watching = false;
 };

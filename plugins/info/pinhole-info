@@ -5,8 +5,6 @@
 #   The original's details: "image" and ImageMagick's format, size and the
 #   orientation it applied, then its EXIF; or "video" and ffprobe's JSON.
 #   Both read only the headers: a 12 MP HEIC takes some 20 ms, a video 60.
-# pinhole-info tidy <cache folder>
-#   What was kept before pinhole.store (API 15) kept the facts: gone.
 
 set -eu
 
@@ -26,12 +24,8 @@ read)
     magick identify -ping -format '%m %w %h %[orientation]\n%[EXIF:*]' -[0] < "$original"
   fi
   ;;
-tidy)
-  rm -f "$2/facts.tsv" "$2"/facts.tsv.*
-  find "$2" -maxdepth 1 -name '*.txt' -delete 2>/dev/null || true
-  ;;
 *)
-  echo "pinhole-info read <image|video> <original> | tidy <cache folder>" >&2
+  echo "pinhole-info read <image|video> <original>" >&2
   exit 2
   ;;
 esac

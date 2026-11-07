@@ -558,14 +558,6 @@ Item {
         onTriggered: root.step(1)
     }
     Command {
-        id: restartAction
-        name: "storage.restart"
-        keys: ["R"]
-        keyLayer: "side"
-        usable: root.section === "storage" && storage.outdated
-        onTriggered: storage.restartService()
-    }
-    Command {
         id: locationAction
         name: "storage.location"
         keys: ["L"]
@@ -1131,16 +1123,6 @@ Item {
                     visible: storage.error !== ""
                     color: theme.red
                     text: storage.error
-                }
-                ShellButton {
-                    visible: storage.outdated
-                    x: Math.round(theme.fontSize * 0.714)
-                    id: restartButton
-                    text: qsTr("Restart it")
-                    lit: root.focusedStop === restartButton
-                    Component.onCompleted: root.addStop(restartButton)
-                    Component.onDestruction: root.dropStop(restartButton)
-                    action: restartAction
                 }
                 // What the limit can and cannot do.
                 Note {

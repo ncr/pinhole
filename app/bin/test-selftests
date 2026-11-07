@@ -75,7 +75,7 @@ def library(scratch):
 
 def faces(profile, lib, out):
     """For people: a face index of People's own in its cache, as its finder
-    leaves one (no OpenCV needed), and a name given in its state. Two
+    leaves one (no OpenCV needed), and a name given in what it syncs. Two
     photos: `named`, one face, Anna's; `shown`, two faces, the left one
     like Anna's, the right one like no one's. Their ids in out/people.json."""
     loader = SourceFileLoader("pinhole_faces", str(ROOT / "plugins/people/pinhole-faces"))
@@ -117,9 +117,12 @@ def faces(profile, lib, out):
                        (json.dumps([[], {}, "careful"], sort_keys=True),))
             db.execute("INSERT INTO meta VALUES ('status', ?)", (json.dumps({"phase": "ready", "errors": 0}),))
         db.close()
-    state = profile / "state/pinhole/plugins/pinhole.people"
-    state.mkdir(parents=True)
-    (state / "state.json").write_text(json.dumps({f"people:{source}": {"anna": {"person": "Anna"}} for source in sources}))
+    # The name in what People syncs of the library (synced.rs: its folder
+    # named as the library's cacheDir is).
+    synced = profile / "state/pinhole/synced" / f"{lib.parent.name}-{lib.name}"
+    synced.mkdir(parents=True)
+    (synced / "pinhole.people.json").write_text(json.dumps({"values": {"anna": {"person": "Anna"}},
+                                                            "clock": {"anna": [1, "selftest"]}}))
     (out / "people.json").write_text(json.dumps({"named": named, "shown": shown}))
 
 

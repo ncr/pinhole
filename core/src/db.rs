@@ -27,6 +27,23 @@ pub fn open(path: &Path) -> Result<Connection> {
 }
 
 fn create(db: &Connection) -> Result<()> {
+    // A library of another schema is not brought up to this one: it is
+    // made again, its source listing it whole at the next round. Nothing
+    // is kept there that its source does not have.
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let made: bool = db.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'assets'", [], |r| r.get::<_, i64>(0))? > 0;
+    if made && version != SCHEMA {
+        eprintln!("pinholed: a library of schema {version}, this one's being {SCHEMA}: made again from its source");
+        let tables: Vec<String> = db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let tx = db.unchecked_transaction()?;
+        for table in tables {
+            tx.execute_batch(&format!("DROP TABLE IF EXISTS \"{}\"", table.replace('"', "\"\"")))?;
+        }
+        tx.commit()?;
+    }
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS assets (
             id TEXT PRIMARY KEY,
@@ -50,9 +67,24 @@ fn create(db: &Connection) -> Result<()> {
             thumb_path TEXT,
             thumb_w INTEGER,
             thumb_h INTEGER,
-            avg_color INTEGER
+            avg_color INTEGER,
+            -- Where it was taken, if it says.
+            latitude REAL,
+            longitude REAL,
+            -- The camera, as the photo's own file says, read where a file
+            -- of it is on this computer (sync::read_cameras).
+            camera_make TEXT,
+            camera_model TEXT,
+            lens_model TEXT,
+            camera_read INTEGER NOT NULL DEFAULT 0,
+            -- What was done to it where its source keeps edits (iCloud),
+            -- turn,x,y,width,height (source.rs, Asset::edit).
+            edit TEXT,
+            -- What kind of picture it is: screenshot.
+            subtype TEXT
         );
         CREATE INDEX IF NOT EXISTS assets_by_date ON assets(asset_date);
+        CREATE INDEX IF NOT EXISTS assets_with_location ON assets(id) WHERE latitude IS NOT NULL;
         -- The file that serves each kind a window asks for (thumb, medium,
         -- full, original, video, live), as the source chose it.
         CREATE TABLE IF NOT EXISTS renditions (
@@ -74,89 +106,14 @@ fn create(db: &Connection) -> Result<()> {
         END;
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )?;
-    migrate(db)
-}
-
-/// The index's schema, kept as `PRAGMA user_version`. Readers (the window,
-/// plugins' helpers) may read a library of a later schema as long as the
-/// columns they read mean what they did; a writer never writes one later
-/// than its own. Each step up is a step in `migrate`.
-pub const SCHEMA: i64 = 5;
-
-/// Bring a library up to `SCHEMA`, one step at a time, each in a
-/// transaction with the version it reaches.
-fn migrate(db: &Connection) -> Result<()> {
-    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < 1 {
-        // 0 to 1, from before the schema was numbered: a library from
-        // before effects were kept gets the column, and the whole library
-        // listed again at the next round to fill it (the change feed only
-        // tells of what changes).
-        let tx = db.unchecked_transaction()?;
-        if tx.prepare("SELECT live_effect FROM assets LIMIT 0").is_err() {
-            tx.execute_batch(
-                "ALTER TABLE assets ADD COLUMN live_effect TEXT;
-                 DELETE FROM meta WHERE key = 'change_token';",
-            )?;
-        }
-        tx.execute_batch("PRAGMA user_version = 1")?;
-        tx.commit()?;
-    }
-    if version < 2 {
-        let tx = db.unchecked_transaction()?;
-        tx.execute_batch(
-            "ALTER TABLE assets ADD COLUMN latitude REAL;
-             ALTER TABLE assets ADD COLUMN longitude REAL;
-             CREATE INDEX assets_with_location ON assets(id) WHERE latitude IS NOT NULL;
-             DELETE FROM meta WHERE key = 'change_token';
-             PRAGMA user_version = 2;",
-        )?;
-        tx.commit()?;
-    }
-    if version < 3 {
-        // The camera, as the photo's own file says, read where a file of it
-        // is on this computer (sync::read_cameras): no listing again.
-        let tx = db.unchecked_transaction()?;
-        tx.execute_batch(
-            "ALTER TABLE assets ADD COLUMN camera_make TEXT;
-             ALTER TABLE assets ADD COLUMN camera_model TEXT;
-             ALTER TABLE assets ADD COLUMN lens_model TEXT;
-             ALTER TABLE assets ADD COLUMN camera_read INTEGER NOT NULL DEFAULT 0;
-             PRAGMA user_version = 3;",
-        )?;
-        tx.commit()?;
-    }
-    if version < 4 {
-        // What was done to a photo where its source keeps edits (iCloud),
-        // "turn,x,y,width,height" (source.rs, Asset::edit): the whole
-        // library listed again at the next round to fill it.
-        let tx = db.unchecked_transaction()?;
-        tx.execute_batch(
-            "ALTER TABLE assets ADD COLUMN edit TEXT;
-             DELETE FROM meta WHERE key = 'change_token';
-             PRAGMA user_version = 4;",
-        )?;
-        tx.commit()?;
-    }
-    if version < 5 {
-        // What kind of picture it is ("screenshot"), public where it was
-        // iCloud's own: filled from what iCloud's table kept, so nothing is
-        // listed again for it.
-        let tx = db.unchecked_transaction()?;
-        tx.execute_batch("ALTER TABLE assets ADD COLUMN subtype TEXT;")?;
-        let icloud: bool = tx
-            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'icloud_assets'", [], |r| r.get::<_, i64>(0))
-            .map(|n| n > 0)?;
-        if icloud {
-            tx.execute_batch(
-                "UPDATE assets SET subtype = 'screenshot' WHERE id IN (SELECT asset_id FROM icloud_assets WHERE subtype = 3);",
-            )?;
-        }
-        tx.execute_batch("PRAGMA user_version = 5;")?;
-        tx.commit()?;
-    }
+    db.pragma_update(None, "user_version", SCHEMA)?;
     Ok(())
 }
+
+/// The index's schema, kept as `PRAGMA user_version`. A writer never
+/// writes one later than its own, and makes one of an earlier again
+/// (`create`).
+pub const SCHEMA: i64 = 5;
 
 pub fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
     db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)", params![key, value])?;
@@ -458,6 +415,43 @@ mod tests {
             });
             assert_eq!(stored, expected);
         }
+    }
+
+    #[test]
+    fn a_library_of_an_earlier_schema_is_made_again() {
+        let dir = temp("earlier");
+        let path = dir.join("library.sqlite");
+        // As one before the schema had a number, with what its source kept.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE assets (id TEXT PRIMARY KEY, favorite INTEGER);
+                 INSERT INTO assets VALUES ('old', 1);
+                 CREATE TABLE icloud_assets (asset_id TEXT);
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO meta VALUES ('change_token', 'stale');",
+            )
+            .unwrap();
+        let conn = open(&path).unwrap();
+        // Nothing of it kept: listed again whole, its token gone.
+        let count: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(meta(&conn, "change_token"), None);
+        let tables: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'icloud_assets'", [], |r| r.get(0)).unwrap();
+        assert_eq!(tables, 0);
+        // Of this schema, every column of it there.
+        conn.query_row("SELECT edit, subtype, camera_make, latitude FROM assets LIMIT 1", [], |_| Ok(())).optional().unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA);
+        drop(conn);
+        // Opened again: kept as it is.
+        let conn = open(&path).unwrap();
+        Index::new(&mut Connection::open(&path).unwrap()).put(&[asset("a", false, "k1")]).unwrap();
+        let count: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+        drop(conn);
+        assert_eq!(open(&path).unwrap().query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -64,8 +64,8 @@ selected() { timeout 2 "$shell" shell selectedBackground 2>/dev/null || true; }
 # How many stay in the folder whatever uses them, the newest.
 KEPT=12
 # What keep wrote into the folder, a name a line, the newest last: all that
-# is ever pruned. A file put there any other way (by hand, or moved over
-# from where they were kept at first) is in no record, and stays.
+# is ever pruned. A file put there any other way (by hand) is in no
+# record, and stays.
 RECORD=.pinhole-kept
 
 # <folder>'s record made the lines on stdin, written aside and renamed.
@@ -120,20 +120,6 @@ prune() {
   done < "$folder/$RECORD" | record "$folder"
 }
 
-# Whether <name> is one keep wrote in Pictures/Pinhole/Backgrounds, where
-# they were kept at first: the photo's name, when it was taken, maybe Live
-# or Bounce and the rendition's few characters, and a background's
-# extension.
-ours() {
-  case "${1##*.}" in jpg | png | webp | gif | bmp | mp4 | m4v | mov | webm | mkv | avi) ;; *) return 1 ;; esac
-  stamp='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9].[0-9][0-9].[0-9][0-9]'
-  case "${1%.*}" in
-    ?*" "$stamp | ?*" "$stamp" Live" | ?*" "$stamp" Bounce") return 0 ;;
-    ?*" "$stamp" "?????? | ?*" "$stamp" Live "?????? | ?*" "$stamp" Bounce "??????) return 0 ;;
-  esac
-  return 1
-}
-
 case "${1:-}" in
 keep)
   from=$2 dir=$3 name=$4 extension=$5 own=$6 srgb=${7:-}
@@ -151,31 +137,6 @@ keep)
   if [ -L "$dir" ]; then
     echo "Refused: $dir is a link; Pinhole keeps its backgrounds only in a folder of its own" >&2
     exit 2
-  fi
-  # Kept in Pictures/Pinhole/Backgrounds at first, where a folder source of
-  # Pictures showed them as photos: those moved, with Omarchy's link and
-  # what its themes remember; anything else there left as it is.
-  old="${dir%/*}/Backgrounds"
-  if [ -d "$old" ] && [ ! -L "$old" ]; then
-    mkdir -p "$dir"
-    shown=$(readlink -f "$state/current/background" 2>/dev/null || true)
-    for file in "$old"/*; do
-      each=${file##*/}
-      if [ ! -f "$file" ] || [ -L "$file" ] || ! ours "$each" || [ -e "$dir/$each" ]; then
-        continue
-      fi
-      real=$(readlink -f -- "$file")
-      mv -n -- "$file" "$dir/"
-      for remembered in "$state"/theme-backgrounds/*; do
-        if [ -f "$remembered" ] && [ "$(cat "$remembered")" = "$real" ]; then
-          printf '%s\n' "$dir/$each" > "$remembered"
-        fi
-      done
-      if [ "$shown" = "$real" ]; then
-        "$bg_set" "$dir/$each" || true
-      fi
-    done
-    rmdir "$old" 2>/dev/null || true
   fi
   # What a keep stopped halfway left (a plugin loaded again kills it before
   # it can tidy up): written to no more for a minute.

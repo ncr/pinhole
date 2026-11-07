@@ -94,7 +94,6 @@ fn start(root: &Path, name: &str, library: &Path, source: &Path, linger: Duratio
         limit: None,
         settings: root.join("config/pinhole/settings.json"),
         plugins: root.join("config/pinhole/plugins.json"),
-        adopt: Some(root.join("old-cache")),
         downloads: 2,
         sync_every: Some(1),
         given: Some(linger),
@@ -122,9 +121,6 @@ fn a_library_given_is_only_read_and_its_service_ends_with_its_windows() {
     let entry = json!({"kind": "folder", "path": photos});
     std::fs::create_dir_all(root.join("config/pinhole")).unwrap();
     std::fs::write(root.join("config/pinhole/settings.json"), json!({"sources": [entry], "source": entry}).to_string()).unwrap();
-    // An old cache with a photo in it: the shared service would adopt it.
-    std::fs::create_dir_all(root.join("old-cache/full")).unwrap();
-    std::fs::write(root.join("old-cache/full/x.jpg"), b"x").unwrap();
 
     // A copy of the folder's library, a.jpg in it; then b.jpg in the folder.
     let given = root.join("given");
@@ -173,8 +169,6 @@ fn a_library_given_is_only_read_and_its_service_ends_with_its_windows() {
         let answer = window.ask(method, params);
         assert_eq!(answer["error"]["code"], "read_only", "{method}: {answer:#}");
     }
-    // Nothing adopted from the old cache.
-    assert!(root.join("old-cache/full/x.jpg").exists());
     // The library file just as it was: no byte of it, nor its time, changed.
     let after = (std::fs::read(&file).unwrap(), std::fs::metadata(&file).unwrap().modified().unwrap());
     assert!(before.0 == after.0, "the library given was written");

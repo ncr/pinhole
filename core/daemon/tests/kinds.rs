@@ -158,7 +158,6 @@ fn a_kind_turned_off_is_neither_listed_nor_shown_nor_touched() {
         limit: None,
         settings: settings.clone(),
         plugins: plugins.clone(),
-        adopt: None,
         downloads: 2,
         // Rounds only when asked for: nothing writes the library unseen.
         sync_every: Some(3600),

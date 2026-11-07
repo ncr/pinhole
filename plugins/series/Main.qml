@@ -138,24 +138,10 @@ PinholePlugin {
         if (editsKey !== "")
             foundIds = []
         editsKey = key
-        adopt(key)
         edits = syncedEdits()
         if (found)
             apply()
         return true
-    }
-    // Kept on this computer alone before they were synced (pinhole.state:
-    // "edits:" and the library's key, and before that "edits", the one
-    // shown then): taken in once, those of any computer winning, now or
-    // once heard of.
-    function adopt(key) {
-        const kept = pinhole.state["edits:" + key] || pinhole.state.edits
-        if (kept)
-            pinhole.synced.adopt({ manual: kept.manual || [], apart: kept.apart || [] })
-        if (pinhole.state["edits:" + key])
-            pinhole.state["edits:" + key] = null
-        if (pinhole.state.edits)
-            pinhole.state.edits = null
     }
     // Changed on another computer (or in another window): as they are now.
     Connections {

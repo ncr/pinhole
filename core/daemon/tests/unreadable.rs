@@ -198,7 +198,6 @@ fn a_damaged_file_is_its_own_and_the_folder_stays_fine() {
         limit: None,
         settings,
         plugins: root.join("config/pinhole/plugins.json"),
-        adopt: None,
         downloads: 2,
         // Rounds only when asked for (`round`).
         sync_every: Some(3600),

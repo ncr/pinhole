@@ -62,8 +62,6 @@ pub struct Config {
     /// The plugins' switches (plugins.rs), which the kinds follow: only
     /// read.
     pub plugins: PathBuf,
-    /// A folder of photos from before (the old cache) to move in.
-    pub adopt: Option<PathBuf>,
     pub downloads: usize,
     /// Seconds between rounds of following the source's changes, if not
     /// as often as the source would.
@@ -72,7 +70,7 @@ pub struct Config {
     /// shared service's, served to it alone: only read and fetched for.
     /// Never synced (the source neither followed nor watched, the settings
     /// not followed), nothing of the cache evicted (the shared service
-    /// does), no move resumed and nothing adopted, nothing changed for a
+    /// does), no move resumed, nothing changed for a
     /// window (the source, the storage, favourites, files added); and the
     /// service ends once no window has been connected for this long.
     /// None: the shared service.
@@ -850,7 +848,6 @@ pub fn run(config: Config) -> Result<()> {
     // The shared service's to do, not one of a library given.
     if given.is_none() {
         shared.storage.resume()?;
-        crate::storage::forget_compatible();
     }
     // What services that ended were making from when they did: any
     // service's to do, as they share the cache.
@@ -914,9 +911,6 @@ pub fn run(config: Config) -> Result<()> {
         });
     }
     {
-        if let Some(old) = shared.config.adopt.clone().filter(|_| given.is_none()) {
-            shared.storage.adopt(old);
-        }
         // Every window reads the library from its new place.
         let weak = Arc::downgrade(&shared);
         // With the folder of them all, when it moved: a window keeping to

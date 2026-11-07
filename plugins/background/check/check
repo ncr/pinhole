@@ -4,8 +4,7 @@
 # Omarchy's shell and omarchy-theme-bg-set, and decoys of both first on
 # PATH that only say they were called: never the desktop's. Whatever the
 # user put in reach (a file by hand, a linked .backgrounds, a link in a
-# linked theme or backgrounds folder, a file in the old Backgrounds) must
-# stay; only what keep wrote goes, all but the newest 12. Exits 1 if
+# linked theme or backgrounds folder) must stay; only what keep wrote goes, all but the newest 12. Exits 1 if
 # anything is off.
 set -eu
 
@@ -106,29 +105,6 @@ i=3; while [ $i -le 20 ]; do keep $i > /dev/null; i=$((i + 1)); done
 check '[ -f "$first" ]' "a kept file a linked theme's link leads to stays"
 check '[ -f "$second" ]' "a kept file a link in a linked backgrounds folder leads to stays"
 check '[ ! -e "$D/p3 000003.png" ]' "the rest still pruned (a folder loop in a theme notwithstanding)"
-
-# Moved over from Pictures/Pinhole/Backgrounds: only what keep named so,
-# with what Omarchy and its themes remember; the user's own left there, and
-# what was moved never pruned, as no record names it.
-fresh moved
-old="$H/Pictures/Pinhole/Backgrounds"
-user "$old/IMG_1 2024-01-02 03.04.05.jpg"
-user "$old/IMG_2 2024-01-02 03.04.05 Live.mov"
-user "$old/IMG_3 2024-01-02 03.04.05 Bounce 1a2b3c.mkv"
-user "$old/holiday.jpg"
-user "$old/notes.txt"
-user "$old/IMG_4 2024-01-02.jpg"
-ln -s "$old/IMG_1 2024-01-02 03.04.05.jpg" "$H/.local/state/omarchy/current/background"
-echo "$old/IMG_2 2024-01-02 03.04.05 Live.mov" > "$H/.local/state/omarchy/theme-backgrounds/other"
-echo "$old/holiday.jpg" > "$H/.local/state/omarchy/theme-backgrounds/mine"
-keep 1 > /dev/null
-check '[ -f "$D/IMG_1 2024-01-02 03.04.05.jpg" ] && [ -f "$D/IMG_2 2024-01-02 03.04.05 Live.mov" ] && [ -f "$D/IMG_3 2024-01-02 03.04.05 Bounce 1a2b3c.mkv" ]' "keep's own moved over"
-check '[ -f "$old/holiday.jpg" ] && [ -f "$old/notes.txt" ] && [ -f "$old/IMG_4 2024-01-02.jpg" ] && [ $(ls "$old" | wc -l) -eq 3 ]' "the user's own left in the old folder"
-check '[ "$(readlink -f "$H/.local/state/omarchy/current/background")" = "$D/IMG_1 2024-01-02 03.04.05.jpg" ]' "the background set now follows it"
-check '[ "$(cat "$H/.local/state/omarchy/theme-backgrounds/other")" = "$D/IMG_2 2024-01-02 03.04.05 Live.mov" ] && [ "$(cat "$H/.local/state/omarchy/theme-backgrounds/mine")" = "$old/holiday.jpg" ]' "what a theme remembers follows; the user's own as it was"
-rm "$H/.local/state/omarchy/current/background" "$H/.local/state/omarchy/theme-backgrounds/other"
-i=2; while [ $i -le 20 ]; do keep $i > /dev/null; i=$((i + 1)); done
-check '[ $(ls "$D" | wc -l) -eq 15 ] && [ -f "$D/IMG_1 2024-01-02 03.04.05.jpg" ]' "what was moved over is never pruned"
 
 # A test's folder only in its home: not beside it, not through a link out.
 fresh guarded

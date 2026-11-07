@@ -149,7 +149,6 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
         limit: None,
         settings,
         plugins: plugins.clone(),
-        adopt: None,
         downloads: 2,
         sync_every: Some(3600),
         given: None,

@@ -36,12 +36,10 @@ make() { # make <name>: made from the photo, the one set before kept
   printf '[colors]\n' | bash "$script" make "$1" "$work/IMG_1.jpg" Yaru "$before" '#112233' '#445566'
 }
 
-# What a killed make left, long ago and just now; and in themes/ itself,
-# as an older Pinhole built there.
-mkdir -p "$build/pinhole-gone.AbC123" "$build/pinhole-going.XyZ789" "$themes/.pinhole-old.QwE456" "$themes/.pinhole-nomark.RtY000"
-touch "$themes/.pinhole-old.QwE456/.pinhole"
-touch -d '-1 hour' "$build/pinhole-gone.AbC123" "$themes/.pinhole-old.QwE456" "$themes/.pinhole-nomark.RtY000"
-# One made by an older Pinhole, its mark the photo's name alone.
+# What a killed make left, long ago and just now.
+mkdir -p "$build/pinhole-gone.AbC123" "$build/pinhole-going.XyZ789"
+touch -d '-1 hour' "$build/pinhole-gone.AbC123"
+# One whose mark does not name it: not Pinhole's to prune.
 mkdir -p "$themes/pinhole-legacy-0000"
 echo IMG_0.HEIC > "$themes/pinhole-legacy-0000/.pinhole"
 touch -d '-2 hours' "$themes/pinhole-legacy-0000/.pinhole"
@@ -50,7 +48,6 @@ make pinhole-t1-0001
 check '[[ $(cat "$H/.local/state/omarchy/current/theme.name") == pinhole-t1-0001 ]]' "made and set"
 check 'grep -qx "name=pinhole-t1-0001" "$themes/pinhole-t1-0001/.pinhole" && grep -qx "photo=IMG_1.jpg" "$themes/pinhole-t1-0001/.pinhole"' "its mark names the photo and the theme"
 check '[[ ! -e $build/pinhole-gone.AbC123 && -d $build/pinhole-going.XyZ789 ]]' "a build left long ago swept, one just now not"
-check '[[ ! -e $themes/.pinhole-old.QwE456 && -d $themes/.pinhole-nomark.RtY000 ]]' "an older Pinhole's leftover in themes/ swept, a folder without its mark not"
 # The user's copy of it under another name, as old as it.
 cp -a "$themes/pinhole-t1-0001" "$themes/pinhole-t1-0001-mine"
 cp -a "$themes/pinhole-t1-0001" "$themes/sunset"
@@ -60,8 +57,8 @@ done
 check '[[ ! -e $themes/pinhole-t1-0001 && ! -e $themes/pinhole-t3-0003 && -d $themes/pinhole-t4-0004 ]]' "all but the newest 12 made pruned"
 check '[[ $(ls -d "$themes"/pinhole-t*-[0-9][0-9][0-9][0-9] | wc -l) -eq 12 ]]' "12 kept"
 check '[[ -d $themes/pinhole-t1-0001-mine && -d $themes/sunset ]]' "the user's copies under other names stay"
-check '[[ -d $themes/pinhole-legacy-0000 && -d $themes/mine ]]' "an older mark's theme, and the user's own, stay"
-check '[[ -z $(find "$themes" -mindepth 1 -maxdepth 1 -name ".*" ! -name ".pinhole-nomark.RtY000") ]]' "nothing built in themes/"
+check '[[ -d $themes/pinhole-legacy-0000 && -d $themes/mine ]]' "a theme its mark does not name, and the user's own, stay"
+check '[[ -z $(find "$themes" -mindepth 1 -maxdepth 1 -name ".*") ]]' "nothing built in themes/"
 check '[[ $(ls "$build") == pinhole-going.XyZ789 ]]' "nothing left in the build folder"
 
 # A theme renamed to the name Pinhole would make: left as it is.

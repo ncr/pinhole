@@ -321,7 +321,6 @@ void Storage::moveTo(const QString &chosen) {
 
 void Storage::take(const QJsonObject &report) {
     m_loaded = true;
-    m_outdated = false;
     m_location = report.value("location").toString();
     m_limit = report.value("limit_bytes").toDouble();
     m_minLimit = report.value("min_limit_bytes").toDouble();
@@ -344,25 +343,13 @@ void Storage::take(const QJsonObject &report) {
 }
 
 void Storage::failed(const QString &code, const QString &) {
-    // A service from before settings existed answers bad_request to them.
-    m_outdated = code == QLatin1String("bad_request") && !m_loaded;
-    m_error = m_outdated
-                  ? tr("The Pinhole service running now is older than this window and has to be restarted.")
-              : code == QLatin1String("bad_request")
+    m_error = code == QLatin1String("bad_request")
                   ? tr("That folder cannot be used.")
               : code == QLatin1String("read_only")
                   ? tr("This library is only being looked at here: storage is set in a window of your own library.")
                   : tr("The Pinhole service is not answering.");
     m_poll.stop();
     emit changed();
-}
-
-void Storage::restartService() {
-    // Only the service: a download under way starts again when asked for.
-    QProcess::execute(QStringLiteral("pkill"), {QStringLiteral("-x"), QStringLiteral("pinholed")});
-    m_error.clear();
-    emit changed();
-    QTimer::singleShot(1500, this, &Storage::refresh);
 }
 
 QString Storage::size(double bytes) const {

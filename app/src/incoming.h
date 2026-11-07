@@ -48,8 +48,7 @@ public:
     QString problemsTitle() const;
     int failed() const { return m_failed; }
 
-    // What the source takes, by extension: as the service says, else (a
-    // service from before adding) what a source of its kind takes.
+    // What the source takes, by extension, as the service says.
     QStringList accepts() const;
     // A file's problem in words, from the service's code for it.
     QString reason(const QString &code, const QString &message) const;

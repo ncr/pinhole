@@ -21,7 +21,6 @@ MODELS = {
         "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"),
 }
 REVISION = "48b10fa505aeb51fbd127fc60a5c660040e823b7"
-LEGACY_MODELS = Path(__file__).resolve().parents[2] / ".tools/face-recognition"
 # Bump when changing the models or preprocessing. Saved labels use this same
 # identity, so a new model never silently moves a name to a different face.
 RECIPE = "yunet-sface-v1"
@@ -59,9 +58,6 @@ def xdg(variable, fallback):
 
 
 def setup(progress):
-    # Reuse the development prototype's verified weights where available.
-    if all(verified(LEGACY_MODELS / name, digest) for name, digest in MODELS.values()):
-        return LEGACY_MODELS
     models = xdg("XDG_CACHE_HOME", ".cache") / "pinhole/face-models"
     models.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (models / "download.lock").open("a") as lock:
@@ -469,17 +465,13 @@ def status(db):
 
 
 def review_labels(db, edits):
-    # Overlay saved labels on the derived index. Explicit face assignments
-    # take priority over names saved on suggested groups by older versions.
+    # Overlay saved labels on the derived index.
     # Said of a face before its thumbnail changed: of it as it is now.
     edits, _ = translated(aliases(db), edits)
     db.execute("CREATE TEMP TABLE labels (key TEXT PRIMARY KEY, name TEXT NOT NULL)")
-    db.execute("CREATE TEMP TABLE legacy (anchor TEXT PRIMARY KEY, name TEXT NOT NULL)")
     db.execute("CREATE TEMP TABLE rejected (anchor TEXT, member TEXT, PRIMARY KEY (anchor, member))")
     db.executemany("INSERT INTO labels VALUES (?,?)",
                    ((key, edit["person"]) for key, edit in edits.items() if edit.get("person")))
-    db.executemany("INSERT INTO legacy VALUES (?,?)",
-                   ((key, edit["name"]) for key, edit in edits.items() if edit.get("name")))
     db.executemany("INSERT OR IGNORE INTO rejected VALUES (?,?)",
                    ((key, face) for key, edit in edits.items() for face in edit.get("rejected", ())))
     # A group someone said is not a person is not guessed to be them again.
@@ -490,13 +482,6 @@ def review_labels(db, edits):
     db.execute("CREATE TEMP TABLE unknown (anchor TEXT PRIMARY KEY)")
     db.executemany("INSERT OR IGNORE INTO unknown VALUES (?)",
                    ((key,) for key, edit in edits.items() if edit.get("unknown")))
-    db.execute("INSERT OR IGNORE INTO labels SELECT anchor, name FROM legacy")
-    db.execute("""
-        INSERT OR IGNORE INTO labels
-        SELECT s.member, l.name FROM legacy l JOIN suggestions s USING (anchor)
-        LEFT JOIN rejected r ON r.anchor=s.anchor AND r.member=s.member
-        WHERE r.member IS NULL ORDER BY s.anchor
-        """)
     db.execute("""
         CREATE TEMP VIEW pending AS
         SELECT s.* FROM suggestions s LEFT JOIN labels l ON l.key=s.member
@@ -676,20 +661,14 @@ def face_guess(db, key, refused):
 
 def photo_rows(db, photo):
     """The faces of one photo: who each is (`name`), or most likely is
-    (`guess`), the group it waits in (`anchor`), and the group named by an
-    older version it is someone by (`legacy`), to take it out of."""
+    (`guess`) and the group it waits in (`anchor`)."""
     rows = db.execute("""
         SELECT f.key, f.box, l.name,
-               (SELECT anchor FROM pending WHERE member=f.key LIMIT 1),
-               (SELECT lg.anchor FROM legacy lg WHERE lg.anchor=f.key
-                UNION ALL
-                SELECT s.anchor FROM legacy lg JOIN suggestions s USING (anchor)
-                LEFT JOIN rejected r ON r.anchor=s.anchor AND r.member=s.member
-                WHERE s.member=f.key AND r.member IS NULL LIMIT 1)
+               (SELECT anchor FROM pending WHERE member=f.key LIMIT 1)
         FROM faces f LEFT JOIN labels l USING (key) WHERE f.photo=? ORDER BY f.key
         """, (photo,)).fetchall()
     faces = []
-    for key, box, name, anchor, legacy in rows:
+    for key, box, name, anchor in rows:
         guess = None
         if name is None:
             # Said not to be someone, the face or the group it waits in.
@@ -698,7 +677,7 @@ def photo_rows(db, photo):
             group = guesses(db, [anchor]).get(anchor) if anchor else None
             guess = group[0] if group and group[0] not in refused else face_guess(db, key, refused)
         faces.append(dict(key=key, id=photo, box=json.loads(box), name=name, guess=guess,
-                          anchor=anchor, legacy=legacy))
+                          anchor=anchor))
     return faces
 
 
@@ -717,25 +696,18 @@ def readonly(path):
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
 
 
-def load_edits(synced, state, source, previous):
+def load_edits(synced, previous):
     """What is said of faces: the library's synced file (PINHOLE_SYNCED, its
-    "values" by face), with what this computer kept before names were
-    synced (state.json's "people:<source>") under it, until the window
-    takes that in."""
+    "values" by face)."""
     try:
         try:
-            entries = json.loads(state.read_text()).get("people:" + source, {}) if state else {}
+            entries = json.loads(synced.read_text()).get("values", {}) if synced else {}
         except FileNotFoundError:
             entries = {}
-        if synced:
-            try:
-                entries = {**entries, **json.loads(synced.read_text()).get("values", {})}
-            except FileNotFoundError:
-                pass
         # Groups with a saved word about them keep their anchor through
         # regrouping, so the word stays with the faces it was said of.
         names = sorted(key for key, edit in entries.items()
-                       if edit.get("name") or edit.get("unknown") or edit.get("not"))
+                       if edit.get("unknown") or edit.get("not"))
         excluded = {key: edit["rejected"] for key, edit in entries.items() if edit.get("rejected")}
         return names, excluded
     except (OSError, ValueError, AttributeError):
@@ -767,7 +739,6 @@ def catalog_rows(catalog, source):
 
 
 def run_index(db, library, source, settings):
-    state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/pinhole.people/state.json"
     synced = Path(os.environ["PINHOLE_SYNCED"]) if os.environ.get("PINHOLE_SYNCED") else None
     path = library / "library.sqlite"
     inode = version = catalog = None
@@ -796,7 +767,7 @@ def run_index(db, library, source, settings):
                     catalog = readonly(path)
                     inode, version = identity, None
                 changed = catalog.execute("PRAGMA data_version").fetchone()[0]
-                saved = load_edits(synced, state, source, edits)
+                saved = load_edits(synced, edits)
                 preference = load_grouping(settings, grouping)
                 refresh = changed != version or (errors and time.monotonic() >= retry)
                 if refresh:
@@ -854,7 +825,7 @@ def exit_with_parent():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment", "photo", "convert"))
+    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment", "photo"))
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--library", type=Path)
     parser.add_argument("--library-key")
@@ -887,24 +858,7 @@ def main():
         _, moved = translated(aliases(db), request.get("edits", {}))
         review_labels(db, request.get("edits", {}))
         limit = max(1, min(2000, int(request.get("limit", 48))))
-        if args.operation == "convert":
-            # Names an older version said of whole groups, as each face's
-            # of the group as it is grouped now, the group's own face too,
-            # but those said not to be in it or named themselves: what
-            # People shows of them now, kept by face from here on.
-            edits, _ = translated(aliases(db), request.get("edits", {}))
-            persons = {}
-            for anchor, edit in edits.items():
-                name = edit.get("name")
-                if not name:
-                    continue
-                rejected = set(edit.get("rejected", ()))
-                members = [m for (m,) in db.execute("SELECT member FROM suggestions WHERE anchor=?", (anchor,))]
-                for face in [anchor] + members:
-                    if face not in rejected and not (edits.get(face) or {}).get("person"):
-                        persons.setdefault(face, name)
-            emit(args.operation, persons=persons, groups=[k for k, e in edits.items() if e.get("name")])
-        elif args.operation == "assignment":
+        if args.operation == "assignment":
             emit(args.operation, keys=assignment_keys(db, request["anchor"]))
         elif args.operation == "photo":
             emit(args.operation, rows=photo_rows(db, request["photo"]), names=known_names(db), moved=moved,

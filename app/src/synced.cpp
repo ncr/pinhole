@@ -223,20 +223,6 @@ void SyncedStore::set(const QString &plugin, const QJsonObject &changes) {
     tell(plugin, changed);
 }
 
-void SyncedStore::adopt(const QString &plugin, const QJsonObject &values) {
-    Doc &mine = doc(plugin);
-    QStringList changed;
-    for (auto it = values.begin(); it != values.end(); ++it) {
-        if (mine.clock.contains(it.key()) || it.value().isNull() || it.value().isUndefined())
-            continue;
-        // At 0: older than anything set anywhere.
-        keep(plugin, it.key(), Change{it.value(), Stamp{0, m_device}});
-        changed.append(it.key());
-    }
-    if (!changed.isEmpty())
-        tell(plugin, changed);
-}
-
 void SyncedStore::keep(const QString &plugin, const QString &key, const Change &change) {
     Doc &mine = doc(plugin);
     if (change.value.isNull())
@@ -383,24 +369,6 @@ PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObj
 QStringList PluginSyncedMap::keys() const { return m_store->values(m_plugin).keys(); }
 
 QJsonObject PluginSyncedMap::values() const { return m_store->values(m_plugin); }
-
-void PluginSyncedMap::adopt(const QVariantMap &values) {
-    QJsonObject json;
-    for (auto it = values.begin(); it != values.end(); ++it) {
-        const QVariant value = it.value().metaType() == QMetaType::fromType<QJSValue>()
-                                   ? it.value().value<QJSValue>().toVariant(QJSValue::ConvertJSObjects)
-                                   : it.value();
-        json.insert(it.key(), QJsonValue::fromVariant(value));
-    }
-    m_store->adopt(m_plugin, json);
-    // Here at once, as a key assigned is.
-    const QJsonObject now = m_store->values(m_plugin);
-    QVariantHash taken;
-    for (auto it = json.begin(); it != json.end(); ++it)
-        if (const QJsonValue value = now.value(it.key()); !value.isUndefined())
-            taken.insert(it.key(), QVariant::fromValue(value));
-    insertAll(this, taken);
-}
 
 QVariant PluginSyncedMap::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.

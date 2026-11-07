@@ -55,7 +55,6 @@ fn main() -> Result<()> {
     kinds.refresh(&pinhole_core::plugins::switches_in(&plugins));
     let saved = storage::read_settings(&settings, &kinds);
     let location = saved.location.clone().unwrap_or_else(storage::default_location);
-    let cache_given = cli.cache.is_some();
     let source = kinds.source_for(kinds.shown(&saved).as_ref())?;
     service::run(Config {
         library: cli.library.unwrap_or_else(|| storage::library_for(&location, source.as_ref())),
@@ -69,7 +68,6 @@ fn main() -> Result<()> {
         plugins,
         // Photos still where the cache was before it moved in with the
         // library come over.
-        adopt: (!cache_given && !cli.given).then(storage::old_cache),
         downloads: cli.downloads,
         sync_every: std::env::var("PINHOLE_SYNC_SECS").ok().and_then(|v| v.parse().ok()),
         given: cli.given.then_some(Duration::from_secs(10)),

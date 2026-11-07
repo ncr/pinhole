@@ -220,14 +220,6 @@ PinholePlugin {
     }
     // Each photo's facts, for the library shown.
     readonly property var factsKept: pinhole.store("facts")
-    // What was kept before, in a file of its own, gone: for each library
-    // shown.
-    function tidy() { pinhole.run("pinhole-info", ["tidy", pinhole.cacheDir]).catch(() => {}) }
-    Component.onCompleted: tidy()
-    Connections {
-        target: pinhole
-        function onCacheDirChanged() { plugin.tidy() }
-    }
     function take(id, key, all) {
         known[id] = { key: key, facts: all }
         if (id === photoId) {

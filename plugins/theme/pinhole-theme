@@ -88,12 +88,8 @@ make)
   fi
   mkdir -p "$THEMES" "$BUILD"
   # What a make stopped halfway left (killed, its window closed), untouched
-  # for ten minutes; and so in themes/ itself, as an older Pinhole built
-  # there: .pinhole-<name>.XXXXXX, with its mark.
+  # for ten minutes.
   find "$BUILD" -mindepth 1 -maxdepth 1 -mmin +10 -exec rm -rf {} + 2>/dev/null || true
-  while IFS= read -r left; do
-    [[ ! -f $left/$MARK ]] || rm -rf -- "$left"
-  done < <(find "$THEMES" -mindepth 1 -maxdepth 1 -type d -name '.pinhole-*.??????' -mmin +10 2>/dev/null || true)
   # Built aside and swapped in, so a theme is never half written.
   next=$(mktemp -d "$BUILD/$name.XXXXXX")
   trap 'rm -rf "$next"' EXIT

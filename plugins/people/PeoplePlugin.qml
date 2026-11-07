@@ -19,52 +19,19 @@ PinholePlugin {
         edits = pinhole.synced.values()
         edited()
         if (shownId !== "") lookSoon.restart()
-        convertSoon.restart()
-    }
-    // Names an older version said of whole groups: said of each face
-    // instead, once, as People shows them now (pinhole-faces convert).
-    Timer { id: convertSoon; interval: 2000; onTriggered: plugin.convertGroupNames() }
-    property bool converting: false
-    function convertGroupNames() {
-        if (converting || !Object.values(edits).some(edit => edit && edit.name))
-            return
-        converting = true
-        pinhole.run("pinhole-faces", ["convert", "--cache", pinhole.cacheDir], {
-            input: plugin.input({ source: plugin.source, offset: 0 }), timeout: 30000
-        }).then(result => {
-            const persons = result.json.persons || {}, groups = result.json.groups || []
-            const patch = {}
-            for (const face of Object.keys(persons))
-                patch[face] = Object.assign({}, edits[face], { person: persons[face] })
-            for (const group of groups)
-                patch[group] = Object.assign({}, patch[group] || edits[group], { name: undefined })
-            writeEdits(patch)
-            console.info("pinhole.people: " + Object.keys(persons).length + " faces named as their groups were, "
-                         + groups.length + " groups' names taken off")
-        }).catch(pinhole.warn).then(() => converting = false)
     }
     Connections {
         target: pinhole.synced
         function onChanged() { plugin.reread() }
     }
-    // Kept on this computer alone before the names went with the library
-    // (pinhole.state, "people:" and the library's key): taken into it once,
-    // what is said of a face on any computer winning, now or once heard of.
-    function adopt() {
-        const key = "people:" + source
-        const before = pinhole.state[key]
-        if (!before) return
-        pinhole.synced.adopt(before)
-        pinhole.state[key] = null
-    }
-    Component.onCompleted: { adopt(); reread() }
-    onSourceChanged: { adopt(); reread() }
+    Component.onCompleted: reread()
+    onSourceChanged: reread()
 
     function writeEdits(patch) {
         const now = Object.assign({}, edits)
         for (const face of Object.keys(patch)) {
             const edit = patch[face]
-            const kept = edit.name || edit.person || edit.rejected?.length || edit.not?.length || edit.unknown
+            const kept = edit.person || edit.rejected?.length || edit.not?.length || edit.unknown
             pinhole.synced[face] = kept ? edit : null
             if (kept) now[face] = edit
             else delete now[face]
@@ -104,7 +71,6 @@ PinholePlugin {
         if (once.edits !== edits) {
             const named = new Set(), all = Object.values(edits)
             for (let i = 0; i < all.length; ++i) {
-                if (all[i].name) named.add(all[i].name)
                 if (all[i].person) named.add(all[i].person)
             }
             once.edits = edits
@@ -132,7 +98,7 @@ PinholePlugin {
     }
 
     // The photo shown full window, and the faces in it: [{ key, box, name,
-    // guess, anchor, legacy, drawn }], `drawn` the face's box in the photo as
+    // guess, anchor, drawn }], `drawn` the face's box in the photo as
     // it is turned and cropped here, left to right.
     readonly property string shownId: (pinhole.library.revision, pinhole.viewer.open && pinhole.viewer.index >= 0
                                        ? pinhole.viewer.id : "")
@@ -229,8 +195,7 @@ PinholePlugin {
         edit({ [face.key]: Object.assign({}, edits[face.key], { person: name }) }, qsTr("naming a face"))
     }
     // This face is not who it was said to be (nor guessed to be them
-    // again): out of a group named by an older version too. The word kept
-    // on it sets it apart from the group it waited in at the next
+    // again). The word kept on it sets it apart from the group it waited in at the next
     // regrouping (pinhole-faces' load_edits), as one said to be someone
     // else is: the rest of that group may well be them.
     function unnameFace(face) {
@@ -240,16 +205,11 @@ PinholePlugin {
             not: (previous.not || []).filter(name => name !== face.name).concat([face.name])
         }) }
         said(face.key, null)
-        if (face.legacy && face.legacy !== face.key) {
-            const group = edits[face.legacy] || {}
-            patch[face.legacy] = Object.assign({}, group, { rejected: (group.rejected || []).concat([face.key]) })
-        }
         edit(patch, qsTr("taking a name from a face"))
     }
-    // A name can be taken from it here: given to it alone, or with a group
-    // named by an older version, as one of its photos.
+    // A name can be taken from it here: given to it.
     function canUnname(face) {
-        return !!face.name && (!!edits[face.key]?.person || (!!face.legacy && face.legacy !== face.key))
+        return !!face.name && !!edits[face.key]?.person
     }
 
     actions: [

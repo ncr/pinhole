@@ -260,8 +260,7 @@ private:
         // Each kind is a plugin's (pinhole.icloud's): turned off, there is
         // nothing to sign in to, and no password is asked for.
         // The switches as plugins.json says them now, edited by hand too
-        // (the service reads it again); then which kinds are on. (A
-        // service from before kinds says none: iCloud is asked as before.)
+        // (the service reads it again); then which kinds are on.
         m_service.call("plugins_changed", {}, [this, given](bool, const QJsonObject &, const QString &) {
             m_service.call("kinds", {}, [this, given](bool, const QJsonObject &kinds, const QString &) {
                 QMap<QString, QJsonObject> byName;

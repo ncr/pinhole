@@ -167,15 +167,6 @@ fn a_window_meets_the_service_of_a_folder() {
     let has_heic = heic(&photos.join("c.heic"), [40, 40, 200], "2024:05:06 07:08:09");
     let magicks = root.join("magicks.log");
     count_magicks(&root.join("bin"), &magicks);
-    // JPEGs a window made itself before it asked the service for them
-    // (`jpeg`): gone as the service starts, however new, and the folder
-    // with them, as nothing writes there any more.
-    let compatible = root.join("cache/pinhole/compatible");
-    std::fs::create_dir_all(&compatible).unwrap();
-    std::fs::write(compatible.join("IMG_0001.jpg"), b"old").unwrap();
-    let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
-    std::fs::File::options().write(true).open(compatible.join("IMG_0001.jpg")).unwrap().set_modified(two_days_ago).unwrap();
-    std::fs::write(compatible.join("IMG_0002.jpg"), b"new").unwrap();
     let entry = json!({"kind": "folder", "path": photos});
     let settings = root.join("config/pinhole/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -197,7 +188,6 @@ fn a_window_meets_the_service_of_a_folder() {
         limit: None,
         settings,
         plugins: root.join("config/pinhole/plugins.json"),
-        adopt: None,
         downloads: 2,
         sync_every: None,
         given: None,
@@ -239,8 +229,6 @@ fn a_window_meets_the_service_of_a_folder() {
     let medium = window.ask("fetch", json!({"asset": "a.jpg", "kind": "medium"}));
     assert_eq!(medium["ok"], true, "{medium:#}");
     assert!(Path::new(medium["result"]["path"].as_str().unwrap()).is_file());
-    assert!(!compatible.exists());
-    assert!(root.join("cache/pinhole").is_dir());
 
     // A JPEG of a photo that is one is its full: here the file itself.
     let jpeg = window.ask("fetch", json!({"asset": "a.jpg", "kind": "jpeg"}));
@@ -465,7 +453,6 @@ fn a_window_meets_the_service_of_a_folder() {
         limit: None,
         settings: root.join("config/pinhole/given.json"),
         plugins: root.join("config/pinhole/plugins.json"),
-        adopt: None,
         downloads: 2,
         sync_every: None,
         given: None,

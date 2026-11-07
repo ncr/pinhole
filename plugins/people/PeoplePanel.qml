@@ -334,17 +334,8 @@ Panel {
         if (!face || page === "home") return
         if (page === "person") {
             const previous = edits[face.key] || {}
-            if (previous.person) {
+            if (previous.person)
                 edit({ [face.key]: Object.assign({}, previous, { person: undefined }) }, qsTr("taking a photo from a person"))
-                return
-            }
-            // Named with a whole group by an older version: out of that group.
-            const patch = {}
-            for (const key of Object.keys(edits)) {
-                if (edits[key].name !== person || key === face.key) continue
-                patch[key] = Object.assign({}, edits[key], { rejected: (edits[key].rejected || []).concat([face.key]) })
-            }
-            if (Object.keys(patch).length) edit(patch, qsTr("taking a photo from a person"))
             return
         }
         const owner = page === "group" ? anchor : likely[checking]
