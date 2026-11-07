@@ -1,4 +1,5 @@
 #include "maptiles.h"
+#include "places.h"
 
 #include <QQmlExtensionPlugin>
 #include <qqml.h>
@@ -11,6 +12,7 @@ class InfoModule : public QQmlExtensionPlugin {
 public:
     void registerTypes(const char *uri) override {
         qmlRegisterType<MapTiles>(uri, 1, 0, "MapTiles");
+        qmlRegisterSingletonType<Places>(uri, 1, 0, "Places", [](QQmlEngine *, QJSEngine *) -> QObject * { return new Places; });
     }
 };
 

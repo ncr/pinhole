@@ -53,6 +53,9 @@ FocusScope {
         return shownPoints
     }
     readonly property bool hasPhotos: availablePoints.length > 0
+    // Where they are, as two lists, for the grouping (Places.groupsAt).
+    readonly property var availableXs: availablePoints.map(p => p.x)
+    readonly property var availableYs: availablePoints.map(p => p.y)
 
     function start(focus) {
         focusPoint = focus
@@ -157,7 +160,7 @@ FocusScope {
         // the photos are gone through), and once more where it stops.
         const zoomed = gestures.moving ? Math.abs(clusteredAt - zoom) >= 0.5 : clusteredAt !== zoom
         if (clusteredFrom !== availablePoints || zoomed) {
-            clustered = Geo.clusters(availablePoints, zoom)
+            clustered = Geo.groupsOf(availablePoints, Places.groupsAt(availableXs, availableYs, zoom), zoom)
             clusteredFrom = availablePoints
             clusteredAt = zoom
         }

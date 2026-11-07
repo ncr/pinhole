@@ -80,6 +80,7 @@
 #include "translator.h"
 #include "viewer.h"
 #include "vectortile.h"
+#include "places.h"
 #include "viewermotion.h"
 #include "zoomer.h"
 
@@ -450,6 +451,60 @@ private slots:
     }
 
     // A vector tile written by hand: water, a road and a city's names.
+    // The map's groups of photos, worked out in Info's module, are those
+    // Places.js clusters() makes, in the same order, each with the same
+    // photos and cover: photos crowded in a few places and some alone, at
+    // every zoom from the world to a street.
+    void theMapsPhotosAreGroupedNativelyAsPlacesJsGroupsThem() {
+        QQmlEngine engine;
+        Places places;
+        engine.rootContext()->setContextProperty("places", &places);
+        QQmlComponent component(&engine);
+        QByteArray qml = R"QML(
+            import QtQml
+            import "PLACES_JS" as Geo
+            QtObject {
+                function compare() {
+                    let seed = 11
+                    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+                    const centres = []
+                    for (let c = 0; c < 60; ++c) centres.push([rnd(), 0.2 + rnd() * 0.5])
+                    const points = []
+                    for (let i = 0; i < 6000; ++i) {
+                        const c = centres[Math.floor(Math.pow(rnd(), 3) * 60)]
+                        const lone = i % 50 === 0
+                        points.push({ id: "p" + i, x: lone ? rnd() : c[0] + (rnd() - 0.5) * 0.002,
+                                      y: lone ? 0.1 + rnd() * 0.8 : c[1] + (rnd() - 0.5) * 0.002, date: (i * 7919) % 6007 })
+                    }
+                    const xs = points.map(p => p.x), ys = points.map(p => p.y)
+                    const said = []
+                    for (const zoom of [0, 2, 4.5, 7, 10, 13, 16, 19]) {
+                        const js = Geo.clusters(points, zoom)
+                        const native = Geo.groupsOf(points, places.groupsAt(xs, ys, zoom), zoom)
+                        const same = js.length === native.length && js.every((g, i) => g.key === native[i].key
+                            && g.cover.id === native[i].cover.id && g.sx === native[i].sx && g.sy === native[i].sy
+                            && g.points.length === native[i].points.length
+                            && g.points.every((p, j) => p === native[i].points[j]))
+                        said.push(zoom + ":" + js.length + ":" + same)
+                    }
+                    return said.join(" ")
+                }
+            }
+        )QML";
+        qml.replace("PLACES_JS", QUrl::fromLocalFile(QFINDTESTDATA("../../plugins/info/Places.js")).toString().toUtf8());
+        component.setData(qml, QUrl("qrc:/places-test.qml"));
+        std::unique_ptr<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        QVariant said;
+        QMetaObject::invokeMethod(object.get(), "compare", Q_RETURN_ARG(QVariant, said));
+        const QStringList zooms = said.toString().split(' ');
+        QCOMPARE(zooms.size(), 8);
+        for (const QString &zoom : zooms)
+            QVERIFY2(zoom.endsWith(":true"), qPrintable(said.toString()));
+        // From a few groups to many: the zooms tell them apart.
+        QVERIFY2(zooms.first().section(':', 1, 1).toInt() < zooms.last().section(':', 1, 1).toInt(), qPrintable(said.toString()));
+    }
+
     void aVectorTileGivesItsShapesAndTheNameInTheLanguageAsked() {
         const auto varint = [](QByteArray &out, quint64 v) {
             do { quint8 b = v & 0x7f; v >>= 7; out.append(char(v ? b | 0x80 : b)); } while (v);

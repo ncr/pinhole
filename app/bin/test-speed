@@ -23,9 +23,11 @@ the compositor this runs on: start it on a hidden workspace, as CLAUDE.md says.
 import argparse
 import json
 import os
+import random
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -46,13 +48,33 @@ def people(faces, out):
 
 
 def fixture(photos):
+    """A synthetic library, made once and kept: its photos taken where a
+    life's are, most in a few places, some alone, and some nowhere."""
     library = ROOT / 'app/build/speed-fixture' / str(photos) / 'fake' / 'speed'
-    if not (library / 'library.sqlite').is_file():
+    if not (library / 'placed').is_file():
         if library.exists():
             shutil.rmtree(library)
         library.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([str(ROOT / 'core/target/release/pinhole-fake'), '--count', str(photos), '--out', str(library)],
                        check=True)
+        places = random.Random(7)
+        homes = [(places.uniform(-50, 65), places.uniform(-170, 170)) for _ in range(120)]
+        db = sqlite3.connect(library / 'library.sqlite')
+        ids = [row[0] for row in db.execute('SELECT id FROM assets ORDER BY asset_date')]
+        rows = []
+        for asset in ids:
+            if places.random() < 0.2:
+                continue
+            if places.random() < 0.03:
+                latitude, longitude = places.uniform(-60, 70), places.uniform(-180, 180)
+            else:
+                home = homes[int(places.random() ** 3 * len(homes))]
+                latitude, longitude = home[0] + places.gauss(0, 0.05), home[1] + places.gauss(0, 0.05)
+            rows.append((latitude, longitude, asset))
+        db.executemany('UPDATE assets SET latitude = ?, longitude = ?, has_location = 1 WHERE id = ?', rows)
+        db.commit()
+        db.close()
+        (library / 'placed').write_text('')
     return library
 
 

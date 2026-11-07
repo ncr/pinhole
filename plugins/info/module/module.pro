@@ -8,8 +8,8 @@ QT += core gui qml quick network concurrent
 TARGET = pinholeinfo
 DESTDIR = $$PWD/../qml/Pinhole/Internal/Info
 
-HEADERS += maptiles.h vectortile.h
-SOURCES += maptiles.cpp vectortile.cpp module.cpp
+HEADERS += maptiles.h places.h vectortile.h
+SOURCES += maptiles.cpp places.cpp vectortile.cpp module.cpp
 
 # Its qmldir beside the library.
 COPIES += qmldir

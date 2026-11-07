@@ -81,6 +81,23 @@ function clusters(points, zoom) {
     return groups
 }
 
+// The groups clusters() makes, from which each photo is in
+// (Places.groupsAt in Info's module, which works it out far quicker).
+function groupsOf(points, of, zoom) {
+    const size = scale(zoom), groups = []
+    for (let n = 0; n < points.length; ++n) {
+        const p = points[n], g = groups[of[n]]
+        if (g === undefined) {
+            groups[of[n]] = { key: p.id, sx: p.x * size, sy: p.y * size, x: p.x, y: p.y, cover: p, points: [p] }
+        } else {
+            g.points.push(p)
+            if (p.date > g.cover.date)
+                g.cover = p
+        }
+    }
+    return groups
+}
+
 // Those of `groups` around the view (a marker's width past its edges).
 function around(groups, cx, cy, zoom, width, height) {
     const size = scale(zoom), margin = 74

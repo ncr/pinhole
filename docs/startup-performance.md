@@ -287,6 +287,7 @@ drawing in software. Its first run here found, besides the start:
 | People opened (Shift+F) | 236–265 ms | ~120 ms |
 | A photo shown with People on (faces asked for) | +87 ms | once per change |
 | Calendar opened / closed (Y) | 192 / 198 ms | 54–73 / 13–22 ms |
+| Map opened, real library (M; again every half a zoom step) | 228–294 ms | 78–93 ms |
 
 The causes: the key clash check asked every Command for every key of every
 action (now an index made once); `pinhole.synced.values()` was a QVariantMap,
@@ -294,4 +295,7 @@ whose every key read in JS goes back to C++ (now a plain object); People
 went through all its faces' names and wrote them all as JSON each time a
 view opened or a photo was shown (now once for each change); the calendar
 drew each year's glowing squares on the window's thread in every frame of
-its opening (now `Canvas.Threaded`).
+its opening (now `Canvas.Threaded`); the map grouped 28,000 photos in
+JavaScript (now `Places.groupsAt` in Info's module, the same groups, which a
+test holds it to). The synthetic library's photos have places, most in a
+few, as a life's: the map's cost was found on the real library first.
