@@ -50,7 +50,6 @@ PinholePlugin {
         if (working)
             return
         const item = pinhole.library.item(index)
-        let kept = "", before = null
         working = true
         pinhole.fetch(index, ways[way].kind)
             // A video's full rendition is its edit as an MP4, but some have
@@ -69,9 +68,28 @@ PinholePlugin {
                     + " " + Qt.formatDateTime(new Date(item.date), "yyyy-MM-dd HH.mm.ss") + ways[way].tag
                 const own = stemOf(from) === stemOf(item.filename || "")
                 // A still made sRGB, as the desktop shows it (API 4).
-                return pinhole.run("background", ["keep", from, folder, name, extension, own ? "own" : "cached",
-                                                  pinhole.srgbProfile])
+                return keepAndSet(from, name, extension, own, way === "still")
             })
+            .catch(failed)
+            .then(() => working = false)
+    }
+    // A file another plugin made (Series' video), as the background: kept
+    // under its own name, then set (the "file" action, API 15).
+    function setFileBackground(path) {
+        if (working)
+            return
+        const extension = extensionOf(path)
+        working = true
+        keepAndSet(path, path.split("/").pop().replace(/\.[^.]*$/, ""), extension, true, stills.includes(extension))
+            .catch(failed)
+            .then(() => working = false)
+    }
+    // `from` kept in the folder as `name`.`extension` (its own file, or the
+    // cache's), then set, the one before remembered for Ctrl Z.
+    function keepAndSet(from, name, extension, own, still) {
+        let kept = "", before = null
+        return pinhole.run("background", ["keep", from, folder, name, extension, own ? "own" : "cached",
+                                          pinhole.srgbProfile])
             .then(result => {
                 kept = result.stdout.trim()
                 return current()
@@ -81,13 +99,10 @@ PinholePlugin {
                 return pinhole.run("background", ["set", kept, ""])
             })
             .then(() => {
-                pinhole.notify(way === "still" ? qsTr("Your desktop background now")
-                                               : qsTr("Your moving desktop background now"))
+                pinhole.notify(still ? qsTr("Your desktop background now") : qsTr("Your moving desktop background now"))
                 if (before.path !== "" && before.path !== kept)
                     pinhole.did(qsTr("setting the background"), () => apply(before), () => apply({ path: kept, theme: before.theme }))
             })
-            .catch(failed)
-            .then(() => working = false)
     }
     function failed(error) {
         if (error.code === "cancelled")
@@ -176,6 +191,15 @@ PinholePlugin {
             shown: plugin.shown !== null && plugin.shown.live
             usable: !plugin.working
             onTriggered: plugin.setBackground(pinhole.viewer.index, "bounce")
+        },
+        // What another plugin made, where it shows it: Series' video.
+        PluginAction {
+            place: "file"
+            text: qsTr("Background")
+            key: "B"
+            accepts: plugin.stills.concat(plugin.videos)
+            busy: plugin.working
+            onTriggered: plugin.setFileBackground(file)
         }
     ]
 

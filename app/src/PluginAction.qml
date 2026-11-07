@@ -7,7 +7,31 @@ QtObject {
     // row at the top right of a photo shown full window, before Copy.
     // "selection": in select mode's bar, after Copy, for what is ticked
     // (pinhole.selection()); its key works only while it shows.
+    // "file" (API 15): no button of its own, something it does with a file
+    // another plugin made, which that plugin offers where it shows the file
+    // (pinhole.fileActions: Series' video as the background). Its key is
+    // what that plugin presses it with.
     property string place: "grid"
+    // A "file" action's: the files it does, by their extension, lowercase
+    // ("mp4"); none, any. The file it is done with now, as it is triggered.
+    property var accepts: []
+    property string file
+    function takes(path) {
+        if (!accepts || accepts.length === 0)
+            return true
+        const name = String(path).split("/").pop()
+        const dot = name.lastIndexOf(".")
+        return dot > 0 && accepts.indexOf(name.slice(dot + 1).toLowerCase()) >= 0
+    }
+    // Done with `path`: `file` set to it, then triggered(), as long as it
+    // shows, can be used, and takes it. Whether it was.
+    function trigger(path) {
+        if (place !== "file" || !shown || !usable || busy || !takes(path))
+            return false
+        file = path
+        triggered()
+        return true
+    }
     // In the bars (the viewer's, select mode's): actions with the same
     // group are one button, the first of them shown, and the rest in its
     // menu under ▾, opened with ⇧ and its key too. Without one, alone.

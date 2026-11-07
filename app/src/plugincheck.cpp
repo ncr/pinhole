@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -312,6 +312,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
         {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
+        {"pinhole.fileActions or a file's PluginAction",
+         QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*fileActions\\b|\\bplace\\s*:\\s*[\"']file[\"']"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
         {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
         {"pinhole.setFavorite", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*setFavorite\\b"))},
@@ -1162,7 +1164,7 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         static const QRegularExpression valueOf(QStringLiteral("(?:^|[;{\\s])(icon|colour|textColour|place)\\s*:\\s*[\"']([^\"']*)[\"']"));
         static const QStringList colours = {"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
         static const QStringList icons = {"video", "live", "heart", "stack"};
-        static const QStringList places = {"grid", "viewer", "selection"};
+        static const QStringList places = {"grid", "viewer", "selection", "file"};
         static const QRegularExpression hex(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
         for (auto m = markOrAction.globalMatch(code); m.hasNext();) {
             const auto match = m.next();

@@ -170,7 +170,8 @@ Item {
         const taken = {}
         for (let i = 0; i < actions.length; ++i) {
             const action = actions[i]
-            if (!action.key) continue
+            // A file's: pressed by the plugin that offers it, with its keys.
+            if (!action.key || action.place === "file") continue
             const key = keymap.portable(action.key)
             const place = action.place === "viewer" ? "viewer" : "grid"
             const clash = own.find(c => layersOf(place).indexOf(c.keyLayer) >= 0
@@ -257,6 +258,7 @@ Item {
         pluginActions = actions.map((a, i) => ({ a: a, i: i }))
             .sort((x, y) => (x.a.order || 0) - (y.a.order || 0) || x.i - y.i)
             .map(x => x.a)
+        plugins.setFileActions(pluginActions.filter(a => a.place === "file"))
         // Made again only when one comes or goes: a photo's layers stay.
         if (layers.length !== pluginLayers.length
                 || layers.some((l, i) => l.plugin !== pluginLayers[i].plugin || l.component !== pluginLayers[i].component))

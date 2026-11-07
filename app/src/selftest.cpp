@@ -2212,7 +2212,24 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
             return;
         }
         studioItem->setProperty("made", QVariantMap{{"path", video}, {"name", QFileInfo(video).fileName()}, {"size", ""}});
-        QMetaObject::invokeMethod(studioItem, "makeBackground");
+        // Background's action on a file, as Series offers it (API 15).
+        QVariant offered = studioItem->property("fileActions");
+        if (offered.canConvert<QJSValue>())
+            offered = offered.value<QJSValue>().toVariant();
+        QObject *action = nullptr;
+        for (const QVariant &each : offered.toList())
+            if (QObject *a = each.value<QObject *>(); a && a->property("key").toString() == QLatin1String("B"))
+                action = a;
+        say(QStringLiteral("the studio offers %1 action(s) on its video%2").arg(offered.toList().size())
+                .arg(action ? QStringLiteral(", Background's among them") : QStringLiteral(", NONE of Background's")));
+        QVariant triggered;
+        if (action)
+            QMetaObject::invokeMethod(action, "trigger", Q_RETURN_ARG(QVariant, triggered), Q_ARG(QVariant, QVariant(video)));
+        if (!triggered.toBool()) {
+            *failed = true;
+            finish();
+            return;
+        }
         waitFor(QStringLiteral("studio-set"), [=](const QString &now) { return keptHere(now) && now.endsWith(".mp4"); }, [=] {
             *set = current();
             // Another theme now, its own file of that name where the one

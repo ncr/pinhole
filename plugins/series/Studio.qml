@@ -211,60 +211,9 @@ Item {
         }
     }
 
-    // The video made as the desktop background, by the Background plugin's
-    // own script, beside this plugin's folder: kept as it keeps one, in
-    // Pictures/Pinhole/.backgrounds, where no folder source shows it and no
-    // cache clean takes it, and the one before remembered with its theme.
-    // Ctrl+Z puts that one back, as the Background plugin's does.
-    // Offered only where that script is: not when Series is a copy among
-    // one's own plugins, or Background is not installed.
-    property bool settingBackground: false
-    readonly property string backgroundScript: pinhole.exists(pinhole.dir + "/../background/background")
-                                               ? pinhole.dir + "/../background/background" : ""
-    function makeBackground() {
-        if (!made || settingBackground || backgroundScript === "")
-            return
-        let kept = "", before = null
-        settingBackground = true
-        pinhole.run(backgroundScript, ["keep", made.path, pinhole.picturesDir() + "/Pinhole/.backgrounds",
-                                       made.name.replace(/\.[^.]*$/, ""), "mp4", "own"])
-            .then(result => {
-                kept = result.stdout.trim()
-                return pinhole.run(backgroundScript, ["current"]).then(result => {
-                    const lines = result.stdout.split("\n")
-                    return { theme: lines[0].trim(), path: (lines[1] || "").trim() }
-                }, () => ({ theme: "", path: "" }))
-            })
-            .then(now => {
-                before = now
-                return pinhole.run(backgroundScript, ["set", kept, ""])
-            })
-            .then(() => {
-                pinhole.notify(qsTr("Your moving desktop background now"))
-                if (before.path !== "" && before.path !== kept)
-                    pinhole.did(qsTr("setting the background"), () => setBackground(before),
-                                () => setBackground({ path: kept, theme: before.theme }))
-            })
-            .catch(backgroundFailed)
-            .then(() => settingBackground = false)
-    }
-    // Undone or done again: that one, if it is still there.
-    function setBackground(background) {
-        pinhole.run(backgroundScript, ["set", background.path, background.theme]).catch(error => {
-            if (error.exitCode === 3)
-                pinhole.notify(qsTr("The background before went with the theme %1").arg(background.theme))
-            else if (error.exitCode === 4)
-                pinhole.notify(qsTr("The background before is gone: %1").arg(background.path.split("/").pop()))
-            else
-                backgroundFailed(error)
-        })
-    }
-    function backgroundFailed(error) {
-        if (error.code === "cancelled")
-            return
-        const why = String(error.message || error.code || error).trim().split("\n").pop()
-        pinhole.notify(qsTr("Could not set the background: %1").arg(why))
-    }
+    // What the other plugins do with the file made (API 15): the
+    // Background plugin's "Background", with its key, while it is on.
+    readonly property var fileActions: made ? pinhole.fileActions.filter(a => a.shown && a.takes(made.path)) : []
 
     FrameAnimation {
         running: studio.shown && studio.playing && studio.making === ""
@@ -463,17 +412,6 @@ Item {
         when: studio.shown && studio.made !== null
         onTriggered: pinhole.showFile(studio.made.path)
     }
-    Command {
-        id: backgroundCommand
-        name: "studio.background"
-        text: qsTr("The video as the background")
-        section: "Series"
-        keys: ["B"]
-        keyLayer: "plugin"
-        when: studio.shown && studio.made !== null && studio.made.path.endsWith(".mp4") && !studio.settingBackground
-              && studio.backgroundScript !== ""
-        onTriggered: studio.makeBackground()
-    }
 
     // The file's frames are drawn here, at its size, out of sight under
     // the studio (a picture is taken of it, not of the screen).
@@ -651,12 +589,20 @@ Item {
             text: qsTr("Show")
             action: showCommand
         }
-        ShellButton {
-            visible: studio.made !== null && studio.made.path.endsWith(".mp4") && studio.backgroundScript !== ""
-            floating: true
-            text: qsTr("Background")
-            busy: studio.settingBackground
-            action: backgroundCommand
+        // Its key pressing it while it shows, in the help under Series.
+        Repeater {
+            model: studio.fileActions
+            ShellButton {
+                required property var modelData
+                floating: true
+                text: modelData.text
+                key: modelData.key
+                keyLayer: "plugin"
+                section: "Series"
+                busy: modelData.busy
+                usable: modelData.usable && !modelData.busy
+                onTapped: modelData.trigger(studio.made.path)
+            }
         }
     }
 

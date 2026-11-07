@@ -465,7 +465,9 @@ setting's default), a `setting` for `SettingSwitch` and `Choices`, and
 library, kept with it on every computer it is shown on, and its file
 given to the plugin's workers (`PINHOLE_SYNCED`); and
 `pinhole.viewer.photo` and `id`. API 15 adds kinds a plugin makes of
-its own (`"<its id>/<name>"` in `makes`, What a plugin makes).
+its own (`"<its id>/<name>"` in `makes`, What a plugin makes), and
+actions on a file: `PluginAction`'s `place: "file"` and
+`pinhole.fileActions`.
 
 `Main.qml` beside it:
 
@@ -695,6 +697,17 @@ its settings, is there as the window first shows. It sets:
   into one, More ▾, whose menu lists them with their keys; the keys work
   either way, and a group's ⇧ key opens that menu on its row. More ▾ is
   lit while one of them is `active`, and turns while one is `busy`.
+  `place: "file"` (API 15) is no button of its own but something it does
+  with a file another plugin made, which that plugin offers where it shows
+  the file: Background's `"Background"` on Series' video. `accepts` lists
+  the extensions it does, lowercase (`["mp4", "jpg"]`; none, any), and
+  `file` is the one it is done with as it is triggered. A plugin finds
+  them in `pinhole.fileActions`, keeps those that are `shown` and whose
+  `takes(path)` is true, shows each as a button with its `text`, `key`
+  and `busy`, and presses it with `trigger(path)`, which sets `file` and
+  triggers it (false, doing nothing, when it is not `usable`, is `busy` or
+  does not take it). Its `key` is the offering plugin's to press it with,
+  on its own keys: no clash with the grid's or the viewer's.
   Menus share the photo-order menu's layout and interaction: a pointer
   opening does not focus the first action; hover and keyboard focus are
   distinct from the saved active state. Press the opener again, click
@@ -924,6 +937,7 @@ this API. A library position is not a visual grid position.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out (as assigning `null` to one does: it reads `undefined`, and `settings.keys()` leaves it out) |
+| `fileActions` | what the plugins on do with a file (API 15): their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
 | `synced` | what the user made of the library shown, which goes with it to every computer it is shown on (API 14): People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `adopt(values)` takes in what the plugin kept before it synced them (its `state`): only keys the library has never had, and a key set on any computer wins over them, now or once heard of; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |

@@ -450,6 +450,26 @@ bool PluginHost::hasKeys() const {
     return keymap && keymap->layer() == QLatin1String("plugin") && keymap->plugin() == m_id;
 }
 
+QList<QObject *> PluginHost::fileActions() const { return m_plugins->fileActions(); }
+
+void Plugins::setFileActions(const QList<QObject *> &actions) {
+    QList<QPointer<QObject>> now(actions.begin(), actions.end());
+    if (now == m_fileActions)
+        return;
+    m_fileActions = now;
+    for (const auto &p : m_plugins)
+        if (p->host)
+            emit p->host->fileActionsChanged();
+}
+
+QList<QObject *> Plugins::fileActions() const {
+    QList<QObject *> actions;
+    for (const QPointer<QObject> &action : m_fileActions)
+        if (action)
+            actions << action.data();
+    return actions;
+}
+
 bool PluginHost::keyboardInUse() const {
     return m_plugins->keymap() && m_plugins->keymap()->input() == QLatin1String("keyboard");
 }

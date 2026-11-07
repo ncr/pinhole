@@ -303,6 +303,11 @@ class PluginHost : public QObject {
     // Whether the keys are this plugin's now: it covers the photos, and no
     // panel of Pinhole's is over it (API 12).
     Q_PROPERTY(bool hasKeys READ hasKeys NOTIFY hasKeysChanged)
+    // What the plugins on do with a file (API 15): their PluginActions of
+    // place "file", the Background plugin's "Background" say, to offer on
+    // a file a plugin made. Its takes(path) says if it does that file, its
+    // trigger(path) does it.
+    Q_PROPERTY(QList<QObject *> fileActions READ fileActions NOTIFY fileActionsChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -350,6 +355,7 @@ public:
     Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options = {});
     bool away() const { return m_away; }
     bool keyboardInUse() const;
+    QList<QObject *> fileActions() const;
     QString input() const;
     bool hasKeys() const;
     // The viewer closed, or another plugin covered meanwhile.
@@ -518,6 +524,7 @@ signals:
     void awayChanged();
     void keyboardInUseChanged();
     void hasKeysChanged();
+    void fileActionsChanged();
     void workersChanged();
     // What one of its workers said: a line of JSON with an "event" it wrote
     // on its stdout (API 12), its latest of each quarter second. What it
@@ -679,7 +686,8 @@ public:
     // PanelHeader, SettingNote and SettingSwitch, Choices.numbered and
     // keyboardInUse. 12: pinhole.copyText, input and hasKeys. 13:
     // pinhole.readText and readJson, a worker's `said` in pinhole.workers.
-    // 14: pinhole.synced.
+    // 14: pinhole.synced. 15: kinds a plugin makes of its own, and actions
+    // on a file (pinhole.fileActions).
     static constexpr int api = 15;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
@@ -747,6 +755,10 @@ public:
     void setGrid(PhotoGrid *grid);
     void setKeymap(Keymap *keymap);
     Keymap *keymap() const { return m_keymap; }
+    // The plugins' actions on a file (place "file"), as the window collects
+    // them: pinhole.fileActions.
+    Q_INVOKABLE void setFileActions(const QList<QObject *> &actions);
+    QList<QObject *> fileActions() const;
     // The window's sources, which pinhole.sources mirrors and asks.
     void setSources(Sources *sources);
     Sources *sourcesObject() const { return m_sources; }
@@ -943,6 +955,7 @@ private:
     PhotoGrid *m_grid = nullptr;
     Favourites *m_favourites = nullptr;
     Sources *m_sources = nullptr;
+    QList<QPointer<QObject>> m_fileActions;
     QQmlEngine *m_engine = nullptr;
     std::unique_ptr<PluginLibrary> m_libraryApi;
     std::unique_ptr<PluginViewer> m_viewerApi;
