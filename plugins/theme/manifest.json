@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "api": 15,
+  "requires": ["magick"],
   "id": "pinhole.theme",
   "name": "Theme",
   "version": "1.0.0",

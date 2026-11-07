@@ -1491,6 +1491,19 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // What a plugin needs (the manifest's "requires", API 15) and whether
+    // a program is there (pinhole.has).
+    void aPluginSaysWhatItNeedsAndAsksWhatIsThere() {
+        PluginBench bench({{"me.a", {{"requires", QJsonArray{"sh", "no-such-program-here"}}}}});
+        QCOMPARE(bench.plugins->at("me.a").value("missing").toStringList(), QStringList({"no-such-program-here"}));
+        QVERIFY(bench.js("pinhole.has('sh')").toBool());
+        QVERIFY(!bench.js("pinhole.has('no-such-program-here')").toBool());
+        QVERIFY(!bench.js("pinhole.has('../sh')").toBool());
+        QVERIFY(!bench.js("pinhole.has('')").toBool());
+        QVERIFY(Plugins::manifestWarnings(QString(), QJsonObject{{"requires", QJsonArray{"magick"}}}).isEmpty());
+        QVERIFY(Plugins::manifestWarnings(QString(), QJsonObject{{"requires", "magick"}}).join(" ").contains("list of the programs"));
+    }
+
     // What a plugin keeps a value for each of many keys of (pinhole.store,
     // API 15): one key at a time, as JSON, in its cacheDir for the library.
     void aPluginKeepsValuesByKeyInAStoreOfItsOwn() {

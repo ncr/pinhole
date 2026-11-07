@@ -418,6 +418,7 @@ And warns of:
 | `api` | a whole number, 1 if left out (below) |
 | `entryPoints` | `{ "main": "Main.qml" }`, required: the file in its folder Pinhole loads |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
+| `requires` | the programs it needs, by their names on PATH (API 15): `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
 | `author`, `license` | yours |
 
 A key not among these is never read: `plugin check` says so, with the one
@@ -470,7 +471,8 @@ actions on a file (`PluginAction`'s `place: "file"` and
 `pinhole.fileActions`), `pinhole.ask`, a worker that `answers`, and
 `library.settled`, `field(name, { shown: true })` and `field("hidden")`,
 an action's `places`, its `helpText`, an action with a key in the help
-by itself, and `pinhole.store(name)`.
+by itself, `pinhole.store(name)`, and the manifest's `requires` with
+`pinhole.has(program)`.
 
 `Main.qml` beside it:
 
@@ -997,6 +999,7 @@ this API. A library position is not a visual grid position.
 | `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
+| `has(program)` | whether a program is there to run (API 15): a name on PATH (`"localsend"`), or one of its folder's by a relative path; for one it can do without, as Send's LocalSend (what it cannot do without goes in the manifest's `requires`) |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `picturesDir()`: the desktop's Pictures folder (`~/Pictures`), for a folder of one's own in it (`picturesDir() + "/Exports"`); in a self-test, the scratch Pictures, never the person's. `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
 | `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled` (the plugin's own `cancel()`) or `reloaded` (the library read again meanwhile: ask again); see Bounded library queries below |

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "api": 15,
+  "requires": ["magick", "ffmpeg"],
   "id": "pinhole.background",
   "name": "Background",
   "version": "1.0.0",

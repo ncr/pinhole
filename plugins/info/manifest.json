@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "api": 15,
+  "requires": ["magick", "ffprobe"],
   "id": "pinhole.info",
   "name": "Info",
   "version": "1.0.0",

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "api": 15,
+  "requires": ["magick"],
   "id": "pinhole.sheet",
   "name": "Contact sheet",
   "version": "1.0.0",

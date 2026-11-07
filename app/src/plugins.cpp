@@ -659,6 +659,15 @@ QString PluginHost::picturePath(const QString &name, const QString &extension) c
 
 bool PluginHost::exists(const QString &path) const { return QFileInfo::exists(path); }
 
+bool PluginHost::has(const QString &program) const {
+    if (program.isEmpty() || program.contains(QLatin1String("..")))
+        return false;
+    // Its own, by a path in its folder; else on PATH, as run() finds it.
+    if (program.contains('/'))
+        return !program.startsWith('/') && QFileInfo(m_dir + '/' + program).isExecutable();
+    return !QStandardPaths::findExecutable(program).isEmpty();
+}
+
 double PluginHost::fileSize(const QString &path) const { return double(QFileInfo(path).size()); }
 
 QString PluginHost::sizeText(double bytes, int decimals) const {
@@ -1305,6 +1314,14 @@ QVariantMap Plugins::at(const QString &id) const {
             {"enabled", p->error.isEmpty() && enabled(*p)},
             {"error", p->error},
             {"problem", p->host->problem()},
+            // What it needs that is not here (its manifest's "requires").
+            {"missing", [&] {
+                 QStringList missing;
+                 for (const QString &program : p->required)
+                     if (QStandardPaths::findExecutable(program).isEmpty())
+                         missing << program;
+                 return missing;
+             }()},
             {"toured", m_toured.value(p->id).toBool()},
             {"sources", p->sources},
             {"copy", p->copy},
@@ -1657,6 +1674,10 @@ void Plugins::scan() {
                 plugin->main = main;
             plugin->sources = sourceKinds(manifest);
             plugin->settingDefaults = manifest.value("settings").toObject().toVariantMap();
+            plugin->required.clear();
+            for (const QJsonValue &each : manifest.value("requires").toArray())
+                if (const QString name = each.toString(); !name.isEmpty() && !name.contains('/'))
+                    plugin->required << name;
             // One's own with a built-in's id takes its place.
             const auto same = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == plugin->id; });
             if (same != found.end()) {

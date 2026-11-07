@@ -1479,6 +1479,17 @@ Item {
                                         color: theme.foreground
                                         font.pixelSize: Math.round(theme.fontSize * 0.857)
                                     }
+                                    // What it needs that is not installed (its
+                                    // manifest's "requires", API 15).
+                                    UiText {
+                                        width: parent.width
+                                        visible: (pluginRow.info.missing ?? []).length > 0
+                                        text: qsTr("It needs %1, which is not installed here.")
+                                                  .arg((pluginRow.info.missing ?? []).join(", "))
+                                        wrapMode: Text.WordWrap
+                                        color: theme.yellow
+                                        font.pixelSize: Math.round(theme.fontSize * 0.857)
+                                    }
                                     // What went wrong in it as it ran: its QML not
                                     // loading, an error thrown, a warning from one
                                     // of its files, each with the file and line.

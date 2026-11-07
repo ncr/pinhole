@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -314,6 +314,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
         {"library.settled, field's shown or field(\"hidden\")",
          QRegularExpression(QStringLiteral("\\bonSettled\\b|\\.\\s*settled\\s*\\.\\s*connect\\b|\\bfield\\s*\\([^()]*,\\s*\\{[^}]*\\bshown\\b|\\bfield\\s*\\(\\s*[\"']hidden[\"']"))},
+        {"requires in the manifest, or pinhole.has", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*has\\s*\\("))},
         {"pinhole.store", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*store\\s*\\("))},
         {"an action's helpText", QRegularExpression(QStringLiteral("\\bPluginAction\\s*\\{[^{}]*\\bhelpText\\s*:"))},
         {"an action's places", QRegularExpression(QStringLiteral("(?:^|[;{\\s])places\\s*:\\s*\\["))},
@@ -474,6 +475,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
                 uses << QStringLiteral("a kind of its own in makes");
         if (declared.contains(QLatin1String("settings")))
             uses << QStringLiteral("settings in the manifest");
+        if (declared.contains(QLatin1String("requires")))
+            uses << QStringLiteral("requires in the manifest, or pinhole.has");
     }
     QMap<int, QStringList> byApi;
     for (const auto &[version, name] : order)
@@ -1380,7 +1383,18 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
     QStringList said;
     // What a manifest has: a key misspelt is never read, and nothing says so.
     static const QStringList keys = {"schemaVersion", "id", "name", "description", "version", "api", "entryPoints",
-                                     "sources", "workers", "makes", "settings", "author", "license"};
+                                     "sources", "workers", "makes", "settings", "requires", "author", "license"};
+    // The programs it needs (API 15): names, as on PATH.
+    if (manifest.contains("requires")) {
+        static const QRegularExpression program(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"));
+        const QJsonValue programs = manifest.value("requires");
+        bool fine = programs.isArray();
+        for (const QJsonValue &each : programs.toArray())
+            fine = fine && program.match(each.toString()).hasMatch();
+        if (!fine)
+            said << QStringLiteral("manifest.json: \"requires\" is a list of the programs it needs, by their names on PATH: "
+                                   "[\"magick\", \"ffprobe\"]");
+    }
     if (manifest.contains("settings") && !manifest.value("settings").isObject())
         said << QStringLiteral("manifest.json: \"settings\" is an object of each setting's default: {\"shuffle\": true}");
     for (auto it = manifest.begin(); it != manifest.end(); ++it)

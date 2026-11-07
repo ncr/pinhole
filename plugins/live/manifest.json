@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
-  "api": 12,
+  "api": 15,
+  "requires": ["ffmpeg", "ffprobe"],
   "id": "pinhole.live",
   "name": "Live Photos",
   "version": "1.0.0",

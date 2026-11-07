@@ -333,35 +333,29 @@ Item {
     function openLocalSend() {
         if (running)
             return
+        // LocalSend there to hand them to (API 15).
+        if (!pinhole.has("localsend"))
+            return outcome("nolocalsend")
         phase = "fetching"
         target = null
-        const at = generation
-        pinhole.run("sh", ["-c", "command -v localsend"]).then(() => {
-            if (phase !== "fetching" || generation !== at)
+        prepare(list => {
+            if (phase !== "fetching")
                 return
-            prepare(list => {
-                if (phase !== "fetching")
-                    return
-                phase = ""
-                if (list.length === 0)
-                    return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
-                const folder = pinhole.cacheDir + "/localsend/" + Date.now()
-                pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
-                    const paths = result.stdout.split("\n").filter(l => l !== "")
-                    // The folder for very many, which LocalSend takes as a folder.
-                    const given = paths.length > 500 ? [folder] : paths
-                    return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
-                                              "sh"].concat(given))
-                }).then(() => panel.close(), error => {
-                    pinhole.warn(error)
-                    outcome("failed")
-                }).catch(pinhole.warn)
-            })
-        }, error => {
-            if (phase !== "fetching" || generation !== at || error.code === "cancelled")
-                return
-            outcome("nolocalsend")
-        }).catch(pinhole.warn)
+            phase = ""
+            if (list.length === 0)
+                return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
+            const folder = pinhole.cacheDir + "/localsend/" + Date.now()
+            pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
+                const paths = result.stdout.split("\n").filter(l => l !== "")
+                // The folder for very many, which LocalSend takes as a folder.
+                const given = paths.length > 500 ? [folder] : paths
+                return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
+                                          "sh"].concat(given))
+            }).then(() => panel.close(), error => {
+                pinhole.warn(error)
+                outcome("failed")
+            }).catch(pinhole.warn)
+        })
     }
 
     readonly property string what: chosen.every(item => item.video) ? qsTr("Send %n video(s)", "", chosen.length)

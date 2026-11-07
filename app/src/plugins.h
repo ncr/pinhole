@@ -472,6 +472,9 @@ public:
     // The ids of the photos the library says are screenshots (API 10).
     Q_INVOKABLE QJSValue screenshots();
     Q_INVOKABLE bool exists(const QString &path) const;
+    // Whether `program` is there to run (API 15): a name on PATH, or a
+    // program of its own folder by a relative path.
+    Q_INVOKABLE bool has(const QString &program) const;
     // A file's size in bytes, and as people read it: "1.8 MB".
     Q_INVOKABLE double fileSize(const QString &path) const;
     // With `decimals` (API 3; 1 when left out).
@@ -941,6 +944,8 @@ private:
         QStringList sources;
         // Its manifest's "settings": each setting's default.
         QVariantMap settingDefaults;
+        // The programs its manifest says it needs ("requires", API 15).
+        QStringList required;
         // One's own with the id of one of Pinhole's own, which it replaces.
         bool copy = false;
         // Its files' names, times and sizes: a change loads it again.
