@@ -5,17 +5,15 @@ import "Engine.js" as Engine
 // One series as its clip, full window: playing at once, with the ways to
 // change it beneath, every one a click or a key, and nothing like a
 // timeline. ← → go through the series; Enter makes a GIF, copied to the
-// clipboard and kept in Pictures/Pinhole.
+// clipboard and kept in Pictures/Pinhole. Shown in its PluginView
+// (Main.qml), over the editor when opened from there, which start()s it on
+// a series.
 Item {
     id: studio
     objectName: "seriesStudio"
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    // Its PluginView's, and the plugin's root through it.
+    readonly property Item plugin: view.plugin
+    readonly property bool shown: view.shown
 
     // Which series, and whether it was opened from the grid (closing then
     // shows the grid at it) or from a photo (closing goes back to it).
@@ -64,12 +62,12 @@ Item {
         original: qsTr("Original"), square: qsTr("Square"), tall: "4:5", story: qsTr("Story")
     })
 
-    function openSeries(k, fromGrid) {
+    // As its view opens on series `k`.
+    function start(k, fromGrid) {
         if (k < 0 || k >= plugin.series.length)
             return
         studio.fromGrid = fromGrid
         show(k)
-        shown = true
     }
     function show(k) {
         studio.k = k
@@ -113,16 +111,23 @@ Item {
         if (next >= 0 && next < plugin.series.length)
             show(next)
     }
-    function close() {
-        // Escape while a file is made stops making it.
-        if (making !== "") {
-            if (recording)
-                recording.cancel()
-            return
-        }
-        shown = false
+    // Esc or ✕ while a file is made stops making it, the view staying open.
+    function back() {
+        if (making === "")
+            return false
+        stopMaking()
+        return true
+    }
+    // As its view closes: opened from the grid, the grid shown at it.
+    function stop() {
+        stopMaking()
         if (fromGrid && positions.length > 0)
             pinhole.reveal(positions[0])
+    }
+    function stopMaking() {
+        recordWhenReady.stop()
+        recording.cancel()
+        making = ""
     }
     // A shot in or out; two at least stay in.
     function toggle(index) {
@@ -160,8 +165,6 @@ Item {
         recordWhenReady.path = path
         recordWhenReady.restart()
     }
-    // The file on its way (pinhole.record), to cancel.
-    property var recording: null
     Timer {
         id: recordWhenReady
         property var plan
@@ -171,38 +174,40 @@ Item {
         onTriggered: {
             if (!recorder.ready)
                 return
-            stop()
+            recordWhenReady.stop()
             const fps = plan.fps
-            studio.recording = studio.pinhole.record(recorder, {
+            recording.start(() => pinhole.record(recorder, {
                 path: path, format: studio.making, width: plan.w, height: plan.h, fps: fps, frames: plan.frames,
                 seek: frame => recorder.time = frame / fps,
                 progress: fraction => studio.progress = fraction
-            })
-            studio.recording.then(file => {
-                studio.making = ""
-                studio.recording = null
-                // Said copied once the clipboard has it (a GIF's first
-                // frame is made a PNG first), not before.
-                const done = { path: file, name: file.split("/").pop(), size: studio.pinhole.sizeText(studio.pinhole.fileSize(file)),
-                               copy: "copying" }
-                studio.made = done
-                const copied = how => {
-                    if (studio.made === done)
-                        studio.made = Object.assign({}, done, { copy: how })
-                }
-                // Another copy asked for meanwhile has the clipboard: this
-                // one only kept.
-                studio.pinhole.copyFile(file).then(() => copied("copied"), error => {
-                    copied(error.code === "cancelled" ? "kept" : "failed")
-                    if (error.code !== "cancelled")
-                        studio.pinhole.warn(error)
-                })
-            }, error => {
-                studio.making = ""
-                studio.recording = null
+            }))
+        }
+    }
+    // The file on its way (pinhole.record).
+    Job {
+        id: recording
+        onDone: file => {
+            studio.making = ""
+            // Said copied once the clipboard has it (a GIF's first frame is
+            // made a PNG first), not before.
+            const done = { path: file, name: file.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(file)),
+                           copy: "copying" }
+            studio.made = done
+            const copied = how => {
+                if (studio.made === done)
+                    studio.made = Object.assign({}, done, { copy: how })
+            }
+            // Another copy asked for meanwhile has the clipboard: this one
+            // only kept.
+            pinhole.copyFile(file).then(() => copied("copied"), error => {
+                copied(error.code === "cancelled" ? "kept" : "failed")
                 if (error.code !== "cancelled")
-                    studio.error = error.message
-            }).catch(studio.pinhole.warn)
+                    pinhole.warn(error)
+            })
+        }
+        onFailed: error => {
+            studio.making = ""
+            studio.error = error.message
         }
     }
 
@@ -288,15 +293,6 @@ Item {
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("The ‹ › buttons")
         onTriggered: studio.step(1)
-    }
-    Command {
-        name: "studio.close"
-        keys: ["Escape", "G"]
-        keyLayer: "plugin"
-        when: studio.shown
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: studio.close()
     }
     Command {
         id: pauseCommand
@@ -465,7 +461,7 @@ Item {
         keys: ["S"]
         keyLayer: "plugin"
         when: studio.shown && studio.made !== null
-        onTriggered: studio.pinhole.showFile(studio.made.path)
+        onTriggered: pinhole.showFile(studio.made.path)
     }
     Command {
         id: backgroundCommand
@@ -498,7 +494,7 @@ Item {
         y: 16
         spacing: 6
         Chip {
-            readonly property var item: studio.positions.length > 0 ? studio.pinhole.library.item(studio.positions[0]) : null
+            readonly property var item: studio.positions.length > 0 ? pinhole.library.item(studio.positions[0]) : null
             readonly property var date: item ? new Date(item.date) : null
             text: date ? date.toLocaleDateString(Qt.locale(), Locale.LongFormat) + " <font color=\"" + theme.darkForeground + "\">· "
                          + date.toLocaleTimeString(Qt.locale(), Locale.ShortFormat) + "</font>" : ""
@@ -529,7 +525,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: studio.close()
+        onTapped: view.back()
     }
 
     // The clip, as big as fits; drag it to move the crop.

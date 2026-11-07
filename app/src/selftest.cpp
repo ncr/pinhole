@@ -1776,11 +1776,14 @@ static QObject *seriesPlugin(QQuickWindow *window) {
     return plugin.value<QObject *>();
 }
 
-static QObject *seriesView(QQuickWindow *window, const char *opener) {
-    QVariant view;
+// What the plugin's view `name` ("editor", "studio") shows, made if it
+// was not yet.
+static QObject *seriesView(QQuickWindow *window, const char *name) {
+    QVariant shown;
     if (QObject *plugin = seriesPlugin(window))
-        QMetaObject::invokeMethod(plugin, opener, Q_RETURN_ARG(QVariant, view));
-    return view.value<QObject *>();
+        if (QObject *view = plugin->property(name).value<QObject *>())
+            QMetaObject::invokeMethod(view, "make", Q_RETURN_ARG(QVariant, shown));
+    return shown.value<QObject *>();
 }
 
 void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder) {
@@ -1790,7 +1793,7 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    auto editor = [window] { return seriesView(window, "ensureEditor"); };
+    auto editor = [window] { return seriesView(window, "editor"); };
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     auto describe = [editor](const QString &name) {
         QObject *e = editor();
@@ -1829,7 +1832,7 @@ void runSeriesSelfTest(QQuickWindow *window, Viewer &viewer, const QString &fold
         // keys and the wheel to it.
         const int first = series[longest].toList().first().toInt();
         viewer.openAt(first, QRectF(0, 0, 100, 100));
-        QMetaObject::invokeMethod(e, "openSeries", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
+        QMetaObject::invokeMethod(plugin, "openEditor", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
         // Each step: what to do, then a moment for it to slide and sharpen.
         const QList<std::pair<QString, std::function<void()>>> steps = {
             { QStringLiteral("open"), [] {} },
@@ -1870,17 +1873,20 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    // In the plugin, by the items it shows, as Series' test finds its own.
+    // In the plugin, by its view: what that shows (made if it was not).
     auto studio = [window] {
         std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *item) -> QQuickItem * {
-            if (item->objectName() == QLatin1String("sheetStudio"))
+            if (item->objectName() == QLatin1String("sheetView"))
                 return item;
             for (QQuickItem *child : item->childItems())
                 if (QQuickItem *found = find(child))
                     return found;
             return nullptr;
         };
-        return static_cast<QObject *>(find(window->contentItem()));
+        QVariant shown;
+        if (QQuickItem *view = find(window->contentItem()))
+            QMetaObject::invokeMethod(view, "make", Q_RETURN_ARG(QVariant, shown));
+        return shown.value<QObject *>();
     };
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     auto describe = [studio](const QString &name) {
@@ -1979,8 +1985,8 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                                      s->property("note").toString(), s->property("shown").toBool() ? "open" : "closed"));
                         key(window, Qt::Key_Escape);
                         QTimer::singleShot(600, window, [=] {
-                            say(describe(QStringLiteral("after Esc")) + QStringLiteral(", %1 of the making's still on its way")
-                                    .arg(studio()->property("makePending").toList().size()));
+                            say(describe(QStringLiteral("after Esc")) + QStringLiteral(", the making %1")
+                                    .arg(studio()->property("making").toString().isEmpty() ? "stopped" : "STILL ON ITS WAY"));
                             QCoreApplication::exit(made.isEmpty() ? 1 : 0);
                         });
                     });
@@ -2198,7 +2204,7 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
     // to one with a background of the same name; Ctrl+Z.
     auto studio = [=] {
         const QString video = qEnvironmentVariable("PINHOLE_SELFTEST_VIDEO");
-        QObject *studioItem = video.isEmpty() ? nullptr : seriesView(window, "ensureStudio");
+        QObject *studioItem = video.isEmpty() ? nullptr : seriesView(window, "studio");
         if (video.isEmpty() || !studioItem) {
             say(video.isEmpty() ? QStringLiteral("no PINHOLE_SELFTEST_VIDEO: the studio left out") : QStringLiteral("no studio"));
             *failed = *failed || !video.isEmpty();
@@ -2284,7 +2290,7 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
         std::printf("selftest: %s\n", qPrintable(line));
         std::fflush(stdout);
     };
-    auto editor = [window] { return seriesView(window, "ensureEditor"); };
+    auto editor = [window] { return seriesView(window, "editor"); };
     auto grab = [window, folder](const QString &name) { window->grabWindow().save(QStringLiteral("%1/%2.png").arg(folder, name)); };
     auto wait = std::make_shared<QTimer>();
     wait->setInterval(250);
@@ -2307,7 +2313,7 @@ void runUndoSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
                 longest = k;
         const int first = series[longest].toList().first().toInt();
         viewer.openAt(first, QRectF(0, 0, 100, 100));
-        QMetaObject::invokeMethod(e, "openSeries", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
+        QMetaObject::invokeMethod(plugin, "openEditor", Q_ARG(QVariant, longest), Q_ARG(QVariant, first));
         const int whole = e->property("flow").toList().size();
         say(QStringLiteral("a series of %1 open to put right; the keys %2").arg(whole)
             .arg(window->property("historyKeys").toBool() ? "on" : "off"));

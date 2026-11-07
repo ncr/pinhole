@@ -8,7 +8,6 @@ import Pinhole.Plugin
 // its clips.
 PinholePlugin {
     id: plugin
-    covering: studio.shown
 
     // The theme's font as a file, for magick to write the dates in.
     property string fontFile: ""
@@ -54,10 +53,12 @@ PinholePlugin {
         }
     }
 
-    SheetStudio {
+    PluginView {
         id: studio
-        objectName: "sheetStudio"
-        anchors.fill: parent
-        plugin: plugin
+        objectName: "sheetView"
+        source: "SheetStudio.qml"
+        toggleKey: "K"
+        closeCommand.mouse: qsTr("The ✕ button")
+        closeCommand.touchpad: qsTr("The ✕ button")
     }
 }

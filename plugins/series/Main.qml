@@ -14,21 +14,17 @@ import Pinhole.Plugin
 // Pinhole's history, to undo with Ctrl Z.
 PinholePlugin {
     id: plugin
-    readonly property bool studioShown: studioView.item?.shown ?? false
-    covering: studioShown || (editorView.item?.shown ?? false)
-
-    function ensureEditor() {
-        if (!editorView.item)
-            editorView.setSource("Editor.qml", { plugin: plugin })
-        return editorView.item
-    }
-    function ensureStudio() {
-        if (!studioView.item)
-            studioView.setSource("Studio.qml", { plugin: plugin })
-        return studioView.item
+    // Its two views: a series to put right, and its clip, over that.
+    property alias editor: editorView
+    property alias studio: studioView
+    // Series `k` to put right, on its photo `from`.
+    function openEditor(k, from) {
+        if (k >= 0 && k < series.length)
+            editorView.open(k, from)
     }
     function openStudio(k, fromGrid) {
-        ensureStudio()?.openSeries(k, fromGrid)
+        if (k >= 0 && k < series.length)
+            studioView.open(k, fromGrid)
     }
 
     // Every series, in the library's order: the positions of its shots.
@@ -269,7 +265,7 @@ PinholePlugin {
             text: plugin.shownSeries >= 0 ? qsTr("Series of %1").arg(plugin.series[plugin.shownSeries].length) : ""
             key: "G"
             shown: plugin.shownSeries >= 0
-            onTriggered: plugin.ensureEditor()?.openSeries(plugin.shownSeries, pinhole.viewer.index)
+            onTriggered: plugin.openEditor(plugin.shownSeries, pinhole.viewer.index)
         },
         PluginAction {
             place: "viewer"
@@ -390,9 +386,21 @@ PinholePlugin {
         when: joining.shown && !plugin.covering
         mouse: qsTr("Click the band")
         touchpad: qsTr("Tap the band")
-        onTriggered: plugin.ensureEditor()?.openSeries(addAction.k, pinhole.viewer.index)
+        onTriggered: plugin.openEditor(addAction.k, pinhole.viewer.index)
     }
 
-    Loader { id: editorView; anchors.fill: parent }
-    Loader { id: studioView; anchors.fill: parent }
+    PluginView {
+        id: editorView
+        source: "Editor.qml"
+        closeCommand.mouse: qsTr("The ✕ button")
+        closeCommand.touchpad: qsTr("The ✕ button")
+    }
+    // G opened it, and G closes it.
+    PluginView {
+        id: studioView
+        source: "Studio.qml"
+        toggleKey: "G"
+        closeCommand.mouse: qsTr("The ✕ button")
+        closeCommand.touchpad: qsTr("The ✕ button")
+    }
 }

@@ -6,16 +6,13 @@ import "Layout.js" as Layout
 // laid out here from the photos' own pictures, with the ways to change it
 // beneath, every one a click or a key. Enter makes it: the photos fetched
 // at the size their cells need, put together by magick, copied to the
-// clipboard and kept in Pictures/Pinhole.
+// clipboard and kept in Pictures/Pinhole. Shown in its PluginView
+// (Main.qml), which start()s it with the photos ticked.
 Item {
     id: studio
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    objectName: "sheetStudio"
+    // Its PluginView's: open now.
+    readonly property bool shown: view.shown
 
     // The photos, oldest first, by id (positions move when the library is
     // read again): {id, date, video, thumbnail}. At most Layout.MOST; how
@@ -31,15 +28,6 @@ Item {
     property var files: ({})
     // The library it was opened on, by its key.
     property string libraryKey: ""
-    // Bumped as it opens again or closes, so what comes for before is let
-    // be; and the same for making it, bumped as that stops (Esc while it is
-    // made), when the previews still come.
-    property int generation: 0
-    property int makeGeneration: 0
-    // What is on its way (fetches, programs), to cancel: for the preview,
-    // and for making it.
-    property var pending: []
-    property var makePending: []
     // The thumbnails' decoded size, about a cell's, for a thousand to fit.
     property int thumbSize: 512
 
@@ -90,7 +78,8 @@ Item {
 
     // Being made: "fetching" the photos (how many are here), then
     // "making"; the last one made, or why not, or a word on what happened.
-    property string making: ""
+    readonly property string making: maker.busy ? stage : ""
+    property string stage: ""
     property int fetched: 0
     property var made: null
     property string error: ""
@@ -102,7 +91,8 @@ Item {
         theme: qsTr("Theme"), white: qsTr("White"), black: qsTr("Black")
     })
 
-    function open(indexes) {
+    // As its view opens: the photos at these library positions.
+    function start(indexes) {
         if (making !== "")
             return
         stop()
@@ -123,107 +113,91 @@ Item {
         error = ""
         note = ""
         thumbSize = Math.max(64, Math.min(512, Math.ceil(2 * Math.sqrt(width * height / Math.max(1, list.length)) / 64) * 64))
-        shown = true
-        const gen = generation
         // The sharper pictures for the preview, as each comes; for a few
         // dozen, past which a cell is small enough for the thumbnail.
-        list.slice(0, 48).forEach(p => fetchFile(p.id, "medium").then(path => {
-            if (gen !== generation)
-                return
+        previews.start(() => list.slice(0, 48).map(p => quietly(fetchFile(p.id, "medium"), path => {
             const more = Object.assign({}, sharp)
             more[p.id] = "image://file/" + encodeURIComponent(path)
             sharp = more
-        }, () => {}).catch(pinhole.warn))
+        })))
         // The shape of those that had none, from their mediums, all at once.
         const unknown = list.filter(p => !(p.aspect > 0))
         if (unknown.length > 0)
-            measure(unknown, gen)
+            measuring.start(() => unknown.map(p => quietly(fetchFile(p.id, "medium"), path => path)),
+                            paths => measure(unknown.map(p => p.id), paths))
     }
-    function measure(unknown, gen) {
-        const paths = {}
-        let left = unknown.length
-        unknown.forEach(p => fetchFile(p.id, "medium").then(path => paths[p.id] = path, () => {}).then(() => {
-            if (--left > 0 || gen !== generation)
-                return
-            const ids = unknown.map(p => p.id).filter(id => paths[id])
-            if (ids.length === 0)
-                return
-            keep(pinhole.run("magick", ["identify", "-ping", "-format", "%w %h %[orientation]\n"].concat(ids.map(id => Layout.magickFile(paths[id]))),
-                             { timeout: 60000 })).then(result => {
-                if (gen !== generation)
-                    return
-                const lines = result.stdout.trim().split("\n")
-                const shapes = {}
-                ids.forEach((id, n) => {
-                    const [w, h, orientation] = (lines[n] || "").split(" ")
-                    // Turned a quarter, as LeftTop to LeftBottom are.
-                    const turned = /^(LeftTop|RightTop|RightBottom|LeftBottom)$/.test(orientation)
-                    if (Number(w) > 0 && Number(h) > 0)
-                        shapes[id] = turned ? Number(h) / Number(w) : Number(w) / Number(h)
-                })
-                aspects = photos.map((p, n) => shapes[p.id] || aspects[n])
-            }, () => {}).catch(pinhole.warn)
-        }).catch(pinhole.warn))
-    }
-
-    // Esc, K or ✕: while one is made, stops it, and says so; else closes.
-    function close() {
-        if (making !== "") {
-            stopMaking()
-            note = qsTr("Cancelled")
+    // Their shapes, by magick, of those whose medium came.
+    function measure(asked, paths) {
+        const ids = asked.filter((id, n) => paths[n])
+        const found = paths.filter(path => path)
+        if (ids.length === 0)
             return
-        }
-        stop()
-        shown = false
+        measuring.start(() => pinhole.run("magick", ["identify", "-ping", "-format", "%w %h %[orientation]\n"].concat(found.map(Layout.magickFile)),
+                                          { timeout: 60000 }), result => {
+            const lines = result.stdout.trim().split("\n")
+            const shapes = {}
+            ids.forEach((id, n) => {
+                const [w, h, orientation] = (lines[n] || "").split(" ")
+                // Turned a quarter, as LeftTop to LeftBottom are.
+                const turned = /^(LeftTop|RightTop|RightBottom|LeftBottom)$/.test(orientation)
+                if (Number(w) > 0 && Number(h) > 0)
+                    shapes[id] = turned ? Number(h) / Number(w) : Number(w) / Number(h)
+            })
+            aspects = photos.map((p, n) => shapes[p.id] || aspects[n])
+        })
     }
-    // Whatever is on its way, let go.
+    // The preview's: each fetch on its own, one that fails failing none
+    // of the others, cancelled with them.
+    Job { id: previews; onFailed: error => pinhole.warn(error) }
+    Job { id: measuring }
+
+    // Esc or ✕: while one is made, stops it, and says so (the view stays
+    // open); else its view closes.
+    function back() {
+        if (making === "")
+            return false
+        maker.cancel()
+        note = qsTr("Cancelled")
+        return true
+    }
+    // As its view closes: whatever is on its way, let go.
     function stop() {
-        ++generation
-        const was = pending
-        pending = []
-        was.forEach(p => p.cancel())
-        stopMaking()
+        previews.cancel()
+        measuring.cancel()
+        maker.cancel()
     }
-    // Making it, let go; the previews still come.
-    function stopMaking() {
-        ++makeGeneration
-        const was = makePending
-        makePending = []
-        was.forEach(p => p.cancel())
-        making = ""
+    // `promise`, its answer given to `then`, and nothing if it fails;
+    // cancelled as it is.
+    function quietly(promise, then) {
+        const quiet = promise.then(then, () => null)
+        quiet.cancel = () => { if (typeof promise.cancel === "function") promise.cancel() }
+        return quiet
     }
-    // A promise kept, to cancel, until it is answered: the preview's, or
-    // with `forMaking` the making's.
-    function keep(promise, forMaking) {
-        const list = () => forMaking ? makePending : pending
-        list().push(promise)
-        const done = () => { const at = list().indexOf(promise); if (at >= 0) list().splice(at, 1) }
-        promise.then(done, done)
-        return promise
-    }
-    // A photo's file, once: a promise of its path.
-    function fetchFile(id, kind, forMaking) {
+    // A photo's file, once: a promise of its path, cancelled as Pinhole's.
+    function fetchFile(id, kind) {
         const key = id + ":" + kind
         if (files[key] !== undefined)
             return Promise.resolve(files[key])
-        return keep(pinhole.fetch(id, kind), forMaking).then(path => {
+        const asked = pinhole.fetch(id, kind)
+        const got = asked.then(path => {
             files[key] = path
             return path
         })
+        got.cancel = () => asked.cancel()
+        return got
     }
 
     // The library read again, as when photos come or go, or another
     // source's shown: the photos are kept by id, those gone left out.
     Connections {
-        target: studio.pinhole.library
+        target: pinhole.library
         function onChanged() { studio.libraryChanged() }
     }
     function libraryChanged() {
         if (!shown)
             return
         if (pinhole.library.key !== libraryKey) {
-            stop()
-            shown = false
+            view.close()
             pinhole.notify(qsTr("Another library is shown, so the contact sheet was closed"))
             return
         }
@@ -232,15 +206,13 @@ Item {
             return
         const gone = photos.length - kept.length
         if (kept.length < 2) {
-            stop()
-            shown = false
+            view.close()
             pinhole.notify(qsTr("The photos ticked are no longer in the library"))
             return
         }
         // Being made, it stops, and says so: ⏎ makes it of those left.
         const wasMaking = making !== ""
-        if (wasMaking)
-            stopMaking()
+        maker.cancel()
         aspects = kept.map(n => aspects[n])
         photos = kept.map(n => photos[n])
         note = wasMaking ? qsTr("%n photo(s) no longer in the library, so the sheet was not made", "", gone)
@@ -249,121 +221,113 @@ Item {
 
     // The sheet: each photo fetched as large as its cell needs (the
     // medium, about 2048 px, unless the cell is near that), a few at a
-    // time, then magick.
+    // time, then magick; copied once made.
     function make() {
         if (making !== "" || photos.length === 0)
             return
-        const gen = makeGeneration
         const sheet = studio.sheet
         const shot = photos.slice()
-        const paths = new Array(shot.length)
         const points = captionPoints
-        making = "fetching"
+        stage = "fetching"
         fetched = 0
         made = null
         error = ""
         note = ""
-        let next = 0, left = shot.length, blurry = 0
-        const take = (n, path) => {
-            paths[n] = path
-            ++fetched
-            if (--left === 0)
-                render(sheet, shot, paths, points, blurry)
-            else
-                start()
-        }
-        // A function, so that take() above may start the next.
-        function start() {
-            if (gen !== makeGeneration || next >= shot.length)
-                return
-            const n = next++
-            const p = shot[n]
-            const cell = sheet.cells[n]
-            const kind = p.video || Math.max(cell.w, cell.h) <= 1280 ? "medium" : "full"
-            // Without the full photo, the medium; without that, the
-            // thumbnail, better than none, and said. Stopped, neither.
-            fetchFile(p.id, kind, true).then(path => path, error => {
-                if (kind === "medium" || error.code === "cancelled" || gen !== makeGeneration)
-                    throw error
-                return fetchFile(p.id, "medium", true)
-            }).then(path => {
-                if (gen === makeGeneration)
-                    take(n, path)
-            }, error => {
-                if (gen !== makeGeneration || error.code === "cancelled")
-                    return
-                ++blurry
-                take(n, p.thumbPath || "")
-            }).catch(pinhole.warn)
-        }
-        for (let k = 0; k < 6; ++k)
-            start()
+        maker.start(() => sheetFile(sheet, shot, points))
     }
-    function render(sheet, shot, paths, points, blurry) {
-        // Mostly thumbnails is no sheet to send.
-        if (paths.some(path => path === "") || blurry * 2 > shot.length) {
-            fail(qsTr("%1 of %2 photos could not be fetched").arg(blurry).arg(shot.length))
-            return
-        }
-        making = "making"
-        const gen = makeGeneration
-        const path = pinhole.picturePath(day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage")),
-                                         "jpg")
-        // Made beside, then moved in whole.
-        const temp = pinhole.cacheDir + "/sheet.jpg"
-        const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], points, plugin.fontFile,
-                                            pinhole.dir + "/sRGB.icc", temp)
-        keep(pinhole.run("mkdir", ["-p", pinhole.cacheDir]), true).then(() => {
-            if (gen !== makeGeneration)
-                return null
-            // A minute, and more for many.
-            return keep(pinhole.run("magick", args, { timeout: 60000 + 500 * shot.length }), true)
-        }).then(result => {
-            if (result === null || gen !== makeGeneration)
-                return null
-            return keep(pinhole.run("mv", ["-f", temp, path]), true)
-        }).then(result => {
-            if (result === null || gen !== makeGeneration)
-                return
-            making = ""
+    Job {
+        id: maker
+        onDone: done => {
             // Said copied once the clipboard has it (a big sheet's PNG takes
             // a moment), not before, when a paste would be what was there.
-            const done = { path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
-                           pixels: sheet.w + " × " + sheet.h, blurry: blurry, copy: "copying" }
-            made = done
+            studio.made = done
             const copied = how => {
-                if (made === done)
-                    made = Object.assign({}, done, { copy: how })
+                if (studio.made === done)
+                    studio.made = Object.assign({}, done, { copy: how })
             }
             // Another copy asked for meanwhile has the clipboard: this one
             // only kept.
-            pinhole.copyFile(path).then(() => copied("copied"), error => {
+            pinhole.copyFile(done.path).then(() => copied("copied"), error => {
                 copied(error.code === "cancelled" ? "kept" : "failed")
                 if (error.code !== "cancelled")
                     pinhole.warn(error)
             })
-        }, error => {
-            if (gen !== makeGeneration || error.code === "cancelled")
-                return
-            fail(error.code === "timeout" ? qsTr("magick took too long")
-                 : (error.message || "").trim().split("\n")[0] || qsTr("magick failed"))
-        }).catch(pinhole.warn)
+        }
+        onFailed: error => studio.error = error.code === "unfetched" ? error.message
+            : error.code === "timeout" ? qsTr("magick took too long")
+            : String(error.message || "").trim().split("\n")[0] || qsTr("magick failed")
     }
-    function fail(why) {
-        making = ""
-        error = why
+    // The file made of `shot` laid out as `sheet`: a promise of what was
+    // made, whose cancel() stops every fetch and program it has on its way.
+    function sheetFile(sheet, shot, points) {
+        const running = new Set()
+        let stopped = false
+        // A promise on its way, to cancel, until it is answered.
+        const keep = promise => {
+            if (stopped) {
+                if (typeof promise.cancel === "function")
+                    promise.cancel()
+                return Promise.reject({ code: "cancelled" })
+            }
+            running.add(promise)
+            const done = () => running.delete(promise)
+            promise.then(done, done)
+            return promise
+        }
+        const paths = new Array(shot.length)
+        let next = 0, blurry = 0
+        // Without the full photo, the medium; without that, the thumbnail,
+        // better than none, and said. Stopped, neither.
+        const fetchOne = n => {
+            const p = shot[n]
+            const cell = sheet.cells[n]
+            const kind = p.video || Math.max(cell.w, cell.h) <= 1280 ? "medium" : "full"
+            return keep(fetchFile(p.id, kind)).catch(error => {
+                if (kind === "medium" || error.code === "cancelled")
+                    throw error
+                return keep(fetchFile(p.id, "medium"))
+            }).catch(error => {
+                if (error.code === "cancelled")
+                    throw error
+                ++blurry
+                return p.thumbPath || ""
+            }).then(path => {
+                paths[n] = path
+                ++studio.fetched
+            })
+        }
+        // Six at a time, each taking the next as it is done.
+        const lane = () => next < shot.length ? fetchOne(next++).then(lane) : null
+        const lanes = []
+        for (let k = 0; k < 6; ++k)
+            lanes.push(lane())
+        const temp = pinhole.cacheDir + "/sheet.jpg"
+        let path = ""
+        const made = Promise.all(lanes).then(() => {
+            // Mostly thumbnails is no sheet to send.
+            if (paths.some(path => path === "") || blurry * 2 > shot.length)
+                throw { code: "unfetched", message: qsTr("%1 of %2 photos could not be fetched").arg(blurry).arg(shot.length) }
+            studio.stage = "making"
+            path = pinhole.picturePath(day(shot[0].date) + " " + (recipe.layout === "grid" ? qsTr("Contact sheet") : qsTr("Collage")),
+                                       "jpg")
+            return keep(pinhole.run("mkdir", ["-p", pinhole.cacheDir]))
+        }).then(() => {
+            // Made beside, then moved in whole; a minute, and more for many.
+            const args = Layout.magickArguments(sheet, paths, colours, recipe.dates ? dates : [], points, view.plugin.fontFile,
+                                                pinhole.dir + "/sRGB.icc", temp)
+            return keep(pinhole.run("magick", args, { timeout: 60000 + 500 * shot.length }))
+        }).then(() => keep(pinhole.run("mv", ["-f", temp, path]))).then(() => ({
+            path: path, name: path.split("/").pop(), size: pinhole.sizeText(pinhole.fileSize(path)),
+            pixels: sheet.w + " × " + sheet.h, blurry: blurry, copy: "copying"
+        }))
+        made.cancel = () => {
+            stopped = true
+            running.forEach(promise => { if (typeof promise.cancel === "function") promise.cancel() })
+        }
+        return made
     }
 
-    // Its keys, while it is on top (Command.qml).
-    Command {
-        name: "sheet.close"
-        keys: ["Escape", "K"]
-        keyLayer: "plugin"
-        when: studio.shown
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: studio.close()
-    }
+    // Its keys, while it is on top (Command.qml); Esc and K are its view's.
     Repeater {
         model: Layout.LAYOUTS
         delegate: Command {
@@ -451,7 +415,7 @@ Item {
         keys: ["S"]
         keyLayer: "plugin"
         when: studio.shown && studio.made !== null
-        onTriggered: studio.pinhole.showFile(studio.made.path)
+        onTriggered: pinhole.showFile(studio.made.path)
     }
 
     // Nothing over it reaches the photos beneath.
@@ -481,7 +445,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: studio.close()
+        onTapped: view.back()
     }
 
     // What was made, or why not: on the clipboard, and where it is kept.

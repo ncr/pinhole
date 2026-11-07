@@ -7188,14 +7188,14 @@ PinholePlugin {
         QCOMPARE(QFileInfo(config).lastModified(), moved);
         QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
         QVERIFY(!plugin->property("covering").toBool());
-        QVERIFY(bench.js("var editor = series.ensureEditor(); editor.openSeries(0, 0); editor.keys").toBool());
+        QVERIFY(bench.js("series.openEditor(0, 0); var editor = series.editor.item; editor.keys").toBool());
         QVERIFY(plugin->property("covering").toBool());
         bench.js("series.openStudio(0, false)");
-        QVERIFY(plugin->property("studioShown").toBool());
+        QVERIFY(bench.js("series.studio.shown").toBool());
         QVERIFY(!bench.js("editor.keys").toBool());
-        QVERIFY(bench.js("series.ensureStudio().close(); editor.keys").toBool());
-        QVERIFY(bench.js("series.ensureEditor() === editor").toBool());
-        bench.js("editor.close()");
+        QVERIFY(bench.js("series.studio.close(); editor.keys").toBool());
+        QVERIFY(bench.js("series.editor.make() === editor").toBool());
+        bench.js("series.editor.close()");
         QVERIFY(!plugin->property("covering").toBool());
         plugin.reset();
     }

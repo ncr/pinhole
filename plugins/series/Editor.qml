@@ -7,19 +7,16 @@ import Pinhole.Plugin
 // before and after it, and in its gaps, faint beside them, to add. Each a click or a key: X takes one out,
 // A adds one, Space shows one up close, U ungroups, G is its GIF or video
 // (Studio, over this); Ctrl+Z undoes an edit. Escape goes back to the
-// photo it was opened from.
+// photo it was opened from. Shown in its PluginView (Main.qml), which
+// start()s it on a series.
 Item {
     id: editor
     objectName: "seriesEditor"
-    required property var plugin
-    readonly property var pinhole: plugin.pinhole
-
-    property bool shown: false
-    visible: opacity > 0
-    opacity: shown ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    // Its PluginView's, and the plugin's root through it.
+    readonly property Item plugin: view.plugin
+    readonly property bool shown: view.shown
     // Its keys, but for while Studio is over it.
-    readonly property bool keys: shown && !plugin.studioShown
+    readonly property bool keys: view.onTop
 
     // The series, followed by one of its photos (its place among the
     // series moves as they change), and the photo the keys act on.
@@ -31,7 +28,7 @@ Item {
     readonly property var positions: k >= 0 ? plugin.series[k] : []
     // An edit under way: the series may be gone for a moment.
     property bool editing: false
-    onKChanged: if (shown && !editing && k < 0) close()
+    onKChanged: if (shown && !editing && k < 0) view.close()
 
     // Photos the series could grow into: this many on each side, taken
     // within this long of it, and the ones in a gap of it up to this wide.
@@ -97,23 +94,29 @@ Item {
         }, () => {}).catch(pinhole.warn)
     }
 
-    // `from`: the photo it opens on, in the series or beside it.
-    function openSeries(k, from) {
+    // As its view opens on series `k`; `from`: the photo it opens on, in
+    // the series or beside it.
+    function start(k, from) {
         if (k < 0 || k >= plugin.series.length)
             return
         const p = plugin.series[k]
         anchor = plugin.idOf(p[0])
         current = from >= 0 ? from : p[0]
         looking = false
-        shown = true
         // It opens with that photo in the middle, without sliding to it.
         sliding.enabled = false
-        view = flowAt
+        middle = flowAt
         sliding.enabled = true
     }
-    function close() {
-        shown = false
+    function stop() {
         looking = false
+    }
+    // Esc up close: back to the series, the view staying open.
+    function back() {
+        if (!looking)
+            return false
+        looking = false
+        return true
     }
 
     // The edits are the plugin's own; here the series is only followed
@@ -126,7 +129,7 @@ Item {
         if (k < 0) {
             const still = ids.find(id => plugin.of(pinhole.library.indexOf(id)) >= 0)
             if (still === undefined) {
-                close()
+                view.close()
                 return
             }
             anchor = still
@@ -146,7 +149,7 @@ Item {
     }
     function ungroup() {
         edit(() => plugin.ungroup([positions[0]]))
-        close()
+        view.close()
     }
     function toStudio() {
         if (k >= 0)
@@ -161,17 +164,17 @@ Item {
     }
     // The three in the middle, by the one among them in the middle: they
     // move only when the photo the keys are on goes past them.
-    property int view: 0
+    property int middle: 0
     function follow() {
         // On one before or after the series, its end that way.
         if (flowAt < 0) {
             const tile = tiles.find(t => t.index === current)
             if (tile)
-                view = tile.apart < 0 ? 0 : flow.length - 1
+                middle = tile.apart < 0 ? 0 : flow.length - 1
         } else if (flowAt > carousel.centre + 1)
-            view = flowAt - 1
+            middle = flowAt - 1
         else if (flowAt < carousel.centre - 1)
-            view = flowAt + 1
+            middle = flowAt + 1
     }
     onFlowAtChanged: follow()
     onTilesChanged: {
@@ -194,16 +197,7 @@ Item {
         return ms === 0 ? qsTr("Not in the series") : ms < 0 ? qsTr("%1 before").arg(span) : qsTr("%1 after").arg(span)
     }
 
-    // Its keys, while it is on top (Command.qml).
-    Command {
-        name: "editor.close"
-        keys: ["Escape"]
-        keyLayer: "plugin"
-        when: editor.keys
-        mouse: qsTr("The ✕ button")
-        touchpad: qsTr("The ✕ button")
-        onTriggered: editor.looking ? editor.looking = false : editor.close()
-    }
+    // Its keys, while it is on top (Command.qml); Esc is its view's.
     Command {
         name: "editor.look"
         text: qsTr("There: a photo up close")
@@ -320,7 +314,7 @@ Item {
         y: 16
         spacing: 6
         Chip {
-            readonly property var date: editor.positions.length > 0 ? new Date(editor.pinhole.library.item(editor.positions[0]).date) : null
+            readonly property var date: editor.positions.length > 0 ? new Date(pinhole.library.item(editor.positions[0]).date) : null
             text: date ? date.toLocaleDateString(Qt.locale(), Locale.LongFormat) + " <font color=\"" + theme.darkForeground + "\">· "
                          + date.toLocaleTimeString(Qt.locale(), Locale.ShortFormat) + "</font>" : ""
             textColor: theme.brightForeground
@@ -336,7 +330,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: editor.close()
+        onTapped: view.close()
     }
 
     // The series as a carousel: three photos side by side in the middle,
@@ -356,7 +350,7 @@ Item {
         visible: !editor.looking
 
         readonly property int count: editor.flow.length
-        readonly property real centre: count < 3 ? (count - 1) / 2 : Math.max(1, Math.min(count - 2, editor.view))
+        readonly property real centre: count < 3 ? (count - 1) / 2 : Math.max(1, Math.min(count - 2, editor.middle))
         property real slide: centre
         Behavior on slide {
             id: sliding
