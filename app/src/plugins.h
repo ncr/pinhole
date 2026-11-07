@@ -680,7 +680,7 @@ public:
     // keyboardInUse. 12: pinhole.copyText, input and hasKeys. 13:
     // pinhole.readText and readJson, a worker's `said` in pinhole.workers.
     // 14: pinhole.synced.
-    static constexpr int api = 14;
+    static constexpr int api = 15;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

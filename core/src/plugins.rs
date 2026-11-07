@@ -336,7 +336,7 @@ pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
         }
         for each in declared {
             let kind = each["kind"].as_str().unwrap_or("");
-            match check_maker(&dir, each) {
+            match check_maker(&id, whole(&manifest["api"]).unwrap_or(1), &dir, each) {
                 Ok(maker) if found.iter().any(|m| m.kind == maker.kind) => {
                     problems.push(format!("{id}: makes {kind:?}: another plugin makes it already"))
                 }
@@ -352,14 +352,40 @@ pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
 /// of. What the window asks for by these names it makes; nothing else.
 pub const MADE_KINDS: [&str; 2] = ["bounce", "long_exposure"];
 
+/// The API from which a plugin can make kinds of its own (`makes`).
+pub const OWN_KINDS_API: i64 = 15;
+
+/// A kind a plugin makes of its own: `<its id>/<name>`, the name in
+/// lowercase letters, digits, '_' and '-'. Its id in front keeps one
+/// plugin's from another's, and from the kinds a source has.
+pub fn own_kind<'a>(plugin: &str, kind: &'a str) -> Option<&'a str> {
+    let name = kind.strip_prefix(plugin)?.strip_prefix('/')?;
+    let fine = (1..=32).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'));
+    fine.then_some(name)
+}
+
+/// Whether a kind asked of `fetch` is a plugin's own (it has a '/').
+pub fn is_own_kind(kind: &str) -> bool {
+    kind.contains('/')
+}
+
 /// One rendition a manifest says it makes, checked.
-fn check_maker(dir: &Path, declared: &Value) -> Result<Maker, String> {
+fn check_maker(plugin: &str, api: i64, dir: &Path, declared: &Value) -> Result<Maker, String> {
     if !declared.is_object() {
         return Err("each is an object: \"kind\", \"from\", \"type\", \"extension\", \"program\"".into());
     }
     let kind = declared["kind"].as_str().unwrap_or("");
-    if !MADE_KINDS.contains(&kind) {
-        return Err(format!("\"kind\" is one of {}", MADE_KINDS.join(", ")));
+    if is_own_kind(kind) {
+        if own_kind(plugin, kind).is_none() {
+            return Err(format!("a kind of its own is \"{plugin}/<name>\", the name lowercase letters, digits, '_' and '-'"));
+        }
+        if api < OWN_KINDS_API {
+            return Err(format!("a kind of its own needs \"api\": {OWN_KINDS_API}"));
+        }
+    } else if !MADE_KINDS.contains(&kind) {
+        return Err(format!("\"kind\" is one of {}, or one of its own: \"{plugin}/<name>\"", MADE_KINDS.join(", ")));
     }
     let from = declared["from"].as_str().unwrap_or("");
     if !["live", "full", "original", "video"].contains(&from) {
@@ -580,13 +606,20 @@ mod tests {
         plugin(&places.personal, "old", manifest("me.old", 11, serde_json::json!([made("bounce")])));
         plugin(&places.personal, "odd", manifest("me.odd", 12, serde_json::json!([made("sparkle"),
             {"kind": "bounce", "from": "live", "type": "public.mpeg-4", "extension": "MP4", "program": "make"}])));
+        // Kinds of its own: under its id, from API 15.
+        plugin(&places.personal, "steady", manifest("me.steady", 15, serde_json::json!([made("me.steady/steadied"),
+            made("me.other/steadied"), made("me.steady/Not Fine")])));
+        plugin(&places.personal, "early", manifest("me.early", 14, serde_json::json!([made("me.early/sooner")])));
         let (found, refused) = makers(&places);
         let kinds: Vec<(&str, &str)> = found.iter().map(|m| (m.plugin.as_str(), m.kind.as_str())).collect();
-        assert_eq!(kinds, [("pinhole.live", "bounce"), ("pinhole.live", "long_exposure")]);
+        assert_eq!(kinds, [("pinhole.live", "bounce"), ("pinhole.live", "long_exposure"), ("me.steady", "me.steady/steadied")]);
         assert!(found[0].builtin && found[0].program.ends_with("live/make") && found[0].args == ["bounce"]);
         let refused = refused.join("\n");
         assert!(refused.contains("me.old: makes: makes needs \"api\": 12"), "{refused}");
         assert!(refused.contains("me.odd: makes \"sparkle\": \"kind\" is one of bounce, long_exposure"), "{refused}");
+        assert!(refused.contains("me.steady: makes \"me.other/steadied\": a kind of its own is \"me.steady/<name>\""), "{refused}");
+        assert!(refused.contains("me.steady: makes \"me.steady/Not Fine\""), "{refused}");
+        assert!(refused.contains("me.early: makes \"me.early/sooner\": a kind of its own needs \"api\": 15"), "{refused}");
         assert!(refused.contains("me.odd: makes \"bounce\": \"extension\""), "{refused}");
         let _ = std::fs::remove_dir_all(&dir);
     }

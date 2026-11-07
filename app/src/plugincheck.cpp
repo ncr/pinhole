@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -458,6 +458,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             uses << QStringLiteral("workers in the manifest");
         if (declared.contains(QLatin1String("makes")))
             uses << QStringLiteral("makes in the manifest");
+        for (const QJsonValue &made : declared.value(QLatin1String("makes")).toArray())
+            if (made.toObject().value(QLatin1String("kind")).toString().contains('/'))
+                uses << QStringLiteral("a kind of its own in makes");
         if (declared.contains(QLatin1String("settings")))
             uses << QStringLiteral("settings in the manifest");
     }
@@ -1458,8 +1461,17 @@ QString Plugins::makesProblem(const QString &dir, const QJsonObject &manifest) {
     for (const QJsonValue &each : declared.toArray()) {
         const QJsonObject made = each.toObject();
         const QString kind = made.value("kind").toString();
-        if (!each.isObject() || !kinds.contains(kind))
-            return tr("each of manifest.json's \"makes\" has a \"kind\": bounce or long_exposure");
+        // Or one of its own (API 15): "<its id>/<name>".
+        const QString id = manifest.value("id").toString();
+        static const QRegularExpression ownName(QStringLiteral("^[a-z0-9][a-z0-9_-]{0,31}$"));
+        if (each.isObject() && kind.contains('/')) {
+            if (!kind.startsWith(id + '/') || !ownName.match(kind.mid(id.size() + 1)).hasMatch())
+                return tr("\"makes\": %1: a kind of its own is \"%2/<name>\", the name lowercase letters, digits, '_' and '-'")
+                    .arg(kind, id);
+            if (manifest.value("api").toInt(1) < 15)
+                return tr("\"makes\": %1: a kind of its own needs \"api\": 15").arg(kind);
+        } else if (!each.isObject() || !kinds.contains(kind))
+            return tr("each of manifest.json's \"makes\" has a \"kind\": bounce, long_exposure or one of its own, \"%1/<name>\"").arg(id);
         const auto wrong = [&kind](const QString &why) { return tr("\"makes\": %1: %2").arg(kind, why); };
         if (!froms.contains(made.value("from").toString()))
             return wrong(tr("\"from\" is live, full, original or video"));

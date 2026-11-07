@@ -1490,6 +1490,33 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // A kind a plugin makes of its own is under its id, from API 15, as
+    // pinholed takes it (core/src/plugins.rs, check_maker).
+    void aPluginMakesKindsOfItsOwnUnderItsId() {
+        QTemporaryDir dir;
+        QFile program(dir.path() + "/make");
+        QVERIFY(program.open(QIODevice::WriteOnly));
+        program.write("#!/bin/sh\n");
+        program.close();
+        program.setPermissions(program.permissions() | QFile::ExeOwner);
+        const auto manifest = [](int api, const QString &kind) {
+            return QJsonObject{{"id", "me.steady"}, {"api", api},
+                               {"makes", QJsonArray{QJsonObject{{"kind", kind}, {"from", "video"}, {"type", "public.mpeg-4"},
+                                                                {"extension", "mp4"}, {"program", "make"}}}}};
+        };
+        QCOMPARE(Plugins::makesProblem(dir.path(), manifest(15, "me.steady/steadied")), QString());
+        QCOMPARE(Plugins::makesProblem(dir.path(), manifest(15, "bounce")), QString());
+        QVERIFY(Plugins::makesProblem(dir.path(), manifest(14, "me.steady/steadied")).contains("needs \"api\": 15"));
+        QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "me.other/steadied")).contains("\"me.steady/<name>\""));
+        QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "me.steady/Steadied")).contains("lowercase"));
+        QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "sparkle")).contains("one of its own"));
+        QFile file(dir.path() + "/manifest.json");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(manifest(15, "me.steady/steadied")).toJson());
+        file.close();
+        QVERIFY(Plugins::apiUses(dir.path()).value(15).contains("a kind of its own in makes"));
+    }
+
     // Every one of API 3's, as docs/plugins.md lists them, in a plugin
     // that asks for API 2: each found, and said by `pinhole plugin check`.
     void everythingOfApi3IsFoundInAPluginOfApi2() {

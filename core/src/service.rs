@@ -1495,9 +1495,13 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     let (Some(asset), Some(kind)) = (params["asset"].as_str(), params["kind"].as_str()) else {
         return reply.send(Err(("bad_request", "fetch needs asset and kind".into())));
     };
-    let Some(want) = Want::parse(kind).filter(|w| *w != Want::Thumb) else {
+    // A kind a plugin makes of its own (`<its id>/<name>`) is made, as the
+    // effects a source has no render of are.
+    let own = crate::plugins::is_own_kind(kind);
+    let want = Want::parse(kind).filter(|w| *w != Want::Thumb);
+    if want.is_none() && !own {
         return reply.send(Err(("bad_request", format!("unknown kind {kind}"))));
-    };
+    }
     // Asked of one source's photo (the window's library, as it says): never
     // another's of the same id, shown since.
     // One that says whose it is not, "", is taken for no one's. And the
@@ -1513,6 +1517,9 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
     if owner != Some(shared.source().id()) {
         return reply.send(Err(("other_source", format!("the library read holds the photos of {}", owner.as_deref().unwrap_or("no one")))));
     }
+    let Some(want) = want else {
+        return make(shared, db, asset, kind, Reply { stream: false, ..reply });
+    };
     if want == Want::Jpeg {
         return jpeg(shared, db, asset, Reply { stream: false, ..reply });
     }
@@ -1528,7 +1535,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
         // An effect the source has no render of: a loop is the motion
         // itself, the others are made from it.
         Err(_) if want == Want::Loop => return fetch(shared, db, &json!({"asset": asset, "kind": "live"}), reply),
-        Err(_) if want.effect().is_some() => return make(shared, db, asset, want, reply),
+        Err(_) if want.effect().is_some() => return make(shared, db, asset, kind, reply),
         Err(_) => return reply.send(Err(("not_found", format!("{asset} has no {kind} rendition")))),
     };
     // A video given a cover of its own (cover.rs) has the same frame in
@@ -1609,6 +1616,13 @@ fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
     Path::new(folder.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
 }
 
+/// Where a kind a plugin makes of its own goes: beside what it is made
+/// from, and counted with it, named after that and the kind.
+fn own_made_path(from: Want, kind: &str, key: &str, extension: &str) -> PathBuf {
+    let suffix = format!("-{}", kind.replace('/', "-"));
+    Path::new(from.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
+}
+
 /// `full` as a JPEG: `full` itself when it is one, else one made from it.
 /// A video has none.
 fn jpeg(shared: &Arc<Shared>, db: &Connection, asset: &str, reply: Reply) {
@@ -1622,7 +1636,7 @@ fn jpeg(shared: &Arc<Shared>, db: &Connection, asset: &str, reply: Reply) {
         Err(_) => reply.send(Err(("not_found", format!("{asset} has no full rendition to make a JPEG of")))),
         Ok((_, true)) => reply.send(Err(("not_found", format!("{asset} is a video: it has no JPEG")))),
         Ok((file_type, _)) if file_type == "public.jpeg" => fetch(shared, db, &json!({"asset": asset, "kind": "full"}), reply),
-        Ok(_) => make(shared, db, asset, Want::Jpeg, reply),
+        Ok(_) => make(shared, db, asset, Want::Jpeg.name(), reply),
     }
 }
 
@@ -1661,14 +1675,16 @@ fn run_maker(maker: &crate::plugins::Maker, from: &Path, out: &Path) -> Result<(
     Ok(())
 }
 
-fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: Reply) {
-    // An effect: the plugin's that makes it (Live Photos'), if it is on.
-    let maker = if want == Want::Jpeg {
+fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, kind: &str, reply: Reply) {
+    // An effect, or a kind a plugin makes of its own: the plugin's that
+    // makes it (Live Photos'), if it is on. A `jpeg` pinholed makes itself.
+    let want = Want::parse(kind);
+    let maker = if want == Some(Want::Jpeg) {
         None
     } else {
-        match maker_of(shared, want.name()) {
+        match maker_of(shared, kind) {
             Some(maker) => Some(maker),
-            None => return reply.send(Err(("turned_off", format!("no plugin that makes a {} is on", want.name())))),
+            None => return reply.send(Err(("turned_off", format!("no plugin that makes a {kind} is on")))),
         }
     };
     let from = match &maker {
@@ -1681,14 +1697,17 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
         |r| r.get::<_, String>(0),
     );
     let Ok(key) = made_from else {
-        return reply.send(Err(("not_found", format!("{asset} has no {} to make a {} of", from.name(), want.name()))));
+        return reply.send(Err(("not_found", format!("{asset} has no {} to make a {kind} of", from.name()))));
     };
     let (file_type, extension) = match &maker {
         Some(maker) => (maker.file_type.clone(), maker.extension.clone()),
         None => ("public.jpeg".to_owned(), "jpg".to_owned()),
     };
     let (file_type, extension) = (file_type.as_str(), extension.as_str());
-    let relative = cached_path(want, &key, extension, true);
+    let relative = match want {
+        Some(want) => cached_path(want, &key, extension, true),
+        None => own_made_path(from, kind, &key, extension),
+    };
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
         return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": "made", "cached": true})));
@@ -1708,6 +1727,7 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
     fetch(shared, db, &json!({"asset": asset, "kind": from.name()}), Reply { id: Value::Null, out: Out::Service(tx), stream: false });
     let shared = shared.clone();
     let extension = extension.to_owned();
+    let kind = kind.to_owned();
     std::thread::spawn(move || {
         let extension = extension.as_str();
         // A panic in making it fails it as an error would: answered, and
@@ -1727,14 +1747,14 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, want: Want, reply: R
             .and_then(|()| Ok(std::fs::rename(&part, &path)?));
             if let Err(e) = result {
                 let _ = std::fs::remove_file(&part);
-                eprintln!("pinholed: making the {} of {}: {e:#}", want.name(), source.display());
+                eprintln!("pinholed: making the {kind} of {}: {e:#}", source.display());
                 return Err(("unavailable".to_owned(), format!("{e:#}")));
             }
             Ok(())
         }))
         .unwrap_or_else(|panic| {
             remove_parts(&path);
-            let why = format!("making the {} panicked ({})", want.name(), panic_message(&*panic));
+            let why = format!("making the {kind} panicked ({})", panic_message(&*panic));
             eprintln!("pinholed: {why}");
             Err(("unavailable".to_owned(), why))
         });

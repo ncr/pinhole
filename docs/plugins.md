@@ -464,7 +464,8 @@ setting's default), a `setting` for `SettingSwitch` and `Choices`, and
 `thumbnailAsIs`. API 14 adds `pinhole.synced`: what the user made of a
 library, kept with it on every computer it is shown on, and its file
 given to the plugin's workers (`PINHOLE_SYNCED`); and
-`pinhole.viewer.photo` and `id`.
+`pinhole.viewer.photo` and `id`. API 15 adds kinds a plugin makes of
+its own (`"<its id>/<name>"` in `makes`, What a plugin makes).
 
 `Main.qml` beside it:
 
@@ -630,7 +631,7 @@ the program of its own that makes it (`"api": 12`):
 
 | Field | |
 |---|---|
-| `kind` | what a window's `fetch` asks for: `bounce` or `long_exposure`, one plugin each |
+| `kind` | what a window's `fetch` asks for: `bounce` or `long_exposure`, one plugin each, or (API 15) a kind of its own, `"<its id>/<name>"` (`"me.steady/steadied"`), the name lowercase letters, digits, `_` and `-` |
 | `from` | the rendition it is made from: `live`, `full`, `original` or `video` |
 | `type`, `extension` | what it makes: its UTI, and its file's extension, lowercase |
 | `program`, `args` | a program in the plugin's folder, and what it is given first |
@@ -645,6 +646,13 @@ own that ends with it; exit 0 with the file written, and pinholed keeps it
 in the cache, made once. Turned off, nothing makes that kind, and `fetch`
 is answered `turned_off`. `plugin check` checks `makes` as pinholed takes
 it.
+
+A kind of its own is always made, a source never has one: `fetch(photo,
+"me.steady/steadied")` from any plugin gets it, made from the photo's
+`from` and kept in the cache beside that, as long as its plugin is on. Its
+id in front keeps it apart from another plugin's and from the kinds a
+source has. A Pinhole before API 15 refuses it, and `fetch` there is
+answered `bad_request`.
 
 ## What a plugin is given
 
@@ -907,7 +915,7 @@ this API. A library position is not a visual grid position.
 | `input` | what was used last: `"keyboard"`, `"mouse"` or `"touchpad"` (API 12), to say "Pinch to zoom" or "Scroll to zoom" |
 | `hasKeys` | whether the keys are the plugin's now: it covers the photos and no panel of Pinhole's is over it (API 12), for what takes keys or gestures of its own |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
-| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the plugin that makes them (Live Photos', What a plugin makes) makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)` (API 4): as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
+| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the plugin that makes them (Live Photos', What a plugin makes) makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it; and (API 15) a kind a plugin makes of its own, `"<its id>/<name>"`): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)` (API 4): as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
 | `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did`. `cancel()` stops only the answer: the change, once asked, still goes through, so read `library.revision` rather than take `cancelled` for nothing changed |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). Its stdin ends after `input`, or at once without one, and its stdout is read as UTF-8 text: a binary file goes through a path instead. `cancel()` asks it to end (SIGTERM) and kills it a second later. `sqlite3`, a clipboard tool (`wl-copy`, `xclip`…) and `xdg-user-dir` are refused, by name, path or in a shell's line: rejected with `refused` (`pinhole.query`, `copyFile`, `picturePath`) |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
