@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -353,6 +353,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"Choices.numbered", QRegularExpression(QStringLiteral("\\bnumbered\\s*:"))},
         {"pinhole.keyboardInUse", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keyboardInUse\\b"))},
         {"PanZoom", QRegularExpression(QStringLiteral("\\bPanZoom\\s*\\{"))},
+        {"pinhole.viewer.photo or id", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*viewer\\s*\\.\\s*(photo|id)\\b"))},
         {"pinhole.adjust, turn or adjustment", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(adjust|turn|adjustment)\\s*\\("))},
         {"Job", QRegularExpression(QStringLiteral("\\bJob\\s*\\{"))},
         {"a setting of SettingSwitch or Choices",
@@ -1096,6 +1097,47 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                             .arg(key, layer == QLatin1String("viewer") ? QStringLiteral("viewer")
                                                                                        : QStringLiteral("grid"),
                                                  does);
+            }
+        }
+        // A group's menu opens with Shift and its button's key (its first
+        // action with one, PluginGroup.qml): an action of the same
+        // place on that key is two shortcuts on one key, neither works.
+        {
+            const QString plain = withoutComments(text);
+            static const QRegularExpression actionObject(QStringLiteral("\\bPluginAction\\s*\\{"));
+            static const QRegularExpression keyOf(QStringLiteral("(?:^|[;\\s])key\\s*:\\s*[\"']([^\"'\\n]+)[\"']"));
+            static const QRegularExpression placeOf(QStringLiteral("(?:^|[;\\s])place\\s*:\\s*[\"'](\\w+)[\"']"));
+            static const QRegularExpression groupOf(QStringLiteral("(?:^|[;\\s])group\\s*:\\s*[\"']([^\"'\\n]+)[\"']"));
+            struct Keyed { QString place, group, key; int line; };
+            QList<Keyed> actions;
+            for (auto m = actionObject.globalMatch(plain); m.hasNext();) {
+                const auto match = m.next();
+                const QString lines = ownLines(plain, match.capturedEnd() - 1);
+                actions.append({placeOf.match(lines).captured(1), groupOf.match(lines).captured(1),
+                                keyOf.match(lines).captured(1), lineAt(plain, match.capturedStart())});
+            }
+            for (const Keyed &member : std::as_const(actions)) {
+                if (member.group.isEmpty() || member.key.isEmpty() || member.key.startsWith(QLatin1String("Shift+"))
+                    || (member.place != QLatin1String("viewer") && member.place != QLatin1String("selection")))
+                    continue;
+                const int together = int(std::count_if(actions.begin(), actions.end(), [&](const Keyed &a) {
+                    return a.place == member.place && a.group == member.group;
+                }));
+                // Its button is its first action (as written) with a key.
+                const auto first = std::find_if(actions.begin(), actions.end(), [&](const Keyed &a) {
+                    return a.place == member.place && a.group == member.group && !a.key.isEmpty();
+                });
+                if (together < 2 || first == actions.end() || first->line != member.line)
+                    continue;
+                const QString menu = portableKey(QStringLiteral("Shift+") + member.key);
+                for (const Keyed &other : std::as_const(actions))
+                    if (other.place == member.place && !other.key.isEmpty() && portableKey(other.key) == menu)
+                        found.errors << QStringLiteral("%1:%2: %3 opens the menu of group \"%4\" (Shift and %5, its button's "
+                                                       "key), and is this action's key too: neither works. Give it another, "
+                                                       "or take it out of the group")
+                                            .arg(file)
+                                            .arg(other.line)
+                                            .arg(other.key, member.group, member.key);
             }
         }
         // What a PluginMark and a PluginAction take as words: one Pinhole

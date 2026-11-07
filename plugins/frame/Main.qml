@@ -113,7 +113,7 @@ PinholePlugin {
                     return
                 }
                 plugin.ticked = false
-                plugin.ensureFrame().play(pinhole.library.item(pinhole.viewer.index).id ?? "", list, true, () => plugin.choose())
+                plugin.ensureFrame().play(pinhole.viewer.id, list, true, () => plugin.choose())
             }
         },
         PluginAction {

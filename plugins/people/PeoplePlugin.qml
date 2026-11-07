@@ -91,7 +91,7 @@ PinholePlugin {
     // guess, anchor, legacy, drawn }], `drawn` the face's box in the photo as
     // it is turned and cropped here, left to right.
     readonly property string shownId: (pinhole.library.revision, pinhole.viewer.open && pinhole.viewer.index >= 0
-                                       ? pinhole.library.item(pinhole.viewer.index).id ?? "" : "")
+                                       ? pinhole.viewer.id : "")
     property string facesOf: ""
     // As pinhole-faces gave them; placed again as the photo is turned or
     // cropped (the library read again).

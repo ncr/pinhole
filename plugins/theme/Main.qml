@@ -20,7 +20,7 @@ PinholePlugin {
     property var replaced: ({})
 
     readonly property bool photoShown: pinhole.viewer.open && pinhole.viewer.index >= 0
-                                       && !pinhole.library.item(pinhole.viewer.index).video
+                                       && !pinhole.viewer.photo.video
 
     Component.onCompleted: pinhole.run("pinhole-theme", ["available"]).then(() => available = true, () => {})
 

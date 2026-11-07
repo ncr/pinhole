@@ -47,20 +47,28 @@ class PluginViewer : public QObject {
     Q_PROPERTY(bool open READ open NOTIFY openChanged)
     Q_PROPERTY(int index READ index NOTIFY indexChanged)
     Q_PROPERTY(QVariantMap hdr READ hdr NOTIFY hdrChanged)
+    // The photo shown, as library.item() gives it, {} with none (API 14);
+    // its id, "" with none. What library.item(viewer.index) was written for.
+    Q_PROPERTY(QVariantMap photo READ photo NOTIFY photoChanged)
+    Q_PROPERTY(QString id READ id NOTIFY photoChanged)
 public:
-    explicit PluginViewer(Viewer *viewer, QObject *parent = nullptr);
+    explicit PluginViewer(Viewer *viewer, class PluginLibrary *library, QObject *parent = nullptr);
     bool open() const;
     int index() const;
     QVariantMap hdr() const;
+    QVariantMap photo() const;
+    QString id() const;
     // The photo closed, as Esc closes it.
     Q_INVOKABLE void close();
 signals:
     void openChanged();
     void indexChanged();
     void hdrChanged();
+    void photoChanged();
 
 private:
     Viewer *m_viewer;
+    class PluginLibrary *m_library;
 };
 
 // What a plugin sees of the library: every photo by its position, oldest

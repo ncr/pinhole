@@ -10,7 +10,7 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
     readonly property bool viewing: pinhole.viewer.open && pinhole.viewer.index >= 0
-    readonly property bool editable: viewing && !pinhole.library.item(pinhole.viewer.index).video
+    readonly property bool editable: viewing && !pinhole.viewer.photo.video
     // The photo shown turned or cropped here: Original takes it back.
     readonly property bool adjusted: (pinhole.library.revision, editable && (() => {
         const now = pinhole.adjustment(pinhole.viewer.index)
@@ -83,7 +83,7 @@ PinholePlugin {
             text: qsTr("Crop")
             key: "K"
             shown: plugin.editable
-            onTriggered: cropping.open(pinhole.library.item(pinhole.viewer.index).id)
+            onTriggered: cropping.open(pinhole.viewer.id)
         },
         PluginAction {
             place: "viewer"

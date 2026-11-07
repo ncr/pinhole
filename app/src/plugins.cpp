@@ -364,11 +364,26 @@ QObject *PluginHost::library() const { return m_plugins->library(); }
 
 QObject *PluginHost::viewer() const { return m_plugins->viewerApi(); }
 
-PluginViewer::PluginViewer(Viewer *viewer, QObject *parent) : QObject(parent), m_viewer(viewer) {
+PluginViewer::PluginViewer(Viewer *viewer, PluginLibrary *library, QObject *parent)
+    : QObject(parent), m_viewer(viewer), m_library(library) {
     connect(viewer, &Viewer::openChanged, this, &PluginViewer::openChanged);
     connect(viewer, &Viewer::indexChanged, this, &PluginViewer::indexChanged);
     connect(viewer, &Viewer::hdrChanged, this, &PluginViewer::hdrChanged);
+    // Another photo, or what is known of this one changed (a favourite, an
+    // edit, the library read again).
+    connect(viewer, &Viewer::openChanged, this, &PluginViewer::photoChanged);
+    connect(viewer, &Viewer::indexChanged, this, &PluginViewer::photoChanged);
+    if (library)
+        connect(library, &PluginLibrary::revisionChanged, this, &PluginViewer::photoChanged);
 }
+
+QVariantMap PluginViewer::photo() const {
+    if (!m_library || !m_viewer->isOpen() || m_viewer->index() < 0)
+        return {};
+    return m_library->item(QJSValue(m_viewer->index()));
+}
+
+QString PluginViewer::id() const { return photo().value(QStringLiteral("id")).toString(); }
 
 bool PluginViewer::open() const { return m_viewer->isOpen(); }
 int PluginViewer::index() const { return m_viewer->index(); }
@@ -639,7 +654,7 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     : QObject(parent), m_library(library), m_service(service), m_viewer(viewer), m_translator(translator),
       m_history(history),
       m_libraryApi(std::make_unique<PluginLibrary>(library)),
-      m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer) : nullptr), m_config(readConfig()),
+      m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer, m_libraryApi.get()) : nullptr), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
       m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files),
       m_syncedStore(std::make_unique<SyncedStore>()), m_toured(readToured()) {
@@ -1734,47 +1749,58 @@ int newPlugin(const QString &id, const QString &folder = {}) {
                 break;
             }
     }
-    // A screen of its own over the photos, as most plugins have: on its
-    // key, the newest photos in a grid that scrolls and pinches as
-    // Pinhole's own, Esc to close. What `pinhole plugin check` asks of a
-    // plugin it has: the kit, every word in qsTr() and in Polish.
+    // A view of its own over the photos, as most plugins have: on its key,
+    // the newest photos as the kit's tiles; ⏎ opens one, and Esc there
+    // comes back to it. The kit's ways (PluginView, PhotoTiles), photos by
+    // id, every word in qsTr() and in Polish: what `pinhole plugin check`
+    // asks of a plugin it has.
     const QByteArray main = QStringLiteral(R"(import QtQuick
 import Pinhole.Plugin
 
-// %1: what it adds to Pinhole. docs/plugins.md has all a plugin is given;
-// saving this file loads it again at once.
+// %1: what it adds to Pinhole. docs/plugins.md has all a plugin is given,
+// docs/plugin-kit.md every part of the kit; saving this file loads it
+// again at once.
 PinholePlugin {
     id: plugin
-    property bool open: false
-    covering: open
-
     actions: [
-        PluginAction { place: "grid"; text: qsTr("Newest"); key: "F2"; onTriggered: plugin.open = true }
+        PluginAction {
+            place: "grid"
+            text: qsTr("Newest")
+            key: "F2"
+            shown: pinhole.library.count > 0
+            onTriggered: newest.open()
+        }
     ]
     help: [["F2", qsTr("The newest photos")]]
-    Command { name: "%2.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
 
-    // Over the photos while open, taking every click, wheel and pinch.
-    Panel {
-        visible: plugin.open
-        PinchZoom {
-            id: zoom
-            anchors.fill: parent
-            levels: [100, 160, 260]
-            level: 1
-            ScrollGrid {
-                anchors.fill: parent
-                anchors.margins: 16
-                cellWidth: zoom.size
-                cellHeight: zoom.size
-                model: Math.min(1000, pinhole.library.count)
-                delegate: Image {
-                    required property int index
-                    width: zoom.size - 4
-                    height: zoom.size - 4
-                    source: pinhole.library.item(pinhole.library.count - 1 - index).thumbnail ?? ""
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
+    // Over the photos while open: made the first time, Esc and F2 close it.
+    PluginView {
+        id: newest
+        toggleKey: "F2"
+        content: Component {
+            Item {
+                id: page
+                // Photos by id, newest first: ids stay the same photo when
+                // the library is read again; positions do not.
+                readonly property var photos: (pinhole.library.revision, pinhole.library.field("id").slice(-500).reverse())
+                Panel {}
+                PanelHeader { id: header; title: qsTr("Newest") }
+                PhotoTiles {
+                    id: tiles
+                    anchors.top: header.bottom
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.margins: 16
+                    library: pinhole.library
+                    photos: page.photos
+                    active: newest.shown && !pinhole.away
+                    // Esc on the photo comes back here, on it.
+                    onOpened: (photo, index) => pinhole.openPhotos(page.photos, photo, { comeBack: true })
+                }
+                Connections {
+                    target: pinhole
+                    function onReturned(photo) { tiles.moveTo(photo) }
                 }
             }
         }
@@ -1784,7 +1810,6 @@ PinholePlugin {
     // Its words in Polish, as Pinhole's own have theirs.
     const QByteArray polish = QJsonDocument(QJsonObject{{"Newest", QString::fromUtf8("Najnowsze")},
                                                         {"The newest photos", QString::fromUtf8("Najnowsze zdjęcia")},
-                                                        {name, name},
                                                         {"What it does, in a sentence.", QString::fromUtf8("Co robi, w jednym zdaniu.")}})
                                   .toJson();
     QDir().mkpath(dir + "/i18n");

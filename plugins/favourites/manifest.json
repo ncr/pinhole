@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 3,
+  "api": 14,
   "id": "pinhole.favourites",
   "name": "Favourites",
   "version": "1.0.0",

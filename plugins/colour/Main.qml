@@ -106,7 +106,7 @@ PinholePlugin {
         },
         PluginAction {
             id: viewerAction
-            readonly property string colour: pinhole.viewer.open ? pinhole.library.item(pinhole.viewer.index).avgColor ?? "" : ""
+            readonly property string colour: pinhole.viewer.open ? pinhole.viewer.photo.avgColor ?? "" : ""
             place: "viewer"
             text: qsTr("Same colour")
             key: "H"

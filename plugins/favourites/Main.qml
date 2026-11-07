@@ -40,7 +40,7 @@ PinholePlugin {
 
     // The photo shown full window, and what is ticked: all favourites?
     readonly property bool shownIsFavourite: (pinhole.library.revision, pinhole.viewer.open && pinhole.viewer.index >= 0
-                                              && pinhole.library.item(pinhole.viewer.index).favorite === true)
+                                              && pinhole.viewer.photo.favorite === true)
     readonly property bool tickedAreFavourites: (pinhole.library.revision, pinhole.selectionCount > 0
                                                  && allFavourites(pinhole.selection()))
 
@@ -75,7 +75,7 @@ PinholePlugin {
     // What the heart was pressed on: the photo shown, or what is ticked.
     function here() {
         if (pinhole.viewer.open && pinhole.viewer.index >= 0)
-            return "shown " + pinhole.library.item(pinhole.viewer.index).id
+            return "shown " + pinhole.viewer.id
         if (pinhole.selectionCount > 0)
             return "ticked " + pinhole.selectionCount + " " + pinhole.selection()[0]
         return ""

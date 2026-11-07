@@ -21,7 +21,7 @@ PinholePlugin {
 
     // Fetching, keeping or setting one: its button's key turns.
     property bool working: false
-    readonly property var shown: pinhole.viewer.open ? pinhole.library.item(pinhole.viewer.index) : null
+    readonly property var shown: pinhole.viewer.open ? pinhole.viewer.photo : null
 
     readonly property string folder: pinhole.picturesDir() + "/Pinhole/.backgrounds"
     // What the shell draws, and what OWE plays (Omarchy's Util.isVideoPath);
