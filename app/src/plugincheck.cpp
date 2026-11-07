@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -312,6 +312,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
         {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
+        {"pinhole.ask or a worker that answers", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*ask\\s*\\("))},
         {"pinhole.fileActions or a file's PluginAction",
          QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*fileActions\\b|\\bplace\\s*:\\s*[\"']file[\"']"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
@@ -460,6 +461,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             uses << QStringLiteral("workers in the manifest");
         if (declared.contains(QLatin1String("makes")))
             uses << QStringLiteral("makes in the manifest");
+        for (const QJsonValue &worker : declared.value(QLatin1String("workers")).toArray())
+            if (worker.toObject().value(QLatin1String("answers")).toBool())
+                uses << QStringLiteral("pinhole.ask or a worker that answers");
         for (const QJsonValue &made : declared.value(QLatin1String("makes")).toArray())
             if (made.toObject().value(QLatin1String("kind")).toString().contains('/'))
                 uses << QStringLiteral("a kind of its own in makes");
@@ -1423,13 +1427,17 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
             return tr("\"workers\": %1 is named twice").arg(name);
         seen << name;
         const auto wrong = [&name](const QString &why) { return tr("\"workers\": %1: %2").arg(name, why); };
-        static const QStringList fields = {"name", "program", "args", "per"};
+        static const QStringList fields = {"name", "program", "args", "per", "answers"};
         for (const QString &key : worker.keys())
             if (!fields.contains(key))
                 return wrong(tr("\"%1\" is none of a worker's fields%2, and pinholed never reads it: %3")
                                  .arg(key, didYouMean(key, fields), fields.join(QStringLiteral(", "))));
         if (worker.contains("per") && worker.value("per") != QJsonValue(QStringLiteral("source")))
             return wrong(tr("\"per\" must be \"source\" (or left out): the only one there is"));
+        if (worker.contains("answers") && !worker.value("answers").isBool())
+            return wrong(tr("\"answers\" is true or false"));
+        if (worker.value("answers").toBool() && manifest.value("api").toInt(1) < 15)
+            return wrong(tr("\"answers\" needs \"api\": 15"));
         if (worker.contains("args")) {
             const QJsonValue args = worker.value("args");
             bool fine = args.isArray() && args.toArray().size() <= 64;

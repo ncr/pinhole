@@ -1490,6 +1490,24 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // A worker that answers (pinhole.ask) says so, from API 15.
+    void aWorkerThatAnswersSaysSoFromApi15() {
+        QTemporaryDir dir;
+        QFile program(dir.path() + "/work");
+        QVERIFY(program.open(QIODevice::WriteOnly));
+        program.write("#!/bin/sh\n");
+        program.close();
+        program.setPermissions(program.permissions() | QFile::ExeOwner);
+        const auto manifest = [](int api, const QJsonValue &answers) {
+            return QJsonObject{{"id", "me.index"}, {"api", api},
+                               {"workers", QJsonArray{QJsonObject{{"name", "index"}, {"program", "work"}, {"answers", answers}}}}};
+        };
+        QCOMPARE(Plugins::workersProblem(dir.path(), manifest(15, true)), QString());
+        QCOMPARE(Plugins::workersProblem(dir.path(), manifest(11, false)), QString());
+        QVERIFY(Plugins::workersProblem(dir.path(), manifest(14, true)).contains("needs \"api\": 15"));
+        QVERIFY(Plugins::workersProblem(dir.path(), manifest(15, "yes")).contains("true or false"));
+    }
+
     // A kind a plugin makes of its own is under its id, from API 15, as
     // pinholed takes it (core/src/plugins.rs, check_maker).
     void aPluginMakesKindsOfItsOwnUnderItsId() {

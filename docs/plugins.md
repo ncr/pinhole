@@ -465,9 +465,9 @@ setting's default), a `setting` for `SettingSwitch` and `Choices`, and
 library, kept with it on every computer it is shown on, and its file
 given to the plugin's workers (`PINHOLE_SYNCED`); and
 `pinhole.viewer.photo` and `id`. API 15 adds kinds a plugin makes of
-its own (`"<its id>/<name>"` in `makes`, What a plugin makes), and
-actions on a file: `PluginAction`'s `place: "file"` and
-`pinhole.fileActions`.
+its own (`"<its id>/<name>"` in `makes`, What a plugin makes),
+actions on a file (`PluginAction`'s `place: "file"` and
+`pinhole.fileActions`), and `pinhole.ask`, a worker that `answers`.
 
 `Main.qml` beside it:
 
@@ -542,6 +542,7 @@ without a window:
 | `program` | a file in the plugin's folder that can be run, by a relative path without `..` |
 | `args` | strings given to it first (none if left out) |
 | `per` | `"source"`, the only one there is (also if left out): one runs for the source shown |
+| `answers` | `true` (API 15): it answers what its plugin asks, `pinhole.ask` (below); `false` if left out |
 
 `workers` needs `"api": 11`. pinholed finds them as it finds providers
 (source-providers.md): in Pinhole's own plugins and yours, a plugin of
@@ -616,6 +617,35 @@ function load() {
         .catch(error => { if (error.code !== "not_found") pinhole.warn(error) })
 }
 ```
+
+### Asking a worker
+
+A worker that keeps something in memory (an index of what photos show, a
+model loaded once) can answer its plugin's questions, instead of a
+program started for each one loading it all again. Its manifest says
+`"answers": true` (API 15), and the QML asks:
+
+```qml
+pinhole.ask("index", { text: field.text, limit: 50 }, { timeout: 10000 })
+    .then(result => panel.found = result.ids)
+    .catch(error => { if (error.code !== "cancelled") panel.problem = error.message })
+```
+
+pinholed writes each question to the worker's stdin as a line of JSON,
+`{"ask": 7, "request": {"text": "cats", "limit": 50}}`, the request as
+the QML gave it; the worker answers on its stdout with a line of its own,
+`{"answer": 7, "result": {"ids": [...]}}`, or `{"answer": 7, "error":
+"why"}`, in any order and while others wait (the `ask` number says which).
+What it says otherwise is as before: its news, its log. The promise is of
+the `result`; rejected with `code` `failed` (its `error` the message),
+`timeout` (none in `timeout` ms, 30 s unless said), `not_running` (not
+started yet, or it stopped before it answered: no source shown, the plugin
+turned off), `unsupported` (its manifest does not say it `answers`),
+`not_found` (no such worker of the plugin's), `cancelled` once `cancel()`
+or the plugin stopped (the worker's answer then goes nowhere), or the
+service's. Its stdin still closes as it is stopped: read the lines until
+EOF, then end. A Pinhole before API 15 runs it as any worker, and asks it
+nothing.
 
 ## What a plugin makes
 
@@ -929,6 +959,7 @@ this API. A library position is not a visual grid position.
 | `hasKeys` | whether the keys are the plugin's now: it covers the photos and no panel of Pinhole's is over it (API 12), for what takes keys or gestures of its own |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
 | `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the plugin that makes them (Live Photos', What a plugin makes) makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it; and (API 15) a kind a plugin makes of its own, `"<its id>/<name>"`): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)` (API 4): as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
+| `ask(name, request, options)` | what its worker `name`, one whose manifest says `"answers": true`, answers to `request` (API 15): a promise of its result; `options`: `{ timeout }` in ms, 30 s unless said (Asking a worker) |
 | `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did`. `cancel()` stops only the answer: the change, once asked, still goes through, so read `library.revision` rather than take `cancelled` for nothing changed |
 | `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`. `options`: `input` (to its stdin), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). Its stdin ends after `input`, or at once without one, and its stdout is read as UTF-8 text: a binary file goes through a path instead. `cancel()` asks it to end (SIGTERM) and kills it a second later. `sqlite3`, a clipboard tool (`wl-copy`, `xclip`…) and `xdg-user-dir` are refused, by name, path or in a shell's line: rejected with `refused` (`pinhole.query`, `copyFile`, `picturePath`) |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |

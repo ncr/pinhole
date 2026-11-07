@@ -379,6 +379,10 @@ public:
     // none of them is in the library. No undo step: the plugin's own
     // (did).
     Q_INVOKABLE QJSValue setFavorite(const QJSValue &photos, bool favorite);
+    // What its worker `name` answers to `request` (API 15): the worker
+    // declared with "answers": true, asked on its stdin by pinholed. A
+    // promise of the answer's result; options: { timeout } in ms (30 s).
+    Q_INVOKABLE QJSValue ask(const QString &name, const QJSValue &request, const QJSValue &options = {});
     // Run a program, its own (in its folder) or any on PATH: a promise of
     // { stdout, stderr, code } once it exits 0, rejected with an Error
     // whose `code` is "exit" (and exitCode, stdout, stderr), "start",

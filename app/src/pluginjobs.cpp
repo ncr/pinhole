@@ -350,6 +350,30 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
     return promise;
 }
 
+QJSValue PluginHost::ask(const QString &name, const QJSValue &request, const QJSValue &options) {
+    // The worker's answer cannot be stopped, only no longer waited for.
+    auto deferred = std::make_shared<Deferred>();
+    const std::weak_ptr<Deferred> weak = deferred;
+    const int generation = m_generation;
+    *deferred = defer([this, weak, generation] {
+        if (const auto d = weak.lock())
+            settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
+    });
+    const QJSValue promise = deferred->promise;
+    QJsonObject params{{"plugin", m_id}, {"name", name}, {"request", QJsonValue::fromVariant(request.toVariant())}};
+    if (const QJSValue timeout = options.property(QStringLiteral("timeout")); timeout.isNumber() && timeout.toNumber() > 0)
+        params.insert("timeout", qint64(timeout.toNumber()));
+    m_plugins->service()->call(QStringLiteral("ask"), params, [this, deferred, generation](bool ok, const QJsonObject &result, const QString &code) {
+        if (!ok) {
+            settle(generation, deferred->reject, error(code, result.value("message").toString()));
+            return;
+        }
+        if (QJSEngine *js = engine())
+            settle(generation, deferred->resolve, js->toScriptValue(result.value("result").toVariant()));
+    });
+    return promise;
+}
+
 QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
     // The service's answer cannot be stopped, only no longer waited for:
     // the photos are set, or put back, either way.

@@ -1182,6 +1182,18 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
             // A service of a library given runs none.
             Some("workers") if shared.config.given.is_some() => reply.send(Ok(json!({"workers": []}))),
             Some("workers") => reply.send(Ok(shared.workers.report_now(shared.workers_shown().as_ref()))),
+            // What a plugin asks its worker (pinhole.ask): answered in a
+            // thread of its own, as the worker takes its time.
+            Some("ask") => {
+                let params = &request["params"];
+                let (Some(plugin), Some(name)) = (params["plugin"].as_str(), params["name"].as_str()) else {
+                    reply.send(Err(("bad_request", "ask needs plugin and name".into())));
+                    continue;
+                };
+                let timeout = Duration::from_millis(params["timeout"].as_u64().unwrap_or(30_000).clamp(1, 600_000));
+                let (shared, plugin, name, asked) = (shared.clone(), plugin.to_owned(), name.to_owned(), params["request"].clone());
+                std::thread::spawn(move || reply.send(shared.workers.ask(&plugin, &name, &asked, timeout).map(|result| json!({"result": result}))));
+            }
             Some("sync") => {
                 let _ = shared.sync_now.lock().unwrap().send(());
                 let _ = shared.carry_now.lock().unwrap().send(());

@@ -245,6 +245,9 @@ pub struct Worker {
     pub program: PathBuf,
     /// What it is given before what pinholed gives every worker.
     pub args: Vec<String>,
+    /// It answers what its plugin asks (`pinhole.ask`, API 15): lines of
+    /// JSON on its stdin, its answers on its stdout.
+    pub answers: bool,
 }
 
 /// The plugin API that brought `workers` (Plugins::apiUses).
@@ -277,10 +280,10 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
         let mut names: Vec<String> = Vec::new();
         for each in declared {
             let name = each["name"].as_str().unwrap_or("");
-            match check_worker(&dir, each, &names) {
-                Ok((program, args)) => {
+            match check_worker(&dir, each, &names, whole(&manifest["api"]).unwrap_or(1)) {
+                Ok((program, args, answers)) => {
                     names.push(name.to_owned());
-                    found.push(Worker { plugin: id.clone(), builtin, name: name.to_owned(), program, args });
+                    found.push(Worker { plugin: id.clone(), builtin, name: name.to_owned(), program, args, answers });
                 }
                 Err(why) => problems.push(format!("{id}: worker {name:?}: {why}")),
             }
@@ -422,7 +425,10 @@ fn check_maker(plugin: &str, api: i64, dir: &Path, declared: &Value) -> Result<M
 
 /// One worker as its manifest declares it, checked: its program and the
 /// arguments it is given first.
-fn check_worker(dir: &Path, declared: &Value, names: &[String]) -> Result<(PathBuf, Vec<String>), String> {
+/// The API from which a worker can answer what its plugin asks.
+pub const ANSWERS_API: i64 = 15;
+
+fn check_worker(dir: &Path, declared: &Value, names: &[String], api: i64) -> Result<(PathBuf, Vec<String>, bool), String> {
     if !declared.is_object() {
         return Err("a worker is an object with a \"name\" and a \"program\"".into());
     }
@@ -449,8 +455,14 @@ fn check_worker(dir: &Path, declared: &Value, names: &[String]) -> Result<(PathB
             .collect::<Result<_, _>>()?,
         _ => return Err("\"args\" is a list of strings".into()),
     };
+    let answers = match &declared["answers"] {
+        Value::Null => false,
+        Value::Bool(answers) if *answers && api < ANSWERS_API => return Err(format!("\"answers\" needs \"api\": {ANSWERS_API}")),
+        Value::Bool(answers) => *answers,
+        _ => return Err("\"answers\" is true or false".into()),
+    };
     let program = program_in(dir, "program", &declared["program"])?;
-    Ok((program, args))
+    Ok((program, args, answers))
 }
 
 /// One provider as its manifest declares it, checked (docs/source-providers.md).

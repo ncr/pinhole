@@ -10,8 +10,11 @@
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::collections::HashMap;
+use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -50,6 +53,8 @@ pub struct Job {
     /// environment as PINHOLE_SYNCED: an argument more would stop a
     /// worker from before that refuses ones it does not know.
     pub synced: PathBuf,
+    /// It answers what is asked of it on its stdin (`ask`).
+    pub answers: bool,
 }
 
 impl Job {
@@ -121,6 +126,51 @@ pub struct Workers {
     /// What each (plugin, name) said last while it runs, for a window or a
     /// panel that opens after: `said` in its status.
     said: Arc<Mutex<HashMap<(String, String), Value>>>,
+    /// What is asked of those that answer, and their stdin to ask it on.
+    asking: Arc<Asking>,
+}
+
+/// An answer, or why there is none: a code and a message.
+pub type Answer = std::result::Result<Value, (&'static str, String)>;
+
+/// The questions to workers that answer (`ask`), on their way.
+#[derive(Default)]
+struct Asking {
+    /// The stdin of each that runs and answers: dropped, it closes, and
+    /// the worker ends.
+    inputs: Mutex<HashMap<(String, String), Arc<Mutex<ChildStdin>>>>,
+    /// Each question asked and not answered yet: whose, and who waits.
+    pending: Mutex<HashMap<u64, ((String, String), Sender<Answer>)>>,
+    next: AtomicU64,
+}
+
+impl Asking {
+    /// The answer a worker wrote: to who asked it that, if it was this
+    /// worker that was asked.
+    fn answered(&self, worker: &(String, String), line: &Value) {
+        let Some(id) = line["answer"].as_u64() else { return };
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.get(&id).is_some_and(|(whose, _)| whose == worker) {
+            let (_, waiting) = pending.remove(&id).unwrap();
+            let _ = waiting.send(match &line["error"] {
+                Value::Null => Ok(line["result"].clone()),
+                Value::String(why) => Err(("failed", why.clone())),
+                other => Err(("failed", other.to_string())),
+            });
+        }
+    }
+
+    /// A worker stopped or ended: its stdin closed, and what was asked of
+    /// it answered so.
+    fn forget(&self, worker: &(String, String)) {
+        self.inputs.lock().unwrap_or_else(|e| e.into_inner()).remove(worker);
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let ids: Vec<u64> = pending.iter().filter(|(_, (whose, _))| whose == worker).map(|(id, _)| *id).collect();
+        for id in ids {
+            let (_, waiting) = pending.remove(&id).unwrap();
+            let _ = waiting.send(Err(("not_running", format!("{} {} ended before it answered", worker.0, worker.1))));
+        }
+    }
 }
 
 /// What a worker says to its plugin's windows.
@@ -170,6 +220,48 @@ impl Workers {
             refused: Mutex::default(),
             tell: Mutex::default(),
             said: Arc::default(),
+            asking: Arc::default(),
+        }
+    }
+
+    /// What `plugin`'s worker `name` answers to `request` (`ask`, API 15):
+    /// written to its stdin as a line, `{"ask": <id>, "request": …}`, and
+    /// answered on its stdout, `{"answer": <id>, "result": …}` or with an
+    /// `"error"`. Waits at most `timeout`. Only one whose manifest says it
+    /// `answers`, while it runs.
+    pub fn ask(&self, plugin: &str, name: &str, request: &Value, timeout: Duration) -> Answer {
+        let worker = (plugin.to_owned(), name.to_owned());
+        let input = self.asking.inputs.lock().unwrap_or_else(|e| e.into_inner()).get(&worker).cloned();
+        let Some(input) = input else {
+            let declared = self.wanted(None).into_iter().find(|(w, _)| w.plugin == plugin && w.name == name);
+            return Err(match declared {
+                None => ("not_found", format!("{plugin} has no worker {name:?} that is on")),
+                Some((w, _)) if !w.answers => ("unsupported", format!("{plugin} {name} answers nothing: its manifest says no \"answers\"")),
+                Some(_) => ("not_running", format!("{plugin} {name} is not running")),
+            });
+        };
+        let id = self.asking.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.asking.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(id, (worker.clone(), tx));
+        let mut line = json!({"ask": id, "request": request}).to_string();
+        line.push('\n');
+        let written = {
+            let mut input = input.lock().unwrap_or_else(|e| e.into_inner());
+            input.write_all(line.as_bytes()).and_then(|()| input.flush())
+        };
+        // Not held while it is waited for: the worker stopped meanwhile
+        // gets its EOF.
+        drop(input);
+        if let Err(e) = written {
+            self.asking.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            return Err(("not_running", format!("{plugin} {name} could not be asked: {e}")));
+        }
+        match rx.recv_timeout(timeout) {
+            Ok(answer) => answer,
+            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {
+                self.asking.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                Err(("timeout", format!("{plugin} {name} did not answer in {} s", timeout.as_secs_f32())))
+            }
         }
     }
 
@@ -245,6 +337,7 @@ impl Workers {
                     key: s.key.clone(),
                     cache: self.cache.join(&w.plugin).join(cache_name(&s.library)),
                     synced: crate::synced::file(&crate::synced::library_dir(&s.library), &w.plugin),
+                    answers: w.answers,
                 });
                 (w, job)
             })
@@ -273,6 +366,7 @@ impl Workers {
             let kept = wanted.iter().any(|(w, _)| w.plugin == slot.plugin && w.name == slot.name);
             if !kept {
                 if let Some((_, child)) = slot.child.take() {
+                    self.asking.forget(&(slot.plugin.clone(), slot.name.clone()));
                     stopping.push(child);
                 }
             }
@@ -301,6 +395,7 @@ impl Workers {
                 // Another source shown, or the worker changed: started
                 // again at once for what it is now.
                 let (_, child) = slot.child.take().unwrap();
+                self.asking.forget(&(slot.plugin.clone(), slot.name.clone()));
                 stopping.push(child);
                 slot.since = SystemTime::now();
                 slot.retry = now;
@@ -315,6 +410,7 @@ impl Workers {
                 Err(_) => Exit { code: None, signal: None, at: millis(SystemTime::now()) },
             };
             eprintln!("pinholed: {} {}: ended ({})", slot.plugin, slot.name, describe(&ended));
+            self.asking.forget(&(slot.plugin.clone(), slot.name.clone()));
             slot.child = None;
             slot.last_exit = Some(ended);
             slot.since = SystemTime::now();
@@ -362,7 +458,8 @@ impl Workers {
             .args(job.argv(&self.plugins))
             .env("PINHOLE_SYNCED", &job.synced)
             // The worker watches this pipe for EOF, including when the
-            // service is replaced or killed. It never uses it for commands.
+            // service is replaced or killed. One that answers is asked on
+            // it too, a line of JSON each.
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -381,6 +478,13 @@ impl Workers {
         let mut child = command.spawn()?;
         eprintln!("pinholed: {plugin} {name}: started {} (pid {})", job.program.display(), child.id());
         let label = format!("{plugin} {name}");
+        let worker = (plugin.to_owned(), name.to_owned());
+        if job.answers {
+            if let Some(input) = child.stdin.take() {
+                self.asking.inputs.lock().unwrap_or_else(|e| e.into_inner()).insert(worker.clone(), Arc::new(Mutex::new(input)));
+            }
+        }
+        let asking = self.asking.clone();
         if let Some(out) = child.stdout.take() {
             let label = label.clone();
             // A line of JSON with an "event": news for its plugin, told to
@@ -405,7 +509,11 @@ impl Workers {
             }
             std::thread::spawn(move || {
                 crate::process::log_lines_telling(&label, out, &mut std::io::stderr(), |line| {
-                    let _ = said.send(line);
+                    if line.get("answer").is_some() {
+                        asking.answered(&worker, &line);
+                    } else {
+                        let _ = said.send(line);
+                    }
                 })
             });
         }
@@ -516,6 +624,61 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn a_worker_that_answers_is_asked_on_its_stdin() {
+        let s = Scratch::new("ask");
+        s.plugin(true, "people", "pinhole.people", None);
+        let at = s.dir.join("builtin/search");
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
+        let manifest = json!({"schemaVersion": 1, "api": 15, "id": "pinhole.search", "entryPoints": {"main": "Main.qml"},
+                              "workers": [{"name": "index", "program": "work", "answers": true}]});
+        std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
+        // Answers each line: an error for "fail", nothing for "slow",
+        // news it says in between left to the windows, else what it got.
+        let script = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed 's/.*"ask":\([0-9]*\).*/\1/')
+  case "$line" in
+    *fail*) echo "{\"answer\":$id,\"error\":\"no such thing\"}" ;;
+    *slow*) ;;
+    *) echo '{"event":"progress"}'; echo "{\"answer\":$id,\"result\":{\"asked\":$line}}" ;;
+  esac
+done
+"#;
+        std::fs::write(at.join("work"), script).unwrap();
+        std::fs::set_permissions(at.join("work"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let wait = Duration::from_secs(5);
+        // Not running yet; one that answers nothing; one there is not.
+        assert_eq!(s.workers.ask("pinhole.search", "index", &json!({}), wait).unwrap_err().0, "not_running");
+        let mut slots = Vec::new();
+        let shown = s.shown("A");
+        rounds(&s, &mut slots, Some(shown.clone()), |s| s.running().iter().all(|(_, running)| *running));
+        assert_eq!(s.workers.ask("pinhole.people", "w", &json!({}), wait).unwrap_err().0, "unsupported");
+        assert_eq!(s.workers.ask("pinhole.search", "other", &json!({}), wait).unwrap_err().0, "not_found");
+        // Asked, from two threads at once: each its own answer.
+        let asked = std::thread::scope(|scope| {
+            let one = scope.spawn(|| s.workers.ask("pinhole.search", "index", &json!({"q": "cats"}), wait));
+            let two = scope.spawn(|| s.workers.ask("pinhole.search", "index", &json!({"q": "dogs"}), wait));
+            (one.join().unwrap(), two.join().unwrap())
+        });
+        assert_eq!(asked.0.unwrap()["asked"]["request"], json!({"q": "cats"}));
+        assert_eq!(asked.1.unwrap()["asked"]["request"], json!({"q": "dogs"}));
+        assert_eq!(s.workers.ask("pinhole.search", "index", &json!({"q": "fail"}), wait), Err(("failed", "no such thing".to_owned())));
+        assert_eq!(s.workers.ask("pinhole.search", "index", &json!({"q": "slow"}), Duration::from_millis(300)).unwrap_err().0, "timeout");
+        // Stopped while asked: answered so at once, not at the timeout.
+        let started = Instant::now();
+        let stopped = std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| s.workers.ask("pinhole.search", "index", &json!({"q": "slow"}), Duration::from_secs(30)));
+            std::thread::sleep(Duration::from_millis(200));
+            s.workers.round(&mut slots, None, &|_| {});
+            waiting.join().unwrap()
+        });
+        assert_eq!(stopped.unwrap_err().0, "not_running");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(s.running(), [("pinhole.people".to_owned(), false), ("pinhole.search".to_owned(), false)]);
     }
 
     #[test]

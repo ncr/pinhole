@@ -603,7 +603,8 @@ pub(crate) fn log_lines_telling(plugin: &str, from: impl Read, log: &mut impl Wr
         };
         if line.trim_start().starts_with('{') {
             if let Ok(said) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                if said.get("event").is_some_and(serde_json::Value::is_string) {
+                // News, or a worker's answer to what was asked of it.
+                if said.get("event").is_some_and(serde_json::Value::is_string) || said.get("answer").is_some_and(serde_json::Value::is_u64) {
                     tell(said);
                     continue;
                 }
