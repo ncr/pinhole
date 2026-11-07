@@ -475,7 +475,9 @@ an action's `places`, its `helpText`, an action with a key in the help
 by itself, `pinhole.store(name)`, and the manifest's `requires` with
 `pinhole.has(program)`, a manifest that leaves out `schemaVersion`
 (1) and `entryPoints` (`Main.qml` beside it), and one word for each thing
-across the kit: `triggered()`, `usable`, `key` (Kit, below).
+across the kit: `triggered()`, `usable`, `key` (Kit, below);
+`pinhole.deliver(path)`; and a tour's last step, in the side panel,
+added by Pinhole when the tour has none.
 
 `Main.qml` beside it:
 
@@ -907,7 +909,10 @@ its settings, is there as the window first shows. It sets:
   `photo` is a library position (or a function giving one) the grid goes to
   and lights, `open` one shown full window, `action` one of its
   `PluginAction`s whose button is lit, and `settings: true` lights its part
-  of the side panel. Pinhole shows it by itself when the plugin is turned
+  of the side panel. A tour with no step of `settings: true` ends in one
+  Pinhole adds (API 15): its part of the side panel, where its tour can be
+  shown again; give one of your own to say there what its settings are.
+  Pinhole shows it by itself when the plugin is turned
   on in the side panel (once the panel closes, `tourReady` is true and the
   grid is free), and again from the side panel. Series' shows a series of
   your own. Plugins on at launch whose tour is not seen show none by
@@ -1015,6 +1020,7 @@ this API. A library position is not a visual grid position.
 | `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
+| `deliver(path)` | a file it made handed over (API 15), as Series' and Sheet's are: on the clipboard (`copyFile`), kept where it is. A promise of how it went, never rejected: `"copied"`, `"kept"` (another copy asked for since has the clipboard) or `"failed"` (said, as `warn` says it) |
 | `has(program)` | whether a program is there to run (API 15): a name on PATH (`"localsend"`), or one of its folder's by a relative path; for one it can do without, as Send's LocalSend (what it cannot do without goes in the manifest's `requires`) |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `picturesDir()`: the desktop's Pictures folder (`~/Pictures`), for a folder of one's own in it (`picturesDir() + "/Exports"`); in a self-test, the scratch Pictures, never the person's. `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |

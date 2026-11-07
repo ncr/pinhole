@@ -1546,6 +1546,13 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // A file made handed over (pinhole.deliver, API 15): never rejected.
+    void aPluginDeliversWhatItMadeAndHearsHowItWent() {
+        PluginBench bench({{"me.a", {}}});
+        bench.js("pinhole.deliver('/no/such/file.png').then(how => said.push('missing ' + how))");
+        QTRY_COMPARE(bench.said(), QStringList({"missing failed"}));
+    }
+
     // The kit's names made one (API 15): a plugin of API 15 is told of the
     // old ones, which still work; a press is no timer's tick.
     void theKitsOlderNamesAreSaidToAPluginOfApi15() {
@@ -7658,6 +7665,11 @@ PinholePlugin {
         QTRY_COMPARE(bench.said().size(), 3);
         QCOMPARE(bench.said().last(), QString("not_found"));
         QVERIFY(mimeData()->hasFormat("image/gif"));
+        // Handed over (pinhole.deliver, API 15): copied, as copyFile does.
+        bench.js("pinhole.deliver(jpeg).then(how => said.push('delivered ' + how))");
+        QTRY_COMPARE(bench.said().size(), 4);
+        QCOMPARE(bench.said().last(), QString("delivered copied"));
+        QCOMPARE(mimeData()->data("image/jpeg"), bytes);
     }
 
     void aSelfTestCopiesToItsOwnClipboardAndNeverToRealPictures() {

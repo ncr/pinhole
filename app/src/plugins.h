@@ -421,6 +421,11 @@ public:
     // made first, away from the window's thread); rejected with "not_found"
     // if there is no such file.
     Q_INVOKABLE QJSValue copyFile(const QString &path);
+    // A file made handed over (API 15), as Series and Sheet hand theirs: on
+    // the clipboard, kept where it is. A promise of how it went, never
+    // rejected: "copied", "kept" (another copy asked for since has the
+    // clipboard) or "failed" (said, as pinhole.warn says it).
+    Q_INVOKABLE QJSValue deliver(const QString &path);
     // Words on the clipboard, as text (paths, a link): a promise of them
     // once it has them (API 12). In a self-test the clipboard is the
     // window's own, as for copyFile.

@@ -624,6 +624,28 @@ QJSValue PluginHost::record(QQuickItem *item, const QJSValue &options, const QJS
     return promise;
 }
 
+QJSValue PluginHost::deliver(const QString &path) {
+    QJSEngine *js = engine();
+    if (!js)
+        return {};
+    static QHash<QJSEngine *, QJSValue> made;
+    if (!made.contains(js))
+        connect(js, &QObject::destroyed, js, [js] { made.remove(js); });
+    QJSValue &how = made[js];
+    if (how.isUndefined())
+        how = js->evaluate(QStringLiteral(R"((function (host, path) {
+            return host.copyFile(path).then(function () { return "copied" }, function (error) {
+                if (error.code === "cancelled")
+                    return "kept"
+                host.warn(error)
+                return "failed"
+            })
+        }))"));
+    // The plugin's host stays Pinhole's: never the engine's to collect.
+    QJSEngine::setObjectOwnership(this, QJSEngine::CppOwnership);
+    return how.call({js->newQObject(this), path});
+}
+
 QJSValue PluginHost::copyFile(const QString &path) {
     const int generation = m_generation;
     // Nothing to stop: the clipboard has it a moment later either way.

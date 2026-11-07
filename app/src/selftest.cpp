@@ -1347,6 +1347,14 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
                 return;
             }
             const int steps = t->property("steps").toList().size();
+            // Its last step the side panel, where it is shown again: its
+            // own, or the one Pinhole adds (API 15).
+            if (*at == 0) {
+                const QVariant all = t->property("steps");
+                const QVariantList list = all.canConvert<QJSValue>() ? all.value<QJSValue>().toVariant().toList() : all.toList();
+                check(!list.isEmpty() && list.last().toMap().value("settings").toBool(),
+                      QStringLiteral("%1's tour ends in the side panel (%2 steps)").arg(only).arg(list.size()));
+            }
             auto *tourItem = qobject_cast<QQuickItem *>(t);
             QObject *action = t->property("action").value<QObject *>();
             auto *button = action ? action->property("button").value<QQuickItem *>() : nullptr;

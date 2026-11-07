@@ -245,13 +245,9 @@ Item {
                 if (studio.made === done)
                     studio.made = Object.assign({}, done, { copy: how })
             }
-            // Another copy asked for meanwhile has the clipboard: this one
-            // only kept.
-            pinhole.copyFile(done.path).then(() => copied("copied"), error => {
-                copied(error.code === "cancelled" ? "kept" : "failed")
-                if (error.code !== "cancelled")
-                    pinhole.warn(error)
-            })
+            // On the clipboard, or only kept if another copy asked for
+            // meanwhile has it (API 15).
+            pinhole.deliver(done.path).then(copied)
         }
         onFailed: error => studio.error = error.code === "unfetched" ? error.message
             : error.code === "timeout" ? qsTr("magick took too long")

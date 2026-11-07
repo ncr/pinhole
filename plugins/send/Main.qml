@@ -91,11 +91,6 @@ PinholePlugin {
         {
             title: qsTr("Pick a device"),
             text: qsTr("Devices with LocalSend open show as they answer, each on its number. Its owner accepts, and the originals go, or HEIC as JPEG with J. L hands them to LocalSend's own window instead.")
-        },
-        {
-            title: qsTr("Settings"),
-            text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),
-            settings: true
         }
     ]
 

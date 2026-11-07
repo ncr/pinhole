@@ -35,11 +35,6 @@ PinholePlugin {
         {
             title: qsTr("Grid or collage"),
             text: qsTr("An even grid, like a contact sheet, or a collage that keeps each photo whole; with a gap, a background, a size and the dates if you like. ⏎ copies it and keeps it in Pictures/Pinhole.")
-        },
-        {
-            title: qsTr("Settings"),
-            text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),
-            settings: true
         }
     ]
 

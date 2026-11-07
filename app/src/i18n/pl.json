@@ -472,6 +472,7 @@
   "\"makes\": %1: a kind of its own needs \"api\": 15": "\"makes\": %1: własny rodzaj wymaga \"api\": 15",
   "\"answers\" is true or false": "\"answers\" to true albo false",
   "It needs %1, which is not installed here.": "Potrzebuje %1, a tego tu nie ma.",
+  "Here, in the side panel (Tab), this tour can be shown again.": "Tu, w panelu bocznym (Tab), obejrzysz ten samouczek jeszcze raz.",
   "\"answers\" needs \"api\": 15": "\"answers\" wymaga \"api\": 15",
   "\"makes\": %1: %2": "\"makes\": %1: %2",
   "\"from\" is live, full, original or video": "\"from\" to live, full, original lub video",

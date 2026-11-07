@@ -197,13 +197,9 @@ Item {
                 if (studio.made === done)
                     studio.made = Object.assign({}, done, { copy: how })
             }
-            // Another copy asked for meanwhile has the clipboard: this one
-            // only kept.
-            pinhole.copyFile(file).then(() => copied("copied"), error => {
-                copied(error.code === "cancelled" ? "kept" : "failed")
-                if (error.code !== "cancelled")
-                    pinhole.warn(error)
-            })
+            // On the clipboard, or only kept if another copy asked for
+            // meanwhile has it (API 15).
+            pinhole.deliver(file).then(copied)
         }
         onFailed: error => {
             studio.making = ""

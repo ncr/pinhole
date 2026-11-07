@@ -26,7 +26,6 @@
   "Fetching…": "Pobieranie…",
   "HEIC as JPEG": "HEIC jako JPEG",
   "HEIC as JPEG, or originals": "HEIC jako JPEG albo oryginały",
-  "Here, in the side panel (Tab), this tour can be shown again.": "Tutaj, w panelu bocznym (Tab), można znów obejrzeć ten przewodnik.",
   "In LocalSend's own window": "W oknie LocalSend",
   "LocalSend has to be open on the phone, on the same network. Sends %1.": "LocalSend musi być otwarty na telefonie, w tej samej sieci. Wysyła %1.",
   "LocalSend is not installed.": "LocalSend nie jest zainstalowany.",
@@ -64,7 +63,6 @@
     "many": "Wysłano %n plików do %1",
     "other": "Wysłano %n pliku do %1"
   },
-  "Settings": "Ustawienia",
   "Something else answered where %1 was: nothing sent.": "Pod adresem %1 odpowiedziało coś innego: nic nie wysłano.",
   "Stop": "Przerwij",
   "Stop sending": "Przerwij wysyłanie",

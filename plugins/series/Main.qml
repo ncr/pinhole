@@ -341,11 +341,6 @@ PinholePlugin {
             text: qsTr("On a photo of a series, X takes it out, U ungroups and G shows the series whole; on one beside a series, A adds it. In select mode, G groups what is ticked. Ctrl\u00a0Z undoes any of it."),
             open: () => touring >= 0 && touring < series.length ? series[touring][0] : -1,
             action: seriesAction
-        },
-        {
-            title: qsTr("Settings"),
-            text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),
-            settings: true
         }
     ]
 
