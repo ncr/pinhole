@@ -1546,6 +1546,20 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // JSON both ways with run (API 15): `json` as its stdin, and the
+    // result's `json` its stdout when that is JSON.
+    void aPluginRunsAProgramWithJsonBothWays() {
+        PluginBench bench({{"me.a", {}}});
+        bench.js("pinhole.run('sh', ['-c', 'cat'], { json: { a: 1, list: ['x'] } })"
+                 " .then(r => said.push('json ' + r.json.a + ' ' + r.json.list[0]))"
+                 " .then(() => pinhole.run('sh', ['-c', 'echo one; echo two'], { json: [] }))"
+                 " .then(r => said.push('lines ' + (r.json === undefined) + ' ' + r.stdout.trim().split('\\n').length))"
+                 " .then(() => pinhole.run('sh', ['-c', 'echo [1,2]']))"
+                 " .then(r => said.push('unasked ' + r.json.length))"
+                 " .catch(e => said.push('failed ' + e.code + ' ' + e.message))");
+        QTRY_COMPARE(bench.said(), QStringList({"json 1 x", "lines true 2", "unasked 2"}));
+    }
+
     // A file made handed over (pinhole.deliver, API 15): never rejected.
     void aPluginDeliversWhatItMadeAndHearsHowItWent() {
         PluginBench bench({{"me.a", {}}});

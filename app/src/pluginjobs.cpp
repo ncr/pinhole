@@ -551,7 +551,10 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
                 killProgram(process);
             }
         });
-    connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path, output, lines](int code, QProcess::ExitStatus status) {
+    // JSON both ways (API 15): `json` given as its stdin, and its stdout
+    // read as JSON into the result's `json`.
+    const bool json = options.hasProperty(QStringLiteral("json"));
+    connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path, output, lines, json](int code, QProcess::ExitStatus status) {
         if (output.isCallable())
             lines();
         const QString out = QString::fromUtf8(process->readAllStandardOutput());
@@ -578,6 +581,13 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
         result.setProperty("code", code);
         result.setProperty("stdout", out);
         result.setProperty("stderr", err);
+        // Its stdout as JSON, when it is (a program that answers lines has
+        // none): asked with `json`, or whenever it starts as JSON does.
+        if (json || out.trimmed().startsWith('{') || out.trimmed().startsWith('[')) {
+            const QJSValue parsed = js->globalObject().property("JSON").property("parse").call({out});
+            if (!parsed.isError())
+                result.setProperty("json", parsed);
+        }
         settle(generation, deferred.resolve, result);
     });
     connect(process, &QProcess::errorOccurred, this, [this, process, deferred, generation, path](QProcess::ProcessError e) {
@@ -589,8 +599,13 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     process->start(path, arguments);
     // Its stdin ends after what it is given, or at once: a program that
     // reads it to the end (jq, cat) never waits for more that cannot come.
-    if (const QJSValue input = options.property("input"); !input.isUndefined() && !input.isNull())
+    if (options.hasProperty(QStringLiteral("json"))) {
+        QJSEngine *js = engine();
+        const QJSValue text = js ? js->globalObject().property("JSON").property("stringify").call({options.property("json")}) : QJSValue();
+        process->write(text.toString().toUtf8() + '\n');
+    } else if (const QJSValue input = options.property("input"); !input.isUndefined() && !input.isNull()) {
         process->write(input.toString().toUtf8());
+    }
     process->closeWriteChannel();
     return deferred.promise;
 }

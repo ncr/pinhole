@@ -140,7 +140,7 @@ PinholePlugin {
             timeout: 10000
         }), result => {
             if (id !== plugin.shownId) return
-            const response = JSON.parse(result.stdout)
+            const response = result.json
             plugin.moveEdits(response.moved)
             plugin.names = response.names || []
             plugin.found = response.rows || []

@@ -404,8 +404,10 @@ public:
     // "timeout" or "cancelled" (SIGTERM, then a kill a second later).
     // `options`: input (written to its stdin), timeout (ms), env (added to
     // Pinhole's), output(line) for each line it writes, as it comes (the
-    // result's stdout is then what follows the last). With a function in place of
-    // options: done(exitCode, stdout, stderr).
+    // result's stdout is then what follows the last); json (API 15), a
+    // value given as its stdin as JSON, in place of input. The result's
+    // `json` (API 15) is its stdout read as JSON, if it is JSON. With a
+    // function in place of options: done(exitCode, stdout, stderr).
     Q_INVOKABLE QJSValue run(const QString &program, const QStringList &arguments, const QJSValue &options = {});
     // An item as it looks over a number of frames, made into a GIF or an
     // MP4 (ffmpeg): options are path, format ("gif" or "mp4"), width,

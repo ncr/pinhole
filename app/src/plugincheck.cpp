@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}, {15, "pinhole.deliver"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}, {15, "pinhole.deliver"}, {15, "run's json"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -403,6 +403,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     static const QRegularExpression onTriggered(QStringLiteral("(?:^|[;{\\s])onTriggered\\s*:"));
     static const QRegularExpression usableSet(QStringLiteral("(?:^|[;{\\s])usable\\s*:"));
     static const QRegularExpression keySet(QStringLiteral("(?:^|[;{\\s])key\\s*:"));
+    static const QRegularExpression runJson(QStringLiteral("(?:^|[{,\\s])json\\s*:"));
     static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay|textColour)\\s*:"));
     // A file's root object, its id, and its hidden set.
     static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
@@ -432,8 +433,11 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         }
         for (auto match = run.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;
-            if (code.mid(open, closing(code, open) - open + 1).contains(output))
+            const QString call = code.mid(open, closing(code, open) - open + 1);
+            if (call.contains(output))
                 uses << QStringLiteral("run's output");
+            if (call.contains(runJson))
+                uses << QStringLiteral("run's json");
         }
         for (auto match = fetch.globalMatch(code); match.hasNext();) {
             const qsizetype open = match.next().capturedEnd() - 1;

@@ -100,7 +100,7 @@ Panel {
     // One step of a read: its rows, and how far the face finder is.
     function read(operation, options) {
         return request(operation, options).then(result => {
-            const response = JSON.parse(result.stdout)
+            const response = result.json
             view.plugin.moveEdits(response.moved)
             status = response.status
             failure = ""
@@ -219,7 +219,7 @@ Panel {
             const operation = page === "person" ? "person" : "members"
             const owner = page === "group" ? anchor?.anchor : page === "check" ? likely[checking]?.anchor : null
             request(operation, { anchor: owner, person: person, limit: 2000 })
-                .then(result => { if (shown && !pinhole.away) open(JSON.parse(result.stdout).rows) })
+                .then(result => { if (shown && !pinhole.away) open(result.json.rows) })
                 .catch(() => { if (shown && !pinhole.away) open(faces) })
         } else if (row.name) {
             go("person", row)
@@ -282,7 +282,7 @@ Panel {
     function nameGroup(row, name) {
         if (!row || !name || naming) return
         namer.start(() => request("assignment", { anchor: row.anchor })
-            .then(result => ({ row: row, name: name, keys: JSON.parse(result.stdout).keys })))
+            .then(result => ({ row: row, name: name, keys: result.json.keys })))
     }
     Job {
         id: namer

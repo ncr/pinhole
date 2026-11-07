@@ -268,7 +268,7 @@ Item {
         // it failed. The PIN with the files, on its stdin: an argument any
         // process can read.
         const run = pinhole.run(plugin.sender, ["send", JSON.stringify(target)],
-                                { input: JSON.stringify({ files: list, pin: pin }), output: line => heard(line) })
+                                { json: { files: list, pin: pin }, output: line => heard(line) })
         sending = run
         run.then(() => {}, error => {
             // Stopped before it could say so (the host kills a second
@@ -345,7 +345,7 @@ Item {
             if (list.length === 0)
                 return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
             const folder = pinhole.cacheDir + "/localsend/" + Date.now()
-            pinhole.run(plugin.sender, ["stage", folder], { input: JSON.stringify(list) }).then(result => {
+            pinhole.run(plugin.sender, ["stage", folder], { json: list }).then(result => {
                 const paths = result.stdout.split("\n").filter(l => l !== "")
                 // The folder for very many, which LocalSend takes as a folder.
                 const given = paths.length > 500 ? [folder] : paths
