@@ -189,6 +189,45 @@ class Guesses(unittest.TestCase):
             worker.review_labels(db, {"a1": {"name": "Anna", "rejected": ["a2"]}})
             self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a2")], [(None, None)])
 
+    def test_a_face_found_again_in_a_new_thumbnail_keeps_what_was_said_of_it(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            db.execute("CREATE TABLE aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL)")
+
+            def vector(angle):
+                v = np.zeros(128, dtype="<f4")
+                v[0], v[1] = np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))
+                return v.tobytes()
+            # The photo turned in iCloud: its face again, a little apart, under
+            # a new key, and a face it had not before.
+            before = [("a1", vector(6))]
+            after = [("a1-turned", vector(8)), ("stranger", vector(70))]
+            worker.carry(db, np, before, after)
+            self.assertEqual(worker.aliases(db), {"a1": "a1-turned"})
+            # Turned again: the first key follows it too.
+            worker.carry(db, np, [("a1-turned", vector(8))], [("a1-again", vector(7))])
+            self.assertEqual(worker.aliases(db), {"a1": "a1-again", "a1-turned": "a1-again"})
+            edits, moved = worker.translated(worker.aliases(db), {
+                "a1": {"person": "Anna"}, "anna": {"rejected": ["a1-turned"]}})
+            self.assertEqual(edits, {"a1-again": {"person": "Anna"}, "anna": {"rejected": ["a1-again"]}})
+            self.assertEqual(moved, {"a1": "a1-again", "a1-turned": "a1-again"})
+            # An edit on the new key wins over the old one's.
+            edits, _ = worker.translated(worker.aliases(db), {"a1": {"person": "Anna"}, "a1-again": {"person": "Ola"}})
+            self.assertEqual(edits, {"a1-again": {"person": "Ola"}})
+            self.assertEqual(worker.with_aliases(db, (["a1"], {"a1-turned": ["a1"]})),
+                             (["a1-again"], {"a1-again": ["a1-again"]}))
+
+    def test_a_named_face_found_again_is_still_named(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            db.execute("CREATE TABLE aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL)")
+            db.execute("UPDATE faces SET key='a1-turned' WHERE key='a1'")
+            db.execute("UPDATE suggestions SET anchor='a1-turned' WHERE anchor='a1'")
+            db.execute("UPDATE suggestions SET member='a1-turned' WHERE member='a1'")
+            db.execute("INSERT INTO aliases VALUES ('a1', 'a1-turned')")
+            worker.review_labels(db, {"a1": {"person": "Anna"}})
+            self.assertEqual([(f["key"], f["name"]) for f in worker.photo_rows(db, "a1")], [("a1-turned", "Anna")])
+
     def test_no_named_people_gives_no_guesses(self):
         with sqlite3.connect(":memory:") as db:
             self.library(db)

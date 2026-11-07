@@ -95,6 +95,7 @@ Panel {
     function read(operation, options) {
         return request(operation, options).then(result => {
             const response = JSON.parse(result.stdout)
+            view.plugin.moveEdits(response.moved)
             status = response.status
             failure = ""
             return response.rows

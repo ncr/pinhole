@@ -40,7 +40,10 @@ Item {
             // The face is where it is in the thumbnail as its file is, not
             // as the photo is turned and cropped here: that thumbnail, and
             // its shape, from the size drawn and what was done to it.
-            readonly property var adjusted: (pinhole.library.revision, pinhole.adjustment(tile.row.id))
+            // Only an edit Pinhole draws: the source's (iCloud's) is in the
+            // thumbnail's file already.
+            readonly property var kept: (pinhole.library.revision, pinhole.adjustment(tile.row.id))
+            readonly property var adjusted: kept.kept === "here" ? kept : { turn: 0, crop: { width: 1, height: 1 } }
             readonly property real turnedWidth: Math.max(1, photo.width || 1) / Math.max(0.01, adjusted.crop?.width ?? 1)
             readonly property real turnedHeight: Math.max(1, photo.height || 1) / Math.max(0.01, adjusted.crop?.height ?? 1)
             readonly property real ratio: (adjusted.turn ?? 0) % 2 ? turnedHeight / turnedWidth : turnedWidth / turnedHeight

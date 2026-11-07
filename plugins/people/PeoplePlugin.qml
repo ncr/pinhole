@@ -24,6 +24,25 @@ PinholePlugin {
         edited(key)
         if (key === stateKey) look()
     }
+    // Said of faces since found again in a new thumbnail (turned or cropped
+    // in iCloud, edited on a phone): moved to their keys now, as
+    // pinhole-faces says ({ old: new }). No step: nothing changes but the
+    // keys.
+    function moveEdits(moved) {
+        const olds = Object.keys(moved || {})
+        if (olds.length === 0) return
+        const saved = Object.assign({}, pinhole.state[stateKey] || {})
+        for (const old of olds) {
+            if (!(old in saved)) continue
+            if (!(moved[old] in saved)) saved[moved[old]] = saved[old]
+            delete saved[old]
+        }
+        for (const key of Object.keys(saved))
+            if (saved[key].rejected)
+                saved[key] = Object.assign({}, saved[key], { rejected: saved[key].rejected.map(face => moved[face] || face) })
+        pinhole.state[stateKey] = saved
+        edited(stateKey)
+    }
     // A step to undo, in the library it was taken in.
     function edit(patch, label) {
         const key = stateKey
@@ -69,6 +88,7 @@ PinholePlugin {
         }), result => {
             if (id !== plugin.shownId) return
             const response = JSON.parse(result.stdout)
+            plugin.moveEdits(response.moved)
             plugin.names = response.names || []
             plugin.found = response.rows || []
             plugin.facesOf = id
@@ -89,8 +109,11 @@ PinholePlugin {
 
     // Each face where it is in the photo as drawn here (turned by quarters
     // clockwise, then cut: pinhole.adjustment), the ones cut away left out.
+    // An edit the source keeps (iCloud's) is in its thumbnail already, the
+    // faces found where it has them: only one kept here is drawn on.
     function placed(id, rows) {
-        const adjusted = pinhole.adjustment(id)
+        const kept = pinhole.adjustment(id)
+        const adjusted = kept.kept === "here" ? kept : { turn: 0, crop: null }
         const crop = adjusted.crop || { x: 0, y: 0, width: 1, height: 1 }
         return rows.map(row => {
             let [x, y, w, h] = row.box

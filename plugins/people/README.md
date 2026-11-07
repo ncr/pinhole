@@ -61,4 +61,7 @@ Inspect groups before naming them.
 Face vectors and suggestions are in the plugin's per-source cache.
 Assignments and rejections are in plugin state, keyed by the face and its
 thumbnail bytes. They survive cache rebuilds with the same thumbnails and
-recipe.
+recipe. When a photo's thumbnail changes (turned or cropped in iCloud,
+edited on a phone), each face found again in it, as alike as faces grouped
+together, keeps what was said of it: the finder keeps its old key as an
+alias, and the plugin moves its edits to the new key.

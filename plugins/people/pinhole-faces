@@ -38,6 +38,12 @@ GUESS_SIMILARITY = 0.5
 GUESS_SAMPLES = 6
 PERSON_SAMPLES = 48
 GUESS_GROUPS = 1000
+# A face found again in a photo's new thumbnail (turned or cropped in
+# iCloud, edited on a phone) is the one before it when this close: in this
+# library's photos turned and cropped, the same face came out at 0.84 or
+# more nine times in ten (0.94 typically), another face in the same photo
+# at 0.44 at most.
+ALIAS_SIMILARITY = SIMILARITY
 
 
 def verified(path, digest):
@@ -149,6 +155,7 @@ def connect(cache, source):
             PRIMARY KEY (anchor, member)
         );
         CREATE INDEX IF NOT EXISTS suggestions_member ON suggestions(member);
+        CREATE TABLE IF NOT EXISTS aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL);
     """)
     return db
 
@@ -176,13 +183,15 @@ def scan(db, library, assets, analyzer, progress):
                 except engine.cv.error as error:
                     raise ValueError("Unreadable thumbnail") from error
                 digest = hashlib.sha256(data).hexdigest()
+                before = db.execute("SELECT key, vector FROM faces WHERE photo=?", (photo,)).fetchall()
+                after = [(face_key(photo, digest, i), box, vector) for i, (box, vector) in enumerate(faces)]
                 db.execute("DELETE FROM meta WHERE key='suggestion-settings'")
                 db.execute("DELETE FROM photos WHERE id=?", (photo,))
                 db.execute("INSERT INTO photos VALUES (?,?,?)", (photo, relative, stamp))
                 db.executemany("INSERT INTO faces VALUES (?,?,?,?)", (
-                    (face_key(photo, digest, i), photo, json.dumps(box), vector)
-                    for i, (box, vector) in enumerate(faces)
+                    (key, photo, json.dumps(box), vector) for key, box, vector in after
                 ))
+                carry(db, engine.np, before, [(key, vector) for key, _, vector in after])
                 time.sleep(0.005)
             available.add(photo)
         except (OSError, ValueError):
@@ -197,6 +206,70 @@ def scan(db, library, assets, analyzer, progress):
             db.execute("DELETE FROM meta WHERE key='suggestion-settings'")
             db.executemany("DELETE FROM photos WHERE id=?", ((photo,) for photo in removed))
     return failures
+
+
+def carry(db, np, before, after):
+    """A photo's faces found again in its new thumbnail: each face before
+    an alias of the one after most like it, so what was said of it (a name,
+    a group's word) stays with it."""
+    if not before or not after:
+        return
+    old = np.frombuffer(b"".join(vector for _, vector in before), dtype="<f4").reshape(-1, 128)
+    new = np.frombuffer(b"".join(vector for _, vector in after), dtype="<f4").reshape(-1, 128)
+    scores = old @ new.T
+    pairs = sorted(((float(scores[i, j]), i, j) for i in range(len(before)) for j in range(len(after))), reverse=True)
+    taken_old, taken_new = set(), set()
+    for score, i, j in pairs:
+        if score < ALIAS_SIMILARITY:
+            break
+        if i in taken_old or j in taken_new:
+            continue
+        taken_old.add(i)
+        taken_new.add(j)
+        was, now = before[i][0], after[j][0]
+        if was == now:
+            continue
+        # Earlier keys of it follow it; a key it had before is its own again.
+        db.execute("UPDATE aliases SET new=? WHERE new=?", (now, was))
+        db.execute("DELETE FROM aliases WHERE old=?", (now,))
+        db.execute("INSERT OR REPLACE INTO aliases VALUES (?,?)", (was, now))
+
+
+def aliases(db):
+    """{old face key: its face's key now}, for faces found again."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='aliases'").fetchone():
+        return {}
+    return dict(db.execute("SELECT old, new FROM aliases"))
+
+
+def translated(alias, edits):
+    """The edits on the faces' keys now, and {old key: new key} of those
+    moved: an edit saved on the new key wins over one on the old."""
+    moved = {}
+    out = {}
+    for key in sorted(edits, key=lambda key: key in alias):
+        edit = edits[key]
+        if not isinstance(edit, dict):
+            continue
+        for face in edit.get("rejected", ()):
+            if face in alias:
+                moved[face] = alias[face]
+        if edit.get("rejected"):
+            edit = dict(edit, rejected=[alias.get(face, face) for face in edit["rejected"]])
+        now = alias.get(key, key)
+        if now != key:
+            moved[key] = now
+            if now in out:
+                continue
+        out[now] = edit
+    return out, moved
+
+
+def with_aliases(db, saved):
+    names, excluded = saved
+    alias = aliases(db)
+    return (sorted({alias.get(key, key) for key in names}),
+            {alias.get(key, key): [alias.get(face, face) for face in faces] for key, faces in excluded.items()})
 
 
 def face_key(photo, digest, index):
@@ -398,6 +471,8 @@ def status(db):
 def review_labels(db, edits):
     # Overlay saved labels on the derived index. Explicit face assignments
     # take priority over names saved on suggested groups by older versions.
+    # Said of a face before its thumbnail changed: of it as it is now.
+    edits, _ = translated(aliases(db), edits)
     db.execute("CREATE TEMP TABLE labels (key TEXT PRIMARY KEY, name TEXT NOT NULL)")
     db.execute("CREATE TEMP TABLE legacy (anchor TEXT PRIMARY KEY, name TEXT NOT NULL)")
     db.execute("CREATE TEMP TABLE rejected (anchor TEXT, member TEXT, PRIMARY KEY (anchor, member))")
@@ -727,7 +802,7 @@ def run_index(db, library, source, settings):
                 if refresh or saved != edits or preference != grouping:
                     # Empty libraries and old caches can be served without a runtime.
                     if db.execute("SELECT 1 FROM faces LIMIT 1").fetchone():
-                        rebuild(db, *saved, preference, lambda: set_status(db, "grouping"))
+                        rebuild(db, *with_aliases(db, saved), preference, lambda: set_status(db, "grouping"))
                     set_status(db, "ready", errors=errors, grouping=preference)
                     version, edits, grouping = changed, saved, preference
             except ImportError as error:
@@ -797,14 +872,18 @@ def main():
         return
     with closing(readonly(path)) as db, db:
         db.execute("BEGIN")
+        # Edits saved on faces since found again: for the plugin to move.
+        _, moved = translated(aliases(db), request.get("edits", {}))
         review_labels(db, request.get("edits", {}))
         limit = max(1, min(2000, int(request.get("limit", 48))))
         if args.operation == "assignment":
             emit(args.operation, keys=assignment_keys(db, request["anchor"]))
         elif args.operation == "photo":
-            emit(args.operation, rows=photo_rows(db, request["photo"]), names=known_names(db), status=status(db))
+            emit(args.operation, rows=photo_rows(db, request["photo"]), names=known_names(db), moved=moved,
+                 status=status(db))
         elif args.operation == "likely":
-            emit(args.operation, rows=likely_rows(db, request["person"], request["offset"], limit), status=status(db))
+            emit(args.operation, rows=likely_rows(db, request["person"], request["offset"], limit), moved=moved,
+                 status=status(db))
         else:
             known = {"known": True, "unknown": False}.get(request.get("which"))
             rows = review_rows(db, args.operation, request.get("anchor") or request.get("person"), request["offset"],
@@ -813,7 +892,7 @@ def main():
                 rows = with_guesses(db, rows)
             elif args.operation == "people":
                 rows = with_likely(db, rows)
-            emit(args.operation, rows=rows, status=status(db))
+            emit(args.operation, rows=rows, moved=moved, status=status(db))
 
 
 if __name__ == "__main__":
