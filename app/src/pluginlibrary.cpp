@@ -1,4 +1,6 @@
 #include "plugins.h"
+
+#include <QTimer>
 #include "adjustment.h"
 #include "pluginquery.h"
 #include "library.h"
@@ -11,11 +13,16 @@
 #include <QFutureWatcher>
 #include <QHash>
 #include <QJSEngine>
+#include <QTimer>
 
 #include <algorithm>
 #include <ctime>
 
-PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(parent), m_library(library) {}
+PluginLibrary::PluginLibrary(const Library *library, QObject *parent) : QObject(parent), m_library(library) {
+    // The source's whose library is read already: the next read of it is
+    // not another's (settled's `switched`).
+    m_settledKey = key();
+}
 
 int PluginLibrary::count() const { return m_library->count(); }
 
@@ -73,18 +80,29 @@ QVariantMap PluginLibrary::item(const QJSValue &photo) const {
 
 const QStringList &PluginLibrary::fieldNames() {
     static const QStringList names = {"date", "day", "id", "filename", "width", "height",
-                                      "video", "live", "favorite", "effect", "avgColor"};
+                                      "video", "live", "favorite", "effect", "avgColor", "hidden"};
     return names;
 }
 
-QVariantList PluginLibrary::field(const QString &name) const {
-    const auto column = [this](auto value) {
+QVariantList PluginLibrary::field(const QString &name, const QVariantMap &options) const {
+    // Only those the grid shows, if asked: the hidden left out.
+    const bool shown = options.value(QStringLiteral("shown")).toBool() && m_hidden;
+    const auto column = [this, shown](auto value) {
         QVariantList list;
         list.reserve(m_library->count());
         for (int i = 0; i < m_library->count(); ++i)
-            list.append(value(m_library->at(i)));
+            if (!shown || !m_hidden(i))
+                list.append(value(m_library->at(i)));
         return list;
     };
+    if (name == QLatin1String("hidden")) {
+        QVariantList list;
+        list.reserve(m_library->count());
+        for (int i = 0; i < m_library->count(); ++i)
+            if (const bool hidden = m_hidden && m_hidden(i); !shown || !hidden)
+                list.append(hidden);
+        return list;
+    }
     if (name == QLatin1String("date"))
         return column([](const LibraryItem &item) { return double(item.date); });
     // Not one of item's: the day it was taken, in local time, as yyyymmdd
@@ -166,6 +184,23 @@ void PluginLibrary::touched() {
 }
 
 bool PluginLibrary::stale() const { return m_told != m_library->generation(); }
+
+void PluginLibrary::settle(bool read, bool hidden) {
+    m_read = m_read || read;
+    m_hiddenChanged = m_hiddenChanged || hidden;
+    if (std::exchange(m_settling, true))
+        return;
+    // Once what comes at once has come: a read and the grid's news of it.
+    QTimer::singleShot(0, this, [this] {
+        m_settling = false;
+        const QString now = key();
+        const QVariantMap how{{"read", std::exchange(m_read, false)},
+                              {"hidden", std::exchange(m_hiddenChanged, false)},
+                              {"switched", now != std::exchange(m_settledKey, now)},
+                              {"revision", m_revision}};
+        emit settled(how);
+    });
+}
 
 // What the library says is a screenshot (API 10), for Screenshots and On
 // this day alike: iCloud's subtype of an iPhone's or an iPad's, a name

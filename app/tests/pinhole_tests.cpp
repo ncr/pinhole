@@ -3813,7 +3813,10 @@ Item {
         grid.setHidden({1});
         QVERIFY(bench.js("pinhole.isHidden('b')").toBool());
         bench.js("pinhole.library.changed.connect(() => said.push('changed'));"
-                 "pinhole.hiddenChanged.connect(() => said.push('hidden ' + pinhole.isHidden('b') + ' ' + pinhole.library.indexOf('b')))");
+                 "pinhole.hiddenChanged.connect(() => said.push('hidden ' + pinhole.isHidden('b') + ' ' + pinhole.library.indexOf('b')));"
+                 "pinhole.library.settled.connect(how => said.push('settled read ' + how.read + ' hidden ' + how.hidden"
+                 "    + ' switched ' + how.switched + ' shown ' + pinhole.library.field('id', { shown: true }).join('')"
+                 "    + ' ' + pinhole.library.field('hidden').join(',')))");
         QSignalSpy gridHidden(&grid, &PhotoGrid::hiddenChanged);
         QSignalSpy cacheDir(bench.host, &PluginHost::cacheDirChanged);
 
@@ -3840,6 +3843,16 @@ Item {
         bench.viewer->libraryReloaded(moved);
         bench.plugins->libraryReloaded(moved);
         QCOMPARE(bench.said(), QStringList({"changed", "hidden true 2"}));
+        // Then settled, once for both, of the library as it is now (API 15).
+        QTRY_COMPARE(bench.said().size(), 3);
+        QCOMPARE(bench.said().last(), QStringLiteral("settled read true hidden true switched false shown newac false,false,true,false"));
+        // What the grid hides alone: settled, not read.
+        bench.js("said.length = 0");
+        grid.setHidden({1, 2});
+        QTRY_COMPARE(bench.said().size(), 2);
+        QCOMPARE(bench.said().last(), QStringLiteral("settled read false hidden true switched false shown newc false,true,true,false"));
+        grid.setHidden({2});
+        bench.js("said.length = 0");
         // A photo's position from its id is of the library now even before
         // plugins are told: as the grid's news reaches them meanwhile.
         QCOMPARE(bench.js("pinhole.library.indexOf('b')").toInt(), 2);
@@ -3858,8 +3871,11 @@ Item {
         bench.viewer->libraryReloaded(gone);
         bench.plugins->libraryReloaded(gone);
         QCOMPARE(cacheDir.count(), 1);
+        QTRY_VERIFY(bench.said().filter("settled").size() == 1);
+        QVERIFY2(bench.said().filter("settled").first().startsWith("settled read true hidden "), qPrintable(bench.said().join("; ")));
+        QVERIFY2(bench.said().filter("settled").first().contains(" switched true shown x"), qPrintable(bench.said().join("; ")));
         QCOMPARE(grid.hidden(), QVariantList());
-        QCOMPARE(bench.said().last(), QStringLiteral("hidden false -1"));
+        QCOMPARE(bench.said().filter("hidden false").last(), QStringLiteral("hidden false -1"));
     }
 
     void twoPluginsHiddenPhotosFollowThemThroughAReloadUntilEachGivesItsOwn() {

@@ -42,9 +42,10 @@ PinholePlugin {
 
     function count() {
         stale = false
+        // The photos the grid shows (API 15): those hidden left out.
         const library = pinhole.library
-        const done = Days.finish(Days.count(library.field("day"), library.field("id"), firstWeekday,
-                                            pinhole.hiddenCount > 0 ? i => pinhole.isHidden(i) : null))
+        const done = Days.finish(Days.count(library.field("day", { shown: true }), library.field("id", { shown: true }),
+                                            firstWeekday, null))
         full = done.full
         glowing = done.glowing
         total = done.total
@@ -54,13 +55,13 @@ PinholePlugin {
         counted = true
     }
 
-    // Read again, or photos hidden from the grid or shown again: counted
-    // again while it shows, once for both when the library's reading moves
-    // what is hidden; else when it is next needed.
+    // Read again, or photos hidden from the grid or shown again (settled,
+    // once for both when they come at once): counted again while it
+    // shows, else when it is next needed.
     property bool stale: true
     function recount() {
         if (calendarView.shown) {
-            Qt.callLater(plugin.count)
+            plugin.count()
         } else {
             stale = true
         }
@@ -71,11 +72,7 @@ PinholePlugin {
     }
     Connections {
         target: pinhole.library
-        function onChanged() { plugin.recount() }
-    }
-    Connections {
-        target: pinhole
-        function onHiddenChanged() { plugin.recount() }
+        function onSettled(how) { plugin.recount() }
     }
     // The histogram is needed on opening the calendar or its settings.
 

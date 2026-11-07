@@ -105,9 +105,16 @@ public:
     Q_INVOKABLE QVariantMap item(const QJSValue &photo) const;
     // One of item's fields for every photo, in the library's order: all
     // the dates at once, say, without a map made for each photo; or "day",
-    // the day each was taken, in local time, as yyyymmdd. Empty for a
-    // name it has not.
-    Q_INVOKABLE QVariantList field(const QString &name) const;
+    // the day each was taken, in local time, as yyyymmdd; or "hidden"
+    // (API 15), whether the grid hides it. Empty for a name it has not.
+    // options: { shown: true } (API 15), only the photos the grid shows,
+    // in their order.
+    Q_INVOKABLE QVariantList field(const QString &name, const QVariantMap &options = {}) const;
+    // Which photos the grid hides, by position: the grid's.
+    void setHidden(std::function<bool(int)> hidden) { m_hidden = std::move(hidden); }
+    // Read again, or what the grid hides changed: settled() once, after
+    // both when both come at once.
+    void settle(bool read, bool hidden);
     // The names field() knows, as `plugin check` holds a plugin to.
     static const QStringList &fieldNames();
     // A photo's position from its id, -1 if the library has none.
@@ -123,10 +130,18 @@ public:
 signals:
     void changed();
     void revisionChanged();
+    // The library as plugins hold it changed, told once for what came at
+    // once (API 15): `how` says whether it was read again (`read`),
+    // whether that is another source's (`switched`, its key another),
+    // whether what the grid hides changed (`hidden`), and the `revision`.
+    void settled(const QVariantMap &how);
 
 private:
     const Library *m_library;
     int m_revision = 0;
+    std::function<bool(int)> m_hidden;
+    bool m_read = false, m_hiddenChanged = false, m_settling = false;
+    QString m_settledKey;
     // The positions by id, of the library's read m_positionsOf.
     mutable QHash<QByteArray, int> m_positions;
     mutable quint64 m_positionsOf = 0;

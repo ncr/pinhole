@@ -481,11 +481,14 @@ void Plugins::setGrid(PhotoGrid *grid) {
     // Told once plugins have the library as it is now, the grid's news of
     // a reload included, so isHidden(id) and their own positions agree.
     connect(grid, &PhotoGrid::hiddenChanged, this, [this] {
-        if (m_libraryApi->stale())
+        if (m_libraryApi->stale()) {
             m_hiddenPending = true;
-        else
+        } else {
             emit hiddenChanged();
+            m_libraryApi->settle(false, true);
+        }
     });
+    m_libraryApi->setHidden([this](int index) { return m_grid && m_grid->isHidden(index); });
     updateMarkBits();
 }
 
@@ -1224,6 +1227,7 @@ void Plugins::libraryReloaded(const std::vector<int> &moved) {
     updateMarkBits();
     emit positionsMoved();
     m_libraryApi->reloaded();
+    m_libraryApi->settle(true, m_hiddenPending);
     // Only another source's library has a cacheDir of its own; the same
     // one read again or moved elsewhere has the same.
     if (const QString name = cacheName(); name != m_cacheName) {
