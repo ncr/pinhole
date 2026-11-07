@@ -119,6 +119,23 @@ int main(int argc, char **argv) {
         self.assertLess(lines.index(f'stop|{window.pid}'), lines.index(restarted))
         self.assertLess(lines.index(f'stop|{service.pid}'), lines.index(restarted))
 
+    def test_restarted_window_is_not_in_the_installers_scope(self):
+        # The installer's unit (a terminal's, an app's) may end, or be
+        # killed by systemd-oomd, with everything in it: not the window.
+        if not shutil.which('systemd-run') or subprocess.run(
+                ['systemd-run', '--user', '--scope', '--quiet', '--collect', 'true'],
+                capture_output=True).returncode != 0:
+            self.skipTest('no systemd user manager')
+        self.start(self.daemon, '--socket', self.socket)
+        window = self.start(self.binary)
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 3)
+        restarted = int([line for line in self.lines() if line.startswith('start|')][-1].split('|')[1])
+        cgroup = lambda pid: Path(f'/proc/{pid}/cgroup').read_text()
+        self.assertNotEqual(cgroup(restarted), cgroup(os.getpid()))
+        self.assertRegex(cgroup(restarted), r'run-[^/]*\.scope')
+
     def test_closed_app_stays_closed_and_old_service_stops(self):
         service = self.start(self.daemon, '--socket', self.socket)
         result = self.restart()
