@@ -284,7 +284,7 @@ complaint when it fails.
 | Sources of your own | your plugin, out of process | The source protocol |
 | `pinhole <command>` (status, sources, show, remove, sync, add, storage) | core | Generic |
 | `pinhole sign-in` / `sign-out` | core CLI, sending `kind: "icloud"` | A terminal has no plugin QML. Says "iCloud is turned off" when it is |
-| Help, tours, the new-plugins card, undo/redo, keys, theme, translations, bench, self-tests | core | Pinhole's frame for everything else |
+| Help, tours, the new-plugins notice, undo/redo, keys, theme, translations, bench, self-tests | core | Pinhole's frame for everything else |
 | Series, Screenshots, On this day, Calendar, Sheet, Send, Info, Colours, Theme, Frame, Background | plugins, as now | Send moves to `fetch "jpeg"` |
 | pinhole-fake | core | A library no source fills, for the grid |
 
@@ -788,7 +788,7 @@ what changed as it was built:
 | A2 kinds | `settings.json` (absent for Jacek), `plugins.json` (read only by pinholed) | none. `resolve` must give the same `Settings` as now for every input. That is a table test over today's cases, plus "no file at all, one Apple ID signed in". Nothing writes settings.json because a plugin was turned off | pinholed with `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` on reflink copies and `PINHOLE_SOCKET` of its own. `sources` lists his Apple ID with `count: 49079`. After a round, `meta.listed_at` and `change_token` are unchanged (no new listing). `enabled["pinhole.icloud"] = false` in the copy's plugins.json lists nothing, leaves the library's mtime as it was, and turning it back on shows it again with no listing |
 | A3 crates | none | `pinhole-auth` keeps its state folder `~/.local/state/pinhole/auth/<apple id>/`. `auth::default_provider` looks in the checkout at `plugins/icloud/auth/pyicloud/pinhole-auth`; installed, it is still beside pinholed | as A2, and `pinhole sign-in` on a scratch state folder |
 | A4 providers | new `~/.local/state/pinhole/sources/` | new, nothing to migrate | the test provider |
-| B3, B4, B6, B7 new plugins | `plugins.json` | **none written.** The new built-ins have no `enabled` entry and so are on. They have no `tour`, so no new-plugins card shows. A test loads a copy of Jacek's plugins.json, runs the window, and checks that the file is byte for byte the same afterwards | `XDG_CONFIG_HOME` on a copy |
+| B3, B4, B6, B7 new plugins | `plugins.json` | **none written.** The new built-ins have no `enabled` entry and so are on. They have no `tour`, so the new-plugins notice does not count them. A test loads a copy of Jacek's plugins.json, runs the window, and checks that the file is byte for byte the same afterwards | `XDG_CONFIG_HOME` on a copy |
 | B3 Live effect chosen | memory only (`m_chosen`) | none | |
 | B1b state and cache | `plugins.json`; new `~/.local/state/pinhole/plugins/<id>/state.json`, `~/.cache/pinhole/plugins/<id>/cache.json`, `~/.local/state/pinhole/toured.json` | `Plugins::moveOutOfSettings`, as the window starts, before any plugin loads: `pinhole.screenshots` `found:*` to its cache; `pinhole.series` `edits:*` and `edits`, `pinhole.info` `shown`, `pinhole.send` `devices` to their state; `toured` to toured.json (merged with what is there). Only those plugins' keys (another plugin's `edits` is its own). The settings are read without them at once. One job on `KeptFiles`: the new files first, then `plugins.json` without them, only if those were written. If they could not be, the keys stay in `plugins.json`, and a setting changed meanwhile writes them back with it (`unmoved`). An emptied plugin's entry goes. With nothing to move, nothing is written | unit tests (the move and the next start writing nothing; a state folder that cannot be made); a window on a copy of Jacek's live `plugins.json` and real library |
 
@@ -1539,8 +1539,8 @@ would mean writing throwaway code.
     or one within it, can still go their way; a raw `Flickable` within
     gets none (the panel scrolls). Plugins get `Scroller` in
     `Pinhole.Plugin`, the start of their views scrolling as the grid does.
-    The side panel, the help, the source picker and the New plugins card
-    have the same `Scroller`, with no gentler tuning of their own: 180 px
+    The side panel, the help and the source picker have the same
+    `Scroller`, with no gentler tuning of their own: 180 px
     a notch, the grid's rubber band and its bounce.
   - `PINHOLE_SELFTEST=sourcesoff:` checks what it says: no photo while off
     (at the start and turned off while open), back on 1, and, on a folder

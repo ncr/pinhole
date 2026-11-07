@@ -833,8 +833,6 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                  if (QObject *icloud = pluginItem(window->contentItem(), QStringLiteral("pinhole.icloud")))
                      QMetaObject::invokeMethod(icloud, "openSignIn", Q_ARG(QVariant, QString()));
              }},
-            {"the new plugins card", "newPluginsCard",
-             [=] { QMetaObject::invokeMethod(window, "showNewPlugins", Q_ARG(QVariant, QVariant(QStringList{"pinhole.series", "pinhole.colour"}))); }},
             {"select mode's Copy menu", "selectCopyGroupCard",
              [=] {
                  grid->setSelecting(true);

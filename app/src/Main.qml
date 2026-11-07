@@ -678,6 +678,36 @@ ApplicationWindow {
         }
     }
 
+    // How many plugins are new (`newPlugins`, their tours not seen), over the
+    // idle grid as the update's notice is: it opens them in the side panel,
+    // × puts it off for three days (one new since brings it back).
+    Row {
+        id: newPluginsNotice
+        objectName: "newPluginsNotice"
+        readonly property var ids: (plugins.revision, win.newPlugins.filter(id => !plugins.at(id).toured))
+        readonly property bool putOff: (plugins.revision, plugins.newPutOff(ids))
+        visible: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp && ids.length > 0 && !putOff
+        anchors.right: parent.right
+        anchors.bottom: updateNotice.visible ? updateNotice.top : helpButton.top
+        anchors.rightMargin: 16
+        anchors.bottomMargin: 8
+        spacing: 4
+        ShellButton {
+            objectName: "newPluginsButton"
+            floating: true
+            text: qsTr("%n new plugin(s)", "", newPluginsNotice.ids.length)
+            onTapped: win.showNewPlugins()
+        }
+        ShellButton {
+            objectName: "newPluginsLater"
+            floating: true
+            text: "×"
+            width: height
+            Accessible.name: qsTr("Later")
+            onTapped: plugins.putOffNew(newPluginsNotice.ids, 3)
+        }
+    }
+
     // Every key, on ? or this. Settings are in the side panel (Tab or ",").
     ShellButton {
         id: helpButton
@@ -1035,11 +1065,10 @@ ApplicationWindow {
     function collectPlugins(freshHidden, freshStacks) { pluginPlane.collectPlugins(freshHidden, freshStacks) }
 
     // A plugin's tour (Tour.qml), from the side panel; and by itself the
-    // first time the plugin is on, once it has something to show and the
-    // grid is free (a plugin turned on in the side panel: once it closes).
-    // Of those on at launch, at most one by itself: with more than one not
-    // seen yet, a card lists them instead (NewPlugins.qml), each once its
-    // tour is ready. A plugin turned on later still shows its own.
+    // first time the plugin is turned on, once it has something to show and
+    // the grid is free (turned on in the side panel: once it closes). Those
+    // on at launch whose tour is not seen show none by themselves: the
+    // notice of new plugins counts them (`newPlugins`).
     function startTour(id) {
         const item = pluginItem(id)
         if (!item || !item.tour || item.tour.length === 0)
@@ -1048,35 +1077,20 @@ ApplicationWindow {
         tourView.active = true
         tourView.item.start(id, plugins.at(id).name, item.tour)
     }
-    property bool touredThisLaunch: false
+    // Those on at launch whose tour is not seen, by id, as they load.
+    property var newPlugins: []
     Timer {
         id: tourDue
         interval: 1200
         onTriggered: {
             if (!autoTours || tourShown)
                 return
-            // Those on at launch whose tour is not seen, and of them those
-            // ready; those turned on since, ready.
             const candidates = pluginPlane.tourCandidates()
-            const unseen = candidates.unseen, ready = candidates.ready, turnedOn = candidates.turnedOn
-            // The card takes in those ready since it showed.
-            if (newPluginsShown) {
-                newPluginsView.item.add(ready)
-                return
-            }
-            if (!win.tourFree)
-                return
-            if (turnedOn.length > 0) {
-                win.startTour(turnedOn[0])
-            } else if (!win.touredThisLaunch && ready.length > 0) {
-                win.touredThisLaunch = true
-                if (unseen.length > 1) {
-                    newPluginsView.active = true
-                    newPluginsView.item.open(ready)
-                } else {
-                    win.startTour(ready[0])
-                }
-            }
+            const more = candidates.unseen.filter(id => win.newPlugins.indexOf(id) < 0)
+            if (more.length > 0)
+                win.newPlugins = win.newPlugins.concat(more)
+            if (win.tourFree && candidates.turnedOn.length > 0)
+                win.startTour(candidates.turnedOn[0])
         }
     }
     // Nothing in the way: no panel, the viewer or select mode, nor a source
@@ -1087,6 +1101,7 @@ ApplicationWindow {
     SidePanel {
         id: side
         objectName: "sidePanel"
+        fallbackFocus: grid
         health: service.health
         pluginItem: id => win.pluginItem(id)
         pluginsLoaded: win.pluginsLoaded
@@ -1126,22 +1141,13 @@ ApplicationWindow {
             side.shown = false
         }
     }
-    // The help over the card, as ? on it takes the keys.
-    readonly property bool newPluginsShown: newPluginsView.item?.shown ?? false
-    // The card of plugins new to tour, made the first time (a self-test's).
-    function showNewPlugins(ids) {
-        newPluginsView.active = true
-        newPluginsView.item.open(ids)
-    }
-    Loader {
-        id: newPluginsView
-        anchors.fill: parent
-        active: false
-        sourceComponent: NewPlugins {
-            objectName: "newPlugins"
-            ready: id => win.pluginItem(id)?.tourReady ?? false
-            onTourRequested: id => win.startTour(id)
-        }
+    // The new plugins in the side panel, marked New, the first in sight;
+    // seen, so the notice does not count them again.
+    function showNewPlugins() {
+        const ids = newPluginsNotice.ids
+        side.showNew(ids)
+        for (const id of ids)
+            plugins.setToured(id)
     }
     property bool guideShown: false
     Loader {
@@ -1195,7 +1201,7 @@ ApplicationWindow {
     readonly property bool chromeUp: chrome > 0
 
     // Something over the window that takes the keys.
-    readonly property bool panelUp: helpShown || guideShown || side.shown || addSourceShown || newPluginsShown || pluginCovering
+    readonly property bool panelUp: helpShown || guideShown || side.shown || addSourceShown || pluginCovering
     // A tour leaves the grid's controls as they are, to point at them, but
     // takes the keys.
     readonly property bool inGrid: !viewerShown && !panelUp && !firstRun && !tourShown
@@ -1203,7 +1209,6 @@ ApplicationWindow {
     readonly property string keyLayer: tourShown ? "tour"
         : helpShown ? "help"
         : guideShown ? "guide"
-        : newPluginsShown ? "newPlugins"
         : addSourceShown ? "addSource"
         : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"

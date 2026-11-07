@@ -817,6 +817,10 @@ public:
     Q_INVOKABLE void setEnabled(const QString &id, bool enabled);
     // Its tour seen: it no longer shows by itself (Tour.qml).
     Q_INVOKABLE void setToured(const QString &id);
+    // The notice of new plugins (Main.qml) put off for some days: it stays
+    // away until then, unless one not among these is new.
+    Q_INVOKABLE void putOffNew(const QStringList &ids, int days);
+    Q_INVOKABLE bool newPutOff(const QStringList &ids) const;
     // The folder one's own plugins go in, in the file manager (made first).
     Q_INVOKABLE void showPersonalDir() const;
     // Look for plugins again.
@@ -868,6 +872,8 @@ public:
     static QString stateRoot();
     static QString cacheRoot();
     static QString touredPath();
+    // ~/.local/state/pinhole/new-plugins.json: the notice put off, until when.
+    static QString putOffPath();
     // Every file of theirs written that is still to be.
     void flush();
     // A plugin's problem changed: the side panel says, once things settle.
@@ -960,6 +966,9 @@ private:
     std::unique_ptr<class SyncedStore> m_syncedStore;
     // The plugins whose tours were seen (toured.json).
     QJsonObject m_toured;
+    // The notice of new plugins put off (new-plugins.json): "until", in ms
+    // since the epoch, and "ids".
+    QJsonObject m_putOff;
     // What moveOutOfSettings took out of plugins.json, until it is written
     // where it now belongs: 0 while it is being, 1 written, 2 failed.
     QJsonObject m_moved;

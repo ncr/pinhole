@@ -833,15 +833,13 @@ its settings, is there as the window first shows. It sets:
   `photo` is a library position (or a function giving one) the grid goes to
   and lights, `open` one shown full window, `action` one of its
   `PluginAction`s whose button is lit, and `settings: true` lights its part
-  of the side panel. Pinhole shows it by itself the first time the plugin is
-  on, once `tourReady` is true and the grid is free, and again from the
-  side panel. Series' shows a series of your own. Of the plugins on at
-  launch, one tour at most shows by itself: with more than one not seen
-  yet, a card lists those plugins instead, each once its tour is ready,
-  with Show for its tour (that one then counts as seen), Skip all (they
-  all do) and Later (none does, and the card comes back next launch). A
-  plugin turned on in the side panel shows its own once the panel
-  closes.
+  of the side panel. Pinhole shows it by itself when the plugin is turned
+  on in the side panel (once the panel closes, `tourReady` is true and the
+  grid is free), and again from the side panel. Series' shows a series of
+  your own. Plugins on at launch whose tour is not seen show none by
+  themselves: a notice over the grid says how many are new, opens them in
+  the side panel marked New (they then count as seen), and its × puts it
+  off for three days, or until another is new.
 - `holdSdr` (API 6): set true while drawing an SDR overlay over the
   viewer's photo without covering it (a `viewerLayer`'s, as Live Photos'
   motion), so the photo uses the same brightness range as the overlay.

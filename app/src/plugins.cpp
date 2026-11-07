@@ -21,6 +21,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QSaveFile>
@@ -123,9 +124,13 @@ QJsonObject readConfig() {
     return config;
 }
 
-QJsonObject readToured() {
-    QFile file(Plugins::touredPath());
+QJsonObject readJson(const QString &path) {
+    QFile file(path);
     return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+}
+
+QJsonObject readToured() {
+    return readJson(Plugins::touredPath());
 }
 
 // What Pinhole's own plugins kept in their settings before they had a
@@ -657,7 +662,8 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
       m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer, m_libraryApi.get()) : nullptr), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
       m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files),
-      m_syncedStore(std::make_unique<SyncedStore>()), m_toured(readToured()) {
+      m_syncedStore(std::make_unique<SyncedStore>()), m_toured(readToured()),
+      m_putOff(readJson(putOffPath())) {
     // pinholed's workers: as each window connects (it hears the source
     // first), and as they change.
     if (m_service)
@@ -773,6 +779,10 @@ QString Plugins::cacheRoot() {
 
 QString Plugins::touredPath() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/toured.json";
+}
+
+QString Plugins::putOffPath() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + "/pinhole/new-plugins.json";
 }
 
 void Plugins::flush() {
@@ -1328,6 +1338,28 @@ void Plugins::setToured(const QString &id) {
     m_files.run([path, bytes] { return KeptFiles::write(path, bytes); });
     ++m_revision;
     emit changed();
+}
+
+void Plugins::putOffNew(const QStringList &ids, int days) {
+    m_putOff = QJsonObject{
+        {"until", QDateTime::currentMSecsSinceEpoch() + qint64(days) * 24 * 3600 * 1000},
+        {"ids", QJsonArray::fromStringList(ids)},
+    };
+    const QString path = putOffPath();
+    const QByteArray bytes = QJsonDocument(m_putOff).toJson();
+    m_files.run([path, bytes] { return KeptFiles::write(path, bytes); });
+    ++m_revision;
+    emit changed();
+}
+
+bool Plugins::newPutOff(const QStringList &ids) const {
+    if (QDateTime::currentMSecsSinceEpoch() >= qint64(m_putOff.value("until").toDouble()))
+        return false;
+    const QJsonArray off = m_putOff.value("ids").toArray();
+    for (const QString &id : ids)
+        if (!off.contains(id))
+            return false;
+    return true;
 }
 
 void Plugins::updateCatalogs() {

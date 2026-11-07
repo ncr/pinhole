@@ -34,6 +34,8 @@ Item {
     onPreparedChanged: if (prepared) orderPlugins()
     property string section: "sources"
     property var returnFocus: null
+    // Where the keys go as it closes when they cannot go back (the grid).
+    property Item fallbackFocus: null
     readonly property var sections: [
         { id: "sources", text: qsTr("Sources") },
         { id: "photos", text: qsTr("Photos") },
@@ -72,13 +74,16 @@ Item {
         const at = sections.findIndex(s => s.id === section)
         selectSection(sections[(at + direction + sections.length) % sections.length].id, true)
     }
+    // Its keys only while it has them: not under a tour, the help or the guide.
     Keys.onShortcutOverride: event => {
+        if (keymap.layer !== "side") return
         const tab = (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
             && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
         const navigation = currentFocus()?.objectName?.startsWith("sideSection-") ?? false
         if (tab || (navigation && (event.key === Qt.Key_Left || event.key === Qt.Key_Right))) event.accepted = true
     }
     Keys.onPressed: event => {
+        if (keymap.layer !== "side") return
         if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
                 && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
             moveFocus(event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1)
@@ -235,6 +240,28 @@ Item {
         return row
     }
 
+    // The plugins new since last looked at (Main.qml's notice), marked New
+    // for as long as the window is open.
+    property var newIds: []
+    function showNew(ids) {
+        newIds = ids
+        prepared = true
+        section = "plugins"
+        shown = true
+        // The first of them in sight, once the rows and the focus are in place.
+        Qt.callLater(() => Qt.callLater(() => {
+            pluginsSection.forceLayout()
+            top.forceLayout()
+            const k = pluginOrder.findIndex(id => ids.indexOf(id) >= 0)
+            const row = k >= 0 ? pluginRows.itemAt(k) : null
+            if (!row)
+                return
+            const y = row.mapToItem(scroller.contentItem, 0, 0).y
+            if (y + row.height > scroller.contentY + scroller.height || y < scroller.contentY)
+                scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, y - theme.fontSize))
+        }))
+    }
+
     // A mark's switch's words: Pinhole's own marks' here, a plugin's its
     // own, else its plugin's name.
     function markText(kind) {
@@ -255,10 +282,18 @@ Item {
         pending = -1
         if (shown) {
             returnFocus = currentFocus()
-            Qt.callLater(restoreFocus)
+            // Opened by a tour, which keeps the keys (→ goes on, not to
+            // another tab): the focus stays where it was.
+            if (keymap.layer !== "tour")
+                Qt.callLater(restoreFocus)
         } else {
+            // Back where it was; or, that gone (the notice that opened it),
+            // to `fallbackFocus`, never left in the panel hidden.
             const previous = returnFocus
-            Qt.callLater(() => { if (previous?.visible && previous.enabled) previous.forceActiveFocus() })
+            Qt.callLater(() => {
+                if (previous?.visible && previous.enabled) previous.forceActiveFocus()
+                else if (root.fallbackFocus && Focus.within(root, currentFocus())) root.fallbackFocus.forceActiveFocus()
+            })
         }
     }
 
@@ -1369,10 +1404,31 @@ Item {
                                         spacing: Math.round(theme.fontSize * 0.5)
                                         UiText {
                                             id: name
-                                            width: Math.min(implicitWidth, parent.width - (yours.visible ? yours.width + parent.spacing : 0))
+                                            width: Math.min(implicitWidth, parent.width - (yours.visible ? yours.width + parent.spacing : 0)
+                                                            - (fresh.visible ? fresh.width + parent.spacing : 0))
                                             text: pluginRow.info.name
                                             color: pluginRow.on ? theme.brightForeground : theme.foreground
                                             elide: Text.ElideRight
+                                        }
+                                        // New since last looked at (showNew).
+                                        Rectangle {
+                                            id: fresh
+                                            objectName: "newPluginMark"
+                                            visible: root.newIds.indexOf(pluginRow.modelData) >= 0
+                                            anchors.verticalCenter: name.verticalCenter
+                                            width: freshText.implicitWidth + Math.round(theme.fontSize * 0.8)
+                                            height: freshText.implicitHeight + 2
+                                            radius: height / 2
+                                            color: "transparent"
+                                            border.width: 1
+                                            border.color: theme.accent
+                                            UiText {
+                                                id: freshText
+                                                anchors.centerIn: parent
+                                                text: qsTr("New")
+                                                color: theme.accent
+                                                font.pixelSize: Math.round(theme.fontSize * 0.714)
+                                            }
                                         }
                                         // One of one's own.
                                         Rectangle {

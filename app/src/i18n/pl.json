@@ -322,11 +322,14 @@
   "Zoom in, out": "Przybliż, oddal",
   "[ ]": "[ ]",
   "More": "Więcej",
-  "New plugins": "Nowe wtyczki",
-  "Each has a short tour of what it does; they stay in the side panel (Tab).": "Każda ma krótki samouczek; zostają w panelu bocznym (Tab).",
-  "Show": "Pokaż",
+  "%n new plugin(s)": {
+    "one": "%n nowa wtyczka",
+    "few": "%n nowe wtyczki",
+    "many": "%n nowych wtyczek",
+    "other": "%n nowej wtyczki"
+  },
+  "New": "Nowa",
   "Later": "Później",
-  "Skip all": "Pomiń wszystkie",
   "Its plugin is turned off.": "Jego wtyczka jest wyłączona.",
   "This file is damaged, so it cannot be shown": "Ten plik jest uszkodzony, więc nie da się go pokazać",
   "It says when something changes": "Samo daje znać o zmianach",

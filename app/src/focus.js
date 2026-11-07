@@ -16,6 +16,13 @@ function items(root) {
     })
 }
 
+// Whether `item` is `root` or within it.
+function within(root, item) {
+    for (let at = item; at; at = at.parent)
+        if (at === root) return true
+    return false
+}
+
 function move(root, direction, current) {
     const all = items(root)
     if (!all.length) { root.forceActiveFocus(); return }

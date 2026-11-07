@@ -198,16 +198,15 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
 
 // PINHOLE_SELFTEST=tour:<dir>: on a profile that has not seen them (a
 // fresh $XDG_STATE_HOME each run: the tours seen are its
-// pinhole/toured.json, which a run writes), wait
-// for the New plugins card (more than one tour not seen, each listed
-// ready) or a tour to show by itself. Later (Esc) leaves them unseen and
-// nothing follows; at the next launch (as if) the card lists them again.
-// ⏎ on Series' (or the first ready); step through the tour with → and
-// grab each step into <dir>; check no tour or card follows and that it
-// alone is seen; ask for Series' again, as the side panel does, Esc, and
-// check none follows. Then one of the card's turned off and on again
-// shows its tour by itself; and at the next launch, Skip all marks the
-// rest seen. Fails on any.
+// pinhole/toured.json, which a run writes), wait for the notice of new
+// plugins, with no tour by itself at launch. × puts it off: none seen, and
+// at the next launch (as if) it stays away until one not put off is new.
+// One of those it counts turned off and on again shows its tour by itself
+// and is no longer counted; tapping the notice opens the side panel on its
+// Plugins with the rest marked New, and seen, and closing it leaves the
+// keys with the grid. Then Series' tour (or another of those ready) from
+// the side panel, each step grabbed into <dir>, its keys its own where it
+// opens the side panel, and none follows. Fails on any.
 void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
 // PINHOLE_SELFTEST=covering (selftestcovering.cpp): one plugin over the
@@ -253,7 +252,7 @@ void runExamplesSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &l
 // lets the pointer through to them, at 850 and 1700 wide. Over the date at
 // the top left, over every part of the side panel (at its top, at its end
 // and between, scrolled on past either), over the photos dimmed beside it,
-// over the help, iCloud's sign-in, the New plugins card and select mode's
+// over the help, iCloud's sign-in and select mode's
 // Copy menu and beside each, and over the viewer: the wheel, a touchpad's
 // swipes, flicks and momentum, smooth pixels, Ctrl and the wheel, the
 // sideways wheel, pinches, two-finger taps, middle clicks; and where no
