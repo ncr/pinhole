@@ -206,7 +206,7 @@ Item {
         Choices {
             id: shapes
             keyLayer: "plugin"
-            when: view.shown
+            usable: view.shown
             section: qsTr("Crop")
             helpText: qsTr("Keep to a shape")
             value: crop.shape
@@ -228,7 +228,7 @@ Item {
         section: qsTr("Crop")
         keys: ["Return", "Enter"]
         keyLayer: "plugin"
-        when: crop.visible
+        usable: crop.visible
         onTriggered: crop.keep()
     }
     Command {
@@ -238,7 +238,7 @@ Item {
         section: qsTr("Crop")
         keys: ["R"]
         keyLayer: "plugin"
-        when: crop.visible
+        usable: crop.visible
         onTriggered: crop.turnOnce()
     }
     Command {
@@ -248,7 +248,7 @@ Item {
         section: qsTr("Crop")
         keys: ["Backspace"]
         keyLayer: "plugin"
-        when: crop.visible
+        usable: crop.visible
         onTriggered: crop.whole()
     }
 }

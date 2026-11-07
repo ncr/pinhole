@@ -131,7 +131,7 @@ PinholePlugin {
         keys: ["Return", "Enter", "Space"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         mouse: qsTr("Click a day")
         touchpad: qsTr("Tap a day")
         onTriggered: calendarView.item.jump()
@@ -143,7 +143,7 @@ PinholePlugin {
         keys: ["Up"]
         keysText: "↑ ↓ ← →"
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Point")
         touchpad: qsTr("Point")
@@ -153,7 +153,7 @@ PinholePlugin {
         name: "calendar.nextDay"
         keys: ["Down"]
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Point")
         touchpad: qsTr("Point")
@@ -163,7 +163,7 @@ PinholePlugin {
         name: "calendar.previousWeek"
         keys: ["Left"]
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Point")
         touchpad: qsTr("Point")
@@ -173,7 +173,7 @@ PinholePlugin {
         name: "calendar.nextWeek"
         keys: ["Right"]
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Point")
         touchpad: qsTr("Point")
@@ -186,7 +186,7 @@ PinholePlugin {
         keys: ["PgUp"]
         keysText: "PgUp PgDn"
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Wheel, then point")
         touchpad: qsTr("Two fingers, then point")
@@ -196,7 +196,7 @@ PinholePlugin {
         name: "calendar.nextYear"
         keys: ["PgDown"]
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         autoRepeat: true
         mouse: qsTr("Wheel, then point")
         touchpad: qsTr("Two fingers, then point")
@@ -209,7 +209,7 @@ PinholePlugin {
         keys: ["Home"]
         keysText: "Home End"
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         mouse: qsTr("Wheel, then point")
         touchpad: qsTr("Two fingers, then point")
         onTriggered: calendarView.item.end(-1)
@@ -218,7 +218,7 @@ PinholePlugin {
         name: "calendar.last"
         keys: ["End"]
         keyLayer: "plugin"
-        when: calendarView.shown
+        usable: calendarView.shown
         mouse: qsTr("Wheel, then point")
         touchpad: qsTr("Two fingers, then point")
         onTriggered: calendarView.item.end(1)

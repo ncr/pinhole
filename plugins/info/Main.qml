@@ -554,7 +554,7 @@ PinholePlugin {
                     text: qsTr("Open map")
                     key: "M"
                     keyLayer: "viewer"
-                    onTapped: plugin.openMap(Geo.point(plugin.photoId, plugin.facts.latitude, plugin.facts.longitude, plugin.item.date))
+                    onTriggered: plugin.openMap(Geo.point(plugin.photoId, plugin.facts.latitude, plugin.facts.longitude, plugin.item.date))
                 }
                 // A long video's original is a big download for a few
                 // lines: only when asked.
@@ -564,7 +564,7 @@ PinholePlugin {
                                                   : qsTr("Read the original")
                     key: "Shift+I"
                     keyLayer: "viewer"
-                    onTapped: plugin.readWaiting()
+                    onTriggered: plugin.readWaiting()
                 }
             }
         }

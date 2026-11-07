@@ -46,7 +46,7 @@ library. The [kit reference](plugins.md#the-kit) explains the shared controls.
 ```json
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 15,
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",
@@ -77,7 +77,7 @@ PinholePlugin {
         years = Object.keys(counts).reverse().map(year => ({ year: year, count: counts[year] }))
     }
     actions: [PluginAction { place: "grid"; text: qsTr("Years"); key: "F5"; onTriggered: { plugin.count(); plugin.open = true } }]
-    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
 
     Panel {
         visible: plugin.open
@@ -139,7 +139,7 @@ explains cancellation and error handling.
 ```json
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 15,
   "id": "example.ask",
   "name": "Example ask",
   "version": "1.0.0",
@@ -166,7 +166,7 @@ PinholePlugin {
     covering: open
     property var photo: ({})
     actions: [PluginAction { id: action; place: "grid"; text: qsTr("Swatch"); key: "F7"; usable: pinhole.library.count > 0; onTriggered: plugin.begin() }]
-    Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "ask.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
 
     function begin() {
         const picked = pinhole.library.item(pinhole.currentIndex())
@@ -192,7 +192,7 @@ PinholePlugin {
             })
     }
 
-    Panel { visible: plugin.open; color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.open = false }
+    Panel { visible: plugin.open; color: Qt.rgba(0, 0, 0, 0.45); onTriggered: plugin.open = false }
     Card {
         visible: plugin.open
         anchors.centerIn: parent
@@ -202,7 +202,7 @@ PinholePlugin {
             id: sizes
             anchors.centerIn: parent
             options: [{ value: 64, text: qsTr("Small") }, { value: 256, text: qsTr("Medium") }, { value: 1024, text: qsTr("Large") }]
-            when: plugin.open
+            usable: plugin.open
             helpText: qsTr("Size")
             onChosen: size => plugin.make(size)
         }

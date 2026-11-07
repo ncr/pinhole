@@ -144,7 +144,7 @@ Item {
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: root.shown
+        usable: root.shown
         onTriggered: root.submit()
     }
     // Tab and ⇧ Tab between the Apple ID and the password, as anywhere.
@@ -159,7 +159,7 @@ Item {
         name: "signIn.next"
         keys: ["Tab"]
         keyLayer: "plugin"
-        when: root.shown && !root.codeStage
+        usable: root.shown && !root.codeStage
         mouse: qsTr("Click the field")
         touchpad: qsTr("Tap the field")
         onTriggered: root.nextField(1)
@@ -168,7 +168,7 @@ Item {
         name: "signIn.previous"
         keys: ["Shift+Tab", "Backtab"]
         keyLayer: "plugin"
-        when: root.shown && !root.codeStage
+        usable: root.shown && !root.codeStage
         mouse: qsTr("Click the field")
         touchpad: qsTr("Tap the field")
         onTriggered: root.nextField(-1)
@@ -186,7 +186,7 @@ Item {
         name: "signIn.newCode"
         keys: ["Ctrl+R"]
         keyLayer: "plugin"
-        when: root.shown && root.codeStage && password.text !== "" && !root.busy
+        usable: root.shown && root.codeStage && password.text !== "" && !root.busy
         onTriggered: {
             code.text = ""
             root.signIn(account.text, password.text)
@@ -198,7 +198,7 @@ Item {
     // it (the photos, the side panel): no button, no wheel.
     Panel {
         color: Qt.rgba(theme.background.r, theme.background.g, theme.background.b, 0.5)
-        onClicked: if (!root.busy) root.view.close()
+        onTriggered: if (!root.busy) root.view.close()
     }
 
     Card {

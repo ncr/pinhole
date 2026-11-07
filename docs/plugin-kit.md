@@ -107,7 +107,8 @@ Properties:
 - `string name`: For tests and the coverage check: "grid.open", "viewer.close".
 - `string text`: What it does, for the help: "Open", "Newest".
 - `string section`: Its part of the help: "library", "select", "photo", "video", "share", "pinhole", a panel's ("sources", "storage", "tour"), or a plugin's name: a plugin's own are under its name in the language, whatever other than Pinhole's parts they say. None: not in the help (a button's own key, shown on it).
-- `var keys`: The keys that do it, as sequences ("Space", "Shift+Up"); the first is the one named, unless `keysText` says it better ("1–9", "↑ ↓").
+- `string key`: The keys that do it, as sequences ("Space", "Shift+Up"); the first is the one named, unless `keysText` says it better ("1–9", "↑ ↓"). One key alone (API 15): `key: "S"`, as an action and a button take it.
+- `var keys`
 - `string keysText`
 - `string mouse`: How with a mouse, and with a touchpad, when not by a button it has: "Wheel", "Pinch". A ShellButton showing it is way enough.
 - `string touchpad`
@@ -115,6 +116,7 @@ Properties:
 - `string noMouse`
 - `string noTouchpad`
 - `string keyLayer`: Whose keys these are: "grid", "viewer", "menu", "side", "addSource", "firstRun", "tour", "help", "plugin"; "chrome" for a button's, on the grid or the viewer, whichever has them; "any" for the window's own.
+- `bool usable`: Whether it can be done now (API 15, as an action's and a button's): its keys work only then. `when`, as it was said before, follows it.
 - `bool when`
 - `bool autoRepeat`
 - `bool bound`: False for keys read elsewhere (the viewer's arrows, timed as they are held): listed, but no shortcut of its own.
@@ -183,7 +185,8 @@ Properties:
 
 Signals:
 
-- `tapped()`: Pressed: a click, a tap, its key (a click on a button is a tap here, not `clicked`).
+- `triggered()`: Pressed: a click, a tap, its key. `triggered()` (API 15), as an action and a Command say it; `tapped()`, as it was said before, too.
+- `tapped()`
 - `activated()`: Pressed: a click, a tap, or Space or Return while it has the keys.
 
 Functions:
@@ -192,7 +195,7 @@ Functions:
 - `count()`
 - `complain(text)`: What pressing it could not do, in a few words under it for four seconds, the button shaking, as a PluginAction's complain() says it under its button (Complaint.qml).
 
-Its handler in QML: `onTapped`.
+Its handler in QML: `onTriggered`.
 
 ## Chip
 
@@ -323,7 +326,7 @@ Properties:
 
 ## Panel
 
-A plugin's screen over the photos: its parent's whole room, in the theme's background or a `color` of its own, taking every click, touch, wheel turn, swipe, pinch and hover over it (Shield), so the photos beneath get none. Its controls go after it. `clicked()` is a click on it where no control is (on a dimmed one beside a card, it puts the card away); with `steps` (Qt.Horizontal, Qt.Vertical), the wheel and a swipe step through something: `stepped(1)` the next, `stepped(-1)` the one before.
+A plugin's screen over the photos: its parent's whole room, in the theme's background or a `color` of its own, taking every click, touch, wheel turn, swipe, pinch and hover over it (Shield), so the photos beneath get none. Its controls go after it. `triggered()` (API 15; `clicked()` too, as before) is a click on it where no control is (on a dimmed one beside a card, it puts the card away); with `steps` (Qt.Horizontal, Qt.Vertical), the wheel and a swipe step through something: `stepped(1)` the next, `stepped(-1)` the one before.
 
 Its root is a `Rectangle` (Qt Quick's: its properties too).
 
@@ -333,10 +336,11 @@ Properties:
 
 Signals:
 
+- `triggered()`
 - `clicked()`
 - `stepped(int step)`
 
-Its handler in QML: `onClicked`.
+Its handler in QML: `onTriggered`.
 
 ## Card
 
@@ -351,7 +355,7 @@ Its root is a `Rectangle` (Qt Quick's: its properties too).
 
 ## Choices
 
-One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `when`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`. Given a `setting` (API 13), it shows and keeps that one of pinhole.settings, as a SettingSwitch does.
+One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `usable`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`. Given a `setting` (API 13), it shows and keeps that one of pinhole.settings, as a SettingSwitch does.
 
 Its root is a `Row` (Qt Quick's: its properties too).
 
@@ -360,7 +364,8 @@ Properties:
 - `var options`: [{ value, text }], in order.
 - `string setting`: The name of one of the plugin's settings, whose value it is.
 - `var value`: The one chosen.
-- `bool when`: While true, the number keys choose.
+- `bool usable`: While true, the number keys choose (API 15, as a button's; `when`, as it was said before, follows it).
+- `bool when`
 - `string keyLayer`: Whose keys they are: the covering plugin's ("plugin"), or "grid" or "viewer".
 - `string section`: Where the help lists the number keys, and in what words.
 - `string helpText`

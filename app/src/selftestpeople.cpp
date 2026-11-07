@@ -212,7 +212,7 @@ void runPeopleSelfTest(QQuickWindow *window, const Library &library, Viewer &vie
                                         QQuickItem *notButton = inCard(QStringLiteral("peopleRemove"));
                                         return notButton && notButton->isVisible() && notButton->property("text").toString() == QLatin1String("Not Ola");
                                     }, 5000, "the card offers Not Ola for the right face", [=, &viewer] {
-                                    QMetaObject::invokeMethod(inCard(QStringLiteral("peopleRemove")), "tapped");
+                                    QMetaObject::invokeMethod(inCard(QStringLiteral("peopleRemove")), "press");
                                     waitFor([=] { return said() == QLatin1String("Anna +1"); }, 8000, "Not Ola takes the name back",
                                             [=, &viewer] {
                                         press(window, Qt::Key_Escape);

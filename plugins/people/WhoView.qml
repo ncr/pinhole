@@ -78,7 +78,7 @@ FocusScope {
     // Over the photo, a little dimmed; a click beside the card closes it.
     Panel {
         color: Qt.rgba(0, 0, 0, 0.3)
-        onClicked: view.close()
+        onTriggered: view.close()
     }
     Repeater {
         model: who.faces

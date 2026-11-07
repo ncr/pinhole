@@ -382,7 +382,7 @@ PinholePlugin {
         name: "series.joining"
         keys: ["G"]
         keyLayer: "viewer"
-        when: joining.shown && !plugin.covering
+        usable: joining.shown && !plugin.covering
         mouse: qsTr("Click the band")
         touchpad: qsTr("Tap the band")
         onTriggered: plugin.openEditor(addAction.k, pinhole.viewer.index)

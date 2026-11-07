@@ -117,7 +117,7 @@ PinholePlugin {
         keyLayer: "viewer"
         noMouse: qsTr("Turn three times")
         noTouchpad: qsTr("Turn three times")
-        when: plugin.editable
+        usable: plugin.editable
         onTriggered: plugin.turn([pinhole.viewer.index], -1)
     }
 

@@ -91,7 +91,7 @@ FocusScope {
             usable: !picker.busy
             activeFocusOnTab: false
             lit: list.activeFocus && list.currentIndex === index
-            onTapped: picker.chosen(modelData)
+            onTriggered: picker.chosen(modelData)
         }
     }
     Flow {
@@ -108,7 +108,7 @@ FocusScope {
             visible: picker.suggested !== "" && picker.typedName === ""
             active: true
             usable: visible && !picker.busy
-            onTapped: picker.chosen(picker.suggested)
+            onTriggered: picker.chosen(picker.suggested)
         }
         ShellButton {
             id: create
@@ -116,7 +116,7 @@ FocusScope {
             text: qsTr("Add a new person")
             visible: picker.allowCreate
             usable: visible && !picker.busy && picker.typedName !== "" && !picker.nameExists
-            onTapped: picker.chosen(picker.typedName)
+            onTriggered: picker.chosen(picker.typedName)
         }
         ShellButton {
             id: remove
@@ -124,8 +124,8 @@ FocusScope {
             text: picker.removeText
             visible: picker.removeText !== ""
             usable: visible && !picker.busy
-            onTapped: picker.removed()
+            onTriggered: picker.removed()
         }
-        ShellButton { id: cancel; text: qsTr("Cancel"); onTapped: picker.cancelled() }
+        ShellButton { id: cancel; text: qsTr("Cancel"); onTriggered: picker.cancelled() }
     }
 }

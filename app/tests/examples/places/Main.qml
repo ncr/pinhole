@@ -11,7 +11,7 @@ PinholePlugin {
     property var pending: null
     covering: open
     actions: [PluginAction { place: "grid"; text: qsTr("Places"); key: "F8"; busy: plugin.pending !== null; onTriggered: plugin.ask() }]
-    Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
 
     onOpenChanged: if (!open) cancelQuery()
     function cancelQuery() {

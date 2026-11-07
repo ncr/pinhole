@@ -329,7 +329,7 @@ Item {
             floating: true
             text: "✕"
             hint: "Esc"
-            onTapped: calendar.view.close()
+            onTriggered: calendar.view.close()
         }
     }
 

@@ -8,9 +8,9 @@ PinholePlugin {
     property bool open: false
     covering: open
     actions: [PluginAction { place: "grid"; text: qsTr("Tiles"); key: "F6"; onTriggered: plugin.open = true }]
-    Command { name: "tiles.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
-    Command { name: "tiles.in"; keys: ["+", "="]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(1) }
-    Command { name: "tiles.out"; keys: ["-"]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(-1) }
+    Command { name: "tiles.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "tiles.in"; keys: ["+", "="]; keyLayer: "plugin"; usable: plugin.open; onTriggered: zoom.zoomBy(1) }
+    Command { name: "tiles.out"; keys: ["-"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: zoom.zoomBy(-1) }
 
     Panel {
         visible: plugin.open

@@ -162,7 +162,7 @@ PinholePlugin {
         name: "screenshots.hide"
         keys: ["Shift+S"]
         keyLayer: "grid"
-        when: !plugin.hiding && plugin.shots.length > 0 && !plugin.covering
+        usable: !plugin.hiding && plugin.shots.length > 0 && !plugin.covering
         mouse: qsTr("The side panel")
         touchpad: qsTr("The side panel")
         onTriggered: plugin.setHiding(true)

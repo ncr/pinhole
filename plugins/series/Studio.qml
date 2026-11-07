@@ -228,7 +228,7 @@ Item {
         keys: ["Left"]
         keysText: "← →"
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("The ‹ › buttons")
         pointerHelp: false
@@ -238,7 +238,7 @@ Item {
         name: "studio.next"
         keys: ["Right"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("The ‹ › buttons")
         onTriggered: studio.step(1)
@@ -250,7 +250,7 @@ Item {
         section: "Series"
         keys: ["Space"]
         keyLayer: "plugin"
-        when: studio.shown
+        usable: studio.shown
         onTriggered: studio.playing = !studio.playing
     }
     Command {
@@ -259,7 +259,7 @@ Item {
         section: "Series"
         keys: ["P"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -271,7 +271,7 @@ Item {
         section: "Series"
         keys: ["L"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -283,7 +283,7 @@ Item {
         section: "Series"
         keys: ["O"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -295,7 +295,7 @@ Item {
         section: "Series"
         keys: ["T"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -308,7 +308,7 @@ Item {
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: studio.shown
+        usable: studio.shown
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -321,7 +321,7 @@ Item {
         keys: ["Shift+Return", "Shift+Enter"]
         keysText: "⇧ ⏎"
         keyLayer: "plugin"
-        when: studio.shown
+        usable: studio.shown
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -349,7 +349,7 @@ Item {
             keys: [modelData[0]]
             keysText: "⇧ ← → ↑ ↓"
             keyLayer: "plugin"
-            when: studio.shown && studio.making === ""
+            usable: studio.shown && studio.making === ""
             autoRepeat: true
             mouse: qsTr("Drag the picture")
             touchpad: qsTr("Three fingers on it")
@@ -360,7 +360,7 @@ Item {
         name: "studio.centre"
         keys: ["0"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Double-click the picture")
         touchpad: qsTr("Double-tap the picture")
         onTriggered: studio.change({ pan: { x: 0, y: 0 } })
@@ -374,7 +374,7 @@ Item {
         keys: ["["]
         keysText: "[ ]"
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         autoRepeat: true
         mouse: qsTr("Point at the strip")
         touchpad: qsTr("Point at the strip")
@@ -385,7 +385,7 @@ Item {
         name: "studio.shotOn"
         keys: ["]"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         autoRepeat: true
         mouse: qsTr("Point at the strip")
         touchpad: qsTr("Point at the strip")
@@ -397,7 +397,7 @@ Item {
         section: "Series"
         keys: ["X"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === "" && studio.shotCursor < studio.all.length
+        usable: studio.shown && studio.making === "" && studio.shotCursor < studio.all.length
         mouse: qsTr("Click it in the strip")
         touchpad: qsTr("Tap it in the strip")
         onTriggered: studio.toggle(studio.all[studio.shotCursor].index)
@@ -409,7 +409,7 @@ Item {
         section: "Series"
         keys: ["S"]
         keyLayer: "plugin"
-        when: studio.shown && studio.made !== null
+        usable: studio.shown && studio.made !== null
         onTriggered: pinhole.showFile(studio.made.path)
     }
 
@@ -442,7 +442,7 @@ Item {
             text: "‹"
             hint: "←"
             usable: studio.k > 0 && studio.making === ""
-            onTapped: studio.step(-1)
+            onTriggered: studio.step(-1)
         }
         Chip {
             text: qsTr("%1 of %2").arg(Number(studio.k + 1).toLocaleString(Qt.locale(), "f", 0))
@@ -453,7 +453,7 @@ Item {
             text: "›"
             hint: "→"
             usable: studio.k < studio.plugin.series.length - 1 && studio.making === ""
-            onTapped: studio.step(1)
+            onTriggered: studio.step(1)
         }
     }
     ShellButton {
@@ -463,7 +463,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: view.back()
+        onTriggered: view.back()
     }
 
     // The clip, as big as fits; drag it to move the crop.
@@ -601,7 +601,7 @@ Item {
                 section: "Series"
                 busy: modelData.busy
                 usable: modelData.usable && !modelData.busy
-                onTapped: modelData.trigger(studio.made.path)
+                onTriggered: modelData.trigger(studio.made.path)
             }
         }
     }
@@ -630,7 +630,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 options: Engine.MOTIONS.map(motion => ({ value: motion, text: studio.names[motion] }))
                 value: studio.recipe.motion
-                when: studio.shown && studio.making === ""
+                usable: studio.shown && studio.making === ""
                 section: "Series"
                 helpText: qsTr("Motion")
                 onChosen: motion => { studio.change({ motion: motion }); studio.time = 0 }
@@ -646,19 +646,19 @@ Item {
                     flat: true
                     text: studio.names[studio.recipe.pace]
                     hint: "P"
-                    onTapped: studio.cycle("pace", Engine.PACES)
+                    onTriggered: studio.cycle("pace", Engine.PACES)
                 }
                 ShellButton {
                     flat: true
                     text: studio.names[studio.recipe.look]
                     hint: "L"
-                    onTapped: studio.cycle("look", Engine.LOOKS)
+                    onTriggered: studio.cycle("look", Engine.LOOKS)
                 }
                 ShellButton {
                     flat: true
                     text: studio.names[studio.recipe.shape]
                     hint: "O"
-                    onTapped: studio.cycle("shape", Engine.SHAPES)
+                    onTriggered: studio.cycle("shape", Engine.SHAPES)
                 }
                 ShellButton {
                     flat: true
@@ -666,7 +666,7 @@ Item {
                     hint: "T"
                     active: studio.recipe.steady && studio.recipe.motion !== "pile"
                     usable: studio.recipe.motion !== "pile"
-                    onTapped: studio.change({ steady: !studio.recipe.steady })
+                    onTriggered: studio.change({ steady: !studio.recipe.steady })
                 }
                 ShellButton {
                     flat: true
@@ -677,13 +677,13 @@ Item {
                     flat: true
                     text: qsTr("Video")
                     hint: "⇧ ⏎"
-                    onTapped: studio.make("mp4")
+                    onTriggered: studio.make("mp4")
                 }
                 ShellButton {
                     active: true
                     text: qsTr("Make GIF")
                     hint: "⏎"
-                    onTapped: studio.make("gif")
+                    onTriggered: studio.make("gif")
                 }
             }
         }

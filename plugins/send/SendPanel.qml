@@ -402,7 +402,7 @@ Item {
     // reaches the photos beneath.
     Panel {
         color: Qt.rgba(0, 0, 0, 0.45)
-        onClicked: panel.close()
+        onTriggered: panel.close()
     }
 
     Card {
@@ -468,7 +468,7 @@ Item {
                     // The one sent to stays readable while it goes.
                     usable: !panel.running || chosen
                     active: chosen
-                    onTapped: panel.sendTo(modelData)
+                    onTriggered: panel.sendTo(modelData)
                 }
             }
             Row {
@@ -558,7 +558,7 @@ Item {
                     text: qsTr("Send")
                     hint: "⏎"
                     usable: pinField.text !== ""
-                    onTapped: {
+                    onTriggered: {
                         const pin = pinField.text
                         pinField.text = ""
                         panel.sendTo(panel.target, pin)
@@ -614,7 +614,7 @@ Item {
         section: "Send to phone"
         keys: ["J"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.running && !panel.typing
+        usable: panel.shown && !panel.running && !panel.typing
         mouse: qsTr("The switch")
         touchpad: qsTr("The switch")
         onTriggered: {
@@ -629,7 +629,7 @@ Item {
         section: "Send to phone"
         keys: ["L"]
         keyLayer: "plugin"
-        when: panel.shown && panel.chosen.length > 0 && !panel.running && !panel.typing
+        usable: panel.shown && panel.chosen.length > 0 && !panel.running && !panel.typing
         onTriggered: panel.openLocalSend()
     }
     Command {
@@ -639,7 +639,7 @@ Item {
         section: "Send to phone"
         keys: ["X"]
         keyLayer: "plugin"
-        when: panel.shown && panel.running
+        usable: panel.shown && panel.running
         onTriggered: panel.stopSending()
     }
 }

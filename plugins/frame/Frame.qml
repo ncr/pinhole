@@ -524,7 +524,7 @@ Item {
         keys: ["Left"]
         keysText: "← →"
         keyLayer: "plugin"
-        when: frame.shown
+        usable: frame.shown
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("Swipe sideways with two fingers")
         onTriggered: frame.go(-1, true)
@@ -534,7 +534,7 @@ Item {
         name: "frame.next"
         keys: ["Right"]
         keyLayer: "plugin"
-        when: frame.shown
+        usable: frame.shown
         mouse: qsTr("The ‹ › buttons")
         touchpad: qsTr("Swipe sideways with two fingers")
         onTriggered: frame.go(1, true)
@@ -546,7 +546,7 @@ Item {
         section: "Photo frame"
         keys: ["Space"]
         keyLayer: "plugin"
-        when: frame.shown
+        usable: frame.shown
         mouse: qsTr("The ❚❚ button")
         touchpad: qsTr("Tap with two fingers")
         onTriggered: frame.setPaused(!frame.paused)

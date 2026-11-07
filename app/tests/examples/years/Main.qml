@@ -15,7 +15,7 @@ PinholePlugin {
         years = Object.keys(counts).reverse().map(year => ({ year: year, count: counts[year] }))
     }
     actions: [PluginAction { place: "grid"; text: qsTr("Years"); key: "F5"; onTriggered: { plugin.count(); plugin.open = true } }]
-    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "years.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
 
     Panel {
         visible: plugin.open

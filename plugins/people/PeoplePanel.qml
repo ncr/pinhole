@@ -448,18 +448,18 @@ Panel {
     // opened from here).
     readonly property bool ownKeys: shown && view.onTop && !pinhole.away
     readonly property bool keysOnTiles: shown && !picking && grid.activeFocus
-    Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
-    Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
-    Command { name: "people.right"; keys: ["Right"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(1, 0) }
-    Command { name: "people.up"; keys: ["Up"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(0, -1) }
-    Command { name: "people.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(0, 1) }
+    Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; usable: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
+    Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; usable: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
+    Command { name: "people.right"; keys: ["Right"]; keyLayer: "plugin"; usable: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(1, 0) }
+    Command { name: "people.up"; keys: ["Up"]; keyLayer: "plugin"; usable: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(0, -1) }
+    Command { name: "people.down"; keys: ["Down"]; keyLayer: "plugin"; usable: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(0, 1) }
     Command {
         id: removeCommand
         name: "people.remove"
         text: panel.page === "person" ? qsTr("Not %1").arg(panel.person) : qsTr("Someone else")
         keys: ["X", "Delete"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.page !== "home" && panel.selection !== null
+        usable: panel.keysOnTiles && panel.page !== "home" && panel.selection !== null
             && (panel.page === "person" || panel.selection.key !== (panel.page === "group" ? panel.anchor?.anchor : panel.likely[panel.checking]?.anchor))
         onTriggered: panel.removeSelected()
     }
@@ -469,7 +469,7 @@ Panel {
         text: qsTr("Someone named…")
         keys: ["M"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.page === "person" && panel.selection !== null && panel.names.length > 1
+        usable: panel.keysOnTiles && panel.page === "person" && panel.selection !== null && panel.names.length > 1
         onTriggered: panel.openPicker("photo")
     }
     Command {
@@ -478,7 +478,7 @@ Panel {
         text: qsTr("New name")
         keys: ["N"]
         keyLayer: "plugin"
-        when: panel.keysOnTiles && panel.page === "group"
+        usable: panel.keysOnTiles && panel.page === "group"
         onTriggered: newName.input.forceActiveFocus()
     }
     Command {
@@ -487,7 +487,7 @@ Panel {
         text: qsTr("Check them")
         keys: ["C"]
         keyLayer: "plugin"
-        when: panel.ownKeys && !panel.picking && panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
+        usable: panel.ownKeys && !panel.picking && panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
         onTriggered: panel.go("check", panel.person)
     }
     Command {
@@ -496,7 +496,7 @@ Panel {
         text: qsTr("Don't know")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.ownKeys && !panel.picking && panel.page === "group" && !newName.input.activeFocus
+        usable: panel.ownKeys && !panel.picking && panel.page === "group" && !newName.input.activeFocus
         onTriggered: panel.markUnknown()
     }
     Command {
@@ -505,7 +505,7 @@ Panel {
         text: qsTr("No")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        usable: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.refuse()
     }
     Command {
@@ -514,7 +514,7 @@ Panel {
         text: qsTr("Skip")
         keys: ["S"]
         keyLayer: "plugin"
-        when: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        usable: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.skip()
     }
     Repeater {
@@ -525,7 +525,7 @@ Panel {
                 name: "people.choose." + (index + 1)
                 keys: [String(index + 1)]
                 keyLayer: "plugin"
-                when: panel.ownKeys && !panel.picking && (panel.page === "group" || panel.page === "check")
+                usable: panel.ownKeys && !panel.picking && (panel.page === "group" || panel.page === "check")
                     && index < panel.choices.length && !newName.input.activeFocus
                 onTriggered: panel.choose(panel.choices[index])
             }
@@ -572,7 +572,7 @@ Panel {
                 visible: panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
                 text: qsTr("%n more to check", "", panel.personRow?.likely ?? 0)
                 hint: checkCommand.keyName
-                onTapped: panel.go("check", panel.person)
+                onTriggered: panel.go("check", panel.person)
             },
             ShellButton {
                 id: mergeButton
@@ -581,7 +581,7 @@ Panel {
                 usable: panel.names.length > 1
                 text: qsTr("Merge with…")
                 hint: ""
-                onTapped: panel.openPicker("merge")
+                onTriggered: panel.openPicker("merge")
             }
         ]
         ShellButton {
@@ -590,7 +590,7 @@ Panel {
             visible: panel.page !== "home"
             text: "‹ " + qsTr("People")
             hint: "Esc"
-            onTapped: panel.back()
+            onTriggered: panel.back()
         }
         // Whom the faces below are compared with.
         PeopleTile {
@@ -629,7 +629,7 @@ Panel {
                     hint: String(index + 1)
                     active: index === 0 && (panel.page === "check" || !!panel.anchor?.guess)
                     busy: panel.naming
-                    onTapped: panel.choose(modelData)
+                    onTriggered: panel.choose(modelData)
                 }
             }
             ShellButton {
@@ -639,20 +639,20 @@ Panel {
                 hint: unknownCommand.keyName
                 active: !!panel.anchor?.unknown
                 checkable: true
-                onTapped: panel.markUnknown()
+                onTriggered: panel.markUnknown()
             }
             ShellButton {
                 visible: panel.page === "check"
                 objectName: "peopleRefuse"
                 text: refuseCommand.text
                 hint: refuseCommand.keyName
-                onTapped: panel.refuse()
+                onTriggered: panel.refuse()
             }
             ShellButton {
                 visible: panel.page === "check"
                 text: skipCommand.text
                 hint: skipCommand.keyName
-                onTapped: panel.skip()
+                onTriggered: panel.skip()
             }
             FieldInput {
                 id: newName
@@ -837,7 +837,7 @@ Panel {
                                 text: "…"
                                 helpText: moveCommand.text
                                 hint: ""
-                                onTapped: {
+                                onTriggered: {
                                     panel.selected = index
                                     panel.openPicker("photo")
                                 }
@@ -848,7 +848,7 @@ Panel {
                                 text: "✕"
                                 helpText: removeCommand.text
                                 hint: ""
-                                onTapped: {
+                                onTriggered: {
                                     panel.selected = index
                                     panel.removeSelected()
                                 }

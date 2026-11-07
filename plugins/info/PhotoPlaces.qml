@@ -586,14 +586,14 @@ FocusScope {
                 text: qsTr("Retry map")
                 visible: tiles.unavailable
                 floating: true
-                onTapped: tiles.retry()
+                onTriggered: tiles.retry()
             }
             ShellButton {
                 text: qsTr("OpenFreeMap © OpenMapTiles © OpenStreetMap")
                 helpText: qsTr("Map data attribution")
                 floating: true
                 visible: tiles.visible
-                onTapped: Qt.openUrlExternally("https://openfreemap.org/")
+                onTriggered: Qt.openUrlExternally("https://openfreemap.org/")
             }
         }
         UiText {
@@ -669,7 +669,7 @@ FocusScope {
                     objectName: "placesHideGallery"
                     text: "✕"
                     helpText: qsTr("Hide photos")
-                    onTapped: places.hidePhotos()
+                    onTriggered: places.hidePhotos()
                 }
             }
         }
@@ -715,7 +715,7 @@ FocusScope {
         keyLayer: "plugin"
         keys: ["Home"]
         // Home is the gallery's first photo while it has the keys.
-        when: places.visible && places.hasPhotos && !photos.activeFocus
+        usable: places.visible && places.hasPhotos && !photos.activeFocus
         onTriggered: places.fitAll()
     }
     Command {
@@ -725,7 +725,7 @@ FocusScope {
         section: qsTr("Map")
         keyLayer: "plugin"
         keys: ["G"]
-        when: places.visible && (places.hasPhotos || places.areaOpen)
+        usable: places.visible && (places.hasPhotos || places.areaOpen)
         onTriggered: places.showVisible()
     }
     Command {
@@ -735,7 +735,7 @@ FocusScope {
         section: qsTr("Map")
         keyLayer: "plugin"
         keys: ["Z"]
-        when: places.visible && places.zoom < Geo.maxZoom
+        usable: places.visible && places.zoom < Geo.maxZoom
             && (places.openedGroup !== null || (map.activeFocus && places.currentGroup !== null))
         onTriggered: places.zoomGroup(places.openedGroup || places.currentGroup)
     }
@@ -748,7 +748,7 @@ FocusScope {
                 keyLayer: "plugin"
                 keys: [modelData[0]]
                 // The gallery's own keys while it has them (PhotoTiles).
-                when: places.visible && map.activeFocus
+                usable: places.visible && map.activeFocus
                 autoRepeat: true
                 onTriggered: places.movePlace(modelData[1], modelData[2])
             }
@@ -756,7 +756,7 @@ FocusScope {
                 name: "places.pan." + modelData[0]
                 keyLayer: "plugin"
                 keys: ["Shift+" + modelData[0]]
-                when: places.visible
+                usable: places.visible
                 autoRepeat: true
                 onTriggered: { gestures.stop(); places.pan(-modelData[1] * 80, -modelData[2] * 80) }
             }
@@ -766,7 +766,7 @@ FocusScope {
         name: "places.open"
         keyLayer: "plugin"
         keys: ["Return", "Enter", "Space"]
-        when: places.visible && map.activeFocus && places.currentGroup !== null
+        usable: places.visible && map.activeFocus && places.currentGroup !== null
         onTriggered: places.showGroup(places.currentGroup)
     }
     Command {
@@ -776,7 +776,7 @@ FocusScope {
         section: qsTr("Map")
         keyLayer: "plugin"
         keys: ["+", "="]
-        when: places.visible && places.hasPhotos && places.zoom < Geo.maxZoom
+        usable: places.visible && places.hasPhotos && places.zoom < Geo.maxZoom
         autoRepeat: true
         onTriggered: places.stepZoom(1)
     }
@@ -787,7 +787,7 @@ FocusScope {
         section: qsTr("Map")
         keyLayer: "plugin"
         keys: ["-"]
-        when: places.visible && places.hasPhotos && places.zoom > 0
+        usable: places.visible && places.hasPhotos && places.zoom > 0
         autoRepeat: true
         onTriggered: places.stepZoom(-1)
     }

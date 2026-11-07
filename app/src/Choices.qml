@@ -1,7 +1,7 @@
 import QtQuick
 
 // One of a few, chosen on a row of buttons, each also its number's key (1,
-// 2, 3…) while `when`: `options` as [{ value, text }], the one chosen
+// 2, 3…) while `usable`: `options` as [{ value, text }], the one chosen
 // `value`, and `chosen(value)` when another is. The keys are in the help
 // under `section`, as `helpText`. Given a `setting` (API 13), it shows and
 // keeps that one of pinhole.settings, as a SettingSwitch does.
@@ -14,8 +14,10 @@ Row {
     readonly property var _settings: setting !== "" && typeof pinhole !== "undefined" && pinhole ? pinhole.settings : null
     // The one chosen.
     property var value: _settings ? _settings[setting] : undefined
-    // While true, the number keys choose.
-    property bool when: visible
+    // While true, the number keys choose (API 15, as a button's; `when`,
+    // as it was said before, follows it).
+    property bool usable: visible
+    property bool when: usable
     // Whose keys they are: the covering plugin's ("plugin"), or "grid" or
     // "viewer".
     property string keyLayer: "plugin"

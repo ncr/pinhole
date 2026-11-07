@@ -205,7 +205,7 @@ Item {
         keys: ["Space", "Return", "Enter"]
         keysText: "Space"
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
         onTriggered: editor.looking = !editor.looking
@@ -217,7 +217,7 @@ Item {
         keys: ["Left"]
         keysText: "← →"
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         autoRepeat: true
         mouse: qsTr("Wheel, or point")
         touchpad: qsTr("Two fingers, or point")
@@ -227,7 +227,7 @@ Item {
         name: "editor.next"
         keys: ["Right"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         autoRepeat: true
         mouse: qsTr("Wheel, or point")
         touchpad: qsTr("Two fingers, or point")
@@ -237,7 +237,7 @@ Item {
         name: "editor.first"
         keys: ["Home"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
         onTriggered: editor.move(-editor.tiles.length)
@@ -246,7 +246,7 @@ Item {
         name: "editor.last"
         keys: ["End"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
         onTriggered: editor.move(editor.tiles.length)
@@ -257,7 +257,7 @@ Item {
         section: "Series"
         keys: ["X"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -269,7 +269,7 @@ Item {
         section: "Series"
         keys: ["A"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -281,7 +281,7 @@ Item {
         section: "Series"
         keys: ["U"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -293,7 +293,7 @@ Item {
         section: "Series"
         keys: ["G"]
         keyLayer: "plugin"
-        when: editor.keys
+        usable: editor.keys
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -330,7 +330,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: view.close()
+        onTriggered: view.close()
     }
 
     // The series as a carousel: three photos side by side in the middle,
@@ -461,7 +461,7 @@ Item {
                     anchors.margins: 8
                     text: tile.modelData.member ? qsTr("Take out") : qsTr("Add")
                     hint: tile.modelData.member ? "X" : "A"
-                    onTapped: {
+                    onTriggered: {
                         editor.current = tile.modelData.index
                         tile.modelData.member ? editor.takeOut() : editor.add()
                     }
@@ -630,20 +630,20 @@ Item {
                 text: qsTr("Take out")
                 hint: "X"
                 usable: editor.currentTile !== null && editor.currentTile.member
-                onTapped: editor.takeOut()
+                onTriggered: editor.takeOut()
             }
             ShellButton {
                 flat: true
                 text: qsTr("Add")
                 hint: "A"
                 usable: editor.currentTile !== null && !editor.currentTile.member
-                onTapped: editor.add()
+                onTriggered: editor.add()
             }
             ShellButton {
                 flat: true
                 text: editor.looking ? qsTr("All photos") : qsTr("Up close")
                 hint: "Space"
-                onTapped: editor.looking = !editor.looking
+                onTriggered: editor.looking = !editor.looking
             }
             Rectangle {
                 width: 1
@@ -654,13 +654,13 @@ Item {
                 flat: true
                 text: qsTr("Ungroup")
                 hint: "U"
-                onTapped: editor.ungroup()
+                onTriggered: editor.ungroup()
             }
             ShellButton {
                 active: true
                 text: qsTr("GIF or video")
                 hint: "G"
-                onTapped: editor.toStudio()
+                onTriggered: editor.toStudio()
             }
         }
     }

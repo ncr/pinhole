@@ -167,7 +167,7 @@ Item {
             key: finder.mode === "wall" ? "W" : ""
             keyLayer: "plugin"
             hint: finder.mode === "wall" ? "W" : ""
-            onTapped: {
+            onTriggered: {
                 finder.mode = "find"
                 finder.search()
             }
@@ -178,7 +178,7 @@ Item {
             key: finder.mode === "find" ? "W" : ""
             keyLayer: "plugin"
             hint: finder.mode === "find" ? "W" : ""
-            onTapped: finder.mode = "wall"
+            onTriggered: finder.mode = "wall"
         }
     }
     // The wall's own, at the right before ✕; under the row when the window
@@ -196,7 +196,7 @@ Item {
             key: "Space"
             keyLayer: "plugin"
             hint: "Space"
-            onTapped: wall.another()
+            onTriggered: wall.another()
         }
         // The text is the key.
         ShellButton {
@@ -205,7 +205,7 @@ Item {
             keyLayer: "plugin"
             hint: ""
             usable: wall.density > 0
-            onTapped: wall.zoomBy(-1)
+            onTriggered: wall.zoomBy(-1)
         }
         ShellButton {
             text: "+"
@@ -213,7 +213,7 @@ Item {
             keyLayer: "plugin"
             hint: ""
             usable: wall.density < wall.densities.length - 1
-            onTapped: wall.zoomBy(1)
+            onTriggered: wall.zoomBy(1)
         }
     }
     // What is shown, where there is room for it.
@@ -232,7 +232,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: finder.view.close()
+        onTriggered: finder.view.close()
     }
 
     // Finding: the wheel and the strip at the left, the photos beside.

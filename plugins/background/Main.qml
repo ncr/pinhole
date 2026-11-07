@@ -248,7 +248,7 @@ PinholePlugin {
                 text: qsTr("Show the folder")
                 visible: pinhole.exists(plugin.folder)
                 // The folder itself (showFile opens a file's folder).
-                onTapped: pinhole.showFile(plugin.folder + "/")
+                onTriggered: pinhole.showFile(plugin.folder + "/")
             }
         }
     }

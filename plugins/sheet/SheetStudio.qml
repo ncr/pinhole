@@ -339,7 +339,7 @@ Item {
             keys: [String(index + 1)]
             keysText: "1 2"
             keyLayer: "plugin"
-            when: studio.shown && studio.making === ""
+            usable: studio.shown && studio.making === ""
             mouse: qsTr("Its button")
             touchpad: qsTr("Its button")
             pointerHelp: false
@@ -352,7 +352,7 @@ Item {
         section: "Contact sheet"
         keys: ["G"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -364,7 +364,7 @@ Item {
         section: "Contact sheet"
         keys: ["B"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -376,7 +376,7 @@ Item {
         section: "Contact sheet"
         keys: ["Z"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -388,7 +388,7 @@ Item {
         section: "Contact sheet"
         keys: ["D"]
         keyLayer: "plugin"
-        when: studio.shown && studio.making === ""
+        usable: studio.shown && studio.making === ""
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -401,7 +401,7 @@ Item {
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: studio.shown
+        usable: studio.shown
         mouse: qsTr("Its button")
         touchpad: qsTr("Its button")
         pointerHelp: false
@@ -414,7 +414,7 @@ Item {
         section: "Contact sheet"
         keys: ["S"]
         keyLayer: "plugin"
-        when: studio.shown && studio.made !== null
+        usable: studio.shown && studio.made !== null
         onTriggered: pinhole.showFile(studio.made.path)
     }
 
@@ -445,7 +445,7 @@ Item {
         anchors.margins: 16
         text: "✕"
         hint: "Esc"
-        onTapped: view.back()
+        onTriggered: view.back()
     }
 
     // What was made, or why not: on the clipboard, and where it is kept.
@@ -584,7 +584,7 @@ Item {
                         text: studio.names[modelData]
                         hint: String(index + 1)
                         active: studio.recipe.layout === modelData
-                        onTapped: studio.change({ layout: modelData })
+                        onTriggered: studio.change({ layout: modelData })
                     }
                 }
                 ShellButton {
@@ -592,7 +592,7 @@ Item {
                     text: qsTr("Dates")
                     hint: "D"
                     active: studio.recipe.dates
-                    onTapped: studio.change({ dates: !studio.recipe.dates })
+                    onTriggered: studio.change({ dates: !studio.recipe.dates })
                 }
             }
             Rectangle {
@@ -606,26 +606,26 @@ Item {
                     flat: true
                     text: studio.names[studio.recipe.gap]
                     hint: "G"
-                    onTapped: studio.cycle("gap", Layout.GAPS)
+                    onTriggered: studio.cycle("gap", Layout.GAPS)
                 }
                 ShellButton {
                     flat: true
                     text: studio.names[studio.recipe.background]
                     hint: "B"
-                    onTapped: studio.cycle("background", Layout.BACKGROUNDS)
+                    onTriggered: studio.cycle("background", Layout.BACKGROUNDS)
                 }
                 // Its longest side.
                 ShellButton {
                     flat: true
                     text: qsTr("%1 px").arg(studio.recipe.size)
                     hint: "Z"
-                    onTapped: studio.cycle("size", Layout.SIZES)
+                    onTriggered: studio.cycle("size", Layout.SIZES)
                 }
                 ShellButton {
                     active: true
                     text: qsTr("Make")
                     hint: "⏎"
-                    onTapped: studio.make()
+                    onTriggered: studio.make()
                 }
             }
         }

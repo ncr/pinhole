@@ -164,13 +164,13 @@ Item {
         ShellButton {
             text: qsTr("In the grid")
             enabled: recent.rows.length > 0
-            onTapped: recent.reveal()
+            onTriggered: recent.reveal()
         }
         ShellButton {
             text: qsTr("Show more")
             visible: recent.rows.length > recent.limit
             enabled: !recent.loading
-            onTapped: { recent.limit += 300; recent.refresh() }
+            onTriggered: { recent.limit += 300; recent.refresh() }
         }
     }
     Command {
@@ -179,7 +179,7 @@ Item {
         section: qsTr("Recent additions")
         keys: ["Shift+Return", "Shift+Enter"]
         keyLayer: "plugin"
-        when: recent.shown && recent.rows.length > 0
+        usable: recent.shown && recent.rows.length > 0
         onTriggered: recent.reveal()
     }
 }

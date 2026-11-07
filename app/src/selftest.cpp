@@ -1596,7 +1596,7 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
     auto notice = [item] { return item("newPluginsNotice"); };
     auto noticeShown = [notice] { return notice() && notice()->property("visible").toBool(); };
     auto noticeIds = [notice] { return notice() ? notice()->property("ids").toStringList() : QStringList(); };
-    auto tap = [item](const char *name) { QMetaObject::invokeMethod(item(name), "tapped"); };
+    auto tap = [item](const char *name) { QMetaObject::invokeMethod(item(name), "press"); };
     auto side = [item] { return item("sidePanel"); };
     // The plugins the notice counted; the one turned on again.
     auto listed = std::make_shared<QStringList>();

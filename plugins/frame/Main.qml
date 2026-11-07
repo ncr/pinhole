@@ -187,7 +187,7 @@ PinholePlugin {
                         flat: true
                         text: Number(modelData).toLocaleString(Qt.locale(), "f", 0)
                         active: pinhole.settings.seconds === modelData
-                        onTapped: pinhole.settings.seconds = modelData
+                        onTriggered: pinhole.settings.seconds = modelData
                     }
                 }
             }

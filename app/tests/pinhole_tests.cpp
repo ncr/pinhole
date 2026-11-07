@@ -1491,6 +1491,42 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // The kit's names made one (API 15): a plugin of API 15 is told of the
+    // old ones, which still work; a press is no timer's tick.
+    void theKitsOlderNamesAreSaidToAPluginOfApi15() {
+        QTemporaryDir dir;
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QFile f(dir.path() + '/' + name);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(text);
+        };
+        const QByteArray qml = R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    Command { name: "a"; text: qsTr("A"); keys: ["A"]; when: true; onTriggered: pinhole.settings.a = 1 }
+    ShellButton { text: qsTr("B"); onTapped: pinhole.settings.b = 1 }
+    Timer { interval: 10; onTriggered: pinhole.settings.c = 1 }
+    Item { TapHandler { onTapped: {} } }
+}
+)";
+        write("Main.qml", qml);
+        write("manifest.json", R"({"api": 15, "id": "me.names"})");
+        QString warnings = Plugins::footguns(dir.path()).warnings.join('\n');
+        QVERIFY2(warnings.contains("a Command's when is usable now"), qPrintable(warnings));
+        QVERIFY2(warnings.contains("a ShellButton's onTapped is onTriggered now"), qPrintable(warnings));
+        QCOMPARE(warnings.count("is onTriggered now"), 1);
+        // Only the Timer's setting is one written often.
+        QCOMPARE(warnings.count("which runs often"), 1);
+        QVERIFY2(warnings.contains("Main.qml:6:"), qPrintable(warnings));
+        // A plugin of an older API keeps its names, unsaid.
+        write("manifest.json", R"({"api": 14, "id": "me.names"})");
+        warnings = Plugins::footguns(dir.path()).warnings.join('\n');
+        QVERIFY(!warnings.contains("now (API 15)"));
+        // The new ones are API 15's.
+        write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {\n    Command { key: \"A\"; usable: true }\n}\n");
+        QVERIFY(Plugins::apiUses(dir.path()).value(15).contains("triggered, usable or key on a ShellButton, Command, Choices or Panel"));
+    }
+
     // A manifest's schemaVersion and entryPoints left out (API 15): 1, and
     // Main.qml beside it; its id, as before, its folder's name.
     void aManifestLeavesOutWhatIsAlwaysTheSame() {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 15,
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",

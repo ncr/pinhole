@@ -155,7 +155,8 @@ of each is in [the kit, member by member](plugin-kit.md)
   `radius`.
 - `Panel`: a screen over the photos, its parent's whole room in the theme's
   background (or a `color`), taking every click, touch, wheel, swipe, pinch
-  and hover, so nothing reaches the photos; `clicked()` where no control is,
+  and hover, so nothing reaches the photos; `triggered()` (API 15;
+  `clicked()` before, still said) where no control is,
   and with `steps` (`Qt.Horizontal`, `Qt.Vertical`) the wheel and a swipe
   step: `stepped(1)` the next, `stepped(-1)` the one before (a notch a
   step, a swipe one), as the Photo frame and the Series editor step.
@@ -221,9 +222,9 @@ PinholePlugin {
     property bool open: false
     covering: open
     actions: [PluginAction { place: "grid"; text: qsTr("Tiles"); key: "F6"; onTriggered: plugin.open = true }]
-    Command { name: "tiles.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
-    Command { name: "tiles.in"; keys: ["+", "="]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(1) }
-    Command { name: "tiles.out"; keys: ["-"]; keyLayer: "plugin"; when: plugin.open; onTriggered: zoom.zoomBy(-1) }
+    Command { name: "tiles.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "tiles.in"; keys: ["+", "="]; keyLayer: "plugin"; usable: plugin.open; onTriggered: zoom.zoomBy(1) }
+    Command { name: "tiles.out"; keys: ["-"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: zoom.zoomBy(-1) }
 
     Panel {
         visible: plugin.open
@@ -268,7 +269,7 @@ PinholePlugin {
     property var pending: null
     covering: open
     actions: [PluginAction { place: "grid"; text: qsTr("Places"); key: "F8"; busy: plugin.pending !== null; onTriggered: plugin.ask() }]
-    Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; when: plugin.open; onTriggered: plugin.open = false }
+    Command { name: "places.close"; keys: ["Escape"]; keyLayer: "plugin"; usable: plugin.open; onTriggered: plugin.open = false }
 
     onOpenChanged: if (!open) cancelQuery()
     function cancelQuery() {
@@ -346,7 +347,7 @@ footgun Pinhole's own plugins hit):
   or a `PluginAction`;
 - a `Command` without a `keyLayer`, or with `"any"` or `"chrome"`: its
   keys would be over the grid and the viewer whenever the plugin is on,
-  Pinhole's own among them. `"plugin"` with a `when` has them while its
+  Pinhole's own among them. `"plugin"` with a `usable` has them while its
   view is shown; `"grid"` or `"viewer"` there, where a key Pinhole or
   another plugin has is said under the plugin, as an action's is;
 - a member `pinhole`, `pinhole.library` or `theme` does not have, and a
@@ -472,8 +473,9 @@ actions on a file (`PluginAction`'s `place: "file"` and
 `library.settled`, `field(name, { shown: true })` and `field("hidden")`,
 an action's `places`, its `helpText`, an action with a key in the help
 by itself, `pinhole.store(name)`, and the manifest's `requires` with
-`pinhole.has(program)`, and a manifest that leaves out `schemaVersion`
-(1) and `entryPoints` (`Main.qml` beside it).
+`pinhole.has(program)`, a manifest that leaves out `schemaVersion`
+(1) and `entryPoints` (`Main.qml` beside it), and one word for each thing
+across the kit: `triggered()`, `usable`, `key` (Kit, below).
 
 `Main.qml` beside it:
 
@@ -762,7 +764,7 @@ its settings, is there as the window first shows. It sets:
   and its keys rest, as for Pinhole's panels. It has the keys then: unless
   something of its own took them first (a field, a list), Pinhole gives
   them to its root, so a `Keys` handler there and a `Command` work at once;
-  give them to an item of yours with `forceActiveFocus()` when its `when`
+  give them to an item of yours with `forceActiveFocus()` when its `usable`
   asks for that item's `activeFocus`. A `FieldInput` with something typed
   takes Escape first and clears it (`cleared()`); with nothing typed,
   Escape goes on to the plugin's own. Its own `Shortcut`s and
@@ -925,6 +927,19 @@ its settings, is there as the window first shows. It sets:
 with what it does in the help), the kit (above), and `Scroller`, what
 `ScrollList`, `ScrollGrid` and `ScrollArea` are made of (API 4), and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
+
+One word for each thing across them (API 15): **`triggered()`** when it
+is used (a `PluginAction`, a `Command`, a `ShellButton`, a `Panel` where no
+control is; a `ShellButton`'s `tapped()` and a `Panel`'s `clicked()` are
+still said), **`usable`** whether it can be now (an action, a button, a
+`SettingSwitch`, and a `Command`'s and `Choices`' in place of their
+`when`, which follows it), **`shown`** whether it shows, **`key`** for one
+key and **`keys`** for several (a `Command` takes either). Something that
+says what it chose has its own: `Choices`' `chosen(value)`, a `Toggle`'s
+`toggled()`, a `FieldInput`'s `accepted()`. A colour named from the theme
+is a `colour` (`"accent"`, `"#rrggbb"`: an action's `textColour`, a mark's
+`colour`); one of Qt's `color` values keeps Qt's word (`labelColor`).
+`plugin check` says an older name in a plugin of API 15; it still works.
 
 These controls support Tab/Shift+Tab focus and Space/Enter activation.
 For a button representing a selected option, set `ShellButton.checkable: true` (API 7)

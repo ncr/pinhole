@@ -223,7 +223,7 @@ Item {
             keys: [modelData[1]]
             keysText: "← → ↑ ↓"
             keyLayer: "plugin"
-            when: days.shown
+            usable: days.shown
             autoRepeat: true
             mouse: qsTr("Point at it")
             touchpad: qsTr("Point at it")
@@ -238,7 +238,7 @@ Item {
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "plugin"
-        when: days.shown && days.total > 0
+        usable: days.shown && days.total > 0
         mouse: qsTr("Click it")
         touchpad: qsTr("Tap it")
         onTriggered: days.openPhoto(days.cursor)
@@ -250,7 +250,7 @@ Item {
         keys: ["Shift+Return", "Shift+Enter"]
         keysText: "⇧ ⏎"
         keyLayer: "plugin"
-        when: days.shown && days.total > 0
+        usable: days.shown && days.total > 0
         mouse: qsTr("In the grid, beside its year")
         touchpad: qsTr("In the grid, beside its year")
         onTriggered: days.reveal(days.photoAt(days.cursor))
@@ -333,7 +333,7 @@ Item {
                 y: line.above
                 flat: true
                 text: qsTr("In the grid")
-                onTapped: days.reveal(line.year.photos[0])
+                onTriggered: days.reveal(line.year.photos[0])
             }
 
             Row {

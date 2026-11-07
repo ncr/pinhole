@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -398,6 +398,10 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
     // A PluginAction's own lines that say its order, hint, busyDelay or
     // textColour.
     static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
+    static const QRegularExpression unified(QStringLiteral("(?<![\\w.])(ShellButton|Command|Choices|Panel)\\s*\\{"));
+    static const QRegularExpression onTriggered(QStringLiteral("(?:^|[;{\\s])onTriggered\\s*:"));
+    static const QRegularExpression usableSet(QStringLiteral("(?:^|[;{\\s])usable\\s*:"));
+    static const QRegularExpression keySet(QStringLiteral("(?:^|[;{\\s])key\\s*:"));
     static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay|textColour)\\s*:"));
     // A file's root object, its id, and its hidden set.
     static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
@@ -445,6 +449,17 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             const qsizetype open = match.next().capturedEnd() - 1;
             if (ownLines(code, open).contains(orderOrHint))
                 uses << QStringLiteral("an action's order, hint, busyDelay, textColour or complain");
+        }
+        // The kit's names made one (API 15): triggered() for being used,
+        // usable for whether it can be, key for one key.
+        for (auto match = unified.globalMatch(code); match.hasNext();) {
+            const auto m = match.next();
+            const QString own = ownLines(code, m.capturedEnd() - 1), type = m.captured(1);
+            const bool triggered = (type == QLatin1String("ShellButton") || type == QLatin1String("Panel")) && own.contains(onTriggered);
+            const bool usable = (type == QLatin1String("Command") || type == QLatin1String("Choices")) && own.contains(usableSet);
+            const bool key = type == QLatin1String("Command") && own.contains(keySet);
+            if (triggered || usable || key)
+                uses << QStringLiteral("triggered, usable or key on a ShellButton, Command, Choices or Panel");
         }
         // A PinholePlugin root's hidden: set where it is, or by its id.
         const auto top = root.match(code);
@@ -824,8 +839,11 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
     // Pinhole's own, or a copy of one of them (its id kept): Pinhole.Internal
     // is theirs.
     QFile manifestFile(QDir(dir).filePath(QStringLiteral("manifest.json")));
-    const bool builtinId = manifestFile.open(QIODevice::ReadOnly)
-        && QJsonDocument::fromJson(manifestFile.readAll()).object().value(QStringLiteral("id")).toString().startsWith(QLatin1String("pinhole."));
+    const QJsonObject manifestRead = manifestFile.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(manifestFile.readAll()).object()
+                                                                          : QJsonObject();
+    const bool builtinId = manifestRead.value(QStringLiteral("id")).toString().startsWith(QLatin1String("pinhole."));
+    // The API it asks for: what it may use, and what older names to say.
+    const int asked = manifestRead.value(QStringLiteral("api")).toInt(1);
 
     // The window's own objects and ids, which a plugin's QML can reach by
     // name, as it is loaded inside the window: what it is given is
@@ -919,6 +937,23 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
         for (const auto &[pattern, why] : superseded)
             for (auto m = pattern.globalMatch(code); m.hasNext();)
                 found.warnings << QStringLiteral("%1:%2: %3").arg(file).arg(lineAt(code, m.next().capturedStart())).arg(QLatin1String(why));
+        // The kit's older names for what has one name now (API 15).
+        static const QRegularExpression older(QStringLiteral("(?<![\\w.])(ShellButton|Command|Choices|Panel)\\s*\\{"));
+        static const QList<std::tuple<QString, QRegularExpression, const char *>> renamed = {
+            {"ShellButton", QRegularExpression(QStringLiteral("(?:^|[;{\\s])onTapped\\s*:")), "a ShellButton's onTapped is onTriggered now (API 15)"},
+            {"Panel", QRegularExpression(QStringLiteral("(?:^|[;{\\s])onClicked\\s*:")), "a Panel's onClicked is onTriggered now (API 15)"},
+            {"Command", QRegularExpression(QStringLiteral("(?:^|[;{\\s])when\\s*:")), "a Command's when is usable now (API 15)"},
+            {"Choices", QRegularExpression(QStringLiteral("(?:^|[;{\\s])when\\s*:")), "Choices' when is usable now (API 15)"},
+        };
+        if (asked >= 15)
+            for (auto m = older.globalMatch(code); m.hasNext();) {
+                const auto block = m.next();
+                const QString own = ownLines(code, block.capturedEnd() - 1);
+                for (const auto &[type, pattern, why] : renamed)
+                    if (type == block.captured(1) && own.contains(pattern))
+                        found.warnings << QStringLiteral("%1:%2: %3, as an action and a button say it; the old name still works")
+                                              .arg(file).arg(lineAt(code, block.capturedStart())).arg(QLatin1String(why));
+            }
         // A file from outside the plugin: another plugin's changes, or goes,
         // with it.
         for (auto m = importLine.globalMatch(text); m.hasNext();) {
@@ -1301,7 +1336,12 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
             const QString handler = handlerAround(code, match.capturedStart());
             const qsizetype end = code.indexOf('\n', match.capturedEnd());
             const QString rest = code.mid(match.capturedEnd(), end < 0 ? -1 : end - match.capturedEnd());
-            const bool frequent = often.match(handler).hasMatch();
+            // onTriggered runs often in a Timer or a FrameAnimation; a
+            // button's or a Command's is a press.
+            const bool pressed = handler == QLatin1String("onTriggered")
+                && !QStringList{"Timer", "FrameAnimation"}.contains(
+                       enclosingObject(code, code.lastIndexOf(QLatin1String("onTriggered"), match.capturedStart())).first);
+            const bool frequent = often.match(handler).hasMatch() && !pressed;
             if (frequent || rest.contains(made))
                 found.warnings << QStringLiteral("%1:%2: a setting written %3: settings are the user's choices, and "
                                                  "plugins.json is written again each time; keep what changes often or "

@@ -189,7 +189,7 @@ PinholePlugin {
         keys: ["Left"]
         keysText: "← →"
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the wheel")
         touchpad: qsTr("Tap the wheel")
@@ -199,7 +199,7 @@ PinholePlugin {
         name: "colour.hueBack"
         keys: ["Right"]
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the wheel")
         touchpad: qsTr("Tap the wheel")
@@ -212,7 +212,7 @@ PinholePlugin {
         keys: ["Up"]
         keysText: "↑ ↓"
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the wheel")
         touchpad: qsTr("Tap the wheel")
@@ -222,7 +222,7 @@ PinholePlugin {
         name: "colour.greyer"
         keys: ["Down"]
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the wheel")
         touchpad: qsTr("Tap the wheel")
@@ -235,7 +235,7 @@ PinholePlugin {
         keys: ["["]
         keysText: "[ ]"
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the strip")
         touchpad: qsTr("Tap the strip")
@@ -245,7 +245,7 @@ PinholePlugin {
         name: "colour.lighter"
         keys: ["]"]
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find"
+        usable: finderView.shown && finderView.item.mode === "find"
         autoRepeat: true
         mouse: qsTr("Click the strip")
         touchpad: qsTr("Tap the strip")
@@ -257,7 +257,7 @@ PinholePlugin {
         section: "Colours"
         keys: ["Return", "Enter"]
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "find" && finderView.item.results.length > 0
+        usable: finderView.shown && finderView.item.mode === "find" && finderView.item.results.length > 0
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
         onTriggered: finderView.item.open(finderView.item.results[0])
@@ -267,7 +267,7 @@ PinholePlugin {
         name: "colour.bigger"
         keys: ["="]
         keyLayer: "plugin"
-        when: finderView.shown && finderView.item.mode === "wall" && finderView.item.canGrow
+        usable: finderView.shown && finderView.item.mode === "wall" && finderView.item.canGrow
         mouse: qsTr("The + button")
         touchpad: qsTr("Pinch")
         onTriggered: finderView.item.grow()
