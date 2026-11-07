@@ -26,6 +26,16 @@ pub const FOLDER: &str = "Pinhole";
 const ROOT: &str = "FOLDER::com.apple.CloudDocs::root";
 const ZONE: &str = "com.apple.CloudDocs";
 
+/// Times a request that never got there is sent again.
+const RETRIES: u64 = 2;
+
+/// An error that says the request was never taken: the connection could
+/// not be made, or was closed before it was sent. Not a timeout: one may
+/// have got there.
+fn unsent(e: &reqwest::Error) -> bool {
+    !e.is_timeout() && (e.is_connect() || e.is_request())
+}
+
 pub struct Drive {
     http: Client,
     /// The folder once found or made: its drivewsid and docwsid.
@@ -80,12 +90,28 @@ impl Drive {
         }
         let what = format!("iCloud Drive {}", url.path());
         let mut headers = session_headers(session, &url, true)?;
-        let mut request = self.http.request(method, url);
-        if let Some((bytes, content_type)) = body {
+        if let Some((_, content_type)) = &body {
             headers.insert(CONTENT_TYPE, HeaderValue::from_str(content_type)?);
-            request = request.body(bytes);
         }
-        let response = request.headers(headers).send().with_context(|| what.clone())?;
+        // A connection the pool kept that Apple had closed meanwhile ("connection
+        // closed before message completed"), or one that could not be made: the
+        // request never got there, so it is sent again at once, on a fresh
+        // connection, a second time after a moment.
+        let mut tries = 0;
+        let response = loop {
+            let mut request = self.http.request(method.clone(), url.clone()).headers(headers.clone());
+            if let Some((bytes, _)) = &body {
+                request = request.body(bytes.clone());
+            }
+            match request.send() {
+                Ok(response) => break response,
+                Err(e) if tries < RETRIES && unsent(&e) => {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(500 * (tries - 1)));
+                }
+                Err(e) => return Err(e).with_context(|| what.clone()),
+            }
+        };
         let status = response.status();
         let bytes = response.bytes().with_context(|| what.clone())?;
         if !status.is_success() {
@@ -341,6 +367,36 @@ mod tests {
             "validated_at": ""
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_request_whose_connection_closes_unanswered_is_sent_again() {
+        let fake = Arc::new(Mutex::new(FakeDrive::default()));
+        let session = serve(fake.clone());
+        // In front of it: the first connection closed before an answer.
+        let front = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = front.local_addr().unwrap().port();
+        let back = fake.lock().unwrap().port;
+        std::thread::spawn(move || {
+            for (n, stream) in front.incoming().enumerate() {
+                let Ok(mut stream) = stream else { return };
+                if n == 0 {
+                    let mut line = [0u8; 64];
+                    let _ = stream.read(&mut line);
+                    continue;
+                }
+                let mut server = std::net::TcpStream::connect(("127.0.0.1", back)).unwrap();
+                let (mut a, mut b) = (stream.try_clone().unwrap(), server.try_clone().unwrap());
+                std::thread::spawn(move || { let _ = std::io::copy(&mut a, &mut server); });
+                let _ = std::io::copy(&mut b, &mut stream);
+            }
+        });
+        let mut session = session;
+        let base = format!("http://127.0.0.1:{port}");
+        session.services.insert("drivews".into(), base);
+        let drive = Drive::default();
+        assert!(drive.list(&session).unwrap().is_empty());
+        assert_eq!(fake.lock().unwrap().requests, ["/retrieveItemDetailsInFolders"]);
     }
 
     #[test]
