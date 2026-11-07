@@ -1,33 +1,16 @@
 #!/bin/sh
 # What Info shows of a photo, for Main.qml.
 #
-# pinhole-info fact <cache folder> <id> <key>
-#   What was read of that original (its key) before, as Main.qml kept it,
-#   or an empty line. The index itself Main.qml reads with pinhole.query,
-#   as every plugin does.
 # pinhole-info read <image|video> <original>
 #   The original's details: "image" and ImageMagick's format, size and the
 #   orientation it applied, then its EXIF; or "video" and ffprobe's JSON.
 #   Both read only the headers: a 12 MP HEIC takes some 20 ms, a video 60.
-# pinhole-info keep <cache folder> <id> <key>
-#   What was read (on stdin, a line of JSON) kept for the photo, over what
-#   was kept for it before, its original then perhaps another.
-#
-# What is kept is one file for each source's library (the cache folder is
-# its own), a line a photo: its id, its original's key and the facts, by
-# tabs. Some 300 bytes a photo, a few MB for a whole library.
+# pinhole-info tidy <cache folder>
+#   What was kept before pinhole.store (API 15) kept the facts: gone.
+
 set -eu
 
 case "${1:-}" in
-fact)
-  cache="$2" id="$3" key="$4"
-  if [ -f "$cache/facts.tsv" ]; then
-    ID="$id" KEY="$key" awk -F '\t' '$1 == ENVIRON["ID"] && $2 == ENVIRON["KEY"] { print $3; found = 1; exit }
-      END { if (!found) print "" }' "$cache/facts.tsv"
-  else
-    echo
-  fi
-  ;;
 read)
   kind="$2" original="$3"
   if [ "$kind" = video ]; then
@@ -43,25 +26,12 @@ read)
     magick identify -ping -format '%m %w %h %[orientation]\n%[EXIF:*]' -[0] < "$original"
   fi
   ;;
-keep)
-  cache="$2" id="$3" key="$4"
-  mkdir -p "$cache"
-  facts=$(head -n 1 | tr -d '\t')
-  file="$cache/facts.tsv"
-  touch "$file"
-  # Two at once (photos stepped through quickly) each write a whole file
-  # of their own; the one later may leave out the other's line, read
-  # again the next time.
-  {
-    ID="$id" awk -F '\t' '$1 != ENVIRON["ID"]' "$file"
-    printf '%s\t%s\t%s\n' "$id" "$key" "$facts"
-  } > "$file.$$"
-  mv "$file.$$" "$file"
-  # Before, each photo's was a file of its own, the tools' whole output.
-  find "$cache" -maxdepth 1 -name '*.txt' -delete
+tidy)
+  rm -f "$2/facts.tsv" "$2"/facts.tsv.*
+  find "$2" -maxdepth 1 -name '*.txt' -delete 2>/dev/null || true
   ;;
 *)
-  echo "pinhole-info fact <cache folder> <id> <key> | read <image|video> <original> | keep <cache folder> <id> <key>" >&2
+  echo "pinhole-info read <image|video> <original> | tidy <cache folder>" >&2
   exit 2
   ;;
 esac

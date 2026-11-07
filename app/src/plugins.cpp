@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "pluginkeystore.h"
 #include "propertymap.h"
 #include "synced.h"
 #include "panzoom.h"
@@ -205,6 +206,21 @@ QObject *PluginHost::cache() const {
     if (!m_cache)
         m_cache = std::make_unique<PluginStoreMap>(m_plugins->cacheStore(), m_id);
     return m_cache.get();
+}
+
+QObject *PluginHost::store(const QString &name) {
+    if (!PluginKeyStore::usableName(name)) {
+        qWarning("pinhole: %s: pinhole.store(\"%s\"): a store's name is lowercase letters, digits, '_' and '-'",
+                 qPrintable(m_id), qPrintable(name));
+        return nullptr;
+    }
+    PluginKeyStore *&store = m_stores[name];
+    if (!store) {
+        // Its host's child: the plugin's QML never takes it over.
+        store = new PluginKeyStore(this, name);
+        QQmlEngine::setObjectOwnership(store, QQmlEngine::CppOwnership);
+    }
+    return store;
 }
 
 QObject *PluginHost::sources() const {

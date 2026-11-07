@@ -89,6 +89,7 @@ HEADERS += \
     $$PWD/encoder.h \
     $$PWD/plugins.h \
     $$PWD/pluginquery.h \
+    $$PWD/pluginkeystore.h \
     $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
     $$PWD/synced.h \
@@ -143,6 +144,7 @@ SOURCES += \
     $$PWD/pluginjobs.cpp \
     $$PWD/plugincheck.cpp \
     $$PWD/pluginquery.cpp \
+    $$PWD/pluginkeystore.cpp \
     $$PWD/pluginstore.cpp \
     $$PWD/synced.cpp \
     $$PWD/incoming.cpp \

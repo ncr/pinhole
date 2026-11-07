@@ -446,6 +446,11 @@ public:
     // from the window (API 13): a promise of its text, or of what its JSON
     // says; rejected "not_found", "not_yours" (another's file), "too_large"
     // (over 32 MB), "unreadable" or "json".
+    // What it keeps a value for each of many keys of (API 15), under
+    // `name`, for the library shown: get(key), put(key, value) and
+    // remove(key), each a promise (PluginKeyStore). Null for a name that
+    // is not lowercase letters, digits, '_' and '-'.
+    Q_INVOKABLE QObject *store(const QString &name);
     Q_INVOKABLE QJSValue readText(const QString &path);
     Q_INVOKABLE QJSValue readJson(const QString &path);
     // The folder a file is in, in the file manager.
@@ -556,6 +561,7 @@ signals:
 private:
     friend class PluginSettings;
     friend class PluginSources;
+    friend class PluginKeyStore;
     QJSEngine *engine() const;
     // A promise to give the plugin: its resolve and reject, and `job`'s
     // cancel() as the promise's.
@@ -578,6 +584,7 @@ private:
     mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
     mutable std::unique_ptr<class PluginSyncedMap> m_synced;
     mutable std::unique_ptr<PluginSources> m_sources;
+    std::map<QString, class PluginKeyStore *> m_stores;
     QString m_problem;
     bool m_away = false;
     bool m_awayInterrupted = false;

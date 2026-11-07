@@ -1491,6 +1491,34 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // What a plugin keeps a value for each of many keys of (pinhole.store,
+    // API 15): one key at a time, as JSON, in its cacheDir for the library.
+    void aPluginKeepsValuesByKeyInAStoreOfItsOwn() {
+        PluginBench bench({{"me.a", {}}});
+        QVERIFY(bench.js("pinhole.store('Not Fine') === null").toBool());
+        bench.js("const s = pinhole.store('facts');"
+                 "s.put('a', { key: 'k1', facts: { iso: 100, camera: 'iPhone' } })"
+                 " .then(() => s.put('b', [1, 'two']))"
+                 " .then(() => s.put('c', 'just text'))"
+                 " .then(() => s.get('a')).then(v => said.push('a ' + v.key + ' ' + v.facts.iso + ' ' + v.facts.camera))"
+                 " .then(() => s.get('b')).then(v => said.push('b ' + v.join('/')))"
+                 " .then(() => s.get('c')).then(v => said.push('c ' + v))"
+                 " .then(() => s.get('none')).then(v => said.push('none ' + v))"
+                 " .then(() => s.put('a', { key: 'k2' })).then(() => s.get('a')).then(v => said.push('again ' + v.key))"
+                 " .then(() => s.remove('b')).then(() => s.get('b')).then(v => said.push('removed ' + v))"
+                 " .then(() => s.put('c', null)).then(() => s.get('c')).then(v => said.push('nulled ' + v))"
+                 " .then(() => said.push('same ' + (pinhole.store('facts') === s)))"
+                 " .catch(e => said.push('failed ' + e.code + ' ' + e.message))");
+        QTRY_COMPARE(bench.said(), QStringList({"a k1 100 iPhone", "b 1/two", "c just text", "none null", "again k2",
+                                                "removed null", "nulled null", "same true"}));
+        // In the plugin's cacheDir, one file for the name.
+        const QString file = bench.js("pinhole.cacheDir").toString() + "/facts.store.sqlite";
+        QVERIFY2(QFileInfo::exists(file), qPrintable(file));
+        // Another store, another file: none of the first's.
+        bench.js("said.length = 0; pinhole.store('other').get('a').then(v => said.push('other ' + v))");
+        QTRY_COMPARE(bench.said(), QStringList({"other null"}));
+    }
+
     // A worker that answers (pinhole.ask) says so, from API 15.
     void aWorkerThatAnswersSaysSoFromApi15() {
         QTemporaryDir dir;

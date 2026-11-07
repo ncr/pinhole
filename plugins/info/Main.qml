@@ -170,8 +170,9 @@ PinholePlugin {
     // run, to cancel.
     function indexed(id, hold) {
         // Through pinhole.query, bounded and read only, as every plugin
-        // reads the index; then what was read of the original before, from
-        // the cache's file (pinhole-info fact).
+        // reads the index; then what was read of the original before, as
+        // kept for the photo (pinhole.store, API 15), if it was of that
+        // original.
         const sql = "SELECT a.*, a.has_location AS location, a.item_type AS type, r.width, r.height, " +
                     "r.file_type AS fileType, r.key FROM assets a LEFT JOIN renditions r " +
                     "ON r.asset_id = a.id AND r.kind = 'original' WHERE a.id = ?"
@@ -179,16 +180,10 @@ PinholePlugin {
         return hold(pinhole.query(sql, [id])).then(rows => {
             const row = rows[0] || {}
             found = { key: row.key || "", first: Details.fromIndex(row), facts: null }
-            return hold(pinhole.run("pinhole-info", ["fact", pinhole.cacheDir, id, found.key]))
-        }).then(result => {
-            const cached = result.stdout.trim()
-            if (cached !== "") {
-                try {
-                    found.facts = Details.merged(found.first, JSON.parse(cached))
-                } catch (e) {
-                    // Read again.
-                }
-            }
+            return hold(factsKept.get(id))
+        }).then(cached => {
+            if (cached && cached.key === found.key && cached.facts)
+                found.facts = Details.merged(found.first, cached.facts)
             return found
         })
     }
@@ -216,12 +211,22 @@ PinholePlugin {
             }).catch(error => failed(job.id, error, qsTr("The original could not be read: %1")))
         }, error => failed(job.id, error, qsTr("The original could not be fetched: %1"))).catch(pinhole.warn)
     }
-    // What pinhole-info read of an original, kept in the cache for it.
+    // What pinhole-info read of an original, kept for the photo with that
+    // original's key: one key's, never the whole file.
     function kept(id, key, output) {
         const read = Details.fromOriginal(output)
-        pinhole.run("pinhole-info", ["keep", pinhole.cacheDir, id, key], { input: JSON.stringify(read) + "\n" })
-            .catch(pinhole.warn)
+        factsKept.put(id, { key: key, facts: read }).catch(pinhole.warn)
         return read
+    }
+    // Each photo's facts, for the library shown.
+    readonly property var factsKept: pinhole.store("facts")
+    // What was kept before, in a file of its own, gone: for each library
+    // shown.
+    function tidy() { pinhole.run("pinhole-info", ["tidy", pinhole.cacheDir]).catch(() => {}) }
+    Component.onCompleted: tidy()
+    Connections {
+        target: pinhole
+        function onCacheDirChanged() { plugin.tidy() }
     }
     function take(id, key, all) {
         known[id] = { key: key, facts: all }

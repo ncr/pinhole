@@ -14,6 +14,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QMimeData>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -240,7 +241,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
         return true;
     }
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit", "people"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit", "people", "info"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -1129,6 +1130,55 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runThemeSelfTest(window, library, viewer, arg);
     if (name == QLatin1String("background"))
         runBackgroundSelfTest(window, library, viewer, arg);
+    // PINHOLE_SELFTEST=info:<dir>: Info's panel on the first photo, its
+    // original read and kept in pinhole.store; run again on the same
+    // profile, what was kept shows without the original read again.
+    if (name == QLatin1String("info")) {
+        auto start = std::make_shared<std::function<void()>>();
+        auto waited = std::make_shared<QElapsedTimer>();
+        waited->start();
+        *start = [window, &viewer, &library, start, waited] {
+            // The folder's library read first.
+            if (library.count() == 0 && waited->elapsed() < 30000) {
+                QTimer::singleShot(250, window, *start);
+                return;
+            }
+            QVariant item;
+            QMetaObject::invokeMethod(window, "pluginItem", Q_RETURN_ARG(QVariant, item), Q_ARG(QVariant, QStringLiteral("pinhole.info")));
+            QObject *info = item.value<QObject *>();
+            if (!info || library.count() == 0) {
+                std::printf("selftest: FAIL no Info plugin, or no photos\n");
+                QCoreApplication::exit(1);
+                return;
+            }
+            info->setProperty("shown", true);
+            viewer.openAt(0, QRectF(0, 0, 100, 100));
+            auto readSeen = std::make_shared<bool>(false);
+            auto clock = std::make_shared<QElapsedTimer>();
+            clock->start();
+            auto poll = new QTimer(window);
+            poll->setInterval(50);
+            QObject::connect(poll, &QTimer::timeout, window, [=] {
+                *readSeen = *readSeen || info->property("reading").toBool();
+                const QVariant value = info->property("facts");
+                const QVariantMap facts = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+                const bool done = !facts.value("format").toString().isEmpty() && facts.contains("bytes")
+                    && !info->property("reading").toBool() && !info->property("coming").toBool();
+                if (!done && clock->elapsed() < 30000)
+                    return;
+                poll->stop();
+                const QString file = info->property("pinhole").value<QObject *>()->property("cacheDir").toString() + "/facts.store.sqlite";
+                std::printf("selftest: %s facts shown: %s x %s, format %s; the original read this time: %s; %s %s\n",
+                            done ? "ok  " : "FAIL", qPrintable(facts.value("width").toString()), qPrintable(facts.value("height").toString()),
+                            qPrintable(facts.value("format").toString()), *readSeen ? "yes" : "no",
+                            qPrintable(file), QFileInfo::exists(file) ? "there" : "MISSING");
+                std::fflush(stdout);
+                QCoreApplication::exit(done && QFileInfo::exists(file) ? 0 : 1);
+            });
+            poll->start();
+        };
+        QTimer::singleShot(2500, window, *start);
+    }
     if (name == QLatin1String("mouse"))
         runMouseSelfTest(window, grid, viewer, library);
     if (name == QLatin1String("keys"))
