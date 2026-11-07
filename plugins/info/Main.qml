@@ -322,16 +322,25 @@ PinholePlugin {
         [qsTr("Format"), formatText()],
         [qsTr("Location"), placeText()]
     ].filter(row => row[1] !== ""))
-    property bool mapOpen: false
-    property var mapFocus: null
-    covering: mapOpen
-
+    // The map (M), over the photos while open, made afresh each time, on
+    // the photo given or all of them; Esc puts a place's photos away before
+    // it closes (PhotoPlaces' back()). Open already (Info's M on a photo
+    // opened from it), it stays as it was.
+    PluginView {
+        id: mapView
+        objectName: "infoMapView"
+        source: "PhotoPlaces.qml"
+        toggleKey: "M"
+        keep: false
+        // Esc is not in the help, as before: the map's own rows are.
+        closeText: ""
+    }
     function openMap(photo) {
-        mapFocus = photo || null
-        mapOpen = true
+        if (!mapView.shown)
+            mapView.open(photo || null)
     }
     function closeMap() {
-        mapOpen = false
+        mapView.close()
     }
     // ← → go through `among`, the place's photos, or the one alone.
     function viewMapPhoto(id, among) {
@@ -339,20 +348,11 @@ PinholePlugin {
             return
         pinhole.openPhotos(among && among.length ? among : [id], id, { comeBack: true })
     }
-    Loader {
-        id: mapLoader
-        anchors.fill: parent
-        active: plugin.mapOpen
-        visible: plugin.mapOpen && !plugin.pinhole.away
-        sourceComponent: PhotoPlaces { owner: plugin }
-        onLoaded: item.start(plugin.mapFocus)
-    }
     readonly property string mapSource: pinhole.library.key
     onMapSourceChanged: closeMap()
     Connections {
         target: plugin.pinhole
-        function onDismissed() { plugin.closeMap() }
-        function onReturned(photo) { if (mapLoader.item) mapLoader.item.cameBack(photo) }
+        function onReturned(photo) { if (mapView.item) mapView.item.cameBack(photo) }
     }
 
     actions: [

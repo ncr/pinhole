@@ -6,8 +6,8 @@ import "Places.js" as Geo
 FocusScope {
     id: places
     objectName: "photoPlaces"
-    required property var owner
-    readonly property var pinhole: owner.pinhole
+    // Shown in Main.qml's PluginView (M), made afresh each time it opens:
+    // `view` is that, `view.plugin` Info's root.
     property var points: []
     property var groups: []
     // The world's groups at `clusteredAt` (Places.js clusters()), made
@@ -60,7 +60,8 @@ FocusScope {
             camera(focus.x, focus.y, 14)
             fitted = true
         }
-        map.forceActiveFocus()
+        // Called before the view shows: the keys once it does.
+        Qt.callLater(() => map.forceActiveFocus())
         refresh()
     }
     function refresh() {
@@ -237,7 +238,7 @@ FocusScope {
     function showGroup(group) {
         choosePlace(group)
         if (group.points.length === 1) {
-            owner.viewMapPhoto(group.points[0].id)
+            view.plugin.viewMapPhoto(group.points[0].id)
             return
         }
         if (selectedPlace === group.cover.id) {
@@ -309,17 +310,23 @@ FocusScope {
         gallery = []
         map.forceActiveFocus()
     }
+    // Esc (PluginView): the photos shown put away first, then the map
+    // closed.
+    function back() {
+        if (!galleryOpen)
+            return false
+        hidePhotos()
+        return true
+    }
     function goBack() {
-        if (galleryOpen)
-            hidePhotos()
-        else
-            owner.closeMap()
+        if (!back())
+            view.close()
     }
     function openGalleryPhoto(at) {
         const photo = gallery[at]
         if (photo) {
             cursor = at
-            owner.viewMapPhoto(photo.id, gallery.map(p => p.id))
+            view.plugin.viewMapPhoto(photo.id, gallery.map(p => p.id))
         }
     }
     // When the photos shown were taken: a month, months of a year, or years.
@@ -356,11 +363,11 @@ FocusScope {
     Timer { id: settle; interval: 65; onTriggered: places.regroup() }
     Timer { id: reload; interval: 300; onTriggered: places.refresh() }
     Connections {
-        target: places.pinhole.library
+        target: pinhole.library
         function onChanged() { reload.restart() }
     }
     Connections {
-        target: places.pinhole
+        target: pinhole
         function onHiddenChanged() {
             ++places.hiddenRevision
             places.scheduleGroups()
@@ -373,7 +380,8 @@ FocusScope {
         id: titlebar
         readonly property bool compact: width < theme.fontSize * 40
         title: qsTr("Map")
-        closeCommand: closeCommand
+        // ✕ closes the view, from the photos too; M, its toggleKey, does.
+        closeHint: "M"
         tools: [
             ShellButton {
                 objectName: "placesFit"
@@ -464,8 +472,8 @@ FocusScope {
                         && modelData.points.some(p => p.id === places.focusPoint.id)
                     readonly property bool highlighted: focusedPhoto || (places.selectedPlace !== ""
                         && modelData.points.some(p => p.id === places.selectedPlace))
-                    readonly property var photo: (places.pinhole.library.revision,
-                        places.pinhole.library.item(focusedPhoto ? places.focusPoint.id : modelData.cover.id))
+                    readonly property var photo: (pinhole.library.revision,
+                        pinhole.library.item(focusedPhoto ? places.focusPoint.id : modelData.cover.id))
                     readonly property bool keyboardFocus: map.activeFocus && pinhole.keyboardInUse
                         && places.currentGroup === modelData
                     x: places.screenX(modelData) - width / 2
@@ -683,7 +691,7 @@ FocusScope {
             clip: true
             visible: places.gallery.length > 0
             activeFocusOnTab: true
-            library: places.pinhole.library
+            library: pinhole.library
             photos: places.gallery.map(p => p.id)
             active: places.visible && photos.activeFocus
             minCell: theme.fontSize * 8
@@ -699,21 +707,6 @@ FocusScope {
         }
     }
 
-    Command {
-        id: closeCommand
-        name: "places.close"
-        keyLayer: "plugin"
-        keys: ["M"]
-        when: places.visible
-        onTriggered: places.owner.closeMap()
-    }
-    Command {
-        name: "places.back"
-        keyLayer: "plugin"
-        keys: ["Escape"]
-        when: places.visible
-        onTriggered: places.goBack()
-    }
     Command {
         id: fitCommand
         name: "places.fit"
