@@ -15,6 +15,31 @@ Then say what changed in the app. `bin/install` is the single public source inst
 photos, settings and the repository. Package updates and removal belong to the OS package manager;
 in-app updates apply only to developer installations.
 
+## Two computers: fixer and spawner
+
+Pinhole is made for both of Jacek's computers, and every change is installed and tried on both:
+
+- **fixer** is this one.
+- **spawner** is reached with `ssh spawner`.
+- They are on one tailnet and almost always on.
+
+They show one iCloud library, and what plugins keep of it (`pinhole.synced`, People's names) goes between them
+through iCloud Drive. So:
+
+- **Think of both.** Whatever a change syncs, caches or keeps per computer must work when the other has its own
+  of it, older or newer, and when the other is on an older Pinhole.
+- **Land, then install on both.** After landing on `main`, install here as above, then on spawner:
+  `ssh spawner 'cd ~/dev/pinhole && git pull --ff-only && bin/install --non-interactive'`.
+  Its checkout is `~/dev/pinhole`.
+- **Check it on both.** For sync, look in each one's `~/.local/state/pinhole/synced/` and `pinholed.log`.
+- **Test on spawner too**, when a change can behave differently there (its library, its state, its hardware).
+  Its windows go to workspace 5 there as well. For `hyprctl` over ssh, set `HYPRLAND_INSTANCE_SIGNATURE`
+  to the folder in `/run/user/1000/hypr`.
+
+You may update, install, open and test Pinhole on spawner without asking.
+
+Omarchy 4.5 can share a screen over ssh: use it when a window on spawner has to be seen.
+
 ## Windows a test opens go to workspace 5
 
 A self-test, the bench or any other run of `app/build/pinhole` opens a real window, and Jacek is working on the
