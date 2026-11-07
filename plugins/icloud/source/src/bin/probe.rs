@@ -113,6 +113,16 @@ enum Cmd {
         #[arg(long)]
         revert: bool,
     },
+    /// WRITES: an edit's fields as given (a JSON object of `{value}`s, read
+    /// from a record), its full, medium and thumbnail renders sent from
+    /// these files: to put an edit made elsewhere back exactly.
+    EditReplay {
+        record: String,
+        fields: PathBuf,
+        full: PathBuf,
+        medium: PathBuf,
+        thumb: PathBuf,
+    },
     /// Check whether videos can be streamed: ranged reads, latency, expiry.
     Stream {
         #[arg(long, default_value_t = 3)]
@@ -153,6 +163,22 @@ fn main() -> Result<()> {
             let tag = pinhole_icloud::edit::write(&mut client, &record, tag.as_deref(), &original, &adjustment, &dir)?;
             let _ = std::fs::remove_dir_all(&dir);
             println!("written: {record} now at tag {tag}");
+            Ok(())
+        }
+        Cmd::EditReplay { record, fields, full, medium, thumb } => {
+            let mut fields: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&fields)?)?;
+            for (prefix, file) in [("resJPEGFull", &full), ("resJPEGMed", &medium), ("resJPEGThumb", &thumb)] {
+                let bytes = std::fs::read(file)?;
+                let size = bytes.len();
+                let value = client.upload_asset(&record, &format!("{prefix}Res"), bytes)?;
+                fields[format!("{prefix}Fingerprint")] = serde_json::json!({"value": value["fileChecksum"]});
+                fields[format!("{prefix}FileSize")] = serde_json::json!({"value": size});
+                fields[format!("{prefix}Res")] = serde_json::json!({"value": value});
+            }
+            let now = client.lookup(&[record.as_str()])?;
+            let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
+            let answer = client.modify(&[(record.as_str(), tag.as_deref())], &fields)?;
+            println!("{}", answer["records"][0]["recordChangeTag"]);
             Ok(())
         }
         Cmd::UploadTest { record, file, field } => {
