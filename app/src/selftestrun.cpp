@@ -683,6 +683,21 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QTimer::singleShot(200, window, [=] {
                     window->grabWindow().save(file);
                     apart("keyboard");
+                    // A plugin's action with a key is in the help by itself
+                    // (API 15): Calendar's, its helpText beside Y.
+                    QQuickItem *board = window->findChild<QQuickItem *>(QStringLiteral("helpBoard"));
+                    std::function<bool(QQuickItem *, const QString &)> says = [&](QQuickItem *item, const QString &text) {
+                        if (item->property("text").toString() == text)
+                            return true;
+                        for (QQuickItem *child : item->childItems())
+                            if (says(child, text))
+                                return true;
+                        return false;
+                    };
+                    const bool derived = board && says(board, QStringLiteral("Every day's photos"));
+                    std::printf("selftest: %s an action's helpText in the help without a help of the plugin's\n", derived ? "ok  " : "FAIL");
+                    std::fflush(stdout);
+                    *failures += derived ? 0 : 1;
                     help->setProperty("tab", QStringLiteral("mouse"));
                     QTimer::singleShot(200, window, [=] {
                         window->grabWindow().save(stem + "-mouse" + suffix);

@@ -20,6 +20,7 @@ PinholePlugin {
             place: "selection"
             text: qsTr("Sheet")
             key: "K"
+            helpText: qsTr("One picture of what is ticked")
             usable: pinhole.selectionCount >= 2
             onTriggered: studio.open(pinhole.selection())
         }
@@ -40,10 +41,6 @@ PinholePlugin {
             text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),
             settings: true
         }
-    ]
-
-    help: [
-        ["K", qsTr("One picture of what is ticked")]
     ]
 
     settings: Component {

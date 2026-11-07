@@ -3,7 +3,7 @@
 each in a scratch profile on an X display of its own, never on the desktop
 (bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
-    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people
+    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people help
     app/bin/test-selftests through layers  # some of them
 
 The window, the service, the fake library and the plugins' helpers built
@@ -28,7 +28,7 @@ import tempfile
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
-MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people"]
+MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people", "help"]
 TEST_PLUGINS = ["scrolls", "layers"]
 
 

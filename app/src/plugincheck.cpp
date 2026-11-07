@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -314,6 +314,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
         {"library.settled, field's shown or field(\"hidden\")",
          QRegularExpression(QStringLiteral("\\bonSettled\\b|\\.\\s*settled\\s*\\.\\s*connect\\b|\\bfield\\s*\\([^()]*,\\s*\\{[^}]*\\bshown\\b|\\bfield\\s*\\(\\s*[\"']hidden[\"']"))},
+        {"an action's helpText", QRegularExpression(QStringLiteral("\\bPluginAction\\s*\\{[^{}]*\\bhelpText\\s*:"))},
+        {"an action's places", QRegularExpression(QStringLiteral("(?:^|[;{\\s])places\\s*:\\s*\\["))},
         {"pinhole.ask or a worker that answers", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*ask\\s*\\("))},
         {"pinhole.fileActions or a file's PluginAction",
          QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*fileActions\\b|\\bplace\\s*:\\s*[\"']file[\"']"))},
@@ -1177,6 +1179,22 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
             const qsizetype open = match.capturedEnd() - 1;
             const int first = lineAt(code, open), last = lineAt(code, closing(code, open));
             const QString lines = textLines.mid(first - 1, last - first + 1).join(QLatin1Char('\n'));
+            // `places` (API 15): each one of Pinhole's bars.
+            static const QRegularExpression placesOf(QStringLiteral("(?:^|[;{\\s])places\\s*:\\s*\\[([^\\]]*)\\]"));
+            static const QRegularExpression quoted(QStringLiteral("[\"']([^\"']*)[\"']"));
+            static const QStringList bars = {"grid", "viewer", "selection"};
+            if (match.captured(1) == QLatin1String("PluginAction"))
+                for (auto p = placesOf.globalMatch(lines); p.hasNext();) {
+                    const auto list = p.next();
+                    const int line = first + int(lines.left(list.capturedStart(1)).count(QLatin1Char('\n')));
+                    for (auto q = quoted.globalMatch(list.captured(1)); q.hasNext();) {
+                        const QString word = q.next().captured(1);
+                        if (!bars.contains(word))
+                            found.errors << QStringLiteral("%1:%2: ").arg(file).arg(line)
+                                                + QStringLiteral("places has \"%1\", none of Pinhole's bars%2, and it never shows there: %3")
+                                                      .arg(word, didYouMean(word, bars), bars.join(QStringLiteral(", ")));
+                    }
+                }
             for (auto v = valueOf.globalMatch(lines); v.hasNext();) {
                 const auto value = v.next();
                 const QString key = value.captured(1), word = value.captured(2);

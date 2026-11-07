@@ -263,12 +263,11 @@ PinholePlugin {
             place: "grid"
             text: qsTr("%n years", "", plugin.years.length)
             key: "D"
+            helpText: qsTr("On this day, in earlier years")
             shown: plugin.years.length > 0
             onTriggered: plugin.openDays()
         }
     ]
-
-    help: [["D", qsTr("On this day, in earlier years")]]
 
     // A real year of one's own: the latest with photos of this day, a
     // photo of the very date if it has one (on the 29th of February, a

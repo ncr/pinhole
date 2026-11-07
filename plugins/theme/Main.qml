@@ -113,12 +113,12 @@ PinholePlugin {
             place: "viewer"
             text: qsTr("Theme")
             key: "T"
+            helpText: qsTr("A desktop theme from the photo")
             shown: plugin.available && plugin.photoShown
             busy: plugin.making !== null
             onTriggered: plugin.make(pinhole.viewer.index)
         }
     ]
-    help: [["T", qsTr("A desktop theme from the photo")]]
 
     tourReady: available && pinhole.library.count > 0
     // The photo nearest `index` that is not a video: the Theme button

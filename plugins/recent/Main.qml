@@ -9,11 +9,11 @@ PinholePlugin {
             place: "grid"
             text: qsTr("Recent additions")
             key: "Shift+N"
+            helpText: qsTr("Photos added recently, whatever their capture date")
             shown: pinhole.library.count > 0
             onTriggered: recent.open()
         }
     ]
-    help: [["⇧ N", qsTr("Photos added recently, whatever their capture date")]]
     PluginView {
         id: recent
         source: "RecentPhotos.qml"

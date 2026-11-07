@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "keys.js" as KeyNames
 
 // Owns plugin lifetime, aggregated actions and photo presentation state.
 // It knows no application panels: the shell decides how tours are shown.
@@ -209,6 +210,26 @@ Item {
             }
         }
     }
+    // An action's place of its own, for one with `places`: made once, kept
+    // while it is there (PlacedAction.qml).
+    property var placed: []
+    readonly property Component placedComponent: Qt.createComponent("PlacedAction.qml")
+    function placedAction(of, where, host, used) {
+        if (["grid", "viewer", "selection"].indexOf(where) < 0 || !host)
+            return null
+        let found = placed.find(p => p.of === of && p.where === where)
+        if (!found) {
+            const action = placedComponent.createObject(root, { of: of, host: host, where: where })
+            if (!action) {
+                console.warn("PlacedAction:", placedComponent.errorString())
+                return null
+            }
+            found = { of: of, where: where, action: action }
+            placed.push(found)
+        }
+        used.push(found.action)
+        return found.action
+    }
     function collectPlugins(freshHidden, freshStacks) {
         freshHidden = freshHidden || []
         freshStacks = freshStacks || []
@@ -218,7 +239,7 @@ Item {
                     loadedMeanwhile.push(id)
             return
         }
-        const actions = [], owners = [], help = [], covering = [], layers = [], kinds = {}
+        const actions = [], owners = [], help = [], covering = [], layers = [], kinds = {}, used = []
         let stacks = [], hidden = [], hiders = []
         for (let i = 0; i < pluginLayer.count; ++i) {
             const loader = pluginLayer.itemAt(i)
@@ -226,11 +247,32 @@ Item {
             if (!item)
                 continue
             for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k) {
-                actions.push(item.actions[k])
-                owners.push(loader.modelData)
+                const action = item.actions[k]
+                // One with `places` (API 15): one of its own in each.
+                const places = action.places && action.places.length > 0 ? Array.from(action.places) : null
+                for (const where of places || [null]) {
+                    const each = where === null ? action : placedAction(action, where, item.pinhole, used)
+                    if (!each)
+                        continue
+                    actions.push(each)
+                    owners.push(loader.modelData)
+                }
             }
-            if (item.help && item.help.length > 0)
-                help.push({ plugin: loader.modelData, keys: item.help })
+            // Its own help, then each action with a key that help does not
+            // say (API 15): its helpText, else its text.
+            const listed = (item.help || []).map(k => KeyNames.nameOf(String(k[0])))
+            const derived = []
+            for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k) {
+                const action = item.actions[k]
+                const words = action.helpText || action.text
+                const name = action.key ? KeyNames.nameOf(action.key) : ""
+                if (action.place === "file" || name === "" || !words || listed.indexOf(name) >= 0)
+                    continue
+                if (!derived.some(d => KeyNames.nameOf(d[0]) === name))
+                    derived.push([action.key, words])
+            }
+            if ((item.help && item.help.length > 0) || derived.length > 0)
+                help.push({ plugin: loader.modelData, keys: (item.help ? Array.from(item.help) : []).concat(derived) })
             if (item.viewerLayer)
                 layers.push({ plugin: loader.modelData, component: item.viewerLayer })
             // Only the kinds its manifest names (Plugins::at's sources).
@@ -252,6 +294,13 @@ Item {
             if (item.covering === true && (!loader.away || item.coveringAway === true))
                 covering.push(loader.modelData)
         }
+        // Those of an action no longer there, or no longer in that place.
+        placed = placed.filter(p => {
+            if (used.indexOf(p.action) >= 0)
+                return true
+            p.action.destroy()
+            return false
+        })
         findClashes(actions, owners)
         // By their order, then as the plugins list them (V4's sort is not
         // stable: by position too).

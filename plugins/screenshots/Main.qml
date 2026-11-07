@@ -152,6 +152,7 @@ PinholePlugin {
             place: "grid"
             text: qsTr("%n screenshots hidden", "", plugin.shots.length)
             key: "Shift+S"
+            helpText: qsTr("Hide or show them")
             shown: plugin.hiding && plugin.shots.length > 0
             active: true
             onTriggered: plugin.setHiding(false)
@@ -167,8 +168,6 @@ PinholePlugin {
         touchpad: qsTr("The side panel")
         onTriggered: plugin.setHiding(true)
     }
-
-    help: [["Shift+S", qsTr("Hide or show them")]]
 
     tourReady: shots.length > 0
     // As it is now: each day's one card, or hidden.

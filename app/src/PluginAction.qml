@@ -12,6 +12,15 @@ QtObject {
     // (pinhole.fileActions: Series' video as the background). Its key is
     // what that plugin presses it with.
     property string place: "grid"
+    // Several places at once (API 15), in place of `place`: ["viewer",
+    // "selection"], one button in each, its key working in each. Pressed,
+    // `pressedIn` says which, and `photos` the ids it is for: the photo
+    // shown in "viewer", those ticked in "selection", none in "grid". In
+    // each it is usable only with something to do it on (a photo shown,
+    // photos ticked, photos at all), unless it is `busy`.
+    property var places: []
+    property string pressedIn
+    property var photos: []
     // A "file" action's: the files it does, by their extension, lowercase
     // ("mp4"); none, any. The file it is done with now, as it is triggered.
     property var accepts: []
@@ -39,6 +48,10 @@ QtObject {
     property string text
     // A key that presses it while it shows: "G", "Shift+G".
     property string key
+    // What the help (?) says it does, beside its key (API 15): its `text`
+    // if left out. Unless the plugin's `help` says what that key does, an
+    // action with a key is in the help by itself.
+    property string helpText
     property bool shown: true
     property bool usable: true
     // Lit, in the accent.

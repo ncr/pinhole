@@ -62,22 +62,14 @@ PinholePlugin {
     readonly property string label: running ? qsTr("Sending") : qsTr("Send")
 
     actions: [
+        // The photo shown, or those ticked (API 15): one action in both.
         PluginAction {
-            id: viewerAction
-            place: "viewer"
+            id: sendAction
+            places: ["viewer", "selection"]
             text: plugin.label
             key: "O"
             busy: plugin.running
-            onTriggered: plugin.panel.open([pinhole.viewer.index])
-        },
-        PluginAction {
-            id: selectionAction
-            place: "selection"
-            text: plugin.label
-            key: "O"
-            busy: plugin.running
-            usable: pinhole.selectionCount > 0 || plugin.running
-            onTriggered: plugin.panel.open(Array.from(pinhole.selection()))
+            onTriggered: plugin.panel.open(photos)
         }
     ]
 
@@ -94,7 +86,7 @@ PinholePlugin {
             title: qsTr("To your phone"),
             text: qsTr("O sends the photo shown, or what is ticked in select mode, to a phone or computer nearby with LocalSend open on it. A Live Photo goes with its video."),
             open: () => pinhole.currentIndex(),
-            action: viewerAction
+            action: sendAction
         },
         {
             title: qsTr("Pick a device"),

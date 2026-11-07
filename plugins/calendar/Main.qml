@@ -82,6 +82,7 @@ PinholePlugin {
             place: "grid"
             text: qsTr("Calendar")
             key: "Y"
+            helpText: qsTr("Every day's photos")
             shown: pinhole.library.count > 0
             onTriggered: plugin.open()
         }
@@ -100,8 +101,6 @@ PinholePlugin {
             settings: true
         }
     ]
-
-    help: [["Y", qsTr("Every day's photos")]]
 
     settings: Component {
         SettingNote {

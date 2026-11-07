@@ -40,11 +40,15 @@ Its root is a `QtObject` (Qt Quick's: its properties too).
 Properties:
 
 - `string place`: "grid": at the top right of the grid, before Select. "viewer": in the row at the top right of a photo shown full window, before Copy. "selection": in select mode's bar, after Copy, for what is ticked (pinhole.selection()); its key works only while it shows. "file" (API 15): no button of its own, something it does with a file another plugin made, which that plugin offers where it shows the file (pinhole.fileActions: Series' video as the background). Its key is what that plugin presses it with.
+- `var places`: Several places at once (API 15), in place of `place`: ["viewer", "selection"], one button in each, its key working in each. Pressed, `pressedIn` says which, and `photos` the ids it is for: the photo shown in "viewer", those ticked in "selection", none in "grid". In each it is usable only with something to do it on (a photo shown, photos ticked, photos at all), unless it is `busy`.
+- `string pressedIn`
+- `var photos`
 - `var accepts`: A "file" action's: the files it does, by their extension, lowercase ("mp4"); none, any. The file it is done with now, as it is triggered.
 - `string file`
 - `string group`: In the bars (the viewer's, select mode's): actions with the same group are one button, the first of them shown, and the rest in its menu under ▾, opened with ⇧ and its key too. Without one, alone.
 - `string text`
 - `string key`: A key that presses it while it shows: "G", "Shift+G".
+- `string helpText`: What the help (?) says it does, beside its key (API 15): its `text` if left out. Unless the plugin's `help` says what that key does, an action with a key is in the help by itself.
 - `bool shown`
 - `bool usable`
 - `bool active`: Lit, in the accent.

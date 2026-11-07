@@ -39,6 +39,7 @@
         <file alias="PluginView.qml">PluginView.qml</file>
         <file alias="Job.qml">Job.qml</file>
         <file alias="PluginAction.qml">PluginAction.qml</file>
+        <file alias="PlacedAction.qml">PlacedAction.qml</file>
         <file alias="Toggle.qml">Toggle.qml</file>
         <file alias="BuildProgress.qml">BuildProgress.qml</file>
         <file alias="AddProgress.qml">AddProgress.qml</file>

@@ -468,7 +468,9 @@ given to the plugin's workers (`PINHOLE_SYNCED`); and
 its own (`"<its id>/<name>"` in `makes`, What a plugin makes),
 actions on a file (`PluginAction`'s `place: "file"` and
 `pinhole.fileActions`), `pinhole.ask`, a worker that `answers`, and
-`library.settled`, `field(name, { shown: true })` and `field("hidden")`.
+`library.settled`, `field(name, { shown: true })` and `field("hidden")`,
+an action's `places`, and its `helpText`, an action with a key in the
+help by itself.
 
 `Main.qml` beside it:
 
@@ -698,7 +700,8 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `shown`, `usable`, `active` (a button filled with the
+  `text`, `key`, `helpText` (what the help says it does, API 15; its
+  `text` if left out), `shown`, `usable`, `active` (a button filled with the
   accent; in a menu, a subtle fill and a check), `textColour` (its words in a colour while not lit: a theme
   colour's name, as a mark's `colour`, or `"#rrggbb"`; the theme's text
   if left out), `busy` (its arc turning once it has been for `busyDelay`
@@ -728,6 +731,15 @@ its settings, is there as the window first shows. It sets:
   into one, More ▾, whose menu lists them with their keys; the keys work
   either way, and a group's ⇧ key opens that menu on its row. More ▾ is
   lit while one of them is `active`, and turns while one is `busy`.
+  `places` (API 15), in place of `place`, puts one action in several:
+  `places: ["viewer", "selection"]` is a button in each, its key in
+  each, where a plugin declared twins before (Send's). Pressed,
+  `pressedIn` says where, and `photos` the ids it is for: the photo
+  shown in `"viewer"`, those ticked in `"selection"`, none in `"grid"`:
+  `onTriggered: panel.open(photos)`. In each it is `usable` only with
+  something to do it on (a photo shown, photos ticked, any photos at
+  all), unless it is `busy`, so what is on its way can still be shown.
+  Its `complain(text)` says it under the button it was pressed with.
   `place: "file"` (API 15) is no button of its own but something it does
   with a file another plugin made, which that plugin offers where it shows
   the file: Background's `"Background"` on Series' video. `accepts` lists
@@ -770,7 +782,11 @@ its settings, is there as the window first shows. It sets:
   (a key as a sequence, "Shift+S", is shown as Pinhole names it: ⇧ S),
   listed under its name with its `Command`s that give a `section` (any
   but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
-  Pinhole's are: the heading says whose they are.
+  Pinhole's are: the heading says whose they are. Its actions with a
+  `key` are there by themselves (API 15), each with its `helpText`, or its
+  `text` without one, after what `help` lists, unless `help` says what
+  that key does: list in `help` only keys of no action (a panel's), or
+  what one key does in several places.
 - `viewerLayer`: a `Component` drawn over a photo shown full window,
   inside it, so it is zoomed, panned, grown from its cell and clipped with
   the photo, as Live Photos plays its motion there. It is made afresh for

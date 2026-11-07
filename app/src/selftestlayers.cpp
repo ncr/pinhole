@@ -162,6 +162,17 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
                   QStringLiteral("… under it: %1, the button %2").arg(describe(c), describe(b)));
         }
     });
+    // One action in three places (API 15): pressed in the viewer, on the
+    // photo shown.
+    at(6400, [=, &viewer, &library] {
+        check(shownWithText(window->contentItem(), QStringLiteral("Everywhere")) != nullptr,
+              QStringLiteral("the action of three places has its button in the viewer"));
+        press(window, Qt::Key_F8);
+        const QString id = QString::fromUtf8(library.at(viewer.index()).id);
+        check(plugin()->property("pressedIn").toString() == QLatin1String("viewer") && plugin()->property("photos").toString() == id,
+              QStringLiteral("F8 in the viewer: pressed in %1 on %2 (the photo shown is %3)")
+                  .arg(plugin()->property("pressedIn").toString(), plugin()->property("photos").toString(), id));
+    });
     at(10700, [=] {
         QQuickItem *said = saying(window, QStringLiteral("Could not test"));
         check(said == nullptr, QStringLiteral("four seconds later it is gone"));
@@ -188,8 +199,22 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
               QStringLiteral("its complaint is over the bar at the bottom: %1, the button %2")
                   .arg(describe(inScene(said)), describe(inScene(before))));
         grab(QStringLiteral("layers-select"));
+        press(window, Qt::Key_F8);
+        const QStringList ids = plugin()->property("photos").toString().split(',', Qt::SkipEmptyParts);
+        check(plugin()->property("pressedIn").toString() == QLatin1String("selection") && ids.size() == grid->selectionCount(),
+              QStringLiteral("F8 in select mode: pressed in %1 on %2 photos (%3 ticked)")
+                  .arg(plugin()->property("pressedIn").toString()).arg(ids.size()).arg(grid->selectionCount()));
+        grid->setSelecting(false);
     });
-    at(12900, [failures] {
+    at(13300, [=] {
+        check(shownWithText(window->contentItem(), QStringLiteral("Everywhere")) != nullptr,
+              QStringLiteral("… and its button on the grid"));
+        press(window, Qt::Key_F8);
+        check(plugin()->property("pressedIn").toString() == QLatin1String("grid") && plugin()->property("photos").toString().isEmpty(),
+              QStringLiteral("F8 on the grid: pressed in %1, on no photos (%2)")
+                  .arg(plugin()->property("pressedIn").toString(), plugin()->property("photos").toString()));
+    });
+    at(13600, [failures] {
         std::printf("selftest: done, %d failed\n", *failures);
         std::fflush(stdout);
         QCoreApplication::exit(*failures ? 1 : 0);
