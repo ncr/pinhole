@@ -2027,12 +2027,16 @@ fn carry_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        let source = shared.source();
+        // The source and its library as one pair: they change together
+        // (switch), and one's files must never go to the other's carrier.
+        let (source, library) = {
+            let _still = shared.storage.library_moving.read().unwrap_or_else(PoisonError::into_inner);
+            (shared.source(), shared.storage.library())
+        };
         let Some(carrier) = source.carrier() else {
             carried = None;
             continue;
         };
-        let library = shared.storage.library();
         let dir = crate::synced::library_dir(&library);
         let now = crate::synced::signature(&dir);
         if seen.as_ref().is_none_or(|(s, _)| *s != now) {

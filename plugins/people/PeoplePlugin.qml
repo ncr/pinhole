@@ -26,14 +26,12 @@ PinholePlugin {
     }
     // Kept on this computer alone before the names went with the library
     // (pinhole.state, "people:" and the library's key): taken into it once,
-    // what is synced already of a face winning.
+    // what is said of a face on any computer winning, now or once heard of.
     function adopt() {
         const key = "people:" + source
         const before = pinhole.state[key]
         if (!before) return
-        const now = pinhole.synced.values()
-        for (const face of Object.keys(before))
-            if (now[face] === undefined) pinhole.synced[face] = before[face]
+        pinhole.synced.adopt(before)
         pinhole.state[key] = null
     }
     Component.onCompleted: { adopt(); reread() }
@@ -59,23 +57,21 @@ PinholePlugin {
     function moveEdits(moved) {
         const olds = Object.keys(moved || {})
         if (olds.length === 0) return
-        const patch = {}
+        const now = Object.assign({}, edits), patch = {}
         for (const old of olds) {
-            if (!(old in edits)) continue
-            if (!(moved[old] in edits)) patch[moved[old]] = edits[old]
+            if (!(old in now)) continue
+            if (!(moved[old] in now)) now[moved[old]] = patch[moved[old]] = now[old]
+            delete now[old]
             patch[old] = null
         }
-        for (const key of Object.keys(edits)) {
-            const rejected = edits[key].rejected
+        // Rejections too, of the keys as they are now.
+        for (const key of Object.keys(now)) {
+            const rejected = now[key].rejected
             if (rejected && rejected.some(face => face in moved))
-                patch[key] = Object.assign({}, patch[key] || edits[key], { rejected: rejected.map(face => moved[face] || face) })
+                now[key] = patch[key] = Object.assign({}, now[key], { rejected: rejected.map(face => moved[face] || face) })
         }
-        const now = Object.assign({}, edits)
-        for (const key of Object.keys(patch)) {
+        for (const key of Object.keys(patch))
             pinhole.synced[key] = patch[key]
-            if (patch[key] === null) delete now[key]
-            else now[key] = patch[key]
-        }
         edits = now
     }
     // A step to undo.

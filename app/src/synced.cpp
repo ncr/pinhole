@@ -10,6 +10,7 @@
 #include <QRandomGenerator>
 #include <QSet>
 #include <QStandardPaths>
+#include <QThread>
 
 #include <memory>
 
@@ -82,10 +83,17 @@ QString SyncedStore::device() {
     QDir().mkpath(stateRoot());
     const QString id = QString::number(QRandomGenerator::system()->generate64() & 0xffffffffffffULL, 16).rightJustified(12, '0');
     QFile file(path);
-    // Made meanwhile by pinholed (or another window): its.
-    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly))
-        return kept().isEmpty() ? id : kept();
-    file.write(id.toUtf8() + '\n');
+    if (file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        file.write(id.toUtf8() + '\n');
+        return id;
+    }
+    // Made meanwhile by pinholed (or another window): its, once written.
+    for (int i = 0; i < 50; ++i) {
+        if (const QString theirs = kept(); !theirs.isEmpty())
+            return theirs;
+        QThread::msleep(20);
+    }
+    qWarning("pinhole: %s stays empty", qPrintable(path));
     return id;
 }
 
@@ -205,17 +213,36 @@ void SyncedStore::set(const QString &plugin, const QJsonObject &changes) {
         // whatever this computer knew of it.
         const auto was = mine.clock.constFind(it.key());
         const Stamp stamp{was == mine.clock.cend() ? now : std::max(now, was.value().at + 1), m_device};
-        if (gone)
-            mine.values.remove(it.key());
-        else
-            mine.values.insert(it.key(), value);
-        mine.clock.insert(it.key(), stamp);
-        m_pending[plugin].insert(it.key(), Change{value, stamp});
+        keep(plugin, it.key(), Change{value, stamp});
         changed.append(it.key());
     }
     if (changed.isEmpty())
         return;
     tell(plugin, changed);
+}
+
+void SyncedStore::adopt(const QString &plugin, const QJsonObject &values) {
+    Doc &mine = doc(plugin);
+    QStringList changed;
+    for (auto it = values.begin(); it != values.end(); ++it) {
+        if (mine.clock.contains(it.key()) || it.value().isNull() || it.value().isUndefined())
+            continue;
+        // At 0: older than anything set anywhere.
+        keep(plugin, it.key(), Change{it.value(), Stamp{0, m_device}});
+        changed.append(it.key());
+    }
+    if (!changed.isEmpty())
+        tell(plugin, changed);
+}
+
+void SyncedStore::keep(const QString &plugin, const QString &key, const Change &change) {
+    Doc &mine = doc(plugin);
+    if (change.value.isNull())
+        mine.values.remove(key);
+    else
+        mine.values.insert(key, change.value);
+    mine.clock.insert(key, change.stamp);
+    m_pending[plugin].insert(key, change);
     // Written once whatever else is set in this turn has been.
     if (!std::exchange(m_writing, true))
         QMetaObject::invokeMethod(this, &SyncedStore::writeChanged, Qt::QueuedConnection);
@@ -229,7 +256,8 @@ void SyncedStore::writeChanged() {
     for (auto it = pending.begin(); it != pending.end(); ++it) {
         const QString plugin = it.key(), folder = m_dir, path = fileIn(m_dir, plugin);
         const QHash<QString, Change> changes = it.value();
-        auto written = std::make_shared<Seen>();
+        // What the file holds once written, and how it is then.
+        auto written = std::make_shared<std::pair<Doc, Seen>>();
         m_files.run(
             [folder, path, changes, written] {
                 const FolderLock lock(folder);
@@ -256,7 +284,8 @@ void SyncedStore::writeChanged() {
                     QJsonDocument(QJsonObject{{"values", file.values}, {"clock", clock}}).toJson(QJsonDocument::Compact);
                 if (!KeptFiles::write(path, bytes))
                     return false;
-                *written = seen(path);
+                written->first = std::move(file);
+                written->second = seen(path);
                 return true;
             },
             [self = QPointer<SyncedStore>(this), plugin, folder, written](bool ok) {
@@ -266,11 +295,15 @@ void SyncedStore::writeChanged() {
                     emit self->failed(plugin);
                     return;
                 }
-                // What this wrote is what is here already: not read again
-                // for it (a file written after, by pinholed, is).
+                // What it wrote, pinholed's merged in before it with it,
+                // taken in here, so the file need not be read again for it
+                // (one written after it is).
                 auto doc = self->m_docs.find(plugin);
-                if (folder == self->m_dir && doc != self->m_docs.end())
-                    doc->second.file = *written;
+                if (folder == self->m_dir && doc != self->m_docs.end()) {
+                    if (const QStringList keys = merge(doc->second, written->first); !keys.isEmpty())
+                        self->tell(plugin, keys);
+                    doc->second.file = written->second;
+                }
             });
     }
 }
@@ -342,6 +375,22 @@ PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObj
 QStringList PluginSyncedMap::keys() const { return m_store->values(m_plugin).keys(); }
 
 QVariantMap PluginSyncedMap::values() const { return m_store->values(m_plugin).toVariantMap(); }
+
+void PluginSyncedMap::adopt(const QVariantMap &values) {
+    QJsonObject json;
+    for (auto it = values.begin(); it != values.end(); ++it) {
+        const QVariant value = it.value().metaType() == QMetaType::fromType<QJSValue>()
+                                   ? it.value().value<QJSValue>().toVariant(QJSValue::ConvertJSObjects)
+                                   : it.value();
+        json.insert(it.key(), QJsonValue::fromVariant(value));
+    }
+    m_store->adopt(m_plugin, json);
+    // Here at once, as a key assigned is.
+    const QJsonObject now = m_store->values(m_plugin);
+    for (auto it = json.begin(); it != json.end(); ++it)
+        if (const QJsonValue value = now.value(it.key()); !value.isUndefined())
+            insert(it.key(), QVariant::fromValue(value));
+}
 
 QVariant PluginSyncedMap::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.

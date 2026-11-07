@@ -167,9 +167,16 @@ pub fn device() -> Result<String> {
             f.write_all(format!("{id}\n").as_bytes())?;
             Ok(id)
         }
-        // Made meanwhile, by the window: its.
+        // Made meanwhile, by the window: its, once it is written.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            Ok(std::fs::read_to_string(&path)?.trim().to_owned())
+            for _ in 0..50 {
+                let id = std::fs::read_to_string(&path)?.trim().to_owned();
+                if !id.is_empty() {
+                    return Ok(id);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(anyhow!("{} is empty", path.display()))
         }
         Err(e) => Err(e).with_context(|| format!("making {}", path.display())),
     }
@@ -264,7 +271,8 @@ pub fn set(dir: &Path, plugin: &str, changes: &Map<String, Value>, by: &str) -> 
     save(&path, &doc)
 }
 
-/// Every plugin's in a library's folder, by plugin.
+/// Every plugin's in a library's folder, by plugin: one that cannot be
+/// read is left out (and said), never taken as empty.
 pub fn all(dir: &Path) -> Result<BTreeMap<String, Doc>> {
     let mut docs = BTreeMap::new();
     let entries = match std::fs::read_dir(dir) {
@@ -276,7 +284,12 @@ pub fn all(dir: &Path) -> Result<BTreeMap<String, Doc>> {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(plugin) = name.strip_suffix(".json") else { continue };
         if is_name(plugin) {
-            docs.insert(plugin.to_owned(), load(&entry.path())?);
+            match load(&entry.path()) {
+                Ok(doc) => {
+                    docs.insert(plugin.to_owned(), doc);
+                }
+                Err(e) => eprintln!("pinholed: synced: {e:#}"),
+            }
         }
     }
     Ok(docs)
@@ -392,16 +405,40 @@ pub fn carry(dir: &Path, carrier: &dyn Carrier, device: &str, computer: &str) ->
         if is_own(&file.name, device) || !file.name.ends_with(".json") || mark.seen.get(&file.name) == Some(&file.version) {
             continue;
         }
-        let bytes = carrier.read(&file.name)?;
-        // A file that cannot be read is read again only once it changes.
+        // One that cannot be got (the network, a file Drive will not
+        // give) is tried again next round; the rest go on meanwhile.
+        let bytes = match carrier.read(&file.name) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("pinholed: synced: {} could not be got: {e:#}", file.name);
+                continue;
+            }
+        };
+        // One that is not what it should be is read again only once it
+        // changes.
         match serde_json::from_slice::<Value>(&bytes).map_err(anyhow::Error::from).and_then(|v| plugins_of(&v)) {
             Ok(plugins) => {
+                let mut all_in = true;
                 for (plugin, doc) in plugins {
-                    if !merge_into(dir, &plugin, &doc)?.is_empty() && !done.changed.contains(&plugin) {
-                        done.changed.push(plugin);
+                    match merge_into(dir, &plugin, &doc) {
+                        Ok(changed) => {
+                            if !changed.is_empty() && !done.changed.contains(&plugin) {
+                                done.changed.push(plugin);
+                            }
+                        }
+                        // This computer's file of it cannot be read: never
+                        // written over; the rest are merged, and this one
+                        // tried again next round.
+                        Err(e) => {
+                            eprintln!("pinholed: synced: {plugin} of {}: {e:#}", file.name);
+                            all_in = false;
+                        }
                     }
                 }
                 done.read.push(file.name.clone());
+                if !all_in {
+                    continue;
+                }
             }
             Err(e) => eprintln!("pinholed: synced: {} could not be read: {e:#}", file.name),
         }
@@ -585,6 +622,42 @@ mod tests {
         // Not read again until it changes.
         assert!(carry(&dir, &drive, "h", "fixer").unwrap().read.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A folder elsewhere with one file it will not give.
+    struct Stubborn(Elsewhere);
+
+    impl Carrier for Stubborn {
+        fn list(&self) -> Result<Vec<Carried>> {
+            self.0.list()
+        }
+        fn read(&self, name: &str) -> Result<Vec<u8>> {
+            if name == "stuck-x.json" { Err(anyhow!("no data_token")) } else { self.0.read(name) }
+        }
+        fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+            self.0.write(name, bytes)
+        }
+    }
+
+    #[test]
+    fn a_file_elsewhere_that_cannot_be_got_holds_up_nothing_else() {
+        let (dir, other) = (folder("stuck"), folder("stuck-other"));
+        let drive = Stubborn(Elsewhere::default());
+        drive.write("stuck-x.json", b"{}").unwrap();
+        set(&other, "pinhole.people", &named("f2", "Ola"), "o").unwrap();
+        carry(&other, &drive, "o", "other").unwrap();
+        set(&dir, "pinhole.people", &named("f1", "Anna"), "h").unwrap();
+        let done = carry(&dir, &drive, "h", "fixer").unwrap();
+        assert!(done.sent);
+        assert_eq!(done.changed, ["pinhole.people"]);
+        assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f2"], json!({"name": "Ola"}));
+        // A plugin's file here that cannot be read: the others still go.
+        std::fs::write(file(&dir, "me.broken"), b"{not json").unwrap();
+        set(&dir, "pinhole.people", &named("f3", "Jan"), "h").unwrap();
+        assert!(carry(&dir, &drive, "h", "fixer").unwrap().sent);
+        assert_eq!(std::fs::read(file(&dir, "me.broken")).unwrap(), b"{not json");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other);
     }
 
     #[test]

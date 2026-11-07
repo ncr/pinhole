@@ -7025,6 +7025,25 @@ PinholePlugin {
         QVERIFY(json().value("clock").toObject().value("face2").toArray().at(0).toDouble() > 4e12);
         QCOMPARE(json().value("values").toObject().value("face3").toObject().value("name").toString(), QString("Jan"));
 
+        // Taken in from before: only keys never had, and older than any
+        // set, so another computer's arriving later wins.
+        bench.js("pinhole.synced.adopt({ face1: { name: 'Before' }, face5: { name: 'Kept' }, face6: { name: 'Lost' } })");
+        QCOMPARE(bench.js("pinhole.synced.face1.name").toString(), QString("Anna"));
+        QCOMPARE(bench.js("pinhole.synced.face5.name").toString(), QString("Kept"));
+        bench.plugins->flush();
+        QCOMPARE(json().value("clock").toObject().value("face5").toArray().at(0).toDouble(), 0.0);
+        {
+            QJsonObject later = json();
+            QJsonObject v = later.value("values").toObject(), c = later.value("clock").toObject();
+            v.insert("face6", QJsonObject{{"name", "Elsewhere"}});
+            c.insert("face6", QJsonArray{1.0, "elsewhere"});
+            later.insert("values", v);
+            later.insert("clock", c);
+            QVERIFY(KeptFiles::write(file, QJsonDocument(later).toJson()));
+        }
+        QTRY_COMPARE(bench.js("pinhole.synced.face6.name").toString(), QString("Elsewhere"));
+        bench.js("pinhole.synced.face5 = null; pinhole.synced.face6 = null");
+
         // Another library shown: its own, told at once; back, these again.
         QTemporaryDir otherLibrary;
         bench.plugins->syncedStore()->setLibrary(otherLibrary.path() + "/folder/other");
@@ -7041,6 +7060,38 @@ PinholePlugin {
         QFile broken(file);
         QVERIFY(broken.open(QIODevice::ReadOnly));
         QCOMPARE(broken.readAll(), QByteArray("{not json"));
+    }
+
+    // People's names: taken in from its state once, and moved with their
+    // faces to the keys a new thumbnail gives them, rejections too, with
+    // nothing left under the old keys.
+    void peoplesNamesAreTakenInAndMoveWithTheirFaces() {
+        PluginBench bench({{"pinhole.people", {{"api", 14}}}});
+        auto *host = bench.host;
+        host->state()->setProperty("people:folder:/x",
+                                   QVariantMap{{"o", QVariantMap{{"person", "Anna"}, {"rejected", QVariantList{"r"}}}},
+                                               {"r", QVariantMap{{"person", "Ola"}}}});
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/PeoplePlugin.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.people&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("people", bench.engine.newQObject(plugin.get()));
+        // Taken in, and gone from the state.
+        QCOMPARE(bench.js("people.edits.o.person").toString(), QString("Anna"));
+        QVERIFY(!host->state()->property("people:folder:/x").isValid());
+        bench.js("people.moveEdits({ o: 'n', r: 'r2' })");
+        QCOMPARE(bench.js("JSON.stringify(people.edits)").toString(),
+                 QString(R"({"n":{"person":"Anna","rejected":["r2"]},"r2":{"person":"Ola"}})"));
+        bench.plugins->flush();
+        const QJsonObject kept = SyncedStore::load(bench.dir.path(), "pinhole.people");
+        QCOMPARE(kept.keys(), (QStringList{"n", "r2"}));
+        QCOMPARE(kept.value("n").toObject().value("rejected").toArray(), (QJsonArray{"r2"}));
     }
 
     // What Pinhole's own plugins kept in plugins.json that is not a choice

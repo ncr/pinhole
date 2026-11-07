@@ -44,6 +44,10 @@ public:
     // Set here at once and kept soon; null or undefined takes it out.
     void set(const QString &plugin, const QString &key, const QJsonValue &value);
     void set(const QString &plugin, const QJsonObject &changes);
+    // Taken in from what a plugin kept before it was synced: each key the
+    // library has never had anywhere, stamped older than any set, so a
+    // key set on any computer, now or once heard of, wins over it.
+    void adopt(const QString &plugin, const QJsonObject &values);
     // Everything set so far written.
     void flush();
 
@@ -81,6 +85,7 @@ private:
         QJsonValue value;
         Stamp stamp;
     };
+    void keep(const QString &plugin, const QString &key, const Change &change);
     static Doc read(const QString &path, bool *ok = nullptr);
     // `from` merged into `into`: the keys whose values changed.
     static QStringList merge(Doc &into, const Doc &from);
@@ -113,6 +118,10 @@ public:
     // All of them at once, as an object: for a plugin's worker or a
     // question to a program.
     Q_INVOKABLE QVariantMap values() const;
+    // What it kept before it synced them (its state), taken in: only keys
+    // the library has never had, and any set on any computer wins over
+    // them, now or once heard of (API 14).
+    Q_INVOKABLE void adopt(const QVariantMap &values);
 
 signals:
     // Some keys changed, here or elsewhere, or another library is shown.

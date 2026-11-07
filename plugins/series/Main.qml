@@ -146,13 +146,12 @@ PinholePlugin {
     }
     // Kept on this computer alone before they were synced (pinhole.state:
     // "edits:" and the library's key, and before that "edits", the one
-    // shown then): taken in once, unless the library has some already.
+    // shown then): taken in once, those of any computer winning, now or
+    // once heard of.
     function adopt(key) {
         const kept = pinhole.state["edits:" + key] || pinhole.state.edits
-        if (kept && pinhole.synced.manual === undefined && pinhole.synced.apart === undefined) {
-            pinhole.synced.manual = kept.manual || []
-            pinhole.synced.apart = kept.apart || []
-        }
+        if (kept)
+            pinhole.synced.adopt({ manual: kept.manual || [], apart: kept.apart || [] })
         if (pinhole.state["edits:" + key])
             pinhole.state["edits:" + key] = null
         if (pinhole.state.edits)

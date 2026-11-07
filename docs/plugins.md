@@ -916,7 +916,7 @@ this API. A library position is not a visual grid position.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out (as assigning `null` to one does: it reads `undefined`, and `settings.keys()` leaves it out) |
-| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on (API 14): People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
+| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on (API 14): People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `adopt(values)` takes in what the plugin kept before it synced them (its `state`): only keys the library has never had, and a key set on any computer wins over them, now or once heard of; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
@@ -1108,8 +1108,8 @@ written over: what was set is said under the plugin in the side panel.
 
 Before API 14 People's names and Series' edits were in their `state`,
 under the library's key: each takes those of the library shown into
-`synced` once, what is synced already winning, and lets them go from its
-`state`.
+`synced` once with `adopt`, so what another computer synced wins even if it
+arrives after, and lets them go from its `state`.
 
 Before API 3, Pinhole's own plugins kept all of these in their settings.
 The first start of a Pinhole with API 3 moves them out of `plugins.json`,
