@@ -161,6 +161,7 @@ SOURCES += \
     $$PWD/selftestframe.cpp \
     $$PWD/selftestedit.cpp \
     $$PWD/selftestpeople.cpp \
+    $$PWD/selftestsnappy.cpp \
     $$PWD/selftesthidden.cpp \
     $$PWD/selfteststacks.cpp \
     $$PWD/selftestthrough.cpp \

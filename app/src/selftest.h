@@ -418,6 +418,12 @@ void runStageSelfTest(QQuickWindow *window, const Library &library, Viewer &view
 // if any check fails.
 void runGainMapSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
 
+// PINHOLE_SELFTEST=snappy[:<file>]: how long the window stands still as the
+// library is read again, a photo opens and closes, and each plugin's view
+// does (selftestsnappy.cpp).
+void runSnappySelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, LibraryReloader &reloader,
+                       const QString &file);
+
 // What a self-test drives.
 struct SelfTestContext {
     QQuickWindow *window;

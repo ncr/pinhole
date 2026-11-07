@@ -46,7 +46,11 @@ def main():
     parser.add_argument('--plugin-cache', type=Path, help='Copy an existing plugin cache into the temporary profile.')
     parser.add_argument('--plugin-state', type=Path, help='Copy existing plugin state into the temporary profile.')
     parser.add_argument('--plugin-settings', type=Path, help='Copy a plugins.json into the temporary profile.')
+    parser.add_argument('--synced', type=Path, help="Copy a library's synced folder (state/pinhole/synced/<it>) into the temporary profile, as the library's.")
     parser.add_argument('--no-plugins', action='store_true')
+    parser.add_argument('--max-first-frame-ms', type=float, help='Fail (exit 1) when the median first frame is later than this.')
+    parser.add_argument('--max-plugin-ms', type=float, help="Fail (exit 1) when any plugin's median synchronous load takes longer than this.")
+    parser.add_argument('--max-plugins-ms', type=float, help='Fail (exit 1) when the median of all plugins loading (grid_ready to plugins_ready) takes longer than this.')
     parser.add_argument('--host-only', action='store_true', help='Measure the Qt host with the service unavailable; do not launch pinholed or fetch renditions. Not comparable to warm-service runs.')
     parser.add_argument('--native-hidden', action='store_true', help='Use the current compositor; invoke ONLY on a hidden test workspace.')
     parser.add_argument('--cpu-affinity', help='Linux diagnostic: run only the Qt host on these CPUs (e.g. 4-11); report the restriction. Does not pin the private service.')
@@ -94,6 +98,10 @@ def main():
                 if source:
                     shutil.copytree(source, profile / target)
             copy_qt_cache(qt_cache, profile / 'cache/pinhole')
+            if args.synced:
+                # As SyncedStore::folderFor names the library's folder.
+                library = args.library.resolve()
+                shutil.copytree(args.synced, profile / 'state/pinhole/synced' / f'{library.parent.name}-{library.name}')
             if args.plugin_settings:
                 shutil.copyfile(args.plugin_settings, profile / 'config/pinhole/plugins.json')
             if args.no_plugins:
@@ -208,9 +216,26 @@ def main():
               'cpu_affinity': effective_affinity, 'cpu_affinity_requested': requested_affinity,
               'service_mode': 'unavailable' if args.host_only else 'private-warm',
               'note': 'Warm filesystem is not a cold OS boot. Main-relative ms excludes the dynamic loader; observed_ms includes process launch and pipe delivery.'}
+    plugins = {plugin: statistics.median(r['plugins_ms'][plugin] for r in measured if plugin in r['plugins_ms'])
+               for plugin in {p for r in measured for p in r['plugins_ms']}}
+    report['plugins_median_ms'] = dict(sorted(plugins.items(), key=lambda item: -item[1]))
+    spans = [r['milestones']['plugins_ready'] - r['milestones']['grid_ready'] for r in measured if 'grid_ready' in r['milestones']]
+    loading = statistics.median(spans) if spans else 0
+    over = []
+    if args.max_first_frame_ms is not None and summary['first_frame']['median_ms'] > args.max_first_frame_ms:
+        over.append(f"first frame {summary['first_frame']['median_ms']:.0f} ms > {args.max_first_frame_ms:.0f} ms")
+    if args.max_plugin_ms is not None:
+        over += [f'plugin {plugin} {ms:.0f} ms > {args.max_plugin_ms:.0f} ms'
+                 for plugin, ms in report['plugins_median_ms'].items() if ms > args.max_plugin_ms]
+    if args.max_plugins_ms is not None and loading > args.max_plugins_ms:
+        over.append(f'plugins loading {loading:.0f} ms > {args.max_plugins_ms:.0f} ms')
+    report['over_budget'] = over
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(summary, indent=2))
-    return 0
+    print('slowest plugins (median ms):', json.dumps(dict(list(report['plugins_median_ms'].items())[:5])))
+    for line in over:
+        print(f'over budget: {line}', file=sys.stderr)
+    return 1 if over else 0
 
 
 if __name__ == '__main__':

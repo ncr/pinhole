@@ -24,6 +24,15 @@ Run `app/bin/test-framestats`, `app/bin/test-queries` and
 [ci/README.md](ci/README.md) describes the pinned container checks, including
 separate Rust, visual and native Wayland jobs.
 
+Run `app/bin/test-speed` after any change that could make something slower:
+starting, a plugin's load, the library read again, a view opened or closed,
+scrolling. It times them with a library and plugin data of years (20,000
+photos, 20,000 faces named) against budgets and exits 1 over any: a cost that
+grows with what a person has never shows with an empty profile, as People's
+34-second start did not. Each window is on a display of its own. When it
+fails, `--qml-profile` says which QML took the time (`app/bin/qml-hotspots`);
+`PINHOLE_SNAPPY_ONLY` runs one step. A new view with a key is timed by itself.
+
 Use `app/bin/measure-startup --help` for repeatable launch measurements.
 Separate fresh QML caches from warm launches and report distributions,
 first frame and photo readiness. Xvfb runs must explicitly use

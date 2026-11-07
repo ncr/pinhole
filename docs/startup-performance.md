@@ -256,3 +256,42 @@ new QML and graphics caches for each launch. Native hidden runs did not
 report photo readiness. A separate Xvfb/OpenGL run on a 384-item fixture
 reported a median of 437 ms to resolve the initial thumbnail tier from
 `main` (423–465 ms over five warm launches).
+
+## Speed at scale (2026-11-07)
+
+People's names of 9,627 faces kept Pinhole from showing anything for 34
+seconds: `pinhole.synced` made each key a property one at a time, and Qt
+makes a property map's type again for every new key. Nothing caught it: the
+startup measurements and CI used an empty profile. `app/bin/test-speed` now
+gives every check a library and plugin data of years (20,000 photos and
+20,000 faces named, or a real library and synced folder read only) and fails
+over a budget:
+
+- starting (`measure-startup`, which now copies a synced folder and fails
+  over `--max-first-frame-ms`, `--max-plugin-ms`, `--max-plugins-ms`);
+- the window standing still (`PINHOLE_SELFTEST=snappy`: a timer on the
+  window's thread, the longest it waited) as the library is read again five
+  times, a photo opens and closes, and every plugin view with a key opens
+  and closes, after a first run that fills the QML cache as use does;
+- scrolling at 5,000 px/s, reported.
+
+CI's native job runs it on headless Weston with budgets for two cores
+drawing in software. Its first run here found, besides the start:
+
+| What | Before | After |
+|---|---:|---:|
+| First frame, real profile (fixer / spawner) | 34,033 / – ms | 482 / 335 ms |
+| People's load, 20,000 faces | 33,744 ms (9,627) | 90 ms |
+| Library read again: window still | 106–137 ms | 13–49 ms |
+| Any view opened or closed: key clashes looked for | 20–90 ms | 2–12 ms |
+| People opened (Shift+F) | 236–265 ms | ~120 ms |
+| A photo shown with People on (faces asked for) | +87 ms | once per change |
+| Calendar opened / closed (Y) | 192 / 198 ms | 54–73 / 13–22 ms |
+
+The causes: the key clash check asked every Command for every key of every
+action (now an index made once); `pinhole.synced.values()` was a QVariantMap,
+whose every key read in JS goes back to C++ (now a plain object); People
+went through all its faces' names and wrote them all as JSON each time a
+view opened or a photo was shown (now once for each change); the calendar
+drew each year's glowing squares on the window's thread in every frame of
+its opening (now `Canvas.Threaded`).

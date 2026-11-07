@@ -53,6 +53,10 @@ signals:
     // terminal): nothing done to the last one's photos is to be undone on
     // these, though a photo here has the same id.
     void otherSource();
+    // Once it is all through: how long the read took on its thread, and
+    // the swap with everything that follows it here (the window stood
+    // still for that long).
+    void swapped(qint64 readMs, qint64 swapMs);
 
 private:
     struct Read;

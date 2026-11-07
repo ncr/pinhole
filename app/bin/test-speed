@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Is Pinhole still quick, with a library and plugin data of years?
+
+What should be at once, timed against budgets; exits 1 if any is over:
+
+- starting: the first frame, and each plugin's load (app/bin/measure-startup);
+- the window standing still as the library is read again, a photo opens and
+  closes, and each plugin's view opens and closes (PINHOLE_SELFTEST=snappy);
+- scrolling at 5,000 px/s (the bench), reported.
+
+The data is made large on purpose: a regression that grows with what a
+person has (People's names of 9,627 faces took 34 seconds to load, one key
+at a time) never shows with an empty profile. By default a synthetic library
+of 20,000 photos (kept under app/build/speed-fixture) and 20,000 faces named
+in People's synced data; --library and --synced measure a real one instead,
+read only.
+
+Every window is on a display of its own, never on the desktop: a private
+headless Weston where there is one, else an X display (app/bin/headless-x:
+Xvfb, or Hyprland's Xwayland on workspace 5). --display native measures on
+the compositor this runs on: start it on a hidden workspace, as CLAUDE.md says.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def people(faces, out):
+    """People's synced file with `faces` faces named, as pinhole.synced keeps it."""
+    out.mkdir(parents=True, exist_ok=True)
+    values, clock = {}, {}
+    for i in range(faces):
+        key = f'{i:064x}'
+        values[key] = {'name': f'Person {i % 900}'} if i % 7 else {'rejected': [f'{i + 1:064x}']}
+        clock[key] = [1794035753792, 'speedtest0000']
+    (out / 'pinhole.people.json').write_text(json.dumps({'values': values, 'clock': clock}, separators=(',', ':')))
+
+
+def fixture(photos):
+    library = ROOT / 'app/build/speed-fixture' / str(photos) / 'fake' / 'speed'
+    if not (library / 'library.sqlite').is_file():
+        if library.exists():
+            shutil.rmtree(library)
+        library.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([str(ROOT / 'core/target/release/pinhole-fake'), '--count', str(photos), '--out', str(library)],
+                       check=True)
+    return library
+
+
+class Display:
+    """A display no one sees: Weston's headless backend or an X display of
+    its own (headless-x), else the one this runs on."""
+
+    def __init__(self, kind, scratch):
+        self.kind, self.env, self.process = kind, {}, None
+        if kind == 'x':
+            # OpenGL without waiting for the display's refresh: Xvfb has none,
+            # and Hyprland gives a hidden Xwayland one frame a second, which
+            # would be timed as the window standing still. Drawn on a thread
+            # of its own, as on Wayland: X's default draws on the window's.
+            self.env = {'QT_QPA_PLATFORM': 'xcb', 'PINHOLE_STARTUP_VIRTUAL': '1', 'QSG_RHI_BACKEND': 'opengl',
+                        'QSG_RENDER_LOOP': 'threaded', 'vblank_mode': '0', '__GL_SYNC_TO_VBLANK': '0'}
+        if kind == 'weston':
+            runtime = scratch / 'runtime'
+            runtime.mkdir(mode=0o700)
+            self.env = {'XDG_RUNTIME_DIR': str(runtime), 'WAYLAND_DISPLAY': 'pinhole-speed', 'QT_QPA_PLATFORM': 'wayland'}
+            self.log = (scratch / 'weston.log').open('w')
+            self.process = subprocess.Popen(['weston', '--backend=headless', '--renderer=gl', '--width=1600',
+                                             '--height=1000', '--socket=pinhole-speed', '--no-config', '--idle-time=0'],
+                                            env=os.environ | self.env, stdout=self.log, stderr=self.log)
+            deadline = time.monotonic() + 15
+            while not (runtime / 'pinhole-speed').exists():
+                if self.process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError(f'headless Weston did not start; see {scratch / "weston.log"}')
+                time.sleep(.05)
+
+    def wrap(self, command):
+        if self.kind == 'x':
+            return [str(ROOT / 'app/bin/headless-x'), '1600x1000', *command]
+        return command
+
+    def close(self):
+        if self.process:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+
+
+def profile(scratch, library, synced):
+    """XDG folders of its own, the synced data as the library's."""
+    env = {'QT_QPA_PLATFORMTHEME': '', 'QT_STYLE_OVERRIDE': 'Fusion', 'PINHOLE_SILENT': '1',
+           'PINHOLE_BUILTIN_PLUGINS': str(ROOT / 'plugins'), 'PINHOLE_SOCKET': str(scratch / 'service.sock'),
+           'PINHOLED': shutil.which('false') or '/usr/bin/false'}
+    for key, folder in [('XDG_CONFIG_HOME', 'config'), ('XDG_DATA_HOME', 'data'), ('XDG_CACHE_HOME', 'cache'),
+                        ('XDG_STATE_HOME', 'state'), ('XDG_PICTURES_DIR', 'Pictures')]:
+        (scratch / folder).mkdir(parents=True, exist_ok=True)
+        env[key] = str(scratch / folder)
+    shutil.copytree(synced, scratch / 'state/pinhole/synced' / f'{library.parent.name}-{library.name}')
+    return env
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--photos', type=int, default=20000, help='Synthetic library size (default 20,000).')
+    parser.add_argument('--faces', type=int, default=20000, help="Faces in People's synced data (default 20,000).")
+    parser.add_argument('--library', type=Path, help='A real library to read instead (read only).')
+    parser.add_argument('--synced', type=Path, help="A real library's synced folder (state/pinhole/synced/<it>).")
+    parser.add_argument('--output', type=Path, default=ROOT / 'app/build/speed')
+    parser.add_argument('--runs', type=int, default=3)
+    parser.add_argument('--display', choices=['auto', 'weston', 'x', 'native'], default='auto')
+    parser.add_argument('--qml-profile', action='store_true',
+                        help='Also run the snappy self-test under qmlprofiler (a qml_debug build in app/build-profile) '
+                             'and say what QML took the time in each call over --max-still-ms (app/bin/qml-hotspots).')
+    parser.add_argument('--max-first-frame-ms', type=float, default=float(os.environ.get('PINHOLE_SPEED_FIRST_FRAME_MS', 1500)))
+    parser.add_argument('--max-plugin-ms', type=float, default=float(os.environ.get('PINHOLE_SPEED_PLUGIN_MS', 100)))
+    parser.add_argument('--max-plugins-ms', type=float, default=float(os.environ.get('PINHOLE_SPEED_PLUGINS_MS', 400)))
+    parser.add_argument('--max-still-ms', type=float, default=float(os.environ.get('PINHOLE_SPEED_STILL_MS', 150)),
+                        help='Longest the window may stand still in a step of the snappy self-test.')
+    args = parser.parse_args()
+
+    display = args.display
+    if display == 'auto':
+        display = 'weston' if shutil.which('weston') else 'x'
+
+    output = args.output.resolve()
+    if output.exists():
+        shutil.rmtree(output)
+    output.mkdir(parents=True)
+    library = (args.library or fixture(args.photos)).resolve()
+    synced = args.synced
+    if not synced:
+        synced = output / 'synced'
+        people(args.faces, synced)
+    over, report = [], {'library': str(library), 'display': display}
+
+    with tempfile.TemporaryDirectory(prefix='pinhole-speed-') as temporary:
+        scratch = Path(temporary)
+        screen = Display(display, scratch)
+        try:
+            # Starting.
+            command = [sys.executable, str(ROOT / 'app/bin/measure-startup'), '--library', str(library),
+                       '--synced', str(synced), '--runs', str(args.runs), '--output', str(output / 'startup'),
+                       '--max-first-frame-ms', str(args.max_first_frame_ms), '--max-plugin-ms', str(args.max_plugin_ms),
+                       '--max-plugins-ms', str(args.max_plugins_ms)]
+            # On X, measure-startup is on the display already (PINHOLE_STARTUP_VIRTUAL).
+            if display != 'x':
+                command.append('--native-hidden')
+            started = subprocess.run(screen.wrap(command), env=os.environ | screen.env, capture_output=True, text=True,
+                                     timeout=600)
+            (output / 'startup.log').write_text(started.stdout + started.stderr)
+            results = output / 'startup/results.json'
+            if not results.is_file():
+                said = [line for line in (started.stdout + started.stderr).splitlines() if 'Error' in line or 'timed out' in line]
+                raise RuntimeError(f'starting was not measured ({said[-1].strip() if said else "see the log"}); '
+                                   f'see {output / "startup.log"}')
+            startup = json.loads(results.read_text())
+            report['startup'] = {'first_frame_ms': startup['summary']['first_frame']['median_ms'],
+                                 'plugins_ms': startup['plugins_median_ms']}
+            over += startup['over_budget']
+
+            # Standing still: once to compile what each view is made of into
+            # the profile's QML cache, as it is after a first use, then timed
+            # twice, each step's better kept: a pause of the JS collector or
+            # of this computer comes once, a step made slower every time.
+            env = os.environ | screen.env | profile(scratch / 'snappy', library, synced) | {
+                'PINHOLE_SNAPPY_MS': str(int(args.max_still_ms))}
+            window = screen.wrap([str(ROOT / 'app/build/pinhole'), '--library', str(library)])
+            subprocess.run(window, env=env | {'PINHOLE_SELFTEST': 'snappy'}, capture_output=True, timeout=240)
+            best, logs = {}, []
+            for attempt in (1, 2):
+                snappy = subprocess.run(window, env=env | {'PINHOLE_SELFTEST': f'snappy:{output / f"snappy-{attempt}.json"}'},
+                                        capture_output=True, text=True, timeout=240)
+                logs.append(snappy.stdout + snappy.stderr)
+                ran = [json.loads(line.split(': ', 2)[2]) for line in snappy.stdout.splitlines()
+                       if line.startswith('selftest: snappy: {')]
+                if not ran or ('selftest: snappy: PASS' not in snappy.stdout and all(s['ok'] for s in ran)):
+                    (output / 'snappy.log').write_text('\n'.join(logs))
+                    raise RuntimeError(f'the snappy self-test did not run through; see {output / "snappy.log"}')
+                for n, s in enumerate(ran):
+                    key = (s['step'], n)
+                    if key not in best or s['still_ms'] < best[key]['still_ms']:
+                        best[key] = s
+            (output / 'snappy.log').write_text('\n'.join(logs))
+            steps = [best[key] for key in sorted(best, key=lambda k: k[1])]
+            for s in steps:
+                s['ok'] = s['still_ms'] <= s['budget_ms']
+            report['still_ms'] = {s['step']: s['still_ms'] for s in steps}
+            over += [f"{s['step']}: the window stood still {s['still_ms']} ms > {s['budget_ms']} ms" for s in steps if not s['ok']]
+
+            if args.qml_profile:
+                profiled = ROOT / 'app/build-profile'
+                profiled.mkdir(exist_ok=True)
+                subprocess.run(['qmake6', str(ROOT / 'app/pinhole.pro'), 'CONFIG+=qml_debug'], cwd=profiled, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['make', f'-j{os.cpu_count()}'], cwd=profiled, check=True, stdout=subprocess.DEVNULL)
+                env = os.environ | screen.env | profile(scratch / 'profiled', library, synced) | {
+                    'PINHOLE_SELFTEST': 'snappy', 'PINHOLE_SNAPPY_MS': str(int(args.max_still_ms))}
+                trace = output / 'snappy.qtd'
+                profiler = shutil.which('qmlprofiler') or '/usr/lib/qt6/bin/qmlprofiler'
+                with (output / 'snappy-profiled.log').open('w') as log:
+                    subprocess.run(screen.wrap([profiler, '-o', str(trace), str(profiled / 'pinhole'), '--library', str(library)]),
+                                   env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
+                hotspots = subprocess.run([sys.executable, str(ROOT / 'app/bin/qml-hotspots'), str(trace),
+                                           '--min', str(args.max_still_ms)], capture_output=True, text=True)
+                (output / 'hotspots.txt').write_text(hotspots.stdout + hotspots.stderr)
+                report['hotspots'] = str(output / 'hotspots.txt')
+
+            # Scrolling, reported.
+            env = os.environ | screen.env | profile(scratch / 'bench', library, synced) | {'PINHOLE_BENCH_ONLY': 'scroll 5,000'}
+            bench = subprocess.run(screen.wrap([str(ROOT / 'app/build/pinhole'), '--bench', '--library', str(library)]),
+                                   env=env, capture_output=True, text=True, timeout=120)
+            (output / 'scroll.log').write_text(bench.stdout + bench.stderr)
+            rows = re.findall(r'^scroll 5,000 px/s\s+(.+)$', bench.stdout + bench.stderr, re.MULTILINE)
+            if len(rows) == 1:
+                fps, p50, p95, p99, longest = map(float, rows[0].split()[:5])
+                report['scroll'] = {'fps': fps, 'p50_ms': p50, 'p95_ms': p95, 'p99_ms': p99, 'max_ms': longest}
+            else:
+                over.append(f'the scroll bench reported no frames; see {output / "scroll.log"}')
+        finally:
+            screen.close()
+
+    report['over_budget'] = over
+    (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(f"first frame {report['startup']['first_frame_ms']:.0f} ms; slowest plugins:",
+          ', '.join(f'{p} {ms:.0f} ms' for p, ms in list(report['startup']['plugins_ms'].items())[:3]))
+    for step, ms in report.get('still_ms', {}).items():
+        print(f'  {step}: stood still {ms} ms')
+    if 'scroll' in report:
+        s = report['scroll']
+        print(f"scroll 5,000 px/s: {s['fps']:.0f} fps, p99 {s['p99_ms']:.1f} ms, longest {s['max_ms']:.1f} ms")
+    for line in over:
+        print(f'OVER BUDGET: {line}', file=sys.stderr)
+    if 'hotspots' in report:
+        print(f"what QML took the time in each call over {args.max_still_ms:.0f} ms:")
+        print(Path(report['hotspots']).read_text())
+    print(f'test-speed: {"FAIL" if over else "PASS"} ({output / "report.json"})')
+    return 1 if over else 0
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f'test-speed: FAIL: {error}', file=sys.stderr)
+        raise SystemExit(1)

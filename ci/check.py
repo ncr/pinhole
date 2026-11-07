@@ -195,6 +195,16 @@ class Checks:
                 self.run('wayland-scroll', ['app/build/pinhole', '--bench', '--library', str(library)],
                          env=env | {'PINHOLE_BENCH_ONLY': 'scroll 5,000', 'PINHOLE_SOCKET': str(scratch / 'bench.sock')}, timeout=90)
                 validate_scroll((self.output / 'wayland-scroll.log').read_text())
+                # What should be at once still is, with a library and plugin
+                # data of years (People's names of 20,000 faces): a cost that
+                # grows with what a person has never shows with an empty
+                # profile. Budgets for two cores drawing in software, far
+                # above the desktop's; the 34-second start it was made for
+                # fails them by far.
+                self.run('speed', ['app/bin/test-speed', '--display', 'weston', '--photos', '10000', '--faces', '20000',
+                                   '--runs', '3', '--output', str(self.output / 'speed'),
+                                   '--max-first-frame-ms', '3000', '--max-plugin-ms', '400',
+                                   '--max-plugins-ms', '1200', '--max-still-ms', '600'], env=env, timeout=1200)
             finally:
                 compositor.terminate()
                 try: compositor.wait(timeout=3)

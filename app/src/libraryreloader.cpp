@@ -145,6 +145,7 @@ void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
         m_wait.stop();
     std::fprintf(stderr, "pinhole: library reloaded: %d items (was %d); read in %lld ms, swapped in %lld ms\n",
                  m_library->count(), before, read->readMs, swapping.elapsed());
+    emit swapped(read->readMs, swapping.elapsed());
     m_reading = false;
     if (std::exchange(m_again, false))
         reload();
