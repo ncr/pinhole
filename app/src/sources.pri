@@ -92,6 +92,7 @@ HEADERS += \
     $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
     $$PWD/synced.h \
+    $$PWD/propertymap.h \
     $$PWD/incoming.h \
     $$PWD/portal.h \
     $$PWD/selftest.h \

@@ -1,5 +1,7 @@
 #include "synced.h"
 
+#include "propertymap.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -357,17 +359,23 @@ PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObj
     // Each as JSON: read in JS, a copy (a list kept as a QVariantList
     // would be a view of the property, changing with the next set).
     const QJsonObject kept = store->values(plugin);
+    QVariantHash all;
+    all.reserve(kept.size());
     for (auto it = kept.begin(); it != kept.end(); ++it)
-        insert(it.key(), QVariant::fromValue(it.value()));
+        all.insert(it.key(), QVariant::fromValue(QJsonValue(it.value())));
+    insertAll(this, all);
     connect(store, &SyncedStore::changed, this, [this](const QString &plugin, const QStringList &keys) {
         if (plugin != m_plugin)
             return;
         const QJsonObject now = m_store->values(m_plugin);
+        QVariantHash told;
+        told.reserve(keys.size());
         for (const QString &key : keys) {
             const QJsonValue value = now.value(key);
             // Taken out: undefined, as one never set is.
-            insert(key, value.isUndefined() ? QVariant() : QVariant::fromValue(value));
+            told.insert(key, value.isUndefined() ? QVariant() : QVariant::fromValue(value));
         }
+        insertAll(this, told);
         emit changed(keys);
     });
 }
@@ -387,9 +395,11 @@ void PluginSyncedMap::adopt(const QVariantMap &values) {
     m_store->adopt(m_plugin, json);
     // Here at once, as a key assigned is.
     const QJsonObject now = m_store->values(m_plugin);
+    QVariantHash taken;
     for (auto it = json.begin(); it != json.end(); ++it)
         if (const QJsonValue value = now.value(it.key()); !value.isUndefined())
-            insert(it.key(), QVariant::fromValue(value));
+            taken.insert(it.key(), QVariant::fromValue(value));
+    insertAll(this, taken);
 }
 
 QVariant PluginSyncedMap::updateValue(const QString &key, const QVariant &input) {

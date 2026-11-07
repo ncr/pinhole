@@ -67,6 +67,7 @@
 #include "framestats.h"
 #include "plugins.h"
 #include "synced.h"
+#include "propertymap.h"
 #include "panzoom.h"
 #include "photoprovider.h"
 #include "thumbnailloader.h"
@@ -7016,6 +7017,27 @@ PinholePlugin {
         bench.js("other.state.y = 3");
         QTRY_VERIFY(host->problem().contains("state"));
         QVERIFY(QDir(state).removeRecursively());
+    }
+
+    // Many keys (People's names of every face) are properties in a moment,
+    // not one by one: that took 34 seconds for 9627 as Pinhole started. A
+    // name Qt takes no property by is skipped, the rest kept.
+    void manySyncedKeysAreTakenInAtOnce() {
+        PluginBench bench({{"t", {{"api", 14}}}});
+        QJsonObject many{{"keys", 1}};
+        for (int i = 0; i < 20000; ++i)
+            many.insert(QString::number(i, 16).rightJustified(64, '0'), QJsonObject{{"name", QString::number(i)}});
+        bench.plugins->syncedStore()->set("t", many);
+        QElapsedTimer took;
+        took.start();
+        PluginSyncedMap map(bench.plugins->syncedStore(), "t");
+        QVERIFY2(took.elapsed() < 2000, qPrintable(QString::number(took.elapsed())));
+        QCOMPARE(map.QQmlPropertyMap::keys().size(), 20000);
+        QVERIFY(!map.contains("keys"));
+        const QVariant last = map.value(QString::number(19999, 16).rightJustified(64, '0'));
+        QVERIFY2(last.value<QJsonValue>().toObject().value("name").toString() == QLatin1String("19999"),
+                 last.metaType().name());
+        bench.plugins->flush();
     }
 
     // What a plugin keeps of the library that goes with it to every

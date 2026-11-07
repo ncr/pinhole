@@ -1,5 +1,7 @@
 #include "pluginstore.h"
 
+#include "propertymap.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -112,8 +114,11 @@ void PluginStore::flush() {
 PluginStoreMap::PluginStoreMap(PluginStore *store, const QString &id, QObject *parent)
     : QQmlPropertyMap(this, parent), m_store(store), m_id(id) {
     const QJsonObject kept = store->values(id);
+    QVariantHash all;
+    all.reserve(kept.size());
     for (auto it = kept.begin(); it != kept.end(); ++it)
-        insert(it.key(), it.value().toVariant());
+        all.insert(it.key(), it.value().toVariant());
+    insertAll(this, all);
 }
 
 QStringList PluginStoreMap::keys() const { return m_store->values(m_id).keys(); }

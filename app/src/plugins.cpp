@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "propertymap.h"
 #include "synced.h"
 #include "panzoom.h"
 #include "pluginguide.h"
@@ -52,8 +53,10 @@
 
 PluginSettings::PluginSettings(PluginHost *host) : QQmlPropertyMap(this, nullptr), m_host(host) {
     const QJsonObject kept = host->m_plugins->settingsOf(host->id());
+    QVariantHash all;
     for (auto it = kept.begin(); it != kept.end(); ++it)
-        insert(it.key(), it.value().toVariant());
+        all.insert(it.key(), it.value().toVariant());
+    insertAll(this, all);
 }
 
 QStringList PluginSettings::keys() const { return m_host->m_plugins->settingsOf(m_host->id()).keys(); }
