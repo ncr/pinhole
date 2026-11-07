@@ -501,7 +501,7 @@ Properties:
 - `bool keep`: Kept once made (true), or let go as it closes.
 - `bool shown` (readonly): Open now.
 - `string toggleKey`: The key that opens it (its action's), which closes it too, beside Esc.
-- `string closeText`: Esc's words in the help; `closeCommand.mouse` and `.touchpad` say how else it closes ("Click"), as a Command's.
+- `string closeText`: Esc's words in the help, none by default (the action that opens it is listed); `closeCommand.mouse` and `.touchpad` say how else it closes ("Click"), as a Command's.
 - `Item item` (readonly): What `source` or `content` made; null before it first opens.
 - `alias closeCommand` (readonly): Its Esc: what a PanelHeader's ✕ presses.
 - `Item plugin` (readonly): The plugin's root and what Pinhole gives it.

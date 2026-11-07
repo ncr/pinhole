@@ -47,9 +47,10 @@ Item {
     // The key that opens it (its action's), which closes it too, beside
     // Esc.
     property string toggleKey
-    // Esc's words in the help; `closeCommand.mouse` and `.touchpad` say
-    // how else it closes ("Click"), as a Command's.
-    property string closeText: qsTr("Close")
+    // Esc's words in the help, none by default (the action that opens it
+    // is listed); `closeCommand.mouse` and `.touchpad` say how else it
+    // closes ("Click"), as a Command's.
+    property string closeText
     // What `source` or `content` made; null before it first opens.
     readonly property Item item: loader.item
     // Its Esc: what a PanelHeader's ✕ presses.
@@ -150,7 +151,8 @@ Item {
         when: view.onTop
         onTriggered: view.back()
     }
-    // Its own key closes it at once (the action lists that key).
+    // Its own key as Esc: back in what it shows first (a making stopped,
+    // a close-up left), else closed. The action lists that key.
     Command {
         name: "view.toggle"
         keys: view.toggleKey !== "" ? [view.toggleKey] : []
@@ -159,7 +161,7 @@ Item {
         noTouchpad: "its action's button"
         keyLayer: "plugin"
         when: view.onTop && view.toggleKey !== ""
-        onTriggered: view.close()
+        onTriggered: view.back()
     }
     Connections {
         target: view.pinhole

@@ -92,9 +92,10 @@ of each is in [the kit, member by member](plugin-kit.md)
   returns true has taken it (a close-up left, a making stopped) and the
   view stays open. A plugin's views open at once (a studio over its
   editor) stack: only the last opened has its keys (`onTop`), and Esc
-  closes it alone. `make()` makes what it shows without opening it, and
-  gives it. `closeText` is Esc's line in the help; `closeCommand.mouse`
-  and `.touchpad` say how else it closes.
+  closes it alone. Its `toggleKey` does as Esc does. `make()` makes what
+  it shows without opening it, and gives it. `closeText` puts Esc in the
+  help with those words (none by default: the action that opens it is
+  listed); `closeCommand.mouse` and `.touchpad` say how else it closes.
 - `Job` (API 13): one thing asked at a time, the latest winning. It
   cancels the one before, drops an answer that came too late, has `busy`,
   asks again by itself when the library was read meanwhile (`reloaded`),
