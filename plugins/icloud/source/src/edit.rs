@@ -307,7 +307,20 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
     } else {
         let upright = upright_of(original)?;
         let renders = render(original, upright, adjustment, dir)?;
-        let data = recipe_json(upright, adjustment, previous.as_ref());
+        // Photos measures the crop in the original's own pixels as stored
+        // (a portrait from the camera: landscape, turned by its
+        // orientation), and the recipe's orientation is the whole turn from
+        // those to what is shown: the original's and the person's.
+        let quarters = match original_orientation {
+            1 => 0,
+            6 => 1,
+            3 => 2,
+            8 => 3,
+            other => return Err(anyhow!("the original is mirrored (orientation {other}): edit it on the iPhone")),
+        };
+        let raw = if quarters % 2 == 1 { Upright { width: upright.height, height: upright.width } } else { upright };
+        let whole = Adjustment { turn: (quarters + adjustment.turn) % 4, crop: adjustment.crop };
+        let data = recipe_json(raw, &whole, previous.as_ref());
         let styled = data["adjustments"].as_array().is_some_and(|a| a.iter().any(|j| j["identifier"] == "SemanticStyle"));
         let recipe = deflate(&data)?;
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
@@ -469,6 +482,17 @@ mod tests {
         // upright photo, which Core Image counts from 0.
         let upside = Adjustment { turn: 2, crop: [0.0, 0.0, 1.0, 0.5] };
         assert_eq!(crop_in_master(upright, &upside), (0, 0, 4032, 1512));
+    }
+
+    #[test]
+    fn a_portrait_from_the_camera_is_cropped_in_its_stored_pixels() {
+        // Stored 4032x3024, shown turned a quarter right (orientation 6),
+        // turned no more: the camera's way, the crop in stored pixels and
+        // the recipe's orientation 6. Its left half as shown is the bottom
+        // half of what is stored, which Core Image counts from 0.
+        let raw = Upright { width: 4032, height: 3024 };
+        let shown_left_half = Adjustment { turn: 1, crop: [0.0, 0.0, 0.5, 1.0] };
+        assert_eq!(crop_in_master(raw, &shown_left_half), (0, 0, 4032, 1512));
     }
 
     #[test]
