@@ -1491,6 +1491,32 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // A manifest's schemaVersion and entryPoints left out (API 15): 1, and
+    // Main.qml beside it; its id, as before, its folder's name.
+    void aManifestLeavesOutWhatIsAlwaysTheSame() {
+        QTemporaryDir root;
+        const QString dir = root.path() + "/me.short";
+        QVERIFY(QDir().mkpath(dir));
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QFile f(dir + '/' + name);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(text);
+        };
+        QJsonObject manifest;
+        QString main;
+        // No Main.qml: said as before.
+        write("manifest.json", R"({"api": 15, "name": "Short"})");
+        QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("entryPoints"));
+        write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {}\n");
+        QCOMPARE(Plugins::manifestProblem(dir, &manifest, &main), QString());
+        QCOMPARE(main, QStringLiteral("Main.qml"));
+        // One given is still checked.
+        write("manifest.json", R"({"api": 15, "schemaVersion": 2})");
+        QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("schemaVersion"));
+        write("manifest.json", R"({"api": 15})");
+        QVERIFY(Plugins::apiUses(dir).value(15).contains("a manifest without schemaVersion or entryPoints"));
+    }
+
     // What a plugin needs (the manifest's "requires", API 15) and whether
     // a program is there (pinhole.has).
     void aPluginSaysWhatItNeedsAndAsksWhatIsThere() {

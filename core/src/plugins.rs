@@ -550,13 +550,14 @@ pub fn usable_id(id: &str) -> bool {
 
 /// As the window takes a manifest at all (Plugins::manifestProblem).
 fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
-    if whole(&manifest["schemaVersion"]) != Some(1) {
+    // Left out (API 15): schema 1, the only one, and Main.qml beside it.
+    if !manifest["schemaVersion"].is_null() && whole(&manifest["schemaVersion"]) != Some(1) {
         return Err("manifest.json needs \"schemaVersion\": 1".into());
     }
     if !usable_id(id) {
         return Err("manifest.json has no usable \"id\"".into());
     }
-    let main = manifest["entryPoints"]["main"].as_str().unwrap_or("");
+    let main = if manifest["entryPoints"].is_null() { "Main.qml" } else { manifest["entryPoints"]["main"].as_str().unwrap_or("") };
     if !safe_relative(main) || !dir.join(main).is_file() {
         return Err("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder".into());
     }
@@ -633,6 +634,19 @@ mod tests {
         assert!(refused.contains("me.steady: makes \"me.steady/Not Fine\""), "{refused}");
         assert!(refused.contains("me.early: makes \"me.early/sooner\": a kind of its own needs \"api\": 15"), "{refused}");
         assert!(refused.contains("me.odd: makes \"bounce\": \"extension\""), "{refused}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_manifest_may_leave_out_its_schema_and_entry_points() {
+        let dir = std::env::temp_dir().join(format!("pinhole-short-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15})).unwrap_err().contains("entryPoints"));
+        std::fs::write(dir.join("Main.qml"), "").unwrap();
+        assert_eq!(taken("me.short", &dir, &serde_json::json!({"api": 15})), Ok(()));
+        assert!(taken("me.short", &dir, &serde_json::json!({"schemaVersion": 2})).unwrap_err().contains("schemaVersion"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"entryPoints": {"main": "Other.qml"}})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

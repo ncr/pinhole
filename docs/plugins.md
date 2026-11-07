@@ -411,12 +411,12 @@ And warns of:
 
 | Key | |
 |---|---|
-| `schemaVersion` | 1, required |
-| `id` | required: letters, digits, `.`, `_` and `-`, beginning with a letter or a digit; yours (`me.…`), as `pinhole.…` are Pinhole's own plugins'. It names the plugin's switch, settings, state and cache |
+| `schemaVersion` | 1, the only one; 1 if left out (API 15) |
+| `id` | its folder's name if left out: letters, digits, `.`, `_` and `-`, beginning with a letter or a digit; yours (`me.…`), as `pinhole.…` are Pinhole's own plugins'. It names the plugin's switch, settings, state and cache |
 | `name`, `description` | what the side panel says of it (translated in `i18n/<language>.json` too) |
 | `version` | yours, shown with its name |
 | `api` | a whole number, 1 if left out (below) |
-| `entryPoints` | `{ "main": "Main.qml" }`, required: the file in its folder Pinhole loads |
+| `entryPoints` | `{ "main": "Main.qml" }`: the file in its folder Pinhole loads; `Main.qml` if left out (API 15) |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
 | `requires` | the programs it needs, by their names on PATH (API 15): `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
 | `author`, `license` | yours |
@@ -472,7 +472,8 @@ actions on a file (`PluginAction`'s `place: "file"` and
 `library.settled`, `field(name, { shown: true })` and `field("hidden")`,
 an action's `places`, its `helpText`, an action with a key in the help
 by itself, `pinhole.store(name)`, and the manifest's `requires` with
-`pinhole.has(program)`.
+`pinhole.has(program)`, and a manifest that leaves out `schemaVersion`
+(1) and `entryPoints` (`Main.qml` beside it).
 
 `Main.qml` beside it:
 

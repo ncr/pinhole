@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -475,6 +475,8 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
                 uses << QStringLiteral("a kind of its own in makes");
         if (declared.contains(QLatin1String("settings")))
             uses << QStringLiteral("settings in the manifest");
+        if (!declared.contains(QLatin1String("schemaVersion")) || !declared.contains(QLatin1String("entryPoints")))
+            uses << QStringLiteral("a manifest without schemaVersion or entryPoints");
         if (declared.contains(QLatin1String("requires")))
             uses << QStringLiteral("requires in the manifest, or pinhole.has");
     }
@@ -1427,10 +1429,12 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
     QJsonParseError parseError;
     *manifest = QJsonDocument::fromJson(file.readAll(), &parseError).object();
     const QString id = manifest->value("id").toString(QFileInfo(dir).fileName());
-    *main = manifest->value("entryPoints").toObject().value("main").toString();
+    // Left out (API 15): Main.qml beside it, and schema 1, the only one.
+    *main = manifest->contains("entryPoints") ? manifest->value("entryPoints").toObject().value("main").toString()
+                                              : QStringLiteral("Main.qml");
     if (parseError.error != QJsonParseError::NoError)
         return tr("manifest.json is not JSON: %1").arg(parseError.errorString());
-    if (manifest->value("schemaVersion").toInt() != 1)
+    if (manifest->value("schemaVersion").toInt(1) != 1)
         return tr("manifest.json needs \"schemaVersion\": 1");
     if (!usableId(id))
         return tr("manifest.json has no usable \"id\": letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit (me.night)");
