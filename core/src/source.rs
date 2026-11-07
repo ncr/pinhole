@@ -518,6 +518,13 @@ pub trait Source: Send + Sync {
                 _work: &std::path::Path) -> Result<()> {
         Err(Unsupported(format!("{} keeps no edits", self.name())).into())
     }
+
+    /// Where what is synced of this library goes between computers
+    /// (synced.rs): iCloud, a Pinhole folder in the account's iCloud Drive.
+    /// None, the default: it stays on this computer.
+    fn carrier(&self) -> Option<&dyn crate::synced::Carrier> {
+        None
+    }
 }
 
 /// A photo turned by quarters clockwise, then the part kept, in fractions

@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "synced.h"
 #include "panzoom.h"
 #include "pluginguide.h"
 #include "sdrvideo.h"
@@ -179,6 +180,12 @@ void Plugins::startupLoaded(const QString &id, double ms) const {
 }
 
 QString PluginHost::coveredBy() const { return m_plugins->coveredBy(); }
+
+QObject *PluginHost::synced() const {
+    if (!m_synced)
+        m_synced = std::make_unique<PluginSyncedMap>(m_plugins->syncedStore(), m_id);
+    return m_synced.get();
+}
 
 QObject *PluginHost::state() const {
     if (!m_state)
@@ -634,7 +641,8 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
       m_libraryApi(std::make_unique<PluginLibrary>(library)),
       m_viewerApi(viewer ? std::make_unique<PluginViewer>(viewer) : nullptr), m_config(readConfig()),
       m_stateStore(stateRoot(), QStringLiteral("state.json"), &m_files),
-      m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files), m_toured(readToured()) {
+      m_cacheStore(cacheRoot(), QStringLiteral("cache.json"), &m_files),
+      m_syncedStore(std::make_unique<SyncedStore>()), m_toured(readToured()) {
     // pinholed's workers: as each window connects (it hears the source
     // first), and as they change.
     if (m_service)
@@ -692,6 +700,7 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     };
     connect(&m_stateStore, &PluginStore::failed, this, failed(tr("Its state could not be kept.")));
     connect(&m_cacheStore, &PluginStore::failed, this, failed(tr("Its cache could not be kept.")));
+    connect(m_syncedStore.get(), &SyncedStore::failed, this, failed(tr("What it keeps of the library could not be kept.")));
     moveOutOfSettings();
     // Saving a file writes it in steps, and editors save several at once:
     // one reload once they are done.
@@ -754,6 +763,7 @@ QString Plugins::touredPath() {
 void Plugins::flush() {
     m_stateStore.flush();
     m_cacheStore.flush();
+    m_syncedStore->flush();
     m_files.wait();
 }
 
@@ -1132,6 +1142,7 @@ QString Plugins::builtInDir() {
 
 void Plugins::libraryOpened() {
     m_cacheName = cacheName();
+    m_syncedStore->setLibrary(m_library->dir());
     if (m_ready)
         return;
     m_ready = true;
@@ -1144,6 +1155,9 @@ void Plugins::libraryOpened() {
 }
 
 void Plugins::libraryReloaded(const std::vector<int> &moved) {
+    // pinhole.synced is the library's before pinhole.library says it is
+    // another: what a plugin sets as it hears of it lands in that one.
+    m_syncedStore->setLibrary(m_library->dir());
     // What each plugin hides and stacks follows its photos until it gives
     // its own again, as the grid's do: the window gathers them again at
     // once, as the grid already has them.

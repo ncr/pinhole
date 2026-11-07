@@ -66,6 +66,7 @@
 #include "pluginguide.h"
 #include "framestats.h"
 #include "plugins.h"
+#include "synced.h"
 #include "panzoom.h"
 #include "photoprovider.h"
 #include "thumbnailloader.h"
@@ -340,6 +341,9 @@ private:
             QDir(Plugins::stateRoot()).removeRecursively();
             QDir(Plugins::cacheRoot()).removeRecursively();
             QFile::remove(Plugins::touredPath());
+            const QString synced = QFileInfo(SyncedStore::folderFor("/x/y")).path();
+            QVERIFY2(synced.contains(QLatin1String("/.qttest/")), qPrintable(synced));
+            QDir(synced).removeRecursively();
         }
         QJSValue js(const QString &code) {
             const QJSValue result = engine.evaluate(code);
@@ -6953,6 +6957,92 @@ PinholePlugin {
         QVERIFY(QDir(state).removeRecursively());
     }
 
+    // What a plugin keeps of the library that goes with it to every
+    // computer (pinhole.synced): properties as its state is, of the library
+    // shown, each key with when and where it was set; merged into its file,
+    // so what another computer brought (pinholed writes the same file) and
+    // what is set here both stay, the later of a key winning.
+    void aPluginsSyncedKeysAreTheLibrarysAndMergeWithOtherComputers() {
+        PluginBench bench({{"t", {{"api", 14}}}, {"u", {{"api", 14}}}});
+        const QString file = SyncedStore::fileIn(SyncedStore::folderFor(bench.dir.path()), "t");
+        QVERIFY(file.contains("/synced/") && file.endsWith("/t.json"));
+        bench.js(R"(
+            var heard = []
+            pinhole.synced.changed.connect(keys => heard.push(keys.join(' ')))
+            pinhole.synced.face1 = { name: "Anna" }
+            pinhole.synced.face2 = { name: "Ola" }
+            said.push(pinhole.synced.face1.name, JSON.stringify(pinhole.synced.values()))
+        )");
+        QCOMPARE(bench.said(), (QStringList{"Anna", R"({"face1":{"name":"Anna"},"face2":{"name":"Ola"}})"}));
+        // What is read is a copy: set again, it is as it was when read.
+        QVERIFY(bench.js(R"(
+            pinhole.synced.list = [1]
+            var read = pinhole.synced.list
+            pinhole.synced.list = [2]
+            const same = read[0] === 1 && pinhole.synced.list[0] === 2
+            pinhole.synced.list = null
+            same
+        )").toBool());
+        // Told once for the turn, written after it.
+        QTRY_COMPARE(bench.js("heard.map(k => k.split(' ').sort().join(' ')).join('|')").toString(), QString("face1 face2 list"));
+        bench.plugins->flush();
+        const auto json = [&file] {
+            QFile f(file);
+            return f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
+        };
+        QCOMPARE(json().value("values").toObject().value("face1").toObject().value("name").toString(), QString("Anna"));
+        const QJsonArray stamp = json().value("clock").toObject().value("face1").toArray();
+        QCOMPARE(stamp.at(1).toString(), SyncedStore::device());
+        QVERIFY(stamp.at(0).toDouble() > 1.7e12);
+        // Another plugin's are its own.
+        auto *u = qobject_cast<PluginHost *>(bench.plugins->at("u").value("host").value<QObject *>());
+        QVERIFY(!u->synced()->property("face1").isValid());
+
+        // Another computer's, merged in by pinholed: a later name for face2
+        // and a face3; an older one for face1, which loses.
+        QJsonObject other = json();
+        QJsonObject values = other.value("values").toObject(), clock = other.value("clock").toObject();
+        values.insert("face1", QJsonObject{{"name", "Old"}});
+        clock.insert("face1", QJsonArray{1000.0, "elsewhere"});
+        values.insert("face2", QJsonObject{{"name", "Ewa"}});
+        clock.insert("face2", QJsonArray{4e12, "elsewhere"});
+        values.insert("face3", QJsonObject{{"name", "Jan"}});
+        clock.insert("face3", QJsonArray{4e12, "elsewhere"});
+        other.insert("values", values);
+        other.insert("clock", clock);
+        bench.js("heard = []");
+        QVERIFY(KeptFiles::write(file, QJsonDocument(other).toJson()));
+        QTRY_COMPARE(bench.js("pinhole.synced.face2 && pinhole.synced.face2.name").toString(), QString("Ewa"));
+        QCOMPARE(bench.js("pinhole.synced.face3.name").toString(), QString("Jan"));
+        QCOMPARE(bench.js("pinhole.synced.keys().sort().join(' ')").toString(), QString("face1 face2 face3"));
+        QTRY_COMPARE(bench.js("heard.map(k => k.split(' ').sort().join(' ')).join('|')").toString(), QString("face2 face3"));
+
+        // Set here after: later than anything seen of it, wherever.
+        bench.js("pinhole.synced.face2 = null; pinhole.synced.face1 = { name: 'Anna', more: 1 }");
+        QVERIFY(bench.js("pinhole.synced.face2").isUndefined());
+        bench.plugins->flush();
+        QVERIFY(!json().value("values").toObject().contains("face2"));
+        QVERIFY(json().value("clock").toObject().value("face2").toArray().at(0).toDouble() > 4e12);
+        QCOMPARE(json().value("values").toObject().value("face3").toObject().value("name").toString(), QString("Jan"));
+
+        // Another library shown: its own, told at once; back, these again.
+        QTemporaryDir otherLibrary;
+        bench.plugins->syncedStore()->setLibrary(otherLibrary.path() + "/folder/other");
+        QVERIFY(bench.js("pinhole.synced.face1").isUndefined());
+        QCOMPARE(bench.js("pinhole.synced.keys().length").toInt(), 0);
+        bench.plugins->syncedStore()->setLibrary(bench.dir.path());
+        QCOMPARE(bench.js("pinhole.synced.face1.more").toInt(), 1);
+
+        // A file that cannot be read is never written over, and is said.
+        QVERIFY(KeptFiles::write(file, "{not json"));
+        bench.js("pinhole.synced.face4 = 1");
+        QTRY_VERIFY(bench.host->problem().contains("library"));
+        bench.plugins->flush();
+        QFile broken(file);
+        QVERIFY(broken.open(QIODevice::ReadOnly));
+        QCOMPARE(broken.readAll(), QByteArray("{not json"));
+    }
+
     // What Pinhole's own plugins kept in plugins.json that is not a choice
     // of the user's moves out of it as Pinhole starts: Screenshots' lists
     // to its cache, Series' edits, Info's panel and Send's devices to their
@@ -7077,14 +7167,13 @@ PinholePlugin {
         // As if its finder found nothing: what was made by hand, shown.
         bench.js("series.take('')");
         QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
+        // Taken from its state into what is synced of the library.
         const auto kept = [&] {
             bench.plugins->flush();
-            QFile file(Plugins::stateRoot() + "/pinhole.series/state.json");
-            return file.open(QIODevice::ReadOnly)
-                       ? QJsonDocument::fromJson(file.readAll()).object().value("edits:folder:/x").toObject().value("manual").toArray()
-                       : QJsonArray();
+            return SyncedStore::load(bench.dir.path(), "pinhole.series").value("manual").toArray();
         };
         QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
+        QVERIFY(!bench.plugins->stateStore()->values("pinhole.series").contains("edits:folder:/x"));
         // b grouped with them: kept, then undone and done again.
         bench.js("series.group([1, 0])");
         QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,1,2]]"));

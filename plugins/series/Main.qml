@@ -38,11 +38,13 @@ PinholePlugin {
     // What the finder found, each series its photos' ids.
     property var foundIds: []
     // The edits: series made or changed by hand (ids), and photos kept out
-    // of any series. The user's own work, so kept in the plugin's state
-    // (not its settings, nor its cache), for each source's library apart
-    // (by its key): a folder's photos are named by their paths, and one
-    // folder's edits must not group another's photos of the same names.
+    // of any series. The user's own work of the library shown, so synced
+    // with it (pinhole.synced: its "manual" and "apart") to every computer
+    // it is shown on, each library's apart: a folder's photos are named by
+    // their paths, and one folder's edits must not group another's photos
+    // of the same names.
     property var edits: ({ manual: [], apart: [] })
+    // The library they are of (its key).
     property string editsKey: ""
     // Bumped when the series or the edits change, for bindings to follow.
     property int revision: 0
@@ -115,41 +117,62 @@ PinholePlugin {
         return [...ids]
     }
     // An edit, `name` in the history: undone, the edits go back to what
-    // they were before it. Undone or done again, it is the edits of the
-    // library it was made in, whichever is shown by then.
+    // they were before it (the history is the library's: another shown
+    // starts it afresh).
     function keep(manual, apart, name) {
-        const key = editsKey, before = edits, after = { manual: manual, apart: apart }
-        setEdits(key, after)
-        pinhole.did(name, () => setEdits(key, before), () => setEdits(key, after))
+        const before = edits, after = { manual: manual, apart: apart }
+        setEdits(after)
+        pinhole.did(name, () => setEdits(before), () => setEdits(after))
     }
-    function setEdits(key, state) {
-        pinhole.state[key] = state
-        if (key !== editsKey)
-            return
+    function setEdits(state) {
+        pinhole.synced.manual = state.manual
+        pinhole.synced.apart = state.apart
         edits = state
         apply()
     }
+    function syncedEdits() {
+        return { manual: pinhole.synced.manual || [], apart: pinhole.synced.apart || [] }
+    }
     // The edits of the library shown, when another is: true then.
     function loadEdits() {
-        const key = "edits:" + pinhole.library.key
+        const key = pinhole.library.key
         if (key === editsKey)
             return false
         // Another library: what the finder found was the last one's.
         if (editsKey !== "")
             foundIds = []
         editsKey = key
-        let kept = pinhole.state[key]
-        // From before they were kept for each library: the one shown then.
-        const old = pinhole.state.edits
-        if (!kept && old) {
-            kept = old
-            pinhole.state[key] = old
-            pinhole.state.edits = null
-        }
-        edits = kept || { manual: [], apart: [] }
+        adopt(key)
+        edits = syncedEdits()
         if (found)
             apply()
         return true
+    }
+    // Kept on this computer alone before they were synced (pinhole.state:
+    // "edits:" and the library's key, and before that "edits", the one
+    // shown then): taken in once, unless the library has some already.
+    function adopt(key) {
+        const kept = pinhole.state["edits:" + key] || pinhole.state.edits
+        if (kept && pinhole.synced.manual === undefined && pinhole.synced.apart === undefined) {
+            pinhole.synced.manual = kept.manual || []
+            pinhole.synced.apart = kept.apart || []
+        }
+        if (pinhole.state["edits:" + key])
+            pinhole.state["edits:" + key] = null
+        if (pinhole.state.edits)
+            pinhole.state.edits = null
+    }
+    // Changed on another computer (or in another window): as they are now.
+    Connections {
+        target: pinhole.synced
+        function onChanged() {
+            const now = plugin.syncedEdits()
+            if (JSON.stringify(now) === JSON.stringify(plugin.edits))
+                return
+            plugin.edits = now
+            if (plugin.found)
+                plugin.apply()
+        }
     }
     // The series made by hand, without any that holds one of `ids`.
     function manualWithout(ids) {

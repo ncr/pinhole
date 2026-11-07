@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod cloudkit;
 pub mod discover;
+pub mod drive;
 pub mod edit;
 pub mod favorite;
 pub mod index;
@@ -68,6 +69,9 @@ pub struct IcloudSource {
     /// by asset and rendition, the link and when it was got, kept here
     /// instead of in the index.
     fresh: Mutex<HashMap<(String, String), (String, i64)>>,
+    /// What is synced of the library, carried in the account's iCloud
+    /// Drive (drive.rs).
+    drive: drive::Drive,
 }
 
 impl IcloudSource {
@@ -83,6 +87,22 @@ impl IcloudSource {
             downloader: Mutex::new(None),
             expired: Mutex::new(HashSet::new()),
             fresh: Mutex::new(HashMap::new()),
+            drive: drive::Drive::default(),
+        }
+    }
+
+    /// `f` with the session of the links client: a session Apple no longer
+    /// takes is got afresh, and `f` tried once more with it.
+    fn on_drive<T>(&self, f: impl Fn(&drive::Drive, &session::Session) -> Result<T>) -> Result<T> {
+        let session = self.with(&self.links, |client| Ok(client.session().clone()))?;
+        match f(&self.drive, &session) {
+            Err(e) if self.health(&e) == Health::NeedsSignIn => {
+                eprintln!("pinholed: iCloud Drive took the session no more ({e:#}); signing in again");
+                *self.links.lock().unwrap() = None;
+                let session = self.with(&self.links, |client| Ok(client.session().clone()))?;
+                f(&self.drive, &session)
+            }
+            result => result,
         }
     }
 
@@ -345,6 +365,10 @@ impl Source for IcloudSource {
     /// In iCloud itself, as icloud.com sets them (`favorite`), with the
     /// change tags the index has; the new ones go back into it, so the next
     /// change needs no lookup.
+    fn carrier(&self) -> Option<&dyn pinhole_core::synced::Carrier> {
+        self.account.as_ref().map(|_| self as &dyn pinhole_core::synced::Carrier)
+    }
+
     fn set_favorite(&self, index: &Connection, ids: &[String], favorite: bool) -> Result<()> {
         let mut assets = Vec::with_capacity(ids.len());
         for id in ids {
@@ -405,5 +429,20 @@ impl Source for IcloudSource {
             return Err(FetchError::Failed(anyhow!("iCloud answered {status}")));
         }
         Ok(Body { length: response.content_length(), reader: Box::new(response) })
+    }
+}
+
+/// What is synced of the library goes in the account's iCloud Drive.
+impl pinhole_core::synced::Carrier for IcloudSource {
+    fn list(&self) -> Result<Vec<pinhole_core::synced::Carried>> {
+        self.on_drive(|drive, session| drive.list(session))
+    }
+
+    fn read(&self, name: &str) -> Result<Vec<u8>> {
+        self.on_drive(|drive, session| drive.read(session, name))
+    }
+
+    fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        self.on_drive(|drive, session| drive.write(session, name, bytes))
     }
 }

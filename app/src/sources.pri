@@ -91,6 +91,7 @@ HEADERS += \
     $$PWD/pluginquery.h \
     $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
+    $$PWD/synced.h \
     $$PWD/incoming.h \
     $$PWD/portal.h \
     $$PWD/selftest.h \
@@ -142,6 +143,7 @@ SOURCES += \
     $$PWD/plugincheck.cpp \
     $$PWD/pluginquery.cpp \
     $$PWD/pluginstore.cpp \
+    $$PWD/synced.cpp \
     $$PWD/incoming.cpp \
     $$PWD/portal.cpp \
     $$PWD/selftest.cpp \

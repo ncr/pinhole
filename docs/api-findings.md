@@ -229,6 +229,39 @@ there (`pinhole-upload-test.jpg`, asset
   which takes JPEG alone up to 100 MB; the current build always uses
   `photosupload`.
 
+## iCloud Drive
+
+The session signed in for Photos reaches iCloud Drive too, as icloud.com's
+Drive does (`drivews` and `docws` among the session's services), which is
+where Pinhole keeps what is synced of a library (service.md, Synced). Checked
+on 7 November 2026 against a real account:
+
+- `drivews` `POST /retrieveItemDetailsInFolders` with
+  `[{"drivewsid": "FOLDER::com.apple.CloudDocs::root", "partialData": false}]`
+  lists the top: each item's `type` (`FOLDER`, `FILE`, `APP_LIBRARY`),
+  `name` (without its extension, which is in `extension`), `drivewsid`,
+  `docwsid` and `etag`. The same with a folder's `drivewsid` lists it.
+- `POST /createFolders` with `{"destinationDrivewsId": <parent>, "folders":
+  [{"clientId": <the session's clientId>, "name": "Pinhole"}]}` makes one
+  and answers with its ids.
+- A file goes in three steps. `docws` `POST
+  /ws/com.apple.CloudDocs/upload/web?token=<t>` (`t` from the
+  `X-APPLE-WEBAUTH-VALIDATE` cookie's `t=` part) with `{"filename",
+  "type": "FILE", "content_type", "size"}` gives a `document_id` and a
+  `url`; the file is POSTed to that `url` as `multipart/form-data`, which
+  answers `singleFile` (`fileChecksum`, `wrappingKey`,
+  `referenceChecksum`, `size`, `receipt`); then `POST
+  /ws/com.apple.CloudDocs/update/documents` with `"command": "add_file"`,
+  those as `data` (`signature`, `wrapping_key`, `reference_signature`,
+  `size`, `receipt`), `"path": {"starting_document_id": <the folder's
+  docwsid>, "path": <name>}` and a `document_id` makes the document.
+  Given the `docwsid` of the file already there as `document_id`, it is
+  written over in place: the same document, a new `etag`, no second file.
+- `GET /ws/com.apple.CloudDocs/download/by_id?document_id=<docwsid>`
+  answers a `data_token.url`, which gives the file without cookies.
+- `drivews` `POST /deleteItems` with `{"items": [{"drivewsid", "etag",
+  "clientId"}]}` deletes one (it goes to Recently Deleted).
+
 ## What this means for Pinhole
 
 1. **Download every thumbnail up front.** 3.1 GB and minutes of transfer

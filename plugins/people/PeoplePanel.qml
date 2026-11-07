@@ -11,8 +11,8 @@ Panel {
     // Its PluginView's (PeoplePlugin.qml): open now.
     readonly property bool shown: view.shown
     property string source: ""
-    property string stateKey: ""
-    property var edits: ({})
+    // What is said of faces: the plugin's (PeoplePlugin.qml), synced.
+    readonly property var edits: view.plugin.edits
     // "home", "group" (a suggestion, `anchor` its row), "person" (`person`
     // its name) or "check" (the groups that look like `person`, one by one).
     property string page: "home"
@@ -65,8 +65,6 @@ Panel {
     function start() {
         if (shown) return
         source = pinhole.library.key || pinhole.library.dir
-        stateKey = "people:" + source
-        edits = pinhole.state[stateKey] || {}
         page = "home"
         selected = 0
         groupLimit = 48
@@ -240,24 +238,13 @@ Panel {
         if (restoreFocus) grid.forceActiveFocus()
     }
     // Kept by the plugin, which names faces on a photo shown too
-    // (PeoplePlugin.qml); what either says, read again here.
-    function writeEdits(key, patch) { view.plugin.writeEdits(key, patch) }
+    // (PeoplePlugin.qml); what either says, or another computer, read again
+    // here.
     Connections {
         target: view.plugin
-        function onEdited(key) {
-            if (key !== panel.stateKey) return
-            panel.edits = pinhole.state[key] || {}
-            if (panel.shown) panel.load()
-        }
+        function onEdited() { if (panel.shown) panel.load() }
     }
-    function edit(patch, label) {
-        const key = stateKey
-        const before = {}
-        for (const face of Object.keys(patch))
-            before[face] = Object.assign({}, edits[face])
-        writeEdits(key, patch)
-        pinhole.did(label, () => panel.writeEdits(key, before), () => panel.writeEdits(key, patch))
-    }
+    function edit(patch, label) { view.plugin.edit(patch, label) }
     // The whole group `row` is `name`; then on to the next one to name.
     // After a group is dealt with: the next one still to name, else home.
     function nextGroup(row) {

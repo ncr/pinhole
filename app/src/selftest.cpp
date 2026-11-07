@@ -9,6 +9,7 @@
 #include "photogrid.h"
 #include "photoprovider.h"
 #include "plugins.h"
+#include "synced.h"
 #include "storage.h"
 #include "viewer.h"
 
@@ -2564,16 +2565,12 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
             series.append(ids.toStringList());
         return series;
     };
-    // As written in its state, once all of it is.
-    auto keptFor = [=](const QString &key) {
+    // As written in what is synced of a library, once all of it is.
+    auto keptFor = [=](const QString &libraryDir) {
         if (auto *plugins = qobject_cast<Plugins *>(qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>()))
             plugins->flush();
-        QFile file(Plugins::stateRoot() + "/pinhole.series/state.json");
-        if (!file.open(QIODevice::ReadOnly))
-            return QList<QStringList>();
         QList<QStringList> series;
-        const QJsonObject edits = QJsonDocument::fromJson(file.readAll()).object()[key].toObject();
-        for (const QVariant &ids : edits.toVariantMap().value("manual").toList())
+        for (const QVariant &ids : SyncedStore::load(libraryDir, "pinhole.series").value("manual").toArray().toVariantList())
             series.append(ids.toStringList());
         return series;
     };
@@ -2605,7 +2602,7 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
     const QString first = library.dir(), firstSource = library.source();
     auto shown = [=, &library](const QString &source) {
         return [=, &library] {
-            return library.source() == source && plugin() && plugin()->property("editsKey").toString() == "edits:" + source;
+            return library.source() == source && plugin() && plugin()->property("editsKey").toString() == source;
         };
     };
     when(QStringLiteral("library with Series"), [=, &library] { return library.count() >= 3 && shown(firstSource)(); }, [=, &library, &reloader] {
@@ -2637,8 +2634,8 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
             QMetaObject::invokeMethod(history, "undo");
             QTimer::singleShot(500, window, [=, &reloader] {
                 check(QStringLiteral("still nothing grouped after Ctrl+Z"), manual().isEmpty());
-                check(QStringLiteral("%1 keeps its group").arg(firstSource), keptFor("edits:" + firstSource) == QList<QStringList>{ids});
-                check(QStringLiteral("%1 has no edits kept").arg(otherSource), keptFor("edits:" + otherSource).isEmpty());
+                check(QStringLiteral("%1 keeps its group").arg(firstSource), keptFor(first) == QList<QStringList>{ids});
+                check(QStringLiteral("%1 has no edits kept").arg(otherSource), keptFor(dir).isEmpty());
                 reloader.moveTo(first);
                 when(QStringLiteral("first library again"), shown(firstSource), [=] {
                     QTimer::singleShot(500, window, [=] {

@@ -46,6 +46,10 @@ pub struct Job {
     pub library: PathBuf,
     pub key: String,
     pub cache: PathBuf,
+    /// The plugin's synced file of the library (synced.rs), in its
+    /// environment as PINHOLE_SYNCED: an argument more would stop a
+    /// worker from before that refuses ones it does not know.
+    pub synced: PathBuf,
 }
 
 impl Job {
@@ -240,6 +244,7 @@ impl Workers {
                     library: s.library.clone(),
                     key: s.key.clone(),
                     cache: self.cache.join(&w.plugin).join(cache_name(&s.library)),
+                    synced: crate::synced::file(&crate::synced::library_dir(&s.library), &w.plugin),
                 });
                 (w, job)
             })
@@ -355,6 +360,7 @@ impl Workers {
         let mut command = Command::new(&job.program);
         command
             .args(job.argv(&self.plugins))
+            .env("PINHOLE_SYNCED", &job.synced)
             // The worker watches this pipe for EOF, including when the
             // service is replaced or killed. It never uses it for commands.
             .stdin(Stdio::piped())
@@ -540,6 +546,7 @@ mod tests {
         let argv: Vec<String> = job.argv(&plugins).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let (library, cache, plugins) = (shown.library.to_string_lossy(), job.cache.to_string_lossy(), plugins.to_string_lossy());
         assert_eq!(argv, ["daemon", "--library", &library, "--library-key", "folder:/Pictures", "--cache-dir", &cache, "--managed-plugins", &plugins]);
+        assert!(job.synced.ends_with("pinhole/synced/folder-Pictures/pinhole.people.json"), "{}", job.synced.display());
         // No source shown: wanted, with nothing to run for.
         assert!(s.workers.wanted(None)[0].1.is_none());
     }

@@ -717,17 +717,27 @@ def readonly(path):
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
 
 
-def load_edits(path, source, previous):
+def load_edits(synced, state, source, previous):
+    """What is said of faces: the library's synced file (PINHOLE_SYNCED, its
+    "values" by face), with what this computer kept before names were
+    synced (state.json's "people:<source>") under it, until the window
+    takes that in."""
     try:
-        entries = json.loads(path.read_text()).get("people:" + source, {})
+        try:
+            entries = json.loads(state.read_text()).get("people:" + source, {}) if state else {}
+        except FileNotFoundError:
+            entries = {}
+        if synced:
+            try:
+                entries = {**entries, **json.loads(synced.read_text()).get("values", {})}
+            except FileNotFoundError:
+                pass
         # Groups with a saved word about them keep their anchor through
         # regrouping, so the word stays with the faces it was said of.
         names = sorted(key for key, edit in entries.items()
                        if edit.get("name") or edit.get("unknown") or edit.get("not"))
         excluded = {key: edit["rejected"] for key, edit in entries.items() if edit.get("rejected")}
         return names, excluded
-    except FileNotFoundError:
-        return [], {}
     except (OSError, ValueError, AttributeError):
         return previous
 
@@ -758,6 +768,7 @@ def catalog_rows(catalog, source):
 
 def run_index(db, library, source, settings):
     state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/pinhole.people/state.json"
+    synced = Path(os.environ["PINHOLE_SYNCED"]) if os.environ.get("PINHOLE_SYNCED") else None
     path = library / "library.sqlite"
     inode = version = catalog = None
     edits = ([], {})
@@ -785,7 +796,7 @@ def run_index(db, library, source, settings):
                     catalog = readonly(path)
                     inode, version = identity, None
                 changed = catalog.execute("PRAGMA data_version").fetchone()[0]
-                saved = load_edits(state, source, edits)
+                saved = load_edits(synced, state, source, edits)
                 preference = load_grouping(settings, grouping)
                 refresh = changed != version or (errors and time.monotonic() >= retry)
                 if refresh:

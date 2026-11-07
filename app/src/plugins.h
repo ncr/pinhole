@@ -264,6 +264,10 @@ class PluginHost : public QObject {
     // Each read the first time it is asked for.
     Q_PROPERTY(QObject *state READ state CONSTANT)
     Q_PROPERTY(QObject *cache READ cache CONSTANT)
+    // What the user made of the library shown that goes with it to every
+    // computer it is shown on (synced.h): People's names, Series' series
+    // (API 14).
+    Q_PROPERTY(QObject *synced READ synced CONSTANT)
     // The sources (PluginSources): those of its own kinds to add, sign in
     // to and out of.
     Q_PROPERTY(QObject *sources READ sources CONSTANT)
@@ -307,6 +311,7 @@ public:
     QObject *settings() const { return m_settings.get(); }
     QObject *state() const;
     QObject *cache() const;
+    QObject *synced() const;
     QObject *sources() const;
     QString problem() const { return m_problem; }
     QString coveredBy() const;
@@ -539,6 +544,7 @@ private:
     std::unique_ptr<PluginSettings> m_settings;
     QVariantMap m_settingDefaults;
     mutable std::unique_ptr<PluginStoreMap> m_state, m_cache;
+    mutable std::unique_ptr<class PluginSyncedMap> m_synced;
     mutable std::unique_ptr<PluginSources> m_sources;
     QString m_problem;
     bool m_away = false;
@@ -667,7 +673,8 @@ public:
     // PanelHeader, SettingNote and SettingSwitch, Choices.numbered and
     // keyboardInUse. 12: pinhole.copyText, input and hasKeys. 13:
     // pinhole.readText and readJson, a worker's `said` in pinhole.workers.
-    static constexpr int api = 13;
+    // 14: pinhole.synced.
+    static constexpr int api = 14;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 
@@ -845,6 +852,8 @@ public:
     bool setSettingOf(const QString &id, const QString &key, const QJsonValue &value);
     // What plugins keep that is not a setting (PluginHost::state, cache).
     PluginStore *stateStore() { return &m_stateStore; }
+    // What is synced of the library shown (synced.h): the plugins'.
+    class SyncedStore *syncedStore() { return m_syncedStore.get(); }
     PluginStore *cacheStore() { return &m_cacheStore; }
     // Where: ~/.local/state/pinhole/plugins, ~/.cache/pinhole/plugins;
     // and the tours seen, ~/.local/state/pinhole/toured.json.
@@ -940,6 +949,7 @@ private:
     // write through it.
     KeptFiles m_files;
     PluginStore m_stateStore, m_cacheStore;
+    std::unique_ptr<class SyncedStore> m_syncedStore;
     // The plugins whose tours were seen (toured.json).
     QJsonObject m_toured;
     // What moveOutOfSettings took out of plugins.json, until it is written

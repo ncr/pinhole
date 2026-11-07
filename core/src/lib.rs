@@ -25,4 +25,5 @@ pub mod source;
 pub mod storage;
 pub mod stream;
 pub mod sync;
+pub mod synced;
 pub mod workers;

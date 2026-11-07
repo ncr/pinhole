@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -311,6 +311,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
          QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(isHidden|hiddenCount|hiddenChanged)\\b"))},
         {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
         {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
+        {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
         {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
         {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
         {"pinhole.setFavorite", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*setFavorite\\b"))},
@@ -722,15 +723,15 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
          true},
         // A key of what it keeps, changed inside: a copy is changed, and
         // nothing is kept or told.
-        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings|synced)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
                                            "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])+\\s*(?:[-+*/]?=(?!=)|\\+\\+|--)")),
          QStringLiteral("pinhole.%1's key changed inside is a copy changed: nothing is kept, and nothing bound to it hears. "
                         "Copy the key, change the copy, assign it whole")},
-        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+        {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(state|cache|settings|synced)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
                                            "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])*\\s*\\.\\s*(?:push|pop|shift|unshift|splice|sort|reverse|fill)\\s*\\(")),
          QStringLiteral("pinhole.%1's key changed in place is a copy changed: nothing is kept, and nothing bound to it hears. "
                         "Copy the key, change the copy, assign it whole")},
-        {QRegularExpression(QStringLiteral("\\bdelete\\s+pinhole\\s*\\.\\s*(state|cache|settings)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
+        {QRegularExpression(QStringLiteral("\\bdelete\\s+pinhole\\s*\\.\\s*(state|cache|settings|synced)\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])"
                                            "\\s*(?:\\.\\s*\\w+|\\[[^\\]\\n]+\\])+")),
          QStringLiteral("deleting inside pinhole.%1's key changes a copy: nothing is kept. Copy the key, delete from the "
                         "copy, assign it whole")},

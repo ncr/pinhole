@@ -324,7 +324,7 @@ footgun Pinhole's own plugins hit):
   `Panel`;
 - `Qt.createQmlObject`: QML made from a string, which check cannot look
   over (a file of the plugin's, with a `Loader` or `Qt.createComponent`);
-- a key of `pinhole.state`, `cache` or `settings` changed inside
+- a key of `pinhole.state`, `synced`, `cache` or `settings` changed inside
   (`pinhole.state.edits[id] = x`, `.push()`, `delete`): a copy is changed,
   nothing is kept and nothing bound to it hears. Copy the key, change the
   copy, assign it whole;
@@ -460,7 +460,9 @@ through the view's own photos only. API 10 takes ids in `hidden` and
 `pinhole.workers`, `PluginView`, `Job`, the manifest's `settings` (each
 setting's default), a `setting` for `SettingSwitch` and `Choices`, and
 `pinhole.adjustment`, `adjust` and `turn`, with `library.item()`'s
-`thumbnailAsIs`.
+`thumbnailAsIs`. API 14 adds `pinhole.synced`: what the user made of a
+library, kept with it on every computer it is shown on, and its file
+given to the plugin's workers (`PINHOLE_SYNCED`).
 
 `Main.qml` beside it:
 
@@ -551,6 +553,11 @@ shown. It is given, after `args`:
 --cache-dir ~/.cache/pinhole/plugins/<id>/<kind>-<name>/
 --managed-plugins ~/.config/pinhole/plugins.json
 ```
+
+and, in its environment, `PINHOLE_SYNCED`: the plugin's `pinhole.synced`
+file of that library (API 14), `{"values": {…}, "clock": {…}}`, whose
+`values` are what the QML reads; it may not be there yet. Read it again
+when it changes, as the settings below; never write it.
 
 `--cache-dir` is the plugin's `pinhole.cacheDir` for that library, made
 before it starts, so what the worker writes there the plugin's QML reads
@@ -909,7 +916,8 @@ this API. A library position is not a visual grid position.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `setting(key, fallback)`, `setSetting(key, value)` | the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out (as assigning `null` to one does: it reads `undefined`, and `settings.keys()` leaves it out) |
-| `state` | what the user made with it, which must outlive Pinhole but is no setting: Series' series made and taken apart by hand, Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
+| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on (API 14): People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
+| `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
@@ -1056,8 +1064,21 @@ Keep each thing in the one it is:
   ```
 
   Setting one to `null` takes the choice back: its default again.
-- `state`: what the user made and would miss: their edits, a panel left
-  open, the devices they sent to.
+- `synced` (API 14): what the user made of the library and would miss on
+  another computer: names given, series made by hand. It is the library's,
+  so another library shown has its own, with nothing to put in its keys.
+  Each computer has it at once and keeps it in
+  `~/.local/state/pinhole/synced/<kind>-<name>/<id>.json`, each key with
+  when and on which computer it was set; pinholed carries it between the
+  computers the library is shown on, as its source can: an iCloud library
+  in a `Pinhole` folder of that account's iCloud Drive, one file to each
+  computer. A folder's library keeps it on this computer. Two computers
+  that change one key before they hear of each other agree on the later,
+  so a key is the most that can be lost to another computer's change:
+  keep each thing the user changes on its own under a key of its own
+  (People: one to a face), not all of them under one.
+- `state`: what the user made and would miss, on this computer: a panel
+  left open, the devices they sent to.
 - `cache`: what can be worked out again, and is kept only to be quick; it
   may be gone (`rm -r ~/.cache/pinhole`), and the plugin works it out again.
 
@@ -1071,11 +1092,21 @@ nothing; several changes in a moment are one write. What could not be
 written is said under the plugin in the side panel. Each is read whole the
 first time the plugin uses it, before the window's first frame if it does
 so as it loads, so keep them small: ids, not pictures (files go in
-`cacheDir`). What is kept for each source's library goes under a key with
-its `library.key`, as Series' `edits:icloud:me@example.com` and
-Screenshots' `found:…`; Screenshots keeps none for a library whose `key`
+`cacheDir`). What is kept in `state` or `cache` for each source's library
+goes under a key with its `library.key`, as Screenshots' `found:…`; Screenshots keeps none for a library whose `key`
 is `""`, nor a list past 5,000, and lets go of those of sources no longer
 added.
+
+`synced` is written as `state` is, soon after and in one step, merged into
+its file under the folder's lock, so what pinholed brought from another
+computer meanwhile stays; a file changed elsewhere is read again, and
+`changed` says what it changed. A file that cannot be read is never
+written over: what was set is said under the plugin in the side panel.
+
+Before API 14 People's names and Series' edits were in their `state`,
+under the library's key: each takes those of the library shown into
+`synced` once, what is synced already winning, and lets them go from its
+`state`.
 
 Before API 3, Pinhole's own plugins kept all of these in their settings.
 The first start of a Pinhole with API 3 moves them out of `plugins.json`,

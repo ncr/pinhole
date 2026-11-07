@@ -83,7 +83,7 @@ service tripped over (a panic, a bug): the rest go on.
 | Method | Params | Result |
 |---|---|---|
 | `fetch` | `asset` (the asset record name, the index's `id`), `kind`, optionally `stream`, and `source`. If supplied, `source` must be nonempty and match the index's `meta.source`. The index must also belong to the source served; otherwise `other_source`. A library given with `--library` can fetch when it is a copy of that source's library; another source's library or one with no owner cannot. | the local file: `path`, `type` (a UTI), `rendition`, `cached`; with `stream`, maybe a `stream` URL instead of waiting (see Streaming) |
-| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event) |
+| `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event), `synced` (how carrying what is synced last went: `at`, milliseconds since 1970, and `error`, or null before it has been carried; see Synced) |
 | `workers` | | `workers`: the plugins' workers it runs or would, as the `workers` event; see Workers |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
 | `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
@@ -302,6 +302,45 @@ socket within seconds, saying only that the zone changed: a round starts
 1.5 s after it (the few pushes of one change make one round). A lost
 connection is tried again after 5 s, doubling to 5 minutes; the rounds
 every minute go on regardless, in case a push is missed.
+
+## Synced
+
+What plugins keep of a library that goes with it to every computer it is
+shown on (`pinhole.synced`, docs/plugins.md; `synced.rs`) is in
+`~/.local/state/pinhole/synced/<kind>-<name>/`, a file to each plugin:
+its `values`, and each key's `clock`, `[milliseconds, computer]`, when and
+where it was last set (a key taken out keeps its clock, so taking it out
+travels). The computer is `~/.local/state/pinhole/device`, an id made by
+whichever of the window and the service first needs one. The window
+writes a key as a plugin sets it, the service what comes from other
+computers, each by reading the file, merging into it and renaming the
+result over it, under the folder's `.lock` (`flock`): neither loses the
+other's. Of two stamps of a key the later wins, and at the same
+millisecond the greater computer, so every computer ends with the same
+whatever order it heard in. Each key set here is stamped a millisecond
+after the latest it has seen of it, so a clock behind another's never
+undoes a change made after one it has heard of.
+
+The shared service carries the library shown's between computers as its
+source can (`Source::carrier`): iCloud in a `Pinhole` folder at the top of
+that account's iCloud Drive (`pinhole-icloud`'s `drive`; api-findings.md,
+iCloud Drive), made the first time there is something to put there. Each
+computer writes one file there, `<its hostname>-<its id>.json`, every
+plugin's file of the library together, and reads the others'. A thread of
+its own (`carry_loop`) carries: as the service starts and as another
+source is shown, once a file here has changed and been still for 3 s (a
+run of faces named goes as one), when a window sends `sync`, and every
+minute (`PINHOLE_SYNC_SECS`) to see what changed elsewhere, since nothing
+tells of that. A round reads the other computers' files whose version
+(Drive's etag) changed since it last read them, merges each plugin's
+into its file here, then writes this computer's own if what it would
+write changed since it last did. What it last did is in the folder's
+`.carried.json`. Windows see what came as their files change. A file
+elsewhere that cannot be read (a newer Pinhole's, one broken) is said in
+pinholed.log and read again only once it changes; a file here that cannot
+be read is never written over. A folder's library, a provider's
+(source-providers.md) and a library given (`--given`) carry nothing: what
+is synced of them stays on this computer.
 
 ## Sources
 

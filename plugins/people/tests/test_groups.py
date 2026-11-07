@@ -235,5 +235,24 @@ class Guesses(unittest.TestCase):
             self.assertEqual(worker.guesses(db, ["a1", "o1"]), {})
 
 
+class Edits(unittest.TestCase):
+    def test_names_come_from_the_synced_file_over_what_was_kept_before(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            state, synced = Path(folder, "state.json"), Path(folder, "pinhole.people.json")
+            state.write_text(json.dumps({"people:icloud:a": {"old": {"name": "Ola"}, "both": {"name": "Ola"}}}))
+            synced.write_text(json.dumps({"values": {"both": {"name": "Anna"}, "new": {"rejected": ["x"]}},
+                                          "clock": {}}))
+            names, excluded = worker.load_edits(synced, state, "icloud:a", None)
+            self.assertEqual(names, ["both", "old"])
+            self.assertEqual(excluded, {"new": ["x"]})
+            # Neither there yet: nothing said; a file that cannot be read
+            # keeps what was read before.
+            self.assertEqual(worker.load_edits(Path(folder, "none"), Path(folder, "none"), "icloud:a", None), ([], {}))
+            synced.write_text("{not json")
+            self.assertEqual(worker.load_edits(synced, state, "icloud:a", "before"), "before")
+
+
 if __name__ == "__main__":
     unittest.main()

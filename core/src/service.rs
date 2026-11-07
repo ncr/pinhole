@@ -194,6 +194,10 @@ struct Shared {
     listeners: Mutex<Vec<Arc<Window>>>,
     /// Wakes the sync thread before its next round is due.
     sync_now: Mutex<mpsc::Sender<()>>,
+    /// Wakes the thread that carries what is synced (carry_loop).
+    carry_now: Mutex<mpsc::Sender<()>>,
+    /// How carrying last went: the `synced` of `status`.
+    carried: Mutex<Value>,
     streams: Arc<Streams>,
     /// The play URL of each video downloading now, by its cache path.
     playable: Mutex<HashMap<PathBuf, String>>,
@@ -792,6 +796,7 @@ pub fn run(config: Config) -> Result<()> {
 
     let (lookup_tx, lookup_rx) = mpsc::channel::<Job>();
     let (sync_tx, sync_rx) = mpsc::channel::<()>();
+    let (carry_tx, carry_rx) = mpsc::channel::<()>();
     let (download_tx, download_rx) = mpsc::channel::<Job>();
     let (changes_tx, changes_rx) = mpsc::channel::<(String, Value, Reply)>();
     let (favorites_tx, favorites_rx) = mpsc::channel::<(Value, Reply)>();
@@ -817,6 +822,8 @@ pub fn run(config: Config) -> Result<()> {
         in_flight: AtomicUsize::new(0),
         listeners: Mutex::new(Vec::new()),
         sync_now: Mutex::new(sync_tx),
+        carry_now: Mutex::new(carry_tx),
+        carried: Mutex::new(Value::Null),
         streams: Streams::start()?,
         playable: Mutex::new(HashMap::new()),
         health: Mutex::new(Health::Fine),
@@ -928,6 +935,10 @@ pub fn run(config: Config) -> Result<()> {
         {
             let shared = shared.clone();
             std::thread::spawn(move || sync_loop(shared, sync_rx));
+        }
+        {
+            let shared = shared.clone();
+            std::thread::spawn(move || carry_loop(shared, carry_rx));
         }
         watch(&shared, &*shared.source());
         {
@@ -1173,6 +1184,7 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
             Some("workers") => reply.send(Ok(shared.workers.report_now(shared.workers_shown().as_ref()))),
             Some("sync") => {
                 let _ = shared.sync_now.lock().unwrap().send(());
+                let _ = shared.carry_now.lock().unwrap().send(());
                 reply.send(Ok(json!({})))
             }
             Some("status") => reply.send(Ok(json!({
@@ -1180,6 +1192,7 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
                 "cache": shared.storage.cache(),
                 "cache_bytes": shared.storage.report()["used_bytes"],
                 "in_flight": shared.in_flight.load(Ordering::Relaxed),
+                "synced": *shared.carried.lock().unwrap(),
                 "windows": shared.listeners.lock().unwrap().len(),
                 "health": shared.health.lock().unwrap().name(),
                 "source": source_info(&shared.config.kinds, &*shared.source()),
@@ -1984,6 +1997,84 @@ fn sync_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
         }
         // Several asks at once make one round.
         while wake.try_recv().is_ok() {}
+    }
+}
+
+/// What is synced of the library shown (synced.rs), carried between this
+/// computer and the others as its source can: soon after it changes here
+/// (once it has been still for a moment: a run of faces named goes as
+/// one), and every round's while to see what changed elsewhere. Windows
+/// see what comes, as their files change.
+fn carry_loop(shared: Arc<Shared>, wake: mpsc::Receiver<()>) {
+    const LOOK: Duration = Duration::from_secs(2);
+    const STILL: Duration = Duration::from_secs(3);
+    let device = match crate::synced::device() {
+        Ok(device) => device,
+        Err(e) => {
+            eprintln!("pinholed: synced: no id for this computer, nothing carried: {e:#}");
+            return;
+        }
+    };
+    let computer = crate::synced::computer();
+    // The library last carried, how its files looked then, and when.
+    let mut carried: Option<(PathBuf, Vec<(String, u64, SystemTime)>, Instant)> = None;
+    // How they look now, and since when (a change waits to be still).
+    let mut seen: Option<(Vec<(String, u64, SystemTime)>, Instant)> = None;
+    let mut asked = true;
+    loop {
+        match wake.recv_timeout(LOOK) {
+            Ok(()) => asked = true,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+        let source = shared.source();
+        let Some(carrier) = source.carrier() else {
+            carried = None;
+            continue;
+        };
+        let library = shared.storage.library();
+        let dir = crate::synced::library_dir(&library);
+        let now = crate::synced::signature(&dir);
+        if seen.as_ref().is_none_or(|(s, _)| *s != now) {
+            seen = Some((now.clone(), Instant::now()));
+        }
+        // Nothing tells of a change elsewhere: looked for every minute,
+        // whatever the source's rounds.
+        let every = shared.config.sync_every.map_or(Duration::from_secs(60), Duration::from_secs).max(Duration::from_secs(5));
+        let due = match &carried {
+            None => true,
+            Some((was, _, _)) if *was != library => true,
+            Some((_, files, at)) => {
+                asked
+                    || at.elapsed() >= every
+                    || (*files != now && seen.as_ref().is_some_and(|(_, since)| since.elapsed() >= STILL))
+            }
+        };
+        if !due {
+            continue;
+        }
+        asked = false;
+        match catch_unwind(AssertUnwindSafe(|| crate::synced::carry(&dir, carrier, &device, &computer))) {
+            Ok(Ok(done)) => {
+                if done.sent || !done.read.is_empty() {
+                    eprintln!(
+                        "pinholed: synced: {}{}{}",
+                        if done.sent { "sent this computer's" } else { "" },
+                        if done.sent && !done.read.is_empty() { "; " } else { "" },
+                        if done.read.is_empty() { String::new() } else { format!("read {}", done.read.join(", ")) },
+                    );
+                }
+                *shared.carried.lock().unwrap() = json!({"at": millis(SystemTime::now()), "error": null});
+            }
+            Ok(Err(e)) => {
+                eprintln!("pinholed: synced: {e:#}");
+                *shared.carried.lock().unwrap() = json!({"at": millis(SystemTime::now()), "error": format!("{e:#}")});
+            }
+            Err(panic) => eprintln!("pinholed: synced: carrying panicked ({})", panic_message(&*panic)),
+        }
+        // Tried, whatever came of it: again when it changes here, a window
+        // asks, or the next round's while is up.
+        carried = Some((library, crate::synced::signature(&dir), Instant::now()));
     }
 }
 

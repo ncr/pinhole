@@ -7,51 +7,84 @@ import Pinhole.Plugin
 PinholePlugin {
     id: plugin
 
-    // What is said of faces here and in the view, as pinhole-faces takes it.
+    // What is said of faces here and in the view, as pinhole-faces takes it:
+    // by face, synced with the library to every computer it is shown on.
     readonly property string source: pinhole.library.key || pinhole.library.dir
-    readonly property string stateKey: "people:" + source
-    // A name given or taken, by either: the view reads again.
-    signal edited(string key)
+    property var edits: ({})
+    // What is said of faces changed, here or elsewhere: the view reads
+    // again.
+    signal edited()
 
-    function writeEdits(key, patch) {
-        const saved = Object.assign({}, pinhole.state[key] || {})
+    function reread() {
+        edits = pinhole.synced.values()
+        edited()
+        if (shownId !== "") lookSoon.restart()
+    }
+    Connections {
+        target: pinhole.synced
+        function onChanged() { plugin.reread() }
+    }
+    // Kept on this computer alone before the names went with the library
+    // (pinhole.state, "people:" and the library's key): taken into it once,
+    // what is synced already of a face winning.
+    function adopt() {
+        const key = "people:" + source
+        const before = pinhole.state[key]
+        if (!before) return
+        const now = pinhole.synced.values()
+        for (const face of Object.keys(before))
+            if (now[face] === undefined) pinhole.synced[face] = before[face]
+        pinhole.state[key] = null
+    }
+    Component.onCompleted: { adopt(); reread() }
+    onSourceChanged: { adopt(); reread() }
+
+    function writeEdits(patch) {
+        const now = Object.assign({}, edits)
         for (const face of Object.keys(patch)) {
             const edit = patch[face]
-            if (edit.name || edit.person || edit.rejected?.length || edit.not?.length || edit.unknown) saved[face] = edit
-            else delete saved[face]
+            const kept = edit.name || edit.person || edit.rejected?.length || edit.not?.length || edit.unknown
+            pinhole.synced[face] = kept ? edit : null
+            if (kept) now[face] = edit
+            else delete now[face]
         }
-        pinhole.state[key] = saved
-        edited(key)
-        if (key === stateKey) look()
+        // There at once for the next step; told again as it is kept.
+        edits = now
     }
     // Said of faces since found again in a new thumbnail (turned or cropped
     // in iCloud, edited on a phone): moved to their keys now, as
     // pinhole-faces says ({ old: new }). No step: nothing changes but the
-    // keys.
+    // keys. Another computer finds the same new keys in the same
+    // thumbnails, and moves what it hears of the old ones as it reads them.
     function moveEdits(moved) {
         const olds = Object.keys(moved || {})
         if (olds.length === 0) return
-        const saved = Object.assign({}, pinhole.state[stateKey] || {})
+        const patch = {}
         for (const old of olds) {
-            if (!(old in saved)) continue
-            if (!(moved[old] in saved)) saved[moved[old]] = saved[old]
-            delete saved[old]
+            if (!(old in edits)) continue
+            if (!(moved[old] in edits)) patch[moved[old]] = edits[old]
+            patch[old] = null
         }
-        for (const key of Object.keys(saved))
-            if (saved[key].rejected)
-                saved[key] = Object.assign({}, saved[key], { rejected: saved[key].rejected.map(face => moved[face] || face) })
-        pinhole.state[stateKey] = saved
-        edited(stateKey)
+        for (const key of Object.keys(edits)) {
+            const rejected = edits[key].rejected
+            if (rejected && rejected.some(face => face in moved))
+                patch[key] = Object.assign({}, patch[key] || edits[key], { rejected: rejected.map(face => moved[face] || face) })
+        }
+        const now = Object.assign({}, edits)
+        for (const key of Object.keys(patch)) {
+            pinhole.synced[key] = patch[key]
+            if (patch[key] === null) delete now[key]
+            else now[key] = patch[key]
+        }
+        edits = now
     }
-    // A step to undo, in the library it was taken in.
+    // A step to undo.
     function edit(patch, label) {
-        const key = stateKey
-        const now = pinhole.state[key] || {}
         const before = {}
         for (const face of Object.keys(patch))
-            before[face] = Object.assign({}, now[face])
-        writeEdits(key, patch)
-        pinhole.did(label, () => plugin.writeEdits(key, before), () => plugin.writeEdits(key, patch))
+            before[face] = Object.assign({}, edits[face])
+        writeEdits(patch)
+        pinhole.did(label, () => plugin.writeEdits(before), () => plugin.writeEdits(patch))
     }
 
     // The photo shown full window, and the faces in it: [{ key, box, name,
@@ -81,7 +114,6 @@ PinholePlugin {
     function look() {
         const id = shownId
         if (id === "") return
-        const edits = pinhole.state[stateKey] || {}
         looking.start(() => pinhole.run("pinhole-faces", ["photo", "--cache", pinhole.cacheDir], {
             input: JSON.stringify({ source: plugin.source, edits: edits, photo: id, offset: 0 }),
             timeout: 10000
@@ -149,7 +181,6 @@ PinholePlugin {
     }
     // This face is `name`, alone: its group stays to name in People.
     function nameFace(face, name) {
-        const edits = pinhole.state[stateKey] || {}
         said(face.key, name)
         edit({ [face.key]: Object.assign({}, edits[face.key], { person: name }) }, qsTr("naming a face"))
     }
@@ -159,7 +190,6 @@ PinholePlugin {
     // regrouping (pinhole-faces' load_edits), as one said to be someone
     // else is: the rest of that group may well be them.
     function unnameFace(face) {
-        const edits = pinhole.state[stateKey] || {}
         const previous = edits[face.key] || {}
         const patch = { [face.key]: Object.assign({}, previous, {
             person: undefined,
@@ -175,7 +205,6 @@ PinholePlugin {
     // A name can be taken from it here: given to it alone, or with a group
     // named by an older version, as one of its photos.
     function canUnname(face) {
-        const edits = pinhole.state[stateKey] || {}
         return !!face.name && (!!edits[face.key]?.person || (!!face.legacy && face.legacy !== face.key))
     }
 

@@ -20,6 +20,7 @@ Properties:
 - `bool covering`: Over the photos and taking the keys: the grid's controls fade and its keys rest, as for Pinhole's own panels. One plugin at a time, the last to start covering: the others wait beneath, unseen and without keys (pinhole.coveredBy says whose it is). By itself while one of its PluginViews is open.
 - `var viewStack`: Its PluginViews open, the last opened last (they keep it), and how many.
 - `int openViews` (readonly)
+- `bool coveringAway` (readonly): The last of them opened over a photo it opened to come back from (pinhole.away): it covers that photo meanwhile, as People's W does.
 - `var help`: Its keys, as the help (?) lists them: [["G", "Series"], ...].
 - `var stacks`: Photos shown in the grid as one card, each a list of library positions: the card stands where the first is and shows it, with the mark for several photos. Opening it opens that photo.
 - `var hidden`: Photos not shown in the grid at all, library positions: no cell, out of any stack, and passed over by the viewer's ← and → and its strip.
@@ -482,7 +483,7 @@ PluginView { id: calendar; source: "Calendar.qml"; toggleKey: "Y" }
 PluginAction { place: "grid"; text: qsTr("Calendar"); key: "Y"; onTriggered: calendar.open() }
 ```
 
-While it is open the plugin covers the photos (its root's `covering`, unless the plugin binds that itself), and it fades in and out. It is made the first time it opens and kept after, so a launch that never shows it pays nothing; `lazy: false` makes it at once. It closes on Esc and on its `toggleKey`, when a photo is handed over from it (pinhole's dismissed()), and is hidden, still open, while a photo opened from it with comeBack shows (pinhole.away).
+While it is open the plugin covers the photos (its root's `covering`, unless the plugin binds that itself), and it fades in and out. It is made the first time it opens and kept after, so a launch that never shows it pays nothing; `lazy: false` makes it at once. It closes on Esc and on its `toggleKey`, when a photo is handed over from it (pinhole's dismissed()), and is hidden, still open, while a photo opened from it with comeBack shows (pinhole.away). One opened while that photo shows is over it, covering it, as People's W names who is in it.
 
 What it shows is `source`, a QML file of the plugin's, or `content`, a Component; `item` is that, once made. In a `source` file, `view` is this view from its first binding on (`view.shown`, `view.close()`, `view.plugin`, the plugin's root), and `pinhole` the plugin's, as anywhere in its files; declare neither. A PanelHeader in it closes it with ✕.
 
@@ -506,6 +507,7 @@ Properties:
 - `Item plugin` (readonly): The plugin's root and what Pinhole gives it.
 - `var pinhole` (readonly)
 - `bool onTop` (readonly): The last opened of the plugin's open views: the one with the keys.
+- `bool openedAway` (readonly): Opened over a photo the plugin opened to come back from: shown.
 
 Signals:
 
