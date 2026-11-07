@@ -50,7 +50,6 @@ PinholePlugin {
     // hold up the viewer's own photos from the service and push them out of
     // its cache. A folder's original is its own file, here already.
     readonly property double smallVideo: 50 * 1024 * 1024
-    readonly property string index: pinhole.library.dir + "/library.sqlite"
 
     readonly property int at: showing ? pinhole.viewer.index : -1
     onAtChanged: look()
@@ -170,12 +169,19 @@ PinholePlugin {
     // facts } (facts only if they were kept). `hold` is given the program
     // run, to cancel.
     function indexed(id, hold) {
-        return hold(pinhole.run("pinhole-info", ["index", index, id, pinhole.cacheDir])).then(result => {
-            const out = result.stdout
-            const split = out.indexOf("\n--\n")
-            const row = JSON.parse(out.slice(0, split))[0] || {}
-            const cached = out.slice(split + 4).trim()
-            const found = { key: row.key || "", first: Details.fromIndex(row), facts: null }
+        // Through pinhole.query, bounded and read only, as every plugin
+        // reads the index; then what was read of the original before, from
+        // the cache's file (pinhole-info fact).
+        const sql = "SELECT a.*, a.has_location AS location, a.item_type AS type, r.width, r.height, " +
+                    "r.file_type AS fileType, r.key FROM assets a LEFT JOIN renditions r " +
+                    "ON r.asset_id = a.id AND r.kind = 'original' WHERE a.id = ?"
+        let found = null
+        return hold(pinhole.query(sql, [id])).then(rows => {
+            const row = rows[0] || {}
+            found = { key: row.key || "", first: Details.fromIndex(row), facts: null }
+            return hold(pinhole.run("pinhole-info", ["fact", pinhole.cacheDir, id, found.key]))
+        }).then(result => {
+            const cached = result.stdout.trim()
             if (cached !== "") {
                 try {
                     found.facts = Details.merged(found.first, JSON.parse(cached))
@@ -393,12 +399,13 @@ PinholePlugin {
         const date = pinhole.library.item(index).date
         if (date === undefined)
             return finding.cancel()
-        finding.start(() => pinhole.run("pinhole-info", ["located", plugin.index, String(Math.round(date))]))
+        finding.start(() => pinhole.query("SELECT id FROM assets WHERE has_location = 1 AND is_video = 0 " +
+                                          "ORDER BY abs(asset_date - ?) LIMIT 1", [Math.round(date)]))
     }
     Job {
         id: finding
         onDone: result => {
-            plugin.placeId = result.stdout.trim()
+            plugin.placeId = result.length > 0 ? result[0].id : ""
             if (plugin.placeId !== "")
                 plugin.readAhead(plugin.placeId)
             const at = plugin.placeId !== "" ? pinhole.library.indexOf(plugin.placeId) : -1
