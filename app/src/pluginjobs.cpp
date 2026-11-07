@@ -19,6 +19,8 @@
 #include <QFileInfo>
 #include <QJSEngine>
 #include <QJSValueIterator>
+#include <QJsonArray>
+#include <QPointer>
 #include <QMimeData>
 #include <QProcess>
 #include <QQmlEngine>
@@ -723,20 +725,33 @@ QVariantMap mapOf(const Adjustment &a) {
 }
 } // namespace
 
-QVariantMap PluginHost::adjustment(const QJSValue &photo) const {
-    AdjustmentStore *store = m_plugins->adjustments();
-    const QList<QByteArray> ids = idsOf(photo);
-    return mapOf(store && !ids.isEmpty() ? store->of(ids.first()) : Adjustment());
+Adjustment PluginHost::currentAdjustment(const QByteArray &id) const {
+    // Kept here (a folder's, or one being saved), else its source's.
+    if (AdjustmentStore *store = m_plugins->adjustments(); store && !store->of(id).isIdentity())
+        return store->of(id);
+    const Library *data = m_plugins->libraryData();
+    if (const int at = m_plugins->library()->positionOf(QJSValue(QString::fromUtf8(id))); at >= 0)
+        return data->at(at).sourceEdit;
+    return {};
 }
 
-bool PluginHost::adjust(const QJSValue &photos, const QVariantMap &adjustment) {
+QVariantMap PluginHost::adjustment(const QJSValue &photo) const {
+    const QList<QByteArray> ids = idsOf(photo);
+    if (ids.isEmpty())
+        return mapOf(Adjustment());
+    QVariantMap map = mapOf(currentAdjustment(ids.first()));
+    // Where it is kept: "source" (its renditions are of it already), "here"
+    // or "" for none.
     AdjustmentStore *store = m_plugins->adjustments();
-    const QList<QByteArray> ids = idsOf(photos);
-    if (!store || ids.isEmpty())
-        return false;
-    Adjustments changes;
-    for (const QByteArray &id : ids) {
-        Adjustment a = store->of(id);
+    const bool here = store && !store->of(ids.first()).isIdentity();
+    map.insert("kept", here ? QStringLiteral("here") : currentAdjustment(ids.first()).isIdentity() ? QString() : QStringLiteral("source"));
+    return map;
+}
+
+QJSValue PluginHost::adjust(const QJSValue &photos, const QVariantMap &adjustment) {
+    Adjustments targets;
+    for (const QByteArray &id : idsOf(photos)) {
+        Adjustment a = currentAdjustment(id);
         if (adjustment.contains("turn"))
             a.turn = adjustment.value("turn").toInt();
         if (adjustment.contains("crop")) {
@@ -745,18 +760,101 @@ bool PluginHost::adjust(const QJSValue &photos, const QVariantMap &adjustment) {
                                     : QRectF(crop.value("x").toDouble(), crop.value("y").toDouble(),
                                              crop.value("width", 1).toDouble(), crop.value("height", 1).toDouble());
         }
-        changes.insert(id, a.normalized());
+        targets.insert(id, a.normalized());
     }
-    return store->set(changes);
+    return applyAdjustments(targets);
 }
 
-bool PluginHost::turn(const QJSValue &photos, int quarters) {
+QJSValue PluginHost::turn(const QJSValue &photos, int quarters) {
+    Adjustments targets;
+    for (const QByteArray &id : idsOf(photos))
+        targets.insert(id, currentAdjustment(id).turned(quarters));
+    return applyAdjustments(targets);
+}
+
+// Where the source keeps edits (iCloud), there: each photo's original
+// fetched, then set_edit, one after another; the service reads the
+// library again once each is in. Where it keeps none (a folder), here
+// (AdjustmentStore). A promise of what was done: { photos: [{ id, turn,
+// crop }], kept: "source" or "here" }.
+QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
+    const int generation = m_generation;
+    const Deferred deferred = defer([] {});
     AdjustmentStore *store = m_plugins->adjustments();
-    const QList<QByteArray> ids = idsOf(photos);
-    if (!store || ids.isEmpty())
-        return false;
-    Adjustments changes;
-    for (const QByteArray &id : ids)
-        changes.insert(id, store->of(id).turned(quarters));
-    return store->set(changes);
+    ServiceClient *service = m_plugins->service();
+    const Library *data = m_plugins->libraryData();
+    if (targets.isEmpty() || !store) {
+        settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such photo")));
+        return deferred.promise;
+    }
+    auto done = [this, generation, deferred, targets](const QString &kept) {
+        QVariantList photos;
+        for (auto it = targets.begin(); it != targets.end(); ++it) {
+            QVariantMap one = mapOf(it.value());
+            one.insert("id", QString::fromUtf8(it.key()));
+            photos.append(one);
+        }
+        settle(generation, deferred.resolve, engine()->toScriptValue(QVariantMap{{"photos", photos}, {"kept", kept}}));
+    };
+    const QString source = data->source();
+    // A library no source fills (pinhole-fake's), a folder's, or no
+    // service: here.
+    if (!service || source.isEmpty() || source == QLatin1String("fake") || source.startsWith(QLatin1String("folder:"))) {
+        if (!store->set(targets)) {
+            settle(generation, deferred.reject, error(QStringLiteral("unavailable"), tr("could not keep the edit")));
+            return deferred.promise;
+        }
+        done(QStringLiteral("here"));
+        return deferred.promise;
+    }
+    auto left = std::make_shared<QList<QByteArray>>(targets.keys());
+    auto next = std::make_shared<std::function<void()>>();
+    const QPointer<PluginHost> alive(this);
+    *next = [=]() {
+        if (!alive)
+            return;
+        if (left->isEmpty()) {
+            // In the source now: nothing kept here for them any more.
+            Adjustments none;
+            for (auto it = targets.begin(); it != targets.end(); ++it)
+                none.insert(it.key(), Adjustment());
+            store->set(none);
+            return done(QStringLiteral("source"));
+        }
+        const QByteArray id = left->takeFirst();
+        const Adjustment target = targets.value(id);
+        service->fetch(id, QStringLiteral("original"), [=](bool ok, const QJsonObject &result, const QString &code) {
+            if (!alive)
+                return;
+            if (!ok) {
+                settle(generation, deferred.reject, error(code.isEmpty() ? QStringLiteral("unavailable") : code,
+                                                          result.value("message").toString(code)));
+                return;
+            }
+            QJsonObject params{{"asset", QString::fromUtf8(id)}, {"original", result.value("path").toString()},
+                               {"source", source}};
+            if (!target.isIdentity()) {
+                params.insert("turn", target.turn);
+                params.insert("crop", QJsonArray{target.crop.x(), target.crop.y(), target.crop.width(), target.crop.height()});
+            }
+            service->call(QStringLiteral("set_edit"), params, [=](bool ok, const QJsonObject &answer, const QString &code) {
+                if (!alive)
+                    return;
+                // A source that keeps no edits (a provider's): all of
+                // them here.
+                if (!ok && code == QLatin1String("unsupported")) {
+                    store->set(targets);
+                    return done(QStringLiteral("here"));
+                }
+                if (!ok) {
+                    settle(generation, deferred.reject, error(code.isEmpty() ? QStringLiteral("unavailable") : code,
+                                                              answer.value("message").toString(code)));
+                    return;
+                }
+                (*next)();
+            });
+        }, false, source);
+    };
+    (*next)();
+    return deferred.promise;
 }

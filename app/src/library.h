@@ -23,6 +23,9 @@ struct LibraryItem {
     quint16 rawW = 0;
     quint16 rawH = 0;
     Adjustment adjust;
+    // What its source has done to it (iCloud's edits, as the index's
+    // `edit` says): its thumbnail and renditions are of it so already.
+    Adjustment sourceEdit;
     float duration = 0;
     qint64 date = 0;
     qint64 added = 0; // source's added date (ms); 0 when unknown, never index/import time

@@ -176,6 +176,11 @@ pub struct Asset {
     /// A Live Photo's, as set on the iPhone.
     pub effect: Option<Effect>,
     pub renditions: Vec<Rendition>,
+    /// What was done to it where the source keeps edits (iCloud): turned
+    /// and cropped, as "turn,x,y,width,height", the part kept in fractions
+    /// of the photo as turned (the window's adjustment.h query form). Its
+    /// renditions are of the photo so already.
+    pub edit: Option<String>,
 }
 
 impl Asset {
@@ -503,6 +508,24 @@ pub trait Source: Send + Sync {
     fn set_favorite(&self, _index: &rusqlite::Connection, _ids: &[String], _favorite: bool) -> Result<()> {
         Err(Unsupported(format!("{} keeps no favourites", self.name())).into())
     }
+
+    /// Turn and crop a photo where the source keeps edits (iCloud, as its
+    /// devices do), from its `original` on this computer, rendered in
+    /// `work`; `None` takes any edit off. The original stays as it was.
+    /// The library learns of it at the next round. Unsupported where the
+    /// source keeps none: the window keeps the edit itself.
+    fn set_edit(&self, _index: &rusqlite::Connection, _id: &str, _original: &std::path::Path, _edit: Option<Edit>,
+                _work: &std::path::Path) -> Result<()> {
+        Err(Unsupported(format!("{} keeps no edits", self.name())).into())
+    }
+}
+
+/// A photo turned by quarters clockwise, then the part kept, in fractions
+/// of the photo as turned (x, y, width, height).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Edit {
+    pub turn: u8,
+    pub crop: [f64; 4],
 }
 
 /// Nothing to show photos from yet, or any more: every source removed.

@@ -49,6 +49,8 @@ pub struct CloudAsset {
     pub location: Option<Location>,
     /// `adjustmentRenderType`: flags of what the edit is (`effect`).
     pub render_type: i64,
+    /// Its turn and crop as Photos' recipe says them (edit::from_record).
+    pub edit: Option<String>,
     /// In Recently Deleted, hidden, or erased: not shown in the library.
     pub gone: bool,
     pub resources: Vec<Resource>,
@@ -131,6 +133,7 @@ impl CloudAsset {
             size: self.resource("Original").and_then(|r| r.size),
             effect,
             renditions,
+            edit: self.edit.clone(),
         }
     }
 }
@@ -254,6 +257,7 @@ fn build_asset(asset: &Value, master: &Value, keep_raw: bool) -> CloudAsset {
         has_location: location.is_some() || !af["locationEnc"].is_null() || !af["locationV2Enc"].is_null(),
         location,
         render_type: af["adjustmentRenderType"]["value"].as_i64().unwrap_or(0),
+        edit: crate::edit::from_record(af, mf),
         gone: ["isDeleted", "isHidden", "isExpunged"].iter().any(|f| af[*f]["value"].as_i64() == Some(1)),
         resources,
         raw: keep_raw.then(|| (asset.clone(), master.clone())),

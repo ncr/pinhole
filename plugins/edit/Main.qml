@@ -26,15 +26,36 @@ PinholePlugin {
     function idsOf(photos) {
         return photos.map(photo => pinhole.library.item(photo).id).filter(id => id !== undefined)
     }
-    // Each as it is now, to undo to; a step that puts them back, or
-    // does it again, in the library it was done in.
+    // Saving in iCloud, which takes a second or two: said if it takes
+    // longer than a moment.
+    property bool saving: false
+    property bool said: false
+    Timer {
+        id: slow
+        interval: 700
+        onTriggered: if (plugin.saving) { plugin.said = true; pinhole.notify(qsTr("Saving the edit in iCloud…")) }
+    }
+    // Each as it is now, to undo to; then done (in iCloud, where the photo
+    // is iCloud's, else kept here), and a step that puts them back, or does
+    // it again, in the library it was done in.
     function step(words, ids, apply) {
         const before = ids.map(id => pinhole.adjustment(id))
         const key = pinhole.library.key
-        apply()
-        const after = ids.map(id => pinhole.adjustment(id))
-        pinhole.did(words, () => { if (pinhole.library.key === key) ids.forEach((id, i) => pinhole.adjust(id, before[i])) },
-                           () => { if (pinhole.library.key === key) ids.forEach((id, i) => pinhole.adjust(id, after[i])) })
+        saving = true
+        said = false
+        slow.restart()
+        apply().then(done => {
+            saving = false
+            const after = done.photos
+            pinhole.did(words,
+                        () => { if (pinhole.library.key === key) ids.forEach((id, i) => pinhole.adjust(id, before[i]).catch(pinhole.warn)) },
+                        () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, a).catch(pinhole.warn)) })
+            if (said && done.kept === "source")
+                pinhole.notify(qsTr("Saved in iCloud"))
+        }).catch(error => {
+            saving = false
+            pinhole.notify(qsTr("Could not save the edit: %1").arg(error.message))
+        })
     }
     function turn(photos, quarters) {
         const ids = idsOf(photos)

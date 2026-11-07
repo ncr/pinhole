@@ -34,7 +34,7 @@ pub const DESIRED_KEYS: &[&str] = &[
     "resOriginalAltWidth", "resOriginalAltHeight", "resOriginalAltFileType", "resOriginalAltRes",
     "resOriginalVidComplWidth", "resOriginalVidComplHeight", "resOriginalVidComplFileType", "resOriginalVidComplRes",
     "resVidComplWidth", "resVidComplHeight", "resVidComplFileType", "resVidComplRes",
-    "adjustmentRenderType",
+    "adjustmentRenderType", "adjustmentType", "adjustmentSimpleDataEnc",
     "itemType", "filenameEnc", "originalOrientation", "orientation",
     "isDeleted", "isExpunged", "isFavorite", "isHidden",
     "recordName", "recordType", "recordChangeTag", "masterRef",

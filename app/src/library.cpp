@@ -30,9 +30,10 @@ bool Library::open(const QString &dir, QString *error) {
         const QSqlRecord schema = db.record("assets");
         const QString effectColumn = schema.indexOf("live_effect") >= 0 ? "live_effect" : "NULL";
         const QString addedColumn = schema.indexOf("added_date") >= 0 ? "added_date" : "NULL";
+        const QString editColumn = schema.indexOf("edit") >= 0 ? "edit" : "NULL";
         const QString columns = QStringLiteral("thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, "
-                                               "favorite, id, filename, %1, %2 FROM assets ORDER BY asset_date, id");
-        if (!q.exec(QStringLiteral("SELECT ") + columns.arg(effectColumn, addedColumn))) {
+                                               "favorite, id, filename, %1, %2, %3 FROM assets ORDER BY asset_date, id");
+        if (!q.exec(QStringLiteral("SELECT ") + columns.arg(effectColumn, addedColumn, editColumn))) {
             *error = q.lastError().text();
             return false;
         }
@@ -55,6 +56,8 @@ bool Library::open(const QString &dir, QString *error) {
             item.id = q.value(9).toString().toUtf8();
             item.filename = q.value(10).toString();
             item.added = q.value(12).toLongLong();
+            if (!q.value(13).isNull())
+                item.sourceEdit = Adjustment::fromQuery(q.value(13).toString());
             const QString effect = q.value(11).toString();
             item.effect = effect == QLatin1String("loop")            ? LiveEffect::Loop
                         : effect == QLatin1String("bounce")          ? LiveEffect::Bounce

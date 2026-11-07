@@ -12,6 +12,7 @@
   "%1 of %2 used · %3 free on this disk": "Zajęte %1 z %2 · %3 wolne na tym dysku",
   "%1 s": "%1 s",
   "%1 selected": "Zaznaczono %1",
+  "could not keep the edit": "nie udało się zachować edycji",
   "could not read %1": "nie udało się odczytać %1",
   "larger than 32 MB: %1": "większy niż 32 MB: %1",
   "only a file in the plugin's folder or its cache: %1": "tylko plik z folderu pluginu albo jego pamięci podręcznej: %1",

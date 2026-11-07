@@ -399,6 +399,7 @@ impl FolderSource {
             size: Some(f.size as i64),
             effect: None,
             renditions,
+            edit: None,
         })
     }
 

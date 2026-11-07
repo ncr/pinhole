@@ -913,7 +913,7 @@ this API. A library position is not a visual grid position.
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
-| `adjustment(photo)`, `adjust(photos, adjustment)`, `turn(photos, quarters)` | what the person did to a photo in Pinhole, never to its file (API 13): `{ turn, crop: { x, y, width, height } }`, quarter turns clockwise and the part kept as fractions of the photo turned. The grid, the viewer, an export as JPEG and a copy show it so; the original exported is as taken. `adjust` sets `turn` and/or `crop` (`{ turn: 0, crop: null }` takes it all back); `turn` turns from where each is, its crop turning with it. Kept per library apart from it (`~/.local/state/pinhole/adjustments/`), followed by other windows; `library.item()` then says the size drawn, and `thumbnailAsIs` is the thumbnail as its file is (to crop again). No step to undo is made: record one with `did`, as Turn and crop does |
+| `adjustment(photo)`, `adjust(photos, adjustment)`, `turn(photos, quarters)` | what was done to a photo, never to its original (API 13): `{ turn, crop: { x, y, width, height }, kept }`, quarter turns clockwise and the part kept as fractions of the photo turned; `kept` is `"source"`, `"here"` or `""`. Where the source keeps edits (iCloud) `adjust` and `turn` write it there as its devices write theirs, the photo rendered from its original: an iPhone shows it and can revert it, though it opens no edit made elsewhere to change it (docs/api-findings.md, Edits); edits made on an iPhone read back the same way. Where it keeps none (a folder), Pinhole keeps it (`~/.local/state/pinhole/adjustments/`) and draws it so: the grid, the viewer, an export as JPEG, a copy. Either way a promise of `{ photos: [{ id, turn, crop }], kept }`; `{ turn: 0, crop: null }` takes it back; `turn` turns from where each is, its crop turning with it. `library.item()` says the size drawn; `thumbnailAsIs` is the thumbnail as its file is. No step to undo is made: record one with `did`, as Turn and crop does |
 | `readText(path)`, `readJson(path)` | a file of its own read whole, away from the window (API 13): one in its folder (`dir`) or its cache (`cacheDir`, what its worker writes). A promise of its text, or of what its JSON says; rejected `not_found`, `not_yours` (a file elsewhere), `too_large` (over 32 MB), `unreadable` or `json` |
 | `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
@@ -936,7 +936,7 @@ one in-memory column is enough. The public catalog tables are:
 
 | Table | Columns |
 |---|---|
-| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read` |
+| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read`, `edit` |
 | `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
 | `meta` | `key`, `value`: `source` is the library's source key (as `library.key`), which a worker checks against `--library-key` |
 
@@ -952,6 +952,10 @@ Inspect the installed schema with `query("PRAGMA table_info(assets)")` or
 `query("PRAGMA table_info(renditions)")` before using an optional column.
 Catalog schema 2 adds nullable `latitude` and `longitude`: a pair of signed
 WGS 84 decimal degrees. `has_location` can be true without a readable pair.
+
+Catalog schema 4 adds `edit`: what a source that keeps edits (iCloud)
+says was done to the photo, `turn,x,y,width,height` as `adjustment()`
+gives it; its renditions are of the photo so already.
 
 Catalog schema 3 adds the camera, as the photo's own EXIF says:
 `camera_make` ("Apple"), `camera_model` ("iPhone 15 Pro") and `lens_model`,

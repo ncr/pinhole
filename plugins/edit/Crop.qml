@@ -20,6 +20,7 @@ Item {
     // Width over height to keep to, in the photo's pixels; 0 for any.
     property real shape: 0
     property string sharp: ""
+    property bool fromOriginal: false
     readonly property var entry: photo !== "" ? (pinhole.library.revision, pinhole.library.item(photo)) : ({})
 
     // The photo's own size as its file is, then as turned.
@@ -35,8 +36,14 @@ Item {
         bx = now.crop.x; by = now.crop.y; bw = now.crop.width; bh = now.crop.height
         shape = 0
         sharp = ""
-        // The thumbnail at once, a sharper picture once it is here.
-        sharpening.start(() => pinhole.fetch(id, "medium"), path => crop.sharp = "image://file/" + encodeURIComponent(path))
+        // Cropped from the photo as taken: kept in iCloud, its thumbnail and
+        // medium are of the edit, so the original (a HEIC, decoded as the
+        // viewer decodes one); else the thumbnail at once and the medium.
+        fromOriginal = now.kept === "source"
+        if (fromOriginal)
+            sharpening.start(() => pinhole.fetch(id, "original"), path => crop.sharp = "image://photo/" + encodeURIComponent(path))
+        else
+            sharpening.start(() => pinhole.fetch(id, "medium"), path => crop.sharp = "image://file/" + encodeURIComponent(path))
         Qt.callLater(() => crop.forceActiveFocus())
     }
     function stop() { sharpening.cancel() }
@@ -95,7 +102,7 @@ Item {
                 width: crop.rawW * room.scale
                 height: crop.rawH * room.scale
                 rotation: crop.turn * 90
-                source: crop.sharp !== "" ? crop.sharp : (crop.entry.thumbnailAsIs ?? "")
+                source: crop.sharp !== "" ? crop.sharp : crop.fromOriginal ? "" : (crop.entry.thumbnailAsIs ?? "")
                 fillMode: Image.Stretch
                 asynchronous: true
                 smooth: true

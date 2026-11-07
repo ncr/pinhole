@@ -81,7 +81,7 @@ fn create(db: &Connection) -> Result<()> {
 /// plugins' helpers) may read a library of a later schema as long as the
 /// columns they read mean what they did; a writer never writes one later
 /// than its own. Each step up is a step in `migrate`.
-pub const SCHEMA: i64 = 3;
+pub const SCHEMA: i64 = 4;
 
 /// Bring a library up to `SCHEMA`, one step at a time, each in a
 /// transaction with the version it reaches.
@@ -123,6 +123,18 @@ fn migrate(db: &Connection) -> Result<()> {
              ALTER TABLE assets ADD COLUMN lens_model TEXT;
              ALTER TABLE assets ADD COLUMN camera_read INTEGER NOT NULL DEFAULT 0;
              PRAGMA user_version = 3;",
+        )?;
+        tx.commit()?;
+    }
+    if version < 4 {
+        // What was done to a photo where its source keeps edits (iCloud),
+        // "turn,x,y,width,height" (source.rs, Asset::edit): the whole
+        // library listed again at the next round to fill it.
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE assets ADD COLUMN edit TEXT;
+             DELETE FROM meta WHERE key = 'change_token';
+             PRAGMA user_version = 4;",
         )?;
         tx.commit()?;
     }
@@ -206,15 +218,15 @@ impl<'a> Index<'a> {
             let mut asset_stmt = tx.prepare_cached(
                 "INSERT INTO assets
                  (id, item_type, filename, asset_date, added_date, favorite, duration, orientation,
-                  has_location, is_video, is_live, size, live_effect, latitude, longitude)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                  has_location, is_video, is_live, size, live_effect, latitude, longitude, edit)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT(id) DO UPDATE SET
                    item_type = excluded.item_type, filename = excluded.filename,
                    asset_date = excluded.asset_date, added_date = excluded.added_date, favorite = excluded.favorite,
                    duration = excluded.duration, orientation = excluded.orientation,
                    has_location = excluded.has_location, is_video = excluded.is_video, is_live = excluded.is_live,
                    size = excluded.size, live_effect = excluded.live_effect,
-                   latitude = excluded.latitude, longitude = excluded.longitude",
+                   latitude = excluded.latitude, longitude = excluded.longitude, edit = excluded.edit",
             )?;
             let mut stale_thumb = tx.prepare_cached("UPDATE assets SET thumb_path = NULL WHERE id = ?1")?;
             let mut clear = tx.prepare_cached("DELETE FROM renditions WHERE asset_id = ?1")?;
@@ -254,7 +266,7 @@ impl<'a> Index<'a> {
                 self.seen.insert(a.id.clone());
                 asset_stmt.execute(params![
                     a.id, a.item_type, a.filename, a.taken, a.added, a.favorite, a.duration, a.orientation,
-                    has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect, latitude, longitude,
+                    has_location, a.kind == Kind::Video, a.kind == Kind::Live, a.size, effect, latitude, longitude, a.edit,
                 ])?;
                 // An edit gives the photo a new thumbnail: forget the old one.
                 if old.as_ref().is_some_and(|o| o.2.is_some() && o.2 != thumb) {
@@ -333,6 +345,7 @@ mod tests {
                 want: Want::Thumb, name: "t".into(), key: thumb.into(),
                 width: None, height: None, size: None, file_type: Some("public.jpeg".into()),
             }],
+            edit: None,
         }
     }
 

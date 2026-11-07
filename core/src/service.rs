@@ -80,8 +80,8 @@ pub struct Config {
 }
 
 /// What a window may not ask of a service of a library given (Config::given).
-const CHANGES: [&str; 9] =
-    ["set_source", "remove_source", "sign_out", "sign_in", "submit_code", "add", "set_favorite", "set_storage", "plugins_changed"];
+const CHANGES: [&str; 10] =
+    ["set_source", "remove_source", "sign_out", "sign_in", "submit_code", "add", "set_favorite", "set_edit", "set_storage", "plugins_changed"];
 
 /// Where to answer one request.
 #[derive(Clone)]
@@ -1215,6 +1215,12 @@ fn talk(shared: Arc<Shared>, stream: UnixStream, out: Arc<Window>) -> Result<()>
             Some("set_favorite") => {
                 let _ = shared.favorites.lock().unwrap().send((request["params"].clone(), reply));
             }
+            // Seconds: rendered and sent to the source, off this
+            // connection's thread.
+            Some("set_edit") => {
+                let (shared, params) = (shared.clone(), request["params"].clone());
+                std::thread::spawn(move || reply.send(set_edit(&shared, &params)));
+            }
             Some(method @ ("sign_in" | "submit_code" | "discover")) => {
                 let (shared, params, method) = (shared.clone(), request["params"].clone(), method.to_owned());
                 std::thread::spawn(move || {
@@ -1342,6 +1348,60 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
     reply.event(progress(total, None, bytes));
     let count = |state: &str| results.iter().filter(|r| r["state"] == state).count();
     Ok(json!({"source": id, "added": count("added"), "duplicates": count("duplicate"), "failed": count("failed"), "files": results}))
+}
+
+/// Turn and crop a photo in its source (`asset`, `turn`, `crop` as
+/// [x, y, width, height] of it turned, or neither to take the edit off;
+/// `original`, its original as fetched into this service's cache; `source`,
+/// the source it is of): where the source keeps edits (iCloud). Then a
+/// round, which brings the photo's new renditions. `unsupported` where it
+/// keeps none: the window keeps the edit itself.
+fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (&'static str, String)> {
+    let Some(id) = params["asset"].as_str() else {
+        return Err(("bad_request", "set_edit needs an asset".into()));
+    };
+    let original = std::path::PathBuf::from(params["original"].as_str().unwrap_or_default());
+    // Only a file of this service's own cache: nothing else of the
+    // computer's is read and sent.
+    let cache = shared.storage.cache();
+    match (original.canonicalize(), cache.canonicalize()) {
+        (Ok(file), Ok(root)) if file.starts_with(&root) && file.is_file() => {}
+        _ => return Err(("bad_request", "set_edit's original is a file the service fetched".into())),
+    }
+    let edit = match (params["turn"].as_u64(), params["crop"].as_array()) {
+        (Some(turn), Some(crop)) if crop.len() == 4 => {
+            let c: Vec<f64> = crop.iter().filter_map(Value::as_f64).collect();
+            if c.len() != 4 {
+                return Err(("bad_request", "crop is four numbers".into()));
+            }
+            Some(crate::source::Edit { turn: (turn % 4) as u8, crop: [c[0], c[1], c[2], c[3]] })
+        }
+        (None, None) => None,
+        _ => return Err(("bad_request", "set_edit needs turn and crop, or neither".into())),
+    };
+    let _moving = shared.storage.library_moving.read().unwrap();
+    let source = shared.source();
+    let path = shared.storage.library().join("library.sqlite");
+    let db = crate::db::open(&path).map_err(|e| ("unavailable", format!("{e:#}")))?;
+    match (params["source"].as_str(), crate::db::meta(&db, "source")) {
+        (Some(asked), Some(owner)) if asked == owner && owner == source.id() => {}
+        _ => return Err(("other_source", "not the source shown".into())),
+    }
+    let work = std::env::temp_dir().join(format!("pinholed-edit-{}-{}", std::process::id(), id.replace('/', "_")));
+    let result = source.set_edit(&db, id, &original, edit, &work);
+    let _ = std::fs::remove_dir_all(&work);
+    if let Err(e) = result {
+        eprintln!("pinholed: set_edit: {e:#}");
+        return Err(match e.downcast_ref::<Unsupported>() {
+            Some(u) => ("unsupported", u.0.clone()),
+            None => (shared.failed(&e), format!("{e:#}")),
+        });
+    }
+    shared.reached();
+    eprintln!("pinholed: {} {id} in its source", if edit.is_some() { "edited" } else { "took the edit off" });
+    // The new renditions, at once rather than within the minute.
+    let _ = shared.sync_now.lock().unwrap().send(());
+    Ok(json!({}))
 }
 
 /// Make assets favourites, or not (`assets`, `favorite`): in the source

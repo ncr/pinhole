@@ -1587,6 +1587,7 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
         size: whole(v, "size", 0..=i64::MAX).map_err(wrong)?,
         effect,
         renditions: made,
+        edit: None,
     })
 }
 

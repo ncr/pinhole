@@ -5283,13 +5283,14 @@ private slots:
         // A plugin's: turned from where it is, cut, taken back.
         bench.plugins->setAdjustments(&store);
         QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 1);
-        QVERIFY(bench.js("pinhole.turn(['a', 'b'], 1)").toBool());
+        bench.js("pinhole.turn(['a', 'b'], 1)");
         QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 2);
         QCOMPARE(bench.js("pinhole.adjustment('b').turn").toInt(), 1);
-        QVERIFY(bench.js("pinhole.adjust('b', { crop: { x: 0.25, y: 0, width: 0.5, height: 1 } })").toBool());
+        bench.js("pinhole.adjust('b', { crop: { x: 0.25, y: 0, width: 0.5, height: 1 } })");
         QCOMPARE(bench.js("pinhole.adjustment('b').crop.width").toNumber(), 0.5);
         QCOMPARE(bench.js("pinhole.adjustment('b').turn").toInt(), 1);
-        QVERIFY(bench.js("pinhole.adjust(['a', 'b'], { turn: 0, crop: null })").toBool());
+        bench.js("var kept = ''; pinhole.adjust(['a', 'b'], { turn: 0, crop: null }).then(r => kept = r.kept)");
+        QTRY_COMPARE(bench.js("kept").toString(), QString("here"));
         QVERIFY(store.snapshot().isEmpty());
     }
 

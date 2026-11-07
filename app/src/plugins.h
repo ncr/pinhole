@@ -1,5 +1,7 @@
 #pragma once
 
+#include "adjustment.h"
+
 #include <QFileSystemWatcher>
 #include <QHash>
 #include <QJSValue>
@@ -393,10 +395,15 @@ public:
     // Photos (positions or ids, or one) given this `turn` and/or `crop`;
     // { turn: 0, crop: null } takes it all back. False when there is no
     // library, or it could not be kept.
-    Q_INVOKABLE bool adjust(const QJSValue &photos, const QVariantMap &adjustment);
+    // A promise of { photos: [{ id, turn, crop }], kept }: kept "source"
+    // where the source keeps edits (iCloud: written there as its devices
+    // write theirs, which they show and can revert), "here" where it keeps
+    // none (a folder: Pinhole keeps it). Rejected "unavailable" when the
+    // source could not take it.
+    Q_INVOKABLE QJSValue adjust(const QJSValue &photos, const QVariantMap &adjustment);
     // Turned `quarters` more clockwise (-1: a quarter back), each from
     // where it is, its crop turning with it.
-    Q_INVOKABLE bool turn(const QJSValue &photos, int quarters);
+    Q_INVOKABLE QJSValue turn(const QJSValue &photos, int quarters);
     // A file in its own folder or its cache (a worker's), read whole away
     // from the window (API 13): a promise of its text, or of what its JSON
     // says; rejected "not_found", "not_yours" (another's file), "too_large"
@@ -521,6 +528,8 @@ private:
     void settle(int generation, const QJSValue &how, const QJSValue &value);
     QJSValue readFile(const QString &path, bool json);
     QList<QByteArray> idsOf(const QJSValue &photos) const;
+    Adjustment currentAdjustment(const QByteArray &id) const;
+    QJSValue applyAdjustments(const Adjustments &targets);
     // query(), and for Pinhole's own asking with a source's tables too.
     QJSValue ask(const QString &sql, const QVariantList &values, bool privateTables);
 

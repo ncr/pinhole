@@ -212,9 +212,10 @@ pub fn fields(
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut fields = json!({
         "adjustmentType": {"value": "com.apple.photo"},
-        // Photos' own: an edit by any other app Photos only shows, and
-        // offers to revert.
-        "adjustmentCreatorCode": {"value": "com.apple.mobileslideshow"},
+        // Pinhole's: a device shows the edit and can revert it, but opens
+        // no edit made elsewhere again, Photos' own replayed byte for byte
+        // included (docs/api-findings.md, Edits).
+        "adjustmentCreatorCode": {"value": "net.becela.pinhole"},
         "adjustmentCompoundVersion": {"value": "1.12"},
         "adjustmentSimpleDataEnc": {"value": b64.encode(recipe)},
         "adjustmentTimestampEnc": {"value": b64.encode(timestamp_plist(now_ms))},
@@ -342,6 +343,36 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
         Some(tag) => Ok(tag.to_owned()),
         None => Err(anyhow!("iCloud would not take the edit: {first}")),
     }
+}
+
+/// The turn and crop Photos' recipe on an asset says, as the core keeps
+/// them ("turn,x,y,width,height", source.rs's Asset::edit): the inverse of
+/// `recipe` and `crop_in_master`. None for a photo not edited, or edited
+/// otherwise than Photos' own way.
+pub fn from_record(asset: &Value, master: &Value) -> Option<String> {
+    let recipe = previous_recipe(&json!({"fields": asset}))?;
+    let crop = recipe["adjustments"].as_array()?.iter().find(|j| j["identifier"] == "Crop").map(|j| &j["settings"]);
+    let quarters = |code: i64| match code { 6 => Some(1u8), 3 => Some(2), 8 => Some(3), 0 | 1 => Some(0), _ => None };
+    let total = quarters(recipe["metadata"]["orientation"].as_i64().unwrap_or(0))?;
+    let original = quarters(master["originalOrientation"]["value"].as_i64().unwrap_or(1))?;
+    let turn = (4 + total - original) % 4;
+    // The stored size: the original's.
+    let (w, h) = (master["resOriginalWidth"]["value"].as_f64()?, master["resOriginalHeight"]["value"].as_f64()?);
+    let [mut x, mut y, mut cw, mut ch] = match crop {
+        Some(c) => {
+            let (cx, cy) = (c["xOrigin"].as_f64()?, c["yOrigin"].as_f64()?);
+            let (cw, ch) = (c["width"].as_f64()?, c["height"].as_f64()?);
+            // From the bottom to from the top, in fractions.
+            [cx / w, (h - cy - ch) / h, cw / w, ch / h]
+        }
+        None => [0.0, 0.0, 1.0, 1.0],
+    };
+    // From the stored frame to the one shown, a quarter right at a time.
+    for _ in 0..total {
+        (x, y, cw, ch) = (1.0 - y - ch, x, ch, cw);
+    }
+    let whole = turn == 0 && x.abs() < 1e-4 && y.abs() < 1e-4 && (cw - 1.0).abs() < 1e-4 && (ch - 1.0).abs() < 1e-4;
+    (!whole).then(|| format!("{turn},{x:.6},{y:.6},{cw:.6},{ch:.6}"))
 }
 
 /// A binary plist of a JSON value (objects, strings, numbers, booleans),
@@ -482,6 +513,30 @@ mod tests {
         // upright photo, which Core Image counts from 0.
         let upside = Adjustment { turn: 2, crop: [0.0, 0.0, 1.0, 0.5] };
         assert_eq!(crop_in_master(upright, &upside), (0, 0, 4032, 1512));
+    }
+
+    #[test]
+    fn an_iphones_recipe_reads_back_as_the_edit_it_is() {
+        // Jacek's reference: stored 4032x3024 upright, turned a quarter
+        // right, cropped to 831, 295 (from the bottom), 2874x2155.
+        let recipe = recipe_json(Upright { width: 4032, height: 3024 }, &Adjustment {
+            turn: 1, crop: [295.0 / 3024.0, 831.0 / 4032.0, 2155.0 / 3024.0, 2874.0 / 4032.0] }, None);
+        let asset = json!({"adjustmentType": {"value": "com.apple.photo"},
+                           "adjustmentSimpleDataEnc": {"value": base64::engine::general_purpose::STANDARD.encode(deflate(&recipe).unwrap())}});
+        let master = json!({"originalOrientation": {"value": 1}, "resOriginalWidth": {"value": 4032}, "resOriginalHeight": {"value": 3024}});
+        let edit = from_record(&asset, &master).unwrap();
+        let parts: Vec<f64> = edit.split(',').map(|p| p.parse().unwrap()).collect();
+        assert_eq!(parts[0], 1.0);
+        assert!((parts[1] - 295.0 / 3024.0).abs() < 1e-5 && (parts[2] - 831.0 / 4032.0).abs() < 1e-5, "{edit}");
+        // A portrait from the camera, turned no more and cropped to its
+        // left half as shown, reads back so.
+        let raw = Upright { width: 4032, height: 3024 };
+        let recipe = recipe_json(raw, &Adjustment { turn: 1, crop: [0.0, 0.0, 0.5, 1.0] }, None);
+        let asset = json!({"adjustmentType": {"value": "com.apple.photo"},
+                           "adjustmentSimpleDataEnc": {"value": base64::engine::general_purpose::STANDARD.encode(deflate(&recipe).unwrap())}});
+        let master = json!({"originalOrientation": {"value": 6}, "resOriginalWidth": {"value": 4032}, "resOriginalHeight": {"value": 3024}});
+        assert_eq!(from_record(&asset, &master).as_deref(), Some("0,0.000000,0.000000,0.500000,1.000000"));
+        assert_eq!(from_record(&json!({}), &master), None);
     }
 
     #[test]
