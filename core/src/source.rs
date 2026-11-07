@@ -181,6 +181,9 @@ pub struct Asset {
     /// of the photo as turned (the window's adjustment.h query form). Its
     /// renditions are of the photo so already.
     pub edit: Option<String>,
+    /// What kind of picture it is where the source says so: "screenshot"
+    /// (an iPhone's, an iPad's), else None.
+    pub subtype: Option<String>,
 }
 
 impl Asset {

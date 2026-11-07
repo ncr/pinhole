@@ -46,6 +46,8 @@ public:
     // (sync::claim): "icloud:me@example.com", "folder:/home/me/Pictures";
     // empty for one that says nothing (pinhole-fake's).
     QString source() const { return m_source; }
+    // Its index says what kind of picture each is (schema 5's subtype).
+    bool hasSubtype() const { return m_hasSubtype; }
     // A favourite set from the window, before the index has it
     // (favourites.h).
     void setFavorite(int i, bool favorite) { m_items[size_t(i)].favorite = favorite; }
@@ -58,6 +60,7 @@ public:
         m_items.swap(other.m_items);
         m_dir.swap(other.m_dir);
         m_source.swap(other.m_source);
+        std::swap(m_hasSubtype, other.m_hasSubtype);
         ++m_generation;
         ++other.m_generation;
     }
@@ -68,6 +71,7 @@ public:
 private:
     QString m_dir;
     QString m_source;
+    bool m_hasSubtype = false;
     std::vector<LibraryItem> m_items;
     quint64 m_generation = 0;
 };

@@ -31,6 +31,7 @@ bool Library::open(const QString &dir, QString *error) {
         const QString effectColumn = schema.indexOf("live_effect") >= 0 ? "live_effect" : "NULL";
         const QString addedColumn = schema.indexOf("added_date") >= 0 ? "added_date" : "NULL";
         const QString editColumn = schema.indexOf("edit") >= 0 ? "edit" : "NULL";
+        m_hasSubtype = schema.indexOf("subtype") >= 0;
         const QString columns = QStringLiteral("thumb_path, avg_color, thumb_w, thumb_h, duration, asset_date, is_video, is_live, "
                                                "favorite, id, filename, %1, %2, %3 FROM assets ORDER BY asset_date, id");
         if (!q.exec(QStringLiteral("SELECT ") + columns.arg(effectColumn, addedColumn, editColumn))) {

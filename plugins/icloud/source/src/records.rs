@@ -60,6 +60,12 @@ pub struct CloudAsset {
 }
 
 impl CloudAsset {
+    /// Its subtype as the index's `subtype` says it: iCloud's 3 is a
+    /// screenshot (an iPhone's, an iPad's).
+    fn subtype_name(&self) -> Option<String> {
+        (self.subtype == Some(3)).then(|| "screenshot".to_owned())
+    }
+
     pub fn is_video(&self) -> bool {
         match self.item_type.as_deref() {
             Some(t) => t.contains("movie") || t.contains("mpeg") || t.contains("video"),
@@ -134,6 +140,7 @@ impl CloudAsset {
             effect,
             renditions,
             edit: self.edit.clone(),
+            subtype: self.subtype_name(),
         }
     }
 }

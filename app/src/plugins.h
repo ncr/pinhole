@@ -543,8 +543,6 @@ private:
     QList<QByteArray> idsOf(const QJSValue &photos) const;
     Adjustment currentAdjustment(const QByteArray &id) const;
     QJSValue applyAdjustments(const Adjustments &targets);
-    // query(), and for Pinhole's own asking with a source's tables too.
-    QJSValue ask(const QString &sql, const QVariantList &values, bool privateTables);
 
     QString m_id;
     QString m_dir;

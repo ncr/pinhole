@@ -137,10 +137,6 @@ private slots:
         QCOMPARE(read(library, "SELECT value FROM meta WHERE key = 'source'").rows.value(0).toMap().value("value").toString(), QString("fake"));
         QCOMPARE(read(library, "PRAGMA table_info(assets)").rows.size(), 2);
         QCOMPARE(read(library, "SELECT name FROM sqlite_master").code, QString());
-        // Pinhole's own asking (screenshots()) reads them.
-        PluginQuery::Limits own;
-        own.privateTables = true;
-        QCOMPARE(read(library, "SELECT url FROM icloud_assets", {}, own).rows.size(), 1);
     }
 
     void onlyOneStatementButTrailingCommentsAreFine() {

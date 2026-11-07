@@ -1588,6 +1588,7 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
         effect,
         renditions: made,
         edit: None,
+        subtype: None,
     })
 }
 

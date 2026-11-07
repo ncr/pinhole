@@ -928,7 +928,7 @@ this API. A library position is not a visual grid position.
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `picturesDir()`: the desktop's Pictures folder (`~/Pictures`), for a folder of one's own in it (`picturesDir() + "/Exports"`); in a self-test, the scratch Pictures, never the person's. `sizeText`: "1.8 MB", with one decimal unless said |
 | `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
 | `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled` (the plugin's own `cancel()`) or `reloaded` (the library read again meanwhile: ask again); see Bounded library queries below |
-| `screenshots()` | the ids of the photos the library says are screenshots (API 10), as Screenshots hides them: iCloud's mark for an iPhone's or an iPad's, a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
+| `screenshots()` | the ids of the photos the library says are screenshots (API 10), as Screenshots hides them: the index's `subtype` (iCloud's mark for an iPhone's or an iPad's), a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
 | `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
 | `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |
@@ -943,7 +943,7 @@ one in-memory column is enough. The public catalog tables are:
 
 | Table | Columns |
 |---|---|
-| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read`, `edit` |
+| `assets` | `id` (stable TEXT primary key), `filename`, `item_type`, `asset_date`, `added_date`, `favorite`, `has_location`, `latitude`, `longitude`, `is_video`, `is_live`, `duration`, `orientation`, `live_effect`, `size`, `thumb_path`, `thumb_w`, `thumb_h`, `avg_color`, `camera_make`, `camera_model`, `lens_model`, `camera_read`, `edit`, `subtype` |
 | `renditions` | `asset_id` (references `assets.id`), `kind`, `name`, `key`, `width`, `height`, `size`, `file_type`; primary key `(asset_id, kind)` |
 | `meta` | `key`, `value`: `source` is the library's source key (as `library.key`), which a worker checks against `--library-key` |
 
@@ -959,6 +959,9 @@ Inspect the installed schema with `query("PRAGMA table_info(assets)")` or
 `query("PRAGMA table_info(renditions)")` before using an optional column.
 Catalog schema 2 adds nullable `latitude` and `longitude`: a pair of signed
 WGS 84 decimal degrees. `has_location` can be true without a readable pair.
+
+Catalog schema 5 adds `subtype`: what kind of picture the source says it
+is, `screenshot` (iCloud's mark of an iPhone's or an iPad's) or NULL.
 
 Catalog schema 4 adds `edit`: what a source that keeps edits (iCloud)
 says was done to the photo, `turn,x,y,width,height` as `adjustment()`

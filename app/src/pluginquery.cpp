@@ -73,14 +73,13 @@ bool isPublic(const char *table) {
     return name == "assets" || name == "renditions" || name == "meta" || name.startsWith("sqlite_");
 }
 
-int authorize(void *data, int action, const char *first, const char *second, const char *, const char *) {
-    const bool everything = static_cast<const Limits *>(data)->privateTables;
+int authorize(void *, int action, const char *first, const char *second, const char *, const char *) {
     switch (action) {
     case SQLITE_SELECT:
     case SQLITE_RECURSIVE:
         return SQLITE_OK;
     case SQLITE_READ:
-        return everything || isPublic(first) ? SQLITE_OK : SQLITE_DENY;
+        return isPublic(first) ? SQLITE_OK : SQLITE_DENY;
     case SQLITE_FUNCTION:
         return second && qstricmp(second, "load_extension") == 0 ? SQLITE_DENY : SQLITE_OK;
     case SQLITE_PRAGMA: {
@@ -90,7 +89,7 @@ int authorize(void *data, int action, const char *first, const char *second, con
         static const QList<QByteArray> tableMetadata{"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list"};
         static const QList<QByteArray> metadata{"database_list", "schema_version", "user_version", "compile_options"};
         if (tableMetadata.contains(name))
-            return everything || isPublic(second) ? SQLITE_OK : SQLITE_DENY;
+            return isPublic(second) ? SQLITE_OK : SQLITE_DENY;
         return !second && metadata.contains(name) ? SQLITE_OK : SQLITE_DENY;
     }
     default:
@@ -157,7 +156,7 @@ Answer read(const QString &path, const QString &sql, const QVariantList &values,
     // where SQLite's opcode progress handler cannot see the deadline.
     sqlite3_limit(db.value, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 1024);
     sqlite3_db_config(db.value, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr);
-    sqlite3_set_authorizer(db.value, authorize, const_cast<Limits *>(&limits));
+    sqlite3_set_authorizer(db.value, authorize, nullptr);
     Statement statement;
     const char *tail = nullptr;
     result = sqlite3_prepare_v3(db.value, source.constData(), int(source.size() + 1), 0, &statement.value, &tail);

@@ -183,22 +183,21 @@ QJSValue PluginHost::screenshots() {
     // a 1080p screen (16:9). Other shapes (3:2, 4:3, 16:10) are as often a
     // picture as a screen, and a scan at 16:9 measures 0.5604.
     static const QList<std::pair<double, double>> shapes = {{0.455, 0.468}, {0.561, 0.566}};
-    constexpr int icloudScreenshot = 3;
-    const bool icloud = m_plugins->library() && m_plugins->library()->key().startsWith(QLatin1String("icloud:"));
     QStringList named, shaped;
     for (const QString &name : names)
         named << QStringLiteral("lower(a.filename) GLOB '%1'").arg(QString(name).replace('\'', QLatin1String("''")));
     const QString ratio = QStringLiteral("MIN(a.thumb_w, a.thumb_h) * 1.0 / MAX(a.thumb_w, a.thumb_h)");
     for (const auto &[low, high] : shapes)
         shaped << QStringLiteral("%1 BETWEEN %2 AND %3").arg(ratio).arg(low).arg(high);
-    const QString sql = QStringLiteral("SELECT a.id FROM assets a")
-        + (icloud ? QStringLiteral(" LEFT JOIN icloud_assets i ON i.asset_id = a.id") : QString())
-        + QStringLiteral(" WHERE NOT a.is_video AND (")
-        + (icloud ? QStringLiteral("i.subtype = %1 OR ").arg(icloudScreenshot) : QString())
+    // What the source says is one (the index's subtype, iCloud's mark),
+    // or what its name and shape say.
+    const bool marked = m_plugins->libraryData() && m_plugins->libraryData()->hasSubtype();
+    const QString sql = QStringLiteral("SELECT a.id FROM assets a WHERE NOT a.is_video AND (")
+        + (marked ? QStringLiteral("a.subtype = 'screenshot' OR ") : QString())
         + named.join(QLatin1String(" OR "))
         + QStringLiteral(" OR (lower(a.filename) GLOB '*.png' AND NOT a.has_location AND a.thumb_w > 0 AND a.thumb_h > 0 AND (")
         + shaped.join(QLatin1String(" OR ")) + QStringLiteral(")));");
-    QJSValue rows = ask(sql, {}, /*privateTables=*/icloud);
+    QJSValue rows = query(sql, {});
     QJSEngine *js = engine();
     if (!js)
         return rows;
@@ -212,10 +211,6 @@ QJSValue PluginHost::screenshots() {
 }
 
 QJSValue PluginHost::query(const QString &sql, const QVariantList &values) {
-    return ask(sql, values, false);
-}
-
-QJSValue PluginHost::ask(const QString &sql, const QVariantList &values, bool privateTables) {
     const int generation = m_generation;
     const auto control = std::make_shared<PluginQuery::Control>();
     auto deferred = std::make_shared<Deferred>();
@@ -274,8 +269,6 @@ QJSValue PluginHost::ask(const QString &sql, const QVariantList &values, bool pr
             settle(generation, deferred->resolve, js->toScriptValue(answer.rows));
         }
     });
-    PluginQuery::Limits limits;
-    limits.privateTables = privateTables;
-    watcher->setFuture(PluginQuery::start(path, sql, values, control, limits));
+    watcher->setFuture(PluginQuery::start(path, sql, values, control));
     return deferred->promise;
 }

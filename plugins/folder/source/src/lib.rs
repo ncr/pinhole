@@ -400,6 +400,7 @@ impl FolderSource {
             effect: None,
             renditions,
             edit: None,
+            subtype: None,
         })
     }
 

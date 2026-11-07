@@ -19,9 +19,6 @@ struct Limits {
     int cellBytes = 1024 * 1024;
     int columns = 64;
     int sqlBytes = 64 * 1024;
-    // Pinhole's own asking (screenshots()): a source's own tables too.
-    // A plugin reads only the public ones: assets, renditions and meta.
-    bool privateTables = false;
 };
 
 class Control {
