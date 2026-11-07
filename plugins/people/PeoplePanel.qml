@@ -238,17 +238,15 @@ Panel {
         picking = ""
         if (restoreFocus) grid.forceActiveFocus()
     }
-    function writeEdits(key, patch) {
-        const saved = Object.assign({}, pinhole.state[key] || {})
-        for (const face of Object.keys(patch)) {
-            const edit = patch[face]
-            if (edit.name || edit.person || edit.rejected?.length || edit.not?.length || edit.unknown) saved[face] = edit
-            else delete saved[face]
-        }
-        pinhole.state[key] = saved
-        if (stateKey === key) {
-            edits = saved
-            if (shown) load()
+    // Kept by the plugin, which names faces on a photo shown too
+    // (PeoplePlugin.qml); what either says, read again here.
+    function writeEdits(key, patch) { view.plugin.writeEdits(key, patch) }
+    Connections {
+        target: view.plugin
+        function onEdited(key) {
+            if (key !== panel.stateKey) return
+            panel.edits = pinhole.state[key] || {}
+            if (panel.shown) panel.load()
         }
     }
     function edit(patch, label) {
@@ -450,6 +448,9 @@ Panel {
             controls[index]?.forceActiveFocus(reverse ? Qt.BacktabFocusReason : Qt.TabFocusReason)
         event.accepted = true
     }
+    // Its keys, unless a view of the plugin's is over it (W on a photo
+    // opened from here).
+    readonly property bool ownKeys: shown && view.onTop && !pinhole.away
     readonly property bool keysOnTiles: shown && !picking && grid.activeFocus
     Command { name: "people.enter"; keys: ["Return", "Enter", "Space"]; keyLayer: "plugin"; when: panel.keysOnTiles; onTriggered: panel.enter(panel.selection) }
     Command { name: "people.left"; keys: ["Left"]; keyLayer: "plugin"; when: panel.keysOnTiles; autoRepeat: true; onTriggered: panel.move(-1, 0) }
@@ -490,7 +491,7 @@ Panel {
         text: qsTr("Check them")
         keys: ["C"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
+        when: panel.ownKeys && !panel.picking && panel.page === "person" && (panel.personRow?.likely ?? 0) > 0
         onTriggered: panel.go("check", panel.person)
     }
     Command {
@@ -499,7 +500,7 @@ Panel {
         text: qsTr("Don't know")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.page === "group" && !newName.input.activeFocus
+        when: panel.ownKeys && !panel.picking && panel.page === "group" && !newName.input.activeFocus
         onTriggered: panel.markUnknown()
     }
     Command {
@@ -508,7 +509,7 @@ Panel {
         text: qsTr("No")
         keys: ["0"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        when: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.refuse()
     }
     Command {
@@ -517,7 +518,7 @@ Panel {
         text: qsTr("Skip")
         keys: ["S"]
         keyLayer: "plugin"
-        when: panel.shown && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
+        when: panel.ownKeys && !panel.picking && panel.page === "check" && panel.likely.length > 0 && !newName.input.activeFocus
         onTriggered: panel.skip()
     }
     Repeater {
@@ -528,7 +529,7 @@ Panel {
                 name: "people.choose." + (index + 1)
                 keys: [String(index + 1)]
                 keyLayer: "plugin"
-                when: panel.shown && !panel.picking && (panel.page === "group" || panel.page === "check")
+                when: panel.ownKeys && !panel.picking && (panel.page === "group" || panel.page === "check")
                     && index < panel.choices.length && !newName.input.activeFocus
                 onTriggered: panel.choose(panel.choices[index])
             }

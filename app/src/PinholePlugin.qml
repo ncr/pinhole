@@ -21,6 +21,9 @@ Item {
     // many.
     property var viewStack: []
     readonly property int openViews: viewStack.length
+    // The last of them opened over a photo it opened to come back from
+    // (pinhole.away): it covers that photo meanwhile, as People's W does.
+    readonly property bool coveringAway: openViews > 0 && viewStack[openViews - 1].openedAway === true
     // Its keys, as the help (?) lists them: [["G", "Series"], ...].
     property var help: []
     // Photos shown in the grid as one card, each a list of library

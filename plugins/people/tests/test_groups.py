@@ -152,6 +152,43 @@ class Guesses(unittest.TestCase):
             self.assertEqual([row["anchor"] for row in worker.review_rows(db, "groups", None, 0, known=False)], ["a1"])
             self.assertNotIn("a1", [row["anchor"] for row in worker.review_rows(db, "groups", None, 0, known=True)])
 
+    def test_a_photo_says_who_each_face_is_or_looks_like(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            db.execute("INSERT INTO faces VALUES ('a1-2', 'a1', '[0.5, 0, 0.2, 0.2]', ?)", (db.execute(
+                "SELECT vector FROM faces WHERE key='o1'").fetchone()[0],))
+            worker.review_labels(db, {"anna": {"person": "Anna"}, "anna2": {"person": "Anna"}, "ola": {"person": "Ola"}})
+            faces = {face["key"]: face for face in worker.photo_rows(db, "a1")}
+            # In a group that looks like Anna; alone, like Ola.
+            self.assertEqual((faces["a1"]["name"], faces["a1"]["guess"], faces["a1"]["anchor"]), (None, "Anna", "a1"))
+            self.assertEqual((faces["a1-2"]["guess"], faces["a1-2"]["anchor"]), ("Ola", None))
+            self.assertEqual([(face["name"], face["guess"]) for face in worker.photo_rows(db, "anna")], [("Anna", None)])
+            self.assertEqual(worker.photo_rows(db, "nowhere"), [])
+            self.assertEqual(worker.known_names(db), ["Anna", "Ola"])
+
+    def test_a_face_said_not_to_be_someone_is_not_guessed_to_be_them(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"anna": {"person": "Anna"}, "a1": {"not": ["Anna"]}})
+            self.assertEqual([face["guess"] for face in worker.photo_rows(db, "a1")], [None])
+
+    def test_a_face_in_a_group_said_not_to_be_someone_is_not_guessed_to_be_them(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"anna": {"person": "Anna"}, "a1": {"not": ["Anna"]}})
+            self.assertEqual([face["guess"] for face in worker.photo_rows(db, "a2")], [None])
+
+    def test_a_face_named_with_an_old_group_says_which_to_take_it_from(self):
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"a1": {"name": "Anna"}})
+            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a2")], [("Anna", "a1")])
+            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a1")], [("Anna", "a1")])
+        with sqlite3.connect(":memory:") as db:
+            self.library(db)
+            worker.review_labels(db, {"a1": {"name": "Anna", "rejected": ["a2"]}})
+            self.assertEqual([(f["name"], f["legacy"]) for f in worker.photo_rows(db, "a2")], [(None, None)])
+
     def test_no_named_people_gives_no_guesses(self):
         with sqlite3.connect(":memory:") as db:
             self.library(db)

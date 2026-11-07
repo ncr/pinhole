@@ -27,6 +27,18 @@ someone else, and **Merge with…** joins two names. Every step can be undone
 with Ctrl Z. A photo opened from a group or a person steps ← → through
 those photos alone.
 
+On a photo shown full window, a button beside the heart says who is in it:
+the names given (**Anna, Ola**), who a face most likely is (**Anna?**), the
+other faces counted (**+1**), or **Who is this?**. W (or the button) rings
+each face on the photo and opens a card beside it for the first face not
+named yet: ⏎ says **Yes** to the person it looks like, a name typed (one
+given before, or a new one) names it, and **Not Anna** takes a wrong name
+back, so it is not guessed to be them again. Each named face moves on to the
+next one not named; after the last the card closes. A ring or a face on the
+card chooses another; Esc closes it. A face is named alone, its group still
+waiting in People, where it now counts towards that person. It works the
+same on a photo opened from People.
+
 Settings → Plugins → People sets how readily similar faces share a group.
 
 The pinned YuNet and SFace weights come from

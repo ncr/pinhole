@@ -7,15 +7,22 @@ FocusScope {
     required property string title
     required property bool busy
     required property bool allowCreate
+    // Who it most likely is: Yes, and ⏎ with nothing typed, choose them.
+    property string suggested: ""
+    // A button that takes the name away ("Not Anna"), when said.
+    property string removeText: ""
     property alias searchField: search.input
     property alias createButton: create
     property alias cancelButton: cancel
+    property alias yesButton: yes
+    property alias removeButton: remove
     property alias choicesList: list
     readonly property string typedName: search.text.trim()
     readonly property var matches: names.filter(name => name.toLowerCase().includes(typedName.toLowerCase()))
     readonly property bool nameExists: names.some(name => name.toLowerCase() === typedName.toLowerCase())
     signal chosen(string name)
     signal cancelled()
+    signal removed()
 
     function reset() {
         search.text = ""
@@ -38,6 +45,10 @@ FocusScope {
             onTextChanged: list.currentIndex = -1
             onAccepted: {
                 if (picker.busy) return
+                if (picker.typedName === "" && picker.suggested !== "") {
+                    picker.chosen(picker.suggested)
+                    return
+                }
                 const existing = picker.names.find(name => name.toLowerCase() === picker.typedName.toLowerCase())
                 if (existing) {
                     picker.chosen(existing)
@@ -90,12 +101,30 @@ FocusScope {
         anchors.bottom: parent.bottom
         spacing: 8
         ShellButton {
+            id: yes
+            objectName: "peopleYes"
+            text: qsTr("Yes, %1").arg(picker.suggested)
+            hint: "⏎"
+            visible: picker.suggested !== "" && picker.typedName === ""
+            active: true
+            usable: visible && !picker.busy
+            onTapped: picker.chosen(picker.suggested)
+        }
+        ShellButton {
             id: create
             objectName: "peopleCreate"
             text: qsTr("Add a new person")
             visible: picker.allowCreate
             usable: visible && !picker.busy && picker.typedName !== "" && !picker.nameExists
             onTapped: picker.chosen(picker.typedName)
+        }
+        ShellButton {
+            id: remove
+            objectName: "peopleRemove"
+            text: picker.removeText
+            visible: picker.removeText !== ""
+            usable: visible && !picker.busy
+            onTapped: picker.removed()
         }
         ShellButton { id: cancel; text: qsTr("Cancel"); onTapped: picker.cancelled() }
     }

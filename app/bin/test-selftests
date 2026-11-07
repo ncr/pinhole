@@ -3,7 +3,7 @@
 each in a scratch profile on an X display of its own, never on the desktop
 (bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
-    app/bin/test-selftests                 # covering through physics stacks hidden layers colour
+    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people
     app/bin/test-selftests through layers  # some of them
 
 The window, the service, the fake library and the plugins' helpers built
@@ -13,17 +13,22 @@ plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Each
 mode's log is kept in build/selftests/<mode>.log. Exits 1 if any fails.
 """
 import datetime
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+import json
+import math
 import os
 from pathlib import Path
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
-MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit"]
+MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people"]
 TEST_PLUGINS = ["scrolls", "layers"]
 
 
@@ -57,6 +62,56 @@ def library(scratch):
     return out
 
 
+def faces(profile, lib, out):
+    """For people: a face index of People's own in its cache, as its finder
+    leaves one (no OpenCV needed), and a name given in its state. Two
+    photos: `named`, one face, Anna's; `shown`, two faces, the left one
+    like Anna's, the right one like no one's. Their ids in out/people.json."""
+    loader = SourceFileLoader("pinhole_faces", str(ROOT / "plugins/people/pinhole-faces"))
+    worker = module_from_spec(spec_from_loader(loader.name, loader))
+    loader.exec_module(worker)
+    catalog = sqlite3.connect(lib / "library.sqlite")
+    rows = catalog.execute("""SELECT id, thumb_path FROM assets WHERE NOT is_video AND thumb_w > thumb_h
+                              ORDER BY asset_date LIMIT 2""").fetchall()
+    # The library's source as the window says it (pinhole.library.key), else
+    # its folder.
+    word = catalog.execute("SELECT value FROM meta WHERE key='source'").fetchone()
+    catalog.close()
+
+    def vector(angle):
+        values = [0.0] * 128
+        if angle is None:
+            values[2] = 1.0
+        else:
+            values[0], values[1] = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        return struct.pack("<128f", *values)
+
+    (named, named_path), (shown, shown_path) = rows
+    seeded = [(named, named_path, [("anna", [0.4, 0.3, 0.2, 0.25], vector(0))]),
+              (shown, shown_path, [("like-anna", [0.1, 0.2, 0.2, 0.25], vector(6)),
+                                   ("no-one", [0.6, 0.2, 0.2, 0.25], vector(None))])]
+    cache = profile / "cache/pinhole/plugins/pinhole.people" / f"{lib.parent.name}-{lib.name}"
+    sources = {word[0]} if word and word[0] else {str(lib), str(lib.resolve())}
+    for source in sources:
+        db = worker.connect(cache, source)
+        with db:
+            for photo, path, found in seeded:
+                stat = (lib / path).resolve().stat()
+                db.execute("INSERT INTO photos VALUES (?,?,?)",
+                           (photo, path, f"{stat.st_mtime_ns}:{stat.st_ctime_ns}:{stat.st_size}"))
+                db.executemany("INSERT INTO faces VALUES (?,?,?,?)",
+                               ((key, photo, json.dumps(box), data) for key, box, data in found))
+            # Grouped already, as it would leave it with nothing named.
+            db.execute("INSERT INTO meta VALUES ('suggestion-settings', ?)",
+                       (json.dumps([[], {}, "careful"], sort_keys=True),))
+            db.execute("INSERT INTO meta VALUES ('status', ?)", (json.dumps({"phase": "ready", "errors": 0}),))
+        db.close()
+    state = profile / "state/pinhole/plugins/pinhole.people"
+    state.mkdir(parents=True)
+    (state / "state.json").write_text(json.dumps({f"people:{source}": {"anna": {"person": "Anna"}} for source in sources}))
+    (out / "people.json").write_text(json.dumps({"named": named, "shown": shown}))
+
+
 def build():
     """The window (and Info's module), the service, the fake library and the
     plugins' helpers, as this checkout has them: a pinholed left from an
@@ -80,6 +135,12 @@ def plugins(scratch):
 
 
 def run(mode, scratch, lib, farm, logs):
+    helper = (farm / "people/pinhole-faces").read_text().split("\n", 1)[0][2:].strip()
+    if mode == "people" and subprocess.run([helper, "-c", "import numpy"], stderr=subprocess.DEVNULL).returncode != 0:
+        # Who a face looks like is worked out with NumPy, as People's
+        # finder needs it anyway.
+        print("people: skipped (People's helper needs python-numpy)")
+        return True
     profile = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=scratch))
     env = {key: value for key, value in os.environ.items() if not key.startswith(("WAYLAND", "HYPRLAND", "DISPLAY"))}
     for key, folder in [("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
@@ -108,6 +169,8 @@ def run(mode, scratch, lib, farm, logs):
         subprocess.run([*command[:2], "timeout", "25", *command[2:]],
                        env=env | {"PINHOLE_SELFTEST": "lazyplugins:" + str(out)},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if mode == "people":
+        faces(profile, given, out)
     env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
     with (logs / f"{mode}.log").open("w") as log:
         code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,

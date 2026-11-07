@@ -430,6 +430,23 @@ def review_labels(db, edits):
         """)
 
 
+def person_samples(db):
+    """A few faces of each named person: (names, whose each is, vectors), or None."""
+    import numpy as np
+    people = db.execute("""
+        SELECT name, vector FROM (
+            SELECT l.name, f.vector, row_number() OVER (PARTITION BY l.name ORDER BY f.key) AS n
+            FROM labels l JOIN faces f USING (key)
+        ) WHERE n <= ?
+        """, (PERSON_SAMPLES,)).fetchall()
+    if not people:
+        return None
+    names = sorted({name for name, _ in people})
+    owner = np.array([names.index(name) for name, _ in people])
+    known = np.frombuffer(b"".join(vector for _, vector in people), dtype="<f4").reshape(-1, 128)
+    return names, owner, known
+
+
 def guesses(db, anchors):
     """The named person each group most likely is: {anchor: (name, score)}.
 
@@ -439,18 +456,11 @@ def guesses(db, anchors):
     import numpy as np
     if not anchors:
         return {}
-    people = db.execute("""
-        SELECT name, vector FROM (
-            SELECT l.name, f.vector, row_number() OVER (PARTITION BY l.name ORDER BY f.key) AS n
-            FROM labels l JOIN faces f USING (key)
-        ) WHERE n <= ?
-        """, (PERSON_SAMPLES,)).fetchall()
-    if not people:
+    samples = person_samples(db)
+    if samples is None:
         return {}
-    names = sorted({name for name, _ in people})
+    names, owner, known = samples
     refused = set(db.execute("SELECT anchor, name FROM refused"))
-    owner = np.array([names.index(name) for name, _ in people])
-    known = np.frombuffer(b"".join(vector for _, vector in people), dtype="<f4").reshape(-1, 128)
     db.execute("CREATE TEMP TABLE IF NOT EXISTS wanted (anchor TEXT PRIMARY KEY)")
     db.execute("DELETE FROM wanted")
     db.executemany("INSERT OR IGNORE INTO wanted VALUES (?)", ((anchor,) for anchor in anchors))
@@ -567,6 +577,61 @@ def review_rows(db, operation, target, offset, only=None, limit=48, known=None):
     return [dict(key=key, id=photo, box=json.loads(box), path=path, count=count, anchor=anchor, name=name,
                  unknown=bool(unknown))
             for key, photo, box, path, count, anchor, name, unknown in db.execute(query, params)]
+
+
+def face_guess(db, key, refused):
+    """The named person one face alone most likely is, or None: its closest
+    match among a few faces of each, as close as a group's must be."""
+    import numpy as np
+    samples = person_samples(db)
+    row = db.execute("SELECT vector FROM faces WHERE key=?", (key,)).fetchone()
+    if samples is None or row is None:
+        return None
+    names, owner, known = samples
+    similarity = known @ np.frombuffer(row[0], dtype="<f4")
+    best = None
+    for person, name in enumerate(names):
+        if name in refused:
+            continue
+        score = float(similarity[owner == person].max())
+        if score >= GUESS_SIMILARITY and (best is None or score > best[1]):
+            best = (name, score)
+    return best[0] if best else None
+
+
+def photo_rows(db, photo):
+    """The faces of one photo: who each is (`name`), or most likely is
+    (`guess`), the group it waits in (`anchor`), and the group named by an
+    older version it is someone by (`legacy`), to take it out of."""
+    rows = db.execute("""
+        SELECT f.key, f.box, l.name,
+               (SELECT anchor FROM pending WHERE member=f.key LIMIT 1),
+               (SELECT lg.anchor FROM legacy lg WHERE lg.anchor=f.key
+                UNION ALL
+                SELECT s.anchor FROM legacy lg JOIN suggestions s USING (anchor)
+                LEFT JOIN rejected r ON r.anchor=s.anchor AND r.member=s.member
+                WHERE s.member=f.key AND r.member IS NULL LIMIT 1)
+        FROM faces f LEFT JOIN labels l USING (key) WHERE f.photo=? ORDER BY f.key
+        """, (photo,)).fetchall()
+    faces = []
+    for key, box, name, anchor, legacy in rows:
+        guess = None
+        if name is None:
+            # Said not to be someone, the face or the group it waits in.
+            refused = {refused for (refused,) in db.execute(
+                "SELECT name FROM refused WHERE anchor IN (?, ?)", (key, anchor or key))}
+            group = guesses(db, [anchor]).get(anchor) if anchor else None
+            guess = group[0] if group and group[0] not in refused else face_guess(db, key, refused)
+        faces.append(dict(key=key, id=photo, box=json.loads(box), name=name, guess=guess,
+                          anchor=anchor, legacy=legacy))
+    return faces
+
+
+def known_names(db):
+    """Every name given, the most photos first."""
+    return [name for (name,) in db.execute("""
+        SELECT l.name FROM labels l JOIN faces f USING (key)
+        GROUP BY l.name ORDER BY count(DISTINCT f.photo) DESC, l.name COLLATE NOCASE""")]
 
 
 def assignment_keys(db, anchor):
@@ -703,7 +768,7 @@ def exit_with_parent():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment"))
+    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment", "photo"))
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--library", type=Path)
     parser.add_argument("--library-key")
@@ -728,7 +793,7 @@ def main():
         if args.operation == "assignment":
             emit(args.operation, keys=[])
         else:
-            emit(args.operation, rows=[], status={"phase": "waiting"})
+            emit(args.operation, rows=[], names=[], status={"phase": "waiting"})
         return
     with closing(readonly(path)) as db, db:
         db.execute("BEGIN")
@@ -736,6 +801,8 @@ def main():
         limit = max(1, min(2000, int(request.get("limit", 48))))
         if args.operation == "assignment":
             emit(args.operation, keys=assignment_keys(db, request["anchor"]))
+        elif args.operation == "photo":
+            emit(args.operation, rows=photo_rows(db, request["photo"]), names=known_names(db), status=status(db))
         elif args.operation == "likely":
             emit(args.operation, rows=likely_rows(db, request["person"], request["offset"], limit), status=status(db))
         else:

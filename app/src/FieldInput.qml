@@ -53,7 +53,12 @@ Rectangle {
         Keys.onShortcutOverride: event => {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                     || (event.key === Qt.Key_Escape && input.text !== "" && !field.done)
-                    || ((event.modifiers & Qt.ControlModifier) && [Qt.Key_Z, Qt.Key_Y, Qt.Key_C, Qt.Key_X, Qt.Key_V, Qt.Key_A].includes(event.key)))
+                    || ((event.modifiers & Qt.ControlModifier) && [Qt.Key_C, Qt.Key_X, Qt.Key_V, Qt.Key_A].includes(event.key))
+                    // Its own undo while it has one; else Pinhole's (a step
+                    // just taken from a card the field is on).
+                    || ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Z
+                        && ((event.modifiers & Qt.ShiftModifier) ? input.canRedo : input.canUndo))
+                    || ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Y && input.canRedo))
                 event.accepted = true
         }
         Keys.onEscapePressed: event => {

@@ -76,7 +76,9 @@ of each is in [the kit, member by member](plugin-kit.md)
   bound by hand), and it fades in and out. It is made the first time it
   opens and kept (`lazy: false` makes it at once). Esc and its `toggleKey`
   close it, as does a photo handed over from it (`dismissed()`); while a
-  photo opened from it with `comeBack` shows, it is hidden and still open.
+  photo opened from it with `comeBack` shows, it is hidden and still open,
+  and a view opened meanwhile (`openedAway`) shows over that photo and
+  covers it, as People's W does.
   `open()`, `close()`, `toggle()`, `shown`, `opened()`, `closed()`, and
   `item`, what `source` (a file beside the main one) or `content` (a
   Component) made. In a `source` file `view` is its view from the first

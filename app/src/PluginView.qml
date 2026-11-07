@@ -13,7 +13,8 @@ import QtQuick
 // shows it pays nothing; `lazy: false` makes it at once. It closes on Esc
 // and on its `toggleKey`, when a photo is handed over from it (pinhole's
 // dismissed()), and is hidden, still open, while a photo opened from it
-// with comeBack shows (pinhole.away).
+// with comeBack shows (pinhole.away). One opened while that photo shows is
+// over it, covering it, as People's W names who is in it.
 //
 // What it shows is `source`, a QML file of the plugin's, or `content`, a
 // Component; `item` is that, once made. In a `source` file, `view` is this
@@ -68,6 +69,9 @@ Item {
 
     property bool _open: false
     property bool _made: !lazy
+    // Opened over a photo the plugin opened to come back from: shown.
+    readonly property bool openedAway: _open && _awayOpened
+    property bool _awayOpened: false
 
     function open(...given) {
         _made = true
@@ -76,6 +80,7 @@ Item {
             shown.start(...given)
         if (_open)
             return
+        _awayOpened = !!(pinhole && pinhole.away)
         _open = true
         opened()
     }
@@ -111,7 +116,7 @@ Item {
 
     anchors.fill: parent
     opacity: _open ? 1 : 0
-    visible: opacity > 0 && !(pinhole && pinhole.away)
+    visible: opacity > 0 && (!(pinhole && pinhole.away) || openedAway)
     Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
     // On the plugin root's stack of open views, whose `covering` follows.

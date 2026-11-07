@@ -240,7 +240,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
         return true;
     }
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "recent", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit", "people"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -1092,6 +1092,8 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         runFrameSelfTest(window, library);
     if (name == QLatin1String("edit"))
         runEditSelfTest(window, library, viewer, arg);
+    if (name == QLatin1String("people"))
+        runPeopleSelfTest(window, library, viewer, arg);
     if (name == QLatin1String("hidden"))
         runHiddenSelfTest(window, grid, library, viewer, arg);
     if (name == QLatin1String("hdrvideo"))

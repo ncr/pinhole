@@ -37,7 +37,13 @@ Item {
         Image {
             id: image
             readonly property var photo: (pinhole.library.revision, pinhole.library.item(tile.row.id))
-            readonly property real ratio: Math.max(1, photo.width || 1) / Math.max(1, photo.height || 1)
+            // The face is where it is in the thumbnail as its file is, not
+            // as the photo is turned and cropped here: that thumbnail, and
+            // its shape, from the size drawn and what was done to it.
+            readonly property var adjusted: (pinhole.library.revision, pinhole.adjustment(tile.row.id))
+            readonly property real turnedWidth: Math.max(1, photo.width || 1) / Math.max(0.01, adjusted.crop?.width ?? 1)
+            readonly property real turnedHeight: Math.max(1, photo.height || 1) / Math.max(0.01, adjusted.crop?.height ?? 1)
+            readonly property real ratio: (adjusted.turn ?? 0) % 2 ? turnedHeight / turnedWidth : turnedWidth / turnedHeight
             readonly property var box: tile.row.box || [0, 0, 1, 1]
             readonly property real side: Math.max(1, picture.width)
             // The width the whole thumbnail is drawn at, for the face to
@@ -53,7 +59,7 @@ Item {
             height: drawn / ratio
             x: placed(side / 2 - centreX * width, width)
             y: placed(side / 2 - centreY * height, height)
-            source: photo.thumbnail || ""
+            source: photo.thumbnailAsIs || photo.thumbnail || ""
             sourceSize: Qt.size(Math.min(1024, width * Screen.devicePixelRatio), Math.min(1024, height * Screen.devicePixelRatio))
             asynchronous: true
             smooth: true

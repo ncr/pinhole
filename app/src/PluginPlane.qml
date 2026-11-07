@@ -65,6 +65,7 @@ Item {
                 target: pluginLoader.item
                 ignoreUnknownSignals: true
                 function onCoveringChanged() { root.collectPlugins() }
+                function onCoveringAwayChanged() { root.collectPlugins() }
                 function onActionsChanged() { root.collectPlugins() }
                 function onHelpChanged() { root.collectPlugins() }
                 function onViewerLayerChanged() { root.collectPlugins() }
@@ -247,7 +248,7 @@ Item {
                 hidden = hidden.concat(away)
                 hiders.push(loader.info.name)
             }
-            if (item.covering === true && !loader.away)
+            if (item.covering === true && (!loader.away || item.coveringAway === true))
                 covering.push(loader.modelData)
         }
         findClashes(actions, owners)

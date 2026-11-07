@@ -116,7 +116,9 @@ automatically in pinholed, even after the window closes. Shift+F shows the
 people named so far and the faces not named yet. A group opens with every
 name a key away (1–9), the likeliest first; once a few photos have a name,
 groups that look like that person say so, and C on the person checks them
-one after another.
+one after another. On a photo shown full window, a button says who is in it
+(Anna, or Anna? for who a face looks like); W rings the faces and names each
+one in turn: ⏎ for the likely one, a name typed, or Not Anna when it is wrong.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
