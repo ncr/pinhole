@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 5,
+  "api": 15,
   "id": "test.scrolls",
   "name": "Scrolls test",
   "version": "1.0.0",

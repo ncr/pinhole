@@ -77,7 +77,6 @@ HEADERS += \
     $$PWD/colour.h \
     $$PWD/gainmap.h \
     $$PWD/display.h \
-    $$PWD/sdrvideo.h \
     $$PWD/videoview.h \
     $$PWD/stage.h \
     $$PWD/viewer.h \
@@ -90,6 +89,7 @@ HEADERS += \
     $$PWD/plugins.h \
     $$PWD/pluginquery.h \
     $$PWD/pluginkeystore.h \
+    $$PWD/tonemap.h \
     $$PWD/pluginguide.h \
     $$PWD/pluginstore.h \
     $$PWD/synced.h \
@@ -129,7 +129,6 @@ SOURCES += \
     $$PWD/colour.cpp \
     $$PWD/gainmap.cpp \
     $$PWD/display.cpp \
-    $$PWD/sdrvideo.cpp \
     $$PWD/videoview.cpp \
     $$PWD/stage.cpp \
     $$PWD/viewer.cpp \
@@ -145,6 +144,7 @@ SOURCES += \
     $$PWD/plugincheck.cpp \
     $$PWD/pluginquery.cpp \
     $$PWD/pluginkeystore.cpp \
+    $$PWD/tonemap.cpp \
     $$PWD/pluginstore.cpp \
     $$PWD/synced.cpp \
     $$PWD/incoming.cpp \

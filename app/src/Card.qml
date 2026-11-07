@@ -6,7 +6,7 @@ import Pinhole
 // in it. Over the photos for a moment (a sign-in, a question), on a dimmed
 // Panel whose click puts it away:
 //
-//     Panel { color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.close() }
+//     Panel { color: Qt.rgba(0, 0, 0, 0.45); onTriggered: plugin.close() }
 //     Card { anchors.centerIn: parent; width: 400; height: 300 }
 Rectangle {
     radius: Math.min(8, theme.radius)

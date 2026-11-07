@@ -854,7 +854,7 @@ def exit_with_parent():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment", "photo"))
+    parser.add_argument("operation", choices=("daemon", "groups", "members", "people", "person", "likely", "assignment", "photo", "convert"))
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--library", type=Path)
     parser.add_argument("--library-key")
@@ -887,7 +887,24 @@ def main():
         _, moved = translated(aliases(db), request.get("edits", {}))
         review_labels(db, request.get("edits", {}))
         limit = max(1, min(2000, int(request.get("limit", 48))))
-        if args.operation == "assignment":
+        if args.operation == "convert":
+            # Names an older version said of whole groups, as each face's
+            # of the group as it is grouped now, the group's own face too,
+            # but those said not to be in it or named themselves: what
+            # People shows of them now, kept by face from here on.
+            edits, _ = translated(aliases(db), request.get("edits", {}))
+            persons = {}
+            for anchor, edit in edits.items():
+                name = edit.get("name")
+                if not name:
+                    continue
+                rejected = set(edit.get("rejected", ()))
+                members = [m for (m,) in db.execute("SELECT member FROM suggestions WHERE anchor=?", (anchor,))]
+                for face in [anchor] + members:
+                    if face not in rejected and not (edits.get(face) or {}).get("person"):
+                        persons.setdefault(face, name)
+            emit(args.operation, persons=persons, groups=[k for k, e in edits.items() if e.get("name")])
+        elif args.operation == "assignment":
             emit(args.operation, keys=assignment_keys(db, request["anchor"]))
         elif args.operation == "photo":
             emit(args.operation, rows=photo_rows(db, request["photo"]), names=known_names(db), moved=moved,

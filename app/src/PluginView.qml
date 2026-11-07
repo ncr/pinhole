@@ -138,7 +138,8 @@ Item {
         // that tells one load of it from the next), not to this one.
         source: view.content || String(view.source) === "" ? ""
               : view.plugin ? Qt.resolvedUrl(view.source, view.plugin) : view.source
-        // A file of an older plugin that declares `view` has it too.
+        // A file that declares `view` as a property of its own (not
+        // required) is given it too.
         onLoaded: if ("view" in item && item.view !== view) item.view = view
     }
     Command {
@@ -148,7 +149,7 @@ Item {
         section: "plugin"
         keys: ["Escape"]
         keyLayer: "plugin"
-        when: view.onTop
+        usable: view.onTop
         onTriggered: view.back()
     }
     // Its own key as Esc: back in what it shows first (a making stopped,
@@ -160,7 +161,7 @@ Item {
         noMouse: "its action's button"
         noTouchpad: "its action's button"
         keyLayer: "plugin"
-        when: view.onTop && view.toggleKey !== ""
+        usable: view.onTop && view.toggleKey !== ""
         onTriggered: view.back()
     }
     Connections {

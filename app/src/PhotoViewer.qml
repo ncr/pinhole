@@ -644,7 +644,7 @@ Item {
                     section: "photo"
                     helpText: qsTr("Back to the library")
                     hint: actionBar.hints ? "Esc" : ""
-                    onTapped: root.closeViewer()
+                    onTriggered: root.closeViewer()
                 }
             }
         }

@@ -36,7 +36,7 @@ PinholePlugin {
                 text: qsTr("Use the 384-photo benchmark")
                 visible: Boolean(backgroundIndex.profile?.benchmark)
                 usable: backgroundIndex.catalogReady && !backgroundIndex.status.running
-                onTapped: backgroundIndex.importBenchmark()
+                onTriggered: backgroundIndex.importBenchmark()
             }
         }
     }

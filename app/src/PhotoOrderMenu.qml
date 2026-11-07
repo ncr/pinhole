@@ -67,7 +67,7 @@ Item {
     // Closing consumes the press; wheels and pinches never reach the grid.
     Panel {
         color: "transparent"
-        onClicked: root.open = false
+        onTriggered: root.open = false
     }
     MenuCard {
         id: card
@@ -155,7 +155,7 @@ Item {
         section: qsTr("Photo order")
         keys: ["Ctrl+Shift+O"]
         keyLayer: "grid"
-        when: root.available
+        usable: root.available
         buttons: 1
         onTriggered: root.toggle(true)
     }
@@ -163,7 +163,7 @@ Item {
         name: "order.close"
         keys: ["Escape"]
         keyLayer: "menu"
-        when: root.open
+        usable: root.open
         buttons: 1
         onTriggered: root.open = false
     }
@@ -171,7 +171,7 @@ Item {
         name: "order.up"
         keys: ["Up"]
         keyLayer: "menu"
-        when: root.open
+        usable: root.open
         autoRepeat: true
         buttons: 1
         onTriggered: { root.pointerInput = false; root.current = Math.max(0, root.current - 1) }
@@ -180,7 +180,7 @@ Item {
         name: "order.down"
         keys: ["Down"]
         keyLayer: "menu"
-        when: root.open
+        usable: root.open
         autoRepeat: true
         buttons: 1
         onTriggered: { root.pointerInput = false; root.current = Math.min(root.options.length - 1, root.current + 1) }
@@ -189,7 +189,7 @@ Item {
         name: "order.choose"
         keys: ["Return", "Enter"]
         keyLayer: "menu"
-        when: root.open
+        usable: root.open
         buttons: 1
         onTriggered: root.choose(root.current >= 0 ? root.current
                                   : Math.max(0, root.options.findIndex(option => option.value === root.value)))

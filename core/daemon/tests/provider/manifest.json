@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 3,
+  "api": 15,
   "id": "test.source",
   "name": "Test source",
   "description": "A folder of JPEGs as a source of a plugin's own, for pinholed's tests (core/daemon/tests/provider.rs).",
@@ -11,9 +11,9 @@
     {
       "kind": "test.source",
       "provider": "pinhole-test-source",
-      "needs_sign_in": true,
+      "needsSignIn": true,
       "accepts": ["jpg", "jpeg"],
-      "rounds_every_secs": 30
+      "roundsEverySecs": 30
     }
   ]
 }

@@ -62,7 +62,7 @@ MenuGroup {
         busyDelay: group.action?.busyDelay ?? 1000
         text: group.action?.text ?? ""
         hint: group.hints ? KeyNames.nameOf(group.action?.key ?? "") : ""
-        onTapped: group.press(group.action)
+        onTriggered: group.press(group.action)
         onHoveredChanged: if (group.action) group.action.hovered = hovered
         Component.onDestruction: if (hovered && group.action) group.action.hovered = false
     }

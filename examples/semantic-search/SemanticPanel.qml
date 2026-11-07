@@ -246,14 +246,14 @@ Panel {
         grid.view.positionViewAtIndex(selected, GridView.Contain)
         grid.forceActiveFocus()
     }
-    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; when: panel.browsing && search.input.activeFocus; onTriggered: panel.toResults() }
+    Command { name: "semantic.down"; keys: ["Down"]; keyLayer: "plugin"; usable: panel.browsing && search.input.activeFocus; onTriggered: panel.toResults() }
     Command {
         id: tagCommand
         name: "semantic.tags"
         text: qsTr("Tags")
         keys: ["T"]
         keyLayer: "plugin"
-        when: panel.browsing && grid.activeFocus && panel.selected >= 0 && (panel.tagQuery || panel.catalogReady)
+        usable: panel.browsing && grid.activeFocus && panel.selected >= 0 && (panel.tagQuery || panel.catalogReady)
         onTriggered: panel.openTags()
     }
     Connections {
@@ -288,7 +288,7 @@ Panel {
                 hint: tagCommand.keyName
                 visible: panel.selected >= 0 && panel.sourceKey !== ""
                 usable: panel.tagQuery || panel.catalogReady
-                onTapped: panel.openTags()
+                onTriggered: panel.openTags()
             }
         ]
         // The question in the title's place.
@@ -416,7 +416,7 @@ Panel {
                             objectName: "semanticExample"
                             text: modelData
                             hint: ""
-                            onTapped: panel.ask(modelData)
+                            onTriggered: panel.ask(modelData)
                         }
                     }
                 }

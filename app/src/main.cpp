@@ -34,7 +34,6 @@
 #include "favourites.h"
 #include "commands.h"
 #include "display.h"
-#include "sdrvideo.h"
 #include "videoview.h"
 #include "history.h"
 #include "markchoices.h"
@@ -230,7 +229,6 @@ int main(int argc, char *argv[]) {
     });
 
     qmlRegisterType<PhotoGrid>("Pinhole", 1, 0, "PhotoGrid");
-    qmlRegisterType<SdrVideo>("Pinhole", 1, 0, "SdrVideo");
     qmlRegisterType<VideoView>("Pinhole", 1, 0, "VideoView");
     qmlRegisterType<StagePhoto>("Pinhole", 1, 0, "StagePhoto");
     // What a plugin's QML imports (docs/plugins.md).

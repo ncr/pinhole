@@ -26,7 +26,7 @@ ScrollArea {
             id: back
             text: qsTr("Back to search")
             hint: "Esc"
-            onTapped: editor.closed()
+            onTriggered: editor.closed()
         }
         Image {
             width: parent.width
@@ -55,7 +55,7 @@ ScrollArea {
                     required property var modelData
                     text: modelData.label + " ×"
                     Accessible.name: qsTr("Remove tag: %1").arg(modelData.label)
-                    onTapped: {
+                    onTriggered: {
                         editor.toggled(modelData)
                         back.forceActiveFocus()
                     }
@@ -86,7 +86,7 @@ ScrollArea {
                     text: modelData.label
                     active: editor.saved.some(tag => tag.id === modelData.id)
                     Accessible.name: (active ? qsTr("Remove tag: %1") : qsTr("Save tag: %1")).arg(modelData.label)
-                    onTapped: editor.toggled(modelData)
+                    onTriggered: editor.toggled(modelData)
                 }
             }
         }

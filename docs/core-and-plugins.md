@@ -498,7 +498,7 @@ records the undo step with `pinhole.did` itself.
 As built (B4): `changed` is the ids of the photos that were not so
 already (not a count), and `read_only` and `no_service` are among the
 codes; `not_found` too when none of the photos is in the library.
-`library.revision` (API 3) goes up with every favourite set, by any
+`library.revision` goes up with every favourite set, by any
 plugin, and every reload, for a binding over `item()`.
 
 ### Sources: `PluginSource` and `pinhole.sources`
@@ -1049,7 +1049,7 @@ CLAUDE.md says. Save the numbers in `/tmp/claude-1000/baseline/numbers.txt`.
   - `render.rs` takes the file and whether it is a video; the folder
     crate's `render` calls it.
 
-### B1: marks from plugins (API 3 begins)
+### B1: marks from plugins (begins)
 
 - Changed: `app/src/marks.{h,cpp}`, `photogrid.{h,cpp}`, `plugins.{h,cpp}`
   (`PluginMark`, `setMarks`, `markKinds`, `marksOf` following through

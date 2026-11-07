@@ -19,6 +19,29 @@ PinholePlugin {
         edits = pinhole.synced.values()
         edited()
         if (shownId !== "") lookSoon.restart()
+        convertSoon.restart()
+    }
+    // Names an older version said of whole groups: said of each face
+    // instead, once, as People shows them now (pinhole-faces convert).
+    Timer { id: convertSoon; interval: 2000; onTriggered: plugin.convertGroupNames() }
+    property bool converting: false
+    function convertGroupNames() {
+        if (converting || !Object.values(edits).some(edit => edit && edit.name))
+            return
+        converting = true
+        pinhole.run("pinhole-faces", ["convert", "--cache", pinhole.cacheDir], {
+            input: plugin.input({ source: plugin.source, offset: 0 }), timeout: 30000
+        }).then(result => {
+            const persons = result.json.persons || {}, groups = result.json.groups || []
+            const patch = {}
+            for (const face of Object.keys(persons))
+                patch[face] = Object.assign({}, edits[face], { person: persons[face] })
+            for (const group of groups)
+                patch[group] = Object.assign({}, patch[group] || edits[group], { name: undefined })
+            writeEdits(patch)
+            console.info("pinhole.people: " + Object.keys(persons).length + " faces named as their groups were, "
+                         + groups.length + " groups' names taken off")
+        }).catch(pinhole.warn).then(() => converting = false)
     }
     Connections {
         target: pinhole.synced

@@ -302,27 +302,14 @@ void PluginHost::stop() {
     }
 }
 
-QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJSValue &done) {
+QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJSValue &options) {
     const Library *data = m_plugins->libraryData();
     // Only this library's photos: a position, or an id it has.
     QByteArray id;
     if (const int index = m_plugins->library()->positionOf(photo); index >= 0)
         id = data->at(index).id;
     const int generation = m_generation;
-    // An object in done's place is options (API 3).
-    const bool stream = !done.isCallable() && done.isObject() && done.property(QStringLiteral("stream")).toBool();
-
-    if (done.isCallable()) {
-        if (id.isEmpty()) {
-            call(done, {QString(), QStringLiteral("not_found")});
-            return {};
-        }
-        m_plugins->service()->fetch(id, kind, [this, generation, done](bool ok, const QJsonObject &result, const QString &code) {
-            if (generation == m_generation)
-                call(done, {ok ? result.value("path").toString() : QString(), ok ? QString() : code});
-        });
-        return {};
-    }
+    const bool stream = options.property(QStringLiteral("stream")).toBool();
 
     // The service's answer cannot be stopped, only no longer waited for.
     auto deferred = std::make_shared<Deferred>();
@@ -450,10 +437,6 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     // What check refuses, however its name was made: not run.
     if (const QString refused = Plugins::refusedRun(program, arguments); !refused.isEmpty()) {
         qWarning().noquote() << m_id + ":" << refused;
-        if (options.isCallable()) {
-            call(options, {-1, QString(), refused});
-            return {};
-        }
         const Deferred deferred = defer([] {});
         settle(m_generation, deferred.reject, error(QStringLiteral("refused"), refused));
         return deferred.promise;
@@ -487,25 +470,6 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
                 killProgram(process);
         });
     });
-
-    if (options.isCallable()) {
-        const QJSValue done = options;
-        connect(process, &QProcess::finished, this, [this, process, done](int code, QProcess::ExitStatus status) {
-            call(done, {status == QProcess::NormalExit ? code : -1, QString::fromUtf8(process->readAllStandardOutput()),
-                        QString::fromUtf8(process->readAllStandardError())});
-            process->deleteLater();
-        });
-        connect(process, &QProcess::errorOccurred, this, [this, process, done, path](QProcess::ProcessError error) {
-            if (error != QProcess::FailedToStart)
-                return;
-            call(done, {-1, QString(), QStringLiteral("%1 did not start").arg(path)});
-            process->deleteLater();
-        });
-        process->start(path, arguments);
-        // As with a promise: its stdin ends at once.
-        process->closeWriteChannel();
-        return {};
-    }
 
     const int generation = m_generation;
     // Why it was stopped, if it was: "cancelled", "timeout".
@@ -610,16 +574,8 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
     return deferred.promise;
 }
 
-QJSValue PluginHost::record(QQuickItem *item, const QJSValue &options, const QJSValue &progress, const QJSValue &done) {
-    const QJSValue onProgress = progress.isCallable() ? progress : options.property("progress");
-    if (done.isCallable()) {
-        auto *recording = new Recording(this, item, options, onProgress, [this, done](const QString &path, const QString &, const QString &e) {
-            call(done, {path, e});
-        });
-        track(recording, [recording] { recording->stop(); });
-        recording->start();
-        return {};
-    }
+QJSValue PluginHost::record(QQuickItem *item, const QJSValue &options) {
+    const QJSValue onProgress = options.property("progress");
     const int generation = m_generation;
     auto deferred = std::make_shared<Deferred>();
     auto *recording = new Recording(this, item, options, onProgress, [this, deferred, generation](const QString &path, const QString &code, const QString &e) {

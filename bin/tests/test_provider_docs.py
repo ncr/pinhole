@@ -12,7 +12,7 @@ class ProviderDocumentationTests(unittest.TestCase):
         example = doc.split('## Source: JPEG folder',1)[1]
         manifest = json.loads(re.search(r'```json\n(.*?)\n```', example, re.S).group(1))
         code = re.search(r'```python\n(.*?)\n```', example, re.S).group(1)
-        assert manifest['api'] == 3 and manifest['id'] == 'me.jpegs'
+        assert manifest['api'] == 15 and manifest['id'] == 'me.jpegs'
         assert manifest['sources'][0]['kind'] == manifest['id']
         checks = []
         with tempfile.TemporaryDirectory(prefix='pinhole-provider-doc-') as temp:

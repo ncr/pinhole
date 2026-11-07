@@ -362,8 +362,7 @@ public:
     Q_INVOKABLE void reveal(const QJSValue &photo) const;
     // Open a photo (a position or an id) full window.
     Q_INVOKABLE void openPhoto(const QJSValue &photo) const;
-    Q_INVOKABLE void openPhotoDirect(const QJSValue &photo) const;
-    // As openPhotoDirect, with only `photos` (ids or positions) to step
+    // As openPhoto, with only `photos` (ids or positions) to step
     // through, in their order, until the viewer closes.
     // `options.comeBack`: its view waits away while the photo shows, and is
     // told `returned(id)` of the one last shown when it closes (API 11).
@@ -379,11 +378,10 @@ public:
     // A photo's file of `kind` (medium, full, original, video, live, and
     // a Live Photo's loop, bounce or long_exposure) from the service: a
     // promise of its path, rejected with an Error whose `code` is the
-    // service's. With `done`, done(path) or done("", code). An object in
-    // its place is `options`: `{ stream: true }` gives a URL for a
+    // service's. `options`: `{ stream: true }` gives a URL for a
     // MediaPlayer instead of a path, the service's http:// one while it is
     // still downloading, else the file's.
-    Q_INVOKABLE QJSValue fetch(const QJSValue &photo, const QString &kind, const QJSValue &done = {});
+    Q_INVOKABLE QJSValue fetch(const QJSValue &photo, const QString &kind, const QJSValue &options = {});
     // Photos (a list of positions or ids, or one) made favourites, or not
     // (favourites.h): at once in the library in memory (the grid's mark,
     // library.item().favorite), then in the source. A promise of
@@ -406,17 +404,14 @@ public:
     // Pinhole's), output(line) for each line it writes, as it comes (the
     // result's stdout is then what follows the last); json (API 15), a
     // value given as its stdin as JSON, in place of input. The result's
-    // `json` (API 15) is its stdout read as JSON, if it is JSON. With a
-    // function in place of options: done(exitCode, stdout, stderr).
+    // `json` (API 15) is its stdout read as JSON, if it is JSON.
     Q_INVOKABLE QJSValue run(const QString &program, const QStringList &arguments, const QJSValue &options = {});
     // An item as it looks over a number of frames, made into a GIF or an
     // MP4 (ffmpeg): options are path, format ("gif" or "mp4"), width,
     // height, fps, frames, seek(frame), called before each frame is taken,
-    // and progress(fraction) as it goes. A promise of the path. With
-    // progress and done after the options: done(path, error) at the end.
+    // and progress(fraction) as it goes. A promise of the path.
     // The item must be in the window and showing while it records.
-    Q_INVOKABLE QJSValue record(QQuickItem *item, const QJSValue &options, const QJSValue &progress = {},
-                                const QJSValue &done = {});
+    Q_INVOKABLE QJSValue record(QQuickItem *item, const QJSValue &options);
     // A file on the clipboard, for pasting into a chat or a file manager:
     // an image as image data too, as Pinhole's own copy has it (Outgoing).
     // A promise of the path, once the clipboard has it (an image's PNG is
@@ -489,11 +484,6 @@ public:
     // A folder chosen in the desktop's own picker, titled `title`: a
     // promise of its path, rejected "cancelled" when none is.
     Q_INVOKABLE QJSValue chooseFolder(const QString &title);
-    // The plugin's settings, kept in ~/.config/pinhole/plugins.json; the
-    // same as pinhole.settings[key].
-    Q_INVOKABLE QVariant setting(const QString &key, const QVariant &fallback = {}) const;
-    // False if it could not be kept (the file could not be written).
-    Q_INVOKABLE bool setSetting(const QString &key, const QVariant &value);
     // What pinhole.settings says of a setting never set (the manifest's
     // "settings", API 13): kept nowhere, so a later default reaches those
     // who never chose.
@@ -754,13 +744,6 @@ public:
     // What is wrong with the renditions a manifest says it makes ("makes"),
     // as pinholed would refuse them.
     static QString makesProblem(const QString &dir, const QJsonObject &manifest);
-    // What the plugin in `dir` uses that came with an API after the first,
-    // by the API that brought it, by its files' code, strings and comments
-    // aside: pinhole's ("pinhole.notify"), a photo's avgColor, or its
-    // root's ("hidden"), for 2; "marks" or "pinhole.state" for 3.
-    // `pinhole plugin check` warns of those of an API newer than its
-    // manifest asks for.
-    static QMap<int, QStringList> apiUses(const QString &dir);
     // The plugin in `dir`'s files named as one of Pinhole's own, or as one
     // of the `others`' (each its id and folder): a qsTr() in it may be
     // given that one's words (Translator). `pinhole plugin check` warns.

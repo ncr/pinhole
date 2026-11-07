@@ -87,11 +87,11 @@ Window {
                 event.accepted = true
             }
         }
-        ShellButton { objectName: "button"; x: 24; y: 24; text: "Copy"; helpText: "Copy selected photos"; floating: true; onTapped: window.fires++ }
+        ShellButton { objectName: "button"; x: 24; y: 24; text: "Copy"; helpText: "Copy selected photos"; floating: true; onTriggered: window.fires++ }
         Toggle { objectName: "toggle"; x: 24; y: 100; Accessible.name: "Show photo dates"; onToggled: { checked = !checked; window.toggles++ } }
         FieldInput { objectName: "field"; x: 24; y: 180; width: 500; placeholder: "Find photos" }
         ShellButton { objectName: "radio"; x: 24; y: 260; text: "Automatic"; checkable: true; active: true; Accessible.role: Accessible.RadioButton }
-        ShellButton { objectName: "disabled"; x: 24; y: 340; text: "Unavailable"; floating: true; usable: false; onTapped: window.fires++ }
+        ShellButton { objectName: "disabled"; x: 24; y: 340; text: "Unavailable"; floating: true; usable: false; onTriggered: window.fires++ }
         ShellButton { objectName: "hidden"; x: 24; y: 420; text: "Hidden"; visible: false }
         FieldInput { objectName: "password"; x: 24; y: 500; width: 500; placeholder: "Password"; password: true; text: "private-value" }
         CopyButton { objectName: "copy"; x: 24; y: 600; floating: true; photos: () => ["one"] }
@@ -102,7 +102,7 @@ Window {
         visible: !window.menus
         x: 760; y: 400; width: 220; height: 220
         Item { anchors.fill: parent; TapHandler { onTapped: window.tileTaps++ } }
-        ShellButton { objectName: "overTile"; x: 150; y: 10; text: "✕"; helpText: "Someone else"; floating: true; onTapped: window.fires++ }
+        ShellButton { objectName: "overTile"; x: 150; y: 10; text: "✕"; helpText: "Someone else"; floating: true; onTriggered: window.fires++ }
     }
     MoreGroup {
         id: more
@@ -130,9 +130,9 @@ Window {
         menuText: "Copy"
         keyLayer: "grid"
         items: [first, unavailable, last]
-        ShellButton { text: "Copy"; flat: true; onTapped: window.fires += 100 }
+        ShellButton { text: "Copy"; flat: true; onTriggered: window.fires += 100 }
     }
-    ShellButton { id: date; objectName: "date"; visible: window.menus; x: 24; y: 24; text: "Photo order"; onTapped: order.toggle(false) }
+    ShellButton { id: date; objectName: "date"; visible: window.menus; x: 24; y: 24; text: "Photo order"; onTriggered: order.toggle(false) }
     PhotoOrderMenu { id: order; objectName: "order"; z: 1001; available: window.menus; button: date; onChosen: mode => value = mode }
 })";
             if (applicationWindow) {

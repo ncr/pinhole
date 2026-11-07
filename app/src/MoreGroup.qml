@@ -66,7 +66,7 @@ MenuGroup {
         lit: more.open
         active: more.items.some(a => a.shown && a.active)
         busy: more.items.some(a => a.shown && a.busy)
-        onTapped: more.toggle(false)
+        onTriggered: more.toggle(false)
     }
 
     // Each folded group's ⇧ key (PluginGroup's menuKey), opening the menu
@@ -86,7 +86,7 @@ MenuGroup {
             name: "more.open." + (keyed?.key ?? "")
             keys: keyed ? ["Shift+" + keyed.key] : []
             keyLayer: more.keyLayer
-            when: keyed !== null && more.visible && modelData.some(a => a.shown)
+            usable: keyed !== null && more.visible && modelData.some(a => a.shown)
             buttons: 1
             onTriggered: more.openAt(modelData.find(a => a.shown))
         }

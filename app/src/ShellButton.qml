@@ -24,7 +24,7 @@ ControlSurface {
     id: control
     property string text
     property var action: null
-    usable: !action || action.when !== false
+    usable: !action || action.usable !== false
     property string key
     property string keyLayer: "chrome"
     property string section
@@ -68,10 +68,8 @@ ControlSurface {
     property int inset: Math.round(theme.fontSize * 0.833)
     // The pointer over it, while it shows.
     readonly property bool hovered: hover.hovered && visible
-    // Pressed: a click, a tap, its key. `triggered()` (API 15), as an
-    // action and a Command say it; `tapped()`, as it was said before, too.
+    // Pressed: a click, a tap, its key, as an action and a Command say it.
     signal triggered()
-    signal tapped()
     // As a tap does: from the keys of a panel it is a stop in.
     function press() {
         if (!usable || !enabled)
@@ -79,7 +77,6 @@ ControlSurface {
         if (action)
             action.trigger()
         triggered()
-        tapped()
     }
 
     readonly property color ink: theme.foreground
@@ -162,9 +159,9 @@ ControlSurface {
             section: control.section
             keys: [control.key]
             keyLayer: control.keyLayer
-            when: control.visible && control.usable
+            usable: control.visible && control.usable
             buttons: 1
-            onTriggered: control.tapped()
+            onTriggered: control.triggered()
         }
     }
     // The action's way for a pointer, while this shows it.

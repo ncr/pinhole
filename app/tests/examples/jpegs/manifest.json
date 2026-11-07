@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "api": 3,
+  "api": 15,
   "id": "me.jpegs",
   "name": "JPEG folder",
   "entryPoints": {

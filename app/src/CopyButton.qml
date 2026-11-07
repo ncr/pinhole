@@ -156,7 +156,7 @@ ControlSurface {
             section: button.section
             keys: [button.key]
             keyLayer: button.keyLayer
-            when: button.visible && button.enabledHere
+            usable: button.visible && button.enabledHere
             buttons: 1
             onTriggered: button.copy()
         }

@@ -86,7 +86,7 @@ Item {
             name: "pick.use" + (index + 1)
             keys: index === 0 ? ["Return", "Enter"] : [String(index + 1)]
             keyLayer: root.keyLayer
-            when: root.shown && index < root.suggestions.length
+            usable: root.shown && index < root.suggestions.length
             mouse: qsTr("Its Use button")
             touchpad: qsTr("Its Use button")
             onTriggered: root.use(index)
@@ -97,7 +97,7 @@ Item {
         name: "pick.close"
         keys: ["Escape"]
         keyLayer: root.keyLayer
-        when: root.shown && !root.firstRun
+        usable: root.shown && !root.firstRun
         onTriggered: root.shown = false
     }
 
@@ -257,7 +257,7 @@ Item {
                                     active: row.first
                                     text: qsTr("Use")
                                     hint: row.first ? "⏎" : String(row.index + 1)
-                                    onTapped: root.use(row.index)
+                                    onTriggered: root.use(row.index)
                                 }
                             }
                         }
@@ -284,7 +284,7 @@ Item {
                             key: modelData.key ?? ""
                             keyLayer: root.keyLayer
                             usable: root.shown
-                            onTapped: modelData.triggered()
+                            onTriggered: modelData.triggered()
                         }
                     }
                 }

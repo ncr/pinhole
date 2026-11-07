@@ -250,9 +250,6 @@ pub struct Worker {
     pub answers: bool,
 }
 
-/// The plugin API that brought `workers` (Plugins::apiUses).
-pub const WORKERS_API: i64 = 11;
-
 /// Every worker the plugins declare, on or not, and why any declared was
 /// refused, one line each. A plugin of your own with a built-in's id
 /// takes its place, its workers too.
@@ -268,19 +265,14 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
             problems.push(format!("{id}: \"workers\" is a list"));
             continue;
         };
-        if let Err(why) = taken(&id, &dir, &manifest).and_then(|()| {
-            if whole(&manifest["api"]).unwrap_or(1) < WORKERS_API {
-                return Err(format!("workers need \"api\": {WORKERS_API}"));
-            }
-            Ok(())
-        }) {
+        if let Err(why) = taken(&id, &dir, &manifest) {
             problems.push(format!("{id}: workers: {why}"));
             continue;
         }
         let mut names: Vec<String> = Vec::new();
         for each in declared {
             let name = each["name"].as_str().unwrap_or("");
-            match check_worker(&dir, each, &names, whole(&manifest["api"]).unwrap_or(1)) {
+            match check_worker(&dir, each, &names) {
                 Ok((program, args, answers)) => {
                     names.push(name.to_owned());
                     found.push(Worker { plugin: id.clone(), builtin, name: name.to_owned(), program, args, answers });
@@ -291,9 +283,6 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
     }
     (found, problems)
 }
-
-/// The API from which a plugin can make renditions (`makes`).
-pub const MAKES_API: i64 = 12;
 
 /// A rendition a plugin makes from another of a photo's, while someone
 /// waits for it (a Live Photo's Bounce from its motion): its manifest's
@@ -328,18 +317,13 @@ pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
             problems.push(format!("{id}: \"makes\" is a list"));
             continue;
         };
-        if let Err(why) = taken(&id, &dir, &manifest).and_then(|()| {
-            if whole(&manifest["api"]).unwrap_or(1) < MAKES_API {
-                return Err(format!("makes needs \"api\": {MAKES_API}"));
-            }
-            Ok(())
-        }) {
+        if let Err(why) = taken(&id, &dir, &manifest) {
             problems.push(format!("{id}: makes: {why}"));
             continue;
         }
         for each in declared {
             let kind = each["kind"].as_str().unwrap_or("");
-            match check_maker(&id, whole(&manifest["api"]).unwrap_or(1), &dir, each) {
+            match check_maker(&id, &dir, each) {
                 Ok(maker) if found.iter().any(|m| m.kind == maker.kind) => {
                     problems.push(format!("{id}: makes {kind:?}: another plugin makes it already"))
                 }
@@ -354,9 +338,6 @@ pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
 /// The kinds a plugin can make: the effects a source may have no render
 /// of. What the window asks for by these names it makes; nothing else.
 pub const MADE_KINDS: [&str; 2] = ["bounce", "long_exposure"];
-
-/// The API from which a plugin can make kinds of its own (`makes`).
-pub const OWN_KINDS_API: i64 = 15;
 
 /// A kind a plugin makes of its own: `<its id>/<name>`, the name in
 /// lowercase letters, digits, '_' and '-'. Its id in front keeps one
@@ -375,7 +356,7 @@ pub fn is_own_kind(kind: &str) -> bool {
 }
 
 /// One rendition a manifest says it makes, checked.
-fn check_maker(plugin: &str, api: i64, dir: &Path, declared: &Value) -> Result<Maker, String> {
+fn check_maker(plugin: &str, dir: &Path, declared: &Value) -> Result<Maker, String> {
     if !declared.is_object() {
         return Err("each is an object: \"kind\", \"from\", \"type\", \"extension\", \"program\"".into());
     }
@@ -383,9 +364,6 @@ fn check_maker(plugin: &str, api: i64, dir: &Path, declared: &Value) -> Result<M
     if is_own_kind(kind) {
         if own_kind(plugin, kind).is_none() {
             return Err(format!("a kind of its own is \"{plugin}/<name>\", the name lowercase letters, digits, '_' and '-'"));
-        }
-        if api < OWN_KINDS_API {
-            return Err(format!("a kind of its own needs \"api\": {OWN_KINDS_API}"));
         }
     } else if !MADE_KINDS.contains(&kind) {
         return Err(format!("\"kind\" is one of {}, or one of its own: \"{plugin}/<name>\"", MADE_KINDS.join(", ")));
@@ -425,10 +403,7 @@ fn check_maker(plugin: &str, api: i64, dir: &Path, declared: &Value) -> Result<M
 
 /// One worker as its manifest declares it, checked: its program and the
 /// arguments it is given first.
-/// The API from which a worker can answer what its plugin asks.
-pub const ANSWERS_API: i64 = 15;
-
-fn check_worker(dir: &Path, declared: &Value, names: &[String], api: i64) -> Result<(PathBuf, Vec<String>, bool), String> {
+fn check_worker(dir: &Path, declared: &Value, names: &[String]) -> Result<(PathBuf, Vec<String>, bool), String> {
     if !declared.is_object() {
         return Err("a worker is an object with a \"name\" and a \"program\"".into());
     }
@@ -457,7 +432,6 @@ fn check_worker(dir: &Path, declared: &Value, names: &[String], api: i64) -> Res
     };
     let answers = match &declared["answers"] {
         Value::Null => false,
-        Value::Bool(answers) if *answers && api < ANSWERS_API => return Err(format!("\"answers\" needs \"api\": {ANSWERS_API}")),
         Value::Bool(answers) => *answers,
         _ => return Err("\"answers\" is true or false".into()),
     };
@@ -479,9 +453,6 @@ fn check(
     found: &[Provided],
 ) -> Result<Provided, String> {
     taken(id, dir, manifest)?;
-    if whole(&manifest["api"]).unwrap_or(1) < 3 {
-        return Err("sources need \"api\": 3".into());
-    }
     let named = kind.len() <= 128
         && kind.starts_with(|c: char| c.is_ascii_alphanumeric())
         && kind.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
@@ -503,6 +474,12 @@ fn check(
     if let Some(other) = found.iter().find(|p| p.kind == kind) {
         return Err(format!("{} has that kind already", other.plugin));
     }
+    // Only what is read: a key misspelt, or as it was written once
+    // (needs_sign_in), is said, not quietly left out.
+    const FIELDS: [&str; 5] = ["kind", "provider", "needsSignIn", "accepts", "roundsEverySecs"];
+    if let Some(key) = declared.as_object().and_then(|o| o.keys().find(|k| !FIELDS.contains(&k.as_str()))) {
+        return Err(format!("\"{key}\" is none of a source's fields: {}", FIELDS.join(", ")));
+    }
     let path = program_in(dir, "provider", provider)?;
     let accepts: Vec<String> = match &declared["accepts"] {
         Value::Null => Vec::new(),
@@ -517,21 +494,16 @@ fn check(
             .collect::<Result<_, _>>()?,
         _ => return Err("\"accepts\" is a list of extensions".into()),
     };
-    // As the rest of the manifest writes its keys (API 15), or as before.
-    let either = |camel: &str, snake: &str| if declared[camel].is_null() { declared[snake].clone() } else { declared[camel].clone() };
-    let rounds_every = match either("roundsEverySecs", "rounds_every_secs") {
+    let rounds_every = match &declared["roundsEverySecs"] {
         Value::Null => None,
-        v => {
-            let named = if declared["roundsEverySecs"].is_null() { "rounds_every_secs" } else { "roundsEverySecs" };
-            Some(whole(&v).and_then(|s| u64::try_from(s).ok()).filter(|s| (5..=86_400).contains(s)).ok_or(format!("\"{named}\" is 5 to 86400"))?)
-        }
+        v => Some(whole(v).and_then(|s| u64::try_from(s).ok()).filter(|s| (5..=86_400).contains(s)).ok_or("\"roundsEverySecs\" is 5 to 86400")?),
     };
     Ok(Provided {
         plugin: id.to_owned(),
         builtin: false,
         kind: kind.to_owned(),
         program: path,
-        needs_sign_in: either("needsSignIn", "needs_sign_in").as_bool().unwrap_or(false),
+        needs_sign_in: declared["needsSignIn"].as_bool().unwrap_or(false),
         accepts,
         rounds_every,
     })
@@ -553,8 +525,17 @@ pub fn usable_id(id: &str) -> bool {
         && !id.contains("..")
 }
 
+/// The plugin API this pinholed is of: the window's (Plugins::api), the
+/// two always the same. A plugin is written for it, and no other.
+pub const API: i64 = 15;
+
 /// As the window takes a manifest at all (Plugins::manifestProblem).
 fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
+    match whole(&manifest["api"]) {
+        Some(API) => {}
+        Some(newer) if newer > API => return Err(format!("it needs a newer Pinhole: plugin API {newer}, and this one has {API}")),
+        asked => return Err(format!("it is written for plugin API {}, and this Pinhole has {API}", asked.unwrap_or(0))),
+    }
     // Left out (API 15): schema 1, the only one, and Main.qml beside it.
     if !manifest["schemaVersion"].is_null() && whole(&manifest["schemaVersion"]) != Some(1) {
         return Err("manifest.json needs \"schemaVersion\": 1".into());
@@ -620,24 +601,23 @@ mod tests {
                                                    "program": "make", "args": [kind]});
         let manifest = |id: &str, api: i64, makes: Value| serde_json::json!({"schemaVersion": 1, "api": api, "id": id,
                                                                               "entryPoints": {"main": "Main.qml"}, "makes": makes});
-        plugin(&places.builtin, "live", manifest("pinhole.live", 12, serde_json::json!([made("bounce"), made("long_exposure")])));
-        plugin(&places.personal, "old", manifest("me.old", 11, serde_json::json!([made("bounce")])));
-        plugin(&places.personal, "odd", manifest("me.odd", 12, serde_json::json!([made("sparkle"),
+        plugin(&places.builtin, "live", manifest("pinhole.live", 15, serde_json::json!([made("bounce"), made("long_exposure")])));
+        plugin(&places.personal, "old", manifest("me.old", 14, serde_json::json!([made("bounce")])));
+        plugin(&places.personal, "odd", manifest("me.odd", 15, serde_json::json!([made("sparkle"),
             {"kind": "bounce", "from": "live", "type": "public.mpeg-4", "extension": "MP4", "program": "make"}])));
-        // Kinds of its own: under its id, from API 15.
+        // Kinds of its own: under its id.
         plugin(&places.personal, "steady", manifest("me.steady", 15, serde_json::json!([made("me.steady/steadied"),
             made("me.other/steadied"), made("me.steady/Not Fine")])));
-        plugin(&places.personal, "early", manifest("me.early", 14, serde_json::json!([made("me.early/sooner")])));
         let (found, refused) = makers(&places);
         let kinds: Vec<(&str, &str)> = found.iter().map(|m| (m.plugin.as_str(), m.kind.as_str())).collect();
         assert_eq!(kinds, [("pinhole.live", "bounce"), ("pinhole.live", "long_exposure"), ("me.steady", "me.steady/steadied")]);
         assert!(found[0].builtin && found[0].program.ends_with("live/make") && found[0].args == ["bounce"]);
         let refused = refused.join("\n");
-        assert!(refused.contains("me.old: makes: makes needs \"api\": 12"), "{refused}");
+        // Written for another API: not taken.
+        assert!(refused.contains("me.old: makes: it is written for plugin API 14, and this Pinhole has 15"), "{refused}");
         assert!(refused.contains("me.odd: makes \"sparkle\": \"kind\" is one of bounce, long_exposure"), "{refused}");
         assert!(refused.contains("me.steady: makes \"me.other/steadied\": a kind of its own is \"me.steady/<name>\""), "{refused}");
         assert!(refused.contains("me.steady: makes \"me.steady/Not Fine\""), "{refused}");
-        assert!(refused.contains("me.early: makes \"me.early/sooner\": a kind of its own needs \"api\": 15"), "{refused}");
         assert!(refused.contains("me.odd: makes \"bounce\": \"extension\""), "{refused}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -650,8 +630,12 @@ mod tests {
         assert!(taken("me.short", &dir, &serde_json::json!({"api": 15})).unwrap_err().contains("entryPoints"));
         std::fs::write(dir.join("Main.qml"), "").unwrap();
         assert_eq!(taken("me.short", &dir, &serde_json::json!({"api": 15})), Ok(()));
-        assert!(taken("me.short", &dir, &serde_json::json!({"schemaVersion": 2})).unwrap_err().contains("schemaVersion"));
-        assert!(taken("me.short", &dir, &serde_json::json!({"entryPoints": {"main": "Other.qml"}})).is_err());
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15, "schemaVersion": 2})).unwrap_err().contains("schemaVersion"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15, "entryPoints": {"main": "Other.qml"}})).is_err());
+        // Of another API: not taken, older or newer.
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 14})).unwrap_err().contains("written for plugin API 14"));
+        assert!(taken("me.short", &dir, &serde_json::json!({})).unwrap_err().contains("written for plugin API 0"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 16})).unwrap_err().contains("needs a newer Pinhole"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -716,7 +700,7 @@ mod tests {
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
             let sources: Vec<Value> = kinds.iter().map(|k| serde_json::json!({"kind": k, "provider": "run"})).collect();
-            let manifest = serde_json::json!({"schemaVersion": 1, "api": 3, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources});
+            let manifest = serde_json::json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             std::fs::write(at.join("run"), "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(at.join("run"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -755,7 +739,7 @@ mod tests {
             }
         };
         let manifest = |id: &str, sources: Value| {
-            serde_json::json!({"schemaVersion": 1, "api": 3, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources})
+            serde_json::json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources})
         };
         let one = |kind: &str, provider: &str| serde_json::json!([{"kind": kind, "provider": provider}]);
         // A built-in with an in-process kind (no provider: not one of these),
@@ -769,7 +753,7 @@ mod tests {
         plugin(&places.personal, "my-photos", manifest("pinhole.photos", serde_json::json!([])), None);
         // Of your own: one right, with what it says of itself, and many wrong.
         plugin(&places.personal, "immich", manifest("me.immich", serde_json::json!([
-            {"kind": "me.immich", "provider": "./run", "needs_sign_in": true, "accepts": ["jpg", "heic"], "rounds_every_secs": 300},
+            {"kind": "me.immich", "provider": "./run", "needsSignIn": true, "accepts": ["jpg", "heic"], "roundsEverySecs": 300},
             {"kind": "me.immich.shared", "provider": "run"},
             {"kind": "me.immich", "provider": "run"},
             {"kind": "me.immichx", "provider": "run"},
@@ -779,8 +763,7 @@ mod tests {
             {"kind": "me.immich.abs", "provider": "/bin/sh"},
             {"kind": "me.immich.missing", "provider": "nothing"},
             {"kind": "me.immich.accepts", "provider": "run", "accepts": [".JPG"]},
-            {"kind": "me.immich.rounds", "provider": "run", "rounds_every_secs": 1},
-            {"kind": "me.immich.camel", "provider": "run", "needsSignIn": true, "roundsEverySecs": 120},
+            {"kind": "me.immich.rounds", "provider": "run", "roundsEverySecs": 1},
         ])), Some(("run", 0o755)));
         plugin(&places.personal, "plain", manifest("me.plain", one("me.plain", "run")), Some(("run", 0o644)));
         plugin(&places.personal, "old", serde_json::json!({"schemaVersion": 1, "id": "me.old", "entryPoints": {"main": "Main.qml"},
@@ -789,18 +772,15 @@ mod tests {
 
         let (found, problems) = provided(&places, &["icloud", "folder"]);
         let kinds: Vec<(&str, &str, bool)> = found.iter().map(|p| (p.plugin.as_str(), p.kind.as_str(), p.builtin)).collect();
-        assert_eq!(kinds, [("pinhole.nas", "pinhole.nas", true), ("me.immich", "me.immich", false), ("me.immich", "me.immich.shared", false),
-                           ("me.immich", "me.immich.camel", false)]);
+        assert_eq!(kinds, [("pinhole.nas", "pinhole.nas", true), ("me.immich", "me.immich", false), ("me.immich", "me.immich.shared", false)]);
         assert_eq!(found[0].program, places.builtin.join("nas/bin/nas"));
         assert_eq!((found[1].needs_sign_in, found[1].accepts.clone(), found[1].rounds_every), (true, vec!["jpg".to_owned(), "heic".to_owned()], Some(300)));
         assert_eq!((found[2].needs_sign_in, found[2].accepts.len(), found[2].rounds_every), (false, 0, None));
-        // As the rest of the manifest writes its keys (API 15).
-        assert_eq!((found[3].needs_sign_in, found[3].rounds_every), (true, Some(120)));
         let said = problems.join("\n");
         for why in ["\"me.immich\": me.immich has that kind already", "\"me.immichx\": its kind must be", "\"icloud\": its kind must be",
                     "\"me.immich/../x\": a kind is letters", "\"me.immich.up\": \"provider\" is a path", "\"me.immich.abs\": \"provider\" is a path",
-                    "\"me.immich.missing\":", "\"me.immich.accepts\": \"accepts\"", "\"me.immich.rounds\": \"rounds_every_secs\"",
-                    "me.plain: source \"me.plain\":", "me.old: source \"me.old\": sources need \"api\": 3",
+                    "\"me.immich.missing\":", "\"me.immich.accepts\": \"accepts\"", "\"me.immich.rounds\": \"roundsEverySecs\"",
+                    "me.plain: source \"me.plain\":", "me.old: source \"me.old\": it is written for plugin API 0",
                     "icloud: source \"icloud\": that kind is pinholed's own"] {
             assert!(said.contains(why), "{why} not in:\n{said}");
         }
@@ -825,13 +805,13 @@ mod tests {
                 std::fs::set_permissions(at.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
             }
         };
-        plugin(&places.builtin, "people", "pinhole.people", 11,
+        plugin(&places.builtin, "people", "pinhole.people", 15,
                serde_json::json!([{"name": "faces", "program": "run", "args": ["daemon"], "per": "source"}]));
         // A built-in one your copy replaces, workers and all.
-        plugin(&places.builtin, "search", "pinhole.search", 11, serde_json::json!([{"name": "old", "program": "run"}]));
-        plugin(&places.personal, "my-search", "pinhole.search", 11, serde_json::json!([{"name": "new", "program": "./run"}]));
+        plugin(&places.builtin, "search", "pinhole.search", 15, serde_json::json!([{"name": "old", "program": "run"}]));
+        plugin(&places.personal, "my-search", "pinhole.search", 15, serde_json::json!([{"name": "new", "program": "./run"}]));
         // Of your own: one right, and many wrong.
-        plugin(&places.personal, "mine", "me.mine", 11, serde_json::json!([
+        plugin(&places.personal, "mine", "me.mine", 15, serde_json::json!([
             {"name": "index", "program": "run"},
             {"name": "index", "program": "run"},
             {"name": "up", "program": "../mine/run"},
@@ -844,7 +824,7 @@ mod tests {
             "run",
         ]));
         plugin(&places.personal, "old", "me.old", 10, serde_json::json!([{"name": "w", "program": "run"}]));
-        plugin(&places.personal, "odd", "me.odd", 11, serde_json::json!({"name": "w", "program": "run"}));
+        plugin(&places.personal, "odd", "me.odd", 15, serde_json::json!({"name": "w", "program": "run"}));
 
         let (found, problems) = workers(&places);
         let names: Vec<(&str, &str, bool)> = found.iter().map(|w| (w.plugin.as_str(), w.name.as_str(), w.builtin)).collect();
@@ -857,7 +837,7 @@ mod tests {
                     "me.mine: worker \"abs\": \"program\" is a path", "me.mine: worker \"plain\":", "me.mine: worker \"missing\":",
                     "me.mine: worker \"bad/name\": a worker's \"name\"", "me.mine: worker \"per\": \"per\" is \"source\"",
                     "me.mine: worker \"args\": \"args\" is a list of strings", "me.mine: worker \"\": a worker is an object",
-                    "me.old: workers: workers need \"api\": 11", "me.odd: \"workers\" is a list"] {
+                    "me.old: workers: it is written for plugin API 10", "me.odd: \"workers\" is a list"] {
             assert!(said.contains(why), "{why} not in:\n{said}");
         }
         assert_eq!(problems.len(), 11, "{said}");

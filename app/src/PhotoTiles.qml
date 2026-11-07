@@ -134,7 +134,7 @@ FocusScope {
                 name: "tiles." + modelData[0]
                 keys: [modelData[0]]
                 keyLayer: "plugin"
-                when: tiles.active && tiles.photos.length > 0
+                usable: tiles.active && tiles.photos.length > 0
                 autoRepeat: true
                 onTriggered: tiles.move(modelData[1])
             }
@@ -144,21 +144,21 @@ FocusScope {
         name: "tiles.first"
         keys: ["Home"]
         keyLayer: "plugin"
-        when: tiles.active && tiles.photos.length > 0
+        usable: tiles.active && tiles.photos.length > 0
         onTriggered: tiles.move(-tiles.cursor)
     }
     Command {
         name: "tiles.last"
         keys: ["End"]
         keyLayer: "plugin"
-        when: tiles.active && tiles.photos.length > 0
+        usable: tiles.active && tiles.photos.length > 0
         onTriggered: tiles.move(tiles.photos.length - 1 - tiles.cursor)
     }
     Command {
         name: "tiles.open"
         keys: ["Return", "Enter", "Space"]
         keyLayer: "plugin"
-        when: tiles.active && tiles.photos.length > 0
+        usable: tiles.active && tiles.photos.length > 0
         onTriggered: tiles.open(tiles.cursor)
     }
 }

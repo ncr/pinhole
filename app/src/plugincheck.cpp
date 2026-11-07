@@ -275,241 +275,6 @@ bool shellButtonCheckable(const QString &source, const QString &code, const QStr
 
 } // namespace
 
-QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
-    // Each by the API that brought it, and the words that use it: pinhole's
-    // own, or what a plugin's root sets. Anything added to what a plugin is
-    // given goes here, under the API it is released in.
-    static const QList<std::pair<int, QString>> order = {
-        {2, "promises"},      {2, "pinhole.settings"}, {2, "pinhole.notify"},   {2, "pinhole.warn"},
-        {2, "pinhole.api"},   {2, "pinhole.coveredBy"}, {2, "pinhole.dismissed"}, {2, "hidden"},
-        {2, "avgColor"},      {2, "library.field"},    {2, "pinhole.isHidden"}, {2, "run's output"},
-        {2, "pinhole.keepAwake"}, {3, "marks"}, {3, "pinhole.state"}, {3, "pinhole.cache"},
-        {3, "viewerLayer"}, {3, "an action's order, hint, busyDelay, textColour or complain"}, {3, "fetch's options"},
-        {3, "fetch's loop, bounce, long_exposure or jpeg"}, {3, "a photo's effect"},
-        {3, "pinhole.setFavorite"}, {3, "library.revision"}, {3, "sources in the manifest"}, {3, "PluginSource"},
-        {3, "pinhole.sources"}, {3, "pinhole.chooseFolder"}, {3, "pinhole.dropStep"}, {4, "a photo's thumbPath"},
-        {4, "pinhole.display"}, {4, "viewer.hdr"}, {4, "pinhole.srgbProfile"}, {4, "SdrVideo"}, {4, "Scroller"},
-        {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
-        {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
-        {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}, {15, "pinhole.deliver"}, {15, "run's json"}, {15, "needsSignIn or roundsEverySecs in sources"}};
-    static const QList<std::pair<QString, QRegularExpression>> words = {
-        // Its root's marks, each a PluginMark.
-        {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
-        {"promises", QRegularExpression(QStringLiteral("\\.\\s*then\\s*\\("))},
-        {"pinhole.settings", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*settings\\b"))},
-        {"pinhole.notify", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*notify\\b"))},
-        {"pinhole.warn", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*warn\\b"))},
-        {"pinhole.api", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*api\\b"))},
-        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*coveredBy\\b"))},
-        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*dismissed\\b"))},
-        // A photo's, as library.item gives it.
-        {"avgColor", QRegularExpression(QStringLiteral("\\.\\s*avgColor\\b"))},
-        // pinhole.library's, or by a name of the plugin's for it.
-        {"library.field", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*field\\s*\\("))},
-        {"pinhole.isHidden",
-         QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(isHidden|hiddenCount|hiddenChanged)\\b"))},
-        {"pinhole.keepAwake", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keepAwake\\b"))},
-        {"pinhole.state", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*state\\b"))},
-        {"pinhole.synced", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*synced\\b"))},
-        {"library.settled, field's shown or field(\"hidden\")",
-         QRegularExpression(QStringLiteral("\\bonSettled\\b|\\.\\s*settled\\s*\\.\\s*connect\\b|\\bfield\\s*\\([^()]*,\\s*\\{[^}]*\\bshown\\b|\\bfield\\s*\\(\\s*[\"']hidden[\"']"))},
-        {"requires in the manifest, or pinhole.has", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*has\\s*\\("))},
-        {"pinhole.deliver", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*deliver\\s*\\("))},
-        {"pinhole.store", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*store\\s*\\("))},
-        {"an action's helpText", QRegularExpression(QStringLiteral("\\bPluginAction\\s*\\{[^{}]*\\bhelpText\\s*:"))},
-        {"an action's places", QRegularExpression(QStringLiteral("(?:^|[;{\\s])places\\s*:\\s*\\["))},
-        {"pinhole.ask or a worker that answers", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*ask\\s*\\("))},
-        {"pinhole.fileActions or a file's PluginAction",
-         QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*fileActions\\b|\\bplace\\s*:\\s*[\"']file[\"']"))},
-        {"pinhole.cache", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*cache\\b"))},
-        {"viewerLayer", QRegularExpression(QStringLiteral("\\bviewerLayer\\s*:"))},
-        {"pinhole.setFavorite", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*setFavorite\\b"))},
-        // Its root's sources, each a PluginSource.
-        {"PluginSource", QRegularExpression(QStringLiteral("\\bPluginSource\\s*\\{"))},
-        {"pinhole.sources", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*sources\\b"))},
-        {"pinhole.chooseFolder", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*chooseFolder\\b"))},
-        {"pinhole.dropStep", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*dropStep\\b"))},
-        // pinhole.library's, or by a name of the plugin's for it.
-        {"library.revision", QRegularExpression(QStringLiteral("\\blibrary\\s*\\.\\s*revision\\b"))},
-        {"an action's order, hint, busyDelay, textColour or complain", QRegularExpression(QStringLiteral("\\.\\s*complain\\s*\\("))},
-        // The kinds fetch has had since API 3, named where they are not in
-        // the call itself (Background's `kind: "loop"`).
-        {"fetch's loop, bounce, long_exposure or jpeg",
-         QRegularExpression(QStringLiteral("\\bkind\\s*[:=]\\s*[\"'](loop|bounce|long_exposure|jpeg)[\"']"))},
-        {"a photo's effect", QRegularExpression(QStringLiteral("\\bfield\\s*\\(\\s*[\"']effect[\"']\\s*\\)"))},
-        // The thumbnail's file beside its URL. (image://file, API 4's too,
-        // is in a string, whose words are not looked at.)
-        {"a photo's thumbPath", QRegularExpression(QStringLiteral("\\.\\s*thumbPath\\b"))},
-        {"pinhole.display", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*display\\b"))},
-        // pinhole.viewer's, or by a name of the plugin's for it.
-        {"viewer.hdr", QRegularExpression(QStringLiteral("\\bviewer\\s*\\.\\s*hdr\\b"))},
-        {"SdrVideo", QRegularExpression(QStringLiteral("\\bSdrVideo\\s*\\{"))},
-        {"pinhole.srgbProfile", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*srgbProfile\\b"))},
-        {"Scroller", QRegularExpression(QStringLiteral("\\bScroller\\s*\\{"))},
-        {"ScrollList, ScrollGrid or ScrollArea", QRegularExpression(QStringLiteral("\\bScroll(List|Grid|Area)\\s*\\{"))},
-        {"PinchZoom", QRegularExpression(QStringLiteral("\\bPinchZoom\\s*\\{"))},
-        {"Panel or Card", QRegularExpression(QStringLiteral("\\b(Panel|Card)\\s*\\{"))},
-        {"Choices", QRegularExpression(QStringLiteral("\\bChoices\\s*\\{"))},
-        {"pinhole.query", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*query\\s*\\("))},
-        {"pinhole.picturePath", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*picturePath\\b"))},
-        {"pinhole.openPhotoDirect", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotoDirect\\b"))},
-        {"pinhole.openPhotos", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotos\\b"))},
-        {"pinhole.selectionIds", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*selectionIds\\b"))},
-        {"pinhole.screenshots", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*screenshots\\b"))},
-        {"PhotoTiles", QRegularExpression(QStringLiteral("\\bPhotoTiles\\s*\\{"))},
-        {"PanelHeader", QRegularExpression(QStringLiteral("\\bPanelHeader\\s*\\{"))},
-        {"SettingNote or SettingSwitch", QRegularExpression(QStringLiteral("\\bSetting(Note|Switch)\\s*\\{"))},
-        {"Choices.numbered", QRegularExpression(QStringLiteral("\\bnumbered\\s*:"))},
-        {"pinhole.keyboardInUse", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*keyboardInUse\\b"))},
-        {"PanZoom", QRegularExpression(QStringLiteral("\\bPanZoom\\s*\\{"))},
-        {"pinhole.viewer.photo or id", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*viewer\\s*\\.\\s*(photo|id)\\b"))},
-        {"pinhole.adjust, turn or adjustment", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(adjust|turn|adjustment)\\s*\\("))},
-        {"Job", QRegularExpression(QStringLiteral("\\bJob\\s*\\{"))},
-        {"a setting of SettingSwitch or Choices",
-         QRegularExpression(QStringLiteral("(?:^|[;{]\\s*)setting\\s*:\\s*[\"']"), QRegularExpression::MultilineOption)},
-        {"PluginView", QRegularExpression(QStringLiteral("\\bPluginView\\s*\\{"))},
-        {"pinhole.readText or readJson", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*read(Text|Json)\\b"))},
-        {"pinhole.workers or workerSaid", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*workers\\b|\\bonWorkerSaid\\b|\\bonWorkersChanged\\b"))},
-        {"pinhole.copyText, input or hasKeys", QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(copyText|input|hasKeys)\\b"))},
-        {"comeBack, away or returned", QRegularExpression(QStringLiteral("\\bcomeBack\\s*:|\\bpinhole\\s*\\.\\s*away\\b|\\bonReturned\\b"))},
-        {"VideoView", QRegularExpression(QStringLiteral("\\bVideoView\\s*\\{"))},
-        // Its root's, kept at SDR while true.
-        {"holdSdr", QRegularExpression(QStringLiteral("\\bholdSdr\\s*:"))},
-    };
-    // pinhole's signals, in a Connections to it.
-    static const QRegularExpression connections(QStringLiteral("\\bConnections\\s*\\{"));
-    static const QRegularExpression toPinhole(
-        QStringLiteral("\\btarget\\s*:\\s*([\\w$]+\\s*\\.\\s*)*pinhole\\s*[;}\\n]"));
-    static const QList<std::pair<QString, QRegularExpression>> handlers = {
-        {"pinhole.coveredBy", QRegularExpression(QStringLiteral("\\bonCoveredByChanged\\b"))},
-        {"pinhole.dismissed", QRegularExpression(QStringLiteral("\\bonDismissed\\b"))},
-        {"pinhole.isHidden", QRegularExpression(QStringLiteral("\\bonHiddenChanged\\b"))},
-    };
-    // run's options, in its call.
-    static const QRegularExpression run(QStringLiteral("\\bpinhole\\s*\\.\\s*run\\s*\\("));
-    static const QRegularExpression output(QStringLiteral("\\boutput\\s*:"));
-    // fetch's, in its call.
-    static const QRegularExpression fetch(QStringLiteral("\\bpinhole\\s*\\.\\s*fetch\\s*\\("));
-    static const QRegularExpression fetchOptions(QStringLiteral("\\bstream\\s*:"));
-    static const QRegularExpression fetchKinds(QStringLiteral("[\"'](loop|bounce|long_exposure|jpeg)[\"']"));
-    // A photo's effect, as library.item gives it: whatever is before the
-    // dot but a layer (Qt Quick's own `layer.effect`).
-    static const QRegularExpression effect(QStringLiteral("(?:\\b([\\w$]+)|[\\])])\\s*\\.\\s*effect\\b"));
-    // A PluginAction's own lines that say its order, hint, busyDelay or
-    // textColour.
-    static const QRegularExpression action(QStringLiteral("\\bPluginAction\\s*\\{"));
-    static const QRegularExpression unified(QStringLiteral("(?<![\\w.])(ShellButton|Command|Choices|Panel)\\s*\\{"));
-    static const QRegularExpression onTriggered(QStringLiteral("(?:^|[;{\\s])onTriggered\\s*:"));
-    static const QRegularExpression usableSet(QStringLiteral("(?:^|[;{\\s])usable\\s*:"));
-    static const QRegularExpression keySet(QStringLiteral("(?:^|[;{\\s])key\\s*:"));
-    static const QRegularExpression runJson(QStringLiteral("(?:^|[{,\\s])json\\s*:"));
-    static const QRegularExpression orderOrHint(QStringLiteral("(^|[;\\s])(order|hint|busyDelay|textColour)\\s*:"));
-    // A file's root object, its id, and its hidden set.
-    static const QRegularExpression root(QStringLiteral("([\\w.]+)\\s*\\{"));
-    static const QRegularExpression rootId(QStringLiteral("(^|[;\\s])id\\s*:\\s*([\\w$]+)"));
-    static const QRegularExpression hiddenSet(QStringLiteral("(^|[;\\s])hidden\\s*:"));
-
-    QSet<QString> uses;
-    QDirIterator it(dir, {"*.qml", "*.js"}, QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        QFile file(it.next());
-        if (file.fileName().contains(QLatin1String("/target/")) || !file.open(QIODevice::ReadOnly))
-            continue;
-        const QString source = QString::fromUtf8(file.readAll());
-        const QString code = codeOnly(source);
-        if (file.fileName().endsWith(QLatin1String(".qml")) && shellButtonCheckable(source, code, file.fileName()))
-            uses << QStringLiteral("ShellButton.checkable");
-        for (const auto &[name, pattern] : words)
-            if (code.contains(pattern))
-                uses << name;
-        for (auto match = connections.globalMatch(code); match.hasNext();) {
-            const qsizetype open = match.next().capturedEnd() - 1;
-            const QString block = code.mid(open, closing(code, open) - open + 1);
-            if (block.contains(toPinhole))
-                for (const auto &[name, pattern] : handlers)
-                    if (block.contains(pattern))
-                        uses << name;
-        }
-        for (auto match = run.globalMatch(code); match.hasNext();) {
-            const qsizetype open = match.next().capturedEnd() - 1;
-            const QString call = code.mid(open, closing(code, open) - open + 1);
-            if (call.contains(output))
-                uses << QStringLiteral("run's output");
-            if (call.contains(runJson))
-                uses << QStringLiteral("run's json");
-        }
-        for (auto match = fetch.globalMatch(code); match.hasNext();) {
-            const qsizetype open = match.next().capturedEnd() - 1;
-            const QString call = code.mid(open, closing(code, open) - open + 1);
-            if (call.contains(fetchOptions))
-                uses << QStringLiteral("fetch's options");
-            if (call.contains(fetchKinds))
-                uses << QStringLiteral("fetch's loop, bounce, long_exposure or jpeg");
-        }
-        for (auto match = effect.globalMatch(code); match.hasNext();)
-            if (match.next().captured(1) != QLatin1String("layer"))
-                uses << QStringLiteral("a photo's effect");
-        for (auto match = action.globalMatch(code); match.hasNext();) {
-            const qsizetype open = match.next().capturedEnd() - 1;
-            if (ownLines(code, open).contains(orderOrHint))
-                uses << QStringLiteral("an action's order, hint, busyDelay, textColour or complain");
-        }
-        // The kit's names made one (API 15): triggered() for being used,
-        // usable for whether it can be, key for one key.
-        for (auto match = unified.globalMatch(code); match.hasNext();) {
-            const auto m = match.next();
-            const QString own = ownLines(code, m.capturedEnd() - 1), type = m.captured(1);
-            const bool triggered = (type == QLatin1String("ShellButton") || type == QLatin1String("Panel")) && own.contains(onTriggered);
-            const bool usable = (type == QLatin1String("Command") || type == QLatin1String("Choices")) && own.contains(usableSet);
-            const bool key = type == QLatin1String("Command") && own.contains(keySet);
-            if (triggered || usable || key)
-                uses << QStringLiteral("triggered, usable or key on a ShellButton, Command, Choices or Panel");
-        }
-        // A PinholePlugin root's hidden: set where it is, or by its id.
-        const auto top = root.match(code);
-        if (!file.fileName().endsWith(QLatin1String(".qml")) || !top.hasMatch()
-            || top.captured(1).section('.', -1) != QLatin1String("PinholePlugin"))
-            continue;
-        const QString own = ownLines(code, top.capturedEnd() - 1);
-        const auto id = rootId.match(own);
-        if (own.contains(hiddenSet)
-            || (id.hasMatch()
-                && code.contains(QRegularExpression("\\b" + QRegularExpression::escape(id.captured(2)) + "\\s*\\.\\s*hidden\\s*=(?!=)"))))
-            uses << QStringLiteral("hidden");
-    }
-    // Sources and workers of its own, in its manifest.
-    if (QFile manifest(dir + "/manifest.json"); manifest.open(QIODevice::ReadOnly)) {
-        const QJsonObject declared = QJsonDocument::fromJson(manifest.readAll()).object();
-        if (declared.contains(QLatin1String("sources")))
-            uses << QStringLiteral("sources in the manifest");
-        if (declared.contains(QLatin1String("workers")))
-            uses << QStringLiteral("workers in the manifest");
-        if (declared.contains(QLatin1String("makes")))
-            uses << QStringLiteral("makes in the manifest");
-        for (const QJsonValue &worker : declared.value(QLatin1String("workers")).toArray())
-            if (worker.toObject().value(QLatin1String("answers")).toBool())
-                uses << QStringLiteral("pinhole.ask or a worker that answers");
-        for (const QJsonValue &made : declared.value(QLatin1String("makes")).toArray())
-            if (made.toObject().value(QLatin1String("kind")).toString().contains('/'))
-                uses << QStringLiteral("a kind of its own in makes");
-        if (declared.contains(QLatin1String("settings")))
-            uses << QStringLiteral("settings in the manifest");
-        if (!declared.contains(QLatin1String("schemaVersion")) || !declared.contains(QLatin1String("entryPoints")))
-            uses << QStringLiteral("a manifest without schemaVersion or entryPoints");
-        for (const QJsonValue &source : declared.value(QLatin1String("sources")).toArray())
-            if (source.toObject().contains(QLatin1String("needsSignIn")) || source.toObject().contains(QLatin1String("roundsEverySecs")))
-                uses << QStringLiteral("needsSignIn or roundsEverySecs in sources");
-        if (declared.contains(QLatin1String("requires")))
-            uses << QStringLiteral("requires in the manifest, or pinhole.has");
-    }
-    QMap<int, QStringList> byApi;
-    for (const auto &[version, name] : order)
-        if (uses.contains(name))
-            byApi[version] << name;
-    return byApi;
-}
-
 namespace {
 
 // QML or JavaScript with its comments gone and its strings kept, line
@@ -850,8 +615,6 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
     const QJsonObject manifestRead = manifestFile.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(manifestFile.readAll()).object()
                                                                           : QJsonObject();
     const bool builtinId = manifestRead.value(QStringLiteral("id")).toString().startsWith(QLatin1String("pinhole."));
-    // The API it asks for: what it may use, and what older names to say.
-    const int asked = manifestRead.value(QStringLiteral("api")).toInt(1);
 
     // The window's own objects and ids, which a plugin's QML can reach by
     // name, as it is loaded inside the window: what it is given is
@@ -928,40 +691,6 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                              "too: use a Command with keyLayer \"plugin\" and a when")
                                   .arg(file)
                                   .arg(lineAt(code, m.next().capturedStart()));
-        // What the kit has a better way of now: still there, said so, and
-        // to go at a later API.
-        static const QList<std::pair<QRegularExpression, const char *>> superseded = {
-            {QRegularExpression(QStringLiteral("\\bSdrVideo\\s*\\{")),
-             "SdrVideo is superseded by VideoView (API 5), which tone-maps an HDR video on the GPU and shows it as "
-             "Pinhole does: SdrVideo goes at a later API"},
-            {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotoDirect\\s*\\(")),
-             "pinhole.openPhotoDirect is superseded by pinhole.openPhotos(photos, photo) (API 9), which steps "
-             "through the view's own photos and can come back to it: openPhotoDirect goes at a later API"},
-            {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(?:setting|setSetting)\\s*\\(")),
-             "pinhole.setting(key, fallback) and setSetting(key, value) are superseded by pinhole.settings (API 2), "
-             "read, bound to and assigned as properties, with each default in the manifest's \"settings\" (API 13): "
-             "they go at a later API"},
-        };
-        for (const auto &[pattern, why] : superseded)
-            for (auto m = pattern.globalMatch(code); m.hasNext();)
-                found.warnings << QStringLiteral("%1:%2: %3").arg(file).arg(lineAt(code, m.next().capturedStart())).arg(QLatin1String(why));
-        // The kit's older names for what has one name now (API 15).
-        static const QRegularExpression older(QStringLiteral("(?<![\\w.])(ShellButton|Command|Choices|Panel)\\s*\\{"));
-        static const QList<std::tuple<QString, QRegularExpression, const char *>> renamed = {
-            {"ShellButton", QRegularExpression(QStringLiteral("(?:^|[;{\\s])onTapped\\s*:")), "a ShellButton's onTapped is onTriggered now (API 15)"},
-            {"Panel", QRegularExpression(QStringLiteral("(?:^|[;{\\s])onClicked\\s*:")), "a Panel's onClicked is onTriggered now (API 15)"},
-            {"Command", QRegularExpression(QStringLiteral("(?:^|[;{\\s])when\\s*:")), "a Command's when is usable now (API 15)"},
-            {"Choices", QRegularExpression(QStringLiteral("(?:^|[;{\\s])when\\s*:")), "Choices' when is usable now (API 15)"},
-        };
-        if (asked >= 15)
-            for (auto m = older.globalMatch(code); m.hasNext();) {
-                const auto block = m.next();
-                const QString own = ownLines(code, block.capturedEnd() - 1);
-                for (const auto &[type, pattern, why] : renamed)
-                    if (type == block.captured(1) && own.contains(pattern))
-                        found.warnings << QStringLiteral("%1:%2: %3, as an action and a button say it; the old name still works")
-                                              .arg(file).arg(lineAt(code, block.capturedStart())).arg(QLatin1String(why));
-            }
         // A file from outside the plugin: another plugin's changes, or goes,
         // with it.
         for (auto m = importLine.globalMatch(text); m.hasNext();) {
@@ -1488,8 +1217,13 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
         return tr("manifest.json has no usable \"id\": letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit (me.night)");
     if (!safeEntry(*main) || !QFileInfo::exists(dir + '/' + *main))
         return tr("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder");
-    if (const int wanted = manifest->value("api").toInt(1); wanted > api)
+    // Written for this Pinhole's API, and no other: one for an older is
+    // not loaded as it was written, nor one for a newer.
+    if (const int wanted = manifest->value("api").toInt(0); wanted > api)
         return tr("It needs a newer Pinhole: plugin API %1, and this one has %2.").arg(wanted).arg(api);
+    else if (wanted < api)
+        return tr("It is written for plugin API %1, and this Pinhole has %2: make it of API %2, and give its manifest \"api\": %2.")
+            .arg(wanted).arg(api);
     if (const QString problem = sourcesProblem(dir, id, *manifest); !problem.isEmpty())
         return problem;
     if (const QString problem = workersProblem(dir, *manifest); !problem.isEmpty())
@@ -1505,8 +1239,6 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
         return {};
     if (!declared.isArray())
         return tr("manifest.json's \"workers\" is a list");
-    if (manifest.value("api").toInt(1) < 11)
-        return tr("workers need \"api\": 11");
     static const QRegularExpression named(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"));
     QStringList seen;
     for (const QJsonValue &each : declared.toArray()) {
@@ -1527,8 +1259,6 @@ QString Plugins::workersProblem(const QString &dir, const QJsonObject &manifest)
             return wrong(tr("\"per\" must be \"source\" (or left out): the only one there is"));
         if (worker.contains("answers") && !worker.value("answers").isBool())
             return wrong(tr("\"answers\" is true or false"));
-        if (worker.value("answers").toBool() && manifest.value("api").toInt(1) < 15)
-            return wrong(tr("\"answers\" needs \"api\": 15"));
         if (worker.contains("args")) {
             const QJsonValue args = worker.value("args");
             bool fine = args.isArray() && args.toArray().size() <= 64;
@@ -1553,8 +1283,6 @@ QString Plugins::makesProblem(const QString &dir, const QJsonObject &manifest) {
         return {};
     if (!declared.isArray())
         return tr("manifest.json's \"makes\" is a list");
-    if (manifest.value("api").toInt(1) < 12)
-        return tr("makes needs \"api\": 12");
     static const QStringList kinds = {"bounce", "long_exposure"};
     static const QStringList froms = {"live", "full", "original", "video"};
     static const QRegularExpression type(QStringLiteral("^[A-Za-z0-9.-]{1,128}$"));
@@ -1569,8 +1297,6 @@ QString Plugins::makesProblem(const QString &dir, const QJsonObject &manifest) {
             if (!kind.startsWith(id + '/') || !ownName.match(kind.mid(id.size() + 1)).hasMatch())
                 return tr("\"makes\": %1: a kind of its own is \"%2/<name>\", the name lowercase letters, digits, '_' and '-'")
                     .arg(kind, id);
-            if (manifest.value("api").toInt(1) < 15)
-                return tr("\"makes\": %1: a kind of its own needs \"api\": 15").arg(kind);
         } else if (!each.isObject() || !kinds.contains(kind))
             return tr("each of manifest.json's \"makes\" has a \"kind\": bounce, long_exposure or one of its own, \"%1/<name>\"").arg(id);
         const auto wrong = [&kind](const QString &why) { return tr("\"makes\": %1: %2").arg(kind, why); };
@@ -1649,8 +1375,6 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
         // One of its own, run by its provider: as pinholed takes it
         // (docs/source-providers.md), so what it would refuse is said here.
         const auto wrong = [&kind](const QString &why) { return tr("\"sources\": %1: %2").arg(kind, why); };
-        if (manifest.value("api").toInt(1) < 3)
-            return wrong(tr("a source needs \"api\": 3"));
         if (!named.match(kind).hasMatch())
             return wrong(tr("a kind is letters, digits, '.', '_' and '-'"));
         if (kind != id && !kind.startsWith(id + '.'))
@@ -1662,14 +1386,13 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
             return wrong(tr("\"provider\" is a path in the plugin's folder, without \"..\""));
         if (const QFileInfo program(dir + '/' + provider); !program.isFile() || !program.isExecutable())
             return wrong(tr("%1 is not a program in the plugin's folder (a file it can run)").arg(provider));
-        // As the rest of the manifest writes its keys (API 15), or as they
-        // were written before.
-        const QString needsSignIn = source.contains("needsSignIn") ? QStringLiteral("needsSignIn") : QStringLiteral("needs_sign_in");
-        const QString roundsEvery = source.contains("roundsEverySecs") ? QStringLiteral("roundsEverySecs") : QStringLiteral("rounds_every_secs");
-        if ((source.contains("needsSignIn") || source.contains("roundsEverySecs")) && manifest.value("api").toInt(1) < 15)
-            return wrong(tr("needsSignIn and roundsEverySecs need \"api\": 15; before, needs_sign_in and rounds_every_secs"));
-        if (source.contains(needsSignIn) && !source.value(needsSignIn).isBool())
-            return wrong(tr("\"%1\" is true or false").arg(needsSignIn));
+        static const QStringList fields = {"kind", "provider", "needsSignIn", "accepts", "roundsEverySecs"};
+        for (const QString &key : source.keys())
+            if (!fields.contains(key))
+                return wrong(tr("\"%1\" is none of a source's fields%2, and pinholed never reads it: %3")
+                                 .arg(key, didYouMean(key, fields), fields.join(QStringLiteral(", "))));
+        if (source.contains("needsSignIn") && !source.value("needsSignIn").isBool())
+            return wrong(tr("\"needsSignIn\" is true or false"));
         if (source.contains("accepts")) {
             const QJsonValue accepts = source.value("accepts");
             bool fine = accepts.isArray();
@@ -1678,10 +1401,10 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
             if (!fine)
                 return wrong(tr("\"accepts\" is a list of extensions in lower case, without the dot"));
         }
-        if (source.contains(roundsEvery)) {
-            const double every = source.value(roundsEvery).toDouble(-1);
+        if (source.contains("roundsEverySecs")) {
+            const double every = source.value("roundsEverySecs").toDouble(-1);
             if (every != std::floor(every) || every < 5 || every > 86400)
-                return wrong(tr("\"%1\" is a whole number from 5 to 86400").arg(roundsEvery));
+                return wrong(tr("\"roundsEverySecs\" is a whole number from 5 to 86400"));
         }
     }
     return {};

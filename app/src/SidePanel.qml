@@ -452,7 +452,7 @@ Item {
         name: "side.up"
         keys: ["Up"]
         keyLayer: "side"
-        when: root.confirming < 0
+        usable: root.confirming < 0
         autoRepeat: true
         mouse: qsTr("Point at a row")
         touchpad: qsTr("Point at a row")
@@ -462,7 +462,7 @@ Item {
         name: "side.down"
         keys: ["Down"]
         keyLayer: "side"
-        when: root.confirming < 0
+        usable: root.confirming < 0
         autoRepeat: true
         mouse: qsTr("Point at a row")
         touchpad: qsTr("Point at a row")
@@ -491,7 +491,7 @@ Item {
         name: "side.press"
         keys: ["Space"]
         keyLayer: "side"
-        when: root.focusedStop !== null && root.confirming < 0 && !root.lowering
+        usable: root.focusedStop !== null && root.confirming < 0 && !root.lowering
         mouse: qsTr("Click it")
         touchpad: qsTr("Tap it")
         onTriggered: root.focusedStop.press()
@@ -511,7 +511,7 @@ Item {
         name: "side.remove"
         keys: ["Delete", "Backspace"]
         keyLayer: "side"
-        when: root.section === "sources" && root.confirming < 0 && root.focusIndex < root.sourceCount
+        usable: root.section === "sources" && root.confirming < 0 && root.focusIndex < root.sourceCount
         // By a pointer, Remove on a source's row; with no source there is
         // no row, and nothing to remove.
         noMouse: root.sourceCount === 0 ? qsTr("No source to remove") : ""
@@ -526,7 +526,7 @@ Item {
         name: "side.add"
         keys: ["A"]
         keyLayer: "side"
-        when: root.section === "sources" && root.confirming < 0
+        usable: root.section === "sources" && root.confirming < 0
         onTriggered: root.addRequested()
     }
     Command {
@@ -544,7 +544,7 @@ Item {
         name: "storage.less"
         keys: ["Left"]
         keyLayer: "side"
-        when: root.section === "storage" && storage.loaded
+        usable: root.section === "storage" && storage.loaded
         autoRepeat: true
         onTriggered: root.step(-1)
     }
@@ -553,7 +553,7 @@ Item {
         name: "storage.more"
         keys: ["Right"]
         keyLayer: "side"
-        when: root.section === "storage" && storage.loaded
+        usable: root.section === "storage" && storage.loaded
         autoRepeat: true
         onTriggered: root.step(1)
     }
@@ -562,7 +562,7 @@ Item {
         name: "storage.restart"
         keys: ["R"]
         keyLayer: "side"
-        when: root.section === "storage" && storage.outdated
+        usable: root.section === "storage" && storage.outdated
         onTriggered: storage.restartService()
     }
     Command {
@@ -570,7 +570,7 @@ Item {
         name: "storage.location"
         keys: ["L"]
         keyLayer: "side"
-        when: root.section === "storage" && storage.loaded && !storage.moving
+        usable: root.section === "storage" && storage.loaded && !storage.moving
         onTriggered: storage.chooseLocation()
     }
 
@@ -642,7 +642,7 @@ Item {
                         flat: true
                         Accessible.role: Accessible.PageTab
                         Accessible.selected: active
-                        onTapped: root.selectSection(modelData.id, true)
+                        onTriggered: root.selectSection(modelData.id, true)
                     }
                 }
             }
@@ -808,14 +808,14 @@ Item {
                                         active: true
                                         text: qsTr("Yes")
                                         hint: "⏎"
-                                        onTapped: root.answer(true)
+                                        onTriggered: root.answer(true)
                                     }
                                     ShellButton {
                                         visible: row.asking
                                         flat: true
                                         text: qsTr("No")
                                         hint: "Esc"
-                                        onTapped: root.confirming = -1
+                                        onTriggered: root.confirming = -1
                                     }
                                     Repeater {
                                         model: row.actions
@@ -827,7 +827,7 @@ Item {
                                             key: modelData.key ?? ""
                                             keyLayer: "side"
                                             usable: root.confirming < 0
-                                            onTapped: root.act(row.index, modelData)
+                                            onTriggered: root.act(row.index, modelData)
                                         }
                                     }
                                     ShellButton {
@@ -908,7 +908,7 @@ Item {
                         lit: root.focusedStop === updateButton
                         Component.onCompleted: root.addStop(updateButton)
                         Component.onDestruction: root.dropStop(updateButton)
-                        onTapped: updateStatus.press()
+                        onTriggered: updateStatus.press()
                     }
                     ShellButton {
                         id: updateLogButton
@@ -917,7 +917,7 @@ Item {
                         lit: root.focusedStop === updateLogButton
                         Component.onCompleted: root.addStop(updateLogButton)
                         Component.onDestruction: root.dropStop(updateLogButton)
-                        onTapped: updater.showLog()
+                        onTriggered: updater.showLog()
                     }
                 }
 
@@ -1079,12 +1079,12 @@ Item {
                             active: true
                             text: qsTr("Remove %1").arg(storage.size(root.removing))
                             hint: "⏎"
-                            onTapped: root.confirmLimit()
+                            onTriggered: root.confirmLimit()
                         }
                         ShellButton {
                             text: qsTr("Cancel")
                             hint: "Esc"
-                            onTapped: root.pending = -1
+                            onTriggered: root.pending = -1
                         }
                     }
                 }
@@ -1209,7 +1209,7 @@ Item {
                             lit: root.focusedStop === orderChoice
                             Component.onCompleted: root.addStop(orderChoice)
                             Component.onDestruction: root.dropStop(orderChoice)
-                            onTapped: timeline.mode = modelData.value
+                            onTriggered: timeline.mode = modelData.value
                         }
                     }
                 }
@@ -1287,7 +1287,7 @@ Item {
                     lit: root.focusedStop === guideButton
                     Component.onCompleted: root.addStop(guideButton)
                     Component.onDestruction: root.dropStop(guideButton)
-                    onTapped: root.guideRequested()
+                    onTriggered: root.guideRequested()
                 }
                 Item { width: 1; height: theme.fontSize }
 
@@ -1549,7 +1549,7 @@ Item {
                                         Component.onCompleted: root.addStop(tourButton)
                                         Component.onDestruction: root.dropStop(tourButton)
                                         text: qsTr("Show how it works")
-                                        onTapped: root.tourRequested(pluginRow.modelData)
+                                        onTriggered: root.tourRequested(pluginRow.modelData)
                                     }
                                 }
                             }
@@ -1575,7 +1575,7 @@ Item {
                     lit: root.focusedStop === folderButton
                     Component.onCompleted: root.addStop(folderButton)
                     Component.onDestruction: root.dropStop(folderButton)
-                    onTapped: plugins.showPersonalDir()
+                    onTriggered: plugins.showPersonalDir()
                 }
                 Item { width: 1; height: theme.fontSize }
             }

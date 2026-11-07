@@ -4,7 +4,7 @@ import "keys.js" as KeyNames
 // One thing Pinhole does, and every way to do it (keymap.h): its keys, and
 // how it goes with a mouse and with a touchpad. The keys work while its
 // `keyLayer` has them (the one on top: the grid, the viewer, a menu, a panel)
-// and `when` allows; a ShellButton given it as its `action` presses it, and
+// and `usable` allows; a ShellButton given it as its `action` presses it, and
 // counts as the way there for a pointer. In the help, under its `section`,
 // if it has one.
 Item {
@@ -41,9 +41,8 @@ Item {
     // the window's own.
     property string keyLayer: "chrome"
     // Whether it can be done now (API 15, as an action's and a button's):
-    // its keys work only then. `when`, as it was said before, follows it.
+    // its keys work only then.
     property bool usable: true
-    property bool when: usable
     property bool autoRepeat: false
     // False for keys read elsewhere (the viewer's arrows, timed as they are
     // held): listed, but no shortcut of its own.
@@ -63,7 +62,7 @@ Item {
 
     // The key as a button or the help shows it: "⇧ E", "Esc".
     readonly property string keyName: keysText !== "" ? keysText : keys.length > 0 ? KeyNames.nameOf(keys[0]) : ""
-    readonly property bool live: bound && when && (keyLayer === "any"
+    readonly property bool live: bound && usable && (keyLayer === "any"
         || (keymap.layer === keyLayer && (keyLayer !== "plugin" || ours()))
         || (keyLayer === "chrome" && (keymap.layer === "grid" || keymap.layer === "viewer")))
 
@@ -83,7 +82,7 @@ Item {
 
     signal triggered()
     function trigger() {
-        if (when)
+        if (usable)
             triggered()
     }
 

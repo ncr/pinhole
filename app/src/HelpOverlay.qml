@@ -375,7 +375,7 @@ Item {
                         active: root.tab === modelData.id
                         text: modelData.name
                         hint: ""
-                        onTapped: {
+                        onTriggered: {
                             root.tab = modelData.id
                             scroller.contentY = 0
                         }

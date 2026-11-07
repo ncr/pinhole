@@ -137,7 +137,7 @@ def render():
         "",
         "What each of `Pinhole.Plugin`'s QML types has: its properties, its",
         "signals (a handler is `on` and the signal's name, capitalised:",
-        "`tapped` is `onTapped`) and its functions, with what their own source",
+        "`triggered` is `onTriggered`) and its functions, with what their own source",
         "says of them. Written from the files themselves by `bin/kit-reference`;",
         "[plugins.md](plugins.md) says how to use them together.",
         "",

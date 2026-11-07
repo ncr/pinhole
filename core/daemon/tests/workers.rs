@@ -121,7 +121,7 @@ fn a_plugins_worker_runs_for_the_source_shown_while_the_plugin_is_on() {
     let plugin = builtin.join("indexer");
     std::fs::create_dir_all(&plugin).unwrap();
     std::fs::write(plugin.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-    let manifest = json!({"schemaVersion": 1, "api": 11, "id": "test.indexer", "entryPoints": {"main": "Main.qml"},
+    let manifest = json!({"schemaVersion": 1, "api": 15, "id": "test.indexer", "entryPoints": {"main": "Main.qml"},
                           "workers": [{"name": "index", "program": "bin/index", "args": ["daemon"], "per": "source"}]});
     std::fs::write(plugin.join("manifest.json"), manifest.to_string()).unwrap();
     let said = root.join("said");

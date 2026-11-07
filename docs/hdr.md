@@ -781,7 +781,7 @@ description's events are read as an output's (`DescriptionReader`). The
 preferred description, once given, is what `display.headroom` and `wide`
 are, and a change is said on stderr. `PINHOLE_HEADROOM` still overrides.
 
-**`holdSdr`** is **API 6** (API 5 was taken by the kit): a plugin root's
+**`holdSdr`** is **API 6** (was taken by the kit): a plugin root's
 property; Live Photos sets it while its motion plays. **Full HDR**
 ("Pełny HDR") is under a "Display" heading in the side panel, shown only
 when `display.hdr`, kept in `window.conf` (`display/fullHdr`).

@@ -50,7 +50,7 @@ and the footguns (What check looks for, below). It takes a folder too
 editor or a script to run on save. A manifest's `sources`
 are checked as pinholed takes them (a provider's kind namespaced by the
 plugin's id, its program in the folder and runnable, `accepts` and
-`rounds_every_secs` as [source-providers.md](source-providers.md) says),
+`roundsEverySecs` as [source-providers.md](source-providers.md) says),
 and so are its `workers` (Workers, below),
 so what pinholed would refuse is said here, and under the plugin in the
 side panel. It refuses anything the plugin uses of an API newer than its
@@ -64,7 +64,7 @@ What Pinhole's own plugins once wrote by hand, and got wrong, is in
 of each is in [the kit, member by member](plugin-kit.md)
 (`pinhole plugin docs plugin-kit`):
 
-- `PluginView` (API 13): a view of the plugin's own over the photos, the
+- `PluginView`: a view of the plugin's own over the photos, the
   calendar, a gallery, a studio, in one line:
 
   ```qml
@@ -96,7 +96,7 @@ of each is in [the kit, member by member](plugin-kit.md)
   it shows without opening it, and gives it. `closeText` puts Esc in the
   help with those words (none by default: the action that opens it is
   listed); `closeCommand.mouse` and `.touchpad` say how else it closes.
-- `Job` (API 13): one thing asked at a time, the latest winning. It
+- `Job`: one thing asked at a time, the latest winning. It
   cancels the one before, drops an answer that came too late, has `busy`,
   asks again by itself when the library was read meanwhile (`reloaded`),
   says nothing of a cancel, and stops with the plugin:
@@ -134,7 +134,7 @@ of each is in [the kit, member by member](plugin-kit.md)
   out, `size` that size: lay what it holds out at `size`, and it is drawn
   larger or smaller while it zooms. A `ScrollGrid` in it passes its
   pinches on, so a grid of cells scrolls and pinches as Pinhole's.
-- `PanZoom` (API 12): a surface moved and zoomed without levels (a map, a
+- `PanZoom`: a surface moved and zoomed without levels (a map, a
   picture larger than its room) on the grid's physics. It says how far,
   the plugin moves its own camera: `panned(dx, dy)` (content pixels, right
   and down positive), `zoomed(x, y, steps)` (steps of 2 around a point,
@@ -155,14 +155,13 @@ of each is in [the kit, member by member](plugin-kit.md)
   `radius`.
 - `Panel`: a screen over the photos, its parent's whole room in the theme's
   background (or a `color`), taking every click, touch, wheel, swipe, pinch
-  and hover, so nothing reaches the photos; `triggered()` (API 15;
-  `clicked()` before, still said) where no control is,
+  and hover, so nothing reaches the photos; `triggered()` where no control is,
   and with `steps` (`Qt.Horizontal`, `Qt.Vertical`) the wheel and a swipe
   step: `stepped(1)` the next, `stepped(-1)` the one before (a notch a
   step, a swipe one), as the Photo frame and the Series editor step.
 - `Card`: a box in the theme, the same: nothing over it goes through. Over
   the photos for a moment, on a dimmed `Panel` whose click puts it away.
-- `PhotoTiles` (API 11): photos as square tiles, as a view shows what it
+- `PhotoTiles`: photos as square tiles, as a view shows what it
   found: `library` (`pinhole.library`), `photos` (ids, in order), `active`
   (its keys while true: ← → ↑ ↓, Home, End, PgUp, PgDn, ⏎, Space),
   `cursor`, `minCell`, and `opened(photo, index)`; `moveTo(id)` puts the
@@ -171,17 +170,17 @@ of each is in [the kit, member by member](plugin-kit.md)
   (`captionHeight` tall, given `photo` and `index`). Each drawn at the
   display's own pixels, the ring on the cursor's and under the pointer as
   Pinhole's own.
-- `PanelHeader` (API 11): the title bar of a view over the whole window,
+- `PanelHeader`: the title bar of a view over the whole window,
   as the map's: `title`, a quieter `detail`, `tools` (buttons at the
   right), then ✕ pressing `closeCommand` and showing its key (or
   `closed()` and `closeHint`); its children go before the title (a ‹ back
   button), and `progress` (0 to 1, -1 for none) is a line along its foot.
-- `SettingNote`, `SettingSwitch` (API 11): a settings component's few
+- `SettingNote`, `SettingSwitch`: a settings component's few
   words (`dim` for a remark) and a setting on or off (`text`, `checked`,
   `usable`, `hint`, `toggled()`), as Pinhole's own plugins set theirs.
 - `Choices`: one of a few on a row of buttons, each also its number's key:
   `options` as `[{ value, text }]`, `value`, `chosen(value)`; `numbered:
-  false` (API 11) for a settings row, without the number keys.
+  false` for a settings row, without the number keys.
 - `ShellButton`'s `complain(text)`: what pressing it could not do, under it
   for four seconds, the button shaking, as a `PluginAction`'s.
 - `pinhole.picturePath(name, extension)` and `pinhole.copyFile(path)`: a
@@ -412,75 +411,24 @@ And warns of:
 
 | Key | |
 |---|---|
-| `schemaVersion` | 1, the only one; 1 if left out (API 15) |
+| `schemaVersion` | 1, the only one; 1 if left out |
 | `id` | its folder's name if left out: letters, digits, `.`, `_` and `-`, beginning with a letter or a digit; yours (`me.…`), as `pinhole.…` are Pinhole's own plugins'. It names the plugin's switch, settings, state and cache |
 | `name`, `description` | what the side panel says of it (translated in `i18n/<language>.json` too) |
 | `version` | yours, shown with its name |
-| `api` | a whole number, 1 if left out (below) |
-| `entryPoints` | `{ "main": "Main.qml" }`: the file in its folder Pinhole loads; `Main.qml` if left out (API 15) |
+| `api` | the plugin API it is written for, this Pinhole's: 15, required (below) |
+| `entryPoints` | `{ "main": "Main.qml" }`: the file in its folder Pinhole loads; `Main.qml` if left out |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
-| `requires` | the programs it needs, by their names on PATH (API 15): `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
+| `requires` | the programs it needs, by their names on PATH: `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
 | `author`, `license` | yours |
 
 A key not among these is never read: `plugin check` says so, with the one
 meant.
 
-`api` is the oldest version of what follows the plugin needs (1 if left
-out); a Pinhole older than that says it needs a newer one and does not load
-it. `pinhole plugin check` refuses one that asks for less than it uses;
-`pinhole plugin check --fix` (API 15) writes the one it needs in its
-manifest first. `pinhole.api` says which one it is running in. API 2 brought promises
-(`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
-`hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
-`pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,
-`pinhole.state`, `pinhole.cache`, `viewerLayer`, an action's `order`,
-`hint`, `busyDelay`, `textColour` and `complain`, `fetch`'s options, its
-Live effects and `jpeg`, a photo's `effect`, `setFavorite`,
-`library.revision`, `sources` in the manifest: a source of photos of
-the plugin's own, whose provider pinholed runs
-([source-providers.md](source-providers.md)), and what the window shows of
-one: the root's `sources` (`PluginSource`), `pinhole.sources`,
-`chooseFolder` and `sizeText`'s decimals. API 4 brought photos in their
-colour-correct image URLs: `image://file`,
-a photo's `thumbPath` now that its `thumbnail` is a URL of that, not of its
-file, `pinhole.display`, the viewer's `hdr`, `pinhole.srgbProfile` and
-`SdrVideo`; and `Scroller`. API 5 brought the kit: `ScrollList`,
-`ScrollGrid`, `ScrollArea`, `PinchZoom`, `Panel`, `Card`, `Choices`, a
-`ShellButton`'s `complain`, `pinhole.query`, `pinhole.picturePath` and
-`VideoView`; and
-`Scroller` scrolling as the grid does, across too. API 6 brought the
-root's `holdSdr`. API 7 adds `ShellButton.checkable` for selected buttons
-that report their state to accessibility tools. API 8 adds
-`pinhole.openPhotoDirect(photo)` for views that cover the library grid.
-API 9 adds `pinhole.openPhotos(photos, photo)`: the same, stepping
-through the view's own photos only. API 10 takes ids in `hidden` and
-`stacks`, as everywhere else, and adds `pinhole.selectionIds()` and
-`pinhole.screenshots()`. API 11 brings `openPhotos`' `comeBack`, `away` and
-`returned()`: Pinhole keeps a view to come back to while its photo shows;
-`workers` in the manifest (Workers, below); `PhotoTiles`, `PanelHeader`,
-`SettingNote`, `SettingSwitch`, `Choices`' `numbered` and
-`pinhole.keyboardInUse`. API 12 adds `pinhole.copyText(text)`, `input`,
-`hasKeys`, `pinhole.workers`, `workerSaid` and `PanZoom`. API 13 adds
-`pinhole.readText(path)` and `readJson(path)`, a worker's `said` in
-`pinhole.workers`, `PluginView`, `Job`, the manifest's `settings` (each
-setting's default), a `setting` for `SettingSwitch` and `Choices`, and
-`pinhole.adjustment`, `adjust` and `turn`, with `library.item()`'s
-`thumbnailAsIs`. API 14 adds `pinhole.synced`: what the user made of a
-library, kept with it on every computer it is shown on, and its file
-given to the plugin's workers (`PINHOLE_SYNCED`); and
-`pinhole.viewer.photo` and `id`. API 15 adds kinds a plugin makes of
-its own (`"<its id>/<name>"` in `makes`, What a plugin makes),
-actions on a file (`PluginAction`'s `place: "file"` and
-`pinhole.fileActions`), `pinhole.ask`, a worker that `answers`, and
-`library.settled`, `field(name, { shown: true })` and `field("hidden")`,
-an action's `places`, its `helpText`, an action with a key in the help
-by itself, `pinhole.store(name)`, and the manifest's `requires` with
-`pinhole.has(program)`, a manifest that leaves out `schemaVersion`
-(1) and `entryPoints` (`Main.qml` beside it), and one word for each thing
-across the kit: `triggered()`, `usable`, `key` (Kit, below);
-`pinhole.deliver(path)`; `run`'s `json` and the result's `json`; and a
-tour's last step, in the side panel,
-added by Pinhole when the tour has none.
+`api` is the plugin API it is written for, and it is required: this
+Pinhole's is 15, and a plugin of any other is not loaded, older or newer
+(`plugin check` and the side panel say which it is). There is no running
+a plugin written for an older one: when the API changes, a plugin is made
+of the new one. `pinhole.api` says which one it is running in.
 
 `Main.qml` beside it:
 
@@ -555,7 +503,7 @@ without a window:
 | `program` | a file in the plugin's folder that can be run, by a relative path without `..` |
 | `args` | strings given to it first (none if left out) |
 | `per` | `"source"`, the only one there is (also if left out): one runs for the source shown |
-| `answers` | `true` (API 15): it answers what its plugin asks, `pinhole.ask` (below); `false` if left out |
+| `answers` | `true`: it answers what its plugin asks, `pinhole.ask` (below); `false` if left out |
 
 `workers` needs `"api": 11`. pinholed finds them as it finds providers
 (source-providers.md): in Pinhole's own plugins and yours, a plugin of
@@ -574,7 +522,7 @@ shown. It is given, after `args`:
 ```
 
 and, in its environment, `PINHOLE_SYNCED`: the plugin's `pinhole.synced`
-file of that library (API 14), `{"values": {…}, "clock": {…}}`, whose
+file of that library, `{"values": {…}, "clock": {…}}`, whose
 `values` are what the QML reads; it may not be there yet. Read it again
 when it changes, as the settings below; never write it.
 
@@ -602,9 +550,9 @@ five seconds later is killed. One that ends by itself is started again ten
 seconds later. A service started for a library given (`--given`) runs
 none.
 
-Its plugin's QML has `pinhole.workers` (API 12): each of its workers'
+Its plugin's QML has `pinhole.workers`: each of its workers'
 `{ name, running, since, lastExit, key, said }`, as pinholed runs them,
-with `workersChanged()`; `said` (API 13) is what it said last while it
+with `workersChanged()`; `said` is what it said last while it
 runs, or null, so a panel opened halfway through a scan shows how far it
 is at once. A worker that ends, or is killed, is `running: false` with
 its `lastExit`: notice it with `onWorkersChanged`, not a timer. A line the worker writes on its stdout that is a JSON
@@ -636,7 +584,7 @@ function load() {
 A worker that keeps something in memory (an index of what photos show, a
 model loaded once) can answer its plugin's questions, instead of a
 program started for each one loading it all again. Its manifest says
-`"answers": true` (API 15), and the QML asks:
+`"answers": true`, and the QML asks:
 
 ```qml
 pinhole.ask("index", { text: field.text, limit: 50 }, { timeout: 10000 })
@@ -657,8 +605,7 @@ turned off), `unsupported` (its manifest does not say it `answers`),
 `not_found` (no such worker of the plugin's), `cancelled` once `cancel()`
 or the plugin stopped (the worker's answer then goes nowhere), or the
 service's. Its stdin still closes as it is stopped: read the lines until
-EOF, then end. A Pinhole before API 15 runs it as any worker, and asks it
-nothing.
+EOF, then end.
 
 ## What a plugin makes
 
@@ -676,7 +623,7 @@ the program of its own that makes it (`"api": 12`):
 
 | Field | |
 |---|---|
-| `kind` | what a window's `fetch` asks for: `bounce` or `long_exposure`, one plugin each, or (API 15) a kind of its own, `"<its id>/<name>"` (`"me.steady/steadied"`), the name lowercase letters, digits, `_` and `-` |
+| `kind` | what a window's `fetch` asks for: `bounce` or `long_exposure`, one plugin each, or a kind of its own, `"<its id>/<name>"` (`"me.steady/steadied"`), the name lowercase letters, digits, `_` and `-` |
 | `from` | the rendition it is made from: `live`, `full`, `original` or `video` |
 | `type`, `extension` | what it makes: its UTI, and its file's extension, lowercase |
 | `program`, `args` | a program in the plugin's folder, and what it is given first |
@@ -696,8 +643,7 @@ A kind of its own is always made, a source never has one: `fetch(photo,
 "me.steady/steadied")` from any plugin gets it, made from the photo's
 `from` and kept in the cache beside that, as long as its plugin is on. Its
 id in front keeps it apart from another plugin's and from the kinds a
-source has. A Pinhole before API 15 refuses it, and `fetch` there is
-answered `bad_request`.
+source has.
 
 ## What a plugin is given
 
@@ -710,7 +656,7 @@ its settings, is there as the window first shows. It sets:
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
   `"grid"` (top right, before Select), `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
-  `text`, `key`, `helpText` (what the help says it does, API 15; its
+  `text`, `key`, `helpText` (what the help says it does; its
   `text` if left out), `shown`, `usable`, `active` (a button filled with the
   accent; in a menu, a subtle fill and a check), `textColour` (its words in a colour while not lit: a theme
   colour's name, as a mark's `colour`, or `"#rrggbb"`; the theme's text
@@ -741,7 +687,7 @@ its settings, is there as the window first shows. It sets:
   into one, More ▾, whose menu lists them with their keys; the keys work
   either way, and a group's ⇧ key opens that menu on its row. More ▾ is
   lit while one of them is `active`, and turns while one is `busy`.
-  `places` (API 15), in place of `place`, puts one action in several:
+  `places`, in place of `place`, puts one action in several:
   `places: ["viewer", "selection"]` is a button in each, its key in
   each, where a plugin declared twins before (Send's). Pressed,
   `pressedIn` says where, and `photos` the ids it is for: the photo
@@ -750,7 +696,7 @@ its settings, is there as the window first shows. It sets:
   something to do it on (a photo shown, photos ticked, any photos at
   all), unless it is `busy`, so what is on its way can still be shown.
   Its `complain(text)` says it under the button it was pressed with.
-  `place: "file"` (API 15) is no button of its own but something it does
+  `place: "file"` is no button of its own but something it does
   with a file another plugin made, which that plugin offers where it shows
   the file: Background's `"Background"` on Series' video. `accepts` lists
   the extensions it does, lowercase (`["mp4", "jpg"]`; none, any), and
@@ -793,7 +739,7 @@ its settings, is there as the window first shows. It sets:
   listed under its name with its `Command`s that give a `section` (any
   but Pinhole's own parts: `"photo"`, `"share"`…). A few words each, as
   Pinhole's are: the heading says whose they are. Its actions with a
-  `key` are there by themselves (API 15), each with its `helpText`, or its
+  `key` are there by themselves, each with its `helpText`, or its
   `text` without one, after what `help` lists, unless `help` says what
   that key does: list in `help` only keys of no action (a panel's), or
   what one key does in several places.
@@ -829,7 +775,7 @@ its settings, is there as the window first shows. It sets:
   it gives `stacks` again (on `library.changed()`, from the ids it keeps,
   as Series does).
 - `hidden`: photos not in the grid at all, a list of photos (ids, or
-  library positions; ids since API 10),
+  library positions),
   as Screenshots hides screenshots. They leave any stack they are in, the
   viewer's ← and →, its strip and Home/End pass over them, and Ctrl A and a
   range leave them out; a plugin can still `openPhoto` one. Say somewhere
@@ -913,7 +859,7 @@ its settings, is there as the window first shows. It sets:
   and lights, `open` one shown full window, `action` one of its
   `PluginAction`s whose button is lit, and `settings: true` lights its part
   of the side panel. A tour with no step of `settings: true` ends in one
-  Pinhole adds (API 15): its part of the side panel, where its tour can be
+  Pinhole adds: its part of the side panel, where its tour can be
   shown again; give one of your own to say there what its settings are.
   Pinhole shows it by itself when the plugin is turned
   on in the side panel (once the panel closes, `tourReady` is true and the
@@ -922,7 +868,7 @@ its settings, is there as the window first shows. It sets:
   themselves: a notice over the grid says how many are new, opens them in
   the side panel marked New (they then count as seen), and its × puts it
   off for three days, or until another is new.
-- `holdSdr` (API 6): set true while drawing an SDR overlay over the
+- `holdSdr`: set true while drawing an SDR overlay over the
   viewer's photo without covering it (a `viewerLayer`'s, as Live Photos'
   motion), so the photo uses the same brightness range as the overlay.
   Pinhole restores the photo's wider range when no plugin holds it.
@@ -933,36 +879,32 @@ its settings, is there as the window first shows. It sets:
 `Spinner`, `Toggle`, `FieldInput` (a line to type into: `text`, `input`,
 `placeholder`, `password`, `done`, `accepted()`), `Command` (a key,
 with what it does in the help), the kit (above), and `Scroller`, what
-`ScrollList`, `ScrollGrid` and `ScrollArea` are made of (API 4), and `theme` has the Omarchy theme's colours and type, so a plugin can look
+`ScrollList`, `ScrollGrid` and `ScrollArea` are made of, and `theme` has the Omarchy theme's colours and type, so a plugin can look
 like the rest.
 
-One word for each thing across them (API 15): **`triggered()`** when it
+One word for each thing across them: **`triggered()`** when it
 is used (a `PluginAction`, a `Command`, a `ShellButton`, a `Panel` where no
-control is; a `ShellButton`'s `tapped()` and a `Panel`'s `clicked()` are
-still said), **`usable`** whether it can be now (an action, a button, a
-`SettingSwitch`, and a `Command`'s and `Choices`' in place of their
-`when`, which follows it), **`shown`** whether it shows, **`key`** for one
+control is), **`usable`** whether it can be now (an action, a button, a
+`SettingSwitch`, a `Command`, `Choices`), **`shown`** whether it shows, **`key`** for one
 key and **`keys`** for several (a `Command` takes either). Something that
 says what it chose has its own: `Choices`' `chosen(value)`, a `Toggle`'s
 `toggled()`, a `FieldInput`'s `accepted()`. A colour named from the theme
 is a `colour` (`"accent"`, `"#rrggbb"`: an action's `textColour`, a mark's
 `colour`); one of Qt's `color` values keeps Qt's word (`labelColor`).
-`plugin check` says an older name in a plugin of API 15; it still works.
 
 These controls support Tab/Shift+Tab focus and Space/Enter activation.
-For a button representing a selected option, set `ShellButton.checkable: true` (API 7)
+For a button representing a selected option, set `ShellButton.checkable: true`
 and bind `active` to its selected state; `Choices` does this for its options.
 Give an unlabelled `Toggle` an explicit `Accessible.name` (for example,
 `Accessible.name: qsTr("Show captions")`) so its purpose is available to
 screen readers. `FieldInput` keeps normal text-editing keys inside the field.
 
-A plugin that plays video uses `VideoView` (API 5) as its `MediaPlayer`'s
+A plugin that plays video uses `VideoView` as its `MediaPlayer`'s
 `videoOutput`. It handles the video's colour and brightness automatically.
 Use its `fillMode`, `contentRect` and `endOfStreamPolicy` as with Qt's
 `VideoOutput`. `hdr` reports whether the current video is HDR, and
 `framesDrawn` counts displayed frames. `plugin check` refuses `VideoOutput`
-and `Video`; use `VideoView` instead. Older plugins using `SdrVideo`
-remain supported, but new code should use `VideoView`.
+and `Video`; use `VideoView` instead.
 
 ```qml
 MediaPlayer { source: url; videoOutput: video }
@@ -985,50 +927,48 @@ this API. A library position is not a visual grid position.
 
 | | |
 |---|---|
-| `library` | `count`; `item(photo)`: `index`, `id`, `date` (when it was taken: ms since 1970 UTC, an instant; for its hour, `new Date(date)` gives this computer's time zone's, not the one it was taken in), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a Live Photo's effect as set on the iPhone: `loop`, `bounce`, `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `field("hidden")` (API 15): whether the grid hides each; `field(name, { shown: true })` (API 15): only those the grid shows, in their order, the hidden left out (a histogram of what shows, with `field("id", { shown: true })` beside it); `[]` for `index`, `thumbnail` or a name it has not (said on stderr, and refused by `plugin check`); `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; `settled(how)` (API 15) once it is read again or what the grid hides changed, once for both when they come at once (a read moves what is hidden), with `how`: `{ read, hidden, switched, revision }`, `read` whether it was read again, `switched` whether that is another source's library (its `key` another: drop what you keep of the one before), `hidden` whether what the grid hides changed: listen to it alone, rather than to `changed` and `pinhole.hiddenChanged` both; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
-| `viewer` | the photo shown full window, read only: `open`, `index`, `photo` (API 14: it, as `library.item()` gives it, `{}` with none) and `id` (its id, `""` with none), `close()` (as Esc closes it); `hdr` (API 4), what makes it HDR, read from its file once it shows: `{ kind, headroom }`, `kind` `"apple"` or `"iso"` (a gain map: Apple's own, or ISO 21496-1's, which Android's and Adobe's Ultra HDR are too, ISO's when it has both), `"pq"` or `"hlg"` (its picture's own curve), and `headroom` how many stops its highlights go above SDR white; `{}` for SDR, a video, or until it is read |
-| `display` | the display the window is on, as the compositor says (API 4): `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
-| `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole (API 4): for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |
+| `library` | `count`; `item(photo)`: `index`, `id`, `date` (when it was taken: ms since 1970 UTC, an instant; for its hour, `new Date(date)` gives this computer's time zone's, not the one it was taken in), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a Live Photo's effect as set on the iPhone: `loop`, `bounce`, `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `field("hidden")`: whether the grid hides each; `field(name, { shown: true })`: only those the grid shows, in their order, the hidden left out (a histogram of what shows, with `field("id", { shown: true })` beside it); `[]` for `index`, `thumbnail` or a name it has not (said on stderr, and refused by `plugin check`); `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; `settled(how)` once it is read again or what the grid hides changed, once for both when they come at once (a read moves what is hidden), with `how`: `{ read, hidden, switched, revision }`, `read` whether it was read again, `switched` whether that is another source's library (its `key` another: drop what you keep of the one before), `hidden` whether what the grid hides changed: listen to it alone, rather than to `changed` and `pinhole.hiddenChanged` both; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
+| `viewer` | the photo shown full window, read only: `open`, `index`, `photo` (it, as `library.item()` gives it, `{}` with none) and `id` (its id, `""` with none), `close()` (as Esc closes it); `hdr`, what makes it HDR, read from its file once it shows: `{ kind, headroom }`, `kind` `"apple"` or `"iso"` (a gain map: Apple's own, or ISO 21496-1's, which Android's and Adobe's Ultra HDR are too, ISO's when it has both), `"pq"` or `"hlg"` (its picture's own curve), and `headroom` how many stops its highlights go above SDR white; `{}` for SDR, a video, or until it is read |
+| `display` | the display the window is on, as the compositor says: `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
+| `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole: for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |
 | `currentIndex()` | the photo under the pointer in the grid, else the middle one |
 | `selection()`, `selectionCount` | the photos ticked in select mode, a card's all of them, as library positions |
-| `selectionIds()` | the same by id (API 10): what to keep across a step that takes a while, as a reload moves positions |
+| `selectionIds()` | the same by id: what to keep across a step that takes a while, as a reload moves positions |
 | `reveal(photo)`, `openPhoto(photo)` | the grid to a photo, marked there with a ring that fades (a hidden one: the next shown, where it would be); a photo full window |
-| `openPhotoDirect(photo)` | superseded by `openPhotos` (`plugin check` says so; it goes at a later API): open a photo full window from a plugin panel without revealing or animating from the library grid (API 8); closing the viewer skips the grid animation as well |
-| `openPhotos(photos, photo, options)` | as `openPhotoDirect`, with `photos` (ids or positions, in the view's order: search results by relevance, a person's photos, a place's) as the only ones ← →, the strip, Home and End go through, until the viewer closes (API 9). `photo` must be one of them. `{ comeBack: true }` (API 11): its view comes back when the photo closes. Meanwhile `away` is true: it covers nothing, the viewer has the keys, and its view hides itself (`visible: shown && !pinhole.away`); then `returned(id)`, the id of the photo shown last, to put its cursor on. If another plugin went over the photos meanwhile, `dismissed()` instead: the way back leads to that one |
-| `away`, `returned(photo)` | see `openPhotos`' `comeBack` (API 11) |
-| `keyboardInUse` | the keys are what was used last, not a pointer (API 11): when to show the ring on the one they are on, as Pinhole's own lists do |
-| `workers`, `workerSaid(name, said)` | its manifest's workers as pinholed runs them, and what one said (API 12); see Workers |
-| `input` | what was used last: `"keyboard"`, `"mouse"` or `"touchpad"` (API 12), to say "Pinch to zoom" or "Scroll to zoom" |
-| `hasKeys` | whether the keys are the plugin's now: it covers the photos and no panel of Pinhole's is over it (API 12), for what takes keys or gestures of its own |
+| `openPhotos(photos, photo, options)` | a photo full window from a plugin's view, without revealing or animating from the library grid (nor back to it as it closes), with `photos` (ids or positions, in the view's order: search results by relevance, a person's photos, a place's) as the only ones ← →, the strip, Home and End go through, until the viewer closes. `photo` must be one of them. `{ comeBack: true }`: its view comes back when the photo closes. Meanwhile `away` is true: it covers nothing, the viewer has the keys, and its view hides itself (`visible: shown && !pinhole.away`); then `returned(id)`, the id of the photo shown last, to put its cursor on. If another plugin went over the photos meanwhile, `dismissed()` instead: the way back leads to that one |
+| `away`, `returned(photo)` | see `openPhotos`' `comeBack` |
+| `keyboardInUse` | the keys are what was used last, not a pointer: when to show the ring on the one they are on, as Pinhole's own lists do |
+| `workers`, `workerSaid(name, said)` | its manifest's workers as pinholed runs them, and what one said; see Workers |
+| `input` | what was used last: `"keyboard"`, `"mouse"` or `"touchpad"`, to say "Pinch to zoom" or "Scroll to zoom" |
+| `hasKeys` | whether the keys are the plugin's now: it covers the photos and no panel of Pinhole's is over it, for what takes keys or gestures of its own |
 | `isHidden(photo)`, `hiddenCount`, `hiddenChanged()` | whether a photo is hidden from the grid by any plugin's `hidden`, how many are, and when that changes (after `library.changed()` when the library is read again): what a plugin counting or showing photos leaves out, as the grid does |
-| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the plugin that makes them (Live Photos', What a plugin makes) makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it; and (API 15) a kind a plugin makes of its own, `"<its id>/<name>"`): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)` (API 4): as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
-| `store(name)` | what it keeps a value for each of many keys of (API 15), for the library shown (a file in its `cacheDir`, so each source's apart): `get(key)`, a promise of the value or `null`; `put(key, value)`, a value JSON can hold, `null` taking it out; `remove(key)`; each a promise. One key read or written at a time, never the whole, and two windows' writes both kept: for what is kept per photo, as Info keeps what it read of each original. It goes with the cache, so only what can be worked out again. `null` for a `name` that is not lowercase letters, digits, `_` and `-` (at most 32) |
-| `ask(name, request, options)` | what its worker `name`, one whose manifest says `"answers": true`, answers to `request` (API 15): a promise of its result; `options`: `{ timeout }` in ms, 30 s unless said (Asking a worker) |
+| `fetch(photo, kind, options)` | a photo's file from the service (`medium`, `full`, `original`, `video`, `live`, and a Live Photo's `loop`, `bounce` and `long_exposure`, which the plugin that makes them (Live Photos', What a plugin makes) makes when the source has none; and `jpeg`, its `full` as a JPEG for whatever reads no HEIC, with its date, place and camera and upright, made once into the cache and the `full` itself when that is a JPEG already, `not_found` for a video, as Pinhole's Export and Send use it; and a kind a plugin makes of its own, `"<its id>/<name>"`): a promise of its path. An `Image` shows a file in its right colours, sRGB whatever profile it carries (an iPhone's Display P3), as `"image://file/" + encodeURIComponent(path)`: as it would show the `file://` URL, at once or not as its `asynchronous` says, at the size its `sourceSize` and `fillMode` make. A `file://` URL shows its codes as if they were sRGB, an iPhone photo duller than it is. `full` and `original` are mostly HEIC, which an `Image` shows as `"image://photo/" + encodeURIComponent(path)`, upright, in sRGB, decoded on threads of their own at its `sourceSize` at most. `options`: `{ stream: true }` gives a URL to play in a `MediaPlayer` instead, the service's `http://` one while it is still downloading (it plays as it comes), else the file's |
+| `store(name)` | what it keeps a value for each of many keys of, for the library shown (a file in its `cacheDir`, so each source's apart): `get(key)`, a promise of the value or `null`; `put(key, value)`, a value JSON can hold, `null` taking it out; `remove(key)`; each a promise. One key read or written at a time, never the whole, and two windows' writes both kept: for what is kept per photo, as Info keeps what it read of each original. It goes with the cache, so only what can be worked out again. `null` for a `name` that is not lowercase letters, digits, `_` and `-` (at most 32) |
+| `ask(name, request, options)` | what its worker `name`, one whose manifest says `"answers": true`, answers to `request`: a promise of its result; `options`: `{ timeout }` in ms, 30 s unless said (Asking a worker) |
 | `setFavorite(photos, favorite)` | photos (a list of positions or ids, or one) made favourites, or not, as the Favourites plugin's heart does: at once in the library (`item().favorite`, the grid's mark, `library.revision`), then in the source, iCloud's favourites or a folder's kept in its library. A promise of `{ changed }`, the ids of those that were not so already, once the source has them; rejected with the service's `code` (`read_only` for a library only looked at, `needs_sign_in`, `unavailable`, `unsupported`, `other_source` when another source is shown, `no_service`; `not_found` when none of them is in the library), the photos put back as they were. It makes no step to undo: record one with `did`. `cancel()` stops only the answer: the change, once asked, still goes through, so read `library.revision` rather than take `cancelled` for nothing changed |
-| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`, and `json`, its stdout read as JSON when it is (API 15). `options`: `input` (to its stdin), `json` (API 15: a value given as its stdin as JSON, in place of `input`), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). Its stdin ends after `input`, or at once without one, and its stdout is read as UTF-8 text: a binary file goes through a path instead. `cancel()` asks it to end (SIGTERM) and kills it a second later. `sqlite3`, a clipboard tool (`wl-copy`, `xclip`…) and `xdg-user-dir` are refused, by name, path or in a shell's line: rejected with `refused` (`pinhole.query`, `copyFile`, `picturePath`) |
+| `run(program, args, options)` | a program, its own (in its folder) or any on PATH: a promise of `{ stdout, stderr, code }`, and `json`, its stdout read as JSON when it is. `options`: `input` (to its stdin), `json` (a value given as its stdin as JSON, in place of `input`), `timeout` (ms), `env` (added to Pinhole's), `output(line)` (each line it writes, as it comes). Its stdin ends after `input`, or at once without one, and its stdout is read as UTF-8 text: a binary file goes through a path instead. `cancel()` asks it to end (SIGTERM) and kills it a second later. `sqlite3`, a clipboard tool (`wl-copy`, `xclip`…) and `xdg-user-dir` are refused, by name, path or in a shell's line: rejected with `refused` (`pinhole.query`, `copyFile`, `picturePath`) |
 | `record(item, options)` | an item as it looks over a number of frames, as a GIF or an MP4: a promise of the file's path. `options` are `path`, `format`, `width`, `height`, `fps`, `frames`, `seek(frame)` and `progress(fraction)` |
 | `notify(text)` | a few words at the foot of the window for a while, as undo's: "Saved to Pictures" |
 | `keepAwake(on)` | the screen kept on, no screensaver and no lock, while `on`, as the Photo frame does while it shows; `false` lets it go, and so does the plugin turned off or loaded again, and Pinhole quitting or crashing. Whether the screen is kept on now: not where it cannot be (not on Wayland, the window hidden, or on a workspace not shown), which it then is once it can |
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
-| `setting(key, fallback)`, `setSetting(key, value)` | superseded by `settings`, its defaults in the manifest's `"settings"` (`plugin check` says so; they go at a later API): the same, by name; `setSetting` says whether it could be kept, and `null` takes the setting out (as assigning `null` to one does: it reads `undefined`, and `settings.keys()` leaves it out) |
-| `fileActions` | what the plugins on do with a file (API 15): their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
-| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on (API 14): People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `adopt(values)` takes in what the plugin kept before it synced them (its `state`): only keys the library has never had, and a key set on any computer wins over them, now or once heard of; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
+| `fileActions` | what the plugins on do with a file: their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
+| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `adopt(values)` takes in what the plugin kept before it synced them (its `state`): only keys the library has never had, and a key set on any computer wins over them, now or once heard of; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
-| `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number (API 3), for `dropStep` |
+| `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number, for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
-| `adjustment(photo)`, `adjust(photos, adjustment)`, `turn(photos, quarters)` | what was done to a photo, never to its original (API 13): `{ turn, crop: { x, y, width, height }, kept }`, quarter turns clockwise and the part kept as fractions of the photo turned; `kept` is `"source"`, `"here"` or `""`. Where the source keeps edits (iCloud) `adjust` and `turn` write it there as its devices write theirs, the photo rendered from its original: an iPhone shows it and can revert it, though it opens no edit made elsewhere to change it (docs/api-findings.md, Edits); edits made on an iPhone read back the same way. Where it keeps none (a folder), Pinhole keeps it (`~/.local/state/pinhole/adjustments/`) and draws it so: the grid, the viewer, an export as JPEG, a copy. Either way a promise of `{ photos: [{ id, turn, crop }], kept }`; `{ turn: 0, crop: null }` takes it back; `turn` turns from where each is, its crop turning with it. `library.item()` says the size drawn; `thumbnailAsIs` is the thumbnail as its file is. No step to undo is made: record one with `did`, as Turn and crop does |
-| `readText(path)`, `readJson(path)` | a file of its own read whole, away from the window (API 13): one in its folder (`dir`) or its cache (`cacheDir`, what its worker writes). A promise of its text, or of what its JSON says; rejected `not_found`, `not_yours` (a file elsewhere), `too_large` (over 32 MB), `unreadable` or `json` |
-| `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them (API 12). As with `copyFile`, a self-test's clipboard is its window's own |
+| `adjustment(photo)`, `adjust(photos, adjustment)`, `turn(photos, quarters)` | what was done to a photo, never to its original: `{ turn, crop: { x, y, width, height }, kept }`, quarter turns clockwise and the part kept as fractions of the photo turned; `kept` is `"source"`, `"here"` or `""`. Where the source keeps edits (iCloud) `adjust` and `turn` write it there as its devices write theirs, the photo rendered from its original: an iPhone shows it and can revert it, though it opens no edit made elsewhere to change it (docs/api-findings.md, Edits); edits made on an iPhone read back the same way. Where it keeps none (a folder), Pinhole keeps it (`~/.local/state/pinhole/adjustments/`) and draws it so: the grid, the viewer, an export as JPEG, a copy. Either way a promise of `{ photos: [{ id, turn, crop }], kept }`; `{ turn: 0, crop: null }` takes it back; `turn` turns from where each is, its crop turning with it. `library.item()` says the size drawn; `thumbnailAsIs` is the thumbnail as its file is. No step to undo is made: record one with `did`, as Turn and crop does |
+| `readText(path)`, `readJson(path)` | a file of its own read whole, away from the window: one in its folder (`dir`) or its cache (`cacheDir`, what its worker writes). A promise of its text, or of what its JSON says; rejected `not_found`, `not_yours` (a file elsewhere), `too_large` (over 32 MB), `unreadable` or `json` |
+| `copyText(text)` | words on the clipboard as text (paths, a link): a promise of them once it has them. As with `copyFile`, a self-test's clipboard is its window's own |
 | `copyFile(path)` | a file on the clipboard, an image as one a chat takes pasted too (a JPEG as it is, a GIF as it is, and a PNG of at most 2560 px, a GIF's first frame), as Pinhole's own copy has it: a promise of the path once the clipboard has it, which for a big picture is a moment later (its PNG is made first, away from the window), so say "Copied" then, not before; `not_found` if there is no such file. The last copy asked for wins: if another (a plugin's or Pinhole's own) is asked for while its picture is made, this one is never set, and is `cancelled` |
 | `showFile(path)` | its folder in the file manager |
-| `deliver(path)` | a file it made handed over (API 15), as Series' and Sheet's are: on the clipboard (`copyFile`), kept where it is. A promise of how it went, never rejected: `"copied"`, `"kept"` (another copy asked for since has the clipboard) or `"failed"` (said, as `warn` says it) |
-| `has(program)` | whether a program is there to run (API 15): a name on PATH (`"localsend"`), or one of its folder's by a relative path; for one it can do without, as Send's LocalSend (what it cannot do without goes in the manifest's `requires`) |
+| `deliver(path)` | a file it made handed over, as Series' and Sheet's are: on the clipboard (`copyFile`), kept where it is. A promise of how it went, never rejected: `"copied"`, `"kept"` (another copy asked for since has the clipboard) or `"failed"` (said, as `warn` says it) |
+| `has(program)` | whether a program is there to run: a name on PATH (`"localsend"`), or one of its folder's by a relative path; for one it can do without, as Send's LocalSend (what it cannot do without goes in the manifest's `requires`) |
 | `picturesDir()`, `exists(path)`, `fileSize(path)`, `sizeText(bytes, decimals)` | `picturesDir()`: the desktop's Pictures folder (`~/Pictures`), for a folder of one's own in it (`picturesDir() + "/Exports"`); in a self-test, the scratch Pictures, never the person's. `sizeText`: "1.8 MB", with one decimal unless said |
-| `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken (API 5). In a self-test, the scratch Pictures, never the person's |
-| `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s (API 5). One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled` (the plugin's own `cancel()`) or `reloaded` (the library read again meanwhile: ask again); see Bounded library queries below |
-| `screenshots()` | the ids of the photos the library says are screenshots (API 10), as Screenshots hides them: the index's `subtype` (iCloud's mark for an iPhone's or an iPad's), a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
+| `picturePath(name, extension)` | a file to make in Pictures/Pinhole, the folder made: `name.extension`, or `name 2.extension`… if that is taken. In a self-test, the scratch Pictures, never the person's |
+| `query(sql, values)` | the library's index (`library.sqlite`; schema below) asked, read only, away from the window: a promise of rows by column name, with `values` bound to its `?`s. One read-only statement, bounded time and results; `cancel()` stops execution, including before the first row. Rejected `sql`, `no_library`, `query_timeout`, `query_limit`, `query_busy`, `cancelled` (the plugin's own `cancel()`) or `reloaded` (the library read again meanwhile: ask again); see Bounded library queries below |
+| `screenshots()` | the ids of the photos the library says are screenshots, as Screenshots hides them: the index's `subtype` (iCloud's mark for an iPhone's or an iPad's), a name screenshots are given (screenshot-…, Screenshot …, Zrzut ekranu …, hyprshot's, grim's…), or a PNG with no place shaped like a phone's screen. A promise, a query's (bounded and cancellable the same) |
 | `chooseFolder(title)` | a folder chosen in the desktop's own picker: a promise of its path, rejected `cancelled` when none is |
 | `sources` | the sources: `list` (every source added whose kind is on, as `PluginSource` is given them), `current` (the id of the one shown), `health` (how the one shown is doing: `fine`, `needs_sign_in`, `offline`, `failing`, or `no_service` when no service runs), `progress` and `rounds` (a library being built; when the one shown was last and is next looked at), `discovered` (what could be added of its kinds, by kind, as the service last found: iCloud's `{ icloudpd: […] }`, a folder's `{ folders: […] }`, a provider's whatever its `discover` says) and `discover()` to look again, `show(id)`; and, only of the kinds its manifest names, else rejected `not_yours`: `add(kind, entry)` (a promise of the source added and shown), `signIn(kind, params)` and `submitCode(kind, params)` (promises of `{ state }`, `signed_in` once added and shown or `needs_code`; rejected with the service's or the provider's code: `wrong_password`, `wrong_code`, `turned_off`…), `signOut(id)` (a promise of the sources left) |
 | `dir`, `cacheDir` | its own folder; a folder for files it can make again, one to each source's library (`cacheDirChanged()` when another source's is shown), beside its `cache` |
@@ -1091,7 +1031,7 @@ its connection settings from a UI plugin.
 
 ### Bounded library queries
 
-`query(sql, values)` has the same signature from API 5 onward. SQL `NULL`
+`query(sql, values)`: SQL `NULL`
 keeps the historical Qt SQL mapping: an empty JavaScript string, rather
 than `null` or `undefined`. Use SQL `IS NULL` to test missing values before
 returning them when this distinction matters. Empty text and empty blobs
@@ -1145,7 +1085,7 @@ Keep each thing in the one it is:
 - `settings`: what the user chose, the switches and choices in its part of
   the side panel. `plugins.json` is theirs, and pinholed reads it again
   each time it changes, so a plugin writes there only when the user
-  changes a setting. Its defaults are its manifest's (API 13), what
+  changes a setting. Its defaults are its manifest's, what
   `pinhole.settings` says of one never chosen, from the first binding on:
 
   ```json
@@ -1166,7 +1106,7 @@ Keep each thing in the one it is:
   ```
 
   Setting one to `null` takes the choice back: its default again.
-- `synced` (API 14): what the user made of the library and would miss on
+- `synced`: what the user made of the library and would miss on
   another computer: names given, series made by hand. It is the library's,
   so another library shown has its own, with nothing to put in its keys.
   Each computer has it at once and keeps it in
@@ -1254,13 +1194,8 @@ the `.catch()` does the same. Nor is there `async`/`await` in QML.
 
 Everything a plugin started ends with it: turned off or loaded again, its
 programs are stopped (asked to end with SIGTERM, killed a second later; so
-too when the window closes), its recordings dropped, and no promise or
-callback of its old self is answered.
-
-Before API 2 these took a callback last in place of a promise
-(`fetch(i, kind, done(path, error))`, `run(program, args, done(code,
-stdout, stderr))`, `record(item, options, progress, done(path, error))`);
-they still do.
+too when the window closes), its recordings dropped, and no promise of its
+old self is answered.
 
 ### Translations
 

@@ -1,7 +1,7 @@
 #include "videoview.h"
 
 #include "colour.h"
-#include "sdrvideo.h"
+#include "tonemap.h"
 
 #include <QQuickWindow>
 #include <QRunnable>

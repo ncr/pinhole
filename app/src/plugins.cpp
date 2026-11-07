@@ -4,7 +4,6 @@
 #include "synced.h"
 #include "panzoom.h"
 #include "pluginguide.h"
-#include "sdrvideo.h"
 #include "videoview.h"
 #include "selftest.h"
 
@@ -548,14 +547,6 @@ void PluginHost::openPhoto(const QJSValue &photo) const {
     m_plugins->viewerObject()->openAt(index, m_plugins->grid()->rectOf(index));
 }
 
-void PluginHost::openPhotoDirect(const QJSValue &photo) const {
-    const int index = m_plugins->library()->positionOf(photo);
-    if (!m_plugins->grid() || index < 0)
-        return;
-    m_plugins->handedOver(m_id);
-    m_plugins->viewerObject()->openAt(index, {});
-}
-
 void PluginHost::openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options) {
     const PluginLibrary *library = m_plugins->library();
     const int index = library->positionOf(photo);
@@ -672,16 +663,6 @@ double PluginHost::fileSize(const QString &path) const { return double(QFileInfo
 
 QString PluginHost::sizeText(double bytes, int decimals) const {
     return QLocale().formattedDataSize(qint64(bytes), std::clamp(decimals, 0, 3), QLocale::DataSizeTraditionalFormat);
-}
-
-QVariant PluginHost::setting(const QString &key, const QVariant &fallback) const {
-    const QJsonObject settings = m_plugins->settingsOf(m_id);
-    return settings.contains(key) ? settings.value(key).toVariant()
-         : m_settingDefaults.contains(key) ? m_settingDefaults.value(key) : fallback;
-}
-
-bool PluginHost::setSetting(const QString &key, const QVariant &value) {
-    return m_plugins->setSettingOf(m_id, key, QJsonValue::fromVariant(value));
 }
 
 double PluginHost::did(const QString &name, const QJSValue &undo, const QJSValue &redo) {
@@ -956,8 +937,6 @@ void Plugins::registerTypes() {
                              "Choices", "PhotoTiles", "PanelHeader", "SettingNote", "SettingSwitch", "PluginView", "Job"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
-    // HDR video made SDR between a MediaPlayer and its VideoOutput (API 4).
-    qmlRegisterType<SdrVideo>("Pinhole.Plugin", 1, 0, "SdrVideo");
     // A player's video drawn right, HDR tone mapped on the GPU (API 5): what
     // a plugin shows video with, never a VideoOutput.
     qmlRegisterType<VideoView>("Pinhole.Plugin", 1, 0, "VideoView");
@@ -1774,11 +1753,9 @@ const char *kPluginUsage = R"(Usage: pinhole plugin <command>
                          ~/.config/pinhole/plugins/<id> (or the folder
                          named, made for it): a manifest.json, a Main.qml
                          and its Polish to start from
-  check [--fix] [folder | id]
-                         look a plugin over as Pinhole would load it: its
+  check [folder | id]    look a plugin over as Pinhole would load it: its
                          manifest, its QML, its translations (the folder
-                         here, if none is named); --fix first gives it the
-                         "api" what it uses needs
+                         here, if none is named)
   docs [name | --json]   read the bundled handbook; --json includes the
                          installed API version and every document
 
@@ -1929,7 +1906,7 @@ PinholePlugin {
     return 0;
 }
 
-int checkPlugin(const QString &target, bool fix = false) {
+int checkPlugin(const QString &target) {
     // A folder, else one of one's own or Pinhole's by the id its manifest
     // gives (Series' folder is series, its id pinhole.series).
     QString dir = QFileInfo(target).absoluteFilePath();
@@ -1996,43 +1973,6 @@ int checkPlugin(const QString &target, bool fix = false) {
     const QString name = QStringLiteral("%1 %2").arg(id, manifest.value("version").toString()).trimmed();
     // QML that does not compile is said, and what the rest of the check
     // finds with it, so one run says all it can.
-    const int asked = manifest.value("api").toInt(1);
-    // What it uses of a newer API than it asks for works here, and not in a
-    // Pinhole of the one it asks for, which would load it all the same and
-    // fail where nobody sees: refused, with the number to give.
-    const QMap<int, QStringList> uses = Plugins::apiUses(dir);
-    const int needed = uses.isEmpty() ? 1 : uses.lastKey();
-    // --fix (API 15): the API it needs written in its manifest, its own
-    // text kept but for that number.
-    if (fix && asked < needed && needed <= Plugins::api) {
-        QFile file(dir + "/manifest.json");
-        QString text = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
-        file.close();
-        static const QRegularExpression apiKey(QStringLiteral("(\"api\"\\s*:\\s*)\\d+(?:\\.0+)?"));
-        if (text.contains(apiKey))
-            text.replace(apiKey, QStringLiteral("\\1%1").arg(needed));
-        else if (const qsizetype open = text.indexOf('{'); open >= 0) {
-            // First, as the next key is laid out: on a line of its own, or
-            // on the same one.
-            qsizetype next = open + 1;
-            while (next < text.size() && text[next].isSpace())
-                ++next;
-            const QString space = text.mid(open + 1, next - open - 1);
-            text.insert(open + 1, space.contains('\n') ? space + QStringLiteral("\"api\": %1,").arg(needed)
-                                                       : QStringLiteral("\"api\": %1, ").arg(needed));
-        }
-        if (!KeptFiles::write(dir + "/manifest.json", text.toUtf8()))
-            return 1;
-        out(QStringLiteral("%1: manifest.json: \"api\": %2 now, as it uses %3").arg(name).arg(needed).arg(uses.last().join(QStringLiteral(", "))));
-        return checkPlugin(dir);
-    }
-    for (auto it = uses.begin(); it != uses.end(); ++it)
-        if (asked < it.key())
-            problems << QStringLiteral("manifest.json: it uses %1, of plugin API %2, and asks for API %3: give it \"api\": %4")
-                            .arg(it.value().join(QStringLiteral(", ")))
-                            .arg(it.key())
-                            .arg(asked)
-                            .arg(needed);
     // The footguns: refused, or warned of.
     Plugins::Findings findings = Plugins::footguns(dir);
     // Its manifest's words, errors: a key never read is something it meant
@@ -2046,7 +1986,7 @@ int checkPlugin(const QString &target, bool fix = false) {
             err(QStringLiteral("%1: warning: %2").arg(name, warning));
         return 1;
     }
-    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(asked));
+    out(QStringLiteral("%1 (plugin API %2): looks fine.").arg(name).arg(Plugins::api));
     for (const QString &warning : findings.warnings)
         err(QStringLiteral("%1: warning: %2").arg(name, warning));
     // A file named as another plugin's, or as one of Pinhole's own: Qt
@@ -2100,13 +2040,6 @@ int runPluginCommand(int argc, char *argv[]) {
         QCoreApplication app(argc, argv);
         return newPlugin(QString::fromLocal8Bit(argv[3]), argc == 5 ? QString::fromLocal8Bit(argv[4]) : QString());
     }
-    // --fix: the API it needs written in its manifest first.
-    const bool fix = command == QLatin1String("check") && argc >= 4 && QLatin1String(argv[3]) == QLatin1String("--fix");
-    if (fix) {
-        for (int i = 3; i + 1 < argc; ++i)
-            argv[i] = argv[i + 1];
-        --argc;
-    }
     if (command == QLatin1String("check") && argc <= 4) {
         // A window system is not needed to compile QML.
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -2114,7 +2047,7 @@ int runPluginCommand(int argc, char *argv[]) {
         QGuiApplication app(argc, argv);
         app.setApplicationName("pinhole");
         Plugins::registerTypes();
-        return checkPlugin(argc == 4 ? QString::fromLocal8Bit(argv[3]) : QStringLiteral("."), fix);
+        return checkPlugin(argc == 4 ? QString::fromLocal8Bit(argv[3]) : QStringLiteral("."));
     }
     std::fputs(kPluginUsage, command.isEmpty() || command == QLatin1String("help") ? stdout : stderr);
     return command.isEmpty() || command == QLatin1String("help") ? 0 : 2;

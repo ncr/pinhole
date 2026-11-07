@@ -1,11 +1,9 @@
-#include "sdrvideo.h"
+#include "tonemap.h"
 
 #include "colour.h"
-#include "videoview.h"
 
 #include <QImage>
-#include <QtMultimedia/private/qplatformvideosink_p.h>
-#include <QQuickItem>
+#include <QMutex>
 #include <QtConcurrent/QtConcurrentMap>
 
 #include <algorithm>
@@ -235,71 +233,4 @@ QVideoFrame toneMapFrame(const QVideoFrame &source, QList<QImage> *buffers) {
     made.setMirrored(source.mirrored());
     made.setStreamFrameRate(source.streamFrameRate());
     return made;
-}
-
-SdrVideo::SdrVideo(QObject *parent) : QObject(parent) {
-    // On the thread the player hands its frames over on: one is made SDR
-    // before the next is taken.
-    connect(&m_sink, &QVideoSink::videoFrameChanged, this, &SdrVideo::frame, Qt::DirectConnection);
-}
-
-SdrVideo::~SdrVideo() {
-    // No frame taken from now on, and the one under way (on the player's
-    // thread) done before any of this goes.
-    disconnect(&m_sink, nullptr, this, nullptr);
-    QMutexLocker done(&m_busy);
-    m_targetSink = nullptr;
-}
-
-void SdrVideo::setOutput(QObject *output) {
-    if (output == m_output)
-        return;
-    if (m_output)
-        disconnect(m_output, &QObject::destroyed, this, nullptr);
-    m_output = output;
-    QVideoSink *sink = qobject_cast<QVideoSink *>(output);
-    if (!sink && output)
-        QMetaObject::invokeMethod(output, "videoSink", Qt::DirectConnection, qReturnArg(sink));
-    // An output going away (before this, as QML may have it) is given no
-    // frame from then on: it waits for the one under way.
-    if (output)
-        connect(output, &QObject::destroyed, this, [this] {
-            QMutexLocker done(&m_busy);
-            m_targetSink = nullptr;
-        }, Qt::DirectConnection);
-    {
-        QMutexLocker done(&m_busy);
-        m_targetSink = sink;
-        m_passThrough = qobject_cast<VideoView *>(output) != nullptr;
-    }
-    // The output's graphics, as its own sink has them: given them, the
-    // player hands over a hardware frame to be drawn as it is, which the
-    // output then does, rather than a copy fetched from the decoder.
-    if (m_rhiFollow)
-        disconnect(m_rhiFollow);
-    if (sink) {
-        m_sink.setRhi(sink->rhi());
-        if (QPlatformVideoSink *platform = sink->platformVideoSink())
-            m_rhiFollow = connect(platform, &QPlatformVideoSink::rhiChanged, this, [this, sink] { m_sink.setRhi(sink->rhi()); });
-    }
-    emit outputChanged();
-}
-
-void SdrVideo::frame(const QVideoFrame &frame) {
-    QMutexLocker busy(&m_busy);
-    if (!m_targetSink)
-        return;
-    // To a VideoView, which tone maps as it draws: as it is.
-    const auto transfer = frame.surfaceFormat().colorTransfer();
-    const bool tagged = transfer == QVideoFrameFormat::ColorTransfer_STD_B67 || transfer == QVideoFrameFormat::ColorTransfer_ST2084;
-    const QVideoFrame sdr = frame.isValid() && !m_passThrough ? toneMapFrame(frame, &m_buffers) : QVideoFrame();
-    const bool hdr = m_passThrough ? frame.isValid() && tagged : sdr.isValid();
-    if (hdr != m_hdr)
-        QMetaObject::invokeMethod(this, [this, hdr] {
-            if (hdr != m_hdr) {
-                m_hdr = hdr;
-                emit hdrChanged();
-            }
-        }, Qt::QueuedConnection);
-    m_targetSink->setVideoFrame(sdr.isValid() ? sdr : frame);
 }

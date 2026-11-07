@@ -271,7 +271,7 @@ ApplicationWindow {
                         key: String(index + 1)
                         keyLayer: "grid"
                         usable: win.sourcesOff
-                        onTapped: {
+                        onTriggered: {
                             if (!personal) {
                                 plugins.setEnabled(modelData, true)
                                 return
@@ -475,7 +475,7 @@ ApplicationWindow {
         name: "add.dismiss"
         keys: ["Escape"]
         keyLayer: "grid"
-        when: addProgress.visible && !incoming.busy && !grid.selecting && !trouble.visible
+        usable: addProgress.visible && !incoming.busy && !grid.selecting && !trouble.visible
         mouse: qsTr("Click it")
         touchpad: qsTr("Tap it")
         onTriggered: incoming.dismiss()
@@ -526,8 +526,8 @@ ApplicationWindow {
         label.width: width - 2 * theme.fontSize
         label.elide: Text.ElideRight
         // Signing in again, from here too, or with I.
-        HoverHandler { enabled: signInAgain.when; cursorShape: Qt.PointingHandCursor }
-        TapHandler { enabled: signInAgain.when; onTapped: signInAgain.trigger() }
+        HoverHandler { enabled: signInAgain.usable; cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: signInAgain.usable; onTapped: signInAgain.trigger() }
         // Beneath its own tap, which sees a press first.
         Shield { anchors.fill: parent; z: -1 }
     }
@@ -537,7 +537,7 @@ ApplicationWindow {
         text: qsTr("Sign in again")
         keys: ["I"]
         keyLayer: "grid"
-        when: service.health === "needs_sign_in" && healthNotice.visible && win.canSignIn(win.shownSource)
+        usable: service.health === "needs_sign_in" && healthNotice.visible && win.canSignIn(win.shownSource)
         mouse: qsTr("Click the notice at the foot")
         touchpad: qsTr("Tap the notice at the foot")
         onTriggered: win.signInTo(win.shownSource)
@@ -612,7 +612,7 @@ ApplicationWindow {
         keys: ["Return", "Enter"]
         keysText: "⏎"
         keyLayer: "grid"
-        when: trouble.visible
+        usable: trouble.visible
         onTriggered: win.signInTo(win.shownSource)
     }
     Command {
@@ -620,7 +620,7 @@ ApplicationWindow {
         name: "trouble.later"
         keys: ["Escape"]
         keyLayer: "grid"
-        when: trouble.visible
+        usable: trouble.visible
         onTriggered: win.troubleSeen = true
     }
 
@@ -664,13 +664,13 @@ ApplicationWindow {
                   : updater.state === "ready" ? qsTr("Restart to finish updating") : qsTr("Update available")
             usable: !updateStatus.busy
             busy: updater.state === "updating"
-            onTapped: updateStatus.press()
+            onTriggered: updateStatus.press()
         }
         ShellButton {
             floating: true
             text: "×"
             width: height
-            onTapped: updateNotice.dismissed = true
+            onTriggered: updateNotice.dismissed = true
         }
         Connections {
             target: updater
@@ -696,7 +696,7 @@ ApplicationWindow {
             objectName: "newPluginsButton"
             floating: true
             text: qsTr("%n new plugin(s)", "", newPluginsNotice.ids.length)
-            onTapped: win.showNewPlugins()
+            onTriggered: win.showNewPlugins()
         }
         ShellButton {
             objectName: "newPluginsLater"
@@ -704,7 +704,7 @@ ApplicationWindow {
             text: "×"
             width: height
             Accessible.name: qsTr("Later")
-            onTapped: plugins.putOffNew(newPluginsNotice.ids, 3)
+            onTriggered: plugins.putOffNew(newPluginsNotice.ids, 3)
         }
     }
 
@@ -780,7 +780,7 @@ ApplicationWindow {
         section: "select"
         keys: ["S"]
         keyLayer: "grid"
-        when: grid.count > 0
+        usable: grid.count > 0
         onTriggered: grid.selecting = !grid.selecting
     }
     Command {
@@ -789,7 +789,7 @@ ApplicationWindow {
         section: "select"
         keys: ["Ctrl+A"]
         keyLayer: "grid"
-        when: grid.count > 0 && !trouble.visible
+        usable: grid.count > 0 && !trouble.visible
         mouse: qsTr("Range")
         touchpad: qsTr("Range")
         onTriggered: grid.selectAll()
@@ -850,7 +850,7 @@ ApplicationWindow {
                 key: modelData.key
                 hint: gridActions.fit < 1 ? KeyNames.nameOf(modelData.key) : ""
                 keyLayer: "grid"
-                onTapped: modelData.triggered()
+                onTriggered: modelData.triggered()
                 onHoveredChanged: modelData.hovered = hovered
                 // What it could not do, under it (PluginAction.complain).
                 transform: Translate { id: gridNudge }
@@ -1256,7 +1256,7 @@ ApplicationWindow {
         section: "pinhole"
         keys: ["Ctrl+Z"]
         keyLayer: "any"
-        when: win.historyKeys
+        usable: win.historyKeys
         onTriggered: history.undo()
     }
     Command {
@@ -1266,7 +1266,7 @@ ApplicationWindow {
         section: "pinhole"
         keys: ["Ctrl+Shift+Z"]
         keyLayer: "any"
-        when: win.historyKeys
+        usable: win.historyKeys
         onTriggered: history.redo()
     }
     // Not while choosing a source, nor while a tour shows. (A field typed
@@ -1376,7 +1376,7 @@ ApplicationWindow {
         section: "pinhole"
         keys: ["?"]
         keyLayer: "any"
-        when: keymap.layer !== "tour"
+        usable: keymap.layer !== "tour"
         onTriggered: win.showHelp(!win.helpShown)
     }
     Command {
@@ -1406,7 +1406,7 @@ ApplicationWindow {
         section: "pinhole"
         keys: keymap.layer === "side" ? [","] : ["Tab", ","]
         keyLayer: "any"
-        when: (keymap.layer === "grid" || keymap.layer === "side") && sources.known
+        usable: (keymap.layer === "grid" || keymap.layer === "side") && sources.known
         onTriggered: side.shown = !side.shown
     }
     Repeater {
@@ -1420,7 +1420,7 @@ ApplicationWindow {
             keys: [String(index + 1)]
             keysText: "1–9"
             keyLayer: "any"
-            when: (keymap.layer === "grid" || keymap.layer === "side") && index < sources.list.length
+            usable: (keymap.layer === "grid" || keymap.layer === "side") && index < sources.list.length
             mouse: qsTr("Its row in the side panel")
             touchpad: qsTr("Its row in the side panel")
             pointerHelp: false
@@ -1482,7 +1482,7 @@ ApplicationWindow {
         keys: ["Shift+Up"]
         keysText: "⇧ ↑ ↓"
         keyLayer: "grid"
-        when: !grid.selecting
+        usable: !grid.selecting
         autoRepeat: true
         mouse: qsTr("Spin the wheel")
         touchpad: qsTr("Flick with two fingers")
@@ -1492,7 +1492,7 @@ ApplicationWindow {
         name: "grid.fastDown"
         keys: ["Shift+Down"]
         keyLayer: "grid"
-        when: !grid.selecting
+        usable: !grid.selecting
         autoRepeat: true
         mouse: qsTr("Spin the wheel")
         touchpad: qsTr("Flick with two fingers")
@@ -1537,7 +1537,7 @@ ApplicationWindow {
         // End works too, as in any list; the button names N alone.
         keysText: "N"
         keyLayer: "grid"
-        when: grid.count > 0
+        usable: grid.count > 0
         onTriggered: grid.cursorToEnd()
     }
     Command {
@@ -1568,7 +1568,7 @@ ApplicationWindow {
         keys: ["Return", "Enter"]
         keysText: "Space ⏎"
         keyLayer: "grid"
-        when: !trouble.visible
+        usable: !trouble.visible
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
         onTriggered: win.openCurrent()
@@ -1580,7 +1580,7 @@ ApplicationWindow {
         section: "select"
         keys: ["Space"]
         keyLayer: "grid"
-        when: !trouble.visible
+        usable: !trouble.visible
         mouse: qsTr("Click a photo")
         touchpad: qsTr("Tap a photo")
         keysText: "Space"
@@ -1593,7 +1593,7 @@ ApplicationWindow {
         text: qsTr("Range: the next photo ends it")
         keys: ["R"]
         keyLayer: "grid"
-        when: grid.selecting
+        usable: grid.selecting
         onTriggered: grid.rangeNext = !grid.rangeNext
     }
     Command {
@@ -1603,7 +1603,7 @@ ApplicationWindow {
         keys: ["Shift+Up"]
         keysText: "⇧ ← → ↑ ↓"
         keyLayer: "grid"
-        when: grid.selecting
+        usable: grid.selecting
         autoRepeat: true
         mouse: qsTr("Drag across, or ⇧ click")
         touchpad: qsTr("Three fingers, or Range")
@@ -1613,7 +1613,7 @@ ApplicationWindow {
         name: "select.rangeDown"
         keys: ["Shift+Down"]
         keyLayer: "grid"
-        when: grid.selecting
+        usable: grid.selecting
         autoRepeat: true
         mouse: qsTr("Drag across")
         touchpad: qsTr("Drag with three fingers, or Range")
@@ -1623,7 +1623,7 @@ ApplicationWindow {
         name: "select.rangeLeft"
         keys: ["Shift+Left"]
         keyLayer: "grid"
-        when: grid.selecting
+        usable: grid.selecting
         autoRepeat: true
         mouse: qsTr("Drag across")
         touchpad: qsTr("Drag with three fingers, or Range")
@@ -1633,7 +1633,7 @@ ApplicationWindow {
         name: "select.rangeRight"
         keys: ["Shift+Right"]
         keyLayer: "grid"
-        when: grid.selecting
+        usable: grid.selecting
         autoRepeat: true
         mouse: qsTr("Drag across")
         touchpad: qsTr("Drag with three fingers, or Range")
@@ -1643,7 +1643,7 @@ ApplicationWindow {
         name: "select.leave"
         keys: ["Escape"]
         keyLayer: "grid"
-        when: grid.selecting && !trouble.visible
+        usable: grid.selecting && !trouble.visible
         mouse: qsTr("Done")
         touchpad: qsTr("Done")
         onTriggered: grid.selecting = false
@@ -1657,7 +1657,7 @@ ApplicationWindow {
         section: "share"
         keys: ["C"]
         keyLayer: "grid"
-        when: win.inGrid && !grid.selecting && grid.count > 0
+        usable: win.inGrid && !grid.selecting && grid.count > 0
         mouse: qsTr("Viewer, select mode")
         touchpad: qsTr("Viewer, select mode")
         onTriggered: outgoing.copy(win.chosen())
@@ -1780,7 +1780,7 @@ ApplicationWindow {
         keys: ["["]
         keysText: "[ ]"
         keyLayer: "viewer"
-        when: viewer.video
+        usable: viewer.video
         mouse: qsTr("Click the bar at the foot")
         touchpad: qsTr("Tap the bar at the foot")
         pointerHelp: false
@@ -1790,7 +1790,7 @@ ApplicationWindow {
         name: "video.on"
         keys: ["]"]
         keyLayer: "viewer"
-        when: viewer.video
+        usable: viewer.video
         mouse: qsTr("Click the bar at the foot")
         touchpad: qsTr("Tap the bar at the foot")
         onTriggered: photoViewer.skip(10)

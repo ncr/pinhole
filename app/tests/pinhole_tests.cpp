@@ -48,9 +48,9 @@
 #include "colour.h"
 #include "display.h"
 #include "stage.h"
+#include "tonemap.h"
 #include "color-management-v1-client-protocol.h"
 #include "gainmap.h"
-#include "sdrvideo.h"
 #include "encoder.h"
 #include "favourites.h"
 #include "history.h"
@@ -311,7 +311,8 @@ private:
             translator = std::make_unique<Translator>(dir.path() + "/language", PINHOLE_I18N);
             QDir(dir.path()).mkdir("plugins");
             for (const auto &[id, extra] : manifests) {
-                QJsonObject manifest{{"schemaVersion", 1}, {"id", id}, {"name", id}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+                QJsonObject manifest{{"schemaVersion", 1}, {"api", Plugins::api}, {"id", id}, {"name", id},
+                                     {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
                 for (auto it = extra.begin(); it != extra.end(); ++it)
                     manifest.insert(it.key(), it.value());
                 QDir(dir.path() + "/plugins").mkdir(id);
@@ -1351,204 +1352,9 @@ QtObject {
         QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
     }
 
-    void directPhotoOpeningRequiresApi8() {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        write(dir.path() + "/Main.qml", "import QtQuick\nItem { function show(id) { pinhole.openPhotoDirect(id) } }\n");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(8), QStringList({"pinhole.openPhotoDirect"}));
-        write(dir.path() + "/Main.qml", "import QtQuick\nItem { function show(id) { pinhole.openPhoto(id) } }\n");
-        QVERIFY(Plugins::apiUses(dir.path()).value(8).isEmpty());
-    }
-
-    void checkableBuiltinShellButtonsRequireApi7WithoutClaimingCustomComponents() {
-        QTemporaryDir dir;
-        const QString main = dir.path() + "/Main.qml";
-        const auto check = [&](const QByteArray &code, bool found) {
-            write(main, code);
-            QCOMPARE(Plugins::apiUses(dir.path()).value(7).contains("ShellButton.checkable"), found);
-        };
-        check("import Pinhole.Plugin\nShellButton { checkable: true; active: true }\n", true);
-        check("import Pinhole.Plugin 1.0 as P\nP.ShellButton { checkable: selected }\n", true);
-        check("import Pinhole.Plugin\nShellButton { QtObject { property bool checkable: true } }\n", false);
-        check("import Pinhole.Plugin\nOther.ShellButton { checkable: true }\n", false);
-        check("import Pinhole.Plugin\nOther . ShellButton { checkable: true }\n", false);
-        check("import Pinhole.Plugin\nShellButton { property bool checkable: true }\n", false);
-        check("import Other.Controls\nShellButton { checkable: true }\n", false);
-        check("import Pinhole.Plugin\nItem { property string words: 'ShellButton { checkable: true }' }\n"
-              "// ShellButton { checkable: true }\n", false);
-        check("import Pinhole.Plugin\nItem { component ShellButton: Item { property bool checkable: false }; "
-              "ShellButton { checkable: true } }\n", false);
-        write(dir.path() + "/ShellButton.qml", "import QtQuick\nItem { property bool checkable: false }\n");
-        check("import Pinhole.Plugin\nShellButton { checkable: true }\n", false);
-        // A qualified builtin stays unambiguous even alongside a local type.
-        check("import Pinhole.Plugin as P\nP.ShellButton { checkable: true }\n", true);
-        QFile::remove(dir.path() + "/ShellButton.qml");
-        QDir().mkpath(dir.path() + "/controls");
-        write(dir.path() + "/controls/ShellButton.qml", "import QtQuick\nItem { property bool checkable: false }\n");
-        check("import Pinhole.Plugin\nimport \"controls\"\nShellButton { checkable: true }\n", false);
-        check("import Pinhole.Plugin\nimport \"controls\" as C\nShellButton { checkable: true }\n", true);
-    }
-
-    // What came with API 2, by a plugin's code, comments and strings
-    // aside; and each of Pinhole's own that uses any asks for API 2.
-    void whatAPluginUsesOfApi2IsFoundAndPinholesOwnAskForIt() {
-        QTemporaryDir dir;
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-// avgColor, pinhole.settings: only in a comment
-PinholePlugin {
-    id: plugin
-    hidden: []
-    property string colour: pinhole.library.item(0).avgColor /* .then( */
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(2), QStringList({"hidden", "avgColor"}));
-        write(dir.path() + "/Main.qml", "import QtQuick\nQtObject {}\n");
-        write(dir.path() + "/Helper.js", "function go() { pinhole.run('x', []).then(r => r) }\n");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(2), QStringList({"promises"}));
-        // Its own names and words are not the API's: a child's hidden, its
-        // own covered and output, a URL's // and what follows, a string's
-        // or a regular expression's words, a template's.
-        QFile::remove(dir.path() + "/Helper.js");
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    id: plugin
-    property bool covered: false
-    property string site: "https://example.com/pinhole.notify" // hidden: [1]
-    property string said: 'pinhole.settings: hidden: output: .then('
-    property var pattern: /pinhole\.warn\/"x/
-    property real half: width / 2 / 3
-    Rectangle { hidden: true; property var output: [] }
-    QtObject { id: other; property bool hidden: false }
-    function f(n) { other.hidden = n; return `${n} pinhole.api .avgColor ${"`"}` }
-    function g(o) { return o.run("x", [], { output: l => l }) }
-    Connections { target: grid; function onHiddenChanged() {} function onCoveredByChanged() {} }
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(2), QStringList());
-        // As they are used: by the root's id, in a template's code, run's
-        // options, a Connections to pinhole as a plugin's part has it.
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin as P
-P.PinholePlugin {
-    id: plugin
-    function f(n) { plugin.hidden = [n]; return `${pinhole.library.item(n).avgColor}` }
-    function g() { pinhole.run("x", [], { timeout: 10, output: line => line }) }
-}
-)");
-        write(dir.path() + "/Part.qml", R"(import QtQuick
-Item {
-    property var host
-    Connections { target: part.host.pinhole; function onCoveredByChanged() {} }
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(2), QStringList({"pinhole.coveredBy", "hidden", "avgColor", "run's output"}));
-        // A value's ++ or -- then a /: a division, not a regular expression
-        // hiding the rest of the line.
-        QFile::remove(dir.path() + "/Part.qml");
-        for (const QString &step : {QStringLiteral("i++"), QStringLiteral("a[i]--"), QStringLiteral("(i)++")}) {
-            write(dir.path() + "/Main.qml", QStringLiteral(R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    function f(i, a) { return %1 / 2 + pinhole.library.item(i).avgColor }
-}
-)").arg(step).toUtf8());
-            QCOMPARE(Plugins::apiUses(dir.path()).value(2), QStringList({"avgColor"}));
-        }
-        // Pinhole's own: each that uses any asks for API 2, and what some
-        // use is found.
-        const QString builtIn = QStringLiteral(PINHOLE_I18N "/../../../plugins");
-        for (const QFileInfo &plugin : QDir(builtIn).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            QFile manifest(plugin.filePath() + "/manifest.json");
-            if (!manifest.exists())
-                continue; // no plugin, as Plugins::scan has it
-            QVERIFY(manifest.open(QIODevice::ReadOnly));
-            const int api = QJsonDocument::fromJson(manifest.readAll()).object().value("api").toInt(1);
-            const QMap<int, QStringList> uses = Plugins::apiUses(plugin.filePath());
-            for (auto it = uses.begin(); it != uses.end(); ++it)
-                QVERIFY2(api >= it.key(), qPrintable(QStringLiteral("%1 uses %2, of API %3, and asks for API %4")
-                                                         .arg(plugin.fileName(), it.value().join(", "))
-                                                         .arg(it.key())
-                                                         .arg(api)));
-        }
-        // A mark is API 3's, as its PluginMark says, a comment's not.
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-// PluginMark { }
-PinholePlugin {
-    marks: [ PluginMark { name: "x"; field: "live"; icon: "live" } ]
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"marks"}}}));
-        // So are its state and its cache; its cacheDir is not.
-        write(dir.path() + "/Main.qml", "import QtQuick\nItem { property var a: pinhole.state.x; property var b: pinhole.cache [\"y\"]; property string c: pinhole.cacheDir }\n");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"pinhole.state", "pinhole.cache"}}}));
-        // A thumbnail's file: API 4's; its URL not.
-        write(dir.path() + "/Main.qml", "import QtQuick\nItem { property string a: \"image://file/\" + encodeURIComponent(p); property string b: item.thumbPath; property url c: item.thumbnail; property string d: \"image://photo/\" }\n");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{4, {"a photo's thumbPath"}}}));
-        // A layer over the viewer's photo, an action's order, hint and
-        // complaint, and fetch's options: API 3's.
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    viewerLayer: Item { property int photo; property bool shown }
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"viewerLayer"}}}));
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    actions: [ PluginAction { text: "a"; order: -10 }, PluginAction { text: "b"; onTriggered: { const p = { order: 1 } } } ]
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain"}}}));
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    actions: [ PluginAction { id: a; text: "a"; onTriggered: { const p = { hint: 1 }; a.complain("no") } } ]
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain"}}}));
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    Component.onCompleted: pinhole.fetch(0, "live", { stream: true }).then(url => {}, error => {})
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()), (QMap<int, QStringList>{{2, {"promises"}}, {3, {"fetch's options"}}}));
-        // A favourite set, the library's revision, an action's words in a
-        // colour (not a property of its own of another name): API 3's.
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    readonly property bool b: (pinhole.library.revision, true)
-    actions: [ PluginAction { textColour: "accent"; onTriggered: pinhole.setFavorite([0], true) },
-               PluginAction { readonly property string colour: "x"; text: colour } ]
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()),
-                 (QMap<int, QStringList>{{3, {"an action's order, hint, busyDelay, textColour or complain", "pinhole.setFavorite",
-                                              "library.revision"}}}));
-        QVERIFY(Plugins::apiUses(builtIn + "/favourites").value(3).contains("pinhole.setFavorite"));
-        QVERIFY(Plugins::apiUses(builtIn + "/series").value(3).contains("pinhole.state"));
-        QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(3).contains("pinhole.cache"));
-        QVERIFY(Plugins::apiUses(builtIn + "/screenshots").value(2).contains("hidden"));
-        QVERIFY(Plugins::apiUses(builtIn + "/send").value(2).contains("run's output"));
-        // Coming back from a photo is Pinhole's now (API 11), not coveredBy's.
-        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(11).contains("comeBack, away or returned"));
-        // Closed when a photo is handed over by its PluginView (API 13), not by onDismissed.
-        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(13).contains("PluginView"));
-        QVERIFY(Plugins::apiUses(builtIn + "/colour").value(2).contains("avgColor"));
-        QVERIFY(Plugins::apiUses(builtIn + "/frame").value(2).contains("pinhole.keepAwake"));
-        QVERIFY(Plugins::apiUses(builtIn + "/background").value(3).contains("fetch's loop, bounce, long_exposure or jpeg"));
-        QVERIFY(Plugins::apiUses(builtIn + "/send").value(3).contains("fetch's loop, bounce, long_exposure or jpeg"));
-        QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
-    }
-
     // A source's keys as the rest of the manifest writes them (API 15), or
     // as before.
-    void aSourceSaysItsKeysEitherWay() {
+    void aSourceWritesItsKeysAsTheManifestDoes() {
         QTemporaryDir dir;
         QFile run(dir.path() + "/run");
         QVERIFY(run.open(QIODevice::WriteOnly));
@@ -1562,8 +1368,8 @@ PinholePlugin {
             return QJsonObject{{"id", "me.nas"}, {"api", api}, {"sources", QJsonArray{s}}};
         };
         QCOMPARE(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needsSignIn", true}, {"roundsEverySecs", 120}})), QString());
-        QCOMPARE(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(3, {{"needs_sign_in", true}, {"rounds_every_secs", 120}})), QString());
-        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(14, {{"needsSignIn", true}})).contains("\"api\": 15"));
+        // As it was written once: not read, and said.
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needs_sign_in", true}})).contains("none of a source's fields"));
         QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"roundsEverySecs", 1}})).contains("\"roundsEverySecs\" is a whole"));
         QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needsSignIn", "yes"}})).contains("\"needsSignIn\" is true or false"));
     }
@@ -1589,42 +1395,6 @@ PinholePlugin {
         QTRY_COMPARE(bench.said(), QStringList({"missing failed"}));
     }
 
-    // The kit's names made one (API 15): a plugin of API 15 is told of the
-    // old ones, which still work; a press is no timer's tick.
-    void theKitsOlderNamesAreSaidToAPluginOfApi15() {
-        QTemporaryDir dir;
-        const auto write = [&](const QString &name, const QByteArray &text) {
-            QFile f(dir.path() + '/' + name);
-            QVERIFY(f.open(QIODevice::WriteOnly));
-            f.write(text);
-        };
-        const QByteArray qml = R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    Command { name: "a"; text: qsTr("A"); keys: ["A"]; when: true; onTriggered: pinhole.settings.a = 1 }
-    ShellButton { text: qsTr("B"); onTapped: pinhole.settings.b = 1 }
-    Timer { interval: 10; onTriggered: pinhole.settings.c = 1 }
-    Item { TapHandler { onTapped: {} } }
-}
-)";
-        write("Main.qml", qml);
-        write("manifest.json", R"({"api": 15, "id": "me.names"})");
-        QString warnings = Plugins::footguns(dir.path()).warnings.join('\n');
-        QVERIFY2(warnings.contains("a Command's when is usable now"), qPrintable(warnings));
-        QVERIFY2(warnings.contains("a ShellButton's onTapped is onTriggered now"), qPrintable(warnings));
-        QCOMPARE(warnings.count("is onTriggered now"), 1);
-        // Only the Timer's setting is one written often.
-        QCOMPARE(warnings.count("which runs often"), 1);
-        QVERIFY2(warnings.contains("Main.qml:6:"), qPrintable(warnings));
-        // A plugin of an older API keeps its names, unsaid.
-        write("manifest.json", R"({"api": 14, "id": "me.names"})");
-        warnings = Plugins::footguns(dir.path()).warnings.join('\n');
-        QVERIFY(!warnings.contains("now (API 15)"));
-        // The new ones are API 15's.
-        write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {\n    Command { key: \"A\"; usable: true }\n}\n");
-        QVERIFY(Plugins::apiUses(dir.path()).value(15).contains("triggered, usable or key on a ShellButton, Command, Choices or Panel"));
-    }
-
     // A manifest's schemaVersion and entryPoints left out (API 15): 1, and
     // Main.qml beside it; its id, as before, its folder's name.
     void aManifestLeavesOutWhatIsAlwaysTheSame() {
@@ -1648,7 +1418,6 @@ PinholePlugin {
         write("manifest.json", R"({"api": 15, "schemaVersion": 2})");
         QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("schemaVersion"));
         write("manifest.json", R"({"api": 15})");
-        QVERIFY(Plugins::apiUses(dir).value(15).contains("a manifest without schemaVersion or entryPoints"));
     }
 
     // What a plugin needs (the manifest's "requires", API 15) and whether
@@ -1693,7 +1462,7 @@ PinholePlugin {
     }
 
     // A worker that answers (pinhole.ask) says so, from API 15.
-    void aWorkerThatAnswersSaysSoFromApi15() {
+    void aWorkerThatAnswersSaysSo() {
         QTemporaryDir dir;
         QFile program(dir.path() + "/work");
         QVERIFY(program.open(QIODevice::WriteOnly));
@@ -1705,8 +1474,7 @@ PinholePlugin {
                                {"workers", QJsonArray{QJsonObject{{"name", "index"}, {"program", "work"}, {"answers", answers}}}}};
         };
         QCOMPARE(Plugins::workersProblem(dir.path(), manifest(15, true)), QString());
-        QCOMPARE(Plugins::workersProblem(dir.path(), manifest(11, false)), QString());
-        QVERIFY(Plugins::workersProblem(dir.path(), manifest(14, true)).contains("needs \"api\": 15"));
+        QCOMPARE(Plugins::workersProblem(dir.path(), manifest(15, false)), QString());
         QVERIFY(Plugins::workersProblem(dir.path(), manifest(15, "yes")).contains("true or false"));
     }
 
@@ -1726,7 +1494,6 @@ PinholePlugin {
         };
         QCOMPARE(Plugins::makesProblem(dir.path(), manifest(15, "me.steady/steadied")), QString());
         QCOMPARE(Plugins::makesProblem(dir.path(), manifest(15, "bounce")), QString());
-        QVERIFY(Plugins::makesProblem(dir.path(), manifest(14, "me.steady/steadied")).contains("needs \"api\": 15"));
         QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "me.other/steadied")).contains("\"me.steady/<name>\""));
         QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "me.steady/Steadied")).contains("lowercase"));
         QVERIFY(Plugins::makesProblem(dir.path(), manifest(15, "sparkle")).contains("one of its own"));
@@ -1734,64 +1501,6 @@ PinholePlugin {
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(QJsonDocument(manifest(15, "me.steady/steadied")).toJson());
         file.close();
-        QVERIFY(Plugins::apiUses(dir.path()).value(15).contains("a kind of its own in makes"));
-    }
-
-    // Every one of API 3's, as docs/plugins.md lists them, in a plugin
-    // that asks for API 2: each found, and said by `pinhole plugin check`.
-    void everythingOfApi3IsFoundInAPluginOfApi2() {
-        QTemporaryDir dir;
-        write(dir.path() + "/manifest.json", R"({ "id": "me.all", "api": 2, "entryPoints": { "main": "Main.qml" },
-            "sources": [{ "kind": "me.all", "provider": "provider" }] })");
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-import Pinhole.Plugin
-PinholePlugin {
-    id: plugin
-    readonly property var ways: ({ bounce: { kind: "bounce" } })
-    readonly property string shownAs: pinhole.library.item(0).effect
-    readonly property bool now: (pinhole.library.revision, true)
-    marks: [ PluginMark { name: "x"; field: "live" } ]
-    viewerLayer: Item { property int photo; property bool shown }
-    actions: [ PluginAction { id: a; text: "a"; order: -1; hint: "h"; busyDelay: 300; textColour: "red"
-                              onTriggered: a.complain("no") } ]
-    function f() {
-        pinhole.state.x = pinhole.cache.y
-        pinhole.setFavorite([0], true)
-        pinhole.fetch(0, "long_exposure", { stream: true })
-        return pinhole.library.field("effect")
-    }
-}
-)");
-        const QStringList all = {"marks", "pinhole.state", "pinhole.cache", "viewerLayer",
-                                 "an action's order, hint, busyDelay, textColour or complain", "fetch's options",
-                                 "fetch's loop, bounce, long_exposure or jpeg", "a photo's effect", "pinhole.setFavorite",
-                                 "library.revision", "sources in the manifest"};
-        QCOMPARE(Plugins::apiUses(dir.path()).value(3), all);
-        // Each kind alone, in the call or named as a kind; a photo's effect
-        // alone, by item or by field.
-        for (const QString &kind : {"loop", "bounce", "long_exposure", "jpeg"}) {
-            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { function f() { return pinhole.fetch(0, '%1') } }\n").arg(kind).toUtf8());
-            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"fetch's loop, bounce, long_exposure or jpeg", "sources in the manifest"}));
-            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { property string kind: \"%1\" }\n").arg(kind).toUtf8());
-            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"fetch's loop, bounce, long_exposure or jpeg", "sources in the manifest"}));
-        }
-        write(dir.path() + "/manifest.json", R"({ "id": "me.all", "api": 2 })");
-        for (const char *use : {"pinhole.library.item(i).effect", "it.effect", "pinhole.library.field('effect')"}) {
-            write(dir.path() + "/Main.qml", QStringLiteral("import QtQuick\nItem { function f(i, it) { return %1 } }\n").arg(QString::fromLatin1(use)).toUtf8());
-            QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList({"a photo's effect"}));
-        }
-        // Not: what API 2 fetched, a layer's effect, a kind's words in a
-        // sentence or a comment, another field.
-        write(dir.path() + "/Main.qml", R"(import QtQuick
-// pinhole.fetch(0, "jpeg"), kind: "loop", item.effect
-Item {
-    property string said: 'kind: "loop" and a jpeg'
-    layer.enabled: true
-    layer.effect: Item {}
-    function f(i) { pinhole.fetch(i, "medium"); pinhole.fetch(i, "live"); return pinhole.library.field("live") + item.layer.effect }
-}
-)");
-        QCOMPARE(Plugins::apiUses(dir.path()).value(3), QStringList());
     }
 
     // A plugin's file named as another's, or as one of Pinhole's own, is
@@ -4179,7 +3888,7 @@ Item {
             QTemporaryDir root;
             const QString dir = root.path() + "/" + id;
             QDir().mkpath(dir + "/module");
-            write(dir + "/manifest.json", QStringLiteral(R"({"schemaVersion": 1, "id": "%1", "name": "Map", "entryPoints": {"main": "Main.qml"}})").arg(id).toUtf8());
+            write(dir + "/manifest.json", QStringLiteral(R"({"schemaVersion": 1, "api": 15, "id": "%1", "name": "Map", "entryPoints": {"main": "Main.qml"}})").arg(id).toUtf8());
             write(dir + "/Main.qml", "import QtQuick\nItem {}\n");
             write(dir + "/module/Gestures.qml", "import QtQuick\nItem {\n    PinchHandler {}\n}\n");
             const QString errors = Plugins::footguns(dir).errors.join('\n');
@@ -5069,7 +4778,7 @@ private slots:
     // kinds as the service says them; and a plugin's pinhole.sources, which
     // mirrors them and acts only on the kinds its manifest names.
     void pluginSourcesActOnlyOnTheirOwnKinds() {
-        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}},
+        PluginBench bench({{"pinhole.icloud", {{"api", Plugins::api}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}},
                           {{"a", 1000}}, true);
         Sources sources(bench.service.get());
         bench.plugins->setSources(&sources);
@@ -5143,7 +4852,7 @@ private slots:
     // A kind of pinholed's own (no provider) only in Pinhole's own plugin of
     // it, or in one's own copy of that plugin; a manifest's sources said.
     void aKindOfPinholedsOwnIsOnlyItsOwnPlugins() {
-        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
+        PluginBench bench({{"pinhole.icloud", {{"api", Plugins::api}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
         QTemporaryDir personal;
         const QJsonObject icloud{{"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}};
         QVERIFY(Plugins::sourcesProblem(bench.dir.path() + "/plugins/pinhole.icloud", "pinhole.icloud", icloud).isEmpty());
@@ -5158,7 +4867,7 @@ private slots:
     // (docs/source-providers.md) is said as the plugin is read, and by
     // `pinhole plugin check`. The test source's manifest is fine.
     void aProvidersSourceIsCheckedAsPinholedTakesIt() {
-        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
+        PluginBench bench({{"pinhole.icloud", {{"api", Plugins::api}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}});
         const QString testSource = QStringLiteral(PINHOLE_I18N "/../../../core/daemon/tests/provider");
         QJsonObject manifest;
         QString main;
@@ -5167,11 +4876,11 @@ private slots:
         write(dir.path() + "/run", "#!/bin/sh\n");
         write(dir.path() + "/data", "");
         QFile(dir.path() + "/run").setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
-        const auto problem = [&dir](const QJsonObject &source, int api = 3, const QString &id = "me.jpegs") {
-            return Plugins::sourcesProblem(dir.path(), id, {{"api", api}, {"sources", QJsonArray{source}}});
+        const auto problem = [&dir](const QJsonObject &source, const QString &id = "me.jpegs") {
+            return Plugins::sourcesProblem(dir.path(), id, {{"api", Plugins::api}, {"sources", QJsonArray{source}}});
         };
-        const QJsonObject fine{{"kind", "me.jpegs"}, {"provider", "run"}, {"needs_sign_in", true}, {"accepts", QJsonArray{"jpg", "heic"}},
-                               {"rounds_every_secs", 30}};
+        const QJsonObject fine{{"kind", "me.jpegs"}, {"provider", "run"}, {"needsSignIn", true}, {"accepts", QJsonArray{"jpg", "heic"}},
+                               {"roundsEverySecs", 30}};
         QCOMPARE(problem(fine), QString());
         QCOMPARE(problem(QJsonObject{{"kind", "me.jpegs.raw"}, {"provider", "./run"}}), QString());
         const auto with = [&fine](const QString &key, const QJsonValue &value) {
@@ -5180,7 +4889,6 @@ private slots:
             return changed;
         };
         const QList<std::pair<QString, QJsonObject>> wrong = {
-            {"api", fine},
             {"its kind must be", with("kind", "other.jpegs")},
             {"its kind must be", with("kind", "me.jpegsx")},
             {"letters, digits", with("kind", "me.jpegs/x")},
@@ -5189,20 +4897,21 @@ private slots:
             {"a path in the plugin's folder", with("provider", "/bin/sh")},
             {"not a program", with("provider", "data")},
             {"not a program", with("provider", "gone")},
-            {"true or false", with("needs_sign_in", "yes")},
+            {"true or false", with("needsSignIn", "yes")},
+            {"none of a source's fields", with("needs_sign_in", true)},
             {"lower case", with("accepts", QJsonArray{"JPG"})},
             {"lower case", with("accepts", QJsonArray{".jpg"})},
             {"lower case", with("accepts", "jpg")},
-            {"5 to 86400", with("rounds_every_secs", 3)},
-            {"5 to 86400", with("rounds_every_secs", 2.5)},
+            {"5 to 86400", with("roundsEverySecs", 3)},
+            {"5 to 86400", with("roundsEverySecs", 2.5)},
         };
         for (const auto &[said, source] : wrong) {
             // The kind icloud is pinholed's own however it is declared.
             const QString id = source.value("kind").toString() == QLatin1String("icloud") ? QStringLiteral("icloud") : QStringLiteral("me.jpegs");
-            const QString why = problem(source, said == QLatin1String("api") ? 2 : 3, id);
+            const QString why = problem(source, id);
             QVERIFY2(why.contains(said), qPrintable(said + " not in: " + why));
         }
-        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.jpegs", {{"api", 3}, {"sources", QJsonArray{fine, fine}}}).contains("twice"));
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.jpegs", {{"api", Plugins::api}, {"sources", QJsonArray{fine, fine}}}).contains("twice"));
     }
 
     // A plugin's workers (docs/plugins.md, Workers): what pinholed would
@@ -5215,26 +4924,24 @@ private slots:
             QString main;
             QCOMPARE(Plugins::manifestProblem(QStringLiteral(PINHOLE_I18N) + folder, &manifest, &main), QString());
             QVERIFY(manifest.value("workers").isArray());
-            QVERIFY(Plugins::apiUses(QStringLiteral(PINHOLE_I18N) + folder).value(11).contains("workers in the manifest"));
         }
         QTemporaryDir dir;
         write(dir.path() + "/run", "#!/bin/sh\n");
         write(dir.path() + "/data", "");
         QFile(dir.path() + "/run").setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
-        const auto problem = [&dir](const QJsonValue &workers, int api = 11) {
-            return Plugins::workersProblem(dir.path(), {{"api", api}, {"workers", workers}});
+        const auto problem = [&dir](const QJsonValue &workers) {
+            return Plugins::workersProblem(dir.path(), {{"api", Plugins::api}, {"workers", workers}});
         };
         const QJsonObject fine{{"name", "faces"}, {"program", "run"}, {"args", QJsonArray{"daemon"}}, {"per", "source"}};
         QCOMPARE(problem(QJsonArray{fine}), QString());
         QCOMPARE(problem(QJsonArray{QJsonObject{{"name", "index"}, {"program", "./run"}}}), QString());
-        QCOMPARE(Plugins::workersProblem(dir.path(), {{"api", 3}}), QString());
+        QCOMPARE(Plugins::workersProblem(dir.path(), {{"api", Plugins::api}}), QString());
         const auto with = [&fine](const QString &key, const QJsonValue &value) {
             QJsonObject changed = fine;
             changed.insert(key, value);
             return QJsonArray{changed};
         };
         const QList<std::pair<QString, QJsonValue>> wrong = {
-            {"\"api\": 11", QJsonArray{fine}},
             {"is a list", fine},
             {"twice", QJsonArray{fine, fine}},
             {"\"name\"", QJsonArray{"run"}},
@@ -5250,7 +4957,7 @@ private slots:
             {"not a program", with("program", "gone")},
         };
         for (const auto &[said, workers] : wrong) {
-            const QString why = problem(workers, said == QLatin1String("\"api\": 11") ? 10 : 11);
+            const QString why = problem(workers);
             QVERIFY2(why.contains(said), qPrintable(said + " not in: " + why));
         }
     }
@@ -5286,7 +4993,7 @@ private slots:
     // offered when it is here, and signing in with a code, what went wrong
     // said in its panel, over the window until it is done.
     void theICloudPluginSignsInWithACodeAndSaysWhyNot() {
-        PluginBench bench({{"pinhole.icloud", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}}, {{"a", 1000}},
+        PluginBench bench({{"pinhole.icloud", {{"api", Plugins::api}, {"sources", QJsonArray{QJsonObject{{"kind", "icloud"}}}}}}}, {{"a", 1000}},
                           true);
         Sources sources(bench.service.get());
         bench.plugins->setSources(&sources);
@@ -5375,7 +5082,7 @@ private slots:
     // offered, with what is in them, and one added and shown as it is
     // chosen.
     void theFoldersPluginOffersTheBiggestFoldersAndAddsOne() {
-        PluginBench bench({{"pinhole.folder", {{"api", 3}, {"sources", QJsonArray{QJsonObject{{"kind", "folder"}}}}}}}, {{"a", 1000}},
+        PluginBench bench({{"pinhole.folder", {{"api", Plugins::api}, {"sources", QJsonArray{QJsonObject{{"kind", "folder"}}}}}}}, {{"a", 1000}},
                           true);
         Sources sources(bench.service.get());
         bench.plugins->setSources(&sources);
@@ -5433,7 +5140,7 @@ private slots:
     }
 
     void setFavoriteSetsAtOnceAndPutsBackWhatTheServiceCouldNot() {
-        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        PluginBench bench({{"pinhole.favourites", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         Favourites favourites(&bench.library, bench.service.get());
         bench.plugins->setFavourites(&favourites);
         const QString told = ".then(r => said.push('set ' + r.changed.join(' ')), e => said.push('not ' + e.code))";
@@ -5533,7 +5240,7 @@ private slots:
         QVERIFY(Adjustment().query().isEmpty());
 
         // Kept apart from the library, per library, and read into it.
-        PluginBench bench({{"t", {{"api", 13}}}});
+        PluginBench bench({{"t", {{"api", Plugins::api}}}});
         AdjustmentStore store;
         store.setLibrary(bench.dir.path());
         QVERIFY(AdjustmentStore::fileFor(bench.dir.path()).endsWith(".json"));
@@ -5562,7 +5269,7 @@ private slots:
     }
 
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {
-        PluginBench bench({{"t", {{"api", 13}, {"settings", QJsonObject{{"shuffle", true}, {"seconds", 8}}}}}});
+        PluginBench bench({{"t", {{"api", Plugins::api}, {"settings", QJsonObject{{"shuffle", true}, {"seconds", 8}}}}}});
         Keymap keymap;
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
         Plugins::registerTypes();
@@ -5676,7 +5383,7 @@ PinholePlugin {
     // People on PluginView: it covers while open, Esc goes a level back
     // first (its back()) and closes at home, ✕ closes from any level.
     void peoplesViewGoesBackOnEscAndClosesOnTheCross() {
-        PluginBench bench({{"pinhole.people", {{"api", 13}, {"settings", QJsonObject{{"grouping", "careful"}}}}}});
+        PluginBench bench({{"pinhole.people", {{"api", Plugins::api}, {"settings", QJsonObject{{"grouping", "careful"}}}}}});
         Keymap keymap;
         Theme theme;
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
@@ -5714,7 +5421,7 @@ PinholePlugin {
     }
 
     void theFavouritesPluginsHeartSetsAndUndoesAndSaysWhyNot() {
-        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        PluginBench bench({{"pinhole.favourites", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         Favourites favourites(&bench.library, bench.service.get());
         bench.plugins->setFavourites(&favourites);
         Keymap keymap;
@@ -5861,7 +5568,7 @@ PinholePlugin {
         QList<std::pair<QByteArray, qint64>> photos;
         for (int i = 0; i < 300; ++i)
             photos.append({QByteArray("p") + QByteArray::number(i), 1000 + i});
-        PluginBench bench({{"pinhole.favourites", {{"api", 3}}}}, photos, true);
+        PluginBench bench({{"pinhole.favourites", {{"api", Plugins::api}}}}, photos, true);
         Favourites favourites(&bench.library, bench.service.get());
         bench.plugins->setFavourites(&favourites);
         Keymap keymap;
@@ -6075,10 +5782,6 @@ PinholePlugin {
         QStringList said = bench.said();
         said.sort();
         QCOMPARE(said, QStringList({"cancelled", "cat fed", "env y", "exit 3 bad", "ok hi 0", "start", "timeout"}));
-        // As before API 2: a callback in place of the options.
-        bench.js(R"(pinhole.run("sh", ["-c", "echo old; exit 2"], (code, out) => said.push("old " + code + " " + out.trim())))");
-        QTRY_COMPARE(bench.said().size(), 8);
-        QCOMPARE(bench.said().last(), QString("old 2 old"));
     }
 
     void aChainOfAPluginsPromisesCancelsWhatItWaitsOn() {
@@ -6397,7 +6100,7 @@ PinholePlugin {
         QDir().mkpath(QFileInfo(config).absolutePath());
         QFile::remove(config);
         write(config, R"({"enabled": {"t": true}})");
-        write(copy + "/manifest.json", R"({"schemaVersion": 1, "id": "t", "name": "t", "entryPoints": {"main": "Main.qml"}})");
+        write(copy + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "t", "name": "t", "entryPoints": {"main": "Main.qml"}})");
         write(copy + "/Main.qml", "import QtQuick\nItem {}\n");
         auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
                                                    QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
@@ -6456,9 +6159,9 @@ PinholePlugin {
     }
 
     // Given a callback, a program's stdin ends at once too: cat ends.
-    void aProgramRunWithACallbackHasItsInputEnded() {
+    void aProgramRunWithNoInputHasItsInputEnded() {
         auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}});
-        bench->js(QStringLiteral(R"(var ended = -2; pinhole.run("cat", [], (code, out) => ended = code))"));
+        bench->js(QStringLiteral(R"(var ended = -2; pinhole.run("cat", []).then(r => ended = r.code))"));
         QTRY_COMPARE_WITH_TIMEOUT(bench->js(QStringLiteral("ended")).toInt(), 0, 3000);
     }
 
@@ -6700,7 +6403,7 @@ PinholePlugin {
     Flickable { }
     PinchHandler { }
     MouseArea { onWheel: wheel => {} }
-    Timer { onTriggered: pinhole.setSetting("seen", Date.now()) }
+    Timer { onTriggered: pinhole.settings.seen = Date.now() }
     Component.onCompleted: {
         pinhole.run("sqlite3", [pinhole.library.dir + "/library.sqlite", "SELECT 1"])
         pinhole.run("wl-copy", ["x"])
@@ -6749,7 +6452,7 @@ PinholePlugin {
     property var days: pinhole.library.field("dayz")
     Command { name: "probe.go"; keys: ["Escape"]; onTriggered: plugin.seen = 1 }
     Command { name: "probe.all"; keys: ["["]; keyLayer: "any"; onTriggered: plugin.seen = 2 }
-    Command { name: "probe.fine"; keys: ["]"]; keyLayer: "plugin"; when: plugin.covering; onTriggered: plugin.seen = 3 }
+    Command { name: "probe.fine"; keys: ["]"]; keyLayer: "plugin"; usable: plugin.covering; onTriggered: plugin.seen = 3 }
     Menu { }
     marks: [ PluginMark { name: "n"; icon: "moon"; colour: "purple" } ]
     actions: [ PluginAction { place: "select"; text: qsTr("Go") } ]
@@ -6790,7 +6493,7 @@ PinholePlugin {
         QTemporaryDir root;
         const QString dir = root.path() + "/me.quiet";
         QDir().mkpath(dir);
-        write(dir + "/manifest.json", R"({"schemaVersion": 1, "id": "me.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        write(dir + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "me.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
         write(dir + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 import Pinhole.Internal
@@ -6818,7 +6521,7 @@ PinholePlugin {
         QVERIFY2(!errors.contains("Main.qml:12"), qPrintable(errors));
         QVERIFY2(warnings.contains("Main.qml:7: a Shortcut takes its keys everywhere"), qPrintable(warnings));
         // Pinhole's own (or a copy keeping its id) may use Pinhole.Internal.
-        write(dir + "/manifest.json", R"({"schemaVersion": 1, "id": "pinhole.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        write(dir + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "pinhole.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
         QVERIFY(!Plugins::footguns(dir).errors.join('\n').contains("Pinhole.Internal"));
     }
 
@@ -7078,7 +6781,7 @@ PinholePlugin {
 
     void whatAPluginThrowsOrWarnsOfIsItsProblemUntilItLoadsAgain() {
         PluginBench bench({{"t", {}}, {"u", {}}});
-        bench.js(R"(pinhole.run("true", [], () => { throw new Error("boom") }))");
+        bench.js(R"(pinhole.warn(new Error("boom")))");
         QTRY_VERIFY(bench.host->problem().contains("boom"));
         QTRY_VERIFY(bench.plugins->at("t").value("problem").toString().contains("boom"));
         QCOMPARE(bench.plugins->at("u").value("problem").toString(), QString());
@@ -7105,20 +6808,19 @@ PinholePlugin {
             pinhole.settings.size = 3
             pinhole.settings["edits:folder:/x"] = { manual: [["a", "b"]], apart: [] }
         )");
-        QCOMPARE(bench.host->setting("size").toInt(), 3);
-        QCOMPARE(bench.host->setting("edits:folder:/x").toMap().value("manual").toList().first().toStringList(),
-                 QStringList({"a", "b"}));
+        QCOMPARE(bench.js("pinhole.settings.size").toInt(), 3);
+        QCOMPARE(bench.js("pinhole.settings['edits:folder:/x'].manual[0].join(' ')").toString(), QString("a b"));
         QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(file.readAll())["settings"]["t"]["size"].toInt(), 3);
-        // setSetting is the same thing, and what is bound to it follows.
+        // What is bound to one follows it.
         bench.engine.rootContext()->setContextProperty("pinhole", bench.host);
         QQmlComponent component(&bench.engine);
         component.setData("import QtQml\nQtObject { property int size: pinhole.settings.size }", QUrl());
         std::unique_ptr<QObject> bound(component.create());
         QVERIFY2(bound, qPrintable(component.errorString()));
         QCOMPARE(bound->property("size").toInt(), 3);
-        QVERIFY(bench.host->setSetting("size", 4));
+        bench.js("pinhole.settings.size = 4");
         QCOMPARE(bound->property("size").toInt(), 4);
         QCOMPARE(bench.js("pinhole.settings.size").toInt(), 4);
         // Null takes one out: it reads as one never set, keys() leaves it
@@ -7224,7 +6926,7 @@ PinholePlugin {
     // not one by one: that took 34 seconds for 9627 as Pinhole started. A
     // name Qt takes no property by is skipped, the rest kept.
     void manySyncedKeysAreTakenInAtOnce() {
-        PluginBench bench({{"t", {{"api", 14}}}});
+        PluginBench bench({{"t", {{"api", Plugins::api}}}});
         QJsonObject many{{"keys", 1}};
         for (int i = 0; i < 20000; ++i)
             many.insert(QString::number(i, 16).rightJustified(64, '0'), QJsonObject{{"name", QString::number(i)}});
@@ -7247,7 +6949,7 @@ PinholePlugin {
     // so what another computer brought (pinholed writes the same file) and
     // what is set here both stay, the later of a key winning.
     void aPluginsSyncedKeysAreTheLibrarysAndMergeWithOtherComputers() {
-        PluginBench bench({{"t", {{"api", 14}}}, {"u", {{"api", 14}}}});
+        PluginBench bench({{"t", {{"api", Plugins::api}}}, {"u", {{"api", Plugins::api}}}});
         const QString file = SyncedStore::fileIn(SyncedStore::folderFor(bench.dir.path()), "t");
         QVERIFY(file.contains("/synced/") && file.endsWith("/t.json"));
         bench.js(R"(
@@ -7350,7 +7052,7 @@ PinholePlugin {
     // faces to the keys a new thumbnail gives them, rejections too, with
     // nothing left under the old keys.
     void peoplesNamesAreTakenInAndMoveWithTheirFaces() {
-        PluginBench bench({{"pinhole.people", {{"api", 14}}}});
+        PluginBench bench({{"pinhole.people", {{"api", Plugins::api}}}});
         auto *host = bench.host;
         host->state()->setProperty("people:folder:/x",
                                    QVariantMap{{"o", QVariantMap{{"person", "Anna"}, {"rejected", QVariantList{"r"}}}},
@@ -7588,7 +7290,7 @@ PinholePlugin {
     // service's own while it still downloads, else the file's; without it
     // a path, as before. And each photo's Live effect as set on the iPhone.
     void aPluginFetchesAMotionToPlayAsItComesAndKnowsItsEffect() {
-        PluginBench bench({{"t", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        PluginBench bench({{"t", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         bench.js(R"(
             pinhole.fetch(0, "video", { stream: true }).then(url => said.push("a " + url))
             pinhole.fetch("b", "bounce", { stream: true }).then(url => said.push("b " + url))
@@ -7850,7 +7552,7 @@ PinholePlugin {
     // motion that does not come is said, in so many words; a bounce chosen
     // is asked for and goes round; another photo's layer starts afresh.
     void theLivePhotosPluginPlaysTheMotionAsItComesAndSaysWhyNot() {
-        PluginBench bench({{"pinhole.live", {{"api", 3}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
+        PluginBench bench({{"pinhole.live", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         {
             QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "live");
             db.setDatabaseName(bench.dir.path() + "/library.sqlite");

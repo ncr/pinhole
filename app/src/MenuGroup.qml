@@ -166,7 +166,7 @@ Item {
             Accessible.expanded: group.open
             hint: ""
             lit: group.open
-            onTapped: group.toggle(false)
+            onTriggered: group.toggle(false)
         }
     }
 
@@ -303,7 +303,7 @@ Item {
             // A plain row ({ text, key, triggered }) is Pinhole's own; a
             // plugin's action is an object of the plugin's.
             pinholes: typeof modelData.objectName !== "string"
-            when: group.visible && modelData.shown !== false && modelData.usable !== false
+            usable: group.visible && modelData.shown !== false && modelData.usable !== false
             // In the menu, or the button: a pointer's way either way.
             buttons: 1
             onTriggered: group.press(modelData)
@@ -317,7 +317,7 @@ Item {
             section: group.menuText !== "" ? group.section : ""
             keys: [group.menuKey]
             keyLayer: group.keyLayer
-            when: group.visible && group.menuItems.length > 0
+            usable: group.visible && group.menuItems.length > 0
             buttons: 1
             onTriggered: group.toggle(true)
         }
@@ -326,7 +326,7 @@ Item {
         name: "menu.close"
         keys: ["Escape"]
         keyLayer: "menu"
-        when: group.open
+        usable: group.open
         buttons: 1
         onTriggered: group.open = false
     }
@@ -334,7 +334,7 @@ Item {
         name: "menu.up"
         keys: ["Up"]
         keyLayer: "menu"
-        when: group.open
+        usable: group.open
         autoRepeat: true
         buttons: 1
         onTriggered: group.step(-1)
@@ -343,7 +343,7 @@ Item {
         name: "menu.down"
         keys: ["Down"]
         keyLayer: "menu"
-        when: group.open
+        usable: group.open
         autoRepeat: true
         buttons: 1
         onTriggered: group.step(1)
@@ -352,7 +352,7 @@ Item {
         name: "menu.press"
         keys: ["Return", "Enter"]
         keyLayer: "menu"
-        when: group.open
+        usable: group.open
         buttons: 1
         // Opened with a click, nothing is chosen yet: ⏎ takes the first row.
         onTriggered: group.press(group.menuItems[group.current >= 0 ? group.current : group.menuItems.findIndex(a => a.usable !== false)])

@@ -333,7 +333,7 @@ fn a_service_of_a_library_given_ends_after_its_windows_whatever_went_on() {
         let live = root.join("builtin/live");
         std::fs::create_dir_all(&live).unwrap();
         std::fs::write(live.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-        std::fs::write(live.join("manifest.json"), json!({"schemaVersion": 1, "api": 12, "id": "pinhole.live",
+        std::fs::write(live.join("manifest.json"), json!({"schemaVersion": 1, "api": 15, "id": "pinhole.live",
             "entryPoints": {"main": "Main.qml"}, "makes": [{"kind": "bounce", "from": "live", "type": "public.mpeg-4",
             "extension": "mp4", "program": "slow-effect", "args": ["bounce"]}]}).to_string()).unwrap();
         let program = live.join("slow-effect");

@@ -579,7 +579,7 @@ mod tests {
             let at = self.dir.join(if builtin { "builtin" } else { "personal" }).join(folder);
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-            let manifest = json!({"schemaVersion": 1, "api": 11, "id": id, "entryPoints": {"main": "Main.qml"},
+            let manifest = json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"},
                                   "workers": [{"name": "w", "program": "work", "args": ["daemon"]}]});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             let end = match exit {

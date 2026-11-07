@@ -14,10 +14,8 @@ Row {
     readonly property var _settings: setting !== "" && typeof pinhole !== "undefined" && pinhole ? pinhole.settings : null
     // The one chosen.
     property var value: _settings ? _settings[setting] : undefined
-    // While true, the number keys choose (API 15, as a button's; `when`,
-    // as it was said before, follows it).
+    // While true, the number keys choose.
     property bool usable: visible
-    property bool when: usable
     // Whose keys they are: the covering plugin's ("plugin"), or "grid" or
     // "viewer".
     property string keyLayer: "plugin"
@@ -45,7 +43,7 @@ Row {
             active: choices.value === modelData.value
             checkable: true
             Accessible.role: Accessible.RadioButton
-            onTapped: if (!active) choices.chosen(modelData.value)
+            onTriggered: if (!active) choices.chosen(modelData.value)
         }
     }
     Repeater {
@@ -60,7 +58,7 @@ Row {
                 keysText: "1–" + Math.min(9, choices.options.length)
                 keyHelp: index === 0 && choices.helpText !== ""
                 keyLayer: choices.keyLayer
-                when: choices.when
+                usable: choices.usable
                 mouse: qsTr("Its button")
                 touchpad: qsTr("Its button")
                 pointerHelp: false

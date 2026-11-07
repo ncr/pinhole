@@ -34,9 +34,9 @@ may be empty) and the program.
     {
       "kind": "me.immich",
       "provider": "pinhole-immich",
-      "needs_sign_in": true,
+      "needsSignIn": true,
       "accepts": ["jpg", "jpeg", "heic", "mov"],
-      "rounds_every_secs": 120
+      "roundsEverySecs": 120
     }
   ]
 }
@@ -55,9 +55,9 @@ PinholePlugin {
 |---|---|---|
 | `kind` | required | Its name in the settings. The plugin's `id`, or the id, a dot and more (`me.immich.shared`): a plugin can never take another's kind, nor `icloud` or `folder`. A kind is the plugin's with the longest id that names it: with plugins `me` and `me.jpegs` installed, `me.jpegs` and `me.jpegs.raw` are only `me.jpegs`'s. Letters, digits, `.`, `_` and `-`. |
 | `provider` | required | The program, a path inside the plugin's folder (no `..`, not absolute), executable. |
-| `needsSignIn` | `false` | Its sources can need signing in: the window offers to, and `pinhole sign-in <kind>`. `needs_sign_in` before API 15, still read. |
+| `needsSignIn` | `false` | Its sources can need signing in: the window offers to, and `pinhole sign-in <kind>`. |
 | `accepts` | `[]` | The extensions of files it takes when they are dropped on the window (`add`), in lower case. None: nothing can be added. |
-| `roundsEverySecs` | 60 | How often a source of it is looked at for changes, 5 to 86400. `rounds_every_secs` before API 15, still read. |
+| `roundsEverySecs` | 60 | How often a source of it is looked at for changes, 5 to 86400. |
 
 The manifest needs `"api": 3` or newer. A source that breaks a rule is left out,
 and pinholed's log (`~/.local/state/pinhole/pinholed.log`) says why:
@@ -194,7 +194,7 @@ A source is an *entry* in `~/.config/pinhole/settings.json`:
 | Method | Params | Answer | Notes before it |
 |---|---|---|---|
 | `add_entry` | what the window gives (a plugin's own form, `pinhole.sources.add`) | `{"entry"}` | |
-| `sign_in` | what the window gives (`kind`, and say `password`); from `pinhole sign-in <kind> [account]` (API 15), `account` and `password` | `{"state": "signed_in", "entry"}` or `{"state": "needs_code"}` | |
+| `sign_in` | what the window gives (`kind`, and say `password`); from `pinhole sign-in <kind> [account]`, `account` and `password` | `{"state": "signed_in", "entry"}` or `{"state": "needs_code"}` | |
 | `submit_code` | `code`, and whatever else the window gives (from `pinhole sign-in`, `account`) | as `sign_in` | |
 | `sign_out` | `entry` | `{}` | |
 | `removed` | `entry` | `{}`: forget what you kept for it | |
@@ -259,7 +259,7 @@ token: pinholed lists everything.
 something changes: a round follows within a second or two (several at once
 make one). `{"note": "listening", "on": true}` tells the window changes come
 as they happen; `false` when that stops. Rounds every
-`rounds_every_secs` go on regardless. A provider started again after a
+`roundsEverySecs` go on regardless. A provider started again after a
 crash is asked to watch again; one asked twice watches once.
 
 **`add`.** A file dropped on the window: `file`, an absolute path, and a

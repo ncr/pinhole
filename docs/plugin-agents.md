@@ -35,7 +35,7 @@ Saving reloads an enabled plugin. Use the installed scaffold's manifest API
 and check `pinhole plugin docs --json` for the installed version. A manifest's
 `api` is the minimum host API required, separate from the plugin's `version`.
 Background work over the whole library (indexing, face finding) is a
-manifest `workers` entry (API 11) that pinholed runs for the source shown,
+manifest `workers` entry that pinholed runs for the source shown,
 not a program the QML starts and keeps alive; see the plugin API's Workers.
 Run `plugin check` after changes.
 It checks the manifest, QML and JS, translations and known API footguns;
@@ -46,7 +46,7 @@ it is not a substitute for running the interaction in the app.
 - Import `Pinhole.Plugin`. Use its components and the `theme` properties.
   Use `Panel` or `Card` to contain input, and `ScrollList`, `ScrollGrid`,
   `ScrollArea`, `PinchZoom`, `Choices` and `ShellButton` for app behaviour.
-  `ShellButton.checkable` requires manifest API 7; bind `active` to its
+  For `ShellButton.checkable`, bind `active` to its
   selected state.
 - Use `PluginAction` for discoverable actions. Set `covering` while a view
   covers the photos. Scope its `Command`s to `keyLayer: "plugin"` and its
@@ -74,24 +74,24 @@ it is not a substitute for running the interaction in the app.
   positions. Use `openPhoto` and `reveal` to navigate. From a covering search
   or results panel, `openPhotos(results, photo, { comeBack: true })` (API
   11) shows it, Pinhole keeping the view to come back to (`away`, then
-  `returned(id)`); without `comeBack`, `openPhotos(results, photo)` (API 9) opens the viewer
+  `returned(id)`); without `comeBack`, `openPhotos(results, photo)` opens the viewer
   without a transition to or from the library grid and steps through the
-  results alone; `openPhotoDirect` (API 8) does the same over the library.
+  results alone.
 - Originals and the library database are read-only to the UI. Fetch with
   `pinhole.fetch`; query with `pinhole.query`, not an external sqlite3.
   Keep user choices in `settings`, user work in `state`, derived data in
   `cache`/`cacheDir`. Make outputs with `picturePath`.
 - Show files through `image://file/` or `image://photo/` as documented, so
   orientation and colours are correct. Video uses `VideoView`. A plugin's
-  SDR overlay in the HDR viewer uses `holdSdr` (API 6) when appropriate.
+  SDR overlay in the HDR viewer uses `holdSdr` when appropriate.
 - Wait for promises to finish before confirming success. Use `copyText`
-  (API 12) and `copyFile` for the clipboard, never a text field's `copy()`
+  and `copyFile` for the clipboard, never a text field's `copy()`
   or `wl-copy`, `notify` for quiet success, `complain` and `warn` for
   failures. Handle cancellation and missing/offline files. Record reversible
   edits with `did`, and drop a refused step with `dropStep`.
   Declare external executable dependencies and show a useful error if one
   is missing. A QML reload or disabling the plugin stops its jobs and drops
-  callbacks; save work needed by the next instance in `state`.
+  their promises; save work needed by the next instance in `state`.
 - Wrap visible words in `qsTr()` and supply `i18n/pl.json`; counted strings
   need plural forms. Give files distinctive names to avoid context clashes.
 - A new source uses a namespaced provider in any language speaking the

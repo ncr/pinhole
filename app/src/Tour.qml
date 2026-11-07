@@ -354,7 +354,7 @@ Item {
         keys: ["Left"]
         keysText: "←"
         keyLayer: "tour"
-        when: root.index > 0
+        usable: root.index > 0
         onTriggered: root.go(-1)
     }
     Command {

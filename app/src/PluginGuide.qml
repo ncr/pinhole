@@ -77,12 +77,12 @@ Panel {
     Command { name: "guide.search"; keyLayer: "guide"; keys: ["Ctrl+F"]; onTriggered: search.input.forceActiveFocus() }
     Command {
         name: "guide.previous"; keyLayer: "guide"; keys: ["Up"]
-        when: !search.input.activeFocus && !reader.activeFocus
+        usable: !search.input.activeFocus && !reader.activeFocus
         autoRepeat: true; onTriggered: root.step(-1)
     }
     Command {
         name: "guide.next"; keyLayer: "guide"; keys: ["Down"]
-        when: !search.input.activeFocus && !reader.activeFocus
+        usable: !search.input.activeFocus && !reader.activeFocus
         autoRepeat: true; onTriggered: root.step(1)
     }
     Command {
@@ -129,7 +129,7 @@ Panel {
                     UiText { width: parent.width; wrapMode: Text.WordWrap; text: qsTr("Plugin workshop"); font.pixelSize: Math.round(theme.fontSize * 1.5); font.weight: Font.DemiBold; Accessible.role: Accessible.Heading }
                     UiText { visible: !root.compact; width: parent.width; wrapMode: Text.WordWrap; text: qsTr("API %1 · Built in · Available offline").arg(pluginGuide.api); color: theme.darkForeground; font.pixelSize: Math.round(theme.fontSize * 0.85) }
                 }
-                ShellButton { id: close; objectName: "guideClose"; anchors.right: parent.right; text: qsTr("Close"); hint: "Esc"; onTapped: root.closed() }
+                ShellButton { id: close; objectName: "guideClose"; anchors.right: parent.right; text: qsTr("Close"); hint: "Esc"; onTriggered: root.closed() }
             }
             Flow {
                 visible: !root.compact
@@ -149,7 +149,7 @@ Panel {
                         key: String(index + 1)
                         keyLayer: "guide"
                         hint: ""
-                        onTapped: root.open(modelData.id)
+                        onTriggered: root.open(modelData.id)
                     }
                 }
             }
@@ -157,7 +157,7 @@ Panel {
                 visible: root.compact
                 width: parent.width
                 height: previousDocument.height
-                ShellButton { id: previousDocument; objectName: "guidePreviousDocument"; text: "←"; Accessible.name: qsTr("Previous document"); onTapped: root.turnDocument(-1) }
+                ShellButton { id: previousDocument; objectName: "guidePreviousDocument"; text: "←"; Accessible.name: qsTr("Previous document"); onTriggered: root.turnDocument(-1) }
                 UiText {
                     anchors.left: previousDocument.right
                     anchors.right: nextDocument.left
@@ -168,7 +168,7 @@ Panel {
                     horizontalAlignment: Text.AlignHCenter
                     color: theme.accent
                 }
-                ShellButton { id: nextDocument; objectName: "guideNextDocument"; anchors.right: parent.right; text: "→"; Accessible.name: qsTr("Next document"); onTapped: root.turnDocument(1) }
+                ShellButton { id: nextDocument; objectName: "guideNextDocument"; anchors.right: parent.right; text: "→"; Accessible.name: qsTr("Next document"); onTriggered: root.turnDocument(1) }
             }
             Rectangle { width: parent.width; height: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.12) }
         }
@@ -204,7 +204,7 @@ Panel {
                         y: Math.round((parent.height - height) / 2)
                         text: root.copied === "agent" ? "✓" : qsTr("Instructions")
                         Accessible.name: qsTr("Copy agent instructions")
-                        onTapped: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
+                        onTriggered: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
                     }
                 }
                 Flow {
@@ -215,15 +215,15 @@ Panel {
                     ShellButton {
                         objectName: !root.compact ? "guideCopyAgent" : "guideCopyAgentWide"
                         text: root.copied === "agent" ? qsTr("✓ Instructions copied") : qsTr("Copy agent instructions")
-                        onTapped: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
+                        onTriggered: root.copy(pluginGuide.markdown("plugin-agents"), "agent")
                     }
                     ShellButton {
                         visible: !root.wide
-                        text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTapped: root.step(-1)
+                        text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTriggered: root.step(-1)
                     }
                     ShellButton {
                         visible: !root.wide
-                        text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTapped: root.step(1)
+                        text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTriggered: root.step(1)
                     }
                 }
             }
@@ -311,8 +311,8 @@ Panel {
                         id: sectionTools
                         anchors.right: parent.right
                         spacing: 4
-                        ShellButton { visible: root.compact; text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTapped: root.step(-1) }
-                        ShellButton { visible: root.compact; text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTapped: root.step(1) }
+                        ShellButton { visible: root.compact; text: "↑"; usable: root.filtered.length > 0; Accessible.name: qsTr("Previous section"); onTriggered: root.step(-1) }
+                        ShellButton { visible: root.compact; text: "↓"; usable: root.filtered.length > 0; Accessible.name: qsTr("Next section"); onTriggered: root.step(1) }
                         ShellButton {
                         id: sectionCopy
                         objectName: "guideCopySection"
@@ -320,7 +320,7 @@ Panel {
                         Accessible.name: qsTr("Copy section")
                         usable: root.entry !== null
                         flat: true
-                        onTapped: root.copy(root.entry.markdown, "section")
+                        onTriggered: root.copy(root.entry.markdown, "section")
                         }
                     }
                 }
@@ -368,7 +368,7 @@ Panel {
                                         required property var modelData
                                         objectName: "guideExample-" + modelData.id
                                         text: modelData.title
-                                        onTapped: root.follow(modelData.link)
+                                        onTriggered: root.follow(modelData.link)
                                     }
                                 }
                             }

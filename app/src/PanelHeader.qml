@@ -77,7 +77,7 @@ Item {
             text: "✕"
             action: header.closeCommand
             hint: header.closeCommand ? header.closeCommand.keyName : header.closeHint
-            onTapped: {
+            onTriggered: {
                 if (header.closeCommand)
                     return
                 if (header.pluginView)

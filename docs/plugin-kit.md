@@ -2,7 +2,7 @@
 
 What each of `Pinhole.Plugin`'s QML types has: its properties, its
 signals (a handler is `on` and the signal's name, capitalised:
-`tapped` is `onTapped`) and its functions, with what their own source
+`triggered` is `onTriggered`) and its functions, with what their own source
 says of them. Written from the files themselves by `bin/kit-reference`;
 [plugins.md](plugins.md) says how to use them together.
 
@@ -98,7 +98,7 @@ Properties:
 
 ## Command
 
-One thing Pinhole does, and every way to do it (keymap.h): its keys, and how it goes with a mouse and with a touchpad. The keys work while its `keyLayer` has them (the one on top: the grid, the viewer, a menu, a panel) and `when` allows; a ShellButton given it as its `action` presses it, and counts as the way there for a pointer. In the help, under its `section`, if it has one.
+One thing Pinhole does, and every way to do it (keymap.h): its keys, and how it goes with a mouse and with a touchpad. The keys work while its `keyLayer` has them (the one on top: the grid, the viewer, a menu, a panel) and `usable` allows; a ShellButton given it as its `action` presses it, and counts as the way there for a pointer. In the help, under its `section`, if it has one.
 
 Its root is a `Item` (Qt Quick's: its properties too).
 
@@ -116,8 +116,7 @@ Properties:
 - `string noMouse`
 - `string noTouchpad`
 - `string keyLayer`: Whose keys these are: "grid", "viewer", "menu", "side", "addSource", "firstRun", "tour", "help", "plugin"; "chrome" for a button's, on the grid or the viewer, whichever has them; "any" for the window's own.
-- `bool usable`: Whether it can be done now (API 15, as an action's and a button's): its keys work only then. `when`, as it was said before, follows it.
-- `bool when`
+- `bool usable`: Whether it can be done now (API 15, as an action's and a button's): its keys work only then.
 - `bool autoRepeat`
 - `bool bound`: False for keys read elsewhere (the viewer's arrows, timed as they are held): listed, but no shortcut of its own.
 - `bool keyHelp`: Which of the help's tabs list it: the keys', and the mouse's and the touchpad's (where its `mouse` and `touchpad` say how, briefly).
@@ -185,8 +184,7 @@ Properties:
 
 Signals:
 
-- `triggered()`: Pressed: a click, a tap, its key. `triggered()` (API 15), as an action and a Command say it; `tapped()`, as it was said before, too.
-- `tapped()`
+- `triggered()`: Pressed: a click, a tap, its key, as an action and a Command say it.
 - `activated()`: Pressed: a click, a tap, or Space or Return while it has the keys.
 
 Functions:
@@ -326,7 +324,7 @@ Properties:
 
 ## Panel
 
-A plugin's screen over the photos: its parent's whole room, in the theme's background or a `color` of its own, taking every click, touch, wheel turn, swipe, pinch and hover over it (Shield), so the photos beneath get none. Its controls go after it. `triggered()` (API 15; `clicked()` too, as before) is a click on it where no control is (on a dimmed one beside a card, it puts the card away); with `steps` (Qt.Horizontal, Qt.Vertical), the wheel and a swipe step through something: `stepped(1)` the next, `stepped(-1)` the one before.
+A plugin's screen over the photos: its parent's whole room, in the theme's background or a `color` of its own, taking every click, touch, wheel turn, swipe, pinch and hover over it (Shield), so the photos beneath get none. Its controls go after it. `triggered()` is a click on it where no control is (on a dimmed one beside a card, it puts the card away); with `steps` (Qt.Horizontal, Qt.Vertical), the wheel and a swipe step through something: `stepped(1)` the next, `stepped(-1)` the one before.
 
 Its root is a `Rectangle` (Qt Quick's: its properties too).
 
@@ -337,7 +335,6 @@ Properties:
 Signals:
 
 - `triggered()`
-- `clicked()`
 - `stepped(int step)`
 
 Its handler in QML: `onTriggered`.
@@ -347,7 +344,7 @@ Its handler in QML: `onTriggered`.
 A card: a box in the theme's background with a hairline round it, that lets nothing over it through to what is beneath (Shield). Its controls go in it. Over the photos for a moment (a sign-in, a question), on a dimmed Panel whose click puts it away:
 
 ```qml
-Panel { color: Qt.rgba(0, 0, 0, 0.45); onClicked: plugin.close() }
+Panel { color: Qt.rgba(0, 0, 0, 0.45); onTriggered: plugin.close() }
 Card { anchors.centerIn: parent; width: 400; height: 300 }
 ```
 
@@ -364,8 +361,7 @@ Properties:
 - `var options`: [{ value, text }], in order.
 - `string setting`: The name of one of the plugin's settings, whose value it is.
 - `var value`: The one chosen.
-- `bool usable`: While true, the number keys choose (API 15, as a button's; `when`, as it was said before, follows it).
-- `bool when`
+- `bool usable`: While true, the number keys choose.
 - `string keyLayer`: Whose keys they are: the covering plugin's ("plugin"), or "grid" or "viewer".
 - `string section`: Where the help lists the number keys, and in what words.
 - `string helpText`
