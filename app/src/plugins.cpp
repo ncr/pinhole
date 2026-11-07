@@ -1774,9 +1774,11 @@ const char *kPluginUsage = R"(Usage: pinhole plugin <command>
                          ~/.config/pinhole/plugins/<id> (or the folder
                          named, made for it): a manifest.json, a Main.qml
                          and its Polish to start from
-  check [folder | id]    look a plugin over as Pinhole would load it: its
+  check [--fix] [folder | id]
+                         look a plugin over as Pinhole would load it: its
                          manifest, its QML, its translations (the folder
-                         here, if none is named)
+                         here, if none is named); --fix first gives it the
+                         "api" what it uses needs
   docs [name | --json]   read the bundled handbook; --json includes the
                          installed API version and every document
 
@@ -1927,7 +1929,7 @@ PinholePlugin {
     return 0;
 }
 
-int checkPlugin(const QString &target) {
+int checkPlugin(const QString &target, bool fix = false) {
     // A folder, else one of one's own or Pinhole's by the id its manifest
     // gives (Series' folder is series, its id pinhole.series).
     QString dir = QFileInfo(target).absoluteFilePath();
@@ -2000,6 +2002,30 @@ int checkPlugin(const QString &target) {
     // fail where nobody sees: refused, with the number to give.
     const QMap<int, QStringList> uses = Plugins::apiUses(dir);
     const int needed = uses.isEmpty() ? 1 : uses.lastKey();
+    // --fix (API 15): the API it needs written in its manifest, its own
+    // text kept but for that number.
+    if (fix && asked < needed && needed <= Plugins::api) {
+        QFile file(dir + "/manifest.json");
+        QString text = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        file.close();
+        static const QRegularExpression apiKey(QStringLiteral("(\"api\"\\s*:\\s*)\\d+(?:\\.0+)?"));
+        if (text.contains(apiKey))
+            text.replace(apiKey, QStringLiteral("\\1%1").arg(needed));
+        else if (const qsizetype open = text.indexOf('{'); open >= 0) {
+            // First, as the next key is laid out: on a line of its own, or
+            // on the same one.
+            qsizetype next = open + 1;
+            while (next < text.size() && text[next].isSpace())
+                ++next;
+            const QString space = text.mid(open + 1, next - open - 1);
+            text.insert(open + 1, space.contains('\n') ? space + QStringLiteral("\"api\": %1,").arg(needed)
+                                                       : QStringLiteral("\"api\": %1, ").arg(needed));
+        }
+        if (!KeptFiles::write(dir + "/manifest.json", text.toUtf8()))
+            return 1;
+        out(QStringLiteral("%1: manifest.json: \"api\": %2 now, as it uses %3").arg(name).arg(needed).arg(uses.last().join(QStringLiteral(", "))));
+        return checkPlugin(dir);
+    }
     for (auto it = uses.begin(); it != uses.end(); ++it)
         if (asked < it.key())
             problems << QStringLiteral("manifest.json: it uses %1, of plugin API %2, and asks for API %3: give it \"api\": %4")
@@ -2074,6 +2100,13 @@ int runPluginCommand(int argc, char *argv[]) {
         QCoreApplication app(argc, argv);
         return newPlugin(QString::fromLocal8Bit(argv[3]), argc == 5 ? QString::fromLocal8Bit(argv[4]) : QString());
     }
+    // --fix: the API it needs written in its manifest first.
+    const bool fix = command == QLatin1String("check") && argc >= 4 && QLatin1String(argv[3]) == QLatin1String("--fix");
+    if (fix) {
+        for (int i = 3; i + 1 < argc; ++i)
+            argv[i] = argv[i + 1];
+        --argc;
+    }
     if (command == QLatin1String("check") && argc <= 4) {
         // A window system is not needed to compile QML.
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -2081,7 +2114,7 @@ int runPluginCommand(int argc, char *argv[]) {
         QGuiApplication app(argc, argv);
         app.setApplicationName("pinhole");
         Plugins::registerTypes();
-        return checkPlugin(argc == 4 ? QString::fromLocal8Bit(argv[3]) : QStringLiteral("."));
+        return checkPlugin(argc == 4 ? QString::fromLocal8Bit(argv[3]) : QStringLiteral("."), fix);
     }
     std::fputs(kPluginUsage, command.isEmpty() || command == QLatin1String("help") ? stdout : stderr);
     return command.isEmpty() || command == QLatin1String("help") ? 0 : 2;

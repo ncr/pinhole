@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QMap>
 #include <QLocale>
 #include <QRegularExpression>
 #include <QTimer>
@@ -31,9 +32,11 @@ With no command, the window opens. A command asks the Pinhole service
                          a folder, or an Apple ID (added if it is new)
   remove <source>        remove a source and its library (a folder's photos
                          stay where they are)
-  sign-in [apple-id]     sign in to iCloud, or take over icloudpd's session,
-                         and show its photos
-  sign-out <apple-id>    forget an Apple ID's session; its library stays
+  sign-in [kind] [account]
+                         sign in to a source that needs it and show its
+                         photos: iCloud (an Apple ID, or icloudpd's session)
+                         unless another kind is named
+  sign-out <source>      forget a source's session; its library stays
   sync                   look for changes now, and follow until that is done
   add <file>...          add photos and videos, or folders of them, to the
                          source shown
@@ -100,8 +103,8 @@ public:
             show(rest.first());
         else if (name == "remove" && rest.size() == 1)
             remove(rest.first());
-        else if (name == "sign-in" && rest.size() <= 1)
-            signIn(rest.value(0));
+        else if (name == "sign-in" && rest.size() <= 2)
+            signIn(rest);
         else if (name == "sign-out" && rest.size() == 1)
             signOut(rest.first());
         else if (name == "sync" && rest.isEmpty())
@@ -242,30 +245,77 @@ private:
     void signOut(const QString &what) {
         call("sources", {}, [this, what](const QJsonObject &list) {
             const QJsonObject known = find(list.value("sources").toArray(), what);
-            if (known.value("kind").toString() != QLatin1String("icloud"))
-                return fail("not_found", QStringLiteral("no Apple ID %1 among the sources").arg(what));
+            if (known.isEmpty())
+                return fail("not_found", QStringLiteral("no source %1 among the sources (pinhole sources)").arg(what));
             call("sign_out", {{"id", known.value("id")}}, [this, known](const QJsonObject &) {
-                say(QStringLiteral("Signed out of %1; its library stays until it is signed in to again").arg(known.value("account").toString()));
+                const QString who = known.value("account").toString();
+                say(QStringLiteral("Signed out of %1; its library stays until it is signed in to again")
+                        .arg(who.isEmpty() ? known.value("name").toString() : who));
                 done();
             });
         });
     }
 
-    void signIn(QString appleId) {
-        // iCloud is a plugin's (pinhole.icloud): turned off, there is
+    void signIn(const QStringList &given) {
+        // Each kind is a plugin's (pinhole.icloud's): turned off, there is
         // nothing to sign in to, and no password is asked for.
         // The switches as plugins.json says them now, edited by hand too
-        // (the service reads it again); then whether iCloud's is on. (A
-        // service from before kinds says neither: it is asked as before.)
-        m_service.call("plugins_changed", {}, [this, appleId](bool, const QJsonObject &, const QString &) {
-            m_service.call("kinds", {}, [this, appleId](bool, const QJsonObject &kinds, const QString &) {
+        // (the service reads it again); then which kinds are on. (A
+        // service from before kinds says none: iCloud is asked as before.)
+        m_service.call("plugins_changed", {}, [this, given](bool, const QJsonObject &, const QString &) {
+            m_service.call("kinds", {}, [this, given](bool, const QJsonObject &kinds, const QString &) {
+                QMap<QString, QJsonObject> byName;
                 for (const QJsonValue &kind : kinds.value("kinds").toArray())
-                    if (kind.toObject().value("kind").toString() == QLatin1String("icloud") && !kind.toObject().value("on").toBool()) {
-                        note("pinhole: iCloud is turned off. Turn it on in Pinhole's side panel (Tab), under Plugins, then sign in.");
-                        return done(1);
-                    }
-                askAppleId(appleId);
+                    byName.insert(kind.toObject().value("kind").toString(), kind.toObject());
+                // A kind named first, else iCloud's, an Apple ID after it
+                // as before.
+                const bool named = !given.isEmpty() && byName.contains(given.first());
+                const QString kind = named ? given.first() : QStringLiteral("icloud");
+                const QString account = named ? given.value(1) : given.value(0);
+                if (!named && given.size() > 1)
+                    return fail("bad_request", QStringLiteral("no kind %1: pinhole sign-in [kind] [account]").arg(given.first()));
+                const QJsonObject known = byName.value(kind);
+                if (!known.isEmpty() && !known.value("on").toBool()) {
+                    note(QStringLiteral("pinhole: %1 is turned off. Turn its plugin on in Pinhole's side panel (Tab), under "
+                                        "Plugins, then sign in.").arg(kind == QLatin1String("icloud") ? "iCloud" : kind));
+                    return done(1);
+                }
+                if (!known.isEmpty() && !known.value("needs_sign_in").toBool())
+                    return fail("bad_request", QStringLiteral("%1 needs no signing in: pinhole show adds one").arg(kind));
+                if (kind == QLatin1String("icloud"))
+                    return askAppleId(account);
+                signInTo(kind, account);
             });
+        });
+    }
+
+    // Another kind's (API 15): its account and password, and a code if it
+    // asks for one, as its provider takes them (docs/source-providers.md).
+    void signInTo(const QString &kind, QString account) {
+        if (account.isEmpty())
+            account = ask("Account: ");
+        if (account.isEmpty())
+            return usage();
+        const QString password = ask("Password: ", true);
+        call("sign_in", {{"kind", kind}, {"account", account}, {"password", password}},
+             [this, kind, account](const QJsonObject &result) { signedInTo(kind, account, result); });
+    }
+
+    void signedInTo(const QString &kind, const QString &account, const QJsonObject &result, int tries = 0) {
+        if (result.value("state").toString() != QLatin1String("needs_code")) {
+            say(QStringLiteral("Signed in to %1 as %2. Pinhole shows its photos now; pinhole status says how far it is.").arg(kind, account));
+            return done();
+        }
+        const QString code = ask("The code it sent you: ");
+        m_service.call("submit_code", {{"kind", kind}, {"account", account}, {"code", code}},
+                       [this, kind, account, tries](bool ok, const QJsonObject &result, const QString &error) {
+            if (ok)
+                return signedInTo(kind, account, result);
+            if (error == QLatin1String("wrong_code") && tries < 2) {
+                note("That code is not the one; try again");
+                return signedInTo(kind, account, QJsonObject{{"state", "needs_code"}}, tries + 1);
+            }
+            fail(error, result.value("message").toString());
         });
     }
 

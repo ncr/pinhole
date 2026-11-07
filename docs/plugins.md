@@ -427,7 +427,9 @@ meant.
 
 `api` is the oldest version of what follows the plugin needs (1 if left
 out); a Pinhole older than that says it needs a newer one and does not load
-it. `pinhole plugin check` refuses one that asks for less than it uses. `pinhole.api` says which one it is running in. API 2 brought promises
+it. `pinhole plugin check` refuses one that asks for less than it uses;
+`pinhole plugin check --fix` (API 15) writes the one it needs in its
+manifest first. `pinhole.api` says which one it is running in. API 2 brought promises
 (`copyFile`'s too), `pinhole.settings`, `notify`, `warn`, photos by id,
 `hidden`, `avgColor`, `library.field`, `isHidden`, `run`'s `output`,
 `pinhole.coveredBy`, `dismissed` and `keepAwake`. API 3 brought `marks`,

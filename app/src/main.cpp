@@ -255,7 +255,6 @@ int main(int argc, char *argv[]) {
     History history;
     // Favourites set from the window (pinhole.setFavorite, plugins/favourites).
     Favourites favourites(&library, &service);
-    QObject::connect(&favourites, &Favourites::changed, &viewer, &Viewer::favoriteChanged);
     Incoming incoming(&service);
     Storage storage(&service);
     Sources sources(&service);

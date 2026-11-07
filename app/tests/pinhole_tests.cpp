@@ -1546,6 +1546,28 @@ PinholePlugin {
         QVERIFY(Plugins::apiUses(builtIn + "/live").value(3).contains("a photo's effect"));
     }
 
+    // A source's keys as the rest of the manifest writes them (API 15), or
+    // as before.
+    void aSourceSaysItsKeysEitherWay() {
+        QTemporaryDir dir;
+        QFile run(dir.path() + "/run");
+        QVERIFY(run.open(QIODevice::WriteOnly));
+        run.write("#!/bin/sh\n");
+        run.close();
+        run.setPermissions(run.permissions() | QFile::ExeOwner);
+        const auto manifest = [](int api, const QJsonObject &source) {
+            QJsonObject s = source;
+            s.insert("kind", "me.nas");
+            s.insert("provider", "run");
+            return QJsonObject{{"id", "me.nas"}, {"api", api}, {"sources", QJsonArray{s}}};
+        };
+        QCOMPARE(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needsSignIn", true}, {"roundsEverySecs", 120}})), QString());
+        QCOMPARE(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(3, {{"needs_sign_in", true}, {"rounds_every_secs", 120}})), QString());
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(14, {{"needsSignIn", true}})).contains("\"api\": 15"));
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"roundsEverySecs", 1}})).contains("\"roundsEverySecs\" is a whole"));
+        QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needsSignIn", "yes"}})).contains("\"needsSignIn\" is true or false"));
+    }
+
     // JSON both ways with run (API 15): `json` as its stdin, and the
     // result's `json` its stdout when that is JSON.
     void aPluginRunsAProgramWithJsonBothWays() {

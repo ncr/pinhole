@@ -34,7 +34,6 @@ Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     connect(&m_fetchLater, &QTimer::timeout, this, &Viewer::fetchShown);
     for (auto changed : {&Viewer::openChanged, &Viewer::indexChanged, &Viewer::imageChanged, &Viewer::videoChanged, &Viewer::messageChanged})
         connect(this, changed, this, &Viewer::loadingChanged);
-    connect(this, &Viewer::indexChanged, this, &Viewer::favoriteChanged);
     // Another photo shown: its shape, and the adjustment drawn.
     connect(this, &Viewer::indexChanged, this, [this] {
         m_shownAdjust = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).adjust : Adjustment();
@@ -72,10 +71,6 @@ qreal Viewer::aspect() const {
 }
 
 bool Viewer::isVideo() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).video; }
-
-bool Viewer::isFavorite() const {
-    return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).favorite;
-}
 
 QString Viewer::title() const {
     if (m_index < 0 || m_index >= m_library->count())
@@ -717,11 +712,9 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     const QVariantList hiddenBefore = std::exchange(m_hiddenGiven, QVariantList(m_hiddenList.begin(), m_hiddenList.end()));
     if (m_index >= 0) {
         if (const int now = mapped(m_index); now >= 0) {
-            // The same photo: nothing on screen changes, only its position,
-            // and maybe whether it is a favourite.
+            // The same photo: nothing on screen changes, only its position.
             m_index = now;
             m_jumpFrom = -1;
-            emit favoriteChanged();
         } else {
             m_index = -1;
             close();

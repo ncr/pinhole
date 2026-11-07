@@ -517,16 +517,21 @@ fn check(
             .collect::<Result<_, _>>()?,
         _ => return Err("\"accepts\" is a list of extensions".into()),
     };
-    let rounds_every = match &declared["rounds_every_secs"] {
+    // As the rest of the manifest writes its keys (API 15), or as before.
+    let either = |camel: &str, snake: &str| if declared[camel].is_null() { declared[snake].clone() } else { declared[camel].clone() };
+    let rounds_every = match either("roundsEverySecs", "rounds_every_secs") {
         Value::Null => None,
-        v => Some(whole(v).and_then(|s| u64::try_from(s).ok()).filter(|s| (5..=86_400).contains(s)).ok_or("\"rounds_every_secs\" is 5 to 86400")?),
+        v => {
+            let named = if declared["roundsEverySecs"].is_null() { "rounds_every_secs" } else { "roundsEverySecs" };
+            Some(whole(&v).and_then(|s| u64::try_from(s).ok()).filter(|s| (5..=86_400).contains(s)).ok_or(format!("\"{named}\" is 5 to 86400"))?)
+        }
     };
     Ok(Provided {
         plugin: id.to_owned(),
         builtin: false,
         kind: kind.to_owned(),
         program: path,
-        needs_sign_in: declared["needs_sign_in"].as_bool().unwrap_or(false),
+        needs_sign_in: either("needsSignIn", "needs_sign_in").as_bool().unwrap_or(false),
         accepts,
         rounds_every,
     })
@@ -775,6 +780,7 @@ mod tests {
             {"kind": "me.immich.missing", "provider": "nothing"},
             {"kind": "me.immich.accepts", "provider": "run", "accepts": [".JPG"]},
             {"kind": "me.immich.rounds", "provider": "run", "rounds_every_secs": 1},
+            {"kind": "me.immich.camel", "provider": "run", "needsSignIn": true, "roundsEverySecs": 120},
         ])), Some(("run", 0o755)));
         plugin(&places.personal, "plain", manifest("me.plain", one("me.plain", "run")), Some(("run", 0o644)));
         plugin(&places.personal, "old", serde_json::json!({"schemaVersion": 1, "id": "me.old", "entryPoints": {"main": "Main.qml"},
@@ -783,10 +789,13 @@ mod tests {
 
         let (found, problems) = provided(&places, &["icloud", "folder"]);
         let kinds: Vec<(&str, &str, bool)> = found.iter().map(|p| (p.plugin.as_str(), p.kind.as_str(), p.builtin)).collect();
-        assert_eq!(kinds, [("pinhole.nas", "pinhole.nas", true), ("me.immich", "me.immich", false), ("me.immich", "me.immich.shared", false)]);
+        assert_eq!(kinds, [("pinhole.nas", "pinhole.nas", true), ("me.immich", "me.immich", false), ("me.immich", "me.immich.shared", false),
+                           ("me.immich", "me.immich.camel", false)]);
         assert_eq!(found[0].program, places.builtin.join("nas/bin/nas"));
         assert_eq!((found[1].needs_sign_in, found[1].accepts.clone(), found[1].rounds_every), (true, vec!["jpg".to_owned(), "heic".to_owned()], Some(300)));
         assert_eq!((found[2].needs_sign_in, found[2].accepts.len(), found[2].rounds_every), (false, 0, None));
+        // As the rest of the manifest writes its keys (API 15).
+        assert_eq!((found[3].needs_sign_in, found[3].rounds_every), (true, Some(120)));
         let said = problems.join("\n");
         for why in ["\"me.immich\": me.immich has that kind already", "\"me.immichx\": its kind must be", "\"icloud\": its kind must be",
                     "\"me.immich/../x\": a kind is letters", "\"me.immich.up\": \"provider\" is a path", "\"me.immich.abs\": \"provider\" is a path",

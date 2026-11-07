@@ -34,7 +34,6 @@ class Viewer : public QObject {
     Q_PROPERTY(qreal aspect READ aspect NOTIFY adjustChanged)
     Q_PROPERTY(bool video READ isVideo NOTIFY indexChanged)
     Q_PROPERTY(QUrl videoSource READ videoSource NOTIFY videoChanged)
-    Q_PROPERTY(bool favorite READ isFavorite NOTIFY favoriteChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     // The full photo, or the video, still on its way (and nothing wrong).
@@ -88,7 +87,6 @@ public:
     qreal aspect() const;
     bool isVideo() const;
     QUrl videoSource() const { return m_video; }
-    bool isFavorite() const;
     QString title() const;
     QString message() const { return m_message; }
     qreal offset() const { return m_motion.offset(); }
@@ -172,7 +170,6 @@ signals:
     void indexChanged();
     // Another photo shown, or this one's favourite changed (favourites.h)
     // or read again.
-    void favoriteChanged();
     void imageChanged();
     void videoChanged();
     void messageChanged();

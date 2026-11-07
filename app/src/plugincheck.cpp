@@ -292,7 +292,7 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
         {5, "ScrollList, ScrollGrid or ScrollArea"}, {5, "PinchZoom"}, {5, "Panel or Card"}, {5, "Choices"},
         {5, "pinhole.query"}, {5, "pinhole.picturePath"}, {5, "VideoView"}, {6, "holdSdr"}, {7, "ShellButton.checkable"},
         {8, "pinhole.openPhotoDirect"}, {9, "pinhole.openPhotos"}, {10, "pinhole.selectionIds"}, {10, "pinhole.screenshots"},
-        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}, {15, "pinhole.deliver"}, {15, "run's json"}};
+        {11, "comeBack, away or returned"}, {11, "workers in the manifest"}, {11, "PhotoTiles"}, {11, "PanelHeader"}, {11, "SettingNote or SettingSwitch"}, {11, "Choices.numbered"}, {11, "pinhole.keyboardInUse"}, {12, "pinhole.copyText, input or hasKeys"}, {12, "pinhole.workers or workerSaid"}, {12, "PanZoom"}, {12, "makes in the manifest"}, {13, "pinhole.readText or readJson"}, {13, "PluginView"}, {13, "Job"}, {13, "settings in the manifest"}, {13, "a setting of SettingSwitch or Choices"}, {13, "pinhole.adjust, turn or adjustment"}, {14, "pinhole.synced"}, {14, "pinhole.viewer.photo or id"}, {15, "a kind of its own in makes"}, {15, "pinhole.fileActions or a file's PluginAction"}, {15, "pinhole.ask or a worker that answers"}, {15, "library.settled, field's shown or field(\"hidden\")"}, {15, "an action's places"}, {15, "an action's helpText"}, {15, "pinhole.store"}, {15, "requires in the manifest, or pinhole.has"}, {15, "a manifest without schemaVersion or entryPoints"}, {15, "triggered, usable or key on a ShellButton, Command, Choices or Panel"}, {15, "pinhole.deliver"}, {15, "run's json"}, {15, "needsSignIn or roundsEverySecs in sources"}};
     static const QList<std::pair<QString, QRegularExpression>> words = {
         // Its root's marks, each a PluginMark.
         {"marks", QRegularExpression(QStringLiteral("\\bPluginMark\\s*\\{"))},
@@ -497,6 +497,9 @@ QMap<int, QStringList> Plugins::apiUses(const QString &dir) {
             uses << QStringLiteral("settings in the manifest");
         if (!declared.contains(QLatin1String("schemaVersion")) || !declared.contains(QLatin1String("entryPoints")))
             uses << QStringLiteral("a manifest without schemaVersion or entryPoints");
+        for (const QJsonValue &source : declared.value(QLatin1String("sources")).toArray())
+            if (source.toObject().contains(QLatin1String("needsSignIn")) || source.toObject().contains(QLatin1String("roundsEverySecs")))
+                uses << QStringLiteral("needsSignIn or roundsEverySecs in sources");
         if (declared.contains(QLatin1String("requires")))
             uses << QStringLiteral("requires in the manifest, or pinhole.has");
     }
@@ -1659,8 +1662,14 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
             return wrong(tr("\"provider\" is a path in the plugin's folder, without \"..\""));
         if (const QFileInfo program(dir + '/' + provider); !program.isFile() || !program.isExecutable())
             return wrong(tr("%1 is not a program in the plugin's folder (a file it can run)").arg(provider));
-        if (source.contains("needs_sign_in") && !source.value("needs_sign_in").isBool())
-            return wrong(tr("\"needs_sign_in\" is true or false"));
+        // As the rest of the manifest writes its keys (API 15), or as they
+        // were written before.
+        const QString needsSignIn = source.contains("needsSignIn") ? QStringLiteral("needsSignIn") : QStringLiteral("needs_sign_in");
+        const QString roundsEvery = source.contains("roundsEverySecs") ? QStringLiteral("roundsEverySecs") : QStringLiteral("rounds_every_secs");
+        if ((source.contains("needsSignIn") || source.contains("roundsEverySecs")) && manifest.value("api").toInt(1) < 15)
+            return wrong(tr("needsSignIn and roundsEverySecs need \"api\": 15; before, needs_sign_in and rounds_every_secs"));
+        if (source.contains(needsSignIn) && !source.value(needsSignIn).isBool())
+            return wrong(tr("\"%1\" is true or false").arg(needsSignIn));
         if (source.contains("accepts")) {
             const QJsonValue accepts = source.value("accepts");
             bool fine = accepts.isArray();
@@ -1669,10 +1678,10 @@ QString Plugins::sourcesProblem(const QString &dir, const QString &id, const QJs
             if (!fine)
                 return wrong(tr("\"accepts\" is a list of extensions in lower case, without the dot"));
         }
-        if (source.contains("rounds_every_secs")) {
-            const double every = source.value("rounds_every_secs").toDouble(-1);
+        if (source.contains(roundsEvery)) {
+            const double every = source.value(roundsEvery).toDouble(-1);
             if (every != std::floor(every) || every < 5 || every > 86400)
-                return wrong(tr("\"rounds_every_secs\" is a whole number from 5 to 86400"));
+                return wrong(tr("\"%1\" is a whole number from 5 to 86400").arg(roundsEvery));
         }
     }
     return {};

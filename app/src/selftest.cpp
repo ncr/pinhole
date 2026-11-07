@@ -1195,9 +1195,9 @@ void runFavouriteSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer,
             grab(step.name + QStringLiteral("-before"), step.bottom);
             key(window, Qt::Key_F);
             const int atOnce = favourites(n);
-            QTimer::singleShot(1500, window, [=, &viewer] {
+            QTimer::singleShot(1500, window, [=, &viewer, &library] {
                 std::printf("selftest: %s: favourites of %d %d, at once %d, after the service %d%s\n", qPrintable(step.name), n,
-                            before, atOnce, favourites(n), step.bottom ? "" : viewer.isFavorite() ? " (viewer ♥)" : " (viewer ♡)");
+                            before, atOnce, favourites(n), step.bottom ? "" : viewer.index() >= 0 && library.at(viewer.index()).favorite ? " (viewer ♥)" : " (viewer ♡)");
                 std::fflush(stdout);
                 grab(step.name + QStringLiteral("-after"), step.bottom);
                 (*next)();
