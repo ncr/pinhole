@@ -32,10 +32,10 @@ Item {
     property int thumbSize: 512
 
     // How it is made, kept for next time.
-    property var recipe: Object.assign({}, Layout.DEFAULT_RECIPE, pinhole.setting("recipe", {}))
+    property var recipe: Object.assign({}, Layout.DEFAULT_RECIPE, pinhole.settings.recipe || {})
     function change(part) {
         recipe = Object.assign({}, recipe, part)
-        pinhole.setSetting("recipe", recipe)
+        pinhole.settings.recipe = recipe
     }
     function cycle(name, list) {
         const part = {}

@@ -906,6 +906,10 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
             {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotoDirect\\s*\\(")),
              "pinhole.openPhotoDirect is superseded by pinhole.openPhotos(photos, photo) (API 9), which steps "
              "through the view's own photos and can come back to it: openPhotoDirect goes at a later API"},
+            {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*(?:setting|setSetting)\\s*\\(")),
+             "pinhole.setting(key, fallback) and setSetting(key, value) are superseded by pinhole.settings (API 2), "
+             "read, bound to and assigned as properties, with each default in the manifest's \"settings\" (API 13): "
+             "they go at a later API"},
         };
         for (const auto &[pattern, why] : superseded)
             for (auto m = pattern.globalMatch(code); m.hasNext();)

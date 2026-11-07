@@ -40,8 +40,7 @@ PinholePlugin {
                     () => keepHiding(!hide), () => keepHiding(hide))
     }
     function keepHiding(hide) {
-        if (!pinhole.setSetting("hide", hide))
-            pinhole.warn(qsTr("The setting could not be kept"))
+        pinhole.settings.hide = hide
         // Never quietly: how many went, and the way back.
         if (hide && shots.length > 0)
             pinhole.notify(qsTr("%n screenshots hidden: ⇧\u00a0S shows them again", "", shots.length))
