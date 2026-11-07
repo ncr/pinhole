@@ -883,6 +883,19 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                                              "too: use a Command with keyLayer \"plugin\" and a when")
                                   .arg(file)
                                   .arg(lineAt(code, m.next().capturedStart()));
+        // What the kit has a better way of now: still there, said so, and
+        // to go at a later API.
+        static const QList<std::pair<QRegularExpression, const char *>> superseded = {
+            {QRegularExpression(QStringLiteral("\\bSdrVideo\\s*\\{")),
+             "SdrVideo is superseded by VideoView (API 5), which tone-maps an HDR video on the GPU and shows it as "
+             "Pinhole does: SdrVideo goes at a later API"},
+            {QRegularExpression(QStringLiteral("\\bpinhole\\s*\\.\\s*openPhotoDirect\\s*\\(")),
+             "pinhole.openPhotoDirect is superseded by pinhole.openPhotos(photos, photo) (API 9), which steps "
+             "through the view's own photos and can come back to it: openPhotoDirect goes at a later API"},
+        };
+        for (const auto &[pattern, why] : superseded)
+            for (auto m = pattern.globalMatch(code); m.hasNext();)
+                found.warnings << QStringLiteral("%1:%2: %3").arg(file).arg(lineAt(code, m.next().capturedStart())).arg(QLatin1String(why));
         // A file from outside the plugin: another plugin's changes, or goes,
         // with it.
         for (auto m = importLine.globalMatch(text); m.hasNext();) {
