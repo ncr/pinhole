@@ -1151,15 +1151,24 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 QCoreApplication::exit(1);
                 return;
             }
+            // Whether it read the original, from its own word: reading
+            // changes, however short the read (a small JPEG's is shorter than
+            // any poll), start a timer that says so.
+            auto readSeen = std::make_shared<bool>(false);
+            auto *read = new QTimer(window);
+            read->setSingleShot(true);
+            read->setInterval(0);
+            QObject::connect(read, &QTimer::timeout, window, [readSeen] { *readSeen = true; });
+            const QMetaObject *meta = info->metaObject();
+            const QMetaMethod changed = meta->property(meta->indexOfProperty("reading")).notifySignal();
+            QObject::connect(info, changed, read, read->metaObject()->method(read->metaObject()->indexOfSlot("start()")));
             info->setProperty("shown", true);
             viewer.openAt(0, QRectF(0, 0, 100, 100));
-            auto readSeen = std::make_shared<bool>(false);
             auto clock = std::make_shared<QElapsedTimer>();
             clock->start();
             auto poll = new QTimer(window);
             poll->setInterval(50);
             QObject::connect(poll, &QTimer::timeout, window, [=] {
-                *readSeen = *readSeen || info->property("reading").toBool();
                 const QVariant value = info->property("facts");
                 const QVariantMap facts = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
                 const bool done = !facts.value("format").toString().isEmpty() && facts.contains("bytes")

@@ -1907,7 +1907,17 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
             .arg(recipe.value("layout").toString()).arg(sheet.value("w").toInt()).arg(sheet.value("h").toInt())
             .arg(recipe.value("gap").toString(), recipe.value("background").toString(), recipe.value("dates").toBool() ? "on" : "off");
     };
-    QTimer::singleShot(2500, window, [=] {
+    // Once the grid has the photos to tick (a folder's library is made as
+    // the window starts) and the plugin is there.
+    const int count = qEnvironmentVariableIsSet("PINHOLE_SHEET_COUNT") ? qEnvironmentVariableIntValue("PINHOLE_SHEET_COUNT") : 7;
+    auto ready = std::make_shared<std::function<void()>>();
+    auto waited = std::make_shared<QElapsedTimer>();
+    waited->start();
+    *ready = [=] {
+        if ((grid->count() < count || !studio()) && waited->elapsed() < 60000) {
+            QTimer::singleShot(100, window, *ready);
+            return;
+        }
         window->setProperty("troubleSeen", true);
         if (!studio()) {
             say(QStringLiteral("FAIL no Contact sheet plugin"));
@@ -1916,7 +1926,6 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
         }
         // Seven photos from the middle of the screen (PINHOLE_SHEET_COUNT
         // for more), ticked as Space does.
-        const int count = qEnvironmentVariableIsSet("PINHOLE_SHEET_COUNT") ? qEnvironmentVariableIntValue("PINHOLE_SHEET_COUNT") : 7;
         grid->setSelecting(true);
         const int first = std::max(0, std::min(grid->indexAt(grid->width() / 2, grid->height() / 2), grid->count() - count));
         for (int i = first; i < first + count; ++i) {
@@ -1969,7 +1978,7 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                     const QString error = s->property("error").toString();
                     // Said copied once the clipboard has it.
                     if ((making != "" || (made.isEmpty() && error.isEmpty()) || made.value("copy") == QLatin1String("copying"))
-                        && clock->elapsed() < 900000)
+                        && clock->elapsed() < 120000)
                         return;
                     poll->stop();
                     grab(QStringLiteral("8-made"));
@@ -1981,7 +1990,7 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
                                 .arg(mime && mime->hasFormat("image/png") ? "yes" : "no", mime && mime->hasFormat("image/jpeg") ? "yes" : "no",
                                      mime && mime->hasUrls() && mime->urls().value(0).toLocalFile() == made.value("path").toString() ? "yes" : "no"));
                     else
-                        say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 900 s") : error));
+                        say(QStringLiteral("FAIL %1").arg(error.isEmpty() ? QStringLiteral("nothing in 120 s: making \"%1\", %2 fetched").arg(making).arg(s->property("fetched").toInt()) : error));
                     // Made again, and Esc at once stops it, the studio
                     // still open; Esc again closes it.
                     key(window, Qt::Key_Return);
@@ -2022,7 +2031,8 @@ void runSheetSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &fold
             });
         };
         (*step)(0);
-    });
+    };
+    QTimer::singleShot(0, window, *ready);
 }
 
 static bool pluginCheckPasses(const QString &plugin, const std::function<void(const QString &)> &say);
@@ -2164,7 +2174,7 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
     const QString home = QDir(QDir::homePath()).canonicalPath();
     const QString omarchyHome = QDir(qEnvironmentVariable("PINHOLE_OMARCHY_HOME")).canonicalPath();
     const QString stubs = qEnvironmentVariable("PINHOLE_OMARCHY_STUBS");
-    const QString kept = QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) + "/Pinhole/.backgrounds").absolutePath();
+    const QString kept = QDir(picturesLocation() + "/Pinhole/.backgrounds").absolutePath();
     if (qEnvironmentVariable("PINHOLE_OMARCHY_HOME").isEmpty() || omarchyHome.isEmpty() || omarchyHome == home
         || !QFileInfo(stubs + "/omarchy-theme-bg-set").isExecutable() || !QFileInfo(stubs + "/omarchy-shell").isExecutable()
         || !kept.startsWith(omarchyHome + '/')) {

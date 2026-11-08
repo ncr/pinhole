@@ -3,13 +3,15 @@
 each in a scratch profile on an X display of its own, never on the desktop
 (bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
-    app/bin/test-selftests                 # covering through physics stacks hidden layers colour edit people help clashes
+    app/bin/test-selftests                 # all: through covering colour physics hidden stacks layers people help edit info sheet background clashes
     app/bin/test-selftests through layers  # some of them
 
 The window, the service, the fake library and the plugins' helpers built
 first (a few seconds when they are up to date). A fake library (pinhole-fake) with screenshots and
 photos taken on this day in earlier years; Pinhole's plugins and the test
-plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Each
+plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Info,
+the contact sheet and Background on a folder of real photos instead, as a
+folder source reads it; Background with an Omarchy of its own. Each
 mode's log is kept in build/selftests/<mode>.log. Exits 1 if any fails.
 """
 import concurrent.futures
@@ -34,7 +36,10 @@ ROOT = APP.parent
 # Each in a window of its own, all at once; through as two, a width each.
 # The longest first, so the last to end ends soonest.
 MODES = ["through:850:panel", "through:1700:panel", "through:850:rest", "through:1700:rest", "covering", "colour", "physics", "hidden", "stacks", "layers", "people", "help",
-         "edit", "clashes"]
+         "edit", "info", "sheet", "background", "clashes"]
+# On a folder of real photos (folder()), its originals there to read: the
+# fake library has thumbnails alone.
+ON_FOLDER = {"info", "sheet", "background"}
 TEST_PLUGINS = ["scrolls", "layers"]
 
 # clashes: what the window says of keys two have (app/tests/clashes), as
@@ -77,6 +82,61 @@ def library(scratch):
     db.commit()
     db.close()
     return out
+
+
+def folder(scratch):
+    """A folder of twelve JPEGs, as a camera leaves them (EXIF: make, model,
+    when), a source of the folder kind reads; and beside it, out of it, a
+    second of a background a theme switch brings (other.jpg) and a video
+    for Series' studio to have made (clip.mp4)."""
+    from PIL import Image, ImageDraw
+    photos = scratch / "folder"
+    photos.mkdir()
+    for n in range(12):
+        image = Image.new("RGB", (1600, 1200), (40 + n * 17, 90, 200 - n * 12))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((300 + n * 40, 250, 1100 + n * 20, 950), fill=(230, 200 - n * 10, 60))
+        exif = Image.Exif()
+        exif[0x010F], exif[0x0110] = "Pinhole", "Selftest One"
+        when = f"2024:06:{n + 1:02d} 10:{n:02d}:00"
+        exif[0x0132] = when
+        exif.get_ifd(0x8769)[0x9003] = when
+        image.save(photos / f"IMG_{n:04d}.JPG", quality=88, exif=exif)
+    Image.new("RGB", (1920, 1080), (20, 120, 90)).save(scratch / "other.jpg", quality=88)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=24:duration=1",
+                    "-pix_fmt", "yuv420p", str(scratch / "clip.mp4")], check=True)
+    return photos
+
+
+def omarchy(profile, scratch, env):
+    """For background: an Omarchy of its own, as its check makes one: a
+    home apart from HOME with its Pictures, a theme "test" whose background
+    a.jpg is set, stand-ins for omarchy-theme-bg-set and omarchy-shell, and
+    decoys of Omarchy's own first on PATH that only fail: never the
+    desktop's."""
+    home = profile / "omarchy"
+    state = home / ".local/state/omarchy"
+    for folder in [state / "current/theme/backgrounds", state / "theme-backgrounds", home / ".config/omarchy/backgrounds",
+                   home / ".config/omarchy/themes/test/backgrounds", home / "Pictures"]:
+        folder.mkdir(parents=True)
+    (state / "current/theme.name").write_text("test\n")
+    for theme in [state / "current/theme", home / ".config/omarchy/themes/test"]:
+        shutil.copy(scratch / "other.jpg", theme / "backgrounds/a.jpg")
+    (state / "current/background").symlink_to(state / "current/theme/backgrounds/a.jpg")
+    stubs, decoys = profile / "stubs", profile / "decoys"
+    stubs.mkdir()
+    decoys.mkdir()
+    (stubs / "omarchy-shell").write_text('#!/bin/sh\nexit 0\n')
+    (stubs / "omarchy-theme-bg-set").write_text('#!/bin/sh\nb=$(realpath -- "$1") && [ -f "$b" ] || exit 1\n'
+                                               'ln -nsf -- "$b" "$PINHOLE_OMARCHY_HOME/.local/state/omarchy/current/background"\n')
+    for decoy in ["omarchy-shell", "omarchy-theme-bg-set", "omarchy-theme-set"]:
+        (decoys / decoy).write_text(f'#!/bin/sh\necho "{decoy} $*" >> "{profile}/decoys.log"\nexit 1\n')
+    for script in [*stubs.iterdir(), *decoys.iterdir()]:
+        script.chmod(0o755)
+    return {"PINHOLE_OMARCHY_HOME": str(home), "PINHOLE_OMARCHY_STUBS": str(stubs),
+            "XDG_PICTURES_DIR": str(home / "Pictures"), "PATH": f"{decoys}:{env['PATH']}",
+            "PINHOLE_SELFTEST_PHOTOS": "IMG_0000.JPG", "PINHOLE_SELFTEST_VIDEO": str(scratch / "clip.mp4"),
+            "PINHOLE_SELFTEST_OTHER": str(scratch / "other.jpg")}
 
 
 def faces(profile, lib, out):
@@ -154,7 +214,7 @@ def plugins(scratch):
     return farm
 
 
-def run(job, scratch, lib, farm, logs):
+def run(job, scratch, lib, farm, logs, photos):
     # A mode, or a mode and its part ("through:850", one width of it).
     mode, _, part = job.partition(":")
     name = job.replace(":", "-")
@@ -192,6 +252,13 @@ def run(job, scratch, lib, farm, logs):
     # A display of its own (bin/headless-x: Xvfb, or Hyprland's Xwayland on
     # workspace 5), which the window's environment is not given.
     command = [str(APP / "bin/headless-x"), "1600x1000", str(APP / "build/pinhole"), "--library", str(given)]
+    if mode in ON_FOLDER:
+        # The folder as the source shown: its library the service's to make.
+        (profile / "config/pinhole").mkdir(parents=True)
+        (profile / "config/pinhole/settings.json").write_text(json.dumps({"source": {"kind": "folder", "path": str(photos)}}))
+        command = command[:3]
+    if mode == "background":
+        env |= omarchy(profile, scratch, env)
     if mode == "hidden":
         # Screenshots hiding, what it found kept from a run before.
         (profile / "config/pinhole").mkdir(parents=True)
@@ -217,12 +284,25 @@ def run(job, scratch, lib, farm, logs):
     with (logs / f"{name}.log").open("w") as log:
         code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
                               stderr=subprocess.STDOUT).returncode
+        if mode == "info" and code == 0:
+            # Again on the same profile: what was kept shows, the original
+            # not read again.
+            log.write("selftest: again, on what the first run kept\n")
+            log.flush()
+            code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
+                                  stderr=subprocess.STDOUT).returncode
     # The pictures a mode took, kept beside its log (edit's: its photo turned
     # and cropped).
     for picture in out.glob("*.png"):
         shutil.copy(picture, logs / f"{name}-{picture.name}")
     text = (logs / f"{name}.log").read_text(errors="replace")
     failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
+    if mode == "info":
+        reads = [line for line in text.splitlines() if "the original read this time:" in line]
+        if [("this time: yes" in line) for line in reads] != [True, False]:
+            failed.append("FAIL the original not read the first time alone: " + " | ".join(reads))
+    if mode == "background" and (profile / "decoys.log").exists():
+        failed.append("FAIL Omarchy's own called: " + (profile / "decoys.log").read_text().strip())
     if mode == "clashes":
         failed += [f"FAIL not said: {' or '.join(group)}" for group in CLASHES if not any(line in text for line in group)]
         failed += [f"FAIL said: {line.strip()}" for line in text.splitlines() if any(free in line for free in NOT_CLASHES)]
@@ -249,12 +329,12 @@ def main():
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="pinhole-selftests-") as temporary:
         scratch = Path(temporary)
-        lib, farm = library(scratch), plugins(scratch)
+        lib, farm, photos = library(scratch), plugins(scratch), folder(scratch)
         # All at once, each in its own X server and profile: as many as
         # there are cores for, the longest first.
         workers = max(1, min(len(jobs), (os.cpu_count() or 2) // 2))
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-            results = list(pool.map(lambda job: run(job, scratch, lib, farm, logs), jobs))
+            results = list(pool.map(lambda job: run(job, scratch, lib, farm, logs, photos), jobs))
     print(f"{sum(results)} of {len(results)} ok in {time.monotonic() - started:.0f} s")
     return 0 if all(results) else 1
 
