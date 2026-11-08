@@ -115,22 +115,25 @@ Item {
             report(error)
         })
     }
+    // A question to the worker, a promise of its answer: pinholed's
+    // worker asked in place (pinhole.ask, no program started each time),
+    // this plugin's own through its socket.
     function request(message) {
+        if (managed)
+            return pinhole.ask("index", message, { timeout: 120000 })
         return pinhole.run(helper, ["request", "--index", indexPath], {
             input: JSON.stringify(message), timeout: 120000
+        }).then(result => {
+            const value = JSON.parse(result.stdout)
+            if (!value.ok) throw new Error(value.error)
+            return value.result
         })
-    }
-    function unpack(result) {
-        const value = JSON.parse(result.stdout)
-        if (!value.ok) throw new Error(value.error)
-        return value.result
     }
     function catalog() {
         if (!ready || managed) return
         catalogReady = false
         cataloguer.start(() => pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001")
-            .then(assets => request({ op: "catalog", assets: assets, auto_index: !paused }))
-            .then(result => unpack(result)))
+            .then(assets => request({ op: "catalog", assets: assets, auto_index: !paused })))
     }
     Job {
         id: cataloguer
@@ -144,7 +147,7 @@ Item {
     // Asked while one is asked: that one's answer will do.
     function poll() {
         if ((!managed && (!ready || !catalogReady)) || poller.busy) return
-        poller.start(() => request({ op: "status" }).then(result => unpack(result)))
+        poller.start(() => request({ op: "status" }))
     }
     Job {
         id: poller
@@ -197,7 +200,7 @@ Item {
         failure = ""
         const source = sourceKey
         return request({ op: "import", run: benchmark.run, corpus: benchmark.corpus }).then(result => {
-            if (source === sourceKey) status = unpack(result)
+            if (source === sourceKey) status = result
         }).catch(error => { if (source === sourceKey) report(error) })
     }
     function toggleIndexing() {
@@ -205,7 +208,7 @@ Item {
         failure = ""
         const resume = paused || status.error !== ""
         pinhole.settings.indexingPaused = !resume
-        toggler.start(() => request(resume ? { op: "start", missing_only: true } : { op: "stop" }).then(result => unpack(result)))
+        toggler.start(() => request(resume ? { op: "start", missing_only: true } : { op: "stop" }))
     }
     Job {
         id: toggler

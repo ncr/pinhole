@@ -313,15 +313,53 @@ class WorkerTests(unittest.TestCase):
             answer = self.worker.request({'op': 'warm'})
         self.assertEqual((answer['warm'], answer['reason']), (False, 'waiting for memory'))
 
-    def test_same_path_thumbnail_replacement_is_excluded_before_query(self):
+    def test_same_path_thumbnail_replacement_is_excluded_from_what_is_found(self):
+        from unittest.mock import Mock
         from photo_search.ane import hash_file
         self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
         self.worker.refresh()
         (self.root / 'a.jpg').write_bytes(b'replaced in place')
-        result = self.worker.request({'op': 'query', 'text': 'pies'})
+        model = Mock()
+        model.encode.return_value = self.vector()[None, :], {}
+        with patch('photo_search.models.TextModel', return_value=model):
+            result = self.worker.request({'op': 'query', 'text': 'pies'})
         self.assertEqual(result['results'], [])
         self.assertEqual(self.worker.status()['errors'], 1)
-        self.assertIsNone(self.worker.engine.text_model)
+
+    def test_a_query_checks_what_it_found_and_the_status_is_counted_once_a_write(self):
+        from unittest.mock import Mock
+        from photo_search.ane import hash_file
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        model = Mock()
+        model.encode.return_value = self.vector()[None, :], {}
+        checked = []
+        refresh = self.worker.refresh
+        with patch('photo_search.models.TextModel', return_value=model), \
+                patch.object(self.worker, 'refresh', side_effect=lambda assets=None: (checked.append(assets), refresh(assets))):
+            result = self.worker.request({'op': 'query', 'text': 'pies'})
+        self.assertEqual([r['id'] for r in result['results']], ['a'])
+        self.assertEqual(checked, [['a']])
+        counted = self.worker.store.counted
+        self.worker.status()
+        self.assertIs(self.worker.store.counted, counted)
+        self.worker.store.fail('a', 'gone')
+        self.assertEqual(self.worker.status()['errors'], 1)
+
+    def test_pinholeds_questions_are_answered_by_number(self):
+        import io
+        from contextlib import redirect_stdout
+        from photo_search.worker import answer
+        said = io.StringIO()
+        with redirect_stdout(said):
+            answer(self.worker, b'{"ask": 7, "request": {"op": "status"}}')
+            answer(self.worker, b'{"ask": 8, "request": {"op": "catalog", "assets": []}}')
+            answer(self.worker, b'{"ask": 9, "request": {"op": "nothing"}}')
+            answer(self.worker, b'not json')
+        lines = [json.loads(line) for line in said.getvalue().splitlines()]
+        self.assertEqual([line['answer'] for line in lines], [7, 8, 9])
+        self.assertIn('indexed', lines[0]['result'])
+        self.assertIn('pinholed manages', lines[1]['error'])
+        self.assertIn('error', lines[2])
 
     def test_tag_suggestions_rank_cached_vectors_and_recheck_the_photo(self):
         import numpy as np

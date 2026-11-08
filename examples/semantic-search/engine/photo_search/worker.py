@@ -151,18 +151,22 @@ class Worker:
                                       "processed": self.processed, "skipped": self.skipped,
                                       "error": self.last_error, "backend": self.args.backend}
 
-    def refresh(self, asset_id=None):
-        """Check indexed local files; same-path replacements must not rank.
+    def refresh(self, assets=None):
+        """Check indexed local files (all, or those of `assets`, ids);
+        same-path replacements must not rank.
 
         Hash once after a worker restart, then only after stat changes. The
         stat cache is ephemeral; vectors remain bound to content SHA-256.
         """
         sql = '''SELECT c.asset_id,c.path,e.fingerprint FROM catalog c
             JOIN embeddings e USING(asset_id) WHERE c.fingerprint=e.fingerprint AND c.active=1'''
-        if asset_id is None:
+        if assets is None:
             rows = self.store.db.execute(sql).fetchall()
         else:
-            rows = self.store.db.execute(sql + ' AND c.asset_id=?', (asset_id,)).fetchall()
+            rows = []
+            for start in range(0, len(assets), 500):
+                chunk = list(assets[start:start + 500])
+                rows += self.store.db.execute(sql + f' AND c.asset_id IN ({",".join("?" * len(chunk))})', chunk).fetchall()
         for asset, relative, fingerprint in rows:
             # The common case, every query: one stat of the file checked
             # before, the same as then (any other file has another inode).
@@ -195,7 +199,7 @@ class Worker:
     def suggest_tags(self, asset):
         if not isinstance(asset, str) or not 0 < len(asset) <= 1024:
             raise ValueError('invalid photo id')
-        self.refresh(asset)
+        self.refresh([asset])
         image = self.store.vector_for(asset)
         if image is None:
             return []
@@ -277,13 +281,20 @@ class Worker:
             limit = message.get('limit', 100)
             if type(limit) is not int or not 1 <= limit <= 500:
                 raise ValueError('result limit must be 1–500')
-            self.refresh()
             if not self.store.status()['indexed']:
                 return {"results": [], "seconds": 0, "status": self.status()}
             started = time.perf_counter()
             vector = self.encode_text([text])[0]
-            return {"results": self.store.search(vector, limit), "seconds": time.perf_counter() - started,
-                    "status": self.status()}
+            # Only what was found checked, not every photo indexed (35,000
+            # stats and a join, most of a question's time): one that
+            # changed is failed, and the search asked again without it.
+            for _ in range(5):
+                results = self.store.search(vector, limit)
+                generation = self.store.generation
+                self.refresh([result["id"] for result in results])
+                if self.store.generation == generation:
+                    break
+            return {"results": results, "seconds": time.perf_counter() - started, "status": self.status()}
         if op == 'warm':
             # Pinhole open: the model loaded and held while it asks again,
             # and the index read into memory, so a question waits for
@@ -390,6 +401,26 @@ class Worker:
                 self.running = False
 
 
+def answer(worker, line):
+    """One of pinholed's questions, {"ask": n, "request": {...}}, answered
+    on stdout with its number: {"answer": n, "result": ...} or "error"."""
+    try:
+        question = json.loads(line)
+        number = question["ask"]
+    except (ValueError, KeyError, TypeError):
+        return
+    try:
+        request = question.get("request")
+        if not isinstance(request, dict):
+            raise ValueError("a request is an object")
+        if request.get("op") == "catalog":
+            raise ValueError("pinholed manages this photo catalog")
+        said = {"answer": number, "result": worker.request(request)}
+    except Exception as error:
+        said = {"answer": number, "error": str(error)}
+    print(json.dumps(said, ensure_ascii=False), flush=True)
+
+
 def serve(args):
     import fcntl
     import select
@@ -428,10 +459,20 @@ def serve(args):
                 next_step = 0
                 from .away import Away
                 away = Away()
+                asked = bytearray()
                 while not stopping:
                     if catalog is not None:
-                        if select.select([0], [], [], 0)[0] and not os.read(0, 1):
-                            break
+                        # pinholed's questions (pinhole.ask), a line each;
+                        # its stdin closed, the end.
+                        if select.select([0], [], [], 0)[0]:
+                            block = os.read(0, 1 << 16)
+                            if not block:
+                                break
+                            asked.extend(block)
+                            while b'\n' in asked:
+                                line, _, rest = bytes(asked).partition(b'\n')
+                                asked[:] = rest
+                                answer(worker, line)
                         catalog.poll(worker)
                     worker.release_idle()
                     try:

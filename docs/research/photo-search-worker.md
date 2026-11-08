@@ -44,8 +44,12 @@ photo in WAL mode. SIGTERM is handled between operations and the socket is
 removed on orderly exit. A process lock rejects a second worker before it
 can unlink a live socket or open the same index.
 
-Requests use one JSON object per Unix-socket connection, ending with a
-newline. `request --index INDEX` computes the same short socket path and
+The shared worker is asked through pinholed (`pinhole.ask`, its manifest
+says `"answers": true`): a question a line on its stdin, `{"ask": n,
+"request": {...}}`, answered on its stdout as `{"answer": n, "result": ...}`
+or `{"answer": n, "error": "why"}`, no program started for each. A window's
+own worker for a separate library is asked through its socket: requests use
+one JSON object per Unix-socket connection, ending with a newline. `request --index INDEX` computes the same short socket path and
 reads the request from stdin; `--socket PATH` is also available. The default
 socket lives in an owner-checked mode-0700 temporary directory with a
 mode-0600 socket. Index files are mode 0600. Requests are bounded to 24 MiB;
@@ -68,6 +72,12 @@ Operations:
 - `query`: `{text:"pies na plaży",limit:100}`, at most 2048 characters and
   500 results. Normalized image/text vectors use exact dot-product ranking,
   with stable photo-id ordering on ties. Similarity is not a probability.
+  Only the thumbnails found are checked against their hashes, not every
+  one indexed: one changed in place is failed and the search asked again
+  without it. The counts in `status` are counted again only after a write.
+  On 35,850 photos with WeMM 4B on CUDA a question takes about 250 ms,
+  most of it the text encoder (355 ms when each started a program and
+  checked every photo).
 - `suggest_tags`: `{id:"photo-id"}` returns up to five `{id,label}` pairs
   from a fixed Polish vocabulary. It checks only the selected thumbnail and
   reuses its saved image vector. The resident text encoder embeds the

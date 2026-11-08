@@ -95,7 +95,6 @@ Panel {
         pinhole.warn(error)
     }
     function request(message) { return indexer.request(message) }
-    function unpack(result) { return indexer.unpack(result) }
     function ask(text) {
         search.text = text
         search.input.cursorPosition = text.length
@@ -118,7 +117,7 @@ Panel {
             openWhenReady = false
             return
         }
-        querier.start(() => request({ op: "query", text: text, limit: 500 }).then(result => unpack(result)))
+        querier.start(() => request({ op: "query", text: text, limit: 500 }))
     }
     Job {
         id: querier
@@ -195,7 +194,7 @@ Panel {
         tagAsset = asset
         tagError = ""
         if (!catalogReady) return
-        suggester.start(() => request({ op: "suggest_tags", id: asset }).then(result => unpack(result)))
+        suggester.start(() => request({ op: "suggest_tags", id: asset }))
     }
     Job {
         id: suggester

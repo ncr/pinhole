@@ -50,6 +50,7 @@ class Store:
         self.identity = expected
         self.generation = 0
         self.snapshot = None
+        self.counted = None
 
     def close(self):
         self.db.close()
@@ -108,11 +109,17 @@ class Store:
         self.invalidate()
 
     def status(self):
+        # Counted again only once something was written (invalidate): a
+        # count over the whole index on every question is tens of ms.
+        if self.counted is not None and self.counted[0] == self.generation:
+            return dict(self.counted[1])
         indexed = self.db.execute('''SELECT count(*) FROM embeddings e JOIN catalog c USING(asset_id)
             WHERE e.fingerprint=c.fingerprint AND c.active=1''').fetchone()[0]
-        return {"indexed": indexed, "total": self.db.execute("SELECT count(*) FROM catalog").fetchone()[0],
-                "errors": self.db.execute("SELECT count(*) FROM failures").fetchone()[0],
-                "dimension": self.dimension}
+        counts = {"indexed": indexed, "total": self.db.execute("SELECT count(*) FROM catalog").fetchone()[0],
+                  "errors": self.db.execute("SELECT count(*) FROM failures").fetchone()[0],
+                  "dimension": self.dimension}
+        self.counted = (self.generation, counts)
+        return dict(counts)
 
     def vector_for(self, asset_id):
         row = self.db.execute('''SELECT e.vector FROM embeddings e JOIN catalog c USING(asset_id)
