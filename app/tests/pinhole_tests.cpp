@@ -2107,6 +2107,19 @@ QtObject {
         cmsCloseProfile(to);
         return qRgb(out[0], out[1], out[2]);
     }
+    // A whole picture in sRGB by lcms2, with one transform: as many codes
+    // as its pixels, not a transform made for each.
+    static QImage lcms2Srgb(const QByteArray &icc, const QImage &picture) {
+        cmsHPROFILE from = cmsOpenProfileFromMem(icc.constData(), cmsUInt32Number(icc.size())), to = cmsCreate_sRGBProfile();
+        cmsHTRANSFORM t = cmsCreateTransform(from, TYPE_BGRA_8, to, TYPE_BGRA_8, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOCACHE);
+        QImage out = picture.convertToFormat(QImage::Format_ARGB32);
+        for (int y = 0; y < out.height(); ++y)
+            cmsDoTransform(t, out.scanLine(y), out.scanLine(y), cmsUInt32Number(out.width()));
+        cmsDeleteTransform(t);
+        cmsCloseProfile(from);
+        cmsCloseProfile(to);
+        return out;
+    }
     static QByteArray testData(const QString &name) {
         QFile file(QStringLiteral(PINHOLE_TEST_DATA "/") + name);
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
@@ -2207,9 +2220,10 @@ QtObject {
             toSrgb(converted, icc);
             QVERIFY(converted != picture);
             int worst = 0;
+            const QImage reference = lcms2Srgb(icc, picture);
             for (int y = 0; y < 64; ++y)
                 for (int x = 0; x < 256; ++x) {
-                    const QRgb a = converted.pixel(x, y), b = lcms2Srgb(icc, picture.pixel(x, y));
+                    const QRgb a = converted.pixel(x, y), b = reference.pixel(x, y);
                     worst = std::max({worst, std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
                 }
             QVERIFY2(worst <= 1, qPrintable(QStringLiteral("%1 codes apart").arg(worst)));
