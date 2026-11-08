@@ -23,6 +23,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import sqlite3
 import struct
 import subprocess
@@ -214,6 +215,35 @@ def plugins(scratch):
     return farm
 
 
+def stop_service(profile):
+    """The profile's pinholed ended, found by its socket: one shown a
+    folder's library is the shared service, which outlives its windows by
+    design, and would stay running after the run otherwise."""
+    socket = f"--socket\0{profile}/run/p.sock\0".encode()
+    found = []
+    for entry in Path("/proc").iterdir():
+        if entry.name.isdigit():
+            try:
+                if socket in (entry / "cmdline").read_bytes():
+                    found.append(int(entry.name))
+            except OSError:
+                pass
+    for pid in found:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + 5
+    while found and time.monotonic() < deadline:
+        found = [pid for pid in found if Path(f"/proc/{pid}").exists()]
+        time.sleep(0.1)
+    for pid in found:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def run(job, scratch, lib, farm, logs, photos):
     # A mode, or a mode and its part ("through:850", one width of it).
     mode, _, part = job.partition(":")
@@ -295,6 +325,7 @@ def run(job, scratch, lib, farm, logs, photos):
             log.flush()
             code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
                                   stderr=subprocess.STDOUT).returncode
+    stop_service(profile)
     # The pictures a mode took, kept beside its log (edit's: its photo turned
     # and cropped).
     for picture in out.glob("*.png"):
