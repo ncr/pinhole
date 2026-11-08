@@ -1,9 +1,7 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "example.tiles",
   "name": "Example tiles",
   "version": "1.0.0",
-  "description": "An example from docs/plugins.md.",
-  "entryPoints": { "main": "Main.qml" }
+  "description": "An example from docs/plugins.md."
 }

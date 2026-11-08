@@ -205,8 +205,7 @@ points: a custom view, a file-making tool and a photo-source provider, with
 all files, dependencies and run instructions. Executable copies live in
 `app/tests/examples/` in the source checkout.
 
-The following smaller examples show additional kit features. Each needs a
-manifest with `"api": 5` or newer.
+The following smaller examples show additional kit features.
 
 A `PinchZoom` over tiles laid out at its `size`:
 
@@ -359,7 +358,7 @@ footgun Pinhole's own plugins hit):
 - `copy()` of a text field: it sets the session's clipboard
   (`pinhole.copyText`);
 - in `manifest.json`, a key it never reads (`"verison"`, with the one
-  meant), an `api` or `schemaVersion` that is not a whole number, an id
+  meant), an `api` that is not a whole number, an id
   of anything but letters, digits, `.`, `_` and `-`, and a `pinhole.` id
   of one's own (they are Pinhole's plugins');
 - `sqlite3` (`pinhole.query`), named anywhere in a string: by its path,
@@ -395,27 +394,25 @@ And warns of:
 
 ```json
 {
-  "schemaVersion": 1,
-  "api": 3,
+  "api": 15,
   "id": "me.favourites",
   "name": "Favourites count",
   "version": "1.0.0",
-  "description": "How many favourites, on F2.",
-  "entryPoints": { "main": "Main.qml" }
+  "description": "How many favourites, on F2."
 }
 ```
 
 | Key | |
 |---|---|
-| `schemaVersion` | 1, the only one; 1 if left out |
 | `id` | its folder's name if left out: letters, digits, `.`, `_` and `-`, beginning with a letter or a digit; yours (`me.…`), as `pinhole.…` are Pinhole's own plugins'. It names the plugin's switch, settings, state and cache |
 | `name`, `description` | what the side panel says of it (translated in `i18n/<language>.json` too) |
 | `version` | yours, shown with its name |
 | `api` | the plugin API it is written for, this Pinhole's: 15, required (below) |
-| `entryPoints` | `{ "main": "Main.qml" }`: the file in its folder Pinhole loads; `Main.qml` if left out |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
 | `requires` | the programs it needs, by their names on PATH: `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
 | `author`, `license` | yours |
+
+What Pinhole loads is always the `Main.qml` beside it.
 
 A key not among these is never read: `plugin check` says so, with the one
 meant.
@@ -483,10 +480,8 @@ without a window:
 
 ```json
 {
-  "schemaVersion": 1,
-  "api": 11,
+  "api": 15,
   "id": "pinhole.people",
-  "entryPoints": { "main": "PeoplePlugin.qml" },
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
   ]
@@ -501,7 +496,7 @@ without a window:
 | `per` | `"source"`, the only one there is (also if left out): one runs for the source shown |
 | `answers` | `true`: it answers what its plugin asks, `pinhole.ask` (below); `false` if left out |
 
-`workers` needs `"api": 11`. pinholed finds them as it finds providers
+pinholed finds them as it finds providers
 (source-providers.md): in Pinhole's own plugins and yours, a plugin of
 your own with a built-in's id in that one's place. It looks again every
 two seconds, so a manifest changed, a plugin added or a switch in
@@ -608,7 +603,7 @@ EOF, then end.
 A plugin can make a photo's renditions a source has no file of, while
 someone waits for them: the Live Photos plugin makes a Live Photo's Bounce
 and Long exposure from its motion. Its manifest says what, from what, and
-the program of its own that makes it (`"api": 12`):
+the program of its own that makes it:
 
 ```json
 "makes": [
@@ -923,7 +918,7 @@ this API. A library position is not a visual grid position.
 
 | | |
 |---|---|
-| `library` | `count`; `item(photo)`: `index`, `id`, `date` (when it was taken: ms since 1970 UTC, an instant; for its hour, `new Date(date)` gives this computer's time zone's, not the one it was taken in), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program; API 4), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a Live Photo's effect as set on the iPhone: `loop`, `bounce`, `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `field("hidden")`: whether the grid hides each; `field(name, { shown: true })`: only those the grid shows, in their order, the hidden left out (a histogram of what shows, with `field("id", { shown: true })` beside it); `[]` for `index`, `thumbnail` or a name it has not (said on stderr, and refused by `plugin check`); `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; `settled(how)` once it is read again or what the grid hides changed, once for both when they come at once (a read moves what is hidden), with `how`: `{ read, hidden, switched, revision }`, `read` whether it was read again, `switched` whether that is another source's library (its `key` another: drop what you keep of the one before), `hidden` whether what the grid hides changed: listen to it alone, rather than to `changed` and `pinhole.hiddenChanged` both; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
+| `library` | `count`; `item(photo)`: `index`, `id`, `date` (when it was taken: ms since 1970 UTC, an instant; for its hour, `new Date(date)` gives this computer's time zone's, not the one it was taken in), `filename`, `thumbnail` (a URL for an `Image`, in sRGB: `image://file/…`), `thumbPath` (the thumbnail's file, to hand to a program), `width`, `height` (the thumbnail's), `video`, `live`, `favorite`, `effect` (a Live Photo's effect as set on the iPhone: `loop`, `bounce`, `long_exposure`, or `""`), `avgColor` (the thumbnail's average colour, `"#rrggbb"`, or `""` before it has one), or `{}` if there is no such photo; `field(name)`: one of those for every photo at once, in the library's order (`field("date")`: all the dates), far quicker than `item` for each, or `field("day")`: the day each was taken in local time, as a number `yyyymmdd` (20250108), before 1970 too, 0 for one with no date (its `date` 0); `field("hidden")`: whether the grid hides each; `field(name, { shown: true })`: only those the grid shows, in their order, the hidden left out (a histogram of what shows, with `field("id", { shown: true })` beside it); `[]` for `index`, `thumbnail` or a name it has not (said on stderr, and refused by `plugin check`); `indexOf(id)`, -1 if none; `dir` (the source's library: `library.sqlite`, to read, and its thumbnails); `key` (which source's library it is, wherever it is kept: `icloud:me@example.com`, `folder:/home/me/Pictures`, `""` for one that does not say; for what a plugin keeps for each source apart); `keys()`, the key of every source added, as the settings say now (what a plugin keeps for one no longer there can go); `changed()` when it is read again; `settled(how)` once it is read again or what the grid hides changed, once for both when they come at once (a read moves what is hidden), with `how`: `{ read, hidden, switched, revision }`, `read` whether it was read again, `switched` whether that is another source's library (its `key` another: drop what you keep of the one before), `hidden` whether what the grid hides changed: listen to it alone, rather than to `changed` and `pinhole.hiddenChanged` both; and `revision`, which goes up whenever what `item` and `field` say may have changed (read again, or a favourite set), for a binding over them |
 | `viewer` | the photo shown full window, read only: `open`, `index`, `photo` (it, as `library.item()` gives it, `{}` with none) and `id` (its id, `""` with none), `close()` (as Esc closes it); `hdr`, what makes it HDR, read from its file once it shows: `{ kind, headroom }`, `kind` `"apple"` or `"iso"` (a gain map: Apple's own, or ISO 21496-1's, which Android's and Adobe's Ultra HDR are too, ISO's when it has both), `"pq"` or `"hlg"` (its picture's own curve), and `headroom` how many stops its highlights go above SDR white; `{}` for SDR, a video, or until it is read |
 | `display` | the display the window is on, as the compositor says: `hdr`, whether it can show anything brighter than SDR white; `headroom`, by how many stops; `wide`, whether its colours go beyond sRGB. On a display without HDR, `hdr` false and `headroom` 0. `pinhole display` prints what the compositor says of each display |
 | `srgbProfile` | the path of an sRGB ICC profile installed with Pinhole: for a program to make a picture sRGB with, as Background and Theme give it to `magick -profile` so a wallpaper and a palette are of the colours the screen shows, not an iPhone's Display P3 codes taken as sRGB |

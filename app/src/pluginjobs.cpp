@@ -515,7 +515,7 @@ QJSValue PluginHost::run(const QString &program, const QStringList &arguments, c
                 killProgram(process);
             }
         });
-    // JSON both ways (API 15): `json` given as its stdin, and its stdout
+    // JSON both ways: `json` given as its stdin, and its stdout
     // read as JSON into the result's `json`.
     const bool json = options.hasProperty(QStringLiteral("json"));
     connect(process, &QProcess::finished, this, [this, process, deferred, why, generation, path, output, lines, json](int code, QProcess::ExitStatus status) {
@@ -645,7 +645,7 @@ QJSValue PluginHost::copyText(const QString &text) {
 }
 
 // A file of its own read, away from the window: one in its folder or its
-// cache (what its worker wrote there), whole, as text or as JSON (API 13).
+// cache (what its worker wrote there), whole, as text or as JSON.
 QJSValue PluginHost::readText(const QString &path) { return readFile(path, false); }
 QJSValue PluginHost::readJson(const QString &path) { return readFile(path, true); }
 

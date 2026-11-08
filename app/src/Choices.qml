@@ -3,7 +3,7 @@ import QtQuick
 // One of a few, chosen on a row of buttons, each also its number's key (1,
 // 2, 3…) while `usable`: `options` as [{ value, text }], the one chosen
 // `value`, and `chosen(value)` when another is. The keys are in the help
-// under `section`, as `helpText`. Given a `setting` (API 13), it shows and
+// under `section`, as `helpText`. Given a `setting`, it shows and
 // keeps that one of pinhole.settings, as a SettingSwitch does.
 Row {
     id: choices

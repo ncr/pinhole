@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.folder",
   "name": "Folders",
@@ -7,9 +6,6 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "A folder of photos on this computer or a disk as a source: its photos and videos, Live Photos paired, followed as it changes, and what you drop on the window copied in.",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "sources": [
     { "kind": "folder" }
   ]

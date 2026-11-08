@@ -288,7 +288,7 @@ private:
         });
     }
 
-    // Another kind's (API 15): its account and password, and a code if it
+    // Another kind's: its account and password, and a code if it
     // asks for one, as its provider takes them (docs/source-providers.md).
     void signInTo(const QString &kind, QString account) {
         if (account.isEmpty())

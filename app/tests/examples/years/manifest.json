@@ -1,11 +1,7 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",
-  "description": "A complete example from the plugin workshop.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "A complete example from the plugin workshop."
 }

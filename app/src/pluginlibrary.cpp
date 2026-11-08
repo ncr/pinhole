@@ -202,7 +202,7 @@ void PluginLibrary::settle(bool read, bool hidden) {
     });
 }
 
-// What the library says is a screenshot (API 10), for Screenshots and On
+// What the library says is a screenshot, for Screenshots and On
 // this day alike: iCloud's subtype of an iPhone's or an iPad's, a name
 // screenshots are given, or a PNG with no place shaped like a phone's
 // screen. A promise of their ids.

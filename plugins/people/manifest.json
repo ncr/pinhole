@@ -1,12 +1,10 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.people",
   "name": "People",
   "version": "0.7.0",
   "description": "Review and name local face groups.",
   "settings": { "grouping": "careful" },
-  "entryPoints": { "main": "PeoplePlugin.qml" },
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
   ]

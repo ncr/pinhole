@@ -1,13 +1,9 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.favourites",
   "name": "Favourites",
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "A heart on F for the photo shown and for what is ticked, set where the photos are (iCloud too) and undone with Ctrl Z; and a mark on favourites in the grid.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "A heart on F for the photo shown and for what is ticked, set where the photos are (iCloud too) and undone with Ctrl Z; and a mark on favourites in the grid."
 }

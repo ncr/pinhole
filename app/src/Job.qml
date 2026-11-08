@@ -1,6 +1,6 @@
 import QtQml
 
-// One thing the plugin asks for at a time, the latest winning (API 13): a
+// One thing the plugin asks for at a time, the latest winning: a
 // query, a run, a fetch. What a plugin otherwise writes by hand around
 // each promise: cancel the one before, drop an answer that came too late,
 // keep a busy flag, ask again when the library was read meanwhile, and

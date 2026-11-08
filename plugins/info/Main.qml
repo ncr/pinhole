@@ -171,7 +171,7 @@ PinholePlugin {
     function indexed(id, hold) {
         // Through pinhole.query, bounded and read only, as every plugin
         // reads the index; then what was read of the original before, as
-        // kept for the photo (pinhole.store, API 15), if it was of that
+        // kept for the photo (pinhole.store), if it was of that
         // original.
         const sql = "SELECT a.*, a.has_location AS location, a.item_type AS type, r.width, r.height, " +
                     "r.file_type AS fileType, r.key FROM assets a LEFT JOIN renditions r " +
@@ -305,7 +305,7 @@ PinholePlugin {
         }
         return parts.join(" · ")
     }
-    // The photo shown's HDR (API 4): {kind, headroom}, {} for SDR.
+    // The photo shown's HDR: {kind, headroom}, {} for SDR.
     readonly property var hdr: pinhole.viewer.hdr || ({})
     readonly property bool hasPlace: Geo.point("", facts.latitude, facts.longitude, 0) !== null
     function placeText() {

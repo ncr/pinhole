@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "requires": ["magick", "ffmpeg"],
   "id": "pinhole.background",
@@ -7,8 +6,5 @@
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Makes the photo shown the desktop background; a video, or a Live Photo's motion, a moving one.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "Makes the photo shown the desktop background; a video, or a Live Photo's motion, a moving one."
 }

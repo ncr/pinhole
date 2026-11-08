@@ -685,7 +685,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                     window->grabWindow().save(file);
                     apart("keyboard");
                     // A plugin's action with a key is in the help by itself
-                    // (API 15): Calendar's, its helpText beside Y.
+                    //: Calendar's, its helpText beside Y.
                     QQuickItem *board = window->findChild<QQuickItem *>(QStringLiteral("helpBoard"));
                     std::function<bool(QQuickItem *, const QString &)> says = [&](QQuickItem *item, const QString &text) {
                         if (item->property("text").toString() == text)

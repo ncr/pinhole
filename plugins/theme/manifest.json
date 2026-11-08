@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "requires": ["magick"],
   "id": "pinhole.theme",
@@ -8,8 +7,5 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "Makes an Omarchy theme from the photo shown full window, and the whole desktop takes its colours.",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "settings": { "strong": true, "mode": "auto" }
 }

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Window
 import Pinhole.Plugin
 
-// Who is in the photo shown (W, or its button, PeoplePlugin.qml): each face
+// Who is in the photo shown (W, or its button, Main.qml): each face
 // ringed on the photo, the one being named in the accent, and beside it a
 // card to say who that is: their name, a new one, Yes to the person it
 // looks like, or Not to the name it has. ⏎ goes on to the next face not

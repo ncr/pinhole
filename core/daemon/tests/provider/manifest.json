@@ -1,12 +1,10 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "test.source",
   "name": "Test source",
   "description": "A folder of JPEGs as a source of a plugin's own, for pinholed's tests (core/daemon/tests/provider.rs).",
   "version": "1.0",
   "author": "Pinhole",
-  "entryPoints": { "main": "Main.qml" },
   "sources": [
     {
       "kind": "test.source",

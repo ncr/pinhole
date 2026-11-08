@@ -1,6 +1,6 @@
 import QtQuick
 
-// A view of the plugin's own over the photos (API 13): what a calendar, a
+// A view of the plugin's own over the photos: what a calendar, a
 // gallery or a studio is drawn in. Put it in the plugin's root and open it
 // from an action:
 //

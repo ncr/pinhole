@@ -1,13 +1,9 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.colour",
   "name": "Colours",
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Finds photos by colour: pick one on a wheel, or the photos closest to one's own; and a rainbow wall of the library, laid out by hue.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "Finds photos by colour: pick one on a wheel, or the photos closest to one's own; and a rainbow wall of the library, laid out by hue."
 }

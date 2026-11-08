@@ -43,7 +43,7 @@ fn a_built_in_kind_whose_plugin_is_your_own_copy_is_on_only_when_turned_on() {
     assert!(!k.refresh(&HashMap::new()));
     assert!(k.on("icloud"));
     std::fs::create_dir_all(places.personal.join("icloud")).unwrap();
-    std::fs::write(places.personal.join("icloud/manifest.json"), json!({"schemaVersion": 1, "id": "pinhole.icloud"}).to_string()).unwrap();
+    std::fs::write(places.personal.join("icloud/manifest.json"), json!({"id": "pinhole.icloud"}).to_string()).unwrap();
     assert!(k.refresh(&HashMap::new()));
     assert!(!k.on("icloud") && k.on("folder"));
     // The built-in's switch, turned on once, is not the copy's own.

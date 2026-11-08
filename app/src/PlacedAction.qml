@@ -1,7 +1,7 @@
 import QtQml
 import QtQuick
 
-// One place of a PluginAction with `places` (API 15): drawn in that place as
+// One place of a PluginAction with `places`: drawn in that place as
 // any action is, with its own button, standing for `of`, whose words, key and
 // state it shows. Pressed, it says where and on which photos (`of.pressedIn`,
 // `of.photos`), then triggers `of`. Made by PluginPlane, never by a plugin.

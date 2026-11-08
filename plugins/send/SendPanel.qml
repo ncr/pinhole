@@ -333,7 +333,7 @@ Item {
     function openLocalSend() {
         if (running)
             return
-        // LocalSend there to hand them to (API 15).
+        // LocalSend there to hand them to.
         if (!pinhole.has("localsend"))
             return outcome("nolocalsend")
         phase = "fetching"

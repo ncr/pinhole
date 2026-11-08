@@ -1,10 +1,10 @@
 import QtQuick
 
-// A plugin's setting that is on or off (API 11): its words, and a switch
+// A plugin's setting that is on or off: its words, and a switch
 // at the right that says `toggled()`; with `usable` false, dimmed and
 // still. Pressing the words presses the switch.
 //
-// Given a `setting` (API 13), it is that one of pinhole.settings: shown as
+// Given a `setting`, it is that one of pinhole.settings: shown as
 // it is (its default from the manifest's "settings" until chosen), and
 // flipped and kept when pressed, with nothing more to write:
 //

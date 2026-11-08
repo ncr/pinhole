@@ -224,7 +224,7 @@ impl Workers {
         }
     }
 
-    /// What `plugin`'s worker `name` answers to `request` (`ask`, API 15):
+    /// What `plugin`'s worker `name` answers to `request` (`ask`):
     /// written to its stdin as a line, `{"ask": <id>, "request": …}`, and
     /// answered on its stdout, `{"answer": <id>, "result": …}` or with an
     /// `"error"`. Waits at most `timeout`. Only one whose manifest says it
@@ -579,7 +579,7 @@ mod tests {
             let at = self.dir.join(if builtin { "builtin" } else { "personal" }).join(folder);
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-            let manifest = json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"},
+            let manifest = json!({"api": 15, "id": id,
                                   "workers": [{"name": "w", "program": "work", "args": ["daemon"]}]});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             let end = match exit {
@@ -633,7 +633,7 @@ mod tests {
         let at = s.dir.join("builtin/search");
         std::fs::create_dir_all(&at).unwrap();
         std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-        let manifest = json!({"schemaVersion": 1, "api": 15, "id": "pinhole.search", "entryPoints": {"main": "Main.qml"},
+        let manifest = json!({"api": 15, "id": "pinhole.search",
                               "workers": [{"name": "index", "program": "work", "answers": true}]});
         std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
         // Answers each line: an error for "fail", nothing for "slow",

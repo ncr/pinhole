@@ -10,7 +10,7 @@
 class QNativeGestureEvent;
 
 // A surface moved and zoomed without levels (a map, a picture larger than
-// its room), with the grid's physics (API 12): what a plugin's own camera
+// its room), with the grid's physics: what a plugin's own camera
 // follows. It says how far to move and zoom, the plugin moves its camera:
 //
 // - a touchpad's swipe pans, following the fingers and coasting on as they

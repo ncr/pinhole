@@ -961,7 +961,7 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
             const qsizetype open = match.capturedEnd() - 1;
             const int first = lineAt(code, open), last = lineAt(code, closing(code, open));
             const QString lines = textLines.mid(first - 1, last - first + 1).join(QLatin1Char('\n'));
-            // `places` (API 15): each one of Pinhole's bars.
+            // `places`: each one of Pinhole's bars.
             static const QRegularExpression placesOf(QStringLiteral("(?:^|[;{\\s])places\\s*:\\s*\\[([^\\]]*)\\]"));
             static const QRegularExpression quoted(QStringLiteral("[\"']([^\"']*)[\"']"));
             static const QStringList bars = {"grid", "viewer", "selection"};
@@ -1161,9 +1161,9 @@ bool Plugins::usableId(const QString &id) {
 QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &manifest) {
     QStringList said;
     // What a manifest has: a key misspelt is never read, and nothing says so.
-    static const QStringList keys = {"schemaVersion", "id", "name", "description", "version", "api", "entryPoints",
+    static const QStringList keys = {"id", "name", "description", "version", "api",
                                      "sources", "workers", "makes", "settings", "requires", "author", "license"};
-    // The programs it needs (API 15): names, as on PATH.
+    // The programs it needs: names, as on PATH.
     if (manifest.contains("requires")) {
         static const QRegularExpression program(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"));
         const QJsonValue programs = manifest.value("requires");
@@ -1180,15 +1180,13 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
         if (!keys.contains(it.key()))
             said << QStringLiteral("manifest.json: \"%1\" is not a manifest's key%2, and is never read")
                         .arg(it.key(), didYouMean(it.key(), keys));
-    for (const QString number : {"api", "schemaVersion"})
-        if (manifest.contains(number)) {
-            const QJsonValue value = manifest.value(number);
-            if (!value.isDouble() || value.toDouble() != double(value.toInt()))
-                said << QStringLiteral("manifest.json: \"%1\" is a whole number (\"%1\": %2), not %3")
-                            .arg(number)
-                            .arg(number == QLatin1String("api") ? api : 1)
-                            .arg(QString::fromUtf8(QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact)).mid(1).chopped(1));
-        }
+    if (manifest.contains("api")) {
+        const QJsonValue value = manifest.value("api");
+        if (!value.isDouble() || value.toDouble() != double(value.toInt()))
+            said << QStringLiteral("manifest.json: \"api\" is a whole number (\"api\": %1), not %2")
+                        .arg(api)
+                        .arg(QString::fromUtf8(QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact)).mid(1).chopped(1));
+    }
     // pinhole. ids are Pinhole's own: one of one's own takes such an id
     // only as a copy of Pinhole's plugin of it.
     const QString id = manifest.value("id").toString();
@@ -1206,17 +1204,14 @@ QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QStr
     QJsonParseError parseError;
     *manifest = QJsonDocument::fromJson(file.readAll(), &parseError).object();
     const QString id = manifest->value("id").toString(QFileInfo(dir).fileName());
-    // Left out (API 15): Main.qml beside it, and schema 1, the only one.
-    *main = manifest->contains("entryPoints") ? manifest->value("entryPoints").toObject().value("main").toString()
-                                              : QStringLiteral("Main.qml");
+    // What it shows is always its Main.qml.
+    *main = QStringLiteral("Main.qml");
     if (parseError.error != QJsonParseError::NoError)
         return tr("manifest.json is not JSON: %1").arg(parseError.errorString());
-    if (manifest->value("schemaVersion").toInt(1) != 1)
-        return tr("manifest.json needs \"schemaVersion\": 1");
     if (!usableId(id))
         return tr("manifest.json has no usable \"id\": letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit (me.night)");
-    if (!safeEntry(*main) || !QFileInfo::exists(dir + '/' + *main))
-        return tr("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder");
+    if (!QFileInfo::exists(dir + '/' + *main))
+        return tr("There is no Main.qml in the plugin's folder");
     // Written for this Pinhole's API, and no other: one for an older is
     // not loaded as it was written, nor one for a newer.
     if (const int wanted = manifest->value("api").toInt(0); wanted > api)
@@ -1290,7 +1285,7 @@ QString Plugins::makesProblem(const QString &dir, const QJsonObject &manifest) {
     for (const QJsonValue &each : declared.toArray()) {
         const QJsonObject made = each.toObject();
         const QString kind = made.value("kind").toString();
-        // Or one of its own (API 15): "<its id>/<name>".
+        // Or one of its own: "<its id>/<name>".
         const QString id = manifest.value("id").toString();
         static const QRegularExpression ownName(QStringLiteral("^[a-z0-9][a-z0-9_-]{0,31}$"));
         if (each.isObject() && kind.contains('/')) {

@@ -446,9 +446,9 @@ Landed. What was built, and where it departs from the plan above it:
   the mediums Frame, Series and Contact sheet fetch. The provider pool
   needed no third thread: the strip's thumbnails load on Qt Quick's thread,
   as they did.
-- **Plugin API 4 begins here**: `image://file` and a photo's `thumbPath`
-  (the thumbnail's file, for a program; Contact sheet's fallback). Frame,
-  Series and Contact sheet ask for 4. H2 adds the rest of API 4.
+- **In the plugin API**: `image://file` and a photo's `thumbPath`
+  (the thumbnail's file, for a program; Contact sheet's fallback), which
+  Frame, Series and Contact sheet use.
 - `core/src/colour.rs`: a thumbnail's average colour through its profile,
   in pinholed (Decisions), and `sync::srgb_averages`, once per library, at
   the start of a round whether or not the source is ready.

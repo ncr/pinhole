@@ -6,7 +6,7 @@ import Pinhole.Plugin
 // going through the answers alone.
 Panel {
     id: panel
-    // The plugin's indexer, which outlives this view (SemanticSearch.qml).
+    // The plugin's indexer, which outlives this view (Main.qml).
     readonly property Item indexer: view.plugin.indexer
     // Its PluginView's: open now.
     readonly property bool shown: view.shown

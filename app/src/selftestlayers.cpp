@@ -171,7 +171,7 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
                   QStringLiteral("… under it: %1, the button %2").arg(describe(c), describe(b)));
         }
     });
-    // One action in three places (API 15): pressed in the viewer, on the
+    // One action in three places: pressed in the viewer, on the
     // photo shown.
     at(6400, [=, &viewer, &library] {
         check(shownWithText(window->contentItem(), QStringLiteral("Everywhere")) != nullptr,

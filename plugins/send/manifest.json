@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.send",
   "name": "Send to phone",
@@ -7,8 +6,5 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "Sends photos to a phone or computer nearby with LocalSend: originals, a Live Photo with its video, or HEIC as JPEG.",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "settings": { "compatible": false }
 }

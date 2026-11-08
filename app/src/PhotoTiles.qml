@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Window
 
-// Photos as square tiles, as a plugin's view shows what it found (API 11):
+// Photos as square tiles, as a plugin's view shows what it found:
 // search results, a place's photos, the newest additions. Each cropped to
 // fill its square at the display's own pixels, a ring in the accent on the
 // one the keys are on and a fainter one under the pointer; ← → ↑ ↓, Home

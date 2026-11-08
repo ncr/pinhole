@@ -67,14 +67,14 @@ PinholePlugin {
                 const name = (item.filename || item.id).replace(/\.[^.]*$/, "").replace(/\//g, "-")
                     + " " + Qt.formatDateTime(new Date(item.date), "yyyy-MM-dd HH.mm.ss") + ways[way].tag
                 const own = stemOf(from) === stemOf(item.filename || "")
-                // A still made sRGB, as the desktop shows it (API 4).
+                // A still made sRGB, as the desktop shows it.
                 return keepAndSet(from, name, extension, own, way === "still")
             })
             .catch(failed)
             .then(() => working = false)
     }
     // A file another plugin made (Series' video), as the background: kept
-    // under its own name, then set (the "file" action, API 15).
+    // under its own name, then set (the "file" action).
     function setFileBackground(path) {
         if (working)
             return

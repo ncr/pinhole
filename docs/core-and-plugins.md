@@ -299,8 +299,7 @@ its manifest asks for `api` below 3. `Plugins::apiTwoUses` becomes
 
 ```json
 {
-  "schemaVersion": 1,
-  "api": 3,
+  "api": 15,
   "id": "pinhole.icloud",
   "sources": [{ "kind": "icloud" }]
 }

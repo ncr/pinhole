@@ -62,7 +62,7 @@ PinholePlugin {
     readonly property string label: running ? qsTr("Sending") : qsTr("Send")
 
     actions: [
-        // The photo shown, or those ticked (API 15): one action in both.
+        // The photo shown, or those ticked: one action in both.
         PluginAction {
             id: sendAction
             places: ["viewer", "selection"]

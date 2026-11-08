@@ -7,8 +7,8 @@
 struct sqlite3;
 class PluginHost;
 
-// What a plugin keeps a value for each of many keys of (pinhole.store,
-// API 15): Info's facts of each photo's original, say. One SQLite file for
+// What a plugin keeps a value for each of many keys of (pinhole.store):
+// Info's facts of each photo's original, say. One SQLite file for
 // each name in the plugin's cacheDir, so for each source's library apart,
 // `<cacheDir>/<name>.store.sqlite`; a value is JSON, read and written one
 // key at a time, so neither is the whole file each time, and two windows

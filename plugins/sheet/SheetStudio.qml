@@ -250,7 +250,7 @@ Item {
                     studio.made = Object.assign({}, studio.made, { copy: how })
             }
             // On the clipboard, or only kept if another copy asked for
-            // meanwhile has it (API 15).
+            // meanwhile has it.
             pinhole.deliver(done.path).then(copied)
         }
         onFailed: error => studio.error = error.code === "unfetched" ? error.message

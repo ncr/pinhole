@@ -42,7 +42,7 @@ PinholePlugin {
 
     function count() {
         stale = false
-        // The photos the grid shows (API 15): those hidden left out.
+        // The photos the grid shows: those hidden left out.
         const library = pinhole.library
         const done = Days.finish(Days.count(library.field("day", { shown: true }), library.field("id", { shown: true }),
                                             firstWeekday, null))

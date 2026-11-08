@@ -8,10 +8,10 @@ import Pinhole.Plugin
 // that look like them to check one after another.
 Panel {
     id: panel
-    // Its PluginView's (PeoplePlugin.qml): open now.
+    // Its PluginView's (Main.qml): open now.
     readonly property bool shown: view.shown
     property string source: ""
-    // What is said of faces: the plugin's (PeoplePlugin.qml), synced.
+    // What is said of faces: the plugin's (Main.qml), synced.
     readonly property var edits: view.plugin.edits
     // "home", "group" (a suggestion, `anchor` its row), "person" (`person`
     // its name) or "check" (the groups that look like `person`, one by one).
@@ -246,7 +246,7 @@ Panel {
         if (restoreFocus) grid.forceActiveFocus()
     }
     // Kept by the plugin, which names faces on a photo shown too
-    // (PeoplePlugin.qml); what either says, or another computer, read again
+    // (Main.qml); what either says, or another computer, read again
     // here.
     Connections {
         target: view.plugin

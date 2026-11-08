@@ -202,7 +202,7 @@ Item {
                     studio.made = Object.assign({}, studio.made, { copy: how })
             }
             // On the clipboard, or only kept if another copy asked for
-            // meanwhile has it (API 15).
+            // meanwhile has it.
             pinhole.deliver(file).then(copied)
         }
         onFailed: error => {
@@ -211,7 +211,7 @@ Item {
         }
     }
 
-    // What the other plugins do with the file made (API 15): the
+    // What the other plugins do with the file made: the
     // Background plugin's "Background", with its key, while it is on.
     readonly property var fileActions: made ? pinhole.fileActions.filter(a => a.shown && a.takes(made.path)) : []
 

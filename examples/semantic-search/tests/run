@@ -95,9 +95,9 @@ def prepare(task, corpus_path, images, rankings):
     # Replace longer tokens first; JSON quoting keeps queries literal QML.
     for key in sorted(values, key=len, reverse=True):
         checks = checks.replace('@' + key + '@', json.dumps(values[key], ensure_ascii=False))
-    text = (original / 'SemanticSearch.qml').read_text().replace('import QtQuick', 'import QtQuick\nimport QtQuick.Window\nimport QtTest', 1)
+    text = (original / 'Main.qml').read_text().replace('import QtQuick', 'import QtQuick\nimport QtQuick.Window\nimport QtTest', 1)
     text = text.rsplit('}', 1)[0] + checks + '}\n'
-    (plugin / 'SemanticSearch.qml').write_text(text)
+    (plugin / 'Main.qml').write_text(text)
     return profile, library
 
 

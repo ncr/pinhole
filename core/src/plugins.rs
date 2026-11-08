@@ -245,7 +245,7 @@ pub struct Worker {
     pub program: PathBuf,
     /// What it is given before what pinholed gives every worker.
     pub args: Vec<String>,
-    /// It answers what its plugin asks (`pinhole.ask`, API 15): lines of
+    /// It answers what its plugin asks (`pinhole.ask`): lines of
     /// JSON on its stdin, its answers on its stdout.
     pub answers: bool,
 }
@@ -536,16 +536,12 @@ fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
         Some(newer) if newer > API => return Err(format!("it needs a newer Pinhole: plugin API {newer}, and this one has {API}")),
         asked => return Err(format!("it is written for plugin API {}, and this Pinhole has {API}", asked.unwrap_or(0))),
     }
-    // Left out (API 15): schema 1, the only one, and Main.qml beside it.
-    if !manifest["schemaVersion"].is_null() && whole(&manifest["schemaVersion"]) != Some(1) {
-        return Err("manifest.json needs \"schemaVersion\": 1".into());
-    }
     if !usable_id(id) {
         return Err("manifest.json has no usable \"id\"".into());
     }
-    let main = if manifest["entryPoints"].is_null() { "Main.qml" } else { manifest["entryPoints"]["main"].as_str().unwrap_or("") };
-    if !safe_relative(main) || !dir.join(main).is_file() {
-        return Err("manifest.json's \"entryPoints\" has no \"main\" file in the plugin's folder".into());
+    // What it shows is always its Main.qml.
+    if !dir.join("Main.qml").is_file() {
+        return Err("there is no Main.qml in the plugin's folder".into());
     }
     Ok(())
 }
@@ -599,8 +595,7 @@ mod tests {
         };
         let made = |kind: &str| serde_json::json!({"kind": kind, "from": "live", "type": "public.mpeg-4", "extension": "mp4",
                                                    "program": "make", "args": [kind]});
-        let manifest = |id: &str, api: i64, makes: Value| serde_json::json!({"schemaVersion": 1, "api": api, "id": id,
-                                                                              "entryPoints": {"main": "Main.qml"}, "makes": makes});
+        let manifest = |id: &str, api: i64, makes: Value| serde_json::json!({"api": api, "id": id, "makes": makes});
         plugin(&places.builtin, "live", manifest("pinhole.live", 15, serde_json::json!([made("bounce"), made("long_exposure")])));
         plugin(&places.personal, "old", manifest("me.old", 14, serde_json::json!([made("bounce")])));
         plugin(&places.personal, "odd", manifest("me.odd", 15, serde_json::json!([made("sparkle"),
@@ -623,15 +618,13 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_may_leave_out_its_schema_and_entry_points() {
+    fn a_plugin_shows_its_main_qml_and_its_manifest_needs_no_more() {
         let dir = std::env::temp_dir().join(format!("pinhole-short-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15})).unwrap_err().contains("entryPoints"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15})).unwrap_err().contains("no Main.qml"));
         std::fs::write(dir.join("Main.qml"), "").unwrap();
         assert_eq!(taken("me.short", &dir, &serde_json::json!({"api": 15})), Ok(()));
-        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15, "schemaVersion": 2})).unwrap_err().contains("schemaVersion"));
-        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15, "entryPoints": {"main": "Other.qml"}})).is_err());
         // Of another API: not taken, older or newer.
         assert!(taken("me.short", &dir, &serde_json::json!({"api": 14})).unwrap_err().contains("written for plugin API 14"));
         assert!(taken("me.short", &dir, &serde_json::json!({})).unwrap_err().contains("written for plugin API 0"));
@@ -700,7 +693,7 @@ mod tests {
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
             let sources: Vec<Value> = kinds.iter().map(|k| serde_json::json!({"kind": k, "provider": "run"})).collect();
-            let manifest = serde_json::json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources});
+            let manifest = serde_json::json!({"api": 15, "id": id, "sources": sources});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             std::fs::write(at.join("run"), "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(at.join("run"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -739,7 +732,7 @@ mod tests {
             }
         };
         let manifest = |id: &str, sources: Value| {
-            serde_json::json!({"schemaVersion": 1, "api": 15, "id": id, "entryPoints": {"main": "Main.qml"}, "sources": sources})
+            serde_json::json!({"api": 15, "id": id, "sources": sources})
         };
         let one = |kind: &str, provider: &str| serde_json::json!([{"kind": kind, "provider": provider}]);
         // A built-in with an in-process kind (no provider: not one of these),
@@ -766,7 +759,7 @@ mod tests {
             {"kind": "me.immich.rounds", "provider": "run", "roundsEverySecs": 1},
         ])), Some(("run", 0o755)));
         plugin(&places.personal, "plain", manifest("me.plain", one("me.plain", "run")), Some(("run", 0o644)));
-        plugin(&places.personal, "old", serde_json::json!({"schemaVersion": 1, "id": "me.old", "entryPoints": {"main": "Main.qml"},
+        plugin(&places.personal, "old", serde_json::json!({"id": "me.old",
                                                            "sources": one("me.old", "run")}), Some(("run", 0o755)));
         plugin(&places.personal, "icloud-twin", manifest("icloud", one("icloud", "run")), Some(("run", 0o755)));
 
@@ -798,7 +791,7 @@ mod tests {
             let at = root.join(folder);
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-            let manifest = serde_json::json!({"schemaVersion": 1, "api": api, "id": id, "entryPoints": {"main": "Main.qml"}, "workers": workers});
+            let manifest = serde_json::json!({"api": api, "id": id, "workers": workers});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             for (name, mode) in [("run", 0o755), ("plain", 0o644)] {
                 std::fs::write(at.join(name), "#!/bin/sh\n").unwrap();

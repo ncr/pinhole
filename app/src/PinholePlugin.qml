@@ -55,6 +55,6 @@ Item {
     // While true, a photo shown full window is kept at SDR: on a display
     // that shows more (wide gamut, HDR), what is beyond fades out, and back
     // in once no plugin asks. For something SDR drawn over the photo, as
-    // Live Photos' motion is (API 6).
+    // Live Photos' motion is.
     property bool holdSdr: false
 }

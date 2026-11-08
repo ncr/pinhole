@@ -1,12 +1,10 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "me.semantic-search",
   "name": "Photo content search",
   "version": "0.8.0",
   "description": "Local English and Polish text search over photo thumbnails.",
   "settings": { "indexingPaused": false },
-  "entryPoints": { "main": "SemanticSearch.qml" },
   "workers": [
     { "name": "index", "program": "pinhole-semantic", "args": ["daemon"], "per": "source", "answers": true }
   ]

@@ -25,11 +25,9 @@ may be empty) and the program.
 
 ```json
 {
-  "schemaVersion": 1,
-  "api": 3,
+  "api": 15,
   "id": "me.immich",
   "name": "Immich",
-  "entryPoints": { "main": "Main.qml" },
   "sources": [
     {
       "kind": "me.immich",
@@ -59,7 +57,7 @@ PinholePlugin {
 | `accepts` | `[]` | The extensions of files it takes when they are dropped on the window (`add`), in lower case. None: nothing can be added. |
 | `roundsEverySecs` | 60 | How often a source of it is looked at for changes, 5 to 86400. |
 
-The manifest needs `"api": 3` or newer. A source that breaks a rule is left out,
+A source that breaks a rule is left out,
 and pinholed's log (`~/.local/state/pinhole/pinholed.log`) says why:
 
 ```

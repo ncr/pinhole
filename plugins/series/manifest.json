@@ -1,13 +1,9 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.series",
   "name": "Series",
   "version": "1.1.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Finds photos of one subject taken close together and makes each series a short GIF or video to send.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "Finds photos of one subject taken close together and makes each series a short GIF or video to send."
 }

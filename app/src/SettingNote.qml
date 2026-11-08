@@ -1,6 +1,6 @@
 import QtQuick
 
-// A plugin's settings' few words (API 11): what a choice does, or how it
+// A plugin's settings' few words: what a choice does, or how it
 // is now, in the side panel's smaller type, wrapped; `dim` for a remark.
 UiText {
     property bool dim: false

@@ -45,15 +45,11 @@ library. The [kit reference](plugins.md#the-kit) explains the shared controls.
 
 ```json
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",
-  "description": "A complete example from the plugin workshop.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "A complete example from the plugin workshop."
 }
 ```
 
@@ -138,15 +134,11 @@ explains cancellation and error handling.
 
 ```json
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "example.ask",
   "name": "Example ask",
   "version": "1.0.0",
-  "description": "A complete example from the plugin workshop.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "A complete example from the plugin workshop."
 }
 ```
 
@@ -256,13 +248,9 @@ stable ids, rendition keys, batching and errors.
 
 ```json
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "me.jpegs",
   "name": "JPEG folder",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "sources": [
     {
       "kind": "me.jpegs",

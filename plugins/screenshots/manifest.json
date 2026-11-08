@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.screenshots",
   "name": "Screenshots",
@@ -7,8 +6,5 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "Keeps screenshots, an iPhone's or a desktop's, from crowding out the photos: each day's one card, or hidden from the grid.",
-  "settings": { "hide": false },
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "settings": { "hide": false }
 }

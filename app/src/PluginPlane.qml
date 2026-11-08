@@ -32,7 +32,7 @@ Item {
             // above the rest, and while it does, the others (an overlay
             // as Info's, one that covered before it) unseen beneath.
             z: root.coveringPlugin === modelData ? 1 : 0
-            // Away while a photo it opened to come back from shows (API 11):
+            // Away while a photo it opened to come back from shows:
             // not covering, so the viewer has the keys. What it shows over
             // the photo (Info's details) stays; its view hides by itself.
             readonly property bool away: info.host ? info.host.away === true : false
@@ -273,7 +273,7 @@ Item {
                 continue
             for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k) {
                 const action = item.actions[k]
-                // One with `places` (API 15): one of its own in each.
+                // One with `places`: one of its own in each.
                 const places = action.places && action.places.length > 0 ? Array.from(action.places) : null
                 for (const where of places || [null]) {
                     const each = where === null ? action : placedAction(action, where, item.pinhole, used)
@@ -284,7 +284,7 @@ Item {
                 }
             }
             // Its own help, then each action with a key that help does not
-            // say (API 15): its helpText, else its text.
+            // say: its helpText, else its text.
             const listed = (item.help || []).map(k => KeyNames.nameOf(String(k[0])))
             const derived = []
             for (let k = 0; k < (item.actions ? item.actions.length : 0); ++k) {

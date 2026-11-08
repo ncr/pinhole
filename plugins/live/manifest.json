@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "requires": ["ffmpeg", "ffprobe"],
   "id": "pinhole.live",
@@ -8,9 +7,6 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "A Live Photo's motion over it on L, and its effects as on the iPhone on ⇧ L: Loop, Bounce and Long exposure; and a mark on Live Photos in the grid.",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "makes": [
     {
       "kind": "bounce",

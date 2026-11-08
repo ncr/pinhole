@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.frame",
   "name": "Photo frame",
@@ -7,8 +6,5 @@
   "author": "Pinhole",
   "license": "MIT",
   "description": "Your photos one after another, full window, slowly moving and fading into each other: a frame for a laptop left open.",
-  "entryPoints": {
-    "main": "Main.qml"
-  },
   "settings": { "photos": "favourites", "seconds": 8, "shuffle": true, "caption": true, "motion": true }
 }

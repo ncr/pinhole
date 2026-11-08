@@ -7,12 +7,12 @@ QtObject {
     // row at the top right of a photo shown full window, before Copy.
     // "selection": in select mode's bar, after Copy, for what is ticked
     // (pinhole.selection()); its key works only while it shows.
-    // "file" (API 15): no button of its own, something it does with a file
+    // "file": no button of its own, something it does with a file
     // another plugin made, which that plugin offers where it shows the file
     // (pinhole.fileActions: Series' video as the background). Its key is
     // what that plugin presses it with.
     property string place: "grid"
-    // Several places at once (API 15), in place of `place`: ["viewer",
+    // Several places at once, in place of `place`: ["viewer",
     // "selection"], one button in each, its key working in each. Pressed,
     // `pressedIn` says which, and `photos` the ids it is for: the photo
     // shown in "viewer", those ticked in "selection", none in "grid". In
@@ -48,7 +48,7 @@ QtObject {
     property string text
     // A key that presses it while it shows: "G", "Shift+G".
     property string key
-    // What the help (?) says it does, beside its key (API 15): its `text`
+    // What the help (?) says it does, beside its key: its `text`
     // if left out. Unless the plugin's `help` says what that key does, an
     // action with a key is in the help by itself.
     property string helpText

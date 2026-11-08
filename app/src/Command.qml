@@ -22,7 +22,7 @@ Item {
     property string section
     // The keys that do it, as sequences ("Space", "Shift+Up"); the first is
     // the one named, unless `keysText` says it better ("1–9", "↑ ↓").
-    // One key alone (API 15): `key: "S"`, as an action and a button take it.
+    // One key alone: `key: "S"`, as an action and a button take it.
     property string key
     property var keys: key !== "" ? [key] : []
     property string keysText
@@ -40,7 +40,7 @@ Item {
     // button's, on the grid or the viewer, whichever has them; "any" for
     // the window's own.
     property string keyLayer: "chrome"
-    // Whether it can be done now (API 15, as an action's and a button's):
+    // Whether it can be done now (as an action's and a button's):
     // its keys work only then.
     property bool usable: true
     property bool autoRepeat: false

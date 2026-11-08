@@ -1,6 +1,6 @@
 import QtQuick
 
-// The title bar of a plugin's view over the whole window (API 11), as the
+// The title bar of a plugin's view over the whole window, as the
 // map's, search's and People's: its `title` in the larger size, a quieter
 // `detail` after it, the `tools` (buttons, a field) at the right, then ✕
 // with its key, which `closed()` says. Items given as its children go

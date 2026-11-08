@@ -47,7 +47,7 @@ class PluginViewer : public QObject {
     Q_PROPERTY(bool open READ open NOTIFY openChanged)
     Q_PROPERTY(int index READ index NOTIFY indexChanged)
     Q_PROPERTY(QVariantMap hdr READ hdr NOTIFY hdrChanged)
-    // The photo shown, as library.item() gives it, {} with none (API 14);
+    // The photo shown, as library.item() gives it, {} with none;
     // its id, "" with none. What library.item(viewer.index) was written for.
     Q_PROPERTY(QVariantMap photo READ photo NOTIFY photoChanged)
     Q_PROPERTY(QString id READ id NOTIFY photoChanged)
@@ -106,8 +106,8 @@ public:
     // One of item's fields for every photo, in the library's order: all
     // the dates at once, say, without a map made for each photo; or "day",
     // the day each was taken, in local time, as yyyymmdd; or "hidden"
-    // (API 15), whether the grid hides it. Empty for a name it has not.
-    // options: { shown: true } (API 15), only the photos the grid shows,
+    //, whether the grid hides it. Empty for a name it has not.
+    // options: { shown: true }, only the photos the grid shows,
     // in their order.
     Q_INVOKABLE QVariantList field(const QString &name, const QVariantMap &options = {}) const;
     // Which photos the grid hides, by position: the grid's.
@@ -131,7 +131,7 @@ signals:
     void changed();
     void revisionChanged();
     // The library as plugins hold it changed, told once for what came at
-    // once (API 15): `how` says whether it was read again (`read`),
+    // once: `how` says whether it was read again (`read`),
     // whether that is another source's (`switched`, its key another),
     // whether what the grid hides changed (`hidden`), and the `revision`.
     void settled(const QVariantMap &how);
@@ -267,7 +267,7 @@ class PluginHost : public QObject {
     // A folder for what it keeps and can make again, one for each source's
     // library.
     Q_PROPERTY(QString cacheDir READ cacheDir NOTIFY cacheDirChanged)
-    // Its workers (the manifest's), as pinholed runs them (API 12): each
+    // Its workers (the manifest's), as pinholed runs them: each
     // { name, running, since (ms), lastExit: { code, signal, at } or null,
     // key (the source's library it works for) }. workersChanged as they
     // start and end.
@@ -288,7 +288,7 @@ class PluginHost : public QObject {
     Q_PROPERTY(QObject *cache READ cache CONSTANT)
     // What the user made of the library shown that goes with it to every
     // computer it is shown on (synced.h): People's names, Series' series
-    // (API 14).
+    //.
     Q_PROPERTY(QObject *synced READ synced CONSTANT)
     // The sources (PluginSources): those of its own kinds to add, sign in
     // to and out of.
@@ -306,18 +306,18 @@ class PluginHost : public QObject {
     // stays away while another's is.
     Q_PROPERTY(QString coveredBy READ coveredBy NOTIFY coveredByChanged)
     // A photo it opened to come back from (openPhotos' comeBack) is shown:
-    // its view waits unseen, without the keys (API 11).
+    // its view waits unseen, without the keys.
     Q_PROPERTY(bool away READ away NOTIFY awayChanged)
     // The keys are what was last used, not a pointer: show the ring on the
-    // one they are on (API 11).
+    // one they are on.
     Q_PROPERTY(bool keyboardInUse READ keyboardInUse NOTIFY keyboardInUseChanged)
-    // What was used last: "keyboard", "mouse" or "touchpad" (API 12), as a
+    // What was used last: "keyboard", "mouse" or "touchpad", as a
     // wheel's turn is told from a touchpad's swipe by it.
     Q_PROPERTY(QString input READ input NOTIFY keyboardInUseChanged)
     // Whether the keys are this plugin's now: it covers the photos, and no
-    // panel of Pinhole's is over it (API 12).
+    // panel of Pinhole's is over it.
     Q_PROPERTY(bool hasKeys READ hasKeys NOTIFY hasKeysChanged)
-    // What the plugins on do with a file (API 15): their PluginActions of
+    // What the plugins on do with a file: their PluginActions of
     // place "file", the Background plugin's "Background" say, to offer on
     // a file a plugin made. Its takes(path) says if it does that file, its
     // trigger(path) does it.
@@ -347,7 +347,7 @@ public:
     Q_INVOKABLE int currentIndex() const;
     // The photos ticked, by position, oldest first.
     Q_INVOKABLE QList<int> selection() const;
-    // The same by id, which a reload of the library does not move (API 10).
+    // The same by id, which a reload of the library does not move.
     Q_INVOKABLE QStringList selectionIds() const;
     int selectionCount() const;
     // Whether a photo (a position or an id) is hidden from the grid, by any
@@ -364,7 +364,7 @@ public:
     // As openPhoto, with only `photos` (ids or positions) to step
     // through, in their order, until the viewer closes.
     // `options.comeBack`: its view waits away while the photo shows, and is
-    // told `returned(id)` of the one last shown when it closes (API 11).
+    // told `returned(id)` of the one last shown when it closes.
     Q_INVOKABLE void openPhotos(const QJSValue &photos, const QJSValue &photo, const QJSValue &options = {});
     bool away() const { return m_away; }
     bool keyboardInUse() const;
@@ -391,7 +391,7 @@ public:
     // none of them is in the library. No undo step: the plugin's own
     // (did).
     Q_INVOKABLE QJSValue setFavorite(const QJSValue &photos, bool favorite);
-    // What its worker `name` answers to `request` (API 15): the worker
+    // What its worker `name` answers to `request`: the worker
     // declared with "answers": true, asked on its stdin by pinholed. A
     // promise of the answer's result; options: { timeout } in ms (30 s).
     Q_INVOKABLE QJSValue ask(const QString &name, const QJSValue &request, const QJSValue &options = {});
@@ -401,9 +401,9 @@ public:
     // "timeout" or "cancelled" (SIGTERM, then a kill a second later).
     // `options`: input (written to its stdin), timeout (ms), env (added to
     // Pinhole's), output(line) for each line it writes, as it comes (the
-    // result's stdout is then what follows the last); json (API 15), a
+    // result's stdout is then what follows the last); json, a
     // value given as its stdin as JSON, in place of input. The result's
-    // `json` (API 15) is its stdout read as JSON, if it is JSON.
+    // `json` is its stdout read as JSON, if it is JSON.
     Q_INVOKABLE QJSValue run(const QString &program, const QStringList &arguments, const QJSValue &options = {});
     // An item as it looks over a number of frames, made into a GIF or an
     // MP4 (ffmpeg): options are path, format ("gif" or "mp4"), width,
@@ -417,16 +417,16 @@ public:
     // made first, away from the window's thread); rejected with "not_found"
     // if there is no such file.
     Q_INVOKABLE QJSValue copyFile(const QString &path);
-    // A file made handed over (API 15), as Series and Sheet hand theirs: on
+    // A file made handed over, as Series and Sheet hand theirs: on
     // the clipboard, kept where it is. A promise of how it went, never
     // rejected: "copied", "kept" (another copy asked for since has the
     // clipboard) or "failed" (said, as pinhole.warn says it).
     Q_INVOKABLE QJSValue deliver(const QString &path);
     // Words on the clipboard, as text (paths, a link): a promise of them
-    // once it has them (API 12). In a self-test the clipboard is the
+    // once it has them. In a self-test the clipboard is the
     // window's own, as for copyFile.
     Q_INVOKABLE QJSValue copyText(const QString &text);
-    // What the person did to a photo in Pinhole (API 13, adjustment.h):
+    // What the person did to a photo in Pinhole (adjustment.h):
     // { turn: quarters clockwise, crop: { x, y, width, height } as fractions
     // of the photo turned }. Never to its file: the grid, the viewer, an
     // export as JPEG and a copy show it so.
@@ -444,10 +444,10 @@ public:
     // where it is, its crop turning with it.
     Q_INVOKABLE QJSValue turn(const QJSValue &photos, int quarters);
     // A file in its own folder or its cache (a worker's), read whole away
-    // from the window (API 13): a promise of its text, or of what its JSON
+    // from the window: a promise of its text, or of what its JSON
     // says; rejected "not_found", "not_yours" (another's file), "too_large"
     // (over 32 MB), "unreadable" or "json".
-    // What it keeps a value for each of many keys of (API 15), under
+    // What it keeps a value for each of many keys of, under
     // `name`, for the library shown: get(key), put(key, value) and
     // remove(key), each a promise (PluginKeyStore). Null for a name that
     // is not lowercase letters, digits, '_' and '-'.
@@ -460,36 +460,36 @@ public:
     Q_INVOKABLE QString picturesDir() const;
     // A file to make in Pictures/Pinhole, as Pinhole names what it makes:
     // `name.extension` there, or `name 2.extension`… if that is taken; the
-    // folder made. In a self-test, the scratch Pictures (API 5).
+    // folder made. In a self-test, the scratch Pictures.
     Q_INVOKABLE QString picturePath(const QString &name, const QString &extension) const;
     // The library's index (library.sqlite, docs/sources.md) asked, read
     // only, away from the window, with bounded time, rows and bytes:
     // a promise of its rows, each an object by column name; rejected
     // "sql", "no_library", "query_timeout", "query_limit", "query_busy"
     // or "cancelled". `values` bind its ?s
-    // (API 5). Never sqlite3 on the file: that one opens it while the
+    //. Never sqlite3 on the file: that one opens it while the
     // service writes, and fails "database is locked".
     Q_INVOKABLE QJSValue query(const QString &sql, const QVariantList &values = {});
-    // The ids of the photos the library says are screenshots (API 10).
+    // The ids of the photos the library says are screenshots.
     Q_INVOKABLE QJSValue screenshots();
     Q_INVOKABLE bool exists(const QString &path) const;
-    // Whether `program` is there to run (API 15): a name on PATH, or a
+    // Whether `program` is there to run: a name on PATH, or a
     // program of its own folder by a relative path.
     Q_INVOKABLE bool has(const QString &program) const;
     // A file's size in bytes, and as people read it: "1.8 MB".
     Q_INVOKABLE double fileSize(const QString &path) const;
-    // With `decimals` (API 3; 1 when left out).
+    // With `decimals` (1 when left out).
     Q_INVOKABLE QString sizeText(double bytes, int decimals = 1) const;
     // A folder chosen in the desktop's own picker, titled `title`: a
     // promise of its path, rejected "cancelled" when none is.
     Q_INVOKABLE QJSValue chooseFolder(const QString &title);
     // What pinhole.settings says of a setting never set (the manifest's
-    // "settings", API 13): kept nowhere, so a later default reaches those
+    // "settings"): kept nowhere, so a later default reaches those
     // who never chose.
     void setSettingDefaults(const QVariantMap &defaults);
     // Done just now, to undo with Ctrl+Z: `name` in a word or two, and
     // functions that undo and redo it (history.h).
-    // Its number, for dropStep (API 3).
+    // Its number, for dropStep.
     Q_INVOKABLE double did(const QString &name, const QJSValue &undo, const QJSValue &redo);
     // A step it did that did not happen after all (what it changed was
     // refused, and put back): out of the history, so Ctrl Z undoes what was
@@ -550,7 +550,7 @@ signals:
     void fileActionsChanged();
     void workersChanged();
     // What one of its workers said: a line of JSON with an "event" it wrote
-    // on its stdout (API 12), its latest of each quarter second. What it
+    // on its stdout, its latest of each quarter second. What it
     // found, to read again from cacheDir, rather than ask on a timer.
     void workerSaid(const QString &name, const QVariantMap &said);
     // Back from the photos it opened (openPhotos' comeBack): `photo` is the
@@ -738,7 +738,7 @@ public:
     static QString sourcesProblem(const QString &dir, const QString &id, const QJsonObject &manifest);
     // What is wrong with the workers a manifest declares ("workers"), as
     // pinholed would refuse them: a name, a program in the folder it can
-    // run, its args, and API 10.
+    // run, and its args.
     static QString workersProblem(const QString &dir, const QJsonObject &manifest);
     // What is wrong with the renditions a manifest says it makes ("makes"),
     // as pinholed would refuse them.
@@ -933,7 +933,7 @@ private:
         QStringList sources;
         // Its manifest's "settings": each setting's default.
         QVariantMap settingDefaults;
-        // The programs its manifest says it needs ("requires", API 15).
+        // The programs its manifest says it needs ("requires").
         QStringList required;
         // One's own with the id of one of Pinhole's own, which it replaces.
         bool copy = false;

@@ -29,7 +29,7 @@ Properties:
 - `list<QtObject> sources`: The kinds of source it brings, each a PluginSource: how Pinhole's side panel, its first run and Add a source show them, and what signing in to one does. Only kinds its manifest's "sources" names.
 - `var tour`: A few steps that show what it does, on the photos and its buttons as they are (Tour.qml): shown by itself the first time it is on, once `tourReady`, and again from the side panel.
 - `bool tourReady`
-- `bool holdSdr`: While true, a photo shown full window is kept at SDR: on a display that shows more (wide gamut, HDR), what is beyond fades out, and back in once no plugin asks. For something SDR drawn over the photo, as Live Photos' motion is (API 6).
+- `bool holdSdr`: While true, a photo shown full window is kept at SDR: on a display that shows more (wide gamut, HDR), what is beyond fades out, and back in once no plugin asks. For something SDR drawn over the photo, as Live Photos' motion is.
 
 ## PluginAction
 
@@ -39,8 +39,8 @@ Its root is a `QtObject` (Qt Quick's: its properties too).
 
 Properties:
 
-- `string place`: "grid": at the top right of the grid, before Select. "viewer": in the row at the top right of a photo shown full window, before Copy. "selection": in select mode's bar, after Copy, for what is ticked (pinhole.selection()); its key works only while it shows. "file" (API 15): no button of its own, something it does with a file another plugin made, which that plugin offers where it shows the file (pinhole.fileActions: Series' video as the background). Its key is what that plugin presses it with.
-- `var places`: Several places at once (API 15), in place of `place`: ["viewer", "selection"], one button in each, its key working in each. Pressed, `pressedIn` says which, and `photos` the ids it is for: the photo shown in "viewer", those ticked in "selection", none in "grid". In each it is usable only with something to do it on (a photo shown, photos ticked, photos at all), unless it is `busy`.
+- `string place`: "grid": at the top right of the grid, before Select. "viewer": in the row at the top right of a photo shown full window, before Copy. "selection": in select mode's bar, after Copy, for what is ticked (pinhole.selection()); its key works only while it shows. "file": no button of its own, something it does with a file another plugin made, which that plugin offers where it shows the file (pinhole.fileActions: Series' video as the background). Its key is what that plugin presses it with.
+- `var places`: Several places at once, in place of `place`: ["viewer", "selection"], one button in each, its key working in each. Pressed, `pressedIn` says which, and `photos` the ids it is for: the photo shown in "viewer", those ticked in "selection", none in "grid". In each it is usable only with something to do it on (a photo shown, photos ticked, photos at all), unless it is `busy`.
 - `string pressedIn`
 - `var photos`
 - `var accepts`: A "file" action's: the files it does, by their extension, lowercase ("mp4"); none, any. The file it is done with now, as it is triggered.
@@ -48,7 +48,7 @@ Properties:
 - `string group`: In the bars (the viewer's, select mode's): actions with the same group are one button, the first of them shown, and the rest in its menu under ▾, opened with ⇧ and its key too. Without one, alone.
 - `string text`
 - `string key`: A key that presses it while it shows: "G", "Shift+G".
-- `string helpText`: What the help (?) says it does, beside its key (API 15): its `text` if left out. Unless the plugin's `help` says what that key does, an action with a key is in the help by itself.
+- `string helpText`: What the help (?) says it does, beside its key: its `text` if left out. Unless the plugin's `help` says what that key does, an action with a key is in the help by itself.
 - `bool shown`
 - `bool usable`
 - `bool active`: Lit, in the accent.
@@ -107,7 +107,7 @@ Properties:
 - `string name`: For tests and the coverage check: "grid.open", "viewer.close".
 - `string text`: What it does, for the help: "Open", "Newest".
 - `string section`: Its part of the help: "library", "select", "photo", "video", "share", "pinhole", a panel's ("sources", "storage", "tour"), or a plugin's name: a plugin's own are under its name in the language, whatever other than Pinhole's parts they say. None: not in the help (a button's own key, shown on it).
-- `string key`: The keys that do it, as sequences ("Space", "Shift+Up"); the first is the one named, unless `keysText` says it better ("1–9", "↑ ↓"). One key alone (API 15): `key: "S"`, as an action and a button take it.
+- `string key`: The keys that do it, as sequences ("Space", "Shift+Up"); the first is the one named, unless `keysText` says it better ("1–9", "↑ ↓"). One key alone: `key: "S"`, as an action and a button take it.
 - `var keys`
 - `string keysText`
 - `string mouse`: How with a mouse, and with a touchpad, when not by a button it has: "Wheel", "Pinch". A ShellButton showing it is way enough.
@@ -116,7 +116,7 @@ Properties:
 - `string noMouse`
 - `string noTouchpad`
 - `string keyLayer`: Whose keys these are: "grid", "viewer", "menu", "side", "addSource", "firstRun", "tour", "help", "plugin"; "chrome" for a button's, on the grid or the viewer, whichever has them; "any" for the window's own.
-- `bool usable`: Whether it can be done now (API 15, as an action's and a button's): its keys work only then.
+- `bool usable`: Whether it can be done now (as an action's and a button's): its keys work only then.
 - `bool autoRepeat`
 - `bool bound`: False for keys read elsewhere (the viewer's arrows, timed as they are held): listed, but no shortcut of its own.
 - `bool keyHelp`: Which of the help's tabs list it: the keys', and the mouse's and the touchpad's (where its `mouse` and `touchpad` say how, briefly).
@@ -352,7 +352,7 @@ Its root is a `Rectangle` (Qt Quick's: its properties too).
 
 ## Choices
 
-One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `usable`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`. Given a `setting` (API 13), it shows and keeps that one of pinhole.settings, as a SettingSwitch does.
+One of a few, chosen on a row of buttons, each also its number's key (1, 2, 3…) while `usable`: `options` as [{ value, text }], the one chosen `value`, and `chosen(value)` when another is. The keys are in the help under `section`, as `helpText`. Given a `setting`, it shows and keeps that one of pinhole.settings, as a SettingSwitch does.
 
 Its root is a `Row` (Qt Quick's: its properties too).
 
@@ -376,7 +376,7 @@ Its handler in QML: `onChosen`.
 
 ## PhotoTiles
 
-Photos as square tiles, as a plugin's view shows what it found (API 11): search results, a place's photos, the newest additions. Each cropped to fill its square at the display's own pixels, a ring in the accent on the one the keys are on and a fainter one under the pointer; ← → ↑ ↓, Home and End, PgUp and PgDn move, ⏎ and Space open, while `active`. The wheel and the touchpad scroll it as the grid does (ScrollGrid).
+Photos as square tiles, as a plugin's view shows what it found: search results, a place's photos, the newest additions. Each cropped to fill its square at the display's own pixels, a ring in the accent on the one the keys are on and a fainter one under the pointer; ← → ↑ ↓, Home and End, PgUp and PgDn move, ⏎ and Space open, while `active`. The wheel and the touchpad scroll it as the grid does (ScrollGrid).
 
 ```qml
 PhotoTiles {
@@ -423,7 +423,7 @@ Its handler in QML: `onOpened`.
 
 ## PanelHeader
 
-The title bar of a plugin's view over the whole window (API 11), as the map's, search's and People's: its `title` in the larger size, a quieter `detail` after it, the `tools` (buttons, a field) at the right, then ✕ with its key, which `closed()` says. Items given as its children go before the title (a ‹ back button); `progress`, 0 to 1, draws a line along its foot while it is under 1 (-1 for none).
+The title bar of a plugin's view over the whole window, as the map's, search's and People's: its `title` in the larger size, a quieter `detail` after it, the `tools` (buttons, a field) at the right, then ✕ with its key, which `closed()` says. Items given as its children go before the title (a ‹ back button); `progress`, 0 to 1, draws a line along its foot while it is under 1 (-1 for none).
 
 Its root is a `Item` (Qt Quick's: its properties too).
 
@@ -449,7 +449,7 @@ Its handler in QML: `onClosed`.
 
 ## SettingNote
 
-A plugin's settings' few words (API 11): what a choice does, or how it is now, in the side panel's smaller type, wrapped; `dim` for a remark.
+A plugin's settings' few words: what a choice does, or how it is now, in the side panel's smaller type, wrapped; `dim` for a remark.
 
 A `UiText`, with all it has (below), and:
 
@@ -459,9 +459,9 @@ Properties:
 
 ## SettingSwitch
 
-A plugin's setting that is on or off (API 11): its words, and a switch at the right that says `toggled()`; with `usable` false, dimmed and still. Pressing the words presses the switch.
+A plugin's setting that is on or off: its words, and a switch at the right that says `toggled()`; with `usable` false, dimmed and still. Pressing the words presses the switch.
 
-Given a `setting` (API 13), it is that one of pinhole.settings: shown as it is (its default from the manifest's "settings" until chosen), and flipped and kept when pressed, with nothing more to write:
+Given a `setting`, it is that one of pinhole.settings: shown as it is (its default from the manifest's "settings" until chosen), and flipped and kept when pressed, with nothing more to write:
 
 ```qml
 SettingSwitch { setting: "shuffle"; text: qsTr("Shuffle") }
@@ -485,7 +485,7 @@ Its handler in QML: `onToggled`.
 
 ## PluginView
 
-A view of the plugin's own over the photos (API 13): what a calendar, a gallery or a studio is drawn in. Put it in the plugin's root and open it from an action:
+A view of the plugin's own over the photos: what a calendar, a gallery or a studio is drawn in. Put it in the plugin's root and open it from an action:
 
 ```qml
 PluginView { id: calendar; source: "Calendar.qml"; toggleKey: "Y" }
@@ -535,7 +535,7 @@ Its handler in QML: `onOpened`.
 
 ## Job
 
-One thing the plugin asks for at a time, the latest winning (API 13): a query, a run, a fetch. What a plugin otherwise writes by hand around each promise: cancel the one before, drop an answer that came too late, keep a busy flag, ask again when the library was read meanwhile, and stop when the plugin does.
+One thing the plugin asks for at a time, the latest winning: a query, a run, a fetch. What a plugin otherwise writes by hand around each promise: cancel the one before, drop an answer that came too late, keep a busy flag, ask again when the library was read meanwhile, and stop when the plugin does.
 
 ```qml
 Job {

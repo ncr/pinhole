@@ -333,7 +333,7 @@ QVariantList PluginHost::workers() const {
             {"since", worker.value("since").toDouble()},
             {"key", worker.value("key").toString()},
             {"lastExit", exit.isObject() ? exit.toObject().toVariantMap() : QVariant()},
-            // What it said last while it runs (API 13): a panel opened
+            // What it said last while it runs: a panel opened
             // after shows how far it is at once.
             {"said", worker.value("said").isObject() ? worker.value("said").toObject().toVariantMap() : QVariant()},
         });
@@ -800,14 +800,14 @@ void Plugins::registerTypes() {
                              "Choices", "PhotoTiles", "PanelHeader", "SettingNote", "SettingSwitch", "PluginView", "Job"})
         qmlRegisterType(QUrl(QStringLiteral("qrc:/%1.qml").arg(QLatin1String(type))), "Pinhole.Plugin", 1, 0, type);
     qmlRegisterType<PluginMark>("Pinhole.Plugin", 1, 0, "PluginMark");
-    // A player's video drawn right, HDR tone mapped on the GPU (API 5): what
+    // A player's video drawn right, HDR tone mapped on the GPU: what
     // a plugin shows video with, never a VideoOutput.
     qmlRegisterType<VideoView>("Pinhole.Plugin", 1, 0, "VideoView");
     // The grid's scrolling over a Flickable of one's own (scroller.h, API
     // 4): ScrollList, ScrollGrid and ScrollArea are each one with it.
     qmlRegisterType<Scroller>("Pinhole.Plugin", 1, 0, "Scroller");
     // A surface panned and zoomed without levels, on the grid's physics
-    // (panzoom.h, API 12): a map, a picture larger than its room.
+    // (panzoom.h): a map, a picture larger than its room.
     qmlRegisterType<PanZoom>("Pinhole.Plugin", 1, 0, "PanZoom");
 }
 
@@ -1111,7 +1111,7 @@ void Plugins::libraryReloaded(const std::vector<int> &moved) {
 
 QVariantList Plugins::hiddenOf(const QString &id, const QVariantList &given, bool fresh) {
     Followed &followed = m_followed[id];
-    // Ids or positions, as a mark's photos are (API 10).
+    // Ids or positions, as a mark's photos are.
     std::vector<int> list = markPhotos(given);
     if (fresh || list != followed.hiddenGiven) {
         followed.hidden = list;
@@ -1652,13 +1652,11 @@ int newPlugin(const QString &id, const QString &folder = {}) {
     QString name = id.section('.', -1).replace('-', ' ').replace('_', ' ');
     name[0] = name[0].toUpper();
     const QJsonObject manifest{
-        {"schemaVersion", 1},
         {"api", Plugins::api},
         {"id", id},
         {"name", name},
         {"version", "0.1.0"},
         {"description", "What it does, in a sentence."},
-        {"entryPoints", QJsonObject{{"main", "Main.qml"}}},
     };
     // Its key: an F key no plugin here names, so two new plugins do not
     // share one (two shortcuts on one key: neither works).

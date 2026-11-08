@@ -1,13 +1,9 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.calendar",
   "name": "Year calendar",
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Every day of every year as a square, lit by how many photos were taken that day; a day, picked, is shown in the grid.",
-  "entryPoints": {
-    "main": "Main.qml"
-  }
+  "description": "Every day of every year as a square, lit by how many photos were taken that day; a day, picked, is shown in the grid."
 }

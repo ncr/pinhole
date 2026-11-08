@@ -311,8 +311,7 @@ private:
             translator = std::make_unique<Translator>(dir.path() + "/language", PINHOLE_I18N);
             QDir(dir.path()).mkdir("plugins");
             for (const auto &[id, extra] : manifests) {
-                QJsonObject manifest{{"schemaVersion", 1}, {"api", Plugins::api}, {"id", id}, {"name", id},
-                                     {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+                QJsonObject manifest{{"api", Plugins::api}, {"id", id}, {"name", id}};
                 for (auto it = extra.begin(); it != extra.end(); ++it)
                     manifest.insert(it.key(), it.value());
                 QDir(dir.path() + "/plugins").mkdir(id);
@@ -1395,8 +1394,9 @@ QtObject {
         QTRY_COMPARE(bench.said(), QStringList({"missing failed"}));
     }
 
-    // A manifest's schemaVersion and entryPoints left out (API 15): 1, and
-    // Main.qml beside it; its id, as before, its folder's name.
+    // A plugin shows its Main.qml, and its manifest needs no more than its
+    // api: its id, as before, its folder's name. A key there is no more
+    // (schemaVersion, entryPoints) is said never read.
     void aManifestLeavesOutWhatIsAlwaysTheSame() {
         QTemporaryDir root;
         const QString dir = root.path() + "/me.short";
@@ -1408,16 +1408,16 @@ QtObject {
         };
         QJsonObject manifest;
         QString main;
-        // No Main.qml: said as before.
+        // No Main.qml: said.
         write("manifest.json", R"({"api": 15, "name": "Short"})");
-        QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("entryPoints"));
+        QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("no Main.qml"));
         write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {}\n");
         QCOMPARE(Plugins::manifestProblem(dir, &manifest, &main), QString());
         QCOMPARE(main, QStringLiteral("Main.qml"));
-        // One given is still checked.
-        write("manifest.json", R"({"api": 15, "schemaVersion": 2})");
-        QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("schemaVersion"));
-        write("manifest.json", R"({"api": 15})");
+        const QJsonObject old{{"api", 15}, {"schemaVersion", 1}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+        const QString said = Plugins::manifestWarnings(dir, old).join('\n');
+        QVERIFY2(said.contains("\"schemaVersion\" is not a manifest's key") && said.contains("\"entryPoints\" is not a manifest's key"),
+                 qPrintable(said));
     }
 
     // What a plugin needs (the manifest's "requires", API 15) and whether
@@ -3963,7 +3963,7 @@ QtObject {
             QTemporaryDir root;
             const QString dir = root.path() + "/" + id;
             QDir().mkpath(dir + "/module");
-            write(dir + "/manifest.json", QStringLiteral(R"({"schemaVersion": 1, "api": 15, "id": "%1", "name": "Map", "entryPoints": {"main": "Main.qml"}})").arg(id).toUtf8());
+            write(dir + "/manifest.json", QStringLiteral(R"({"api": 15, "id": "%1", "name": "Map"})").arg(id).toUtf8());
             write(dir + "/Main.qml", "import QtQuick\nItem {}\n");
             write(dir + "/module/Gestures.qml", "import QtQuick\nItem {\n    PinchHandler {}\n}\n");
             const QString errors = Plugins::footguns(dir).errors.join('\n');
@@ -5428,7 +5428,7 @@ PinholePlugin {
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
         bench.engine.rootContext()->setContextProperty("theme", &theme);
         Plugins::registerTypes();
-        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/PeoplePlugin.qml");
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/Main.qml");
         QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.people&load=0");
         std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
         QVERIFY2(plugin, qPrintable(component.errorString()));
@@ -6139,7 +6139,7 @@ PinholePlugin {
         QDir().mkpath(QFileInfo(config).absolutePath());
         QFile::remove(config);
         write(config, R"({"enabled": {"t": true}})");
-        write(copy + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "t", "name": "t", "entryPoints": {"main": "Main.qml"}})");
+        write(copy + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
         write(copy + "/Main.qml", "import QtQuick\nItem {}\n");
         auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
                                                    QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
@@ -6480,7 +6480,7 @@ PinholePlugin {
     // put together in qsTr, and a manifest's misspelt key.
     void checkRefusesWhatOnlyFailsAsItRuns() {
         QTemporaryDir dir;
-        write(dir.path() + "/manifest.json", R"({"schemaVersion": 1, "verison": "1", "api": "3", "id": "me.probe", "entryPoints": {"main": "Main.qml"}})");
+        write(dir.path() + "/manifest.json", R"({"verison": "1", "api": "3", "id": "me.probe"})");
         write(dir.path() + "/Main.qml", R"(import QtQuick
 import QtQuick.Controls
 import Pinhole.Plugin
@@ -6521,7 +6521,7 @@ PinholePlugin {
                  qPrintable(errors));
         QVERIFY2(warnings.contains("Main.qml:19: words put together inside qsTr"), qPrintable(warnings));
         const QString manifest = Plugins::manifestWarnings(dir.path(), QJsonDocument::fromJson(
-            R"({"schemaVersion": 1, "verison": "1", "api": "3", "id": "me.probe"})").object()).join('\n');
+            R"({"verison": "1", "api": "3", "id": "me.probe"})").object()).join('\n');
         QVERIFY2(manifest.contains("\"verison\" is not a manifest's key (version?)"), qPrintable(manifest));
         QVERIFY2(manifest.contains("\"api\" is a whole number"), qPrintable(manifest));
         QVERIFY(Plugins::usableId("me.night") && !Plugins::usableId(".") && !Plugins::usableId("my plugin"));
@@ -6532,7 +6532,7 @@ PinholePlugin {
         QTemporaryDir root;
         const QString dir = root.path() + "/me.quiet";
         QDir().mkpath(dir);
-        write(dir + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "me.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        write(dir + "/manifest.json", R"({"api": 15, "id": "me.quiet", "name": "Quiet"})");
         write(dir + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 import Pinhole.Internal
@@ -6560,7 +6560,7 @@ PinholePlugin {
         QVERIFY2(!errors.contains("Main.qml:12"), qPrintable(errors));
         QVERIFY2(warnings.contains("Main.qml:7: a Shortcut takes its keys everywhere"), qPrintable(warnings));
         // Pinhole's own (or a copy keeping its id) may use Pinhole.Internal.
-        write(dir + "/manifest.json", R"({"schemaVersion": 1, "api": 15, "id": "pinhole.quiet", "name": "Quiet", "entryPoints": {"main": "Main.qml"}})");
+        write(dir + "/manifest.json", R"({"api": 15, "id": "pinhole.quiet", "name": "Quiet"})");
         QVERIFY(!Plugins::footguns(dir).errors.join('\n').contains("Pinhole.Internal"));
     }
 
@@ -7082,7 +7082,7 @@ PinholePlugin {
         bench.engine.rootContext()->setContextProperty("keymap", &keymap);
         bench.engine.rootContext()->setContextProperty("theme", &theme);
         Plugins::registerTypes();
-        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/PeoplePlugin.qml");
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/people/Main.qml");
         QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.people&load=0");
         std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(host)}}));
         QVERIFY2(plugin, qPrintable(component.errorString()));

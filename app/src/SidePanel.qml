@@ -1462,7 +1462,7 @@ Item {
                                         font.pixelSize: Math.round(theme.fontSize * 0.857)
                                     }
                                     // What it needs that is not installed (its
-                                    // manifest's "requires", API 15).
+                                    // manifest's "requires").
                                     UiText {
                                         width: parent.width
                                         visible: (pluginRow.info.missing ?? []).length > 0

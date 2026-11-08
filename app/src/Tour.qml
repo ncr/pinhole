@@ -50,7 +50,7 @@ Item {
         pluginId = id
         pluginName = name
         // Its last step, where the side panel shows it again, unless one of
-        // its own already goes there (API 15: no plugin says it itself).
+        // its own already goes there: no plugin says it itself.
         const own = Array.from(list)
         if (!own.some(step => step.settings === true))
             own.push({ title: qsTr("Settings"), text: qsTr("Here, in the side panel (Tab), this tour can be shown again."),

@@ -1348,7 +1348,7 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
             }
             const int steps = t->property("steps").toList().size();
             // Its last step the side panel, where it is shown again: its
-            // own, or the one Pinhole adds (API 15).
+            // own, or the one Pinhole adds.
             if (*at == 0) {
                 const QVariant all = t->property("steps");
                 const QVariantList list = all.canConvert<QJSValue>() ? all.value<QJSValue>().toVariant().toList() : all.toList();
@@ -2230,7 +2230,7 @@ void runBackgroundSelfTest(QQuickWindow *window, const Library &library, Viewer 
             return;
         }
         studioItem->setProperty("made", QVariantMap{{"path", video}, {"name", QFileInfo(video).fileName()}, {"size", ""}});
-        // Background's action on a file, as Series offers it (API 15).
+        // Background's action on a file, as Series offers it.
         QVariant offered = studioItem->property("fileActions");
         if (offered.canConvert<QJSValue>())
             offered = offered.value<QJSValue>().toVariant();

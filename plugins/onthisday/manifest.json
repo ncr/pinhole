@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "api": 15,
   "id": "pinhole.onthisday",
   "name": "On this day",
@@ -11,8 +10,5 @@
     "span": 0,
     "videos": true,
     "screenshots": false
-  },
-  "entryPoints": {
-    "main": "Main.qml"
   }
 }
