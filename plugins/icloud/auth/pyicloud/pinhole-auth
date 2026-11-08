@@ -65,6 +65,7 @@ class Provider:
         gives it (the window calls the account by it); a name noted before
         stays when there is none to give."""
         account = {"apple_id": apple_id}
+        old = {}
         try:
             old = json.loads(self.account_file.read_text())
             if old.get("apple_id") == apple_id and old.get("name"):
@@ -74,6 +75,8 @@ class Provider:
         name = ((getattr(api, "data", None) or {}).get("dsInfo") or {}).get("fullName")
         if name:
             account["name"] = name
+        if account == old:
+            return
         tmp = self.account_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(account))
         os.chmod(tmp, 0o600)
@@ -193,6 +196,9 @@ class Provider:
         api = self.connect(apple_id)
         if api.requires_2fa:
             raise ProviderError("needs_code", "Apple wants a two-factor code")
+        # The owner's name as Apple gives it now, for an account signed in
+        # to before it was kept, or renamed since.
+        self.save_apple_id(apple_id, api)
         return {
             "apple_id": apple_id,
             "dsid": str(api.data["dsInfo"]["dsid"]),

@@ -75,6 +75,11 @@ Operations:
   Only the thumbnails found are checked against their hashes, not every
   one indexed: one changed in place is failed and the search asked again
   without it. The counts in `status` are counted again only after a write.
+  The index in memory stays as photos are indexed: what is put or failed
+  since is kept beside it and ranked with it, and it is made one again in
+  memory past 4,096 such, never read again for it. A question holds
+  indexing off for 10 s, so the next of a search being typed never waits
+  for a photo on the GPU.
   On 35,850 photos with WeMM 4B on CUDA a question takes about 250 ms,
   most of it the text encoder (355 ms when each started a program and
   checked every photo).

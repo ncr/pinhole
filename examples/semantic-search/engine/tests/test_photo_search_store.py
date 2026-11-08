@@ -30,6 +30,43 @@ class StoreTests(unittest.TestCase):
         self.store.close()
         self.temporary.cleanup()
 
+    def test_writes_while_asked_rank_as_the_index_read_again_and_keep_it_in_memory(self):
+        import numpy as np
+        from unittest.mock import patch
+        from photo_search.store import Store
+        rng = np.random.default_rng(7)
+        unit = lambda: (lambda v: v / np.linalg.norm(v))(rng.normal(size=8))
+        store = Store(self.root / 'big.sqlite', 'source-b', {'model': 'test'}, 8)
+        self.addCleanup(store.close)
+        store.catalog([{'id': f'p{i:03d}', 'path': f'p{i}.jpg'} for i in range(120)])
+        for i in range(60):
+            store.put(f'p{i:03d}', f'h{i}', unit())
+        query = unit()
+        store.search(query, 500)
+        read = store.snapshot
+        # Indexed meanwhile: new ones, one put again, one failed, one good again.
+        for i in range(60, 90):
+            store.put(f'p{i:03d}', f'h{i}', unit())
+        store.put('p005', 'h5b', unit())
+        store.fail('p010', 'gone')
+        store.fail('p020', 'gone')
+        store.fingerprint('p020', 'h20')
+        found = store.search(query, 500)
+        self.assertIs(store.snapshot, read)
+        again = Store(self.root / 'big.sqlite', 'source-b', {'model': 'test'}, 8)
+        self.addCleanup(again.close)
+        expected = again.search(query, 500)
+        self.assertEqual([r['id'] for r in found], [r['id'] for r in expected])
+        np.testing.assert_allclose([r['score'] for r in found], [r['score'] for r in expected], atol=2e-3)
+        self.assertNotIn('p010', [r['id'] for r in found])
+        self.assertIn('p020', [r['id'] for r in found])
+        # Past the most kept beside it: made one again in memory, the same.
+        with patch('photo_search.store.MERGE', 3):
+            merged = store.search(query, 500)
+        self.assertIsNot(store.snapshot, read)
+        self.assertEqual((store.added, store.gone), ({}, set()))
+        self.assertEqual([r['id'] for r in merged], [r['id'] for r in expected])
+
     def test_restart_retains_vectors_and_source_identity_is_required(self):
         from photo_search.store import Store
         self.store.put('a', 'hash', self.a)
@@ -374,6 +411,21 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(checked, [['a']])
         self.assertEqual(self.worker.status()['errors'], 1)
         self.assertFalse(self.worker.sweep())
+
+    def test_a_question_holds_indexing_off_a_while(self):
+        from unittest.mock import Mock
+        from photo_search.ane import hash_file
+        from photo_search import worker as module
+        self.assertFalse(self.worker.asking())
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        model = Mock()
+        model.encode.return_value = self.vector()[None, :], {}
+        with patch('photo_search.models.TextModel', return_value=model):
+            self.worker.request({'op': 'query', 'text': 'pies'})
+        self.assertTrue(self.worker.asking())
+        self.worker.request({'op': 'status'})
+        with patch.object(module.time, 'monotonic', return_value=self.worker.asked_at + module.ASKING + 1):
+            self.assertFalse(self.worker.asking())
 
     def test_pinholeds_questions_are_answered_by_number(self):
         import io

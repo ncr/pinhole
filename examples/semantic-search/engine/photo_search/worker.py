@@ -19,6 +19,9 @@ MAX_MESSAGE = 24 << 20
 # Pinhole open asks for the model every 20 seconds (warm); it is held this
 # long past each ask, so a window that is busy a moment does not lose it.
 HOLD_SECONDS = 90
+# A search holds indexing off this long past each question: one photo
+# indexed takes the GPU about a second, which a question would wait for.
+ASKING = 10
 
 # Stable ids and Polish prompts for the prototype's fixed vocabulary.
 TAGS = (
@@ -108,6 +111,10 @@ class Worker:
         # The indexed photos still to be checked in the background, a few
         # at a time while it has nothing else to do (sweep).
         self.unswept = None
+        # When someone last asked something: indexing holds off a while
+        # after, so the next question of a search being typed never waits
+        # for a photo being indexed on the GPU.
+        self.asked_at = None
 
     def close(self):
         try:
@@ -242,8 +249,14 @@ class Worker:
         self.pending, self.running, self.waiting = [], False, False
         self.release()
 
+    def asking(self):
+        """Someone searched in the last ASKING seconds."""
+        return self.asked_at is not None and time.monotonic() - self.asked_at < ASKING
+
     def request(self, message):
         op = message.get('op')
+        if op in ('query', 'suggest_tags'):
+            self.asked_at = time.monotonic()
         if op == 'status':
             return self.status()
         if op == 'catalog':
@@ -505,7 +518,7 @@ def serve(args):
                             next_step = started + 5
                         elif not worker.running and worker.sweep():
                             pass
-                        elif worker.running and started >= next_step:
+                        elif worker.running and started >= next_step and not worker.asking():
                             try:
                                 worker.step()
                                 # Pinhole tells the plugin (workerSaid), which

@@ -9,6 +9,9 @@ import numpy as np
 
 KIND = "pinhole-semantic-index-v1"
 CHUNK = 4096
+# Vectors put or dropped beside the index in memory before it is made one
+# again (Store.prepare): a question scores those few apart meanwhile.
+MERGE = 4096
 
 
 class Store:
@@ -51,6 +54,12 @@ class Store:
         self.generation = 0
         self.snapshot = None
         self.counted = None
+        # Beside the index in memory: vectors put since it was read (added)
+        # and those in it no longer good (gone), so a question while photos
+        # are being indexed never waits for 35,000 vectors read again.
+        self.added = {}
+        self.gone = set()
+        self.positions = {}
 
     def close(self):
         self.db.close()
@@ -87,8 +96,23 @@ class Store:
             self.generation += 1
 
     def invalidate(self):
+        """What is in memory dropped, read again at the next question."""
         self.generation += 1
         self.snapshot = None
+        self.added, self.gone, self.positions = {}, set(), {}
+
+    def keep(self, asset_id, vector=None):
+        """One photo's vector in memory as written now: `vector` (float32)
+        good from now on, or none, it no longer is. Counted again too."""
+        self.generation += 1
+        if self.snapshot is None:
+            return
+        if asset_id in self.positions:
+            self.gone.add(asset_id)
+        if vector is None:
+            self.added.pop(asset_id, None)
+        else:
+            self.added[asset_id] = np.asarray(vector, dtype=np.float16)
 
     def fresh(self, asset_id, fingerprint):
         row = self.db.execute("SELECT fingerprint FROM embeddings WHERE asset_id=?", (asset_id,)).fetchone()
@@ -98,7 +122,10 @@ class Store:
         with self.db:
             self.db.execute("UPDATE catalog SET fingerprint=? WHERE asset_id=?", (fingerprint, asset_id))
             self.db.execute("DELETE FROM failures WHERE asset_id=?", (asset_id,))
-        self.invalidate()
+        # Its vector, kept from before, good again.
+        row = self.db.execute('''SELECT e.vector FROM embeddings e JOIN catalog c USING(asset_id)
+            WHERE e.asset_id=? AND e.fingerprint=c.fingerprint AND c.active=1''', (asset_id,)).fetchone()
+        self.keep(asset_id, np.frombuffer(row[0], dtype="<f4") if row and len(row[0]) == self.dimension * 4 else None)
 
     def put(self, asset_id, fingerprint, vector):
         vector = np.asarray(vector, dtype="<f4")
@@ -112,13 +139,13 @@ class Store:
             self.db.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?)",
                             (asset_id, fingerprint, vector.tobytes(), time.time_ns()))
             self.db.execute("DELETE FROM failures WHERE asset_id=?", (asset_id,))
-        self.invalidate()
+        self.keep(asset_id, vector)
 
     def fail(self, asset_id, reason):
         with self.db:
             self.db.execute("UPDATE catalog SET fingerprint=NULL WHERE asset_id=?", (asset_id,))
             self.db.execute("INSERT OR REPLACE INTO failures VALUES (?,?,?)", (asset_id, str(reason)[:2048], time.time_ns()))
-        self.invalidate()
+        self.keep(asset_id)
 
     def status(self):
         # Counted again only once something was written (invalidate): a
@@ -154,13 +181,33 @@ class Store:
         scores = np.empty(len(ids), dtype=np.float32)
         for start in range(0, len(ids), CHUNK):
             scores[start:start + CHUNK] = matrix[start:start + CHUNK].astype(np.float32) @ vector
+        if self.gone:
+            scores[[self.positions[asset] for asset in self.gone]] = -np.inf
         order = np.argsort(-scores, kind="stable")[:limit]
-        return [{"id": ids[i], "score": float(scores[i])} for i in order]
+        found = [(float(scores[i]), ids[i]) for i in order if np.isfinite(scores[i])]
+        if self.added:
+            fresh = list(self.added)
+            fresh_scores = np.stack([self.added[a] for a in fresh]).astype(np.float32) @ vector
+            found += [(float(score), asset) for score, asset in zip(fresh_scores, fresh)]
+        # Highest first, a tie by id, as one ranking of all of them.
+        found.sort(key=lambda pair: (-pair[0], pair[1]))
+        return [{"id": asset, "score": score} for score, asset in found[:limit]]
 
     def prepare(self):
         """The index in memory, half its stored size: half-precision vectors
         rank as the stored ones do, read a chunk at a time."""
         if self.snapshot is not None:
+            if len(self.added) + len(self.gone) <= MERGE:
+                return self.snapshot
+            # Many put since: one index again, in memory, without reading it.
+            ids, matrix = self.snapshot
+            keep = [i for i, asset in enumerate(ids) if asset not in self.gone]
+            fresh = sorted(self.added)
+            ids = [ids[i] for i in keep] + fresh
+            parts = [matrix[keep]] + ([np.stack([self.added[a] for a in fresh])] if fresh else [])
+            self.snapshot = ids, np.concatenate(parts)
+            self.added, self.gone = {}, set()
+            self.positions = {asset: i for i, asset in enumerate(ids)}
             return self.snapshot
         rows = self.db.execute('''SELECT e.asset_id,e.vector FROM embeddings e JOIN catalog c USING(asset_id)
             WHERE e.fingerprint=c.fingerprint AND c.active=1 ORDER BY e.asset_id''')
@@ -175,4 +222,6 @@ class Store:
             chunks.append(matrix.astype(np.float16))
         matrix = np.concatenate(chunks) if chunks else np.empty((0, self.dimension), dtype=np.float16)
         self.snapshot = ids, matrix
+        self.added, self.gone = {}, set()
+        self.positions = {asset: i for i, asset in enumerate(ids)}
         return self.snapshot
