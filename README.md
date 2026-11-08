@@ -17,7 +17,11 @@ photos and videos as they are (an iPhone's `IMG_1234.HEIC` with
 sources fit in is in [docs/sources.md](docs/sources.md).
 
 Everything that is set is in that side panel: the sources, where Pinhole
-keeps its files and how much room they take, and the plugins.
+keeps its files and how much room they take, and the plugins. iCloud,
+Folders, Favourites, Turn and crop, Live Photos, Info, Send to phone and
+Screenshots are on from the start; Series, People, the calendar, On this
+day, Colours, Contact sheet, Photo frame, Background and Theme are there
+too, off until turned on.
 
 Small marks in a photo's corner say what it is: a video, a Live Photo, a
 favourite, several photos as one card, and whatever a plugin marks; each
@@ -32,7 +36,7 @@ undoes any of it, as it does a favourite, and Ctrl ⇧ Z does it again. It
 also (G in the grid, or on a photo of one) makes a series a short GIF or
 video to send: Flip, Bounce, Fade, Drift or Pile, at a pace, in a look and a
 shape, held steady; ⏎ copies it and keeps it in Pictures/Pinhole. It is
-on unless turned off in the side panel.
+off until turned on in the side panel.
 
 On this day shows the photos taken on today's date in earlier years, a year
 at a time, the latest first: D in the grid, where its button says how many
@@ -162,9 +166,6 @@ as the default. Capture dates, calendar and series data stay unchanged. The
 viewer follows the grid's order too. A newly extended series shows its latest
 addition on its card; archived series keep their original cover.
 
-Recent additions (⇧ N) shows received and imported photos newest first by
-when they joined the library. Each card shows the added and capture dates;
-open a photo or use In the grid to find its place in the main chronology.
 The main grid ends in a complete row; spare cells before its oldest photo
 form a history card with the library's years, colours and a jump to the newest.
 
@@ -258,7 +259,6 @@ plugins/series/           the Series plugin; finder/ is pinhole-series, which fi
 plugins/background/       the Background plugin: a photo or video as the desktop background
 plugins/onthisday/        the On this day plugin
 plugins/calendar/         the Year calendar plugin: photos per day, a year a row
-plugins/recent/           Recent additions: received photos by when they joined the library
 plugins/sheet/            the Contact sheet plugin: a grid or collage of what is ticked, made by magick
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             photo details and the library map; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files

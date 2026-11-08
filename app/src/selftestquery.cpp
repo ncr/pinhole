@@ -17,7 +17,7 @@ void runQuerySelfTest(QQuickWindow *window) {
     QTimer::singleShot(1500, window, [window] {
         auto *engine = qmlEngine(window);
         auto *plugins = qobject_cast<Plugins *>(engine->rootContext()->contextProperty("plugins").value<QObject *>());
-        auto *host = plugins ? qobject_cast<PluginHost *>(plugins->at("pinhole.recent").value("host").value<QObject *>()) : nullptr;
+        auto *host = plugins ? qobject_cast<PluginHost *>(plugins->at("pinhole.info").value("host").value<QObject *>()) : nullptr;
         if (!host) {
             std::fputs("selftest: querylimits: missing plugin host\n", stderr);
             return QCoreApplication::exit(1);

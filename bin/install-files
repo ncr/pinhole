@@ -113,9 +113,6 @@ command = sys.argv[2].replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\
 entry.write_text(entry.read_text().replace('Exec=pinhole', 'Exec="' + command + '"'))
 PY
 fi
-install -d "$PREFIX/lib/pinhole/plugins/recent/i18n"
-install -Dm644 -t "$PREFIX/lib/pinhole/plugins/recent" plugins/recent/manifest.json plugins/recent/*.qml
-install -Dm644 -t "$PREFIX/lib/pinhole/plugins/recent/i18n" plugins/recent/i18n/*.json
 "$ROOT/bin/install-metadata" "$PREFIX"
 "$ROOT/bin/install-record" "$PREFIX"
 # Only a complete staged tree can replace the running installation.

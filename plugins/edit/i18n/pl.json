@@ -9,7 +9,6 @@
   "Keep to a shape": "Trzymaj proporcje",
   "Leave it as it was": "Zostaw, jak było",
   "Original": "Oryginał",
-  "R turns the photo shown a quarter, Shift R back; K crops it, Shift K takes it back to the original. Kept in Pinhole, never in the photo's file: the grid, the viewer, exports as JPEG and copies show it so, and Ctrl Z undoes it.": "R obraca pokazane zdjęcie o ćwierć obrotu, Shift R z powrotem; K je kadruje, Shift K przywraca oryginał. Zapisane w Pinhole, nigdy w pliku zdjęcia: tak pokazują je siatka, podgląd, eksport do JPEG i kopia, a Ctrl Z cofa.",
   "Saved in iCloud": "Zapisane w iCloud",
   "Saving the edit in iCloud…": "Zapisuję edycję w iCloud…",
   "The photo as it was taken again": "Znów zdjęcie takie, jak zrobione",
@@ -23,5 +22,6 @@
   "Whole photo": "Całe zdjęcie",
   "cropping": "kadrowanie",
   "going back to the original": "powrót do oryginału",
-  "turning": "obrót"
+  "turning": "obrót",
+  "R turns the photo shown a quarter, Shift R back; K crops it, Shift K takes it back to the original. In iCloud it is saved as an edit of the photo, which the iPhone shows too; a folder's photo keeps it in Pinhole, its file untouched. The grid, the viewer, exports as JPEG and copies show it so, and Ctrl Z undoes it.": "R obraca pokazane zdjęcie o ćwierć obrotu, Shift R z powrotem; K je kadruje, Shift K przywraca oryginał. W iCloud zapisuje się jako edycja zdjęcia, którą widać też na iPhonie; zdjęcie z folderu ma ją w Pinhole, a jego plik zostaje nietknięty. Tak pokazują je siatka, podgląd, eksport do JPEG i kopie, a Ctrl Z to cofa."
 }

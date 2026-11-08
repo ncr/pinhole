@@ -252,17 +252,21 @@ def run(job, scratch, lib, farm, logs, photos):
     # A display of its own (bin/headless-x: Xvfb, or Hyprland's Xwayland on
     # workspace 5), which the window's environment is not given.
     command = [str(APP / "bin/headless-x"), "1600x1000", str(APP / "build/pinhole"), "--library", str(given)]
+    # Every built-in on, those that start off too: the self-tests look at
+    # all of them.
+    (profile / "config/pinhole").mkdir(parents=True, exist_ok=True)
+    switches = {"enabled": {json.loads((m).read_text()).get("id", m.parent.name): True
+                            for m in farm.glob("*/manifest.json") if json.loads(m.read_text()).get("startsOff")}}
+    (profile / "config/pinhole/plugins.json").write_text(json.dumps(switches))
     if mode in ON_FOLDER:
         # The folder as the source shown: its library the service's to make.
-        (profile / "config/pinhole").mkdir(parents=True)
         (profile / "config/pinhole/settings.json").write_text(json.dumps({"source": {"kind": "folder", "path": str(photos)}}))
         command = command[:3]
     if mode == "background":
         env |= omarchy(profile, scratch, env)
     if mode == "hidden":
         # Screenshots hiding, what it found kept from a run before.
-        (profile / "config/pinhole").mkdir(parents=True)
-        (profile / "config/pinhole/plugins.json").write_text('{"settings": {"pinhole.screenshots": {"hide": true}}}')
+        (profile / "config/pinhole/plugins.json").write_text(json.dumps(switches | {"settings": {"pinhole.screenshots": {"hide": True}}}))
         subprocess.run([*command[:2], "timeout", "25", *command[2:]],
                        env=env | {"PINHOLE_SELFTEST": "lazyplugins:" + str(out)},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

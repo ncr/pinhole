@@ -1300,7 +1300,7 @@ bool Plugins::enabled(const Plugin &plugin) const {
     // A copy of one of Pinhole's own has a switch of its own (copy:<id>):
     // the built-in's, turned on once, never turns on a copy half made.
     const QJsonValue state = m_config.value("enabled").toObject().value(plugin.copy ? "copy:" + plugin.id : plugin.id);
-    return state.isBool() ? state.toBool() : !plugin.personal;
+    return state.isBool() ? state.toBool() : !plugin.personal && !plugin.startsOff;
 }
 
 bool Plugins::writeConfig(QJsonObject config) {
@@ -1496,6 +1496,7 @@ void Plugins::scan() {
             plugin->description = manifest.value("description").toString();
             plugin->version = manifest.value("version").toString();
             plugin->author = manifest.value("author").toString();
+            plugin->startsOff = !personal && manifest.value("startsOff").toBool();
             // Pinhole.Internal is Pinhole's own plugins' (and copies keeping
             // the id of one there is): it may change with any version, so
             // another's does not load with it, as check says, a made-up

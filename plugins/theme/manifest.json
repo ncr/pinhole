@@ -1,5 +1,6 @@
 {
   "api": 15,
+  "startsOff": true,
   "requires": ["magick"],
   "id": "pinhole.theme",
   "name": "Theme",

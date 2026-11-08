@@ -1161,7 +1161,7 @@ bool Plugins::usableId(const QString &id) {
 QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &manifest) {
     QStringList said;
     // What a manifest has: a key misspelt is never read, and nothing says so.
-    static const QStringList keys = {"id", "name", "description", "version", "api",
+    static const QStringList keys = {"id", "name", "description", "version", "api", "startsOff",
                                      "sources", "workers", "makes", "settings", "requires", "author", "license"};
     // The programs it needs: names, as on PATH.
     if (manifest.contains("requires")) {
@@ -1173,6 +1173,13 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
         if (!fine)
             said << QStringLiteral("manifest.json: \"requires\" is a list of the programs it needs, by their names on PATH: "
                                    "[\"magick\", \"ffprobe\"]");
+    }
+    // Off until turned on: Pinhole's own may say so; one's own always is.
+    if (manifest.contains("startsOff")) {
+        if (!manifest.value("startsOff").isBool())
+            said << QStringLiteral("manifest.json: \"startsOff\" is true or false");
+        else if (!QDir(dir).absolutePath().startsWith(builtInDir() + '/'))
+            said << QStringLiteral("manifest.json: \"startsOff\" is for Pinhole's own plugins: yours is off until turned on anyway");
     }
     if (manifest.contains("settings") && !manifest.value("settings").isObject())
         said << QStringLiteral("manifest.json: \"settings\" is an object of each setting's default: {\"shuffle\": true}");

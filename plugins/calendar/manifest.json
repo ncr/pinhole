@@ -1,5 +1,6 @@
 {
   "api": 15,
+  "startsOff": true,
   "id": "pinhole.calendar",
   "name": "Year calendar",
   "version": "1.0.0",

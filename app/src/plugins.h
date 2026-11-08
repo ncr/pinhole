@@ -937,6 +937,9 @@ private:
         QStringList required;
         // One's own with the id of one of Pinhole's own, which it replaces.
         bool copy = false;
+        // One of Pinhole's own that is off until turned on (its manifest's
+        // "startsOff"): there for whoever wants it, not for everyone.
+        bool startsOff = false;
         // Its files' names, times and sizes: a change loads it again.
         QString stamp;
         bool personal = false;

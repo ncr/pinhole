@@ -1,5 +1,6 @@
 {
   "api": 15,
+  "startsOff": true,
   "id": "pinhole.colour",
   "name": "Colours",
   "version": "1.0.0",

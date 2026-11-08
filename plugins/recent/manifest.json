@@ -1,9 +1,0 @@
-{
-  "api": 15,
-  "id": "pinhole.recent",
-  "name": "Recent additions",
-  "version": "1.0.0",
-  "author": "Pinhole",
-  "license": "MIT",
-  "description": "Find photos received or imported recently, even when they were taken years ago."
-}

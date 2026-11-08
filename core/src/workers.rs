@@ -328,7 +328,7 @@ impl Workers {
         let builtins = crate::plugins::builtin_ids(places);
         found
             .into_iter()
-            .filter(|w| crate::plugins::is_on(&switches, &w.plugin, w.builtin, !w.builtin && builtins.contains(&w.plugin)))
+            .filter(|w| crate::plugins::is_on(&switches, &w.plugin, w.builtin && !w.starts_off, !w.builtin && builtins.contains(&w.plugin)))
             .map(|w| {
                 let job = shown.map(|s| Job {
                     program: w.program.clone(),

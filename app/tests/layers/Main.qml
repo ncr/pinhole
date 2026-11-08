@@ -10,7 +10,7 @@ PinholePlugin {
     property int unshown: 0
     property var last: null
     property int triggered: 0
-    // The action in three places (API 15): where it was last pressed, and
+    // The action in three places: where it was last pressed, and
     // on which photos.
     property string pressedIn: ""
     property string photos: "-"

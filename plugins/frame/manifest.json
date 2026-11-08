@@ -1,5 +1,6 @@
 {
   "api": 15,
+  "startsOff": true,
   "id": "pinhole.frame",
   "name": "Photo frame",
   "version": "1.0.0",

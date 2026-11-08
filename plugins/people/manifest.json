@@ -1,5 +1,6 @@
 {
   "api": 15,
+  "startsOff": true,
   "id": "pinhole.people",
   "name": "People",
   "version": "0.7.0",

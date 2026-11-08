@@ -13,7 +13,8 @@ Pinhole's own and the fullest example.
 
 A plugin is a folder with a `manifest.json` and a QML file, as Omarchy's
 are. Pinhole's own are in its plugins folder (`/usr/lib/pinhole/plugins`
-installed, `plugins/` in a checkout) and are on unless turned off; your own
+installed, `plugins/` in a checkout) and are on unless turned off, or off
+until turned on where their manifest says `"startsOff": true`; your own
 go in `~/.config/pinhole/plugins/<id>/` and start off, to be turned on in
 the side panel (Tab). One of yours with a built-in's id takes its place, so
 copying a built-in there is how to change it.
@@ -409,6 +410,7 @@ And warns of:
 | `version` | yours, shown with its name |
 | `api` | the plugin API it is written for, this Pinhole's: 15, required (below) |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
+| `startsOff` | `true`: one of Pinhole's own that is off until turned on in the side panel, there for whoever wants it (Series, People, the calendar…); left out, it is on. Yours start off anyway |
 | `requires` | the programs it needs, by their names on PATH: `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
 | `author`, `license` | yours |
 

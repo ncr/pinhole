@@ -1663,7 +1663,7 @@ fn maker_of(shared: &Shared, kind: &str) -> Option<crate::plugins::Maker> {
     let switches = crate::plugins::switches_in(&shared.config.plugins);
     let builtins = crate::plugins::builtin_ids(places);
     crate::plugins::makers(places).0.into_iter().find(|m| {
-        m.kind == kind && crate::plugins::is_on(&switches, &m.plugin, m.builtin, !m.builtin && builtins.contains(&m.plugin))
+        m.kind == kind && crate::plugins::is_on(&switches, &m.plugin, m.builtin && !m.starts_off, !m.builtin && builtins.contains(&m.plugin))
     })
 }
 

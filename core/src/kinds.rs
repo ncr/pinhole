@@ -215,7 +215,7 @@ impl Kinds {
         for p in providers.iter() {
             let plugin = &p.provided().plugin;
             let copy = !p.provided().builtin && builtins.contains(plugin);
-            let turned_on = crate::plugins::is_on(&switches, plugin, p.provided().builtin, copy);
+            let turned_on = crate::plugins::is_on(&switches, plugin, p.provided().builtin && !p.provided().starts_off, copy);
             p.set_on(turned_on);
             if turned_on {
                 on.insert(p.kind().to_owned());

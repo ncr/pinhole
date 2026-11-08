@@ -135,9 +135,11 @@ pub fn personal_ids(places: &Places) -> std::collections::HashSet<String> {
 pub struct Provided {
     /// The plugin's id, whose switch it follows.
     pub plugin: String,
-    /// The plugin is a built-in one: on unless switched off. One of your
-    /// own is off until switched on.
+    /// The plugin is a built-in one: on unless switched off, or unless its
+    /// manifest `starts_off`. One of your own is off until switched on.
     pub builtin: bool,
+    /// A built-in one off until switched on (its manifest's "startsOff").
+    pub starts_off: bool,
     /// Its kind, which is the plugin's id or starts with it and a dot.
     pub kind: String,
     /// The program, in the plugin's folder.
@@ -178,6 +180,12 @@ fn installed(places: &Places) -> Vec<(String, PathBuf, Value, bool)> {
 /// on, as the window has them.
 pub fn turned_on(builtin: bool, switch: Option<bool>) -> bool {
     if builtin { switch != Some(false) } else { switch == Some(true) }
+}
+
+/// Whether a plugin is on before it is ever switched: a built-in one whose
+/// manifest does not say `"startsOff": true`.
+pub fn on_by_default(builtin: bool, manifest: &Value) -> bool {
+    builtin && manifest["startsOff"] != Value::Bool(true)
 }
 
 /// Whether the plugin `id` is on, by its switch in `switches`. Your own
@@ -222,7 +230,7 @@ pub fn provided(places: &Places, compiled: &[&str]) -> (Vec<Provided>, Vec<Strin
             let kind = declared["kind"].as_str().unwrap_or("");
             let builtin = *builtin;
             match check(id, dir, manifest, kind, provider, declared, compiled, &ids, &found) {
-                Ok(provided) => found.push(Provided { builtin, ..provided }),
+                Ok(provided) => found.push(Provided { builtin, starts_off: builtin && !on_by_default(builtin, manifest), ..provided }),
                 Err(why) => problems.push(format!("{id}: source {kind:?}: {why}")),
             }
         }
@@ -239,6 +247,8 @@ pub struct Worker {
     pub plugin: String,
     /// The plugin is a built-in one: on unless switched off.
     pub builtin: bool,
+    /// A built-in one off until switched on (its manifest's "startsOff").
+    pub starts_off: bool,
     /// Its name, one of the plugin's own.
     pub name: String,
     /// The program, in the plugin's folder.
@@ -275,7 +285,8 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
             match check_worker(&dir, each, &names) {
                 Ok((program, args, answers)) => {
                     names.push(name.to_owned());
-                    found.push(Worker { plugin: id.clone(), builtin, name: name.to_owned(), program, args, answers });
+                    let starts_off = builtin && !on_by_default(builtin, &manifest);
+                    found.push(Worker { plugin: id.clone(), builtin, starts_off, name: name.to_owned(), program, args, answers });
                 }
                 Err(why) => problems.push(format!("{id}: worker {name:?}: {why}")),
             }
@@ -291,6 +302,8 @@ pub fn workers(places: &Places) -> (Vec<Worker>, Vec<String>) {
 pub struct Maker {
     pub plugin: String,
     pub builtin: bool,
+    /// A built-in one off until switched on (its manifest's "startsOff").
+    pub starts_off: bool,
     /// The kind a window asks `fetch` for: `bounce`, `long_exposure`.
     pub kind: String,
     /// The rendition it is made from: `live`, `full`, `original`, `video`.
@@ -327,7 +340,7 @@ pub fn makers(places: &Places) -> (Vec<Maker>, Vec<String>) {
                 Ok(maker) if found.iter().any(|m| m.kind == maker.kind) => {
                     problems.push(format!("{id}: makes {kind:?}: another plugin makes it already"))
                 }
-                Ok(maker) => found.push(Maker { plugin: id.clone(), builtin, ..maker }),
+                Ok(maker) => found.push(Maker { plugin: id.clone(), builtin, starts_off: builtin && !on_by_default(builtin, &manifest), ..maker }),
                 Err(why) => problems.push(format!("{id}: makes {kind:?}: {why}")),
             }
         }
@@ -392,6 +405,7 @@ fn check_maker(plugin: &str, dir: &Path, declared: &Value) -> Result<Maker, Stri
     Ok(Maker {
         plugin: String::new(),
         builtin: false,
+        starts_off: false,
         kind: kind.to_owned(),
         from: from.to_owned(),
         file_type: file_type.to_owned(),
@@ -501,6 +515,7 @@ fn check(
     Ok(Provided {
         plugin: id.to_owned(),
         builtin: false,
+        starts_off: false,
         kind: kind.to_owned(),
         program: path,
         needs_sign_in: declared["needsSignIn"].as_bool().unwrap_or(false),
@@ -800,6 +815,12 @@ mod tests {
         };
         plugin(&places.builtin, "people", "pinhole.people", 15,
                serde_json::json!([{"name": "faces", "program": "run", "args": ["daemon"], "per": "source"}]));
+        // A built-in one that starts off.
+        plugin(&places.builtin, "zoo", "pinhole.zoo", 15, serde_json::json!([{"name": "keeper", "program": "run"}]));
+        let zoo = places.builtin.join("zoo/manifest.json");
+        let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&zoo).unwrap()).unwrap();
+        manifest["startsOff"] = Value::Bool(true);
+        std::fs::write(&zoo, manifest.to_string()).unwrap();
         // A built-in one your copy replaces, workers and all.
         plugin(&places.builtin, "search", "pinhole.search", 15, serde_json::json!([{"name": "old", "program": "run"}]));
         plugin(&places.personal, "my-search", "pinhole.search", 15, serde_json::json!([{"name": "new", "program": "./run"}]));
@@ -821,10 +842,16 @@ mod tests {
 
         let (found, problems) = workers(&places);
         let names: Vec<(&str, &str, bool)> = found.iter().map(|w| (w.plugin.as_str(), w.name.as_str(), w.builtin)).collect();
-        assert_eq!(names, [("pinhole.people", "faces", true), ("me.mine", "index", false), ("pinhole.search", "new", false)]);
+        assert_eq!(names, [("pinhole.people", "faces", true), ("pinhole.zoo", "keeper", true), ("me.mine", "index", false),
+                           ("pinhole.search", "new", false)]);
+        assert!(!found[0].starts_off && found[1].starts_off);
+        // Off until switched on, then as any built-in.
+        let zoo_on = |switches: &HashMap<String, bool>| is_on(switches, "pinhole.zoo", found[1].builtin && !found[1].starts_off, false);
+        assert!(!zoo_on(&HashMap::new()));
+        assert!(zoo_on(&[("pinhole.zoo".to_owned(), true)].into()));
         assert_eq!(found[0].program, places.builtin.join("people/run"));
         assert_eq!(found[0].args, ["daemon"]);
-        assert_eq!(found[2].program, places.personal.join("my-search/./run"));
+        assert_eq!(found[3].program, places.personal.join("my-search/./run"));
         let said = problems.join("\n");
         for why in ["me.mine: worker \"index\": that name is the plugin's already", "me.mine: worker \"up\": \"program\" is a path",
                     "me.mine: worker \"abs\": \"program\" is a path", "me.mine: worker \"plain\":", "me.mine: worker \"missing\":",

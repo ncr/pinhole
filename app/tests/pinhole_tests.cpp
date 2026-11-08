@@ -1351,7 +1351,7 @@ QtObject {
         QCOMPARE(bench.js("pinhole.library.field('day').join(' ')").toString(), QString("19600229 19650615 0 20250108"));
     }
 
-    // A source's keys as the rest of the manifest writes them (API 15), or
+    // A source's keys as the rest of the manifest writes them, or
     // as before.
     void aSourceWritesItsKeysAsTheManifestDoes() {
         QTemporaryDir dir;
@@ -1373,7 +1373,7 @@ QtObject {
         QVERIFY(Plugins::sourcesProblem(dir.path(), "me.nas", manifest(15, {{"needsSignIn", "yes"}})).contains("\"needsSignIn\" is true or false"));
     }
 
-    // JSON both ways with run (API 15): `json` as its stdin, and the
+    // JSON both ways with run: `json` as its stdin, and the
     // result's `json` its stdout when that is JSON.
     void aPluginRunsAProgramWithJsonBothWays() {
         PluginBench bench({{"me.a", {}}});
@@ -1387,7 +1387,7 @@ QtObject {
         QTRY_COMPARE(bench.said(), QStringList({"json 1 x", "lines true 2", "unasked 2"}));
     }
 
-    // A file made handed over (pinhole.deliver, API 15): never rejected.
+    // A file made handed over (pinhole.deliver): never rejected.
     void aPluginDeliversWhatItMadeAndHearsHowItWent() {
         PluginBench bench({{"me.a", {}}});
         bench.js("pinhole.deliver('/no/such/file.png').then(how => said.push('missing ' + how))");
@@ -1420,7 +1420,19 @@ QtObject {
                  qPrintable(said));
     }
 
-    // What a plugin needs (the manifest's "requires", API 15) and whether
+    // One of Pinhole's own whose manifest says "startsOff" is off until
+    // turned on, and then as any other; one that does not, on.
+    void aBuiltInThatStartsOffIsOffUntilTurnedOn() {
+        PluginBench bench({{"me.on", {}}, {"me.off", {{"startsOff", true}}}});
+        QVERIFY(bench.plugins->at("me.on").value("enabled").toBool());
+        QVERIFY(!bench.plugins->at("me.off").value("enabled").toBool());
+        bench.plugins->setEnabled("me.off", true);
+        QVERIFY(bench.plugins->at("me.off").value("enabled").toBool());
+        bench.plugins->setEnabled("me.off", false);
+        QVERIFY(!bench.plugins->at("me.off").value("enabled").toBool());
+    }
+
+    // What a plugin needs (the manifest's "requires") and whether
     // a program is there (pinhole.has).
     void aPluginSaysWhatItNeedsAndAsksWhatIsThere() {
         PluginBench bench({{"me.a", {{"requires", QJsonArray{"sh", "no-such-program-here"}}}}});
@@ -1433,8 +1445,8 @@ QtObject {
         QVERIFY(Plugins::manifestWarnings(QString(), QJsonObject{{"requires", "magick"}}).join(" ").contains("list of the programs"));
     }
 
-    // What a plugin keeps a value for each of many keys of (pinhole.store,
-    // API 15): one key at a time, as JSON, in its cacheDir for the library.
+    // What a plugin keeps a value for each of many keys of (pinhole.store):
+    // one key at a time, as JSON, in its cacheDir for the library.
     void aPluginKeepsValuesByKeyInAStoreOfItsOwn() {
         PluginBench bench({{"me.a", {}}});
         QVERIFY(bench.js("pinhole.store('Not Fine') === null").toBool());
@@ -3829,7 +3841,7 @@ QtObject {
         bench.viewer->libraryReloaded(moved);
         bench.plugins->libraryReloaded(moved);
         QCOMPARE(bench.said(), QStringList({"changed", "hidden true 2"}));
-        // Then settled, once for both, of the library as it is now (API 15).
+        // Then settled, once for both, of the library as it is now.
         QTRY_COMPARE(bench.said().size(), 3);
         QCOMPARE(bench.said().last(), QStringLiteral("settled read true hidden true switched false shown newac false,false,true,false"));
         // What the grid hides alone: settled, not read.
@@ -7223,7 +7235,7 @@ PinholePlugin {
         QTRY_COMPARE(bench.said().size(), 3);
         QCOMPARE(bench.said().last(), QString("not_found"));
         QVERIFY(mimeData()->hasFormat("image/gif"));
-        // Handed over (pinhole.deliver, API 15): copied, as copyFile does.
+        // Handed over (pinhole.deliver): copied, as copyFile does.
         bench.js("pinhole.deliver(jpeg).then(how => said.push('delivered ' + how))");
         QTRY_COMPARE(bench.said().size(), 4);
         QCOMPARE(bench.said().last(), QString("delivered copied"));
