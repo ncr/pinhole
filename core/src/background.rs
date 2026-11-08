@@ -593,12 +593,17 @@ mod tests {
     /// which works: not stopped.
     #[test]
     fn a_program_waiting_on_one_it_started_that_works_is_not_stopped() {
+        // Longer than the quiet it is given, the one waiting doing nothing
+        // all along. A second of quiet, not less: on a computer busy with
+        // every core (bin/test-all), an idle-priority child can go a few
+        // hundred milliseconds without a look-in.
+        let quiet = Duration::from_secs(1);
         let mut waiting = command("sh");
-        waiting.args(["-c", "(i=0; while [ $i -lt 600000 ]; do i=$((i+1)); done); echo done"]);
+        waiting.args(["-c", "(i=0; while [ $i -lt 2000000 ]; do i=$((i+1)); done); echo done"]);
         let started = Instant::now();
-        let out = output_within(&mut waiting, &quick(Duration::from_millis(300))).unwrap();
+        let out = output_within(&mut waiting, &quick(quiet)).unwrap();
         assert_eq!(&out.stdout[..], b"done\n");
-        assert!(started.elapsed() > Duration::from_millis(600), "{:?}", started.elapsed());
+        assert!(started.elapsed() > quiet, "{:?}", started.elapsed());
     }
 
     #[test]

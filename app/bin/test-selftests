@@ -85,25 +85,52 @@ def library(scratch):
     return out
 
 
+def exif(make, model, when):
+    """An EXIF segment (APP1) as a camera writes one: its make, its model,
+    and when, as DateTime and DateTimeOriginal."""
+    def ascii(text):
+        return text.encode() + b"\0"
+    def ifd(entries, start, tail):
+        # Each entry: tag, type 2 (ASCII) or 4 (LONG), and its value, the
+        # longer ones after the directory.
+        body, extra = struct.pack("<H", len(entries)), b""
+        after = start + 2 + 12 * len(entries) + 4
+        for tag, kind, value in entries:
+            if kind == 4:
+                body += struct.pack("<HHII", tag, 4, 1, value)
+            elif len(value) <= 4:
+                body += struct.pack("<HHI", tag, 2, len(value)) + value.ljust(4, b"\0")
+            else:
+                body += struct.pack("<HHII", tag, 2, len(value), after + len(extra))
+                extra += value + (b"\0" if len(value) % 2 else b"")
+        return body + struct.pack("<I", tail) + extra
+    first = ifd([(0x010F, 2, ascii(make)), (0x0110, 2, ascii(model)), (0x0132, 2, ascii(when)), (0x8769, 4, 0)], 8, 0)
+    exif_at = 8 + len(first)
+    first = ifd([(0x010F, 2, ascii(make)), (0x0110, 2, ascii(model)), (0x0132, 2, ascii(when)), (0x8769, 4, exif_at)], 8, 0)
+    tiff = b"II*\0" + struct.pack("<I", 8) + first + ifd([(0x9003, 2, ascii(when))], exif_at, 0)
+    data = b"Exif\0\0" + tiff
+    return b"\xff\xe1" + struct.pack(">H", len(data) + 2) + data
+
+
 def folder(scratch):
     """A folder of twelve JPEGs, as a camera leaves them (EXIF: make, model,
     when), a source of the folder kind reads; and beside it, out of it, a
     second of a background a theme switch brings (other.jpg) and a video
-    for Series' studio to have made (clip.mp4)."""
-    from PIL import Image, ImageDraw
+    for Series' studio to have made (clip.mp4). Made with ImageMagick and
+    ffmpeg, which Pinhole's plugins need anyway."""
     photos = scratch / "folder"
     photos.mkdir()
     for n in range(12):
-        image = Image.new("RGB", (1600, 1200), (40 + n * 17, 90, 200 - n * 12))
-        draw = ImageDraw.Draw(image)
-        draw.ellipse((300 + n * 40, 250, 1100 + n * 20, 950), fill=(230, 200 - n * 10, 60))
-        exif = Image.Exif()
-        exif[0x010F], exif[0x0110] = "Pinhole", "Selftest One"
+        plain = scratch / f"plain{n}.jpg"
+        subprocess.run(["magick", "-size", "1600x1200", f"xc:rgb({40 + n * 17},90,{200 - n * 12})",
+                        "-fill", f"rgb(230,{200 - n * 10},60)", "-draw", f"ellipse {700 + n * 30},600 400,350 0,360",
+                        "-strip", "-quality", "88", str(plain)], check=True)
+        jpeg = plain.read_bytes()
         when = f"2024:06:{n + 1:02d} 10:{n:02d}:00"
-        exif[0x0132] = when
-        exif.get_ifd(0x8769)[0x9003] = when
-        image.save(photos / f"IMG_{n:04d}.JPG", quality=88, exif=exif)
-    Image.new("RGB", (1920, 1080), (20, 120, 90)).save(scratch / "other.jpg", quality=88)
+        (photos / f"IMG_{n:04d}.JPG").write_bytes(jpeg[:2] + exif("Pinhole", "Selftest One", when) + jpeg[2:])
+        plain.unlink()
+    subprocess.run(["magick", "-size", "1920x1080", "xc:rgb(20,120,90)", "-quality", "88", str(scratch / "other.jpg")],
+                   check=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=24:duration=1",
                     "-pix_fmt", "yuv420p", str(scratch / "clip.mp4")], check=True)
     return photos
