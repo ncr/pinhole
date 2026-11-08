@@ -188,7 +188,8 @@ PinholePlugin {
             group: "background"
             text: qsTr("Bounce as background")
             key: "Shift+V"
-            shown: plugin.shown !== null && plugin.shown.live
+            // Made by the plugin that makes Bounce (Live Photos'): while one is on.
+            shown: plugin.shown !== null && plugin.shown.live && pinhole.fetchable.includes("bounce")
             usable: !plugin.working
             onTriggered: plugin.setBackground(pinhole.viewer.index, "bounce")
         },

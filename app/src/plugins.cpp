@@ -143,6 +143,8 @@ PluginHost::PluginHost(const QString &id, const QString &dir, Plugins *plugins)
     m_settings = std::make_unique<PluginSettings>(this);
     connect(plugins, &Plugins::selectionChanged, this, &PluginHost::selectionChanged);
     connect(plugins, &Plugins::hiddenChanged, this, &PluginHost::hiddenChanged);
+    // A plugin turned on or off, or loaded again: what fetch can ask may too.
+    connect(plugins, &Plugins::changed, this, &PluginHost::fetchableChanged);
     connect(this, &PluginHost::notified, plugins, [this](const QString &text) { emit m_plugins->notice(m_id, text); });
 }
 
@@ -440,6 +442,17 @@ bool PluginHost::hasKeys() const {
 }
 
 QList<QObject *> PluginHost::fileActions() const { return m_plugins->fileActions(); }
+QStringList PluginHost::fetchable() const { return m_plugins->fetchable(); }
+
+QStringList Plugins::fetchable() const {
+    QStringList kinds = {"medium", "full", "original", "jpeg", "video", "live", "loop"};
+    for (const auto &p : m_plugins)
+        if (p->error.isEmpty() && enabled(*p))
+            for (const QString &kind : p->makes)
+                if (!kinds.contains(kind))
+                    kinds << kind;
+    return kinds;
+}
 
 void Plugins::setFileActions(const QList<QObject *> &actions) {
     QList<QPointer<QObject>> now(actions.begin(), actions.end());
@@ -1511,6 +1524,10 @@ void Plugins::scan() {
                 plugin->main = main;
             plugin->sources = sourceKinds(manifest);
             plugin->settingDefaults = manifest.value("settings").toObject().toVariantMap();
+            plugin->makes.clear();
+            if (makesProblem(plugin->dir, manifest).isEmpty())
+                for (const QJsonValue &each : manifest.value("makes").toArray())
+                    plugin->makes << each.toObject().value("kind").toString();
             plugin->required.clear();
             for (const QJsonValue &each : manifest.value("requires").toArray())
                 if (const QString name = each.toString(); !name.isEmpty() && !name.contains('/'))

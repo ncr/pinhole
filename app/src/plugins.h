@@ -322,6 +322,11 @@ class PluginHost : public QObject {
     // a file a plugin made. Its takes(path) says if it does that file, its
     // trigger(path) does it.
     Q_PROPERTY(QList<QObject *> fileActions READ fileActions NOTIFY fileActionsChanged)
+    // The kinds pinhole.fetch can ask for now: a source's (medium, full,
+    // original, jpeg, video, live, loop) and those the plugins on make
+    // (bounce and long_exposure while Live Photos is on): what to offer
+    // only while it can be had.
+    Q_PROPERTY(QStringList fetchable READ fetchable NOTIFY fetchableChanged)
 public:
     PluginHost(const QString &id, const QString &dir, class Plugins *plugins);
     ~PluginHost() override;
@@ -369,6 +374,7 @@ public:
     bool away() const { return m_away; }
     bool keyboardInUse() const;
     QList<QObject *> fileActions() const;
+    QStringList fetchable() const;
     QString input() const;
     bool hasKeys() const;
     // The viewer closed, or another plugin covered meanwhile.
@@ -548,6 +554,7 @@ signals:
     void keyboardInUseChanged();
     void hasKeysChanged();
     void fileActionsChanged();
+    void fetchableChanged();
     void workersChanged();
     // What one of its workers said: a line of JSON with an "event" it wrote
     // on its stdout, its latest of each quarter second. What it
@@ -697,22 +704,8 @@ class Plugins : public QObject {
     // defaultShown }. At most 32, and 4 of any plugin.
     Q_PROPERTY(QVariantList markKinds READ markKinds NOTIFY markKindsChanged)
 public:
-    // The version of what a plugin is given. A manifest's "api" asks for
-    // at least this; a plugin asking for more says it needs a newer
-    // Pinhole. 2: promises, pinhole.settings, notify, photos by id. 3:
-    // marks, pinhole.state and pinhole.cache. 4: photos in sRGB
-    // (image://file, a photo's thumbPath; docs/hdr.md). 5: the kit
-    // (ScrollList, ScrollGrid, ScrollArea, PinchZoom, Panel, Card,
-    // Choices), pinhole.query and pinhole.picturePath. 6: holdSdr.
-    // 7: ShellButton.checkable for accessible selected buttons.
-    // 8: pinhole.openPhotoDirect. 9: pinhole.openPhotos. 10: ids in hidden
-    // and stacks, pinhole.selectionIds, pinhole.screenshots. 11: coming back
-    // from the photos (openPhotos' comeBack, away, returned), PhotoTiles,
-    // PanelHeader, SettingNote and SettingSwitch, Choices.numbered and
-    // keyboardInUse. 12: pinhole.copyText, input and hasKeys. 13:
-    // pinhole.readText and readJson, a worker's `said` in pinhole.workers.
-    // 14: pinhole.synced. 15: kinds a plugin makes of its own, and actions
-    // on a file (pinhole.fileActions).
+    // The version of what a plugin is given: a manifest's "api" is this,
+    // neither less nor more.
     static constexpr int api = 15;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
@@ -777,6 +770,9 @@ public:
     // them: pinhole.fileActions.
     Q_INVOKABLE void setFileActions(const QList<QObject *> &actions);
     QList<QObject *> fileActions() const;
+    // The kinds fetch can ask for now: what a source has, and what the
+    // plugins on make (pinhole.fetchable).
+    QStringList fetchable() const;
     // The window's sources, which pinhole.sources mirrors and asks.
     void setSources(Sources *sources);
     Sources *sourcesObject() const { return m_sources; }
@@ -935,6 +931,8 @@ private:
         QVariantMap settingDefaults;
         // The programs its manifest says it needs ("requires").
         QStringList required;
+        // The kinds it makes (its manifest's "makes"), for fetch to ask.
+        QStringList makes;
         // One's own with the id of one of Pinhole's own, which it replaces.
         bool copy = false;
         // One of Pinhole's own that is off until turned on (its manifest's

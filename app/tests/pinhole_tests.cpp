@@ -1490,8 +1490,8 @@ QtObject {
         QVERIFY(Plugins::workersProblem(dir.path(), manifest(15, "yes")).contains("true or false"));
     }
 
-    // A kind a plugin makes of its own is under its id, from API 15, as
-    // pinholed takes it (core/src/plugins.rs, check_maker).
+    // A kind a plugin makes of its own is under its id, as pinholed takes
+    // it (core/src/plugins.rs, check_maker).
     void aPluginMakesKindsOfItsOwnUnderItsId() {
         QTemporaryDir dir;
         QFile program(dir.path() + "/make");
@@ -1513,6 +1513,29 @@ QtObject {
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(QJsonDocument(manifest(15, "me.steady/steadied")).toJson());
         file.close();
+    }
+
+    // What fetch can ask for: a source's kinds always, a made one while the
+    // plugin that makes it is on, and pinhole.fetchable says when that
+    // changes.
+    void fetchableHasWhatThePluginsOnMake() {
+        const QJsonArray makes{QJsonObject{{"kind", "bounce"}, {"from", "live"}, {"type", "public.mpeg-4"},
+                                           {"extension", "mp4"}, {"program", "make"}}};
+        PluginBench bench({{"me.asker", {}}, {"me.maker", {{"makes", makes}}}});
+        QFile program(bench.dir.path() + "/plugins/me.maker/make");
+        QVERIFY(program.open(QIODevice::WriteOnly));
+        program.write("#!/bin/sh\n");
+        program.close();
+        program.setPermissions(program.permissions() | QFile::ExeOwner);
+        bench.plugins->rescan();
+        QStringList fetchable = bench.host->fetchable();
+        QVERIFY(fetchable.contains("medium") && fetchable.contains("jpeg") && fetchable.contains("loop"));
+        QVERIFY2(fetchable.contains("bounce"), qPrintable(fetchable.join(' ')));
+        QSignalSpy told(bench.host, &PluginHost::fetchableChanged);
+        bench.plugins->setEnabled("me.maker", false);
+        QVERIFY(told.count() > 0);
+        QVERIFY(!bench.host->fetchable().contains("bounce"));
+        QVERIFY(bench.host->fetchable().contains("medium"));
     }
 
     // A plugin's file named as another's, or as one of Pinhole's own, is
