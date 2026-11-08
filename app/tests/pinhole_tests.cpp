@@ -7535,7 +7535,7 @@ PinholePlugin {
     }
 
     // Storage::library names a folder's library as the service does
-    // (storage::library_for); one made under its former name is kept to.
+    // (storage::library_for); one whose name another's has, by its id.
     void aFoldersLibraryIsNamedAsTheServiceNamesIt() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir location;
@@ -7557,26 +7557,22 @@ PinholePlugin {
         // A tilde of its own is told apart from the hash's.
         shown("/home/me/My/Photos~7f094097f3a39b1b");
         QVERIFY(Storage::library() != location.path() + "/library/folder/home-me-My-Photos~7f094097f3a39b1b");
-        // The same as core's: one made under a former name is kept to, and
-        // a folder whose name another's former one is has one by its id.
-        const QString former = location.path() + "/library/folder/a-b-c";
-        QVERIFY(QDir().mkpath(former));
-        makeLibrary(former, {{"x.jpg", 1}}, false, "folder:/a/b-c");
-        shown("/a/b-c");
-        QCOMPARE(Storage::library(), former);
+        // The same as core's: a folder whose name another's library has
+        // has one by its id.
+        const QString taken = location.path() + "/library/folder/a-b-c";
+        QVERIFY(QDir().mkpath(taken));
+        makeLibrary(taken, {{"x.jpg", 1}}, false, "folder:/elsewhere");
         shown("/a/b/c");
-        QCOMPARE(Storage::library(), former + "~43215282df502c0e");
-        shown("/a-b/c");
-        QVERIFY(Storage::library() != former);
+        QCOMPARE(Storage::library(), taken + "~43215282df502c0e");
         // That name by its id another's too: the next; its own there is
         // kept to, even once its name is no one's.
-        const QString byId = former + "~43215282df502c0e", next = byId + "-1";
+        const QString byId = taken + "~43215282df502c0e", next = byId + "-1";
         QVERIFY(QDir().mkpath(byId) && QDir().mkpath(next));
         makeLibrary(byId, {{"x.jpg", 1}}, false, "folder:/a/b/c~43215282df502c0e");
         shown("/a/b/c");
         QCOMPARE(Storage::library(), next);
         makeLibrary(next, {{"x.jpg", 1}}, false, "folder:/a/b/c");
-        QVERIFY(QDir(former).removeRecursively());
+        QVERIFY(QDir(taken).removeRecursively());
         QCOMPARE(Storage::library(), next);
         QVERIFY(QDir(byId).removeRecursively());
         QCOMPARE(Storage::library(), next);

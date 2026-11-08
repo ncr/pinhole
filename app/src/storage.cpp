@@ -181,7 +181,6 @@ QString Storage::library() {
         return folder() + "/library/none";
     const QString under = folder() + "/library/" + kind + '/';
     QString id, name;
-    QStringList former;
     if (kind == QLatin1String("folder")) {
         // FolderSource::library_name: the path with dashes, and a hash of
         // it after a tilde if it has a dash or a tilde of its own.
@@ -193,7 +192,6 @@ QString Storage::library() {
         while (name.endsWith('/'))
             name.chop(1);
         name.replace('/', '-');
-        former.append(under + (name.isEmpty() ? QStringLiteral("root") : name));
         if (name.isEmpty())
             name = QStringLiteral("-");
         else if (path.contains('-') || path.contains('~'))
@@ -202,12 +200,11 @@ QString Storage::library() {
         id = "icloud:" + source.value("account").toString();
         name = source.value("account").toString();
     }
-    // Its own wherever it is: its name, a former one, or one by its id it
-    // was given when its name was another's; else the first that is no
-    // one's.
+    // Its own wherever it is: its name, or one by its id it was given when
+    // its name was another's; else the first that is no one's.
     const QString preferred = under + name;
     const auto byId = [&](int n) { return preferred + stableHash(id) + (n == 0 ? QString() : '-' + QString::number(n)); };
-    QStringList own = QStringList{preferred} + former;
+    QStringList own{preferred};
     // Every one there by its id, whichever came free since.
     const QString hash = name + stableHash(id);
     static const QRegularExpression numbered(QStringLiteral("^-\\d+$"));

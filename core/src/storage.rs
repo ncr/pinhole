@@ -232,8 +232,8 @@ pub fn remove_source(path: &Path, kinds: &Kinds, id: &str) -> Result<Option<Valu
 /// pinhole.icloud's by account); with no source, an empty one in
 /// `library/none`. Never another source's (by what each says it is,
 /// `library_owner`), and always the same one: its own wherever it is (its
-/// name, a former one, or one by its id it was given when its name was
-/// another's), else the first of those that is no one's.
+/// name, or one by its id it was given when its name was another's), else
+/// the first of those that is no one's.
 pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathBuf {
     if source.kind() == "none" {
         return location.join("library/none");
@@ -254,9 +254,7 @@ pub fn library_for(location: &Path, source: &dyn crate::source::Source) -> PathB
         .map(|n| kind.join(n))
         .collect();
     by_ids.sort();
-    let formers = source.former_library_names().into_iter().map(|former| kind.join(former));
     if let Some(own) = std::iter::once(kind.join(&name))
-        .chain(formers)
         .chain(by_ids)
         .find(|dir| library_owner(dir).as_deref() == Some(id.as_str()))
     {

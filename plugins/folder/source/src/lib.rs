@@ -531,12 +531,6 @@ impl Source for FolderSource {
         }
     }
 
-    /// Until October 2026 a dash in the path was not told apart from a slash.
-    fn former_library_names(&self) -> Vec<String> {
-        let name = self.root.to_string_lossy().trim_matches('/').replace('/', "-");
-        vec![if name.is_empty() { "root".into() } else { name }]
-    }
-
     fn health(&self, error: &anyhow::Error) -> Health {
         if !self.root.is_dir() {
             return Health::Offline;
