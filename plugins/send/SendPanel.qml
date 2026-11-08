@@ -587,7 +587,7 @@ Item {
                     hint: jpegCommand.keyName
                     checked: pinhole.settings.compatible
                     // Not while a PIN is typed or a send goes.
-                    usable: jpegCommand.when
+                    usable: jpegCommand.usable
                     onToggled: jpegCommand.trigger()
                 }
             }
@@ -596,7 +596,7 @@ Item {
                 ShellButton {
                     text: qsTr("Send with LocalSend")
                     action: localSendCommand
-                    usable: localSendCommand.when
+                    usable: localSendCommand.usable
                 }
                 ShellButton {
                     visible: panel.running

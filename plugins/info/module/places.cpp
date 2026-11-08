@@ -8,6 +8,9 @@
 QList<int> Places::groupsAt(const QList<double> &xs, const QList<double> &ys, double zoom) const {
     const qsizetype count = std::min(xs.size(), ys.size());
     const double size = 256 * std::pow(2.0, zoom), radius = 74;
+    // Its columns go round, as the world does (Places.js clusters()).
+    const qint64 columns = std::max<qint64>(1, qint64(std::ceil(size / radius)));
+    const auto column = [columns](qint64 i) { return ((i % columns) + columns) % columns; };
     struct Group {
         double sx, sy;
     };
@@ -18,16 +21,18 @@ QList<int> Places::groupsAt(const QList<double> &xs, const QList<double> &ys, do
     QList<int> of(count);
     for (qsizetype n = 0; n < count; ++n) {
         const double x = xs[n] * size, y = ys[n] * size;
-        const qint64 bx = qint64(std::floor(x / radius)), by = qint64(std::floor(y / radius));
+        const qint64 bx = column(qint64(std::floor(x / radius))), by = qint64(std::floor(y / radius));
         int near = -1;
         double distance = radius * radius;
         for (qint64 j = by - 1; j <= by + 1; ++j)
             for (qint64 i = bx - 1; i <= bx + 1; ++i) {
-                const auto cell = bins.constFind(key(i, j));
+                const auto cell = bins.constFind(key(column(i), j));
                 if (cell == bins.cend())
                     continue;
                 for (const int g : *cell) {
-                    const double dx = groups[size_t(g)].sx - x, dy = groups[size_t(g)].sy - y;
+                    double dx = groups[size_t(g)].sx - x;
+                    dx -= size * std::round(dx / size);
+                    const double dy = groups[size_t(g)].sy - y;
                     const double d = dx * dx + dy * dy;
                     if (d < distance) {
                         near = g;

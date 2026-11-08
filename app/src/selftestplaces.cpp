@@ -79,7 +79,7 @@ int markers(QQuickItem *root) {
 
 QQuickItem *mapAction(QQuickItem *root) {
     return findItem(root, [](QQuickItem *item) {
-        if (item->property("key").toString() == "M" && item->metaObject()->indexOfSignal("tapped()") >= 0)
+        if (item->property("key").toString() == "M" && item->metaObject()->indexOfSignal("triggered()") >= 0)
             return true;
         const auto text = item->property("text").toString();
         return item->objectName().startsWith("menuOption_") && (text == "Map" || text == "Mapa");
@@ -88,7 +88,7 @@ QQuickItem *mapAction(QQuickItem *root) {
 
 QQuickItem *viewerClose(QQuickItem *root) {
     return findItem(named(root, "photoViewer"), [](QQuickItem *item) {
-        return item->property("key").toString() == "Escape" && item->metaObject()->indexOfSignal("tapped()") >= 0;
+        return item->property("key").toString() == "Escape" && item->metaObject()->indexOfSignal("triggered()") >= 0;
     });
 }
 

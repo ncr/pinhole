@@ -42,8 +42,8 @@ QtObject {
         const east = Places.point("east", 0, 179.99, 200)
         const view = Places.fit([west, east], 500, 400)
         expect("near the date line", Math.abs(Places.delta(view.x, 0)) < 0.00001, true)
-        expect("merged on the overview", Places.clusters([west, east], view.x, view.y, 8, 500, 400).length, 1)
-        expect("separate on zoom", Places.clusters([west, east], view.x, view.y, 14, 500, 400).length, 2)
+        expect("merged across the date line", Places.clusters([west, east], 8).length, 1)
+        expect("separate on zoom", Places.clusters([west, east], 14).length, 2)
         expect("invalid coordinates", Places.point("bad", 91, 0, 0), null)
 
         for (let n = 1; n <= count; ++n) {

@@ -986,14 +986,18 @@ fn peer_user(conn: &std::net::TcpStream) -> Option<u32> {
         std::net::SocketAddr::V6(_) => None,
     };
     let (theirs, ours) = (hex(conn.peer_addr().ok()?)?, hex(conn.local_addr().ok()?)?);
-    let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
-    table.lines().skip(1).find_map(|line| {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.get(1) == Some(&theirs.as_str()) && fields.get(2) == Some(&ours.as_str()) {
-            fields.get(7)?.parse().ok()
-        } else {
-            None
-        }
+    // The table is read a part at a time while sockets come and go, and a
+    // read can miss one that is there: one not found is looked for again.
+    (0..5).find_map(|_| {
+        let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
+        table.lines().skip(1).find_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.get(1) == Some(&theirs.as_str()) && fields.get(2) == Some(&ours.as_str()) {
+                fields.get(7)?.parse().ok()
+            } else {
+                None
+            }
+        })
     })
 }
 

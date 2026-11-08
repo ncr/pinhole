@@ -43,21 +43,28 @@ function fit(points, width, height) {
 //
 // The cells are the world's, not the view's: at one zoom the groups are the
 // same wherever the view is, so panning only shows more or fewer of them and
-// no marker jumps from one group to another under the fingers.
+// no marker jumps from one group to another under the fingers. Its columns
+// go round, as the world does: photos either side of the date line are
+// neighbours.
 function clusters(points, zoom) {
     const size = scale(zoom), radius = 74
+    const columns = Math.max(1, Math.ceil(size / radius))
+    // A column as the world goes round: left of the first is the last.
+    const column = i => ((i % columns) + columns) % columns
     const bins = Object.create(null)
     const groups = []
     for (const p of points) {
         const x = p.x * size, y = p.y * size
-        const bx = Math.floor(x / radius), by = Math.floor(y / radius)
+        const bx = column(Math.floor(x / radius)), by = Math.floor(y / radius)
         let near = null, distance = radius * radius
         for (let j = by - 1; j <= by + 1; ++j) {
             for (let i = bx - 1; i <= bx + 1; ++i) {
-                const cell = bins[i + ":" + j]
+                const cell = bins[column(i) + ":" + j]
                 if (!cell) continue
                 for (const g of cell) {
-                    const d = (g.sx - x) ** 2 + (g.sy - y) ** 2
+                    let dx = g.sx - x
+                    dx -= size * Math.round(dx / size)
+                    const d = dx ** 2 + (g.sy - y) ** 2
                     if (d < distance) {
                         near = g
                         distance = d
