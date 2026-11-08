@@ -82,6 +82,9 @@ Item {
     property string stage: ""
     property int fetched: 0
     property var made: null
+    // Which copy of what was made is the latest: `made` is a copy of the
+    // object put in it, never that object, so not told apart by identity.
+    property int delivered: 0
     property string error: ""
     property string note: ""
 
@@ -241,9 +244,10 @@ Item {
             // Said copied once the clipboard has it (a big sheet's PNG takes
             // a moment), not before, when a paste would be what was there.
             studio.made = done
+            const ticket = ++studio.delivered
             const copied = how => {
-                if (studio.made === done)
-                    studio.made = Object.assign({}, done, { copy: how })
+                if (studio.made && studio.delivered === ticket)
+                    studio.made = Object.assign({}, studio.made, { copy: how })
             }
             // On the clipboard, or only kept if another copy asked for
             // meanwhile has it (API 15).
