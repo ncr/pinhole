@@ -67,14 +67,27 @@ int main(int argc, char **argv) {
         self.addCleanup(self.cleanup_processes)
 
     def cleanup_processes(self):
-        # Relaunched processes are detached; collect their recorded PIDs too.
+        # Relaunched processes are detached; collect their recorded PIDs too,
+        # and wait for them to be gone: one ending writes its stop line into
+        # this test's folder, which must not be being removed meanwhile.
+        detached = []
         if self.events.exists():
             for line in self.events.read_text().splitlines():
                 if line.startswith('start|'):
                     try:
                         os.kill(int(line.split('|')[1]), 15)
+                        detached.append(int(line.split('|')[1]))
                     except ProcessLookupError:
                         pass
+        def alive(pid):
+            # Gone, or a zombie no one has reaped yet.
+            try:
+                return ') Z ' not in Path(f'/proc/{pid}/stat').read_text(errors='replace')
+            except OSError:
+                return False
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and any(alive(pid) for pid in detached):
+            time.sleep(.02)
         for child in self.children:
             try:
                 child.wait(timeout=3)
