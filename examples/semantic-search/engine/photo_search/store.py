@@ -76,21 +76,28 @@ class Store:
         # synced, a favourite): the same catalog is no write, and new
         # photos alone leave the index in memory as it is, as nothing in
         # it changed. Only what left or moved drops it.
-        known = dict(self.db.execute("SELECT asset_id,path FROM catalog WHERE active=1"))
+        known = dict(self.db.execute("SELECT asset_id,path FROM catalog"))
         given = {x["id"]: x["path"] for x in assets}
         if known == given:
             return
-        moved = any(known.get(asset, path) != path for asset, path in given.items()) or not known.keys() <= given.keys()
+        # Only what changed is written: a new photo synced is one row, not
+        # the whole catalog again while a question waits.
+        removed = [asset for asset in known if asset not in given]
+        moved = [(asset, path) for asset, path in given.items() if asset in known and known[asset] != path]
+        added = [(asset, path) for asset, path in given.items() if asset not in known]
         with self.db:
-            self.db.execute("UPDATE catalog SET active=0")
-            self.db.executemany('''INSERT INTO catalog(asset_id,path,active) VALUES (?,?,1)
-                ON CONFLICT(asset_id) DO UPDATE SET
-                fingerprint=CASE WHEN catalog.path=excluded.path THEN catalog.fingerprint ELSE NULL END,
-                path=excluded.path,active=1''', [(x["id"], x["path"]) for x in assets])
-            self.db.execute("DELETE FROM embeddings WHERE asset_id IN (SELECT asset_id FROM catalog WHERE active=0)")
-            self.db.execute("DELETE FROM failures WHERE asset_id IN (SELECT asset_id FROM catalog WHERE active=0)")
-            self.db.execute("DELETE FROM catalog WHERE active=0")
-        if moved:
+            for start in range(0, len(removed), 500):
+                chunk = removed[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                for table in ("embeddings", "failures", "catalog"):
+                    self.db.execute(f"DELETE FROM {table} WHERE asset_id IN ({marks})", chunk)
+            # A path changed: its vector no longer stands for it.
+            self.db.executemany("UPDATE catalog SET path=?, fingerprint=NULL WHERE asset_id=?",
+                                [(path, asset) for asset, path in moved])
+            self.db.executemany("INSERT INTO catalog(asset_id,path,active) VALUES (?,?,1)", added)
+        # Only what left or moved drops the index in memory; new photos have
+        # no vector in it yet.
+        if removed or moved:
             self.invalidate()
         else:
             self.generation += 1
