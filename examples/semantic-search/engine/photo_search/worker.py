@@ -105,6 +105,9 @@ class Worker:
         self.last_error = ''
         self.processed = self.skipped = 0
         self.stamps = {}
+        # The indexed photos still to be checked in the background, a few
+        # at a time while it has nothing else to do (sweep).
+        self.unswept = None
 
     def close(self):
         try:
@@ -190,6 +193,20 @@ class Worker:
                 self.store.fail(asset, str(error))
                 self.stamps.pop(asset, None)
 
+    def sweep(self, count=100):
+        """The next `count` indexed photos checked (refresh), between other
+        work: all of them in turn after a start or a new catalog, without
+        a question ever waiting for 35,000 stats or a first hash of each.
+        True while some are left."""
+        if self.unswept is None:
+            self.unswept = deque(asset for (asset,) in self.store.db.execute(
+                'SELECT asset_id FROM embeddings ORDER BY asset_id'))
+        if not self.unswept:
+            return False
+        chunk = [self.unswept.popleft() for _ in range(min(count, len(self.unswept)))]
+        self.refresh(chunk)
+        return bool(self.unswept)
+
     def encode_text(self, texts):
         try:
             return self.engine.encode_text(texts)
@@ -244,10 +261,14 @@ class Worker:
                 relative = asset['path']
                 if not relative or Path(relative).is_absolute() or not (self.args.library / relative).resolve().is_relative_to(self.args.library.resolve()):
                     raise ValueError('catalog path escapes the library')
+            before = self.store.generation
             self.store.catalog(assets)
             active = {x['id'] for x in assets}
             self.stamps = {key: value for key, value in self.stamps.items() if key in active}
-            self.refresh()
+            if self.store.generation != before:
+                # Every indexed photo checked again, in the background: a
+                # question meanwhile checks what it found itself.
+                self.unswept = None
             if auto is False and self.running:
                 self.stop()
             elif self.running:
@@ -482,6 +503,8 @@ def serve(args):
                         if (worker.running and started >= next_step and args.background
                                 and worker.yield_to_person(away() is False)):
                             next_step = started + 5
+                        elif not worker.running and worker.sweep():
+                            pass
                         elif worker.running and started >= next_step:
                             try:
                                 worker.step()

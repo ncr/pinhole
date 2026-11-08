@@ -345,6 +345,36 @@ class WorkerTests(unittest.TestCase):
         self.worker.store.fail('a', 'gone')
         self.assertEqual(self.worker.status()['errors'], 1)
 
+    def test_the_same_catalog_writes_nothing_and_new_photos_keep_the_index_in_memory(self):
+        from photo_search.ane import hash_file
+        self.worker.request({'op': 'catalog', 'assets': self.assets})
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        snapshot = self.worker.store.prepare()
+        generation = self.worker.store.generation
+        self.worker.request({'op': 'catalog', 'assets': self.assets})
+        self.assertEqual(self.worker.store.generation, generation)
+        self.assertIs(self.worker.store.snapshot, snapshot)
+        (self.root / 'new.jpg').write_bytes(b'new')
+        self.worker.request({'op': 'catalog', 'assets': self.assets + [{'id': 'new', 'path': 'new.jpg'}]})
+        self.assertIs(self.worker.store.snapshot, snapshot)
+        self.assertEqual(self.worker.status()['total'], len(self.assets) + 1)
+        self.worker.request({'op': 'catalog', 'assets': [x for x in self.assets if x['id'] != 'a']})
+        self.assertIsNone(self.worker.store.snapshot)
+
+    def test_every_indexed_photo_is_checked_in_the_background_a_few_at_a_time(self):
+        from photo_search.ane import hash_file
+        self.worker.request({'op': 'catalog', 'assets': self.assets})
+        self.worker.store.put('a', hash_file(self.root / 'a.jpg'), self.vector())
+        (self.root / 'a.jpg').write_bytes(b'replaced in place')
+        checked = []
+        refresh = self.worker.refresh
+        with patch.object(self.worker, 'refresh', side_effect=lambda assets=None: (checked.append(assets), refresh(assets))):
+            while self.worker.sweep(count=1):
+                pass
+        self.assertEqual(checked, [['a']])
+        self.assertEqual(self.worker.status()['errors'], 1)
+        self.assertFalse(self.worker.sweep())
+
     def test_pinholeds_questions_are_answered_by_number(self):
         import io
         from contextlib import redirect_stdout

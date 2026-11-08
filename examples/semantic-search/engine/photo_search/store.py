@@ -63,6 +63,15 @@ class Store:
         if any(not isinstance(x["id"], str) or not 0 < len(x["id"]) <= 1024 or
                not isinstance(x["path"], str) or len(x["path"]) > 8192 for x in assets):
             raise ValueError("invalid catalog asset")
+        # pinholed reads the library again on every change of it (a photo
+        # synced, a favourite): the same catalog is no write, and new
+        # photos alone leave the index in memory as it is, as nothing in
+        # it changed. Only what left or moved drops it.
+        known = dict(self.db.execute("SELECT asset_id,path FROM catalog WHERE active=1"))
+        given = {x["id"]: x["path"] for x in assets}
+        if known == given:
+            return
+        moved = any(known.get(asset, path) != path for asset, path in given.items()) or not known.keys() <= given.keys()
         with self.db:
             self.db.execute("UPDATE catalog SET active=0")
             self.db.executemany('''INSERT INTO catalog(asset_id,path,active) VALUES (?,?,1)
@@ -72,7 +81,10 @@ class Store:
             self.db.execute("DELETE FROM embeddings WHERE asset_id IN (SELECT asset_id FROM catalog WHERE active=0)")
             self.db.execute("DELETE FROM failures WHERE asset_id IN (SELECT asset_id FROM catalog WHERE active=0)")
             self.db.execute("DELETE FROM catalog WHERE active=0")
-        self.invalidate()
+        if moved:
+            self.invalidate()
+        else:
+            self.generation += 1
 
     def invalidate(self):
         self.generation += 1
