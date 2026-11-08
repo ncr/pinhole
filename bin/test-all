@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Every test Pinhole has, as fast as it can go, and nothing on the desktop:
+
+    bin/test-all
+
+Built first (bin/build, and each suite's own). Then all at once: the
+window's unit tests (app/bin/test, in processes side by side), every Rust
+test program of core's workspace and of the plugins' own crates, each in a
+process of its own, the Python tests, the plugins' checks and tests, the kit
+reference, the accessibility, query and frame tests and the map's (on Xvfb);
+and after them the window's self-tests (app/bin/test-selftests, each on an
+Xvfb of its own), which want the cores to themselves. What each said is in
+build/test-all/<name>.log; a line a suite as each ends, the failures' logs'
+last lines after, and how long it all took. Exits 1 if anything failed.
+
+Its windows are Xvfb's alone (xorg-server-xvfb): without it, it stops
+rather than show one."""
+import concurrent.futures
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+LOGS = ROOT / "app/build/test-all"
+PRINTING = threading.Lock()
+# What every run is given: no display or compositor of the desktop's, and
+# Xvfb alone for a window.
+QUIET = {"PINHOLE_X_ONLY": "1", "QT_QPA_PLATFORMTHEME": "generic"}
+
+
+def env():
+    kept = {k: v for k, v in os.environ.items() if not k.startswith(("WAYLAND", "DISPLAY", "HYPRLAND"))}
+    return kept | QUIET
+
+
+def say(line):
+    with PRINTING:
+        print(line, flush=True)
+
+
+def run(name, command, cwd=ROOT, extra=None, ok=lambda code, text: code == 0):
+    """A suite: its output into its log, a line said as it ends."""
+    started = time.monotonic()
+    log = LOGS / f"{name}.log"
+    with log.open("w") as out:
+        code = subprocess.run(command, cwd=cwd, env=env() | (extra or {}), stdout=out, stderr=subprocess.STDOUT,
+                              stdin=subprocess.DEVNULL).returncode
+    text = log.read_text(errors="replace")
+    passed = ok(code, text)
+    say(f"{'ok    ' if passed else 'FAILED'} {name} ({time.monotonic() - started:.0f} s)")
+    return name, passed, log
+
+
+def rust_programs():
+    """Each test program cargo builds for core's workspace, with the folder
+    its crate is in (where cargo test would run it)."""
+    made = subprocess.run(["cargo", "test", "--workspace", "--no-run", "--locked", "--message-format=json", "-q"],
+                          cwd=ROOT / "core", capture_output=True, text=True, check=True).stdout
+    programs = []
+    for line in made.splitlines():
+        message = json.loads(line)
+        if message.get("reason") == "compiler-artifact" and message.get("executable") and message["profile"].get("test"):
+            crate = Path(message["manifest_path"]).parent
+            kind = message["target"]["kind"][0]
+            name = f"rust-{crate.name}-{message['target']['name']}" + ("" if kind == "test" else f"-{kind}")
+            programs.append((name, message["executable"], crate))
+    return programs
+
+
+def main():
+    if not shutil.which("Xvfb"):
+        print("test-all: needs Xvfb (xorg-server-xvfb): its windows are never on the desktop")
+        return 2
+    LOGS.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    # Built first, one after another: each build uses every core itself.
+    for name, command in [("build", [str(ROOT / "bin/build")]),
+                          ("build-qt-tests", [sys.executable, "-c", "import runpy,sys; sys.argv=['test']; "
+                                              f"m=runpy.run_path('{ROOT}/app/bin/test'); m['build']()"])]:
+        _, passed, log = run(name, command)
+        if not passed:
+            print(log.read_text(errors="replace")[-3000:])
+            return 1
+    programs = rust_programs()
+    say(f"built in {time.monotonic() - started:.0f} s")
+
+    suites = [("qt", [str(ROOT / "app/bin/test")], ROOT, None),
+              ("accessibility", [str(ROOT / "app/bin/test-accessibility")], ROOT, None),
+              ("queries", [str(ROOT / "app/bin/test-queries")], ROOT, None),
+              ("framestats", [str(ROOT / "app/bin/test-framestats")], ROOT, None),
+              ("places", [str(ROOT / "app/bin/test-places")], ROOT, None),
+              ("python-bin", [sys.executable, "-m", "unittest", "discover", "-s", "bin/tests"], ROOT, None),
+              ("python-people", [sys.executable, "-m", "unittest", "discover", "-s", "plugins/people/tests"], ROOT, None),
+              ("python-semantic-search", [sys.executable, "-B", "-m", "unittest", "discover", "-s",
+                                          "examples/semantic-search/engine/tests"], ROOT, None),
+              ("calendar", [str(ROOT / "plugins/calendar/tests/run")], ROOT, None),
+              ("live", [str(ROOT / "plugins/live/tests/run")], ROOT, None),
+              ("kit-reference", [str(ROOT / "bin/kit-reference"), "--check"], ROOT, None),
+              ("rust-series-finder", ["cargo", "test", "--locked", "-q"], ROOT / "plugins/series/finder", None),
+              ("rust-send-sender", ["cargo", "test", "--locked", "-q"], ROOT / "plugins/send/sender", None)]
+    suites += [(f"check-{c}", ["sh", f"plugins/{c}/check/check"], ROOT, None) for c in ("background", "theme", "info")]
+    suites += [(name, [program], crate, None) for name, program, crate in programs]
+    with concurrent.futures.ThreadPoolExecutor(len(suites)) as pool:
+        results = list(pool.map(lambda s: run(s[0], s[1], cwd=s[2], extra=s[3]), suites))
+    # The window's self-tests after: timing is part of what they look at.
+    results.append(run("selftests", [str(ROOT / "app/bin/test-selftests")]))
+
+    failed = [(name, log) for name, passed, log in results if not passed]
+    for name, log in failed:
+        lines = log.read_text(errors="replace").splitlines()
+        shown = [l for l in lines if "FAIL" in l or "panicked" in l or "error" in l.lower()][:15] or lines[-15:]
+        print(f"\n--- {name} ({log}):")
+        print("\n".join(shown))
+    print(f"\n{len(results) - len(failed)} of {len(results)} ok in {time.monotonic() - started:.0f} s")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

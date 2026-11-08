@@ -511,14 +511,21 @@ fn a_folder_through_a_provider_listed_with_thumbnails_followed_and_fetched_from(
     assert_eq!(count(&library).0, 303, "the library stays");
 }
 
-#[test]
-fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
-    let mut scratch = Scratch::new("trouble");
+/// A provider's source signed in to, its 50 photos listed: for each way
+/// a provider goes wrong, each test on one of its own, side by side.
+fn troubled(tag: &str) -> (Scratch, Window, PathBuf, Vec<String>) {
+    let mut scratch = Scratch::new(&format!("trouble-{tag}"));
     photos(&scratch.photos(), 50);
     let mut window = scratch.start();
     let library = signed_in(&scratch, &mut window, "path", 50);
     let listed = contents(&library);
+    (scratch, window, library, listed)
+}
 
+#[test]
+fn a_provider_that_hangs_is_stopped_and_harms_nothing() {
+    let (scratch, mut window, library, listed) = troubled("hang");
+    let _ = (&library, &listed);
     // Hangs: stopped after its silence (3 s here), the health failing, and
     // the library as it was.
     window.forget();
@@ -532,7 +539,12 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
     assert_eq!(contents(&library), listed);
     scratch.behave();
     window.event(30, |e| e["event"] == "health" && e["state"] == "fine");
+}
 
+#[test]
+fn a_provider_that_crashes_is_started_again_seldom_and_harms_nothing() {
+    let (scratch, mut window, library, listed) = troubled("crash");
+    let _ = (&library, &listed);
     // Crashes: started again at most once in 10 s, the health failing
     // meanwhile.
     window.forget();
@@ -552,7 +564,12 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
     assert_eq!(contents(&library), listed);
     scratch.behave();
     window.event(30, |e| e["event"] == "health" && e["state"] == "fine");
+}
 
+#[test]
+fn a_provider_that_says_what_is_not_the_protocol_is_stopped_and_harms_nothing() {
+    let (scratch, mut window, library, listed) = troubled("lines");
+    let _ = (&library, &listed);
     // Lines that are not the protocol, one too long, a put too big: it is
     // stopped, or what it was asked fails, and nothing of it is written.
     for (i, (how, logged)) in [
@@ -577,7 +594,12 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
         window.event(30, |e| e["event"] == "health" && e["state"] == "fine");
         assert!(until(15, || contents(&library) != listed), "{how}: the change never came");
     }
+}
 
+#[test]
+fn a_providers_hostile_or_broken_listings_write_only_what_is_right() {
+    let (scratch, mut window, library, listed) = troubled("hostile");
+    let _ = (&library, &listed);
     // Hostile, and broken, listings: lines for other requests, news that is
     // no news, a removal in a listing, and assets that are not right. Only
     // what is right is written; what it had of one it now says wrong stays.
@@ -623,7 +645,16 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
     assert_eq!(now, photos_there, "the broken one stays, the rest as listed");
     let thumb_after: String = db(&library).query_row("SELECT thumb_path FROM assets WHERE id = '00/IMG_0000.jpg'", [], |r| r.get(0)).unwrap();
     assert_eq!(thumb_before, thumb_after);
+}
 
+#[test]
+fn a_providers_flood_of_log_is_passed_over_and_never_kept() {
+    let (scratch, mut window, library, listed) = troubled("logs");
+    let _ = (&library, &listed);
+    let reset = || {
+        // No token it knows: the next round lists the whole library.
+        let _ = std::fs::remove_dir_all(scratch.state().join("seen"));
+    };
     // A line of its log of 200 MB: its start logged, the rest passed over
     // as it comes, never kept.
     window.forget();
@@ -647,6 +678,7 @@ fn a_provider_that_hangs_crashes_floods_or_lies_never_harms_the_library() {
     assert!((150..=400).contains(&noise), "{noise} lines of noise logged");
     scratch.behave();
 }
+
 
 #[test]
 fn a_kind_outside_its_plugins_name_is_refused_and_a_plugin_turned_off_stops_its_provider() {

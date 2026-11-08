@@ -3,6 +3,10 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build/query-tests"
 cd "$ROOT/build/query-tests"
-qmake6 "$ROOT/tests/query/query_tests.pro"
+# qmake only when what it reads changed: a Makefile made again has make do
+# much of it again for nothing.
+if [ ! -f Makefile ] || [ "$ROOT/tests/query/query_tests.pro" -nt Makefile ] || [ "$ROOT/src/sources.pri" -nt Makefile ]; then
+    qmake6 "$ROOT/tests/query/query_tests.pro"
+fi
 make -j2
 QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic exec ./pluginquery_tests "$@"

@@ -12,7 +12,10 @@ For plugin work, read [the agent contract](docs/plugin-agents.md) and
 API version and the same bundled documents without a window. New public
 capabilities must update the contract, checker, examples and Polish strings.
 
-Use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run`,
+`bin/test-all` runs every test below at once, none of them on the desktop,
+in about a minute and a half; what each said is in `app/build/test-all/`.
+Run it before landing. One by one:
+use `app/bin/test [QtTest method …]`, `plugins/calendar/tests/run`,
 `plugins/live/tests/run` and
 `python3 -m unittest discover -s bin/tests` and
 `python3 -m unittest discover -s examples/semantic-search/engine/tests`. Core tests run with
@@ -39,8 +42,10 @@ first frame and photo readiness. Xvfb runs must explicitly use
 `QT_QPA_PLATFORM=xcb`; inherited `wayland;xcb` can open a test on the real
 desktop. Native tests belong on hidden workspace 5 (CLAUDE.md).
 `app/bin/test-selftests`, `test-accessibility` and `test-places` get a display
-of their own from `app/bin/headless-x`: Xvfb, or where it is not installed,
-a rootful Xwayland that Hyprland starts on workspace 5 silently. Never use
+of their own from `app/bin/headless-x`: Xvfb on a number from 100 up that no
+other run has, or where it is not installed, a rootful Xwayland that
+Hyprland starts on workspace 5 silently (`bin/test-all` and
+`test-selftests` want Xvfb). Never use
 the user's clipboard or Pictures for a self-test.
 
 Use the shared `ShellButton`, `Toggle`, `FieldInput` and `Choices` controls.

@@ -3,6 +3,8 @@
 
 #include "selftest.h"
 
+#include "photogrid.h"
+
 #include "keymap.h"
 #include "viewer.h"
 
@@ -214,8 +216,9 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap) {
         {"the Year calendar over it", [=] { triggerGridAction(QStringLiteral("Y")); }, "plugin", "pinhole.calendar", true, false, true},
         {"a day from it (⏎): the grid, On this day closed for good", [=] { press(window, Qt::Key_Return); }, "grid", "", false, false},
     });
+    PhotoGrid *grid = window->findChild<PhotoGrid *>(QStringLiteral("grid"));
     auto run = std::make_shared<std::function<void(int)>>();
-    *run = [=](int k) {
+    *run = [=, &viewer, &keymap](int k) {
         if (k >= steps->size()) {
             // Then Pinhole's own over a plugin covering.
             overCovering(window, check, [=] {
@@ -225,9 +228,24 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap) {
             return;
         }
         (*steps)[k].act();
-        // Long enough for the viewer to open or close, and a plugin's
-        // screen to fade.
-        QTimer::singleShot(1200, window, [=] {
+        // Once the viewer has opened or closed and the grid is still (a
+        // plugin's screen fades as long as they move, half a second), however
+        // slowly frames come.
+        auto settled = std::make_shared<std::function<void(int)>>();
+        *settled = [=, &viewer, &keymap](int polls) {
+            // Where it should be, and still there (frames, not a guess):
+            // or what it is after eight seconds, said as it is.
+            const Step &want = (*steps)[k];
+            const bool there = keymap.layer() == want.layer && keymap.plugin() == want.covering
+                               && shown("pinhole.onthisday") == want.days && shown("pinhole.colour") == want.colours
+                               && shown("pinhole.calendar") == want.calendar && !viewer.animating() && !grid->animating();
+            static int stillFor = 0;
+            stillFor = there ? stillFor + 1 : 0;
+            if (stillFor < 10 && polls < 400) {
+                QTimer::singleShot(20, window, [settled, polls] { (*settled)(polls + 1); });
+                return;
+            }
+            stillFor = 0;
             const Step &step = (*steps)[k];
             state(step.name, step.layer, step.covering);
             check(shown("pinhole.onthisday") == step.days && shown("pinhole.colour") == step.colours
@@ -236,7 +254,8 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap) {
                       .arg(step.name, step.days ? "over the photos" : "away", step.colours ? "over the photos" : "away",
                            step.calendar ? "over the photos" : "away"));
             (*run)(k + 1);
-        });
+        };
+        (*settled)(0);
     };
     // Once both are loaded and On this day has years to show.
     auto clock = std::make_shared<QElapsedTimer>();

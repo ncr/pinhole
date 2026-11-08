@@ -44,6 +44,12 @@ const QUEUE_MAX: usize = 4096;
 /// gone, for its downloads to end.
 const FINISH_WITHIN: Duration = Duration::from_secs(30);
 
+/// FINISH_WITHIN, or `PINHOLE_FINISH_WITHIN_MS` for a test that cannot wait
+/// half a minute.
+fn finish_within() -> Duration {
+    std::env::var("PINHOLE_FINISH_WITHIN_MS").ok().and_then(|ms| ms.parse().ok()).map_or(FINISH_WITHIN, Duration::from_millis)
+}
+
 pub struct Config {
     /// The folder everything is kept in (storage.rs), and in it, unless
     /// given otherwise, the library and the cache.
@@ -1012,7 +1018,7 @@ pub fn run(config: Config) -> Result<()> {
         // Downloads under way end first, half a minute at most: what
         // they bring is in the shared cache, not left half there.
         let downloading = shared.in_flight.load(Ordering::Relaxed) > 0;
-        if count == 0 && since.elapsed() >= linger && (!downloading || since.elapsed() >= linger + FINISH_WITHIN) {
+        if count == 0 && since.elapsed() >= linger && (!downloading || since.elapsed() >= linger + finish_within()) {
             eprintln!("pinholed: no window for {} s: done", since.elapsed().as_secs());
             // A window coming meanwhile finds none, and starts one. Only
             // its own: one bound there since is another service's.

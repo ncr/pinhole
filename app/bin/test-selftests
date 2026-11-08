@@ -12,6 +12,7 @@ photos taken on this day in earlier years; Pinhole's plugins and the test
 plugins (app/tests/scrolls, app/tests/layers) as the built-in ones. Each
 mode's log is kept in build/selftests/<mode>.log. Exits 1 if any fails.
 """
+import concurrent.futures
 import datetime
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -25,10 +26,15 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
-MODES = ["covering", "through", "physics", "stacks", "hidden", "layers", "colour", "edit", "people", "help", "clashes"]
+# Each in a window of its own, all at once; through as two, a width each.
+# The longest first, so the last to end ends soonest.
+MODES = ["through:850:panel", "through:1700:panel", "through:850:rest", "through:1700:rest", "covering", "colour", "physics", "hidden", "stacks", "layers", "people", "help",
+         "edit", "clashes"]
 TEST_PLUGINS = ["scrolls", "layers"]
 
 # clashes: what the window says of keys two have (app/tests/clashes), as
@@ -148,14 +154,17 @@ def plugins(scratch):
     return farm
 
 
-def run(mode, scratch, lib, farm, logs):
+def run(job, scratch, lib, farm, logs):
+    # A mode, or a mode and its part ("through:850", one width of it).
+    mode, _, part = job.partition(":")
+    name = job.replace(":", "-")
     helper = (farm / "people/pinhole-faces").read_text().split("\n", 1)[0][2:].strip()
     if mode == "people" and subprocess.run([helper, "-c", "import numpy"], stderr=subprocess.DEVNULL).returncode != 0:
         # Who a face looks like is worked out with NumPy, as People's
         # finder needs it anyway.
         print("people: skipped (People's helper needs python-numpy)")
         return True
-    profile = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=scratch))
+    profile = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=scratch))
     env = {key: value for key, value in os.environ.items() if not key.startswith(("WAYLAND", "HYPRLAND", "DISPLAY"))}
     for key, folder in [("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
                         ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"), ("XDG_PICTURES_DIR", "pictures"),
@@ -167,7 +176,14 @@ def run(mode, scratch, lib, farm, logs):
     env |= {"PINHOLE_BUILTIN_PLUGINS": str(farm), "PINHOLED": str(ROOT / "core/target/release/pinholed"),
             "PINHOLE_SOCKET": str(profile / "run/p.sock"), "QT_QPA_PLATFORM": "xcb", "QT_QPA_PLATFORMTHEME": "generic",
             "LIBGL_ALWAYS_SOFTWARE": "1", "QSG_RHI_BACKEND": "opengl", "QT_FORCE_STDERR_LOGGING": "1",
-            "PINHOLE_MAP_TILES": "http://127.0.0.1:1/"}
+            "PINHOLE_MAP_TILES": "http://127.0.0.1:1/",
+            # Its own Xvfb, never the desktop.
+            "PINHOLE_X_ONLY": "1"}
+    if mode == "through" and part:
+        wide, _, section = part.partition(":")
+        env["PINHOLE_SELFTEST_WIDE"] = wide
+        if section:
+            env["PINHOLE_SELFTEST_PART"] = section
     given = lib
     if mode == "stacks":
         # It changes the library: a copy of its own.
@@ -197,33 +213,49 @@ def run(mode, scratch, lib, farm, logs):
         env["PINHOLE_SELFTEST"] = "startup"
     else:
         env["PINHOLE_SELFTEST"] = f"{mode}:{out}" if mode not in ("covering", "physics", "stacks") else mode
-    with (logs / f"{mode}.log").open("w") as log:
+    started = time.monotonic()
+    with (logs / f"{name}.log").open("w") as log:
         code = subprocess.run([*command[:2], "timeout", "900", *command[2:]], env=env, stdout=log,
                               stderr=subprocess.STDOUT).returncode
     # The pictures a mode took, kept beside its log (edit's: its photo turned
     # and cropped).
     for picture in out.glob("*.png"):
-        shutil.copy(picture, logs / f"{mode}-{picture.name}")
-    text = (logs / f"{mode}.log").read_text(errors="replace")
+        shutil.copy(picture, logs / f"{name}-{picture.name}")
+    text = (logs / f"{name}.log").read_text(errors="replace")
     failed = [line for line in text.splitlines() if "FAIL" in line or "timed out" in line]
     if mode == "clashes":
         failed += [f"FAIL not said: {' or '.join(group)}" for group in CLASHES if not any(line in text for line in group)]
         failed += [f"FAIL said: {line.strip()}" for line in text.splitlines() if any(free in line for free in NOT_CLASHES)]
-    print(f"{mode}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code}")
-    for line in failed[:12]:
-        print("    " + line)
+    said = [f"{name}: {'ok' if code == 0 and not failed else 'FAILED (exit %d)' % code} ({time.monotonic() - started:.0f} s)"]
+    said += ["    " + line for line in failed[:12]]
+    with PRINTING:
+        print("\n".join(said), flush=True)
     return code == 0 and not failed
 
 
+PRINTING = threading.Lock()
+
+
 def main():
-    modes = sys.argv[1:] or MODES
+    # A mode named alone that has parts runs them all ("through").
+    asked = sys.argv[1:]
+    jobs = [job for name in asked for job in ([m for m in MODES if m.startswith(name + ":")] or [name])] if asked else MODES
+    if not shutil.which("Xvfb"):
+        print("test-selftests: needs Xvfb (xorg-server-xvfb): its windows are never on the desktop")
+        return 2
     logs = APP / "build/selftests"
     logs.mkdir(parents=True, exist_ok=True)
     build()
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="pinhole-selftests-") as temporary:
         scratch = Path(temporary)
         lib, farm = library(scratch), plugins(scratch)
-        results = [run(mode, scratch, lib, farm, logs) for mode in modes]
+        # All at once, each in its own X server and profile: as many as
+        # there are cores for, the longest first.
+        workers = max(1, min(len(jobs), (os.cpu_count() or 2) // 2))
+        with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+            results = list(pool.map(lambda job: run(job, scratch, lib, farm, logs), jobs))
+    print(f"{sum(results)} of {len(results)} ok in {time.monotonic() - started:.0f} s")
     return 0 if all(results) else 1
 
 

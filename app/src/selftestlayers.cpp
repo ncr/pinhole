@@ -9,6 +9,7 @@
 #include "viewer.h"
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QPointer>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -90,6 +91,12 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
     };
     auto steps = std::make_shared<QList<std::pair<int, std::function<void()>>>>();
     auto at = [steps](int ms, std::function<void()> f) { steps->append({ms, std::move(f)}); };
+    // A step that waits, past its time, for what it looks at to be there.
+    auto readyFor = std::make_shared<QHash<int, std::function<bool()>>>();
+    auto when = [steps, readyFor](int ms, std::function<bool()> ready, std::function<void()> f) {
+        readyFor->insert(int(steps->size()), std::move(ready));
+        steps->append({ms, std::move(f)});
+    };
     auto shown = std::make_shared<int>(-1);
     auto old = std::make_shared<QPointer<QQuickItem>>();
 
@@ -101,7 +108,9 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
         check(made() == 0, QStringLiteral("no layer before a photo is open (%1)").arg(made()));
         viewer.openAt(*shown, grid->rectOf(*shown));
     });
-    at(800, [=, &viewer] {
+    // Its layer is made once the photo is in, which a window slow for
+    // frames takes longer over: waited for.
+    when(800, [=, &viewer] { return made() >= 1 && layer() && layer()->property("photo").toInt() == viewer.index(); }, [=, &viewer] {
         check(made() == 1, QStringLiteral("one layer made as the photo opened (%1)").arg(made()));
         check(layer() && layer()->property("shown").toBool() && layer()->property("photo").toInt() == viewer.index(),
               QStringLiteral("it is shown, on photo %1").arg(layer() ? layer()->property("photo").toInt() : -1));
@@ -220,7 +229,15 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
         QCoreApplication::exit(*failures ? 1 : 0);
     });
 
-    QTimer::singleShot(2000, window, [window, steps, plugin] {
+    // Once the photos are in (as slowly as they come with many windows
+    // drawn at once): the first step opens one.
+    auto ready = std::make_shared<std::function<void(int)>>();
+    *ready = [=, &library, &viewer](int polls) {
+        if ((library.count() == 0 || !plugin()) && polls < 600) {
+            QTimer::singleShot(100, window, [ready, polls] { (*ready)(polls + 1); });
+            return;
+        }
+        QTimer::singleShot(500, window, [window, steps, plugin, grid, readyFor, &viewer] {
         // Without the test plugin there is nothing to test.
         if (!plugin()) {
             std::printf("selftest: FAIL the test plugin test.layers is not loaded: put app/tests/layers among the plugins "
@@ -230,7 +247,31 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
             QCoreApplication::exit(1);
             return;
         }
-        for (const auto &[ms, f] : *steps)
-            QTimer::singleShot(ms, window, f);
-    });
+        // One after another, each as long after the one before as its time
+        // says, and then once the photo and the grid hold still: however
+        // slowly frames come (many windows drawn at once), a step finds
+        // what the one before set going done.
+        auto next = std::make_shared<std::function<void(int)>>();
+        *next = [=, &viewer](int k) {
+            if (k >= steps->size())
+                return;
+            const int gap = (*steps)[k].first - (k > 0 ? (*steps)[k - 1].first : 0);
+            QTimer::singleShot(gap, window, [=, &viewer] {
+                auto idle = std::make_shared<std::function<void(int)>>();
+                *idle = [=, &viewer](int polls) {
+                    const auto ready = readyFor->value(k);
+                    if ((viewer.animating() || grid->animating() || (ready && !ready())) && polls < 250) {
+                        QTimer::singleShot(20, window, [idle, polls] { (*idle)(polls + 1); });
+                        return;
+                    }
+                    (*steps)[k].second();
+                    (*next)(k + 1);
+                };
+                (*idle)(0);
+            });
+        };
+        (*next)(0);
+        });
+    };
+    (*ready)(0);
 }

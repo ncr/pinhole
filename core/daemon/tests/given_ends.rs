@@ -23,6 +23,10 @@ use pinhole_core::source::{Body, FetchError, Listing, Source, Stored, Ticket};
 use pinhole_folder::FolderSource;
 use serde_json::{json, Value};
 
+/// How long a service gives what is under way here, once its windows are
+/// gone.
+const FINISH: Duration = Duration::from_secs(4);
+
 /// A folder whose `local` or `open` panics while `PANICS` says so, as a
 /// bug in a source would.
 struct Faulty {
@@ -248,6 +252,10 @@ fn a_service_of_a_library_given_ends_after_its_windows_whatever_went_on() {
         pinhole_core::sync::list(&source, &mut db, &|_, _| {}, &|| false).unwrap();
     }
     let linger = Duration::from_millis(1000);
+    // What is under way given four seconds, not half a minute, once its
+    // windows are gone (service.rs, FINISH_WITHIN): the service started in
+    // this test's own process reads it.
+    std::env::set_var("PINHOLE_FINISH_WITHIN_MS", FINISH.as_millis().to_string());
     let cache = root.join("location/cache");
 
     // A bug answering a window: that window is hung up on, rather than
@@ -355,7 +363,8 @@ fn a_service_of_a_library_given_ends_after_its_windows_whatever_went_on() {
         let gone = Instant::now();
         drop(window);
         let after = ended_after(&ended, gone, 45).expect("still running 45 s after its last window, making something");
-        assert!(after >= linger + Duration::from_secs(29) && after < linger + Duration::from_secs(33), "ended {after:?} after its last window");
+        assert!(after >= linger + FINISH - Duration::from_millis(500) && after < linger + FINISH + Duration::from_secs(3),
+                "ended {after:?} after its last window");
         let deadline = Instant::now() + Duration::from_secs(5);
         while !running(&program).is_empty() {
             assert!(Instant::now() < deadline, "the program making the bounce goes on: {:?}", running(&program));

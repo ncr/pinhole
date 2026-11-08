@@ -3,16 +3,53 @@
 #
 #   app/bin/headless-x 1600x1000 command [argument…]
 #
-# Under Xvfb (xvfb-run -a) where it is installed. Without it, under
-# Hyprland: a rootful Xwayland of that size, started by Hyprland on
-# workspace 5 without showing it, and stopped after. The command runs with
-# DISPLAY set to it and no Wayland or Hyprland of its own; its exit code is
-# this one's.
+# Under Xvfb where it is installed, on a display number from 100 up that
+# it takes for itself: no two runs side by side ever share one. Without it, unless
+# PINHOLE_X_ONLY is set, under Hyprland: a rootful Xwayland of that size,
+# started by Hyprland on workspace 5 without showing it, and stopped after.
+# The command runs with DISPLAY set to it and no Wayland or Hyprland of its
+# own; its exit code is this one's.
 set -eu
 size="$1"
 shift
-if command -v xvfb-run >/dev/null 2>&1; then
-    exec xvfb-run -a -s "-screen 0 ${size}x24" "$@"
+if command -v Xvfb >/dev/null 2>&1; then
+    unset WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD
+    dir="$(mktemp -d)"
+    server=
+    stop() {
+        [ -n "$server" ] && kill "$server" 2>/dev/null || true
+        [ -n "$server" ] && wait "$server" 2>/dev/null || true
+        rm -rf "$dir"
+    }
+    trap stop EXIT
+    trap 'exit 143' INT TERM
+    # From 100 up, clear of the desktop's: a number another server holds
+    # (its lock, which Xvfb takes atomically) has this one end at once, and
+    # the next is tried. Once it listens, it says its number on fd 3.
+    n=100
+    while :; do
+        rm -f "$dir/display" && mkfifo "$dir/display"
+        Xvfb ":$n" -displayfd 3 -screen 0 "${size}x24" -nolisten tcp 3>"$dir/display" >"$dir/log" 2>&1 &
+        server=$!
+        if read -r said <"$dir/display"; then
+            break
+        fi
+        wait "$server" 2>/dev/null || true
+        server=
+        n=$((n + 1))
+        if [ "$n" -gt 400 ]; then
+            echo "headless-x: Xvfb did not start" >&2
+            cat "$dir/log" >&2
+            exit 1
+        fi
+    done
+    status=0
+    DISPLAY=":$n" "$@" || status=$?
+    exit "$status"
+fi
+if [ -n "${PINHOLE_X_ONLY:-}" ]; then
+    echo "headless-x: no Xvfb (xorg-server-xvfb), and nothing is to show on the desktop" >&2
+    exit 127
 fi
 # The caller may have given the command a runtime folder of its own:
 # Hyprland's is the account's.
@@ -20,7 +57,7 @@ runtime="/run/user/$(id -u)"
 instance="${HYPRLAND_INSTANCE_SIGNATURE:-0}"
 if ! command -v Xwayland >/dev/null 2>&1 || ! command -v hyprctl >/dev/null 2>&1 \
     || ! XDG_RUNTIME_DIR="$runtime" hyprctl -i "$instance" version >/dev/null 2>&1; then
-    echo "headless-x: neither xvfb-run nor Hyprland's Xwayland to run it in" >&2
+    echo "headless-x: neither Xvfb nor Hyprland's Xwayland to run it in" >&2
     exit 127
 fi
 dir="$(mktemp -d)"

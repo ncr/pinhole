@@ -279,6 +279,7 @@ app/bin/build
 app/build/pinhole            # ? lists keys and gestures; Ctrl Shift F toggles frame stats
 app/build/pinhole --bench    # scripted run, prints frame timing per phase
 app/bin/test                 # unit tests: scroll physics, viewer motion, translations, theme, library
+bin/test-all                 # every test, at once, on Xvfb (about a minute and a half)
 ```
 
 `PINHOLE_BENCH_ONLY=pinch` runs only the phases with that in their name;

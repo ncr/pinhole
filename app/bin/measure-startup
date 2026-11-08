@@ -69,12 +69,12 @@ def main():
         parser.error('--warmup must be between 0 and 5')
     if not (args.library / 'library.sqlite').is_file():
         parser.error('--library must contain library.sqlite')
-    # Choose xcb explicitly: an inherited "wayland;xcb" otherwise puts
-    # an xvfb-run test on the person's actual desktop.
+    # On an Xvfb of its own (bin/headless-x), xcb chosen explicitly: an
+    # inherited "wayland;xcb" otherwise puts it on the person's desktop.
     if not args.native_hidden and os.environ.get('PINHOLE_STARTUP_VIRTUAL') != '1':
-        return subprocess.call(['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24',
+        return subprocess.call([str(Path(__file__).resolve().parent / 'headless-x'), '1600x1000',
                                 sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-                               env=os.environ | {'PINHOLE_STARTUP_VIRTUAL': '1', 'QT_QPA_PLATFORM': 'xcb'})
+                               env=os.environ | {'PINHOLE_STARTUP_VIRTUAL': '1', 'QT_QPA_PLATFORM': 'xcb', 'PINHOLE_X_ONLY': '1'})
 
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)

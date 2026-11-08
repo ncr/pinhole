@@ -69,10 +69,20 @@ impl Window {
 
     /// A round asked for now, and waited for to its end.
     fn round(&mut self) {
-        // Its start (no next round yet), then its end (the next one set).
+        // Its start (no next round yet), then its end (the next one set):
+        // told maybe before the answer to sync is, as that is waited for.
+        let before = self.heard.len();
         assert_eq!(self.ask("sync", json!({}))["ok"], true);
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut started = false;
+        for line in &self.heard[before..] {
+            let rounds = line["event"] == "rounds";
+            if rounds && line["next"].is_null() {
+                started = true;
+            } else if rounds && started {
+                return;
+            }
+        }
         while Instant::now() < deadline {
             if let Some(line) = self.line() {
                 let rounds = line["event"] == "rounds";

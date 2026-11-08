@@ -3,6 +3,10 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build/frame-tests"
 cd "$ROOT/build/frame-tests"
-qmake6 "$ROOT/tests/framestats_tests.pro"
+# qmake only when what it reads changed: a Makefile made again has make do
+# much of it again for nothing.
+if [ ! -f Makefile ] || [ "$ROOT/tests/framestats_tests.pro" -nt Makefile ] || [ "$ROOT/src/sources.pri" -nt Makefile ]; then
+    qmake6 "$ROOT/tests/framestats_tests.pro"
+fi
 make -j"${PINHOLE_BUILD_JOBS:-2}"
 QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic ./framestats_tests "$@"

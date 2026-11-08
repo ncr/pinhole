@@ -5,7 +5,11 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
 cd "$ROOT/build"
 
-qmake6 "$ROOT/pinhole.pro"
+# qmake only when what it reads changed: a Makefile made again has make do
+# much of it again for nothing.
+if [ ! -f Makefile ] || [ "$ROOT/pinhole.pro" -nt Makefile ] || [ "$ROOT/src/sources.pri" -nt Makefile ]; then
+    qmake6 "$ROOT/pinhole.pro"
+fi
 make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}"
 
 # Pinhole's own plugins' native QML modules, against the window's Qt, each

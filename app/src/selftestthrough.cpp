@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QGuiApplication>
+#include <QStyleHints>
 #include <QRegularExpression>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
@@ -246,6 +247,9 @@ QList<Kind> presses() {
 } // namespace
 
 void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &dir) {
+    // What a single click does waits for a second no longer than this: each
+    // click tried waits through it.
+    QGuiApplication::styleHints()->setMouseDoubleClickInterval(200);
     Viewer *view = &viewer;
     auto failures = std::make_shared<int>(0);
     auto check = [failures](bool ok, const QString &what) {
@@ -307,12 +311,23 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
     struct Step {
         QString what;
         std::function<void()> act;
-        int wait = 700;
+        // Before the next: what it set off, once begun, is waited for as
+        // the grid settles (run, below).
+        int wait = 60;
     };
     auto steps = std::make_shared<QList<Step>>();
     // Longer before the next, once, after undoing what got through.
     auto extraWait = std::make_shared<int>(0);
-    auto add = [steps](const QString &what, std::function<void()> act, int wait = 700) { steps->append({what, act, wait}); };
+    // A part of it alone if PINHOLE_SELFTEST_PART says it ("panel": the side
+    // panel; "rest": the rest), each in a window of its own, at once.
+    const QString part = qEnvironmentVariable("PINHOLE_SELFTEST_PART");
+    const bool panelPart = part.isEmpty() || part == QLatin1String("panel");
+    const bool restPart = part.isEmpty() || part == QLatin1String("rest");
+    auto keeping = std::make_shared<bool>(true);
+    auto add = [steps, keeping](const QString &what, std::function<void()> act, int wait = 60) {
+        if (*keeping)
+            steps->append({what, act, wait});
+    };
 
     // Each kind of input at each point: none reaches the grid, and the
     // first point of each that does is named. Laid out again meanwhile by
@@ -323,6 +338,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
         for (const Kind &kind : kinds) {
             auto attempt = std::make_shared<std::function<void(int)>>();
             *attempt = [=](int tries) {
+                // The next step waits for this one's verdict.
+                *busy = true;
                 if (grid->animating())
                     grid->jumpToFraction(grid->scrollFraction());
                 still();
@@ -338,7 +355,12 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                         first = QStringLiteral(" first at %1,%2 (%3)").arg(qRound(p.x())).arg(qRound(p.y()))
                                     .arg(describe(within ? within(window) : window->contentItem(), p));
                 }
-                QTimer::singleShot(650, window, [=] {
+                // Long enough for what it set off to show: a few frames, or
+                // for a click, past the time a second one would make it a
+                // double click (what a single one does waits that long).
+                const bool clicked = kind.name.contains(QLatin1String("click")) || kind.name.contains(QLatin1String("tap"));
+                const int settle = clicked ? QGuiApplication::styleHints()->mouseDoubleClickInterval() + 60 : 120;
+                QTimer::singleShot(settle, window, [=] {
                     const QStringList got = untouched();
                     const bool layout = *relaid != relaidBefore && reached == 0
                                         && QStringList(got).filter(QRegularExpression("^(scrolled|moved)$")).size() == got.size();
@@ -362,7 +384,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                     }
                 });
             };
-            add(QStringLiteral("%1 over %2").arg(kind.name, over), [=] { (*attempt)(0); }, 700);
+            add(QStringLiteral("%1 over %2").arg(kind.name, over), [=] { (*attempt)(0); }, 0);
         }
     };
 
@@ -429,12 +451,19 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
         grid->jumpToFraction(0.5);
     };
 
-    for (const QSize size : {QSize(850, 900), QSize(1700, 1000)}) {
+    // One width alone if PINHOLE_SELFTEST_WIDE says it (test-selftests runs
+    // each in a window of its own, at once).
+    QList<QSize> sizes{QSize(850, 900), QSize(1700, 1000)};
+    if (const int only = qEnvironmentVariableIntValue("PINHOLE_SELFTEST_WIDE"); only > 0)
+        sizes.removeIf([only](const QSize &s) { return s.width() != only; });
+    for (const QSize size : sizes) {
         const QString wide = QStringLiteral("%1 wide").arg(size.width());
+        *keeping = true;
         add(QStringLiteral("the window %1, the grid half way").arg(wide), [=] {
             window->resize(size);
             settleGrid();
         }, 1500);
+        *keeping = restPart;
         add(QStringLiteral("the date shows, %1").arg(wide), [=] {
             check(!rectOf("dateLabel").isEmpty(), QStringLiteral("the date shows at the top left (%1)").arg(grid->property("dateLabel").toString()));
         }, 100);
@@ -462,6 +491,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
         probe(QStringLiteral("the date in select mode, ") + wide, date, datePresses, nullptr);
         add(QStringLiteral("select mode left, %1").arg(wide), [=] { grid->setSelecting(false); }, 300);
 
+        *keeping = panelPart;
         // The side panel by its button: it opens, and the photo under the
         // button does not.
         add(QStringLiteral("the side panel's button, %1").arg(wide), [=] {
@@ -819,6 +849,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             });
         }, 900);
 
+        *keeping = restPart;
         // The other panels over the photos.
         struct Over {
             QString name;
@@ -886,6 +917,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
               nullptr);
         add(QStringLiteral("the photo closed, %1").arg(wide), [=] { view->close(); }, 1200);
     }
+    *keeping = true;
     add("done", [=] {
         say(QStringLiteral("done, %1 failed").arg(*failures));
         QCoreApplication::exit(*failures ? 1 : 0);
@@ -908,7 +940,7 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
                     QTimer::singleShot(wait, window, [poll] { (*poll)(); });
                     return;
                 }
-                if ((grid->animating() || *busy) && ++*waited < 60) {
+                if ((grid->animating() || *busy) && ++*waited < 200) {
                     QTimer::singleShot(50, window, [poll] { (*poll)(); });
                     return;
                 }
