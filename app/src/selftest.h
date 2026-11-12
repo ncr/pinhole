@@ -112,6 +112,12 @@ class QQuickWindow;
 // waits on the network. With no session the source needs signing in: its
 // card in the middle is looked past. Exits 1 if any step fails.
 void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const Library &library);
+// PINHOLE_SELFTEST=corner:<folder>: the bottom right corner (the notice,
+// − + and ?) up at launch, one notice there at a time; resting with the
+// pointer still, waking as it moves, kept up while it is on the corner,
+// its ? then still a click away. A picture of each step in <folder>.
+// Exits 1 if any fails.
+void runCornerSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &folder);
 // PINHOLE_SELFTEST=keys: the window through its states (the grid and its
 // More menu, select mode and its menu, the viewer, its menu and its More
 // menu, a More menu closed by Esc, the side panel, the help and sign-in over

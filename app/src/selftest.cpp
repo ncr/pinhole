@@ -952,7 +952,13 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
          [=] { return !grid->selecting(); }},
         {"Esc puts the help away", [=] { key(window, Qt::Key_Escape); },
          [=] { return !window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
-        {"the ? button in the corner shows it", [=] { click(window, centreOf(window, "helpButton")); },
+        {"the ? button in the corner shows it", [=] {
+             // The pointer there first, as a hand brings it: the corner
+             // rests while it is still (runCornerSelfTest).
+             const QPointF at = centreOf(window, "helpButton");
+             mouse(window, QEvent::MouseMove, at, Qt::NoButton);
+             click(window, at);
+         },
          [=] { return window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
         {"and Esc again puts it away", [=] { key(window, Qt::Key_Escape); },
          [=] { return !window->findChild<QObject *>(QStringLiteral("help"))->property("shown").toBool(); }},
@@ -1020,6 +1026,90 @@ void runMouseSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, con
         (*run)(0);
     };
     (*settled)();
+}
+
+void runCornerSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &folder) {
+    // A scratch profile has no session: the sign-in card looked past.
+    window->setProperty("troubleSeen", true);
+    auto item = [window](const char *name) { return window->findChild<QQuickItem *>(QLatin1String(name)); };
+    auto up = [item](const char *name) {
+        QQuickItem *i = item(name);
+        return i && i->isVisible() && i->opacity() > 0.99;
+    };
+    auto gone = [item](const char *name) {
+        QQuickItem *i = item(name);
+        return i && !i->isVisible();
+    };
+    auto corner = [up] { return up("helpButton") && up("zoomButtons"); };
+    auto rested = [gone] { return gone("helpButton") && gone("zoomButtons") && gone("newPluginsNotice") && gone("updateNotice"); };
+    auto help = [window] {
+        QObject *h = window->findChild<QObject *>(QStringLiteral("help"));
+        return h && h->property("shown").toBool();
+    };
+    auto middle = [grid] { return QPointF(grid->width() / 2, grid->height() / 2); };
+    // Beside ?, on +: on the corner.
+    auto onCorner = [window] { return centreOf(window, "helpButton") - QPointF(60, 0); };
+    struct Step {
+        const char *what;
+        std::function<void()> act;
+        std::function<bool()> check;
+        // Within `wait` ms, looked at every 100; `still`: at its end, and
+        // all along until then from 400 ms on (once it has faded in).
+        int wait;
+        bool still = false;
+    };
+    auto steps = std::make_shared<QList<Step>>(QList<Step>{
+        {"the corner up at launch", [] {}, corner, 2000},
+        {"the new plugins' notice up over it, alone (the update's waits)", [=] {
+             // As a launch counts them where tours show by themselves
+             // (not over a self-test but the tour's): every plugin, whose
+             // tours a scratch profile has not seen.
+             QObject *plugins = qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>();
+             window->setProperty("newPlugins", QVariant(plugins->property("ids").toStringList()));
+         },
+         [=] { return corner() && up("newPluginsNotice") && gone("updateNotice"); }, 15000},
+        {"the pointer still, all of the corner rests", [] {}, rested, 12000},
+        {"a move in the middle wakes it", [=] {
+             mouse(window, QEvent::MouseMove, middle() - QPointF(20, 20), Qt::NoButton);
+             mouse(window, QEvent::MouseMove, middle(), Qt::NoButton);
+         }, [=] { return corner() && up("newPluginsNotice"); }, 1000},
+        {"still in the middle, it rests again", [] {}, rested, 4000},
+        {"the pointer on the corner keeps it up", [=] {
+             mouse(window, QEvent::MouseMove, onCorner() - QPointF(0, 30), Qt::NoButton);
+             mouse(window, QEvent::MouseMove, onCorner(), Qt::NoButton);
+         }, corner, 5000, true},
+        {"? there shows the help", [=] { click(window, centreOf(window, "helpButton")); }, help, 1000},
+        {"Esc puts it away, the corner up under the pointer", [=] { key(window, Qt::Key_Escape); },
+         [=] { return !help() && corner(); }, 1500},
+    });
+    auto failures = std::make_shared<int>(0);
+    auto run = std::make_shared<std::function<void(int)>>();
+    *run = [=](int k) {
+        if (k == steps->size()) {
+            QCoreApplication::exit(*failures ? 1 : 0);
+            return;
+        }
+        const Step step = (*steps)[k];
+        step.act();
+        auto clock = std::make_shared<QElapsedTimer>();
+        clock->start();
+        auto look = std::make_shared<std::function<void()>>();
+        *look = [=] {
+            const bool ok = step.check();
+            const bool over = clock->elapsed() >= step.wait;
+            if (step.still ? ok && !over : !ok && !over) {
+                QTimer::singleShot(100, window, [look] { (*look)(); });
+                return;
+            }
+            *failures += ok ? 0 : 1;
+            window->grabWindow().save(QStringLiteral("%1/corner-%2.png").arg(folder).arg(k + 1));
+            std::printf("selftest: %-4s %s (%lld ms)\n", ok ? "ok" : "FAIL", step.what, static_cast<long long>(clock->elapsed()));
+            std::fflush(stdout);
+            (*run)(k + 1);
+        };
+        QTimer::singleShot(step.still ? 400 : 0, window, [look] { (*look)(); });
+    };
+    (*run)(0);
 }
 
 void runCopyTwiceSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, const QString &folder) {
@@ -1602,7 +1692,8 @@ void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder
     };
     auto item = [window](const char *name) { return window->findChild<QObject *>(QLatin1String(name)); };
     auto notice = [item] { return item("newPluginsNotice"); };
-    auto noticeShown = [notice] { return notice() && notice()->property("visible").toBool(); };
+    // Wanted: the corner it stands in may be resting, the pointer still.
+    auto noticeShown = [notice] { return notice() && notice()->property("wanted").toBool(); };
     auto noticeIds = [notice] { return notice() ? notice()->property("ids").toStringList() : QStringList(); };
     auto tap = [item](const char *name) { QMetaObject::invokeMethod(item(name), "press"); };
     auto side = [item] { return item("sidePanel"); };

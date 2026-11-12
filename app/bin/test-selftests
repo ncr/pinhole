@@ -3,7 +3,7 @@
 each in a scratch profile on an X display of its own, never on the desktop
 (bin/headless-x: Xvfb, or without it Hyprland's Xwayland on workspace 5):
 
-    app/bin/test-selftests                 # all: through covering colour physics hidden stacks layers people help edit info sheet background clashes
+    app/bin/test-selftests                 # all: through covering colour physics hidden stacks layers people help corner edit info sheet background clashes
     app/bin/test-selftests through layers  # some of them
 
 The window, the service, the fake library and the plugins' helpers built
@@ -36,7 +36,7 @@ APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
 # Each in a window of its own, all at once; through as two, a width each.
 # The longest first, so the last to end ends soonest.
-MODES = ["through:850:panel", "through:1700:panel", "through:850:rest", "through:1700:rest", "covering", "colour", "physics", "hidden", "stacks", "layers", "people", "help",
+MODES = ["through:850:panel", "through:1700:panel", "through:850:rest", "through:1700:rest", "covering", "colour", "physics", "hidden", "stacks", "layers", "people", "help", "corner",
          "edit", "info", "sheet", "background", "clashes"]
 # On a folder of real photos (folder()), its originals there to read: the
 # fake library has thumbnails alone.

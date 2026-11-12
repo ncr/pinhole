@@ -646,13 +646,19 @@ ApplicationWindow {
 
     // A quiet invitation, only over the idle grid. Dismissing it keeps the
     // update available in settings; no photo or keyboard focus is taken.
+    // One notice at a time over the corner: this waits while new plugins'
+    // is up.
     UpdateStatus { id: updateStatus }
     Row {
         id: updateNotice
         objectName: "updateNotice"
         property bool dismissed: false
-        visible: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp
+        readonly property bool wanted: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp
                  && !dismissed && ["available", "updating", "ready"].indexOf(updater.state) >= 0
+                 && !newPluginsNotice.wanted
+        onWantedChanged: if (wanted) corner.wake(6000)
+        visible: wanted && corner.open
+        opacity: corner.shown
         anchors.right: parent.right
         anchors.bottom: helpButton.top
         anchors.rightMargin: 16
@@ -686,9 +692,13 @@ ApplicationWindow {
         objectName: "newPluginsNotice"
         readonly property var ids: (plugins.revision, win.newPlugins.filter(id => !plugins.at(id).toured))
         readonly property bool putOff: (plugins.revision, plugins.newPutOff(ids))
-        visible: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp && ids.length > 0 && !putOff
+        readonly property bool wanted: win.inGrid && !grid.selecting && !win.firstRun && win.chromeUp
+                                       && ids.length > 0 && !putOff
+        onWantedChanged: if (wanted) corner.wake(6000)
+        visible: wanted && corner.open
+        opacity: corner.shown
         anchors.right: parent.right
-        anchors.bottom: updateNotice.visible ? updateNotice.top : helpButton.top
+        anchors.bottom: helpButton.top
         anchors.rightMargin: 16
         anchors.bottomMargin: 8
         spacing: 4
@@ -713,8 +723,8 @@ ApplicationWindow {
         id: helpButton
         objectName: "helpButton"
         floating: true
-        visible: win.chromeUp
-        opacity: win.chrome
+        visible: win.chromeUp && corner.open
+        opacity: win.chrome * corner.shown
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 16
@@ -733,8 +743,8 @@ ApplicationWindow {
     Row {
         id: zoomButtons
         objectName: "zoomButtons"
-        visible: win.chromeUp && !win.firstRun && grid.count > 0
-        opacity: win.chrome
+        visible: win.chromeUp && !win.firstRun && grid.count > 0 && corner.open
+        opacity: win.chrome * corner.shown
         anchors.right: helpButton.left
         anchors.rightMargin: 6
         anchors.bottom: helpButton.bottom
@@ -757,6 +767,55 @@ ApplicationWindow {
 
     // What the corner buttons take of the bottom right.
     readonly property real cornerWidth: 16 + helpButton.width + 6 + zoomButtons.width + 8
+
+    // The corner (its notice, − + and ?) lies over the photos only while the
+    // pointer moves in the window, and while it is on the corner: a pointer
+    // still for a moment (as it is while a wheel or touchpad scrolls) or
+    // gone from the window fades it, and the photos under it take the
+    // clicks. Over everything, so it sees every move; it takes none.
+    Item {
+        id: corner
+        objectName: "corner"
+        anchors.fill: parent
+        z: 1000
+        property bool awake: true
+        readonly property point at: pointer.point.position
+        // Where the corner's buttons are, with a margin to reach them.
+        readonly property bool held: pointer.hovered
+            && at.x >= Math.min(zoomButtons.x,
+                                newPluginsNotice.wanted ? newPluginsNotice.x : updateNotice.wanted ? updateNotice.x : helpButton.x) - 16
+            && at.y >= (newPluginsNotice.wanted ? newPluginsNotice.y : updateNotice.wanted ? updateNotice.y : helpButton.y) - 16
+        readonly property bool up: awake || held
+        // 1 shown to 0 resting; `open` with the target, so a button that
+        // just woke takes the click. (The item itself stays, to see moves.)
+        property real shown: up ? 1 : 0
+        Behavior on shown { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+        readonly property bool open: up || shown > 0
+        HoverHandler {
+            id: pointer
+            onHoveredChanged: hovered ? corner.wake(2500) : corner.rest()
+        }
+        onAtChanged: wake(2500)
+        // Up for at least `ms` more (a notice longer, to be read).
+        property real until: 0
+        function wake(ms) {
+            const now = Date.now()
+            until = Math.max(until, now + ms)
+            awake = true
+            resting.interval = until - now
+            resting.restart()
+        }
+        function rest() {
+            awake = false
+            until = 0
+            resting.stop()
+        }
+        Timer {
+            id: resting
+            onTriggered: corner.awake = false
+        }
+        Component.onCompleted: wake(4000)
+    }
 
     // Select mode, as in Photos on an iPhone: a button to enter it, and
     // while in it a bar with what is selected and what to do with it.
