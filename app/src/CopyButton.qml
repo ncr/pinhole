@@ -43,7 +43,7 @@ ControlSurface {
     property alias border: surface.border
 
     readonly property color ink: theme.foreground
-    width: Math.max(label.implicitWidth, tick.implicitWidth) + 2 * Math.round(theme.fontSize * 0.833)
+    width: label.implicitWidth + 2 * Math.round(theme.fontSize * 0.833)
     height: Math.round(theme.fontSize * 2.333)
     Rectangle {
         id: surface
@@ -54,10 +54,10 @@ ControlSurface {
         border.color: Qt.rgba(button.ink.r, button.ink.g, button.ink.b, (hover.containsMouse || button.activeFocus) && button.usable ? 0.25 : button.flat ? 0 : 0.4)
     }
     Rectangle {
-        anchors.fill: parent; anchors.margins: -3
-        radius: surface.radius + 2
+        anchors.fill: parent
+        radius: surface.radius
         color: "transparent"; border.width: 2; border.color: theme.accent
-        visible: button.activeFocus
+        visible: button.activeFocus && keymap.input === "keyboard"
     }
     opacity: !enabledHere ? 0.4 : phase === "working" ? 0.6 : 1
     // Every press shows: the button gives a little under the finger.
@@ -78,7 +78,7 @@ ControlSurface {
         id: tick
         anchors.horizontalCenter: parent.horizontalCenter
         y: centredIn(button.height)
-        text: "✓ " + qsTr("Copied")
+        text: "✓"
         color: theme.accent
         opacity: button.phase === "done" ? 1 : 0
         Accessible.ignored: true

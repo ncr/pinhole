@@ -35,6 +35,7 @@ class Viewer : public QObject {
     Q_PROPERTY(bool video READ isVideo NOTIFY indexChanged)
     Q_PROPERTY(QUrl videoSource READ videoSource NOTIFY videoChanged)
     Q_PROPERTY(QString title READ title NOTIFY indexChanged)
+    Q_PROPERTY(QString shortTitle READ shortTitle NOTIFY indexChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     // The full photo, or the video, still on its way (and nothing wrong).
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
@@ -88,6 +89,7 @@ public:
     bool isVideo() const;
     QUrl videoSource() const { return m_video; }
     QString title() const;
+    QString shortTitle() const;
     QString message() const { return m_message; }
     qreal offset() const { return m_motion.offset(); }
     qreal stripOffset() const { return m_motion.stripOffset(); }
@@ -120,8 +122,9 @@ public:
     Q_INVOKABLE QUrl imageFor(int index) const;
     Q_INVOKABLE QUrl thumbnailAt(int index) const;
     Q_INVOKABLE qreal aspectAt(int index) const;
-    // The area photos are fitted to: the window above the carousel.
-    Q_INVOKABLE void setViewport(qreal width, qreal height);
+    // The area photos are fitted to, between the window's top band and
+    // the carousel, and how far down the window it starts.
+    Q_INVOKABLE void setViewport(qreal width, qreal height, qreal top = 0);
     Q_INVOKABLE void advance(qreal seconds);
     // Zoom about a point of the viewport, or its centre by steps (keys).
     Q_INVOKABLE void zoomBy(qreal factor, qreal x, qreal y);
@@ -242,6 +245,7 @@ private:
     QString m_message;
     ViewerMotion m_motion;
     QSizeF m_viewport{1, 1};
+    qreal m_viewportTop = 0;
     // Mouse wheel notches not yet used; high-resolution wheels send parts.
     double m_notches = 0;
     // Times for a mouse grab's moves, as the touchpad's events carry their own.

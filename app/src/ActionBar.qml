@@ -44,12 +44,16 @@ Rectangle {
         return groups
     }
 
+    // In a band of the app rather than over the photos: its buttons alone,
+    // the band their card.
+    property bool bare: false
+
     width: row.width + 2
     height: row.height + 2
     radius: Math.min(4, theme.radius)
-    color: theme.background
+    color: bare ? "transparent" : theme.background
     border.color: theme.foreground
-    border.width: 1
+    border.width: bare ? 0 : 1
     // Between and around its buttons nothing reaches what is beneath (a
     // photo in select mode, the photo in the viewer).
     Shield { anchors.fill: parent; z: -1 }

@@ -72,10 +72,10 @@ qreal Viewer::aspect() const {
 
 bool Viewer::isVideo() const { return m_index >= 0 && m_index < m_library->count() && m_library->at(m_index).video; }
 
-QString Viewer::title() const {
-    if (m_index < 0 || m_index >= m_library->count())
-        return {};
-    const QDateTime when = QDateTime::fromMSecsSinceEpoch(m_library->at(m_index).date);
+// The photo's date and time as the window words them, the day and month in
+// full or (`brief`) as the locale shortens them.
+static QString titleOf(qint64 date, bool brief) {
+    const QDateTime when = QDateTime::fromMSecsSinceEpoch(date);
     // "Saturday, 24 October 2026 · 16:16", in the locale's own words; the
     // window shows the time after the dot muted. Locales put a narrow
     // no-break space before AM/PM, which the monospace face draws with no
@@ -83,7 +83,24 @@ QString Viewer::title() const {
     const QLocale locale;
     QString time = locale.toString(when.time(), QLocale::ShortFormat);
     time.replace(QChar(0x202F), QLatin1Char(' ')).replace(QChar(0x00A0), QLatin1Char(' '));
-    return locale.toString(when.date(), QLocale::LongFormat) + QStringLiteral(" · ") + time;
+    // Brief, the same order with the names short: "Sat, 24 Oct 2026".
+    QString format = locale.dateFormat(QLocale::LongFormat);
+    if (brief)
+        format.replace(QLatin1String("dddd"), QLatin1String("ddd")).replace(QLatin1String("MMMM"), QLatin1String("MMM"));
+    return locale.toString(when.date(), format) + QStringLiteral(" · ") + time;
+}
+
+QString Viewer::title() const {
+    if (m_index < 0 || m_index >= m_library->count())
+        return {};
+    return titleOf(m_library->at(m_index).date, false);
+}
+
+// Where the whole of it has no room beside the buttons.
+QString Viewer::shortTitle() const {
+    if (m_index < 0 || m_index >= m_library->count())
+        return {};
+    return titleOf(m_library->at(m_index).date, true);
 }
 
 void Viewer::setMessage(const QString &message) {
@@ -160,13 +177,13 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
         switch (g->gestureType()) {
         case Qt::BeginNativeGesture:
             m_pinchScale = 1;
-            m_motion.pinchBegin(g->position().x(), g->position().y());
+            m_motion.pinchBegin(g->position().x(), g->position().y() - m_viewportTop);
             break;
         case Qt::ZoomNativeGesture:
             // Each event's value is the change since the last; summed, not
             // multiplied (multiplying compounds, see the grid).
             m_pinchScale = std::max(0.05, m_pinchScale + g->value());
-            m_motion.pinch(m_pinchScale, g->position().x(), g->position().y());
+            m_motion.pinch(m_pinchScale, g->position().x(), g->position().y() - m_viewportTop);
             break;
         case Qt::EndNativeGesture:
             if (m_motion.pinchEnd())
@@ -196,7 +213,7 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
         if (std::abs(angle.y()) >= std::abs(angle.x())) {
             // The wheel zooms at the pointer, a notch a quarter: pulled
             // towards you, the photo comes closer.
-            m_motion.zoomBy(std::pow(1.25, -classic.y() / 120.0), wheel->position().x(), wheel->position().y());
+            m_motion.zoomBy(std::pow(1.25, -classic.y() / 120.0), wheel->position().x(), wheel->position().y() - m_viewportTop);
             emit motionChanged();
             return true;
         }
@@ -213,7 +230,7 @@ bool Viewer::eventFilter(QObject *, QEvent *event) {
         // Ctrl and a touchpad's scroll zoom at the pointer.
         const double notches = (angle.y() != 0 ? angle.y() : angle.x()) / 120.0;
         if (notches != 0)
-            m_motion.zoomBy(std::pow(1.25, notches), wheel->position().x(), wheel->position().y());
+            m_motion.zoomBy(std::pow(1.25, notches), wheel->position().x(), wheel->position().y() - m_viewportTop);
         emit motionChanged();
         return true;
     }
@@ -380,7 +397,8 @@ void Viewer::fitPhoto() {
     m_motion.setNeighbours(rowBeside(-1) >= 0, rowBeside(1) >= 0);
 }
 
-void Viewer::setViewport(qreal width, qreal height) {
+void Viewer::setViewport(qreal width, qreal height, qreal top) {
+    m_viewportTop = top;
     m_viewport = QSizeF(std::max<qreal>(1, width), std::max<qreal>(1, height));
     m_motion.setViewport(m_viewport.width(), m_viewport.height());
     fitPhoto();

@@ -20,9 +20,9 @@ Rectangle {
     Behavior on color { ColorAnimation { duration: 100 } }
     Behavior on border.color { ColorAnimation { duration: 100 } }
     Rectangle {
+        // Inside its own edge: in a bar or a menu it stays within the card.
         anchors.fill: parent
-        anchors.margins: -3
-        radius: surface.radius + 2
+        radius: surface.radius
         color: "transparent"
         border.width: 2
         border.color: theme.accent

@@ -61,18 +61,24 @@ Item {
     property rect cell: Qt.rect(0, 0, 0, 0)
 
     // The carousel's band along the bottom; photos fit the area above it.
+    // The band along the top, with the date and what can be done, and the
+    // carousel's along the bottom; photos fit the area between them, so
+    // neither lies on the photo.
+    readonly property real barHeight: Math.round(theme.fontSize * 2.333) + 2
+    readonly property real topHeight: barHeight + 12
     readonly property real stripHeight: 60
-    readonly property real areaHeight: Math.max(1, height - stripHeight)
+    readonly property real areaHeight: Math.max(1, height - stripHeight - topHeight)
     // Dragged up or down to close: how far along, 0 to 1, and what the
     // background and controls keep of their opacity meanwhile.
     readonly property real dismissed: Math.min(1, Math.abs(viewer.dismiss) / Math.max(1, height * 0.45))
     readonly property real chrome: 1 - dismissed
     readonly property real fitWidth: Math.min(width, areaHeight * viewer.aspect)
     readonly property real fitHeight: fitWidth / Math.max(0.01, viewer.aspect)
-    onWidthChanged: viewer.setViewport(width, areaHeight)
-    onAreaHeightChanged: viewer.setViewport(width, areaHeight)
+    onWidthChanged: viewer.setViewport(width, areaHeight, topHeight)
+    onAreaHeightChanged: viewer.setViewport(width, areaHeight, topHeight)
+    onTopHeightChanged: viewer.setViewport(width, areaHeight, topHeight)
     Component.onCompleted: {
-        viewer.setViewport(width, areaHeight)
+        viewer.setViewport(width, areaHeight, topHeight)
         // Opened before the viewer was made (Main.qml): opens now.
         if (viewer.open)
             opened()
@@ -182,7 +188,7 @@ Item {
             width: Math.min(root.width, root.areaHeight * aspect)
             height: width / Math.max(0.01, aspect)
             x: centre - width / 2
-            y: (root.areaHeight - height) / 2
+            y: root.topHeight + (root.areaHeight - height) / 2
             visible: root.progress === 1 && at >= 0 && x < root.width && x + width > 0
             opacity: root.chrome
             Image {
@@ -208,7 +214,7 @@ Item {
         readonly property real targetWidth: root.fitWidth * viewer.zoom
         readonly property real targetHeight: root.fitHeight * viewer.zoom
         x: root.lerp(root.cell.x, root.width / 2 + viewer.offset + viewer.panX - targetWidth / 2, root.progress)
-        y: root.lerp(root.cell.y, root.areaHeight / 2 + viewer.panY + viewer.dismiss - targetHeight / 2, root.progress)
+        y: root.lerp(root.cell.y, root.topHeight + root.areaHeight / 2 + viewer.panY + viewer.dismiss - targetHeight / 2, root.progress)
         // Shrinking a little as it is dragged away, as in Photos.
         scale: 1 - 0.25 * root.dismissed * root.progress
         width: root.lerp(root.cell.width, targetWidth, root.progress)
@@ -469,83 +475,104 @@ Item {
             width: height
             readonly property bool can: viewer.beside(modelData) >= 0
             opacity: pointer.hoveredSide === modelData && can ? 0.9 * root.progress : 0
-            y: (root.areaHeight - height) / 2
+            y: root.topHeight + (root.areaHeight - height) / 2
             Behavior on opacity { NumberAnimation { duration: 120 } }
         }
     }
 
-    // What is shown, and what is still on its way.
-    Column {
-        id: titleColumn
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.margins: 16
-        spacing: 6
+    // The top band, the theme's dark background with a hairline under it,
+    // as the carousel's: a zoomed photo passes under it. On it, what is
+    // shown and what is still on its way, and at its right what can be done
+    // with it, as one bar: the plugins' groups (the heart and Live with its
+    // effects first), Copy and Export, and back to the library.
+    Rectangle {
+        id: topBand
+        width: parent.width
+        height: root.topHeight
+        color: theme.darkBackground
         opacity: root.progress * root.chrome
-        Row {
-            spacing: 6
-            Chip {
-                id: dateChip
-                // The date bright, the time after it muted.
-                readonly property var parts: viewer.title.split(" · ")
-                text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
-                                       : viewer.title
-                textColor: theme.brightForeground
-                // A click on it is not one on the photo's left side,
-                // which steps to the one before.
-                Shield { anchors.fill: parent; z: -1 }
-            }
-            // The full photo or the video still coming, or what a plugin's
-            // layer shows over it (a Live Photo's effect), after a second.
-            Spinner {
-                objectName: "loadingSpinner"
-                busy: viewer.loading || layers.loading
-            }
-        }
-        Chip {
-            text: viewer.message
-            visible: text !== ""
-            textColor: theme.darkForeground
-            Shield { anchors.fill: parent; z: -1 }
+        // A click on it is not one on the photo, nor on its sides.
+        Shield { anchors.fill: parent }
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: 1
+            color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.15)
         }
     }
+    Row {
+        id: titleRow
+        x: 16
+        height: root.topHeight
+        spacing: 8
+        opacity: topBand.opacity
+        // Where not even the brief date has room beside the least of the
+        // bar, the bar alone.
+        visible: actionBar.besideDate < 3
+        UiText {
+            id: dateLabel
+            // The date bright, the time after it muted; in the locale's
+            // short names where the whole of it has no room.
+            readonly property string said: actionBar.briefDate ? viewer.shortTitle : viewer.title
+            readonly property var parts: said.split(" · ")
+            y: centredIn(parent.height)
+            color: theme.brightForeground
+            textFormat: Text.StyledText
+            text: parts.length > 1 ? parts[0] + " <font color=\"" + theme.darkForeground + "\">· " + parts[1] + "</font>"
+                                   : said
+        }
+        // The full photo or the video still coming, or what a plugin's
+        // layer shows over it (a Live Photo's effect), after a second.
+        Spinner {
+            objectName: "loadingSpinner"
+            anchors.verticalCenter: parent.verticalCenter
+            busy: viewer.loading || layers.loading
+        }
+    }
+    // What went wrong with it, under the band.
+    Chip {
+        x: 16
+        y: root.topHeight + 12
+        opacity: topBand.opacity
+        text: viewer.message
+        visible: text !== ""
+        textColor: theme.darkForeground
+        Shield { anchors.fill: parent; z: -1 }
+    }
 
-    // What can be done with it, as one card: the plugins' groups (the
-    // heart and Live with its effects first), Copy and Export, and back to
-    // the library. Right of the date, as much as fits there (`fit`); under it
-    // when not even the least does.
     Row {
         id: actions
         anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: 16
-        anchors.topMargin: actionBar.below ? titleColumn.y + titleColumn.height + 6 : 16
+        anchors.rightMargin: 8
+        y: Math.round((root.topHeight - actionBar.height) / 2)
         spacing: 8
-        opacity: root.progress * root.chrome
+        opacity: topBand.opacity
         ActionBar {
             id: actionBar
             objectName: "viewerActions"
+            bare: true
 
             // How much it says, from 0, everything, to 2: the keys go, then
-            // the plugins' buttons fold into More ▾. The first that fits,
-            // from the words (as select mode's bar does, Main.qml), right
-            // of the date and the arc beside it; where not even the least
-            // does, it goes under the date, the window's width its room.
+            // the plugins' buttons fold into More ▾. The first that fits
+            // beside the date, from the words (as select mode's bar does,
+            // Main.qml); the date brief where that lets it say more than
+            // the least.
             function levelIn(room) {
                 for (let level = 0; level < 3; ++level)
                     if (widthAt(level) <= room)
                         return level
                 return 3
             }
-            readonly property int besideDate: {
+            function room(title) {
                 // The date's width a step at a time, so that a photo's
                 // longer or shorter date does not refold the bar.
                 const step = 3 * theme.fontSize
-                const date = Math.ceil((dateChip.width + 6 + dateChip.height) / step) * step
-                return levelIn(root.width - 16 - (16 + date + 8))
+                const date = Math.ceil((viewerMetrics.of(title) + titleRow.spacing + root.barHeight) / step) * step
+                return root.width - actions.anchors.rightMargin - (titleRow.x + date + 8)
             }
-            readonly property bool below: besideDate > 2
-            readonly property int fit: below ? Math.min(2, levelIn(root.width - 32)) : besideDate
+            readonly property bool briefDate: levelIn(room(viewer.title)) > 2
+            readonly property int besideDate: levelIn(room(briefDate ? viewer.shortTitle : viewer.title))
+            readonly property int fit: Math.min(2, besideDate)
             readonly property bool hints: fit < 1
             readonly property bool folded: fit >= 2
             readonly property var pluginGroups: groupsOf(root.pluginActions)
@@ -571,7 +598,7 @@ Item {
                 } else if (shown.length > 0) {
                     groups.push(words(qsTr("More") + " ▾") + pad)
                 }
-                groups.push(Math.max(words(qsTr("Copy")) + (level < 1 ? words("  C") : 0), words("✓ " + qsTr("Copied"))) + pad + arrow)
+                groups.push(words(qsTr("Copy")) + (level < 1 ? words("  C") : 0) + pad + arrow)
                 groups.push(words("?") + pad)
                 groups.push(words("✕") + key("Esc") + pad)
                 return 2 + groups.reduce((sum, w) => sum + w, 0) + 5 * (groups.length - 1)

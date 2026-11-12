@@ -4624,6 +4624,34 @@ PinholePlugin {
         qunsetenv("PINHOLE_SOCKET");
     }
 
+    void theViewersBriefTitleShortensTheDaysAndMonthsNames() {
+        QTemporaryDir dir;
+        // Wednesday 11 November 2026, at noon here.
+        const qint64 noon = QDateTime(QDate(2026, 11, 11), QTime(12, 7)).toMSecsSinceEpoch();
+        makeLibrary(dir.path(), {{"a", noon}});
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/none.sock").toUtf8());
+        ServiceClient service(dir.path());
+        Viewer viewer(&library, &service);
+        viewer.setViewport(800, 600);
+        QCOMPARE(viewer.shortTitle(), QString());
+        viewer.openAt(0, {});
+        const QLocale locale;
+        const QDate day(2026, 11, 11);
+        QVERIFY(viewer.title().contains(locale.dayName(3, QLocale::LongFormat)));
+        QVERIFY(viewer.shortTitle().contains(locale.toString(day, QStringLiteral("ddd"))));
+        QVERIFY(viewer.shortTitle().contains(locale.toString(day, QStringLiteral("MMM"))));
+        QVERIFY(!viewer.shortTitle().contains(locale.toString(day, QStringLiteral("MMMM")))
+                || locale.toString(day, QStringLiteral("MMMM")) == locale.toString(day, QStringLiteral("MMM")));
+        QVERIFY(viewer.shortTitle().size() < viewer.title().size());
+        // The time after the dot, as in the whole title.
+        QCOMPARE(viewer.shortTitle().section(QStringLiteral(" · "), 1), viewer.title().section(QStringLiteral(" · "), 1));
+        viewer.close();
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void theViewersRowPassesOverHiddenPhotos() {
         QTemporaryDir dir;
         makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}});
