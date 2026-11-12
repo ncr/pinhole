@@ -57,9 +57,15 @@ FocusScope {
     readonly property var availableXs: availablePoints.map(p => p.x)
     readonly property var availableYs: availablePoints.map(p => p.y)
 
+    // On one photo (a point: M on it), on several (the ids of photos
+    // ticked: those with a place in view, once read), or on all of them
+    // (none).
+    property var fitIds: null
     function start(focus) {
-        focusPoint = focus
-        if (focus) {
+        const several = Array.isArray(focus)
+        focusPoint = several ? null : focus
+        fitIds = several ? new Set(focus) : null
+        if (focus && !several) {
             camera(focus.x, focus.y, 14)
             fitted = true
         }
@@ -96,6 +102,15 @@ FocusScope {
             pending = null
             points = result.sort(byDate)
             loading = false
+            if (fitIds) {
+                const chosen = points.filter(p => fitIds.has(p.id))
+                fitIds = null
+                if (chosen.length > 0) {
+                    const view = Geo.fit(chosen, viewWidth, viewHeight)
+                    fitted = true
+                    centerOn(view.x, view.y, view.zoom)
+                }
+            }
             if (!fitted && points.length > 0)
                 fitAll()
             regroup()

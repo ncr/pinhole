@@ -326,9 +326,9 @@ PinholePlugin {
         [qsTr("Location"), placeText()]
     ].filter(row => row[1] !== ""))
     // The map (M), over the photos while open, made afresh each time, on
-    // the photo given or all of them; Esc puts a place's photos away before
-    // it closes (PhotoPlaces' back()). Open already (Info's M on a photo
-    // opened from it), it stays as it was.
+    // the photo given, the photos given, or all of them; Esc puts a place's
+    // photos away before it closes (PhotoPlaces' back()). Open already, it
+    // stays as it was.
     PluginView {
         id: mapView
         objectName: "infoMapView"
@@ -341,6 +341,32 @@ PinholePlugin {
     function openMap(photo) {
         if (!mapView.shown)
             mapView.open(photo || null)
+    }
+    // M wherever it is pressed, Info shown or not: on the grid all of
+    // them; on a photo, it, where it was taken (Info's coordinates when it
+    // has them, its original's, else the index's), or all of them when it
+    // has no place; on photos ticked, those with a place in view, all of
+    // them when none has. On a photo opened from the map, back to it.
+    function mapOf(ids) {
+        if (mapView.shown) {
+            if (pinhole.away && pinhole.viewer.open)
+                pinhole.viewer.close()
+            return
+        }
+        placing.cancel()
+        if (!ids || ids.length === 0)
+            return openMap(null)
+        if (ids.length > 1)
+            return openMap(Array.from(ids))
+        if (ids[0] === photoId && hasPlace)
+            return openMap(Geo.point(photoId, facts.latitude, facts.longitude, item.date))
+        placing.start(() => pinhole.query("SELECT id, latitude, longitude, asset_date FROM assets WHERE id = ?", [ids[0]]))
+    }
+    Job {
+        id: placing
+        onDone: rows => plugin.openMap(rows.length > 0 ? Geo.point(rows[0].id, rows[0].latitude, rows[0].longitude, rows[0].asset_date) : null)
+        // The index gone meanwhile: all of them.
+        onFailed: error => plugin.openMap(null)
     }
     function closeMap() {
         mapView.close()
@@ -360,11 +386,12 @@ PinholePlugin {
 
     actions: [
         PluginAction {
-            place: "grid"
+            id: mapAction
+            places: ["grid", "viewer", "selection"]
             text: qsTr("Map")
             key: "M"
             shown: pinhole.library.count > 0
-            onTriggered: plugin.openMap(null)
+            onTriggered: plugin.mapOf(photos)
         },
         PluginAction {
             id: infoAction
@@ -442,10 +469,6 @@ PinholePlugin {
                 pinhole.warn(error)
         })
     }
-    QtObject {
-        id: mapLight
-        property Item button: mapButton
-    }
     tour: [
         {
             title: qsTr("Details"),
@@ -462,7 +485,7 @@ PinholePlugin {
             title: qsTr("Where"),
             text: qsTr("M shows this photo and nearby photos on the map."),
             open: () => plugin.placeStep(),
-            action: mapLight
+            action: mapAction
         }
     ]
 
@@ -536,28 +559,15 @@ PinholePlugin {
                 font.pixelSize: panel.textSize
                 text: plugin.trouble
             }
-            Row {
-                spacing: 8
-                visible: plugin.hasPlace || plugin.waiting
-                ShellButton {
-                    id: mapButton
-                    objectName: "infoMap"
-                    visible: plugin.hasPlace
-                    text: qsTr("Open map")
-                    key: "M"
-                    keyLayer: "viewer"
-                    onTriggered: plugin.openMap(Geo.point(plugin.photoId, plugin.facts.latitude, plugin.facts.longitude, plugin.item.date))
-                }
-                // A long video's original is a big download for a few
-                // lines: only when asked.
-                ShellButton {
-                    visible: plugin.waiting
-                    text: plugin.waitingBytes > 0 ? qsTr("Read the original · %1").arg(pinhole.sizeText(plugin.waitingBytes))
-                                                  : qsTr("Read the original")
-                    key: "Shift+I"
-                    keyLayer: "viewer"
-                    onTriggered: plugin.readWaiting()
-                }
+            // A long video's original is a big download for a few
+            // lines: only when asked.
+            ShellButton {
+                visible: plugin.waiting
+                text: plugin.waitingBytes > 0 ? qsTr("Read the original · %1").arg(pinhole.sizeText(plugin.waitingBytes))
+                                              : qsTr("Read the original")
+                key: "Shift+I"
+                keyLayer: "viewer"
+                onTriggered: plugin.readWaiting()
             }
         }
     }

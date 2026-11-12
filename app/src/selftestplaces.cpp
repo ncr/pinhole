@@ -256,7 +256,10 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
             break;
         case 4:
             if (!viewer->isOpen() || map) return;
+            // Back to the map: M as it came, Esc, or the viewer's ✕.
             if (keys)
+                press(window, Qt::Key_M);
+            else if (run->input == 2)
                 press(window, Qt::Key_Escape);
             else if (auto *button = viewerClose(root))
                 click(window, device, button);
@@ -313,25 +316,70 @@ void runPlacesSelfTest(QQuickWindow *window, Viewer *viewer, const QString &fold
                 run->clock.restart();
                 return;
             }
-            // Info's M, with a time of its own as each input's run has.
+            // M on a photo, Info shown or not, with a time of its own as
+            // each input's run has.
             run->clock.restart();
             viewer->openAt(0, {});
             break;
         case 10:
             if (!viewer->isOpen() || !named(root, "photoViewer")) return;
-            press(window, Qt::Key_I);
-            break;
-        case 11:
-            if (!named(root, "infoMap")) return;
+            if (named(root, "infoPanel"))
+                return fail("Info was open before I");
             press(window, Qt::Key_M);
             break;
+        case 11: {
+            // Its place, read from the index: Info is not open to know it.
+            if (!map || !viewer->isOpen()) return;
+            const auto focus = map->property("focusPoint").toMap();
+            if (zoom() != 14 || focus.value("id").toString().isEmpty())
+                return;
+            press(window, Qt::Key_M);
+            break;
+        }
         case 12:
+            if (map || !viewer->isOpen()) return;
+            std::puts("selftest: places: M on a photo without Info: PASS");
+            press(window, Qt::Key_I);
+            break;
+        case 13:
+            if (!named(root, "infoPanel")) return;
+            press(window, Qt::Key_M);
+            break;
+        case 14:
             if (!map || !viewer->isOpen() || zoom() != 14) return;
             press(window, Qt::Key_M);
             break;
-        default:
+        case 15: {
             if (map || !viewer->isOpen()) return;
             std::puts("selftest: places: Info M and return to the photo: PASS");
+            press(window, Qt::Key_I);
+            press(window, Qt::Key_Escape);
+            // Warsaw's two ticked (the oldest: Lisbon, the newest, is last).
+            auto *grid = named(root, "grid");
+            grid->setProperty("selecting", true);
+            for (int at : {0, 1}) {
+                QMetaObject::invokeMethod(grid, "putCursorOn", Q_ARG(int, at));
+                QMetaObject::invokeMethod(grid, "tickCursor");
+            }
+            break;
+        }
+        case 16:
+            if (viewer->isOpen() || !named(root, "selectBar")) return;
+            press(window, Qt::Key_M);
+            break;
+        case 17: {
+            // Those two in view, close: not the whole world's three.
+            if (!map) return;
+            const double warsaw = (21.015 + 180) / 360;
+            if (zoom() < 10 || std::abs(longitude() - warsaw) > 0.01) return;
+            if (!folder.isEmpty())
+                window->grabWindow().save(folder + "/places-selection.png");
+            press(window, Qt::Key_M);
+            break;
+        }
+        default:
+            if (map) return;
+            std::puts("selftest: places: M on photos ticked: PASS");
             timer->stop();
             return QCoreApplication::quit();
         }
