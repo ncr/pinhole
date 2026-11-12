@@ -36,11 +36,15 @@ PanelWindow {
   // The grid: square cells with a hairline between them, as Pinhole's.
   readonly property int columns: store ? store.columns : 4
   readonly property int rows: Math.max(1, Math.ceil(Math.max(1, store ? store.items.length : 0) / columns))
-  readonly property real cell: Style.space(84)
-  readonly property real cellGap: Math.max(2, Style.space(2))
-  readonly property real pad: Style.space(10)
-  readonly property real headerHeight: Style.space(30)
-  readonly property real footerHeight: Style.space(22)
+  // Every length a whole number of the screen's pixels, so at a scale such
+  // as 1.6 no photo lands between pixels and is drawn soft.
+  readonly property real dpr: devicePixelRatio > 0 ? devicePixelRatio : 1
+  function px(v) { return Math.round(v * dpr) / dpr }
+  readonly property real cell: px(Style.space(84))
+  readonly property real cellGap: px(Math.max(2, Style.space(2)))
+  readonly property real pad: px(Style.space(10))
+  readonly property real headerHeight: px(Style.space(30))
+  readonly property real footerHeight: px(Style.space(22))
   readonly property real gridWidth: columns * cell + (columns - 1) * cellGap
   readonly property real gridHeight: rows * cell + (rows - 1) * cellGap
   readonly property real cardWidth: gridWidth + pad * 2
@@ -56,8 +60,8 @@ PanelWindow {
     if (barPosition === "bottom") y = height - barThickness - cardHeight - gap
     else if (barPosition === "left") { x = barThickness + gap; y = p.y + ah / 2 - cardHeight / 2 }
     else if (barPosition === "right") { x = width - barThickness - cardWidth - gap; y = p.y + ah / 2 - cardHeight / 2 }
-    return Qt.point(Math.round(Math.max(gap, Math.min(x, width - cardWidth - gap))),
-                    Math.round(Math.max(gap, Math.min(y, height - cardHeight - gap))))
+    return Qt.point(px(Math.max(gap, Math.min(x, width - cardWidth - gap))),
+                    px(Math.max(gap, Math.min(y, height - cardHeight - gap))))
   }
   // Where the card grows from: the icon's side.
   readonly property real originX: anchorItem && anchorWindow
@@ -199,6 +203,7 @@ PanelWindow {
             required property var modelData
             store: popup.store
             item: modelData
+            dpr: popup.dpr
             width: popup.cell
             height: popup.cell
           }

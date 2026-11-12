@@ -26,6 +26,8 @@ Item {
   readonly property bool fresh: store && item && item.added !== undefined ? store.isFresh(item) === true : false
   readonly property bool waiting: wantDrag && !go
   readonly property real radius: Math.max(2, Math.min(Style.space(5), Style.cornerRadius))
+  // The window's scale, fractional ones too, from the panel.
+  property real dpr: 1
 
   // The photos this drag carries, fixed when it begins.
   property var dragIds: []
@@ -107,14 +109,15 @@ Item {
       id: thumbnail
       anchors.fill: parent
       source: cell.item ? cell.item.thumb : ""
-      // Read at the size it is drawn, on a HiDPI display too.
-      sourceSize.width: Math.ceil(cell.width * 2)
-      sourceSize.height: Math.ceil(cell.height * 2)
+      // Read at exactly the pixels it covers, so nothing scales it again:
+      // at a fractional scale such as 1.6 a picture read larger and shrunk
+      // on the screen comes out soft.
+      sourceSize.width: Math.round(cell.width * cell.dpr)
+      sourceSize.height: Math.round(cell.height * cell.dpr)
       fillMode: Image.PreserveAspectCrop
       asynchronous: true
       cache: true
       smooth: true
-      mipmap: true
       opacity: status === Image.Ready ? 1 : 0
       Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
       scale: mouse.containsMouse && !cell.store.dragging ? 1.045 : 1
