@@ -89,6 +89,7 @@ PanelWindow {
   }
 
   onOpenChanged: {
+    hoveredAdded = -1
     if (open) {
       body.forceActiveFocus()
       if (bar) bar.requestPopout(coordinatorKey)
@@ -179,12 +180,15 @@ PanelWindow {
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: -Style.space(3)
           readonly property int fresh: popup.store ? popup.store.items.filter(function(i) { return popup.store.isFresh(i) }).length : 0
-          text: fresh > 0 ? strings.tn("fresh", fresh).arg(Commons.I18n.formatNumber(fresh))
-                          : (popup.store && popup.store.items.length > 0 ? popup.age(popup.store.items[0].added) : "")
+          // The photo under the pointer: when it was added.
+          readonly property bool pointed: popup.hoveredAdded >= 0
+          text: pointed ? popup.age(popup.hoveredAdded)
+                : fresh > 0 ? strings.tn("fresh", fresh).arg(Commons.I18n.formatNumber(fresh))
+                : (popup.store && popup.store.items.length > 0 ? popup.age(popup.store.items[0].added) : "")
           textFormat: Text.PlainText
           font.family: popup.store ? popup.store.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
-          color: fresh > 0 ? Commons.Color.accent : Commons.Color.muted
+          color: pointed ? Commons.Color.foreground : fresh > 0 ? Commons.Color.accent : Commons.Color.muted
           renderType: Text.NativeRendering
         }
       }
@@ -204,6 +208,10 @@ PanelWindow {
             store: popup.store
             item: modelData
             dpr: popup.dpr
+            onHoveredChanged: {
+              if (hovered) popup.hoveredAdded = modelData.added
+              else if (popup.hoveredAdded === modelData.added) popup.hoveredAdded = -1
+            }
             width: popup.cell
             height: popup.cell
           }
@@ -250,6 +258,9 @@ PanelWindow {
       }
     }
   }
+
+  // When the photo under the pointer was added; -1 with none.
+  property real hoveredAdded: -1
 
   // "just now", "12 min ago", "3 h ago", then the day.
   property real now: Date.now()

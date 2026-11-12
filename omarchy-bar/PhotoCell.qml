@@ -28,6 +28,8 @@ Item {
   readonly property real radius: Math.max(2, Math.min(Style.space(5), Style.cornerRadius))
   // The window's scale, fractional ones too, from the panel.
   property real dpr: 1
+  // Under the pointer, for the panel to say when it was added.
+  readonly property bool hovered: mouse.containsMouse && !!store && !store.dragging
 
   // The photos this drag carries, fixed when it begins.
   property var dragIds: []
