@@ -57,12 +57,28 @@ void Outgoing::flash(const QString &status) {
 namespace {
 
 // Files promised to a drop target: it sees text/uri-list straight away, and
-// the list itself is produced when asked for, waiting for the files.
+// the list itself is produced when asked for, waiting for the files. They
+// are on their way from the moment the drag is under way, so a drop target
+// that asks as soon as the drag enters it (Chromium's do) waits the least.
 class PromisedFiles : public QMimeData {
+    // What the drop gets, shared with the downloads and with every request
+    // waiting for them. The drag can end while a request waits (the target
+    // gave up, Esc), and Qt then frees the drag and this object inside that
+    // wait's own event loop: the request finds only this afterwards.
+    struct Promise {
+        bool asked = false, ready = false;
+        QStringList files;
+        QList<QEventLoop *> waiting;
+    };
+
 public:
-    PromisedFiles(Outgoing *outgoing, Outgoing::Chosen items) : m_outgoing(outgoing), m_items(std::move(items)) {
+    PromisedFiles(Outgoing *outgoing, Outgoing::Chosen items)
+        : m_outgoing(outgoing), m_items(std::move(items)), m_promise(std::make_shared<Promise>()) {
         // Under way once the drag's own event loop turns.
-        QTimer::singleShot(0, this, [this] { m_started = true; });
+        QTimer::singleShot(0, this, [this] {
+            m_started = true;
+            fetch();
+        });
     }
 
     QStringList formats() const override { return {QStringLiteral("text/uri-list")}; }
@@ -72,44 +88,34 @@ protected:
     QVariant retrieveData(const QString &mime, QMetaType type) const override {
         if (mime != QLatin1String("text/uri-list"))
             return {};
-        // The files are made when a drop target asks for them. Qt's Wayland
-        // drag also asks for the URL list as it starts (to offer a portal
-        // file transfer), and waiting for downloads in there freed this
-        // object under Qt and crashed: that gets nothing. It is told apart by
-        // when it asks, not how: a drop target's request comes through
-        // urls() as well (Qt 6.12), so an empty list there dropped nothing.
-        if (!m_ready && !m_started)
+        // Qt's Wayland drag also asks for the URL list as it starts (to
+        // offer a portal file transfer), and waiting for downloads in there
+        // freed this object under Qt and crashed: that gets nothing. It is
+        // told apart by when it asks, not how: a drop target's request comes
+        // through urls() as well (Qt 6.12), so an empty list there dropped
+        // nothing.
+        if (!m_started)
             return QVariantList();
-        if (!m_ready) {
-            // The answer may come after the wait gave up (or never): it then
-            // finds neither this loop nor this object, both perhaps gone by
-            // then, only the state they shared, and leaves it be.
-            struct Waiting {
-                QEventLoop *loop = nullptr;
-                QStringList files;
-                bool done = false;
-            };
-            const auto waiting = std::make_shared<Waiting>();
-            QEventLoop wait;
-            waiting->loop = &wait;
-            QTimer::singleShot(120000, &wait, &QEventLoop::quit);
-            m_outgoing->prepare(m_items, true, {}, [waiting](const QStringList &files, int) {
-                if (!waiting->loop)
-                    return;
-                waiting->files = files;
-                waiting->done = true;
-                waiting->loop->quit();
-            });
+        const auto promise = m_promise;
+        if (!promise->ready) {
+            fetch();
             // Answered at once (all of them at hand): no wait, as a quit
-            // before exec() would not end it.
-            if (!waiting->done)
+            // before exec() would not end it. A second request while the
+            // first waits (the target asks again) waits for the same files.
+            if (!promise->ready) {
+                QEventLoop wait;
+                QTimer::singleShot(120000, &wait, &QEventLoop::quit);
+                promise->waiting.append(&wait);
                 wait.exec();
-            waiting->loop = nullptr;
-            m_files = waiting->files;
-            m_ready = true;
+                promise->waiting.removeOne(&wait);
+                // Given up: what has come by now, and no more waiting. Files
+                // that come later are still kept for a later request.
+                promise->ready = true;
+            }
         }
+        // This object may be gone by now: only `promise` from here on.
         QList<QUrl> urls;
-        for (const QString &f : m_files)
+        for (const QString &f : promise->files)
             urls.append(QUrl::fromLocalFile(f));
         if (type.id() == QMetaType::QByteArray || type.id() == QMetaType::QString) {
             QByteArray text;
@@ -124,11 +130,24 @@ protected:
     }
 
 private:
+    // The files asked for, once: their answer may come after this object is
+    // gone, and goes only to the promise.
+    void fetch() const {
+        if (m_promise->asked)
+            return;
+        m_promise->asked = true;
+        m_outgoing->prepare(m_items, true, {}, [promise = m_promise](const QStringList &files, int) {
+            promise->files = files;
+            promise->ready = true;
+            for (QEventLoop *loop : std::as_const(promise->waiting))
+                loop->quit();
+        });
+    }
+
     Outgoing *m_outgoing;
     Outgoing::Chosen m_items;
+    const std::shared_ptr<Promise> m_promise;
     bool m_started = false;
-    mutable bool m_ready = false;
-    mutable QStringList m_files;
 };
 
 } // namespace
