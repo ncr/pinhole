@@ -35,7 +35,7 @@ public:
     // What a drop of these would take: `files` on this computer of a kind
     // the source takes, and `folders` (looked into only when dropped: a
     // drag hovering must not walk a whole disk). Neither: the drop is not
-    // for this window.
+    // for this window. Pinhole's own copies of its photos count as neither.
     Q_INVOKABLE QVariantMap wanted(const QList<QUrl> &urls) const;
     // Add them, after anything still being added.
     Q_INVOKABLE void add(const QList<QUrl> &urls);
@@ -47,6 +47,10 @@ public:
     QStringList problems() const { return m_problems; }
     QString problemsTitle() const;
     int failed() const { return m_failed; }
+
+    // A file Pinhole itself made to hand a photo over (a drag out of this
+    // window or the bar's panel): the library has it already.
+    static bool ownCopy(const QString &path);
 
     // What the source takes, by extension, as the service says.
     QStringList accepts() const;

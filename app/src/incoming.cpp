@@ -1,7 +1,9 @@
 #include "incoming.h"
 
+#include "outgoing.h"
 #include "serviceclient.h"
 
+#include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -40,6 +42,11 @@ Incoming::Incoming(ServiceClient *service, QObject *parent) : QObject(parent), m
     });
 }
 
+bool Incoming::ownCopy(const QString &path) {
+    const QString own = QDir::cleanPath(Outgoing::stagingFolder()) + '/';
+    return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).startsWith(own);
+}
+
 QStringList Incoming::accepts() const {
     QStringList takes;
     for (const QJsonValue &v : m_service->source().value("accepts").toArray())
@@ -58,7 +65,7 @@ QVariantMap Incoming::wanted(const QList<QUrl> &urls) const {
     const QStringList takes = accepts();
     int files = 0, folders = 0;
     for (const QUrl &url : urls) {
-        if (takes.isEmpty() || !url.isLocalFile())
+        if (takes.isEmpty() || !url.isLocalFile() || ownCopy(url.toLocalFile()))
             continue;
         const QFileInfo info(url.toLocalFile());
         if (info.isDir())
@@ -72,7 +79,7 @@ QVariantMap Incoming::wanted(const QList<QUrl> &urls) const {
 void Incoming::add(const QList<QUrl> &urls) {
     QStringList paths;
     for (const QUrl &url : urls) {
-        if (url.isLocalFile())
+        if (url.isLocalFile() && !ownCopy(url.toLocalFile()))
             paths.append(QFileInfo(url.toLocalFile()).absoluteFilePath());
     }
     if (paths.isEmpty())

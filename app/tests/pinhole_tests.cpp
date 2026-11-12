@@ -61,6 +61,7 @@
 #include "libraryreloader.h"
 #include "markchoices.h"
 #include "marks.h"
+#include "incoming.h"
 #include "outgoing.h"
 #include "photogrid.h"
 #include "pluginguide.h"
@@ -387,6 +388,14 @@ private slots:
 
     // Two reloads before one frame: a texture kept from before both goes
     // through both moves, not only the last (a neighbour's picture else).
+    void photosDraggedOutOfPinholeAreNotAddedBackToIt() {
+        const QString own = Outgoing::stagingFolder();
+        QVERIFY(Incoming::ownCopy(own + "/1794483454603/IMG_8191.HEIC"));
+        QVERIFY(Incoming::ownCopy(own + "/x/../1794483454603/IMG_8191.jpg"));
+        QVERIFY(!Incoming::ownCopy(own + "-elsewhere/IMG_8191.jpg"));
+        QVERIFY(!Incoming::ownCopy(QDir::homePath() + "/Pictures/IMG_8191.jpg"));
+    }
+
     void texturesFollowEveryReloadBetweenFrames() {
         // 0..5; the photo at 1 goes, then the one now at 3 (once 4).
         const std::vector<int> first{0, -1, 1, 2, 3, 4};

@@ -3,7 +3,8 @@ import QtQuick
 // Photos and videos dragged in from elsewhere (a file manager, say): the
 // whole window takes them, lit in the accent while they hover, and adds
 // them to the source shown (incoming). Only a drag that brings files the
-// source takes; never photos being dragged out of this window.
+// source takes; never photos being dragged out of this window or out of
+// the panel on the bar, which the library has already.
 DropArea {
     id: target
     // What to call the source, and what adding does there, as its plugin
