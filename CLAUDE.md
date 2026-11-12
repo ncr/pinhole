@@ -30,7 +30,8 @@ through iCloud Drive. So:
 - **Think of both.** Whatever a change syncs, caches or keeps per computer must work when the other has its own
   of it, older or newer, and when the other is on an older Pinhole.
 - **Land, then install on both.** After landing on `main`, install here as above, then on the other one, e.g.
-  `ssh spawner 'cd ~/dev/pinhole && git pull --ff-only && bin/install --non-interactive'`.
+  `ssh spawner 'bash -lc "cd ~/dev/pinhole && git pull --ff-only && bin/install --non-interactive"'`
+  (a login shell: without it there is no `cargo` on fixer, and no `OMARCHY_PATH` for `omarchy` commands).
 - **Check it on both.** For sync, look in each one's `~/.local/state/pinhole/synced/` and `pinholed.log`.
 - **Test on spawner too**, when a change can behave differently there (its library, its state, its hardware).
   Its windows go to workspace 5 there as well. For `hyprctl` over ssh, set `HYPRLAND_INSTANCE_SIGNATURE`
