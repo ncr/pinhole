@@ -21,6 +21,9 @@ Panel {
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
+  // The theme's colour, for the icon carried off the bar over windows; on
+  // the bar it takes the bar's own (barForeground), which turns dark over a
+  // light wallpaper as the bar's other icons do.
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color accent: Commons.Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -113,7 +116,7 @@ Panel {
         width: root.iconWidth
         height: root.iconHeight
         readonly property color ink: root.result === "problem" ? Commons.Color.urgent
-          : root.lit || root.dropping || PinholeStore.adding || root.result === "added" ? root.accent : root.foreground
+          : root.lit || root.dropping || PinholeStore.adding || root.result === "added" ? root.accent : root.barForeground
         onInkChanged: picture.requestPaint()
         // Held over it, the box opens a little for what is dropped.
         scale: root.dropping ? 1.18 : 1
