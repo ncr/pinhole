@@ -72,7 +72,7 @@ def restart(prefix, checkout):
     executables.add(str((prefix / 'bin/pinhole').resolve()))
     runtime = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
     sockets = {os.environ.get('PINHOLE_SOCKET', runtime + '/pinhole.sock')}
-    windows, daemons = [], []
+    windows, daemons, followers = [], [], []
     for process in Path('/proc').iterdir():
         if not process.name.isdigit():
             continue
@@ -82,7 +82,13 @@ def restart(prefix, checkout):
             started = identity(process)
             argv = (process / 'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
             executable = os.readlink(process / 'exe').removesuffix(' (deleted)')
-            if executable in executables:
+            if executable in executables and len(argv) > 1 and argv[1] == b'recent':
+                # Omarchy's bar following the library: stopped, and started
+                # again by the bar itself, with what was just installed.
+                followers.append((process, started))
+            elif executable in executables and (len(argv) < 2 or argv[1].startswith(b'-')):
+                # A window: the window's own options, or none. Any other
+                # command (an `add` under way in a terminal) is left alone.
                 env, cwd = session(process)
                 window_runtime = env.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
                 sockets.add(env.get('PINHOLE_SOCKET', window_runtime + '/pinhole.sock'))
@@ -93,7 +99,7 @@ def restart(prefix, checkout):
                 daemons.append((process, started, socket, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
         except (OSError, IndexError):
             continue
-    stop([(process, started) for process, started, *_ in windows])
+    stop([(process, started) for process, started, *_ in windows] + followers)
     daemons = [daemon for daemon in daemons if daemon[2] in sockets]
     stop([(process, started) for process, started, *_ in daemons])
     for _, _, args, env, cwd in windows:

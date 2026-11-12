@@ -1,5 +1,6 @@
 #include "recent.h"
 
+#include "serviceclient.h"
 #include "storage.h"
 
 #include <QCoreApplication>
@@ -16,7 +17,10 @@
 #include <QTimer>
 
 #include <cstdio>
+#include <functional>
+#include <memory>
 #include <csignal>
+#include <poll.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
@@ -84,6 +88,26 @@ QJsonObject newest(const QString &dir, int count) {
     return out;
 }
 
+// The library the shared service shows, as its status says: a source of
+// any kind, a plugin's too, whose library's name only the service knows.
+// Asked and let go at once, so this holds no service open. Not answering
+// in a few seconds: the one the settings name (Storage::library).
+void shownLibrary(QObject *context, std::function<void(const QString &)> then) {
+    auto *client = new ServiceClient(QString(), context);
+    auto settled = std::make_shared<bool>(false);
+    auto finish = [client, then, settled](const QString &dir) {
+        if (*settled)
+            return;
+        *settled = true;
+        client->deleteLater();
+        then(dir.isEmpty() ? Storage::library() : dir);
+    };
+    QTimer::singleShot(3000, client, [finish] { finish({}); });
+    client->call(QStringLiteral("status"), {}, [finish](bool ok, const QJsonObject &result, const QString &) {
+        finish(ok ? result.value("library").toString() : QString());
+    });
+}
+
 // --follow: the library's files watched (the index's write-ahead log is
 // written with every change), the library shown looked up again now and
 // then (another source shown), and a line only when what it says changed.
@@ -99,12 +123,23 @@ public:
         // Watched files are lost when replaced or removed (the log, on the
         // last close), and the source shown can change: looked at again.
         m_again.setInterval(30000);
-        connect(&m_again, &QTimer::timeout, this, [this] { say(); });
+        connect(&m_again, &QTimer::timeout, this, [this] { look(); });
         m_again.start();
-        say();
+        look();
     }
 
 private:
+    // Which library is shown, asked again, then said.
+    void look() {
+        shownLibrary(this, [this](const QString &dir) {
+            if (dir != m_dir || m_watcher.files().size() < 2) {
+                m_dir = dir;
+                watch(dir);
+            }
+            say();
+        });
+    }
+
     void watch(const QString &dir) {
         if (!m_watcher.files().isEmpty())
             m_watcher.removePaths(m_watcher.files());
@@ -118,12 +153,15 @@ private:
     }
 
     void say() {
-        const QString dir = Storage::library();
-        if (dir != m_dir || m_watcher.files().size() < 2) {
-            m_dir = dir;
-            watch(dir);
+        // No one reads any more (the pipe's other end closed): done.
+        pollfd out{STDOUT_FILENO, 0, 0};
+        if (poll(&out, 1, 0) > 0 && (out.revents & (POLLERR | POLLHUP))) {
+            QCoreApplication::exit(0);
+            return;
         }
-        const QByteArray line = QJsonDocument(newest(dir, m_count)).toJson(QJsonDocument::Compact);
+        if (m_dir.isEmpty())
+            return;
+        const QByteArray line = QJsonDocument(newest(m_dir, m_count)).toJson(QJsonDocument::Compact);
         if (line == m_said)
             return;
         m_said = line;
@@ -162,10 +200,13 @@ int runRecent(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
     app.setApplicationName("pinhole");
     if (!follow) {
-        const QByteArray line = QJsonDocument(newest(Storage::library(), count)).toJson(QJsonDocument::Compact);
-        std::fputs(line.constData(), stdout);
-        std::fputc('\n', stdout);
-        return 0;
+        shownLibrary(&app, [count](const QString &dir) {
+            const QByteArray line = QJsonDocument(newest(dir, count)).toJson(QJsonDocument::Compact);
+            std::fputs(line.constData(), stdout);
+            std::fputc('\n', stdout);
+            QCoreApplication::exit(0);
+        });
+        return app.exec();
     }
     // Whoever follows (the bar's shell) can go without a word, reloaded or
     // restarted: this goes with it rather than follow for no one.

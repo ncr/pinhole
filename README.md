@@ -201,9 +201,11 @@ On Omarchy, `bin/install` also gives the bar a Pinhole widget: its camera
 obscura lights up with the number of photos that came since you last
 looked, and a click shows the newest as a small grid to drag them from
 into a chat, a browser or a folder. Click photos to drag several at once.
+Photos dropped on the icon are added to the source shown, as on the window.
 It goes on the bar with `omarchy bar put io.github.ncr.pinhole`. It reads
-what `pinhole recent --follow` says and drags what `pinhole export` makes,
-a HEIC as a JPEG, as a drag out of the window does.
+what `pinhole recent --follow` says, drags what `pinhole export` makes (a
+HEIC as a JPEG, as a drag out of the window does) and adds with
+`pinhole add --json`, whatever the source.
 
 `bin/install` builds the checkout and links the launcher, service and plugins to
 it in `~/.local`, without a package or root password. QML plugins stay live in

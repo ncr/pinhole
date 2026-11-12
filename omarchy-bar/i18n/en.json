@@ -1,14 +1,48 @@
 {
   "title": "Just added",
-  "fresh": { "one": "%1 new", "other": "%1 new" },
+  "fresh": {
+    "one": "%1 new",
+    "other": "%1 new"
+  },
   "now": "just now",
-  "minutes": { "one": "%1 min ago", "other": "%1 min ago" },
-  "hours": { "one": "%1 h ago", "other": "%1 h ago" },
+  "minutes": {
+    "one": "%1 min ago",
+    "other": "%1 min ago"
+  },
+  "hours": {
+    "one": "%1 h ago",
+    "other": "%1 h ago"
+  },
   "hint": "Drag a photo where it is needed · click to choose several",
-  "chosen": { "one": "%1 chosen · drag it out", "other": "%1 chosen · drag any of them out" },
+  "chosen": {
+    "one": "%1 chosen · drag it out",
+    "other": "%1 chosen · drag any of them out"
+  },
   "empty": "No photos in Pinhole yet",
   "loading": "Reading the library…",
   "missing": "Pinhole is not installed on this computer",
   "tooltip": "Pinhole: just added",
-  "tooltip.fresh": { "one": "%1 new photo in Pinhole", "other": "%1 new photos in Pinhole" }
+  "tooltip.fresh": {
+    "one": "%1 new photo in Pinhole",
+    "other": "%1 new photos in Pinhole"
+  },
+  "add.notAdded": {
+    "one": "%1 file not added",
+    "other": "%1 files not added"
+  },
+  "add.withNote": "Added, with a note",
+  "add.already": "%1 has them already",
+  "add.stillOnly": "%1: added as a still photo, since iCloud on the web does not take a Live Photo's motion",
+  "add.duplicate": "%1: already in %2",
+  "add.failed": "%1: %2",
+  "add.reason.unsupported": "not a photo or a video that %1 takes",
+  "add.reason.too_large": "too large for %1",
+  "add.reason.over_quota": "%1 storage is full",
+  "add.reason.protected": "Advanced Data Protection keeps iCloud.com out of the library, so nothing can be added from here",
+  "add.reason.needs_sign_in": "not signed in to %1",
+  "add.reason.unavailable": "%1 could not be reached",
+  "add.reason.read_only": "this library is only being looked at here: nothing can be added to it",
+  "add.reason.no_service": "the Pinhole service could not be started",
+  "add.reason.not_found": "the file is gone",
+  "add.reason.other": "could not be added"
 }

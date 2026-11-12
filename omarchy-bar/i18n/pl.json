@@ -1,14 +1,60 @@
 {
   "title": "Właśnie dodane",
-  "fresh": { "one": "%1 nowe", "few": "%1 nowe", "many": "%1 nowych", "other": "%1 nowego" },
+  "fresh": {
+    "one": "%1 nowe",
+    "few": "%1 nowe",
+    "many": "%1 nowych",
+    "other": "%1 nowego"
+  },
   "now": "przed chwilą",
-  "minutes": { "one": "%1 min temu", "few": "%1 min temu", "many": "%1 min temu", "other": "%1 min temu" },
-  "hours": { "one": "%1 godz. temu", "few": "%1 godz. temu", "many": "%1 godz. temu", "other": "%1 godz. temu" },
+  "minutes": {
+    "one": "%1 min temu",
+    "few": "%1 min temu",
+    "many": "%1 min temu",
+    "other": "%1 min temu"
+  },
+  "hours": {
+    "one": "%1 godz. temu",
+    "few": "%1 godz. temu",
+    "many": "%1 godz. temu",
+    "other": "%1 godz. temu"
+  },
   "hint": "Przeciągnij zdjęcie tam, gdzie go potrzebujesz · kliknij, by wybrać kilka",
-  "chosen": { "one": "Wybrane: %1 · przeciągnij je", "few": "Wybrane: %1 · przeciągnij którekolwiek", "many": "Wybrane: %1 · przeciągnij którekolwiek", "other": "Wybrane: %1 · przeciągnij którekolwiek" },
+  "chosen": {
+    "one": "Wybrane: %1 · przeciągnij je",
+    "few": "Wybrane: %1 · przeciągnij którekolwiek",
+    "many": "Wybrane: %1 · przeciągnij którekolwiek",
+    "other": "Wybrane: %1 · przeciągnij którekolwiek"
+  },
   "empty": "W Pinhole nie ma jeszcze zdjęć",
   "loading": "Czytam bibliotekę…",
   "missing": "Pinhole nie jest zainstalowany na tym komputerze",
   "tooltip": "Pinhole: właśnie dodane",
-  "tooltip.fresh": { "one": "%1 nowe zdjęcie w Pinhole", "few": "%1 nowe zdjęcia w Pinhole", "many": "%1 nowych zdjęć w Pinhole", "other": "%1 nowego zdjęcia w Pinhole" }
+  "tooltip.fresh": {
+    "one": "%1 nowe zdjęcie w Pinhole",
+    "few": "%1 nowe zdjęcia w Pinhole",
+    "many": "%1 nowych zdjęć w Pinhole",
+    "other": "%1 nowego zdjęcia w Pinhole"
+  },
+  "add.notAdded": {
+    "one": "Nie dodano %1 pliku",
+    "few": "Nie dodano %1 plików",
+    "many": "Nie dodano %1 plików",
+    "other": "Nie dodano %1 pliku"
+  },
+  "add.withNote": "Dodano, z uwagą",
+  "add.already": "%1 już je ma",
+  "add.stillOnly": "%1: dodano jako zwykłe zdjęcie, bo iCloud w przeglądarce nie przyjmuje ruchu zdjęcia Live",
+  "add.duplicate": "%1: już jest w %2",
+  "add.failed": "%1: %2",
+  "add.reason.unsupported": "to nie zdjęcie ani film, które przyjmie %1",
+  "add.reason.too_large": "za duży dla %1",
+  "add.reason.over_quota": "brak miejsca w %1",
+  "add.reason.protected": "Zaawansowana ochrona danych nie wpuszcza iCloud.com do biblioteki, więc stąd nie da się nic dodać",
+  "add.reason.needs_sign_in": "nie zalogowano do %1",
+  "add.reason.unavailable": "brak połączenia z %1",
+  "add.reason.read_only": "ta biblioteka jest tu tylko przeglądana: nie można nic do niej dodać",
+  "add.reason.no_service": "nie udało się uruchomić usługi Pinhole",
+  "add.reason.not_found": "pliku już nie ma",
+  "add.reason.other": "nie udało się dodać"
 }

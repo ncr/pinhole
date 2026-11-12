@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -112,7 +113,7 @@ int main(int argc, char **argv) {
         return p
 
     def restart(self):
-        return subprocess.run([str(HELPER), str(self.prefix), str(self.checkout)],
+        return subprocess.run([sys.executable, str(HELPER), str(self.prefix), str(self.checkout)],
                               env=dict(self.env, PINHOLE_TEST_SESSION='installer session'),
                               capture_output=True, text=True, timeout=15)
 
@@ -131,6 +132,24 @@ int main(int argc, char **argv) {
         self.assertIn(f'|{self.root}|original session|--example|family photos with spaces', restarted)
         self.assertLess(lines.index(f'stop|{window.pid}'), lines.index(restarted))
         self.assertLess(lines.index(f'stop|{service.pid}'), lines.index(restarted))
+
+    def test_commands_are_not_reopened_as_windows_and_the_bars_follower_is_only_stopped(self):
+        window = self.start(self.binary)
+        follower = self.start(self.binary, 'recent', '--count', '16', '--follow')
+        adding = self.start(self.binary, 'add', 'photo.heic')
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.wait_for(lambda: len([line for line in self.lines() if line.startswith('start|')]) == 4)
+        lines = self.lines()
+        self.assertIn(f'stop|{window.pid}', lines)
+        self.assertIn(f'stop|{follower.pid}', lines)
+        self.assertNotIn(f'stop|{adding.pid}', lines)
+        reopened = [line for line in lines if line.startswith('start|')][3:]
+        self.assertEqual(len(reopened), 1)
+        self.assertIn('|original session', reopened[0])
+        self.assertNotIn('|recent', reopened[0])
+        time.sleep(.3)
+        self.assertEqual(len([line for line in self.lines() if line.startswith('start|')]), 4)
 
     def test_restarted_window_is_not_in_the_installers_scope(self):
         # The installer's unit (a terminal's, an app's) may end, or be

@@ -44,7 +44,7 @@ With no command, the window opens. A command asks the Pinhole service
                          unless another kind is named
   sign-out <source>      forget a source's session; its library stays
   sync                   look for changes now, and follow until that is done
-  add <file>...          add photos and videos, or folders of them, to the
+  add <file>... [--json] add photos and videos, or folders of them, to the
                          source shown
   recent [--count <n>] [--follow]
                          the photos added most lately, newest first, as JSON
@@ -148,6 +148,8 @@ private:
     }
 
     void fail(const QString &code, const QString &message = {}) {
+        if (m_json)
+            say(QString::fromUtf8(QJsonDocument(QJsonObject{{"error", code}, {"message", message}}).toJson(QJsonDocument::Compact)));
         if (code == QLatin1String("no_service"))
             note("pinhole: the Pinhole service is not running, and pinholed could not be started");
         else if (code == QLatin1String("incompatible"))
@@ -425,7 +427,15 @@ private:
         });
     }
 
-    void add(const QStringList &files) {
+    // --json: a line {"progress", "done", "total", "file"} as each file goes
+    // (progress of all of them, 0 to 1), then {"place", "files"} with the
+    // service's answer for each (docs/service.md, Adding): for what drops
+    // files without a window, as Omarchy's bar does.
+    void add(QStringList files) {
+        if (files.removeAll(QStringLiteral("--json")) > 0)
+            m_json = true;
+        if (files.isEmpty())
+            return usage();
         QJsonArray paths;
         for (const QString &file : files) {
             const QFileInfo info(file);
@@ -443,25 +453,41 @@ private:
             if (file != m_phase || tenth != m_tenth) {
                 m_phase = file;
                 m_tenth = tenth;
-                note(QStringLiteral("%1 of %2: %3 (%4%)")
-                         .arg(e.value("done").toInt() + 1).arg(e.value("total").toInt()).arg(file).arg(tenth * 10));
+                const int done = e.value("done").toInt(), of = std::max(1, e.value("total").toInt());
+                if (m_json)
+                    say(QString::fromUtf8(QJsonDocument(QJsonObject{{"progress", (done + tenth / 10.0) / of},
+                                                                    {"done", done}, {"total", of}, {"file", file}})
+                                              .toJson(QJsonDocument::Compact)));
+                else
+                    note(QStringLiteral("%1 of %2: %3 (%4%)").arg(done + 1).arg(of).arg(file).arg(tenth * 10));
             }
         });
         call("add", {{"files", paths}}, [this](const QJsonObject &result) {
             int failed = 0;
-            for (const QJsonValue &v : result.value("files").toArray()) {
+            const QJsonArray answers = result.value("files").toArray();
+            for (const QJsonValue &v : answers) {
                 const QJsonObject f = v.toObject();
                 const QString file = f.value("file").toString(), state = f.value("state").toString();
+                if (state != QLatin1String("added") && state != QLatin1String("duplicate"))
+                    ++failed;
+                if (m_json)
+                    continue;
                 if (state == QLatin1String("added"))
                     say(QStringLiteral("%1: added").arg(file));
                 else if (state == QLatin1String("duplicate"))
                     say(QStringLiteral("%1: there already").arg(file));
-                else {
-                    ++failed;
+                else
                     say(QStringLiteral("%1: %2").arg(file, f.value("error").toObject().value("message").toString()));
-                }
                 if (f.contains("note"))
                     say(QStringLiteral("  %1").arg(f.value("note").toString()));
+            }
+            if (m_json) {
+                // What to call the place they went: iCloud, or a folder's name.
+                const QJsonObject source = m_service.source();
+                const QString place = source.value("kind").toString() == QLatin1String("icloud")
+                                          ? QStringLiteral("iCloud") : source.value("name").toString();
+                say(QString::fromUtf8(QJsonDocument(QJsonObject{{"place", place}, {"files", answers}})
+                                          .toJson(QJsonDocument::Compact)));
             }
             done(failed ? 1 : 0);
         });
@@ -512,8 +538,17 @@ private:
         }
         if (ids.isEmpty())
             return usage();
+        // The library the service shows: a plugin's source's too, whose
+        // folder only it knows.
+        call("status", {}, [this, ids, folder](const QJsonObject &status) {
+            const QString shown = status.value("library").toString();
+            exportFrom(shown.isEmpty() ? Storage::library() : shown, ids, folder);
+        });
+    }
+
+    void exportFrom(const QString &dir, const QStringList &ids, const QString &folder) {
         QString error;
-        if (!m_library.open(Storage::library(), &error))
+        if (!m_library.open(dir, &error))
             return fail("not_found", error);
         m_library.applyAdjustments(AdjustmentStore::load(m_library.dir()));
         QHash<QByteArray, int> at;

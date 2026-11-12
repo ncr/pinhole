@@ -23,12 +23,19 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property int freshCount: PinholeStore.freshCount
   readonly property bool lit: freshCount > 0
+  // Files held over the icon that it would add (DropArea below).
+  property bool dropping: false
+  // What the badge says: how many came, or how a drop on the icon went.
+  readonly property string result: PinholeStore.addResult
+  readonly property string badgeText: result === "added" ? "\uf00c" : result === "problem" ? "\uf12a"
+    : lit ? Commons.I18n.formatNumber(freshCount) : ""
+  readonly property color badgeColor: result === "problem" ? Commons.Color.urgent : accent
 
   readonly property real iconWidth: Math.round(Style.bar.iconSize * 1.17)
   readonly property real iconHeight: Math.round(Style.bar.iconSize * 0.88)
-  readonly property int badgeWidth: lit
-    ? Math.max(Style.space(12), String(freshCount).length * Style.space(6) + Style.space(8)) : 0
-  readonly property int barContentWidth: iconWidth + (lit ? badgeWidth + Style.space(5) : 0)
+  readonly property int badgeWidth: badgeText !== ""
+    ? Math.max(Style.space(12), (result !== "" ? 1 : badgeText.length) * Style.space(6) + Style.space(8)) : 0
+  readonly property int barContentWidth: iconWidth + (badgeWidth > 0 ? badgeWidth + Style.space(5) : 0)
 
   // A Panel has no size of its own: the bar is given one from what it
   // shows, never from a child filling it.
@@ -79,8 +86,32 @@ Panel {
         anchors.verticalCenter: parent.verticalCenter
         width: root.iconWidth
         height: root.iconHeight
-        readonly property color ink: root.lit ? root.accent : root.foreground
+        readonly property color ink: root.result === "problem" ? Commons.Color.urgent
+          : root.lit || root.dropping || PinholeStore.adding || root.result === "added" ? root.accent : root.foreground
         onInkChanged: picture.requestPaint()
+        // Held over it, the box opens a little for what is dropped.
+        scale: root.dropping ? 1.18 : 1
+        Behavior on scale {
+          NumberAnimation { duration: Style.duration(160); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
+        }
+
+        // While a drop is being added: how far, as a line under the box.
+        Rectangle {
+          anchors.top: parent.bottom
+          anchors.topMargin: Math.max(2, Style.space(2.5))
+          width: parent.width
+          height: Math.max(1.5, Style.space(2))
+          radius: height / 2
+          color: Util.alpha(root.accent, 0.28)
+          visible: PinholeStore.adding
+          Rectangle {
+            width: Math.max(parent.height, parent.width * PinholeStore.addProgress)
+            height: parent.height
+            radius: parent.radius
+            color: root.accent
+            Behavior on width { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutCubic } }
+          }
+        }
 
         // The pinhole and its light are cut out of the box, so the bar
         // shows through them, see-through or not.
@@ -119,11 +150,11 @@ Panel {
       // How many photos came since the panel was last opened.
       Rectangle {
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.lit
+        visible: root.badgeText !== ""
         height: Style.space(12)
         width: root.badgeWidth
         radius: height / 2
-        color: root.accent
+        color: root.badgeColor
 
         FontMetrics { id: badgeMetrics; font: badgeLabel.font }
         Text {
@@ -132,7 +163,7 @@ Panel {
           readonly property real pixelRatio: QsWindow.window ? QsWindow.window.devicePixelRatio : 1
           anchors.verticalCenterOffset: Math.round((Math.round(height / 2) - baselineOffset
             + badgeMetrics.capitalHeight / 2) * pixelRatio) / pixelRatio
-          text: Commons.I18n.formatNumber(root.freshCount)
+          text: root.badgeText
           textFormat: Text.PlainText
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -144,5 +175,24 @@ Panel {
     }
 
     onPressed: function(b) { root.toggle() }
+  }
+
+  // Photos dropped on the icon are added to Pinhole, as on its window.
+  DropArea {
+    anchors.fill: parent
+    keys: ["text/uri-list"]
+    onEntered: function(drag) {
+      var wanted = PinholeStore.droppable(drag.urls).length > 0
+      drag.accepted = wanted
+      root.dropping = wanted
+    }
+    onExited: root.dropping = false
+    onDropped: function(drop) {
+      root.dropping = false
+      var paths = PinholeStore.droppable(drop.urls)
+      if (paths.length === 0) return
+      drop.accept(Qt.CopyAction)
+      PinholeStore.add(paths)
+    }
   }
 }

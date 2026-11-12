@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 
 // What the bar knows of Pinhole's library: the photos added most lately,
 // which of them are new since the panel was last looked at, and the files
@@ -162,6 +163,7 @@ Singleton {
     loaded = true
     missing = false
     if (seenAdded >= 0 && open) markSeen()
+    else if (seenAdded >= 0 && ownOnly(list)) markSeen()
     // What has just come is what will be dragged: its file is made now,
     // so the drag is under way the moment it starts.
     var fresh = []
@@ -173,6 +175,18 @@ Singleton {
     var kept = {}
     for (var id in selected) if (known[id]) kept[id] = true
     selected = kept
+  }
+
+  // Everything new is what was just dropped on the bar from here.
+  function ownOnly(list) {
+    var now = Date.now(), fresh = 0
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].added <= seenAdded) continue
+      var until = ownNames[stem(list[i].name)]
+      if (!until || until < now) return false
+      fresh++
+    }
+    return fresh > 0
   }
 
   // The index is Pinhole's, the names in it the camera's or whoever made
@@ -268,6 +282,142 @@ Singleton {
       failed = failedNow
     }
   }
+
+  // ---- Files dropped on the bar, added ----------------------------------
+
+  // As files dropped on Pinhole's window are: `pinhole add`, which asks
+  // the service, for the source shown, one drop after another.
+  property bool adding: false
+  // How far, 0 to 1, of all the files of the drop being added.
+  property real addProgress: 0
+  // How the last drop went, a moment after: "added", "problem" or "".
+  property string addResult: ""
+  // Stems of the files just added: their photos coming into the library
+  // are this computer's own doing, not news for the bar to light up for.
+  property var ownNames: ({})
+  property var addQueue: []
+
+  // The local files and folders of a drop, as paths; none of the files
+  // Pinhole makes to hand over, already in its library.
+  function droppable(urls) {
+    var paths = []
+    for (var i = 0; i < urls.length && paths.length < 500; i++) {
+      var url = String(urls[i])
+      if (url.indexOf("file://") !== 0) continue
+      var path
+      try { path = decodeURIComponent(url.slice(7).replace(/^localhost\//, "/")) } catch (e) { continue }
+      if (path.charAt(0) !== "/" || /[\u0000\n\r]/.test(path)) continue
+      if (path.indexOf("/pinhole/outgoing/") >= 0) continue
+      paths.push(path)
+    }
+    return paths
+  }
+
+  function add(paths) {
+    if (paths.length === 0) return
+    addQueue = addQueue.concat([paths])
+    addNext()
+  }
+
+  function addNext() {
+    if (adder.running || addQueue.length === 0) return
+    var paths = addQueue[0]
+    addQueue = addQueue.slice(1)
+    adding = true
+    addProgress = 0
+    addResult = ""
+    resultShown.stop()
+    adder.answer = null
+    adder.paths = paths
+    // The paths are arguments, never part of the command line's text.
+    adder.command = ["sh", "-c", root.runner, "pinhole", "add", "--json"].concat(paths)
+    adder.running = true
+  }
+
+  Process {
+    id: adder
+    property var paths: []
+    property var answer: null
+    stdout: SplitParser {
+      onRead: function(line) {
+        var said
+        try { said = JSON.parse(line) } catch (e) { return }
+        if (!said || typeof said !== "object") return
+        var p = Number(said.progress)
+        if (isFinite(p)) root.addProgress = Math.max(root.addProgress, Math.min(1, Math.max(0, p)))
+        else adder.answer = said
+      }
+    }
+    onExited: function(code) {
+      root.added(adder.answer, adder.paths, code)
+      Qt.callLater(root.addNext)
+    }
+  }
+
+  Timer { id: resultShown; interval: 3200; onTriggered: root.addResult = "" }
+
+  function stem(name) {
+    var base = String(name).split("/").pop()
+    var dot = base.lastIndexOf(".")
+    return (dot > 0 ? base.slice(0, dot) : base).toLowerCase()
+  }
+
+  // How the drop went: a tick on the bar, and what was not added (or added
+  // with a note) told the way the window tells it, as a notification.
+  function added(answer, paths, code) {
+    adding = addQueue.length > 0
+    addProgress = 1
+    var problems = []
+    var failed = 0, addedCount = 0
+    var place = answer && typeof answer.place === "string" && answer.place.length > 0 ? answer.place.slice(0, 80) : "Pinhole"
+    if (answer && Array.isArray(answer.files)) {
+      var own = Object.assign({}, ownNames)
+      var until = Date.now() + 10 * 60 * 1000
+      for (var i = 0; i < answer.files.length && i < 500; i++) {
+        var f = answer.files[i] || {}
+        var name = String(f.file || "").split("/").pop().slice(0, 255)
+        var count = Array.isArray(f.files) ? Math.max(1, f.files.length) : 1
+        if (f.state === "added") {
+          addedCount += count
+          var made = Array.isArray(f.files) ? f.files : [f.file]
+          for (var j = 0; j < made.length && j < 500; j++) own[stem(made[j])] = until
+          if (f.note) problems.push(strings.t("add.stillOnly").arg(name))
+        } else if (f.state === "duplicate") {
+          problems.push(strings.t("add.duplicate").arg(name).arg(place))
+        } else {
+          failed += count
+          var error = f.error || {}
+          problems.push(strings.t("add.failed").arg(name).arg(reason(String(error.code || ""), place)))
+        }
+      }
+      ownNames = own
+    } else {
+      // No answer at all: the service could not be asked.
+      failed = Math.max(1, paths.length)
+      var whole = answer && typeof answer.error === "string" ? reason(answer.error, place) : strings.t("add.reason.unavailable").arg(place)
+      problems.push(whole)
+    }
+    addResult = failed > 0 || (addedCount === 0 && problems.length > 0) ? "problem" : "added"
+    resultShown.restart()
+    if (problems.length > 0) {
+      var title = failed > 0 ? strings.tn("add.notAdded", failed).arg(failed)
+                : addedCount > 0 ? strings.t("add.withNote") : strings.t("add.already").arg(place)
+      notify(title, problems.slice(0, 12).join("\n"))
+    }
+  }
+
+  function reason(code, place) {
+    var known = ["unsupported", "too_large", "over_quota", "protected", "needs_sign_in", "unavailable", "read_only", "no_service", "not_found"]
+    return known.indexOf(code) >= 0 ? strings.t("add.reason." + code).arg(place) : strings.t("add.reason.other")
+  }
+
+  // The notification's text is the files' names: no markup gets through.
+  function notify(title, body) {
+    var plain = function(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    Quickshell.execDetached(["notify-send", "--app-name=Pinhole", "--icon=pinhole", plain(title), plain(body)])
+  }
+
+  Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
   // ---- What was seen, kept --------------------------------------------
 
