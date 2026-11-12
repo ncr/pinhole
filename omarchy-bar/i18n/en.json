@@ -1,0 +1,14 @@
+{
+  "title": "Just added",
+  "fresh": { "one": "%1 new", "other": "%1 new" },
+  "now": "just now",
+  "minutes": { "one": "%1 min ago", "other": "%1 min ago" },
+  "hours": { "one": "%1 h ago", "other": "%1 h ago" },
+  "hint": "Drag a photo where it is needed · click to choose several",
+  "chosen": { "one": "%1 chosen · drag it out", "other": "%1 chosen · drag any of them out" },
+  "empty": "No photos in Pinhole yet",
+  "loading": "Reading the library…",
+  "missing": "Pinhole is not installed on this computer",
+  "tooltip": "Pinhole: just added",
+  "tooltip.fresh": { "one": "%1 new photo in Pinhole", "other": "%1 new photos in Pinhole" }
+}

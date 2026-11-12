@@ -1,6 +1,11 @@
 #include "commands.h"
 
+#include "adjustment.h"
+#include "library.h"
+#include "outgoing.h"
+#include "recent.h"
 #include "serviceclient.h"
+#include "storage.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -8,6 +13,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
 #include <QLocale>
@@ -40,6 +46,13 @@ With no command, the window opens. A command asks the Pinhole service
   sync                   look for changes now, and follow until that is done
   add <file>...          add photos and videos, or folders of them, to the
                          source shown
+  recent [--count <n>] [--follow]
+                         the photos added most lately, newest first, as JSON
+  export <id>... [--to <folder>] [--json]
+                         photos of the library shown (ids from `recent`) as
+                         files to hand over, as a drag out of the window
+                         makes them: a HEIC as a JPEG, an edit as it looks;
+                         prints each file's path
   storage [--limit <GB>] [--move-to <folder>]
                          where Pinhole keeps its files, and how much room
                          they may take
@@ -50,7 +63,8 @@ With no command, the window opens. A command asks the Pinhole service
   help                   this
 )";
 
-const QStringList kCommands = {"status", "sources", "show", "remove", "sign-in", "sign-out", "sync", "add", "storage", "help"};
+const QStringList kCommands = {"status", "sources", "show", "remove", "sign-in", "sign-out", "sync", "add", "storage",
+                               "recent", "export", "help"};
 
 void say(const QString &line) {
     std::fputs(qPrintable(line + '\n'), stdout);
@@ -113,6 +127,8 @@ public:
             add(rest);
         else if (name == "storage")
             storage(rest);
+        else if (name == "export" && !rest.isEmpty())
+            exportPhotos(rest);
         else
             usage();
     }
@@ -477,7 +493,70 @@ private:
         });
     }
 
+    // The photos as a drag out of the window hands them over (Outgoing,
+    // compatible form), into a staging folder of their own unless --to
+    // names one. Each as it is ready: its path, or with --json a line
+    // {"id", "path"} or {"id", "error"}.
+    void exportPhotos(const QStringList &args) {
+        QStringList ids;
+        QString folder;
+        for (int i = 0; i < args.size(); ++i) {
+            if (args[i] == QLatin1String("--json"))
+                m_json = true;
+            else if (args[i] == QLatin1String("--to") && i + 1 < args.size())
+                folder = QDir::cleanPath(QFileInfo(args[++i]).absoluteFilePath());
+            else if (args[i].startsWith(QLatin1Char('-')))
+                return usage();
+            else
+                ids.append(args[i]);
+        }
+        if (ids.isEmpty())
+            return usage();
+        QString error;
+        if (!m_library.open(Storage::library(), &error))
+            return fail("not_found", error);
+        m_library.applyAdjustments(AdjustmentStore::load(m_library.dir()));
+        QHash<QByteArray, int> at;
+        for (int i = 0; i < m_library.count(); ++i)
+            at.insert(m_library.at(i).id, i);
+        m_service.setShown(m_library.source());
+        m_outgoing = new Outgoing(&m_library, &m_service, &m_service);
+        m_left = int(ids.size());
+        for (const QString &id : ids) {
+            const auto found = at.constFind(id.toUtf8());
+            if (found == at.constEnd()) {
+                exported(id, {}, QStringLiteral("not in the library shown"));
+                continue;
+            }
+            m_outgoing->prepare(m_outgoing->snapshot({found.value()}), true, folder,
+                                [this, id](const QStringList &files, int) {
+                                    exported(id, files.value(0),
+                                             files.isEmpty() ? QStringLiteral("could not be fetched") : QString());
+                                }, true);
+        }
+    }
+
+    void exported(const QString &id, const QString &path, const QString &error) {
+        if (!error.isEmpty())
+            ++m_failed;
+        if (m_json)
+            say(QString::fromUtf8(QJsonDocument(error.isEmpty() ? QJsonObject{{"id", id}, {"path", path}}
+                                                                : QJsonObject{{"id", id}, {"error", error}})
+                                      .toJson(QJsonDocument::Compact)));
+        else if (error.isEmpty())
+            say(path);
+        else
+            note(QStringLiteral("pinhole: %1: %2").arg(id, error));
+        if (--m_left == 0)
+            done(m_failed ? 1 : 0);
+    }
+
     QStringList m_args;
+    // export: the library shown, and what makes its files.
+    Library m_library;
+    Outgoing *m_outgoing = nullptr;
+    int m_left = 0, m_failed = 0;
+    bool m_json = false;
     // The service this command asks; started if none is running.
     ServiceClient m_service{QString()};
     // sync and add: what has been said so far.
@@ -498,6 +577,8 @@ int runCommand(int argc, char *argv[]) {
         std::fprintf(stderr, "pinhole: no command %s\n\n%s", argv[1], kUsage);
         return 2;
     }
+    if (qstrcmp(argv[1], "recent") == 0)
+        return runRecent(argc, argv);
     if (qstrcmp(argv[1], "help") == 0) {
         std::fputs(kUsage, stdout);
         return 0;

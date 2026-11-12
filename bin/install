@@ -51,7 +51,12 @@ if [ "${PINHOLE_UPDATE_LOCK_HELD:-0}" != 1 ]; then
     fi
     export PINHOLE_UPDATE_LOCK_HELD=1
 fi
+# Omarchy's shell finds the bar widget (omarchy-bar/) among its plugins.
+omarchy_plugin="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.ncr.pinhole"
 if [ "$mode" = uninstall ]; then
+    if [ -L "$omarchy_plugin" ] && [ "$(readlink "$omarchy_plugin")" = "$(CDPATH= cd -- "${PREFIX:-$HOME/.local}" 2>/dev/null && pwd -P)/lib/pinhole/omarchy-bar" ]; then
+        rm "$omarchy_plugin"
+    fi
     bin/uninstall-files "${PREFIX:-$HOME/.local}"
     update-desktop-database "${PREFIX:-$HOME/.local}/share/applications" 2>/dev/null || true
     exit 0
@@ -75,6 +80,13 @@ run_install() {
     fi
     bin/install-dev "$PREFIX"
     update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
+    # On Omarchy, the bar widget: linked unless one of the person's own is
+    # there (a clone they edit). It goes on the bar with
+    # `omarchy bar put io.github.ncr.pinhole`.
+    if [ -d "$(dirname -- "$(dirname -- "$omarchy_plugin")")" ] && { [ -L "$omarchy_plugin" ] || [ ! -e "$omarchy_plugin" ]; }; then
+        mkdir -p "$(dirname -- "$omarchy_plugin")"
+        ln -sfn "$PREFIX/lib/pinhole/omarchy-bar" "$omarchy_plugin"
+    fi
     if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
         bin/restart-installed "$PREFIX" "$ROOT"
     fi

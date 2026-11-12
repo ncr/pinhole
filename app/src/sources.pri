@@ -85,6 +85,7 @@ HEADERS += \
     $$PWD/favourites.h \
     $$PWD/history.h \
     $$PWD/commands.h \
+    $$PWD/recent.h \
     $$PWD/encoder.h \
     $$PWD/plugins.h \
     $$PWD/pluginquery.h \
@@ -137,6 +138,7 @@ SOURCES += \
     $$PWD/favourites.cpp \
     $$PWD/history.cpp \
     $$PWD/commands.cpp \
+    $$PWD/recent.cpp \
     $$PWD/encoder.cpp \
     $$PWD/plugins.cpp \
     $$PWD/pluginlibrary.cpp \

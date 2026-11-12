@@ -19,8 +19,9 @@ in-app updates apply only to developer installations.
 
 Pinhole is made for both of Jacek's computers, and every change is installed and tried on both:
 
-- **fixer** is this one.
-- **spawner** is reached with `ssh spawner`.
+- **fixer**: its checkout is `~/Work/pinhole`.
+- **spawner**: its checkout is `~/dev/pinhole`.
+- A session runs on either (`hostname` says which) and reaches the other with `ssh fixer` or `ssh spawner`.
 - They are on one tailnet and almost always on.
 
 They show one iCloud library, and what plugins keep of it (`pinhole.synced`, People's names) goes between them
@@ -28,9 +29,8 @@ through iCloud Drive. So:
 
 - **Think of both.** Whatever a change syncs, caches or keeps per computer must work when the other has its own
   of it, older or newer, and when the other is on an older Pinhole.
-- **Land, then install on both.** After landing on `main`, install here as above, then on spawner:
+- **Land, then install on both.** After landing on `main`, install here as above, then on the other one, e.g.
   `ssh spawner 'cd ~/dev/pinhole && git pull --ff-only && bin/install --non-interactive'`.
-  Its checkout is `~/dev/pinhole`.
 - **Check it on both.** For sync, look in each one's `~/.local/state/pinhole/synced/` and `pinholed.log`.
 - **Test on spawner too**, when a change can behave differently there (its library, its state, its hardware).
   Its windows go to workspace 5 there as well. For `hyprctl` over ssh, set `HYPRLAND_INSTANCE_SIGNATURE`

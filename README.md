@@ -197,6 +197,14 @@ pinhole help                 # every command: sources, show, remove, sync, add, 
 Each asks the Pinhole service, `pinholed`, and starts it if it is not
 running; only the service writes the library.
 
+On Omarchy, `bin/install` also gives the bar a Pinhole widget: its camera
+obscura lights up with the number of photos that came since you last
+looked, and a click shows the newest as a small grid to drag them from
+into a chat, a browser or a folder. Click photos to drag several at once.
+It goes on the bar with `omarchy bar put io.github.ncr.pinhole`. It reads
+what `pinhole recent --follow` says and drags what `pinhole export` makes,
+a HEIC as a JPEG, as a drag out of the window does.
+
 `bin/install` builds the checkout and links the launcher, service and plugins to
 it in `~/.local`, without a package or root password. QML plugins stay live in
 the repository. After a successful install, running windows and their service

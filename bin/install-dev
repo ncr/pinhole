@@ -29,6 +29,8 @@ links = {
     "lib/pinhole/plugins": "plugins",
     "share/pinhole/sRGB.icc": "app/assets/sRGB.icc",
     "share/icons/hicolor/scalable/apps/pinhole.svg": "pkgbuild/pinhole.svg",
+    # Omarchy's bar widget (omarchy-bar/), linked into the shell by bin/install.
+    "lib/pinhole/omarchy-bar": "omarchy-bar",
     # Plugins look beside their QML for their compiled helper.
 }
 for target, source in links.items():

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ncr.pinhole",
+  "name": "Pinhole",
+  "version": "1.0.0",
+  "author": "ncr",
+  "license": "MIT",
+  "description": "The photos that just came to your Pinhole library, one click from the bar, ready to drag where they are needed.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Pinhole",
+    "description": "Lights up when a photo arrives; the panel shows the newest as a small grid to drag from.",
+    "category": "Apps",
+    "aliases": [
+      "photos",
+      "icloud"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
