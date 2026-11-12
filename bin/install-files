@@ -102,6 +102,7 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/people/i18n" plugins/people/i18n/
 install -Dm755 plugins/people/pinhole-faces "$PREFIX/lib/pinhole/plugins/people/pinhole-faces"
 # Omarchy's bar widget: the newest photos, to drag out (omarchy-bar/).
 install -Dm644 -t "$PREFIX/lib/pinhole/omarchy-bar" omarchy-bar/manifest.json omarchy-bar/qmldir omarchy-bar/*.qml
+install -Dm755 -t "$PREFIX/lib/pinhole/omarchy-bar" omarchy-bar/open-here
 install -Dm644 -t "$PREFIX/lib/pinhole/omarchy-bar/i18n" omarchy-bar/i18n/*.json
 # An sRGB profile, for plugins to make a picture sRGB with (pinhole.srgbProfile).
 install -Dm644 app/assets/sRGB.icc "$PREFIX/share/pinhole/sRGB.icc"

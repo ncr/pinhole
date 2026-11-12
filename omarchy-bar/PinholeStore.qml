@@ -142,6 +142,14 @@ Singleton {
       + 'else PATH="$HOME/.local/bin:$PATH" exec setsid pinhole; fi'])
   }
 
+  // Pinhole's window where the pointer is, the bar's strip apart: opened
+  // there, or brought there if it is open (open-here).
+  function openHere(axis, from, to) {
+    open = false
+    var script = String(Qt.resolvedUrl("open-here")).replace(/^file:\/\//, "")
+    Quickshell.execDetached(["sh", decodeURIComponent(script), axis, String(Math.floor(from)), String(Math.ceil(to))])
+  }
+
   // ---- The library, followed --------------------------------------------
 
   // A launcher in ~/.local/bin (a source install) comes before the

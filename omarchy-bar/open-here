@@ -1,0 +1,67 @@
+#!/bin/sh
+# Pinhole's window, where the pointer is: what a drag of the bar's icon onto
+# the desktop asks for (Panel.qml). The pointer is where the icon was let go.
+#
+# Not open, Pinhole is started and Hyprland places its window as it places
+# any new one: on the monitor and workspace under the pointer, in the tile
+# under it. Open, its window is taken out of where it is and put there the
+# same way. Let go over the bar again, nothing happens.
+#
+#   open-here [x|y FROM TO]   the bar's strip, in the layout's coordinates
+
+set -u
+
+call() { hyprctl dispatch "$1" >/dev/null 2>&1; }
+
+at=$(hyprctl cursorpos -j 2>/dev/null) || exit 1
+x=$(printf '%s' "$at" | jq -r '.x | floor')
+y=$(printf '%s' "$at" | jq -r '.y | floor')
+case $x$y in '' | *[!0-9-]*) exit 1 ;; esac
+
+if [ $# -ge 3 ]; then
+  case $1 in x) v=$x ;; *) v=$y ;; esac
+  [ "$v" -ge "${2%.*}" ] && [ "$v" -lt "${3%.*}" ] && exit 0
+fi
+
+# The monitor under the pointer, and the workspace shown on it.
+monitor=$(hyprctl monitors -j | jq -c --argjson x "$x" --argjson y "$y" '
+  [.[] | (if (.transform % 2) == 1 then [.height, .width] else [.width, .height] end) as $s
+       | select($x >= .x and $x < .x + $s[0] / .scale and $y >= .y and $y < .y + $s[1] / .scale)][0] // empty')
+[ -n "$monitor" ] || exit 1
+name=$(printf '%s' "$monitor" | jq -r '.name')
+workspace=$(printf '%s' "$monitor" | jq -r 'if (.specialWorkspace.name // "") != "" then .specialWorkspace.name else (.activeWorkspace.id | tostring) end')
+[ "$(printf '%s' "$monitor" | jq -r '.focused')" = true ] || call "hl.dsp.focus({ monitor = '$name' })"
+
+# Its window, by the class only it has; of several, the one last used.
+window=$(hyprctl clients -j | jq -c '[.[] | select(.class == "pinhole")] | sort_by(.focusHistoryID) | .[0] // empty')
+
+if [ -z "$window" ]; then
+  if command -v uwsm-app >/dev/null; then exec setsid uwsm-app -- pinhole.desktop; fi
+  PATH="$HOME/.local/bin:$PATH" exec setsid pinhole
+fi
+
+address=$(printf '%s' "$window" | jq -r '.address')
+case $address in 0x*) ;; *) exit 1 ;; esac
+inside=$(printf '%s' "$window" | jq -r --argjson x "$x" --argjson y "$y" --arg ws "$workspace" '
+  ((.workspace.id | tostring) == $ws or .workspace.name == $ws)
+  and $x >= .at[0] and $x < .at[0] + .size[0] and $y >= .at[1] and $y < .at[1] + .size[1]')
+
+# Let go over Pinhole itself: it is there already.
+if [ "$inside" != true ]; then
+  # A window filling the screen has no tile to go into: it comes as a window.
+  [ "$(printf '%s' "$window" | jq -r '.fullscreen')" = 0 ] || call "hl.dsp.window.fullscreen({ action = 'off', window = 'address:$address' })"
+  if [ "$(printf '%s' "$window" | jq -r '.floating')" = true ]; then
+    # A floating one stays floating, its middle under the pointer.
+    w=$(printf '%s' "$window" | jq -r '.size[0]')
+    h=$(printf '%s' "$window" | jq -r '.size[1]')
+    call "hl.dsp.window.move({ workspace = '$workspace', follow = false, window = 'address:$address' })"
+    call "hl.dsp.window.move({ x = $((x - w / 2)), y = $((y - h / 2)), window = 'address:$address' })"
+  else
+    # Tiled, it leaves its tile and is tiled again: Hyprland then splits the
+    # tile under the pointer for it, as for a window just opened.
+    call "hl.dsp.window.float({ action = 'on', window = 'address:$address' })"
+    call "hl.dsp.window.move({ workspace = '$workspace', follow = false, window = 'address:$address' })"
+    call "hl.dsp.window.float({ action = 'off', window = 'address:$address' })"
+  fi
+fi
+call "hl.dsp.focus({ window = 'address:$address' })"

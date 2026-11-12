@@ -7,6 +7,9 @@ import qs.Ui
 // Pinhole on the bar: its camera obscura, lit in the accent with the number
 // of photos that came since the panel was last opened. A click opens the
 // newest as a small grid to drag them from (PinholeStore, RecentPopup).
+// A right click opens Pinhole; the icon dragged off the bar by the right
+// button opens it where it is let go (the left button's drag is the bar's
+// own, which moves its widgets).
 //
 // The bar makes a widget on every monitor; what they show is the store's,
 // one for the shell.
@@ -45,6 +48,31 @@ Panel {
   implicitWidth: bar && bar.vertical ? (bar ? bar.barSize : Style.bar.sizeHorizontal) : barSlot
   implicitHeight: bar && bar.vertical ? barSlot : (bar ? bar.barSize : Style.bar.sizeHorizontal)
 
+  // The camera obscura of Pinhole's icon, in one colour: the box, with the
+  // pinhole and its light cut out of it, so what is behind shows through.
+  function paintBox(c, x, y, w, h, ink) {
+    c.reset()
+    c.translate(x, y)
+    c.globalCompositeOperation = "source-over"
+    c.fillStyle = ink
+    var r = Math.max(1.5, h * 0.2)
+    c.beginPath()
+    c.roundedRect(0, 0, w, h, r, r)
+    c.fill()
+    c.globalCompositeOperation = "destination-out"
+    c.globalAlpha = 0.6
+    c.beginPath()
+    c.moveTo(w * 0.5, h * 0.5)
+    c.lineTo(w * 0.86, h * 0.17)
+    c.lineTo(w * 0.86, h * 0.83)
+    c.closePath()
+    c.fill()
+    c.globalAlpha = 1
+    c.beginPath()
+    c.arc(w * 0.5, h * 0.5, Math.max(1.1, h * 0.14), 0, Math.PI * 2)
+    c.fill()
+  }
+
   Component.onCompleted: PinholeStore.fontFamily = root.fontFamily
   onFontFamilyChanged: PinholeStore.fontFamily = root.fontFamily
 
@@ -79,8 +107,6 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.space(5)
 
-      // The camera obscura of Pinhole's icon, in one colour: the box, the
-      // pinhole, and the light falling through it.
       Item {
         id: icon
         anchors.verticalCenter: parent.verticalCenter
@@ -113,37 +139,13 @@ Panel {
           }
         }
 
-        // The pinhole and its light are cut out of the box, so the bar
-        // shows through them, see-through or not.
         Canvas {
           id: picture
           anchors.fill: parent
           renderStrategy: Canvas.Cooperative
           onWidthChanged: requestPaint()
           onHeightChanged: requestPaint()
-          onPaint: {
-            var c = getContext("2d")
-            var w = width, h = height
-            c.reset()
-            c.globalCompositeOperation = "source-over"
-            c.fillStyle = icon.ink
-            var r = Math.max(1.5, h * 0.2)
-            c.beginPath()
-            c.roundedRect(0, 0, w, h, r, r)
-            c.fill()
-            c.globalCompositeOperation = "destination-out"
-            c.globalAlpha = 0.6
-            c.beginPath()
-            c.moveTo(w * 0.5, h * 0.5)
-            c.lineTo(w * 0.86, h * 0.17)
-            c.lineTo(w * 0.86, h * 0.83)
-            c.closePath()
-            c.fill()
-            c.globalAlpha = 1
-            c.beginPath()
-            c.arc(w * 0.5, h * 0.5, Math.max(1.1, h * 0.14), 0, Math.PI * 2)
-            c.fill()
-          }
+          onPaint: root.paintBox(getContext("2d"), 0, 0, width, height, icon.ink)
         }
       }
 
@@ -178,6 +180,60 @@ Panel {
     onPressed: function(b) {
       if (b === Qt.RightButton) PinholeStore.openPinhole()
       else root.toggle()
+    }
+
+    // The icon, carried off the bar by the right button: a real Wayland
+    // drag, so its picture follows the pointer over any window, of
+    // something no window takes. Where it ends is where Pinhole opens;
+    // back over the bar, nowhere.
+    DragHandler {
+      target: null
+      acceptedButtons: Qt.RightButton
+      dragThreshold: Style.space(6)
+      onActiveChanged: {
+        if (!active || carried.go) return
+        if (root.bar) root.bar.hideTooltip(button)
+        PinholeStore.open = false
+        carried.grabToImage(function(result) {
+          if (result) carried.Drag.imageSource = result.url
+          carried.go = true
+        })
+      }
+    }
+
+    // What the drag carries: the icon, a size up, beside the pointer and
+    // not under the hand that holds it (the picture hangs from its top left
+    // corner). Never seen on the bar.
+    Canvas {
+      id: carried
+      property bool go: false
+      readonly property real aside: Style.space(13)
+      width: aside + Math.round(root.iconWidth * 1.4)
+      height: aside + Math.round(root.iconHeight * 1.4)
+      opacity: 0
+      renderStrategy: Canvas.Cooperative
+      onWidthChanged: requestPaint()
+      onHeightChanged: requestPaint()
+      onPaint: root.paintBox(getContext("2d"), aside, aside, width - aside, height - aside, root.foreground)
+      Connections {
+        target: root
+        function onForegroundChanged() { carried.requestPaint() }
+      }
+
+      Drag.active: go
+      Drag.dragType: Drag.Automatic
+      Drag.supportedActions: Qt.MoveAction
+      Drag.mimeData: ({ "application/x-pinhole-window": "pinhole" })
+      Drag.onDragFinished: {
+        go = false
+        // The bar's strip on its screen, in the layout's coordinates: the
+        // bar's window is as big as its screen.
+        var screen = QsWindow.window ? QsWindow.window.screen : null
+        var from = root.mapToItem(null, 0, 0)
+        var vertical = root.bar && root.bar.vertical
+        var start = vertical ? (screen ? screen.x : 0) + from.x : (screen ? screen.y : 0) + from.y
+        PinholeStore.openHere(vertical ? "x" : "y", start, start + (vertical ? root.width : root.height))
+      }
     }
   }
 
