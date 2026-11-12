@@ -174,7 +174,11 @@ Panel {
       }
     }
 
-    onPressed: function(b) { root.toggle() }
+    // Left: the newest photos. Right: Pinhole itself.
+    onPressed: function(b) {
+      if (b === Qt.RightButton) PinholeStore.openPinhole()
+      else root.toggle()
+    }
   }
 
   // Photos dropped on the icon are added to Pinhole, as on its window.

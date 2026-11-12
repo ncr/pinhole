@@ -130,6 +130,18 @@ Singleton {
   }
   property string pendingOpen: ""
 
+  // Pinhole's window: brought forward if it is open (by its class, which
+  // only it has: a title could be any terminal's in ~/dev/pinhole), else
+  // opened as the launcher opens it.
+  function openPinhole() {
+    open = false
+    Quickshell.execDetached(["sh", "-c",
+      'a=$(hyprctl clients -j | jq -r \'[.[] | select(.class == "pinhole")] | sort_by(.focusHistoryID) | .[0].address // empty\'); '
+      + 'if [ -n "$a" ]; then hyprctl dispatch "hl.dsp.focus({ window = \\"address:$a\\" })" >/dev/null 2>&1 || hyprctl dispatch focuswindow "address:$a"; '
+      + 'elif command -v uwsm-app >/dev/null; then exec setsid uwsm-app -- pinhole.desktop; '
+      + 'else PATH="$HOME/.local/bin:$PATH" exec setsid pinhole; fi'])
+  }
+
   // ---- The library, followed --------------------------------------------
 
   // A launcher in ~/.local/bin (a source install) comes before the
