@@ -66,7 +66,7 @@ def launch(program, args, env, cwd, logfile):
                          start_new_session=True, close_fds=True)
 
 
-def restart(prefix, checkout):
+def restart(prefix, checkout, followers_only=False):
     prefix, checkout = Path(prefix).resolve(), Path(checkout).resolve()
     executables = {str(prefix / 'bin/pinhole'), str(checkout / 'app/build/pinhole')}
     executables.add(str((prefix / 'bin/pinhole').resolve()))
@@ -99,6 +99,11 @@ def restart(prefix, checkout):
                 daemons.append((process, started, socket, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
         except (OSError, IndexError):
             continue
+    if followers_only:
+        # An update from the window (bin/update), which restarts the
+        # window and its service itself: only the bar's follower.
+        stop(followers)
+        return
     stop([(process, started) for process, started, *_ in windows] + followers)
     daemons = [daemon for daemon in daemons if daemon[2] in sockets]
     stop([(process, started) for process, started, *_ in daemons])
@@ -119,7 +124,9 @@ def restart(prefix, checkout):
 
 if __name__ == '__main__':
     try:
-        restart(*sys.argv[1:])
+        args = sys.argv[1:]
+        followers_only = '--followers' in args
+        restart(*[arg for arg in args if arg != '--followers'], followers_only=followers_only)
     except (OSError, RuntimeError) as error:
         print(f'Installed Pinhole, but could not restart it: {error}', file=sys.stderr)
         sys.exit(1)

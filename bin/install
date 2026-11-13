@@ -90,17 +90,22 @@ run_install() {
     fi
     if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
         bin/restart-installed "$PREFIX" "$ROOT"
+    else
+        # The window restarts itself, and its service; Omarchy's bar
+        # following the library is neither, and runs what was installed.
+        bin/restart-installed --followers "$PREFIX" "$ROOT"
     fi
     # Omarchy's shell keeps the types it once read (PhotoCell,
-    # PinholeStore) through its own reload of a changed plugin, so a bar
-    # widget other than the one last installed needs the shell started
-    # again. Compared with what the last install wrote down, not with the
+    # PinholeStore) and the words it once translated through its own
+    # reload of a changed plugin, so a bar widget any of whose files is
+    # other than the last installed one's needs the shell started again. Compared with what the last install wrote down, not with the
     # files before this one: a developer install links them to the
     # checkout, which a pull (or bin/update's merge) has changed already.
     # Not Pinhole's window, so also from an update in the window, which
     # keeps the window running (PINHOLE_KEEP_RUNNING) to restart it itself.
     bar_sum="$PREFIX/share/pinhole/omarchy-bar.cksum"
-    bar_now="$(cat "$PREFIX"/lib/pinhole/omarchy-bar/*.qml "$PREFIX"/lib/pinhole/omarchy-bar/qmldir 2>/dev/null | cksum)"
+    bar_now="$(cd "$PREFIX/lib/pinhole/omarchy-bar" 2>/dev/null && find -L . -type f -print0 | sort -z \
+        | xargs -0 cksum 2>/dev/null | cksum)"
     if [ -L "$omarchy_plugin" ] && [ "$bar_now" != "$(cat "$bar_sum" 2>/dev/null)" ]; then
         if ! pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; then
             printf '%s\n' "$bar_now" >"$bar_sum"
