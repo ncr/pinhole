@@ -622,6 +622,9 @@ class PluginMark : public QObject {
     // A shape of Pinhole's own ("video", "live", "heart", "stack"), or one
     // character of the theme's font, a Nerd Font glyph (marks.h).
     Q_PROPERTY(QString icon READ icon WRITE setIcon NOTIFY changed)
+    // A theme colour's name (red, green, yellow, blue, magenta, cyan,
+    // accent), or "#rrggbb".
+    Q_PROPERTY(QString colour READ colour WRITE setColour NOTIFY changed)
     // Left to right in the corner: a favourite's 10, Pinhole's video 20,
     // Live 30, Pinhole's stack 90.
     Q_PROPERTY(int order READ order WRITE setOrder NOTIFY changed)
@@ -641,6 +644,8 @@ public:
     void setText(const QString &text);
     QString icon() const { return m_icon; }
     void setIcon(const QString &icon);
+    QString colour() const { return m_colour; }
+    void setColour(const QString &colour);
     int order() const { return m_order; }
     void setOrder(int order);
     QString field() const { return m_field; }
@@ -655,7 +660,7 @@ signals:
     void photosChanged();
 
 private:
-    QString m_name, m_text, m_icon, m_field;
+    QString m_name, m_text, m_icon, m_colour = QStringLiteral("accent"), m_field;
     int m_order = 50;
     QVariantList m_photos;
     bool m_defaultShown = true;
@@ -693,15 +698,15 @@ class Plugins : public QObject {
     Q_PROPERTY(bool loadingAll READ loadingAll NOTIFY allLoaded)
     // Every kind of mark the grid can draw, Pinhole's own and the loaded
     // plugins' (PluginMark), in their order left to right: each { id,
-    // plugin ("" for Pinhole's own), name, text, icon, order, field
-    // ("video", "live",
+    // plugin ("" for Pinhole's own), name, text, icon, colour (as given: a
+    // theme colour's name or "#rrggbb"), order, field ("video", "live",
     // "favorite", "stack", or "" for a plugin's list of photos),
     // defaultShown }. At most 32, and 4 of any plugin.
     Q_PROPERTY(QVariantList markKinds READ markKinds NOTIFY markKindsChanged)
 public:
     // The version of what a plugin is given: a manifest's "api" is this,
     // neither less nor more.
-    static constexpr int api = 16;
+    static constexpr int api = 15;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

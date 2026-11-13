@@ -110,6 +110,7 @@ PinholePlugin {
             name: "favorite"
             text: qsTr("Favourites")
             icon: "heart"
+            colour: "red"
             order: 10
             field: "favorite"
         }

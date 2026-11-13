@@ -949,10 +949,9 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
             }
         }
         // What a PluginMark and a PluginAction take as words: one Pinhole
-        // knows, or nothing is drawn (said only as it runs). A mark is
-        // white: it takes no colour.
+        // knows, or nothing is drawn (said only as it runs).
         static const QRegularExpression markOrAction(QStringLiteral("\\b(PluginMark|PluginAction)\\s*\\{"));
-        static const QRegularExpression valueOf(QStringLiteral("(?:^|[;{\\s])(icon|textColour|place)\\s*:\\s*[\"']([^\"']*)[\"']"));
+        static const QRegularExpression valueOf(QStringLiteral("(?:^|[;{\\s])(icon|colour|textColour|place)\\s*:\\s*[\"']([^\"']*)[\"']"));
         static const QStringList colours = {"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
         static const QStringList icons = {"video", "live", "heart", "stack"};
         static const QStringList places = {"grid", "viewer", "selection", "file"};
@@ -986,7 +985,7 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                 if (key == QLatin1String("place") && match.captured(1) == QLatin1String("PluginAction") && !places.contains(word))
                     wrong = QStringLiteral("place \"%1\" is none of Pinhole's%2, and the action never shows: %3")
                                 .arg(word, didYouMean(word, places), places.join(QStringLiteral(", ")));
-                else if (key == QLatin1String("textColour") && !word.isEmpty()
+                else if ((key == QLatin1String("colour") || key == QLatin1String("textColour")) && !word.isEmpty()
                          && !colours.contains(word) && !hex.match(word).hasMatch())
                     wrong = QStringLiteral("%1 \"%2\" is no colour of the theme's%3: %4, or \"#rrggbb\"")
                                 .arg(key, word, didYouMean(word, colours), colours.join(QStringLiteral(", ")));

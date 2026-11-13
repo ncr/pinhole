@@ -25,7 +25,7 @@ may be empty) and the program.
 
 ```json
 {
-  "api": 16,
+  "api": 15,
   "id": "me.immich",
   "name": "Immich",
   "sources": [

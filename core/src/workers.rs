@@ -579,7 +579,7 @@ mod tests {
             let at = self.dir.join(if builtin { "builtin" } else { "personal" }).join(folder);
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-            let manifest = json!({"api": 16, "id": id,
+            let manifest = json!({"api": 15, "id": id,
                                   "workers": [{"name": "w", "program": "work", "args": ["daemon"]}]});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             let end = match exit {
@@ -633,7 +633,7 @@ mod tests {
         let at = s.dir.join("builtin/search");
         std::fs::create_dir_all(&at).unwrap();
         std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
-        let manifest = json!({"api": 16, "id": "pinhole.search",
+        let manifest = json!({"api": 15, "id": "pinhole.search",
                               "workers": [{"name": "index", "program": "work", "answers": true}]});
         std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
         // Answers each line: an error for "fail", nothing for "slow",

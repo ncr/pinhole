@@ -69,8 +69,9 @@ class PhotoGrid : public QQuickItem {
     // library that is not empty but shows nothing.
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY cellsChanged)
     // The kinds of mark there are (Plugins::markKinds), in their order left
-    // to right in a cell's corner, each { id, icon, field }: its shape
-    // (marks.h: markShape), and the library's field that
+    // to right in a cell's corner, each { id, icon, colour, field }: its
+    // shape (marks.h: markShape), its colour (a theme's, lit as neon where
+    // cells are small and unlit closer), and the library's field that
     // carries it ("video", "live", "favorite"; "stack" for a stack's card),
     // or none for one whose photos a plugin lists (setMarkBits). At most
     // 32, a bit of a word each.
@@ -372,6 +373,14 @@ private:
     void setScroll(double y);
     void syncBounds();
     void updateAnimating();
+    // Whether a level is far enough out for the marks to be neon,
+    // and noting when the grid came to rest at such a level, from which
+    // the tubes strike one by one (-1: not lit).
+    bool neonAt(int columns) const;
+    void updateNeon();
+    double m_neonSince = -1; // s, on m_neonClock
+    // Seconds of animation frames, the strike's clock.
+    double m_neonClock = 0;
     void refreshStats();
     void invalidateSceneGraph();
     void touched(double timeMs, const char *how);
@@ -412,6 +421,7 @@ private:
     struct MarkKind {
         QString id;
         MarkShape shape;
+        QColor colour;
         bool operator==(const MarkKind &) const = default;
     };
     QVariantList m_markKindsGiven;

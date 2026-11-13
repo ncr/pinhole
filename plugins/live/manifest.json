@@ -1,5 +1,5 @@
 {
-  "api": 16,
+  "api": 15,
   "requires": ["ffmpeg", "ffprobe"],
   "id": "pinhole.live",
   "name": "Live Photos",

@@ -1,5 +1,5 @@
 {
-  "api": 16,
+  "api": 15,
   "id": "pinhole.send",
   "name": "Send to phone",
   "version": "1.0.0",

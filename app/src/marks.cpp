@@ -53,8 +53,9 @@ QImage blurredAlpha(const QImage &source, int radius) {
 }
 
 // The mark itself, white, in a unit square scaled to `px`, its shapes kept
-// within the middle seven tenths so the outline has room.
-QImage shape(const MarkShape &mark, int px) {
+// within the middle seven tenths so the shadow has room. As a `tube` (a
+// neon sign's) the filled shapes are drawn as their outlines.
+QImage shape(const MarkShape &mark, int px, bool tube = false) {
     QImage image(px, px, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
     QPainter p(&image);
@@ -63,7 +64,8 @@ QImage shape(const MarkShape &mark, int px) {
     const QColor white(255, 255, 255);
     if (!mark.glyph.isEmpty()) {
         // A character of the theme's font, as big as Pinhole's own shapes
-        // are (six tenths of the square at its longer side), in the middle.
+        // are (six tenths of the square at its longer side), in the middle;
+        // filled, or as a tube its outline.
         QFont font(Theme::fontFamily());
         font.setPixelSize(100);
         QPainterPath path;
@@ -76,8 +78,13 @@ QImage shape(const MarkShape &mark, int px) {
         fit.translate(0.5, 0.5);
         fit.scale(scale, scale);
         fit.translate(-bounds.center().x(), -bounds.center().y());
-        p.setPen(Qt::NoPen);
-        p.setBrush(white);
+        if (tube) {
+            p.setPen(QPen(white, 0.06, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+        } else {
+            p.setPen(Qt::NoPen);
+            p.setBrush(white);
+        }
         p.drawPath(fit.map(path));
         return image;
     }
@@ -89,7 +96,7 @@ QImage shape(const MarkShape &mark, int px) {
         path.lineTo(0.77, 0.5);
         path.closeSubpath();
         p.setPen(QPen(white, 0.08, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.setBrush(white);
+        p.setBrush(tube ? QBrush(Qt::NoBrush) : QBrush(white));
         p.drawPath(path);
     } else if (mark.builtin == QLatin1String("live")) {
         // As the iPhone draws Live: a dot, a ring, and a ring of dots.
@@ -101,7 +108,9 @@ QImage shape(const MarkShape &mark, int px) {
         p.drawEllipse(QPointF(0.5, 0.5), 0.2, 0.2);
         p.setPen(Qt::NoPen);
         p.setBrush(white);
-        // Few and big enough that the outline does not run them together.
+        // As a tube fewer and bigger, or the glow runs them together.
+        // Few and big enough that neither the outline nor the glow runs
+        // them together.
         const int dots = 9;
         const double ring = 0.35, dot = 0.04;
         for (int i = 0; i < dots; ++i) {
@@ -118,8 +127,13 @@ QImage shape(const MarkShape &mark, int px) {
         path.cubicTo(0.53, 0.24, 0.58, 0.2, 0.65, 0.2);
         path.cubicTo(0.74, 0.2, 0.83, 0.27, 0.83, 0.38);
         path.cubicTo(0.83, 0.52, 0.7, 0.64, 0.5, 0.79);
-        p.setPen(Qt::NoPen);
-        p.setBrush(white);
+        if (tube) {
+            p.setPen(QPen(white, 0.075, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+        } else {
+            p.setPen(Qt::NoPen);
+            p.setBrush(white);
+        }
         p.drawPath(path);
     } else if (mark.builtin == QLatin1String("stack")) {
         // Two cards, one behind the other: the one behind shows only at
@@ -134,7 +148,7 @@ QImage shape(const MarkShape &mark, int px) {
         p.drawRoundedRect(front.adjusted(-0.08, -0.08, 0.08, 0.08), 0.1, 0.1);
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
         p.setPen(QPen(white, 0.065));
-        p.setBrush(QColor(255, 255, 255, 60));
+        p.setBrush(tube ? QColor(Qt::transparent) : QColor(255, 255, 255, 60));
         p.drawRoundedRect(front, 0.07, 0.07);
     }
     return image;
@@ -241,6 +255,44 @@ PlainClock plainClock(int px) {
         strip.drawImage(i * px, px, core);
     }
     return clock;
+}
+
+NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit) {
+    px = std::max(8, px);
+    const int side = int(std::lround(px * kNeonSpread)), at = (side - px) / 2;
+    QImage tube(side, side, QImage::Format_ARGB32_Premultiplied);
+    tube.fill(Qt::transparent);
+    QPainter(&tube).drawImage(at, at, shape(mark, px, true));
+    NeonMark neon;
+    neon.core = tube;
+    {
+        QPainter p(&neon.core);
+        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        // White-hot when lit, the colour's dark glass when not.
+        const auto hot = [&](int c) { return int(lerp(c * 0.3, c + (255 - c) * 0.3, lit)); };
+        p.fillRect(neon.core.rect(), QColor(hot(colour.red()), hot(colour.green()), hot(colour.blue()),
+                                            int(255 * (0.55 + 0.45 * lit))));
+    }
+    // A tight bright glow hugging the tube and a wide soft one, and under
+    // them a wider dark one.
+    const QImage near = blurredAlpha(tube, std::max(1, px / 18));
+    const QImage far = blurredAlpha(tube, std::max(2, px / 5));
+    const QImage dark = blurredAlpha(tube, std::max(3, px / 4));
+    neon.glow = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < side; ++y) {
+        const auto *n = reinterpret_cast<const QRgb *>(near.constScanLine(y));
+        const auto *f = reinterpret_cast<const QRgb *>(far.constScanLine(y));
+        const auto *d = reinterpret_cast<const QRgb *>(dark.constScanLine(y));
+        auto *out = reinterpret_cast<QRgb *>(neon.glow.scanLine(y));
+        for (int x = 0; x < side; ++x) {
+            const double light = lit * std::min(1.0, 2.0 * qAlpha(n[x]) / 255.0 + 2.4 * qAlpha(f[x]) / 255.0);
+            const double shade = std::min(1.0, 2.5 * qAlpha(d[x]) / 255.0) * (0.2 + 0.3 * lit);
+            const double alpha = shade * (1 - light) + 0.45 * light;
+            out[x] = qRgba(int(colour.red() * light), int(colour.green() * light), int(colour.blue() * light),
+                           int(std::lround(alpha * 255)));
+        }
+    }
+    return neon;
 }
 
 QImage MarkProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize) {

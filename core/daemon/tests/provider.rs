@@ -692,7 +692,7 @@ fn a_kind_outside_its_plugins_name_is_refused_and_a_plugin_turned_off_stops_its_
         for file in ["Main.qml", "pinhole-test-source"] {
             std::fs::copy(scratch.plugin.join(file), dir.join(file)).unwrap();
         }
-        let manifest = json!({"api": 16, "id": id,
+        let manifest = json!({"api": 15, "id": id,
                               "sources": [{"kind": kind, "provider": "pinhole-test-source"}]});
         std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
     }

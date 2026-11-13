@@ -36,8 +36,8 @@ ApplicationWindow {
         stacks: win.pluginStacks
         hidden: win.pluginHidden
         // Every kind of mark, Pinhole's and the plugins' (plugins.markKinds),
-        // those switched on in the side panel drawn.
-        markKinds: plugins.markKinds.map(k => ({ id: k.id, icon: k.icon, field: k.field }))
+        // in the theme's colours; those switched on in the side panel drawn.
+        markKinds: plugins.markKinds.map(k => ({ id: k.id, icon: k.icon, field: k.field, colour: win.markColour(k.colour) }))
         marksShown: (markChoices.revision, plugins.markKinds.filter(k => markChoices.shown(k.id, k.defaultShown)).map(k => k.id))
         // The keyboard's cursor, while the keyboard is what is in use.
         cursorShown: keymap.input === "keyboard"

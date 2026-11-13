@@ -352,8 +352,8 @@ footgun Pinhole's own plugins hit):
 - a member `pinhole`, `pinhole.library` or `theme` does not have, and a
   `library.field()` it does not know: undefined, or an empty list, as it
   runs;
-- a `PluginAction`'s `place` or `textColour`, or a `PluginMark`'s `icon`,
-  Pinhole does not know: nothing is drawn;
+- a `PluginAction`'s `place`, a `PluginMark`'s `icon` or a `colour` /
+  `textColour` Pinhole does not know: nothing is drawn;
 - a file a `Loader`, `Image` or `Qt.createComponent` takes from outside
   the plugin (`"../series/Studio.qml"`, `file:///…`);
 - `copy()` of a text field: it sets the session's clipboard
@@ -395,7 +395,7 @@ And warns of:
 
 ```json
 {
-  "api": 16,
+  "api": 15,
   "id": "me.favourites",
   "name": "Favourites count",
   "version": "1.0.0",
@@ -482,7 +482,7 @@ without a window:
 
 ```json
 {
-  "api": 16,
+  "api": 15,
   "id": "pinhole.people",
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
@@ -652,7 +652,7 @@ its settings, is there as the window first shows. It sets:
   `text`, `key`, `helpText` (what the help says it does; its
   `text` if left out), `shown`, `usable`, `active` (a button filled with the
   accent; in a menu, a subtle fill and a check), `textColour` (its words in a colour while not lit: a theme
-  colour's name (red, green, yellow, blue, magenta, cyan, accent) or `"#rrggbb"`; the theme's text
+  colour's name, as a mark's `colour`, or `"#rrggbb"`; the theme's text
   if left out), `busy` (its arc turning once it has been for `busyDelay`
   ms, 1000 unless said), and `onTriggered`.
   `order` places it among the others of its place, lowest first, then in
@@ -791,6 +791,7 @@ its settings, is there as the window first shows. It sets:
           name: "picked"            // unique in the plugin
           text: qsTr("Picked")      // its switch's words in the side panel
           icon: "\uf005"      // video, live, heart, stack, or one character (a Nerd Font glyph)
+          colour: "green"           // red, green, yellow, blue, magenta, cyan, accent, or "#rrggbb"
           order: 25                 // left to right: favourite 10, video 20, Live 30, stack 90; 50 if left out
           photos: plugin.picked     // library positions (or ids)
           // or field: "live"       // the photos whose library field is true: live, favorite, video
@@ -804,10 +805,9 @@ its settings, is there as the window first shows. It sets:
   when the library is read again, its photos stay marked where they are
   now until it gives `photos` again (on `library.changed()`, from the ids
   it keeps), as with `hidden`. Nothing of a mark is QML's while the grid
-  draws: it reads a word for each cell. Every mark is drawn white over a
-  thin dark outline, its glyph in the theme's font, the same in the side
-  panel and on the photos at every size; a video's length follows
-  Pinhole's video mark where the cell has room.
+  draws: it reads a word for each cell. Its glyph is drawn in the theme's
+  font, white over a thin dark outline in the side panel and on the photos
+  seen closer, and as a neon tube in its `colour` far out.
 - `sources`: how the window shows the kinds of source the plugin brings,
   each a `PluginSource` of a kind its manifest's `sources` names (one of
   another kind is left out, and said under the plugin). iCloud and Folders

@@ -23,13 +23,14 @@ struct MarkShape {
 MarkShape markShape(const QString &icon);
 
 // One mark, white over a thin dark outline so it reads on any photo, `px`
-// pixels square (device pixels), the same in the grid at every level, in
-// the side panel, and as the bar's panel draws a video's.
+// pixels square (device pixels): in the side panel, on the grid's cells
+// seen closer, and as the bar's panel draws a video's. From afar the grid
+// lights it as neon instead (neonMark()).
 QImage markImage(const MarkShape &mark, int px);
 
-// A video's length, as the grid writes it after the video mark where the
-// cell has room (and as the bar's panel writes it under a video): "0:42",
-// "12:05", "1:02:33", rounded to the second; empty for none.
+// A video's length, as the grid writes it after the video mark on cells
+// seen closer where it has room (and as the bar's panel writes it under a
+// video): "0:42", "12:05", "1:02:33", rounded to the second; empty for none.
 QString clockText(double seconds);
 
 // The characters a length is written in, "0123456789:", white over a thin
@@ -46,6 +47,20 @@ struct PlainClock {
 };
 PlainClock plainClock(int px);
 int clockChar(QChar c);
+
+// The same mark lit like a neon tube, for cells seen from afar, where a
+// white mark is lost among the photos: a white-hot core in a tint of
+// `colour`, and the light it throws, which partly adds to what is under it
+// (premultiplied, its colour stronger than its alpha) and darkens the rest a
+// little so it shows on bright photos too. Both kNeonSpread times the
+// mark's `px`, the mark in their middle. The grid draws every glow, then
+// every core, so no light falls on a neighbour's core. `lit` from 0, the
+// tube dark, to 1, as it strikes and stays on.
+constexpr double kNeonSpread = 2;
+struct NeonMark {
+    QImage glow, core;
+};
+NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit = 1);
 
 // "image://mark/video" (live, heart, stack, or a glyph, its character
 // percent-encoded) for QML, as the grid draws them.

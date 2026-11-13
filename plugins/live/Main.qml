@@ -85,6 +85,7 @@ PinholePlugin {
             name: "live"
             text: qsTr("Live Photos")
             icon: "live"
+            colour: "yellow"
             order: 30
             field: "live"
             // Off until turned on: nearly every iPhone photo is one.
