@@ -78,6 +78,10 @@ run_install() {
             exit 1
         fi
     fi
+    # The bar widget as it was installed before: Omarchy's shell keeps the
+    # types it once read (PhotoCell, PinholeStore) through its own reload of
+    # a changed plugin, so a changed widget needs the shell started again.
+    bar_before="$(cat "$PREFIX"/lib/pinhole/omarchy-bar/*.qml 2>/dev/null | cksum)"
     bin/install-dev "$PREFIX"
     update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
     # On Omarchy, the bar widget: linked unless one of the person's own is
@@ -89,6 +93,11 @@ run_install() {
     fi
     if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
         bin/restart-installed "$PREFIX" "$ROOT"
+        if [ -L "$omarchy_plugin" ] && [ "$(cat "$PREFIX"/lib/pinhole/omarchy-bar/*.qml | cksum)" != "$bar_before" ] \
+            && command -v omarchy-restart-shell >/dev/null 2>&1 && pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; then
+            omarchy-restart-shell >/dev/null 2>&1 && echo "Restarted Omarchy's shell for the new bar widget." \
+                || echo "Could not restart Omarchy's shell; the bar widget changes on its next start." >&2
+        fi
     fi
     echo "Installed $(git rev-parse --short HEAD) into $PREFIX (source checkout)"
     # Another Pinhole found first on PATH (a package's, an older install)
