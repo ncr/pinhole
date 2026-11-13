@@ -75,11 +75,12 @@ constexpr qint64 kUploadNanos = 3'000'000;
 // 4 MB each.
 constexpr double kMosaicBelowPx = 100;
 constexpr size_t kMaxPages = 64;
-// Marks (marks.h: markImage()), white over a thin dark outline, with a
-// video's length after its mark where the cell has room: kMarkShare of a cell's width on screen, from kMarkPx up
-// to kMarkMaxPx, a little in from its bottom left corner, on cells at
-// least kMarksFromPx big; smaller ones would be all marks. In the order of
-// markKinds, left to right.
+// Marks (marks.h: markImage()), white over a thin dark outline, and a
+// video's length in the bottom right corner where the cell has room:
+// kMarkShare of a cell's width on screen, from kMarkPx up to kMarkMaxPx,
+// a little in from its bottom left corner, on cells at least kMarksFromPx
+// big; smaller ones would be all marks. In the order of markKinds, left to
+// right.
 constexpr double kMarkPx = 22;
 constexpr double kMarkMaxPx = 40;
 constexpr double kMarkShare = 0.1;
@@ -2204,7 +2205,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         QRectF rect;
         quint32 marks; // a bit for each of m_markKinds
         int photo;
-        QString clock; // a video's length, written after its mark up close
+        QString clock; // a video's length, written in the bottom right corner up close
     };
     std::vector<std::vector<Marked>> marked(drawn.size());
     std::vector<quint64> wanted;
@@ -2732,16 +2733,20 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             const int passes = neon ? 2 : 1;
             const double cellWidthNow = cells.empty() ? 0 : cells.front().rect.width();
             const double markSize = std::clamp(cellWidthNow * kMarkShare, kMarkPx, kMarkMaxPx);
-            // A length only up close, where it fits in its cell after the marks.
-            auto clockFits = [&](const Marked &c) {
-                if (neon || c.clock.isEmpty())
-                    return false;
+            // A video's length in the cell's bottom right corner, apart from
+            // the marks, which are lit from afar and it never is: only up
+            // close, and where the cell has room for both.
+            auto clockWidth = [&](const QString &clock) {
                 double w = 0;
-                for (QChar ch : c.clock)
+                for (QChar ch : clock)
                     if (const int at = clockChar(ch); at >= 0)
                         w += markSize * rs.clockAdvance[size_t(at)];
-                return 2 * kMarkInset + std::popcount(c.marks) * std::round(markSize * 0.8) + markSize * 0.1 + w
-                    <= c.rect.width();
+                return w;
+            };
+            auto clockFits = [&](const Marked &c) {
+                return !neon && !c.clock.isEmpty()
+                    && 2 * kMarkInset + std::popcount(c.marks) * std::round(markSize * 0.8) + markSize * 0.5
+                               + clockWidth(c.clock) <= c.rect.width();
             };
             int quads = 0;
             for (const Marked &c : cells)
@@ -2756,8 +2761,6 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             // A lit mark's square is kNeonSpread times as big, about the
             // same middle.
             const double grow = neon ? size * (kNeonSpread - 1) / 2 : 0;
-            // Where each length is written: its pen's start, for both its rows.
-            std::vector<std::pair<double, double>> clocks;
             for (int pass = 0; pass < passes; ++pass) {
                 for (const Marked &c : cells) {
                     float v0 = 0, v1 = neon ? 1.0f : 1.0f / 3;
@@ -2785,28 +2788,16 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                         // The next a little closer than a whole mark: each has
                         // room around it for its outline.
                         x += std::round(size * 0.8);
-                        // A video's length right after its mark.
-                        if (clockFits(c) && (m_videoMask & (1u << m))) {
-                            double pen = x + size * 0.02;
-                            clocks.emplace_back(pen, y);
-                            for (QChar ch : c.clock) {
-                                const int at = clockChar(ch);
-                                pen += size * (at < 0 ? 0 : rs.clockAdvance[size_t(at)]);
-                            }
-                            x = std::round(pen + size * 0.04);
-                        }
                     }
                 }
             }
             // The lengths: every outline, then every core.
             for (int row = 1; row <= 2; ++row) {
-                size_t n = 0;
                 for (const Marked &c : cells) {
                     if (!clockFits(c))
                         continue;
-                    double pen = clocks[n].first;
-                    const double y = clocks[n].second;
-                    ++n;
+                    double pen = c.rect.right() - kMarkInset - size * 0.05 - clockWidth(c.clock);
+                    const double y = snap(c.rect.bottom() - kMarkInset - size);
                     for (QChar ch : c.clock) {
                         const int at = clockChar(ch);
                         if (at < 0)

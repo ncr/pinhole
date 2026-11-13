@@ -147,10 +147,9 @@ Item {
     layer.enabled: true
   }
 
-  // A video's mark and its length: the play triangle lit as Pinhole's grid
-  // lights it from afar, a cyan neon tube (NeonMark), in a square `markPx`
-  // big, 4 in from the corner; then the length, white over a thin dark
-  // outline as the grid writes it up close.
+  // A video's mark: the play triangle lit as Pinhole's grid lights it from
+  // afar, a cyan neon tube (NeonMark), in a square `markPx` big, 4 in from
+  // the corner.
   Item {
     id: videoMark
     readonly property real markPx: Style.space(22)
@@ -167,21 +166,25 @@ Item {
       markPx: videoMark.markPx
       seed: cell.photoId
     }
+  }
 
-    // The digits as tall as the triangle's middle, on the grid's baseline.
-    Text {
-      x: videoMark.markPx * 0.82
-      y: videoMark.markPx * 0.71 - baselineOffset
-      text: cell.clock(cell.item ? cell.item.duration : 0)
-      textFormat: Text.PlainText
-      font.family: cell.store ? cell.store.fontFamily : Style.font.family
-      font.pixelSize: Math.round(videoMark.markPx * 0.575)
-      font.weight: Font.DemiBold
-      font.features: { "tnum": 1 }
-      color: "white"
-      style: Text.Outline
-      styleColor: Qt.rgba(0, 0, 0, 0.75)
-    }
+  // A video's length in the bottom right corner, apart from the neon, as
+  // the grid writes it up close: white over a thin dark outline, its digits
+  // as tall as the triangle's middle, on the marks' baseline.
+  Text {
+    readonly property real markPx: videoMark.markPx
+    visible: videoMark.visible
+    x: parent.width - Style.space(4) - markPx * 0.05 - width
+    y: parent.height - Style.space(4) - markPx + markPx * 0.71 - baselineOffset
+    text: cell.clock(cell.item ? cell.item.duration : 0)
+    textFormat: Text.PlainText
+    font.family: cell.store ? cell.store.fontFamily : Style.font.family
+    font.pixelSize: Math.round(markPx * 0.575)
+    font.weight: Font.DemiBold
+    font.features: { "tnum": 1 }
+    color: "white"
+    style: Text.Outline
+    styleColor: Qt.rgba(0, 0, 0, 0.75)
   }
 
   // New since the panel was last looked at: a dot of the accent, lit as

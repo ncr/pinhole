@@ -28,9 +28,8 @@ MarkShape markShape(const QString &icon);
 // lights it as neon instead (neonMark()).
 QImage markImage(const MarkShape &mark, int px);
 
-// A video's length, as the grid writes it after the video mark on cells
-// seen closer where it has room (and as the bar's panel writes it under a
-// video): "0:42", "12:05", "1:02:33", rounded to the second; empty for none.
+// A video's length, as the grid writes it in the bottom right corner of
+// cells seen closer where it has room (and as the bar's panel writes it): "0:42", "12:05", "1:02:33", rounded to the second; empty for none.
 QString clockText(double seconds);
 
 // The characters a length is written in, "0123456789:", white over a thin
