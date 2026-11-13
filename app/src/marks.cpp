@@ -2,6 +2,7 @@
 
 #include "theme.h"
 
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPath>
 #include <QTextBoundaryFinder>
@@ -209,6 +210,82 @@ QImage plainMark(const MarkShape &mark, const QColor &colour, int px) {
     r.drawImage(QPointF(0, std::max(1.0, px / 40.0)), shadow);
     r.drawImage(QPointF(0, 0), tube);
     return result;
+}
+
+QString clockText(double seconds) {
+    if (!(seconds > 0))
+        return {};
+    const qint64 s = std::llround(seconds), m = s / 60, h = m / 60;
+    const QString ss = QStringLiteral("%1").arg(s % 60, 2, 10, QLatin1Char('0'));
+    if (h > 0)
+        return QStringLiteral("%1:%2:%3").arg(h).arg(m % 60, 2, 10, QLatin1Char('0')).arg(ss);
+    return QStringLiteral("%1:%2").arg(m).arg(ss);
+}
+
+int clockChar(QChar c) {
+    if (c >= QLatin1Char('0') && c <= QLatin1Char('9'))
+        return c.unicode() - '0';
+    return c == QLatin1Char(':') ? 10 : -1;
+}
+
+PlainClock plainClock(const QColor &colour, int px) {
+    px = std::max(8, px);
+    PlainClock clock;
+    clock.strip = QImage(px * kClockChars, px * 2, QImage::Format_ARGB32_Premultiplied);
+    clock.strip.fill(Qt::transparent);
+    // Laid out at a size of 100 and scaled into the unit square, the
+    // digits as tall as the plain marks' shapes are.
+    QFont font(Theme::fontFamily());
+    font.setPixelSize(100);
+    font.setWeight(QFont::DemiBold);
+    const QFontMetricsF metrics(font);
+    double digitHeight = 0, digitAdvance = 0;
+    for (char d = '0'; d <= '9'; ++d) {
+        QPainterPath path;
+        path.addText(0, 0, font, QString(QLatin1Char(d)));
+        digitHeight = std::max(digitHeight, -path.boundingRect().top());
+        digitAdvance = std::max(digitAdvance, metrics.horizontalAdvance(QLatin1Char(d)));
+    }
+    if (digitHeight <= 0)
+        return clock;
+    const double scale = 0.42 / digitHeight, baseline = 0.5 + 0.21;
+    const auto light = [](int c) { return c + (255 - c) / 5; };
+    const QColor ink(light(colour.red()), light(colour.green()), light(colour.blue()));
+    for (int i = 0; i < kClockChars; ++i) {
+        const QChar c = i < 10 ? QChar(QLatin1Char(char('0' + i))) : QChar(QLatin1Char(':'));
+        const double own = metrics.horizontalAdvance(c);
+        const double advance = (i < 10 ? digitAdvance : own) * scale;
+        clock.advance[size_t(i)] = advance;
+        QPainterPath path;
+        path.addText(0, 0, font, QString(c));
+        QImage core(px, px, QImage::Format_ARGB32_Premultiplied);
+        core.fill(Qt::transparent);
+        {
+            QPainter p(&core);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.scale(px, px);
+            p.translate(0.5 - own * scale / 2, baseline);
+            p.scale(scale, scale);
+            p.setPen(Qt::NoPen);
+            p.setBrush(Qt::white);
+            p.drawPath(path);
+        }
+        QImage shadow = blurredAlpha(core, std::max(1, px / 10));
+        {
+            QPainter p(&shadow);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.fillRect(shadow.rect(), QColor(0, 0, 0, 230));
+        }
+        {
+            QPainter p(&core);
+            p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+            p.fillRect(core.rect(), ink);
+        }
+        QPainter p(&clock.strip);
+        p.drawImage(QPointF(i * px, std::max(1.0, px / 40.0)), shadow, QRectF(0, 0, px, px - std::max(1.0, px / 40.0)));
+        p.drawImage(i * px, px, core);
+    }
+    return clock;
 }
 
 NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit) {

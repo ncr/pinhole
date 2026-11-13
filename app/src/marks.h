@@ -2,6 +2,8 @@
 
 #include <QQuickImageProvider>
 
+#include <array>
+
 // The small marks in a grid cell's bottom left corner that say what a cell
 // is beyond a photo: a video, a Live Photo, a favourite, several photos as
 // one card (a plugin's stack, such as a series), or whatever a plugin marks
@@ -30,6 +32,27 @@ QImage markImage(const MarkShape &mark, int px);
 // lighter, over a soft dark shadow so it reads on bright photos too, `px`
 // pixels square.
 QImage plainMark(const MarkShape &mark, const QColor &colour, int px);
+
+// A video's length, as the grid writes it after the video mark on cells
+// seen closer (and as the bar's panel writes it under a video): "0:42",
+// "12:05", "1:02:33", rounded to the second; empty for none.
+QString clockText(double seconds);
+
+// The characters a length is written in, "0123456789:", drawn as
+// plainMark() draws a mark (in `colour`, a little lighter, over a soft dark
+// shadow), each in a cell `px` square of a strip twice `px` tall: their
+// shadows in the top row, their cores in the bottom, so the grid draws a
+// length's shadows first and none falls on a neighbour's core. As tall as
+// the plain marks' shapes, about the middle of the cell, which the
+// character's `advance` (a share of `px`, every digit as wide) is centred
+// in. clockChar() is a character's cell, or -1.
+constexpr int kClockChars = 11;
+struct PlainClock {
+    QImage strip;
+    std::array<double, kClockChars> advance{};
+};
+PlainClock plainClock(const QColor &colour, int px);
+int clockChar(QChar c);
 
 // The same mark lit like a neon tube, for cells seen from afar, where a
 // white mark is lost among the photos: a white-hot core in a tint of
