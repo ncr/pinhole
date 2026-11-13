@@ -1418,12 +1418,12 @@ QtObject {
         QJsonObject manifest;
         QString main;
         // No Main.qml: said.
-        write("manifest.json", R"({"api": 15, "name": "Short"})");
+        write("manifest.json", R"({"api": 16, "name": "Short"})");
         QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("no Main.qml"));
         write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {}\n");
         QCOMPARE(Plugins::manifestProblem(dir, &manifest, &main), QString());
         QCOMPARE(main, QStringLiteral("Main.qml"));
-        const QJsonObject old{{"api", 15}, {"schemaVersion", 1}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+        const QJsonObject old{{"api", 16}, {"schemaVersion", 1}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
         const QString said = Plugins::manifestWarnings(dir, old).join('\n');
         QVERIFY2(said.contains("\"schemaVersion\" is not a manifest's key") && said.contains("\"entryPoints\" is not a manifest's key"),
                  qPrintable(said));
@@ -4007,7 +4007,7 @@ QtObject {
             QTemporaryDir root;
             const QString dir = root.path() + "/" + id;
             QDir().mkpath(dir + "/module");
-            write(dir + "/manifest.json", QStringLiteral(R"({"api": 15, "id": "%1", "name": "Map"})").arg(id).toUtf8());
+            write(dir + "/manifest.json", QStringLiteral(R"({"api": 16, "id": "%1", "name": "Map"})").arg(id).toUtf8());
             write(dir + "/Main.qml", "import QtQuick\nItem {}\n");
             write(dir + "/module/Gestures.qml", "import QtQuick\nItem {\n    PinchHandler {}\n}\n");
             const QString errors = Plugins::footguns(dir).errors.join('\n');
@@ -4132,12 +4132,11 @@ QtObject {
     }
 
     static std::unique_ptr<PluginMark> mark(const QString &name, const QString &field, const QString &icon = "live",
-                                            const QString &colour = "green", int order = 50) {
+                                            int order = 50) {
         auto m = std::make_unique<PluginMark>();
         m->setName(name);
         m->setField(field);
         m->setIcon(icon);
-        m->setColour(colour);
         m->setOrder(order);
         return m;
     }
@@ -4159,10 +4158,10 @@ QtObject {
         // Pinhole's own: video and stack. Live Photos' and favourites' are
         // their plugins' (Live off until turned on, as plugins/live has it).
         QCOMPARE(kindIds(plugins), (QStringList{"pinhole/video", "pinhole/stack"}));
-        auto live = mark("live", "live", "live", "yellow", 30);
+        auto live = mark("live", "live", "live", 30);
         live->setDefaultShown(false);
         plugins.setMarks("pinhole.live", {live.get()});
-        auto favourite = mark("favorite", "favorite", "heart", "red", 10);
+        auto favourite = mark("favorite", "favorite", "heart", 10);
         plugins.setMarks("pinhole.favourites", {favourite.get()});
         QSignalSpy kindsChanged(&plugins, &Plugins::markKindsChanged);
         const QStringList pinholes{"pinhole.favourites/favorite", "pinhole/video", "pinhole.live/live", "pinhole/stack"};
@@ -4170,13 +4169,12 @@ QtObject {
         const QVariantMap video = plugins.markKinds()[1].toMap();
         QCOMPARE(video.value("plugin").toString(), QString());
         QCOMPARE(video.value("field").toString(), QStringLiteral("video"));
-        QCOMPARE(video.value("colour").toString(), QStringLiteral("cyan"));
         QCOMPARE(plugins.markKinds()[2].toMap().value("plugin").toString(), QStringLiteral("pinhole.live"));
         QVERIFY(!plugins.markKinds()[2].toMap().value("defaultShown").toBool());
 
         // Two of one plugin's, by their order among Pinhole's.
-        auto glyph = mark("star", "", QStringLiteral(""), "#ff8800", 25);
-        auto lived = mark("lived", "live", "live", "blue");
+        auto glyph = mark("star", "", QStringLiteral(""), 25);
+        auto lived = mark("lived", "live", "live");
         plugins.setMarks("me.p0", {glyph.get(), lived.get()});
         QCOMPARE(kindIds(plugins), (QStringList{"pinhole.favourites/favorite", "pinhole/video", "me.p0/star",
                                                 "pinhole.live/live", "me.p0/lived", "pinhole/stack"}));
@@ -4196,12 +4194,11 @@ QtObject {
         // Not right: left out, and said under the plugin.
         auto noField = mark("a", "date");
         auto noIcon = mark("b", "", "two words");
-        auto noColour = mark("c", "", "live", "pink");
         auto noName = mark("d/e", "");
-        plugins.setMarks("me.p1", {noField.get(), noIcon.get(), noColour.get(), noName.get()});
+        plugins.setMarks("me.p1", {noField.get(), noIcon.get(), noName.get()});
         QCOMPARE(kindIds(plugins).size(), 6);
         const QString problem = plugins.at("me.p1").value("problem").toString();
-        for (const QString &said : {"no field \"date\"", "icon must be", "no colour \"pink\"", "\"d/e\""})
+        for (const QString &said : {"no field \"date\"", "icon must be", "\"d/e\""})
             QVERIFY2(problem.contains(said), qPrintable(problem));
         // ...and a plugin's own name used twice.
         auto again = mark("lived", "video");
@@ -4356,8 +4353,8 @@ import Pinhole.Plugin
 PinholePlugin {
     property var picked: [1]
     marks: [
-        PluginMark { name: "picked"; text: "Picked"; icon: "★"; colour: "green"; photos: picked },
-        PluginMark { name: "loved"; field: "favorite"; icon: "heart"; colour: "blue"; order: 5; defaultShown: false }
+        PluginMark { name: "picked"; text: "Picked"; icon: "★"; photos: picked },
+        PluginMark { name: "loved"; field: "favorite"; icon: "heart"; order: 5; defaultShown: false }
     ]
 })", QUrl());
         std::unique_ptr<QObject> item(component.create());
@@ -4367,7 +4364,6 @@ PinholePlugin {
         bench.js("plugins.setMarks('me.a', item.marks)");
         QCOMPARE(kindIds(*bench.plugins), (QStringList{"me.a/loved", "pinhole/video", "me.a/picked", "pinhole/stack"}));
         const QVariantMap loved = bench.plugins->markKinds()[0].toMap();
-        QCOMPARE(loved.value("colour").toString(), QStringLiteral("blue"));
         QVERIFY(!loved.value("defaultShown").toBool());
         QCOMPARE(bench.plugins->markKinds()[2].toMap().value("text").toString(), QStringLiteral("Picked"));
         QCOMPARE(bench.plugins->marksOf("me.a"), (QVariantMap{{"picked", QVariantList{1}}}));
@@ -4378,7 +4374,7 @@ PinholePlugin {
     }
 
     // The kinds' shapes: Pinhole's four, one character, and nothing else;
-    // each drawn, plain and lit.
+    // each drawn.
     void aMarksIconIsOneOfPinholesShapesOrOneCharacter() {
         QCOMPARE(markShape("video").builtin, QStringLiteral("video"));
         QCOMPARE(markShape("favorite").builtin, QStringLiteral("heart"));
@@ -4399,9 +4395,30 @@ PinholePlugin {
                 return n;
             };
             QVERIFY2(lit(markImage(shape, 40)) > 40, qPrintable(icon));
-            QVERIFY2(lit(plainMark(shape, Qt::green, 40)) > 40, qPrintable(icon));
-            QVERIFY2(lit(neonMark(shape, Qt::green, 22).core) > 20, qPrintable(icon));
         }
+    }
+
+    // A video's length as the grid and the bar's panel write it, and its
+    // characters drawn, each with an outline and a core.
+    void aVideosLengthIsMinutesAndSecondsOrHours() {
+        QCOMPARE(clockText(0), QString());
+        QCOMPARE(clockText(4.4), QStringLiteral("0:04"));
+        QCOMPARE(clockText(59.6), QStringLiteral("1:00"));
+        QCOMPARE(clockText(725), QStringLiteral("12:05"));
+        QCOMPARE(clockText(3753), QStringLiteral("1:02:33"));
+        QCOMPARE(clockChar(QLatin1Char(':')), 10);
+        QCOMPARE(clockChar(QLatin1Char('a')), -1);
+        const PlainClock clock = plainClock(40);
+        QCOMPARE(clock.strip.size(), QSize(40 * kClockChars, 80));
+        QCOMPARE(clock.advance[0], clock.advance[1]);
+        QVERIFY(clock.advance[10] > 0 && clock.advance[0] > 0);
+        int outline = 0, core = 0;
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 40; ++x) {
+                outline += qAlpha(clock.strip.pixel(x, y)) > 64;
+                core += qAlpha(clock.strip.pixel(x, 40 + y)) > 128;
+            }
+        QVERIFY(outline > 20 && core > 20);
     }
 
     void screenshotsHidesWhatItKeptAtOnceAndNeverOneLibrarysAsAnothers() {
@@ -5564,7 +5581,6 @@ PinholePlugin {
         // Its mark: the library's field, a red heart first in the corner, shown.
         QCOMPARE(bench.js("plugin.marks[0].field").toString(), QString("favorite"));
         QCOMPARE(bench.js("plugin.marks[0].icon").toString(), QString("heart"));
-        QCOMPARE(bench.js("plugin.marks[0].colour").toString(), QString("red"));
         QCOMPARE(bench.js("plugin.marks[0].order").toInt(), 10);
         QVERIFY(bench.js("plugin.marks[0].defaultShown").toBool());
         QCOMPARE(bench.js("plugin.shownAction.key").toString(), QString("F"));
@@ -6211,7 +6227,7 @@ PinholePlugin {
         QDir().mkpath(QFileInfo(config).absolutePath());
         QFile::remove(config);
         write(config, R"({"enabled": {"t": true}})");
-        write(copy + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
+        write(copy + "/manifest.json", R"({"api": 16, "id": "t", "name": "t"})");
         write(copy + "/Main.qml", "import QtQuick\nItem {}\n");
         auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
                                                    QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
@@ -6565,8 +6581,8 @@ PinholePlugin {
     Command { name: "probe.all"; keys: ["["]; keyLayer: "any"; onTriggered: plugin.seen = 2 }
     Command { name: "probe.fine"; keys: ["]"]; keyLayer: "plugin"; usable: plugin.covering; onTriggered: plugin.seen = 3 }
     Menu { }
-    marks: [ PluginMark { name: "n"; icon: "moon"; colour: "purple" } ]
-    actions: [ PluginAction { place: "select"; text: qsTr("Go") } ]
+    marks: [ PluginMark { name: "n"; icon: "moon" } ]
+    actions: [ PluginAction { place: "select"; text: qsTr("Go"); textColour: "purple" } ]
     Loader { source: "../series/Studio.qml" }
     Component.onCompleted: {
         sources.show("x")
@@ -6585,7 +6601,7 @@ PinholePlugin {
         QVERIFY2(errors.contains("Main.qml:10: keyLayer \"any\""), qPrintable(errors));
         QVERIFY2(!errors.contains("Main.qml:11:"), qPrintable(errors));
         QVERIFY2(errors.contains("Main.qml:12: a Menu opens over the whole window"), qPrintable(errors));
-        QVERIFY2(errors.contains("icon \"moon\"") && errors.contains("colour \"purple\""), qPrintable(errors));
+        QVERIFY2(errors.contains("icon \"moon\"") && errors.contains("textColour \"purple\""), qPrintable(errors));
         QVERIFY2(errors.contains("place \"select\" is none of Pinhole's (selection?)"), qPrintable(errors));
         QVERIFY2(errors.contains("Main.qml:15: ../series/Studio.qml is outside the plugin"), qPrintable(errors));
         QVERIFY2(errors.contains("Main.qml:17: sources is the window's own"), qPrintable(errors));
@@ -6604,7 +6620,7 @@ PinholePlugin {
         QTemporaryDir root;
         const QString dir = root.path() + "/me.quiet";
         QDir().mkpath(dir);
-        write(dir + "/manifest.json", R"({"api": 15, "id": "me.quiet", "name": "Quiet"})");
+        write(dir + "/manifest.json", R"({"api": 16, "id": "me.quiet", "name": "Quiet"})");
         write(dir + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 import Pinhole.Internal
@@ -6632,7 +6648,7 @@ PinholePlugin {
         QVERIFY2(!errors.contains("Main.qml:12"), qPrintable(errors));
         QVERIFY2(warnings.contains("Main.qml:7: a Shortcut takes its keys everywhere"), qPrintable(warnings));
         // Pinhole's own (or a copy keeping its id) may use Pinhole.Internal.
-        write(dir + "/manifest.json", R"({"api": 15, "id": "pinhole.quiet", "name": "Quiet"})");
+        write(dir + "/manifest.json", R"({"api": 16, "id": "pinhole.quiet", "name": "Quiet"})");
         QVERIFY(!Plugins::footguns(dir).errors.join('\n').contains("Pinhole.Internal"));
     }
 

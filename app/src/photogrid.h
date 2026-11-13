@@ -69,19 +69,14 @@ class PhotoGrid : public QQuickItem {
     // library that is not empty but shows nothing.
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY cellsChanged)
     // The kinds of mark there are (Plugins::markKinds), in their order left
-    // to right in a cell's corner, each { id, icon, colour, field }: its
-    // shape (marks.h: markShape), its colour (a theme's, lit as neon where
-    // cells are small and unlit closer), and the library's field that
+    // to right in a cell's corner, each { id, icon, field }: its shape
+    // (marks.h: markShape), and the library's field that
     // carries it ("video", "live", "favorite"; "stack" for a stack's card),
     // or none for one whose photos a plugin lists (setMarkBits). At most
     // 32, a bit of a word each.
     Q_PROPERTY(QVariantList markKinds READ markKinds WRITE setMarkKinds NOTIFY markKindsChanged)
     // The ids of those drawn: the others are turned off (MarkChoices).
     Q_PROPERTY(QStringList marksShown READ marksShown WRITE setMarksShown NOTIFY marksShownChanged)
-    // The colour of the video mark and the video's length after it on
-    // cells seen closer, as text is: not the mark's own colour, which is
-    // its neon's from afar.
-    Q_PROPERTY(QColor captionColor READ captionColor WRITE setCaptionColor NOTIFY captionColorChanged)
     Q_PROPERTY(int columns READ columns NOTIFY columnsChanged)
     Q_PROPERTY(bool animating READ animating NOTIFY animatingChanged)
     Q_PROPERTY(bool statsVisible READ statsVisible WRITE setStatsVisible NOTIFY statsVisibleChanged)
@@ -163,8 +158,6 @@ public:
     void setMarkKinds(const QVariantList &kinds);
     QStringList marksShown() const { return m_marksShown; }
     void setMarksShown(const QStringList &ids);
-    QColor captionColor() const { return m_captionColor; }
-    void setCaptionColor(const QColor &colour);
     // The marks plugins list by photo: a word for each library position,
     // the bit of each kind (by its place in markKinds) that marks it. Empty
     // for none; read past its end as none.
@@ -303,7 +296,6 @@ signals:
     void cursorShownChanged();
     void rangeNextChanged();
     void cursorColorChanged();
-    void captionColorChanged();
     void coveredChanged();
     void dateLabelChanged();
     void zoomingChanged();
@@ -380,14 +372,6 @@ private:
     void setScroll(double y);
     void syncBounds();
     void updateAnimating();
-    // Whether a level is far enough out for the marks to be neon,
-    // and noting when the grid came to rest at such a level, from which
-    // the tubes strike one by one (-1: not lit).
-    bool neonAt(int columns) const;
-    void updateNeon();
-    double m_neonSince = -1; // s, on m_neonClock
-    // Seconds of animation frames, the strike's clock.
-    double m_neonClock = 0;
     void refreshStats();
     void invalidateSceneGraph();
     void touched(double timeMs, const char *how);
@@ -428,7 +412,6 @@ private:
     struct MarkKind {
         QString id;
         MarkShape shape;
-        QColor colour;
         bool operator==(const MarkKind &) const = default;
     };
     QVariantList m_markKindsGiven;
@@ -453,7 +436,6 @@ private:
     bool m_cursorLeads = false;
     double m_cursorPressed = -1, m_cursorStepped = -1;
     QColor m_cursorColor{0xc0, 0xca, 0xf5};
-    QColor m_captionColor{Qt::white};
     void revealCell(int cell);
     void keepCursorInView();
     // The cell the pointer is over, else the middle one in view.

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Shapes
 import Quickshell
 import qs.Commons
 import qs.Commons as Commons
@@ -7,7 +8,8 @@ import qs.Commons as Commons
 // One photo in the panel's grid, and the thing you drag.
 //
 // As in Pinhole: a square of the photo's middle, its average colour until
-// the thumbnail is read, a video's length in its corner, and a border of
+// the thumbnail is read, a video's mark and length in its corner as the
+// grid draws them, and a border of
 // the accent around one chosen. A photo new since the panel was last
 // opened has a dot of the accent.
 //
@@ -128,19 +130,6 @@ Item {
       }
     }
 
-    // Shade for what is drawn over the photo, only where it is.
-    Rectangle {
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      height: parent.height * 0.42
-      visible: cell.item && cell.item.video
-      gradient: Gradient {
-        GradientStop { position: 0; color: "transparent" }
-        GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0.45) }
-      }
-    }
-
     // Waiting for the file a drag carries: the photo dims under a ring.
     Rectangle {
       anchors.fill: parent
@@ -158,23 +147,58 @@ Item {
     layer.enabled: true
   }
 
-  // A video's length, white with a soft shadow like Pinhole's marks.
-  Text {
-    id: length
-    anchors.left: parent.left
-    anchors.bottom: parent.bottom
-    anchors.margins: Style.space(5)
+  // A video's mark and its length, as Pinhole's grid draws them on a cell
+  // of this size (app/src/marks.cpp, photogrid.cpp): a play triangle in a
+  // square `markPx` big, 4 in from the corner, then the length, white over
+  // a thin dark outline.
+  Item {
+    id: videoMark
+    readonly property real markPx: Style.space(22)
+    x: Style.space(4)
+    y: parent.height - Style.space(4) - markPx
+    width: markPx
+    height: markPx
     visible: !!cell.item && cell.item.video
-    text: cell.clock(cell.item ? cell.item.duration : 0)
-    textFormat: Text.PlainText
-    font.family: cell.store ? cell.store.fontFamily : Style.font.family
-    font.pixelSize: Style.font.caption
-    font.weight: Font.DemiBold
-    font.features: { "tnum": 1 }
-    color: "white"
-    style: Text.Raised
-    styleColor: Qt.rgba(0, 0, 0, 0.35)
-    renderType: Text.NativeRendering
+
+    Shape {
+      anchors.fill: parent
+      preferredRendererType: Shape.CurveRenderer
+      ShapePath {
+        strokeColor: Qt.rgba(0, 0, 0, 0.75)
+        strokeWidth: videoMark.markPx * 0.15
+        fillColor: Qt.rgba(0, 0, 0, 0.75)
+        joinStyle: ShapePath.RoundJoin
+        startX: videoMark.markPx * 0.35; startY: videoMark.markPx * 0.25
+        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.75 }
+        PathLine { x: videoMark.markPx * 0.77; y: videoMark.markPx * 0.5 }
+        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.25 }
+      }
+      ShapePath {
+        strokeColor: "white"
+        strokeWidth: videoMark.markPx * 0.08
+        fillColor: "white"
+        joinStyle: ShapePath.RoundJoin
+        startX: videoMark.markPx * 0.35; startY: videoMark.markPx * 0.25
+        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.75 }
+        PathLine { x: videoMark.markPx * 0.77; y: videoMark.markPx * 0.5 }
+        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.25 }
+      }
+    }
+
+    // The digits as tall as the triangle's middle, on the grid's baseline.
+    Text {
+      x: videoMark.markPx * 0.82
+      y: videoMark.markPx * 0.71 - baselineOffset
+      text: cell.clock(cell.item ? cell.item.duration : 0)
+      textFormat: Text.PlainText
+      font.family: cell.store ? cell.store.fontFamily : Style.font.family
+      font.pixelSize: Math.round(videoMark.markPx * 0.575)
+      font.weight: Font.DemiBold
+      font.features: { "tnum": 1 }
+      color: "white"
+      style: Text.Outline
+      styleColor: Qt.rgba(0, 0, 0, 0.75)
+    }
   }
 
   // New since the panel was last looked at.

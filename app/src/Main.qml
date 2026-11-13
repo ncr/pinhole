@@ -36,11 +36,8 @@ ApplicationWindow {
         stacks: win.pluginStacks
         hidden: win.pluginHidden
         // Every kind of mark, Pinhole's and the plugins' (plugins.markKinds),
-        // in the theme's colours; those switched on in the side panel drawn.
-        markKinds: plugins.markKinds.map(k => ({ id: k.id, icon: k.icon, field: k.field, colour: win.markColour(k.colour) }))
-        // A video's mark and length up close, as text on a photo: the
-        // theme's, or white where the theme's is dark on dark shadow.
-        captionColor: theme.light ? "white" : theme.foreground
+        // those switched on in the side panel drawn.
+        markKinds: plugins.markKinds.map(k => ({ id: k.id, icon: k.icon, field: k.field }))
         marksShown: (markChoices.revision, plugins.markKinds.filter(k => markChoices.shown(k.id, k.defaultShown)).map(k => k.id))
         // The keyboard's cursor, while the keyboard is what is in use.
         cursorShown: keymap.input === "keyboard"

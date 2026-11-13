@@ -542,7 +542,7 @@ pub fn usable_id(id: &str) -> bool {
 
 /// The plugin API this pinholed is of: the window's (Plugins::api), the
 /// two always the same. A plugin is written for it, and no other.
-pub const API: i64 = 15;
+pub const API: i64 = 16;
 
 /// As the window takes a manifest at all (Plugins::manifestProblem).
 fn taken(id: &str, dir: &Path, manifest: &Value) -> Result<(), String> {
@@ -611,12 +611,12 @@ mod tests {
         let made = |kind: &str| serde_json::json!({"kind": kind, "from": "live", "type": "public.mpeg-4", "extension": "mp4",
                                                    "program": "make", "args": [kind]});
         let manifest = |id: &str, api: i64, makes: Value| serde_json::json!({"api": api, "id": id, "makes": makes});
-        plugin(&places.builtin, "live", manifest("pinhole.live", 15, serde_json::json!([made("bounce"), made("long_exposure")])));
+        plugin(&places.builtin, "live", manifest("pinhole.live", API, serde_json::json!([made("bounce"), made("long_exposure")])));
         plugin(&places.personal, "old", manifest("me.old", 14, serde_json::json!([made("bounce")])));
-        plugin(&places.personal, "odd", manifest("me.odd", 15, serde_json::json!([made("sparkle"),
+        plugin(&places.personal, "odd", manifest("me.odd", API, serde_json::json!([made("sparkle"),
             {"kind": "bounce", "from": "live", "type": "public.mpeg-4", "extension": "MP4", "program": "make"}])));
         // Kinds of its own: under its id.
-        plugin(&places.personal, "steady", manifest("me.steady", 15, serde_json::json!([made("me.steady/steadied"),
+        plugin(&places.personal, "steady", manifest("me.steady", API, serde_json::json!([made("me.steady/steadied"),
             made("me.other/steadied"), made("me.steady/Not Fine")])));
         let (found, refused) = makers(&places);
         let kinds: Vec<(&str, &str)> = found.iter().map(|m| (m.plugin.as_str(), m.kind.as_str())).collect();
@@ -624,7 +624,7 @@ mod tests {
         assert!(found[0].builtin && found[0].program.ends_with("live/make") && found[0].args == ["bounce"]);
         let refused = refused.join("\n");
         // Written for another API: not taken.
-        assert!(refused.contains("me.old: makes: it is written for plugin API 14, and this Pinhole has 15"), "{refused}");
+        assert!(refused.contains(&format!("me.old: makes: it is written for plugin API 14, and this Pinhole has {API}")), "{refused}");
         assert!(refused.contains("me.odd: makes \"sparkle\": \"kind\" is one of bounce, long_exposure"), "{refused}");
         assert!(refused.contains("me.steady: makes \"me.other/steadied\": a kind of its own is \"me.steady/<name>\""), "{refused}");
         assert!(refused.contains("me.steady: makes \"me.steady/Not Fine\""), "{refused}");
@@ -637,13 +637,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pinhole-short-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(taken("me.short", &dir, &serde_json::json!({"api": 15})).unwrap_err().contains("no Main.qml"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": 16})).unwrap_err().contains("no Main.qml"));
         std::fs::write(dir.join("Main.qml"), "").unwrap();
-        assert_eq!(taken("me.short", &dir, &serde_json::json!({"api": 15})), Ok(()));
+        assert_eq!(taken("me.short", &dir, &serde_json::json!({"api": 16})), Ok(()));
         // Of another API: not taken, older or newer.
         assert!(taken("me.short", &dir, &serde_json::json!({"api": 14})).unwrap_err().contains("written for plugin API 14"));
         assert!(taken("me.short", &dir, &serde_json::json!({})).unwrap_err().contains("written for plugin API 0"));
-        assert!(taken("me.short", &dir, &serde_json::json!({"api": 16})).unwrap_err().contains("needs a newer Pinhole"));
+        assert!(taken("me.short", &dir, &serde_json::json!({"api": API + 1})).unwrap_err().contains("needs a newer Pinhole"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -708,7 +708,7 @@ mod tests {
             std::fs::create_dir_all(&at).unwrap();
             std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
             let sources: Vec<Value> = kinds.iter().map(|k| serde_json::json!({"kind": k, "provider": "run"})).collect();
-            let manifest = serde_json::json!({"api": 15, "id": id, "sources": sources});
+            let manifest = serde_json::json!({"api": 16, "id": id, "sources": sources});
             std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
             std::fs::write(at.join("run"), "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(at.join("run"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -747,7 +747,7 @@ mod tests {
             }
         };
         let manifest = |id: &str, sources: Value| {
-            serde_json::json!({"api": 15, "id": id, "sources": sources})
+            serde_json::json!({"api": 16, "id": id, "sources": sources})
         };
         let one = |kind: &str, provider: &str| serde_json::json!([{"kind": kind, "provider": provider}]);
         // A built-in with an in-process kind (no provider: not one of these),
@@ -813,19 +813,19 @@ mod tests {
                 std::fs::set_permissions(at.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
             }
         };
-        plugin(&places.builtin, "people", "pinhole.people", 15,
+        plugin(&places.builtin, "people", "pinhole.people", API,
                serde_json::json!([{"name": "faces", "program": "run", "args": ["daemon"], "per": "source"}]));
         // A built-in one that starts off.
-        plugin(&places.builtin, "zoo", "pinhole.zoo", 15, serde_json::json!([{"name": "keeper", "program": "run"}]));
+        plugin(&places.builtin, "zoo", "pinhole.zoo", API, serde_json::json!([{"name": "keeper", "program": "run"}]));
         let zoo = places.builtin.join("zoo/manifest.json");
         let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&zoo).unwrap()).unwrap();
         manifest["startsOff"] = Value::Bool(true);
         std::fs::write(&zoo, manifest.to_string()).unwrap();
         // A built-in one your copy replaces, workers and all.
-        plugin(&places.builtin, "search", "pinhole.search", 15, serde_json::json!([{"name": "old", "program": "run"}]));
-        plugin(&places.personal, "my-search", "pinhole.search", 15, serde_json::json!([{"name": "new", "program": "./run"}]));
+        plugin(&places.builtin, "search", "pinhole.search", API, serde_json::json!([{"name": "old", "program": "run"}]));
+        plugin(&places.personal, "my-search", "pinhole.search", API, serde_json::json!([{"name": "new", "program": "./run"}]));
         // Of your own: one right, and many wrong.
-        plugin(&places.personal, "mine", "me.mine", 15, serde_json::json!([
+        plugin(&places.personal, "mine", "me.mine", API, serde_json::json!([
             {"name": "index", "program": "run"},
             {"name": "index", "program": "run"},
             {"name": "up", "program": "../mine/run"},
@@ -838,7 +838,7 @@ mod tests {
             "run",
         ]));
         plugin(&places.personal, "old", "me.old", 10, serde_json::json!([{"name": "w", "program": "run"}]));
-        plugin(&places.personal, "odd", "me.odd", 15, serde_json::json!({"name": "w", "program": "run"}));
+        plugin(&places.personal, "odd", "me.odd", API, serde_json::json!({"name": "w", "program": "run"}));
 
         let (found, problems) = workers(&places);
         let names: Vec<(&str, &str, bool)> = found.iter().map(|w| (w.plugin.as_str(), w.name.as_str(), w.builtin)).collect();

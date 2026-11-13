@@ -29,7 +29,7 @@ A custom view presents your existing library differently. This example reads
 the date column only when you press **F5**, then opens a themed, scrollable
 list. **Escape** returns to the grid. It creates no files and changes no photos.
 
-**Dependencies:** Pinhole of plugin API 15; no external programs.
+**Dependencies:** Pinhole of plugin API 16; no external programs.
 **Folder:** `~/.config/pinhole/plugins/example.years/`.
 
 ```sh
@@ -45,7 +45,7 @@ library. The [kit reference](plugins.md#the-kit) explains the shared controls.
 
 ```json
 {
-  "api": 15,
+  "api": 16,
   "id": "example.years",
   "name": "Example years",
   "version": "1.0.0",
@@ -115,7 +115,7 @@ photo's average colour, keeps it in Pictures/Pinhole and copies it. It
 confirms success only after the clipboard is ready. **Escape** cancels the
 dialog. This demonstrates the workflow; it does not export the photo itself.
 
-**Dependencies:** Pinhole of plugin API 15 and ImageMagick's `magick` executable
+**Dependencies:** Pinhole of plugin API 16 and ImageMagick's `magick` executable
 (on Arch/Omarchy, package `imagemagick`). A missing executable is reported
 beside the action. Originals remain unchanged.
 **Folder:** `~/.config/pinhole/plugins/example.ask/`.
@@ -134,7 +134,7 @@ explains cancellation and error handling.
 
 ```json
 {
-  "api": 15,
+  "api": 16,
   "id": "example.ask",
   "name": "Example ask",
   "version": "1.0.0",
@@ -227,7 +227,7 @@ thumbnails. This example is read-only: it neither imports nor deletes originals.
 It lists only the chosen folder's immediate JPEG files, not subfolders, and
 uses modification time as the capture-date fallback.
 
-**Dependencies:** Pinhole of plugin API 15, Python 3, and Pinhole's normal image
+**Dependencies:** Pinhole of plugin API 16, Python 3, and Pinhole's normal image
 decoding dependencies. No Python packages or network account are needed.
 **Folder:** `~/.config/pinhole/plugins/me.jpegs/`.
 
@@ -248,7 +248,7 @@ stable ids, rendition keys, batching and errors.
 
 ```json
 {
-  "api": 15,
+  "api": 16,
   "id": "me.jpegs",
   "name": "JPEG folder",
   "sources": [

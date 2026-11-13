@@ -848,10 +848,6 @@ void PluginMark::setIcon(const QString &icon) {
     if (change(m_icon, icon))
         emit changed();
 }
-void PluginMark::setColour(const QString &colour) {
-    if (change(m_colour, colour))
-        emit changed();
-}
 void PluginMark::setOrder(int order) {
     if (change(m_order, order))
         emit changed();
@@ -942,17 +938,14 @@ void Plugins::updateMarkKinds() {
     };
     // Pinhole's own: the video and the stack marks. Live Photos' and
     // favourites' are their plugins' (plugins/live, plugins/favourites).
-    auto core = [](const QString &id, const QString &icon, const QString &colour, int order, const QString &field,
-                   bool shown) {
+    auto core = [](const QString &id, const QString &icon, int order, const QString &field, bool shown) {
         return Kind{{{"id", id}, {"plugin", QString()}, {"name", id.section('/', 1)}, {"text", QString()},
-                     {"icon", icon}, {"colour", colour}, {"order", order}, {"field", field}, {"defaultShown", shown}},
+                     {"icon", icon}, {"order", order}, {"field", field}, {"defaultShown", shown}},
                     nullptr};
     };
-    std::vector<Kind> kinds{core("pinhole/video", "video", "cyan", 20, "video", true),
-                            core("pinhole/stack", "stack", "magenta", 90, "stack", true)};
+    std::vector<Kind> kinds{core("pinhole/video", "video", 20, "video", true),
+                            core("pinhole/stack", "stack", 90, "stack", true)};
     static const QStringList fields{"", "live", "favorite", "video"};
-    static const QStringList colours{"red", "green", "yellow", "blue", "magenta", "cyan", "accent"};
-    static const QRegularExpression hex(QStringLiteral("^#[0-9a-fA-F]{6}$"));
     static const QRegularExpression names(QStringLiteral("^[A-Za-z0-9._-]+$"));
     for (const auto &plugin : m_plugins) {
         const auto found = m_marks.find(plugin->id);
@@ -976,9 +969,6 @@ void Plugins::updateMarkKinds() {
                 problems << QStringLiteral("%1: no field \"%2\" (live, favorite, video, or none for photos)").arg(what, mark->field());
             else if (!markShape(mark->icon()).valid())
                 problems << QStringLiteral("%1: its icon must be video, live, heart, stack or one character").arg(what);
-            else if (!colours.contains(mark->colour()) && !hex.match(mark->colour()).hasMatch())
-                problems << QStringLiteral("%1: no colour \"%2\" (red, green, yellow, blue, magenta, cyan, accent or #rrggbb)")
-                                .arg(what, mark->colour());
             else if (taken.size() == kMaxMarksEach)
                 problems << QStringLiteral("%1 is left out: %2 marks at most for a plugin").arg(what).arg(kMaxMarksEach);
             else if (int(kinds.size()) >= kMaxMarks)
@@ -986,7 +976,7 @@ void Plugins::updateMarkKinds() {
             else {
                 taken << name;
                 kinds.push_back({{{"id", id}, {"plugin", plugin->id}, {"name", name}, {"text", mark->text()},
-                                  {"icon", mark->icon()}, {"colour", mark->colour()}, {"order", mark->order()},
+                                  {"icon", mark->icon()}, {"order", mark->order()},
                                   {"field", mark->field()}, {"defaultShown", mark->defaultShown()}},
                                  mark});
             }

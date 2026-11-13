@@ -241,7 +241,7 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
         });
         return true;
     }
-    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "neon", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "corner", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit", "people", "info", "snappy"};
+    static const QStringList known = {"sourcesfade", "shot", "help", "selectbar", "settings", "sourcesbar", "zoomfast", "wheelzoom", "zoomdates", "drop", "viewer", "copytwice", "live", "actionbar", "layers", "favourite", "tour", "series", "undo", "theme", "background", "mouse", "corner", "keys", "covering", "inputs", "reload", "outgoing", "otherseries", "plugins", "sheet", "send", "frame", "hidden", "stacks", "sources", "sourcesoff", "through", "colour", "hdrvideo", "hdrplay", "stage", "gainmap", "physics", "examples", "timeline", "gridcopy", "gridsharp", "startup", "guide", "lazyplugins", "edit", "people", "info", "snappy"};
     if (!known.contains(name)) {
         std::fprintf(stderr, "pinhole: no self-test %s (there are: %s)\n", qPrintable(name), qPrintable(known.join(", ")));
         return false;
@@ -981,45 +981,6 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 ++*frame;
             });
             timer->start(50);
-        });
-    }
-    // PINHOLE_SELFTEST=neon:<dir>: zooming out to 29 columns, where the
-    // marks' tubes strike, in and out again, then in to 7, where they are
-    // white, and out to 13, where the photos dim and the tubes strike anew,
-    // as 60 frames a second in <dir>
-    // (PINHOLE_SELFTEST_AT: where in the library). Frames are stepped here,
-    // not by the clock, so slow grabs do not change the timing. 29 first, so
-    // its thumbnails are in.
-    if (name == QLatin1String("neon")) {
-        QTimer::singleShot(2500, window, [window, grid, arg] {
-            const double at = qEnvironmentVariable("PINHOLE_SELFTEST_AT").toDouble();
-            window->setProperty("troubleSeen", true);
-            grid->setColumnsNow(29);
-            grid->jumpToFraction(at);
-            QTimer::singleShot(5000, window, [grid, at] { grid->setColumnsNow(13), grid->jumpToFraction(at); });
-            QTimer::singleShot(8000, window, [window, grid, arg] {
-                int frame = 0;
-                auto frames = [&](int n) {
-                    for (int i = 0; i < n; ++i, ++frame) {
-                        grid->advance(1.0 / 60);
-                        window->grabWindow().save(QStringLiteral("%1/%2.jpg").arg(arg).arg(frame, 4, 10, QLatin1Char('0')), nullptr, 92);
-                    }
-                };
-                frames(30);
-                grid->zoomStep(1);
-                frames(150);
-                grid->zoomStep(-1);
-                frames(50);
-                grid->zoomStep(1);
-                frames(150);
-                grid->zoomStep(-1);
-                frames(50);
-                grid->zoomStep(-1);
-                frames(50);
-                grid->zoomStep(1);
-                frames(150);
-                QCoreApplication::quit();
-            });
         });
     }
     if (name == QLatin1String("drop"))

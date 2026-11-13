@@ -53,9 +53,8 @@ QImage blurredAlpha(const QImage &source, int radius) {
 }
 
 // The mark itself, white, in a unit square scaled to `px`, its shapes kept
-// within the middle seven tenths so the shadow has room. As a `tube` (a
-// neon sign's) the filled shapes are drawn as their outlines.
-QImage shape(const MarkShape &mark, int px, bool tube = false) {
+// within the middle seven tenths so the outline has room.
+QImage shape(const MarkShape &mark, int px) {
     QImage image(px, px, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
     QPainter p(&image);
@@ -64,8 +63,7 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
     const QColor white(255, 255, 255);
     if (!mark.glyph.isEmpty()) {
         // A character of the theme's font, as big as Pinhole's own shapes
-        // are (six tenths of the square at its longer side), in the middle;
-        // filled, or as a tube its outline.
+        // are (six tenths of the square at its longer side), in the middle.
         QFont font(Theme::fontFamily());
         font.setPixelSize(100);
         QPainterPath path;
@@ -78,13 +76,8 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
         fit.translate(0.5, 0.5);
         fit.scale(scale, scale);
         fit.translate(-bounds.center().x(), -bounds.center().y());
-        if (tube) {
-            p.setPen(QPen(white, 0.06, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            p.setBrush(Qt::NoBrush);
-        } else {
-            p.setPen(Qt::NoPen);
-            p.setBrush(white);
-        }
+        p.setPen(Qt::NoPen);
+        p.setBrush(white);
         p.drawPath(fit.map(path));
         return image;
     }
@@ -96,7 +89,7 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
         path.lineTo(0.77, 0.5);
         path.closeSubpath();
         p.setPen(QPen(white, 0.08, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.setBrush(tube ? QBrush(Qt::NoBrush) : QBrush(white));
+        p.setBrush(white);
         p.drawPath(path);
     } else if (mark.builtin == QLatin1String("live")) {
         // As the iPhone draws Live: a dot, a ring, and a ring of dots.
@@ -108,9 +101,9 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
         p.drawEllipse(QPointF(0.5, 0.5), 0.2, 0.2);
         p.setPen(Qt::NoPen);
         p.setBrush(white);
-        // As a tube fewer and bigger, or the glow runs them together.
-        const int dots = tube ? 9 : 14;
-        const double ring = tube ? 0.35 : 0.33, dot = tube ? 0.04 : 0.03;
+        // Few and big enough that the outline does not run them together.
+        const int dots = 9;
+        const double ring = 0.35, dot = 0.04;
         for (int i = 0; i < dots; ++i) {
             const double a = 2 * M_PI * i / dots;
             p.drawEllipse(QPointF(0.5 + ring * std::cos(a), 0.5 + ring * std::sin(a)), dot, dot);
@@ -125,13 +118,8 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
         path.cubicTo(0.53, 0.24, 0.58, 0.2, 0.65, 0.2);
         path.cubicTo(0.74, 0.2, 0.83, 0.27, 0.83, 0.38);
         path.cubicTo(0.83, 0.52, 0.7, 0.64, 0.5, 0.79);
-        if (tube) {
-            p.setPen(QPen(white, 0.075, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            p.setBrush(Qt::NoBrush);
-        } else {
-            p.setPen(Qt::NoPen);
-            p.setBrush(white);
-        }
+        p.setPen(Qt::NoPen);
+        p.setBrush(white);
         p.drawPath(path);
     } else if (mark.builtin == QLatin1String("stack")) {
         // Two cards, one behind the other: the one behind shows only at
@@ -146,10 +134,22 @@ QImage shape(const MarkShape &mark, int px, bool tube = false) {
         p.drawRoundedRect(front.adjusted(-0.08, -0.08, 0.08, 0.08), 0.1, 0.1);
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
         p.setPen(QPen(white, 0.065));
-        p.setBrush(tube ? QColor(Qt::transparent) : QColor(255, 255, 255, 60));
+        p.setBrush(QColor(255, 255, 255, 60));
         p.drawRoundedRect(front, 0.07, 0.07);
     }
     return image;
+}
+
+// White over a thin dark outline, so it reads on any photo, light or dark.
+QImage outlined(const QImage &white, int px) {
+    QImage outline = blurredAlpha(white, std::max(1, px / 28));
+    for (int y = 0; y < outline.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(outline.scanLine(y));
+        for (int x = 0; x < outline.width(); ++x)
+            line[x] = qRgba(0, 0, 0, std::min(190, qAlpha(line[x]) * 3));
+    }
+    QPainter(&outline).drawImage(0, 0, white);
+    return outline;
 }
 
 } // namespace
@@ -171,45 +171,7 @@ MarkShape markShape(const QString &icon) {
 
 QImage markImage(const MarkShape &mark, int px) {
     px = std::max(8, px);
-    const QImage white = shape(mark, px);
-    // The shadow at a little over half, a little below, then the mark over it.
-    QImage shadow = blurredAlpha(white, std::max(1, px / 14));
-    {
-        QPainter p(&shadow);
-        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        p.fillRect(shadow.rect(), QColor(0, 0, 0, 150));
-    }
-    QImage result(px, px, QImage::Format_ARGB32_Premultiplied);
-    result.fill(Qt::transparent);
-    QPainter r(&result);
-    r.drawImage(QPointF(0, std::max(1.0, px / 32.0)), shadow);
-    r.drawImage(QPointF(0, 0), white);
-    return result;
-}
-
-QImage plainMark(const MarkShape &mark, const QColor &colour, int px) {
-    px = std::max(8, px);
-    QImage tube = shape(mark, px, true);
-    {
-        QPainter p(&tube);
-        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        const auto light = [](int c) { return c + (255 - c) / 5; };
-        p.fillRect(tube.rect(), QColor(light(colour.red()), light(colour.green()), light(colour.blue())));
-    }
-    // The shadow darker and wider than a white mark's: thin coloured lines
-    // need more of it to stand off a photo.
-    QImage shadow = blurredAlpha(shape(mark, px, true), std::max(1, px / 10));
-    {
-        QPainter p(&shadow);
-        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        p.fillRect(shadow.rect(), QColor(0, 0, 0, 230));
-    }
-    QImage result(px, px, QImage::Format_ARGB32_Premultiplied);
-    result.fill(Qt::transparent);
-    QPainter r(&result);
-    r.drawImage(QPointF(0, std::max(1.0, px / 40.0)), shadow);
-    r.drawImage(QPointF(0, 0), tube);
-    return result;
+    return outlined(shape(mark, px), px);
 }
 
 QString clockText(double seconds) {
@@ -228,13 +190,13 @@ int clockChar(QChar c) {
     return c == QLatin1Char(':') ? 10 : -1;
 }
 
-PlainClock plainClock(const QColor &colour, int px) {
+PlainClock plainClock(int px) {
     px = std::max(8, px);
     PlainClock clock;
     clock.strip = QImage(px * kClockChars, px * 2, QImage::Format_ARGB32_Premultiplied);
     clock.strip.fill(Qt::transparent);
     // Laid out at a size of 100 and scaled into the unit square, the
-    // digits as tall as the plain marks' shapes are.
+    // digits as tall as the marks' shapes are.
     QFont font(Theme::fontFamily());
     font.setPixelSize(100);
     font.setWeight(QFont::DemiBold);
@@ -249,12 +211,11 @@ PlainClock plainClock(const QColor &colour, int px) {
     if (digitHeight <= 0)
         return clock;
     const double scale = 0.42 / digitHeight, baseline = 0.5 + 0.21;
-    const QColor ink = colour;
+    QPainter strip(&clock.strip);
     for (int i = 0; i < kClockChars; ++i) {
         const QChar c = i < 10 ? QChar(QLatin1Char(char('0' + i))) : QChar(QLatin1Char(':'));
         const double own = metrics.horizontalAdvance(c);
-        const double advance = (i < 10 ? digitAdvance : own) * scale;
-        clock.advance[size_t(i)] = advance;
+        clock.advance[size_t(i)] = (i < 10 ? digitAdvance : own) * scale;
         QPainterPath path;
         path.addText(0, 0, font, QString(c));
         QImage core(px, px, QImage::Format_ARGB32_Premultiplied);
@@ -269,60 +230,17 @@ PlainClock plainClock(const QColor &colour, int px) {
             p.setBrush(Qt::white);
             p.drawPath(path);
         }
-        QImage shadow = blurredAlpha(core, std::max(1, px / 10));
+        // The outline alone, the core cut out of it.
+        QImage outline = outlined(core, px);
         {
-            QPainter p(&shadow);
-            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-            p.fillRect(shadow.rect(), QColor(0, 0, 0, 230));
+            QPainter p(&outline);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+            p.drawImage(0, 0, core);
         }
-        {
-            QPainter p(&core);
-            p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-            p.fillRect(core.rect(), ink);
-        }
-        QPainter p(&clock.strip);
-        p.drawImage(QPointF(i * px, std::max(1.0, px / 40.0)), shadow, QRectF(0, 0, px, px - std::max(1.0, px / 40.0)));
-        p.drawImage(i * px, px, core);
+        strip.drawImage(i * px, 0, outline);
+        strip.drawImage(i * px, px, core);
     }
     return clock;
-}
-
-NeonMark neonMark(const MarkShape &mark, const QColor &colour, int px, double lit) {
-    px = std::max(8, px);
-    const int side = int(std::lround(px * kNeonSpread)), at = (side - px) / 2;
-    QImage tube(side, side, QImage::Format_ARGB32_Premultiplied);
-    tube.fill(Qt::transparent);
-    QPainter(&tube).drawImage(at, at, shape(mark, px, true));
-    NeonMark neon;
-    neon.core = tube;
-    {
-        QPainter p(&neon.core);
-        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        // White-hot when lit, the colour's dark glass when not.
-        const auto hot = [&](int c) { return int(lerp(c * 0.3, c + (255 - c) * 0.3, lit)); };
-        p.fillRect(neon.core.rect(), QColor(hot(colour.red()), hot(colour.green()), hot(colour.blue()),
-                                            int(255 * (0.55 + 0.45 * lit))));
-    }
-    // A tight bright glow hugging the tube and a wide soft one, and under
-    // them a wider dark one.
-    const QImage near = blurredAlpha(tube, std::max(1, px / 18));
-    const QImage far = blurredAlpha(tube, std::max(2, px / 5));
-    const QImage dark = blurredAlpha(tube, std::max(3, px / 4));
-    neon.glow = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
-    for (int y = 0; y < side; ++y) {
-        const auto *n = reinterpret_cast<const QRgb *>(near.constScanLine(y));
-        const auto *f = reinterpret_cast<const QRgb *>(far.constScanLine(y));
-        const auto *d = reinterpret_cast<const QRgb *>(dark.constScanLine(y));
-        auto *out = reinterpret_cast<QRgb *>(neon.glow.scanLine(y));
-        for (int x = 0; x < side; ++x) {
-            const double light = lit * std::min(1.0, 2.0 * qAlpha(n[x]) / 255.0 + 2.4 * qAlpha(f[x]) / 255.0);
-            const double shade = std::min(1.0, 2.5 * qAlpha(d[x]) / 255.0) * (0.2 + 0.3 * lit);
-            const double alpha = shade * (1 - light) + 0.45 * light;
-            out[x] = qRgba(int(colour.red() * light), int(colour.green() * light), int(colour.blue() * light),
-                           int(std::lround(alpha * 255)));
-        }
-    }
-    return neon;
 }
 
 QImage MarkProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize) {
