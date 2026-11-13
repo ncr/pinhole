@@ -93,11 +93,14 @@ run_install() {
     fi
     if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
         bin/restart-installed "$PREFIX" "$ROOT"
-        if [ -L "$omarchy_plugin" ] && [ "$(cat "$PREFIX"/lib/pinhole/omarchy-bar/*.qml | cksum)" != "$bar_before" ] \
-            && command -v omarchy-restart-shell >/dev/null 2>&1 && pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; then
-            omarchy-restart-shell >/dev/null 2>&1 && echo "Restarted Omarchy's shell for the new bar widget." \
-                || echo "Could not restart Omarchy's shell; the bar widget changes on its next start." >&2
-        fi
+    fi
+    # The shell is not Pinhole's window: restarted for a changed widget
+    # by an update from the window too (bin/update), which keeps the
+    # window running to restart it itself.
+    if [ -L "$omarchy_plugin" ] && [ "$(cat "$PREFIX"/lib/pinhole/omarchy-bar/*.qml | cksum)" != "$bar_before" ] \
+        && command -v omarchy-restart-shell >/dev/null 2>&1 && pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; then
+        omarchy-restart-shell >/dev/null 2>&1 && echo "Restarted Omarchy's shell for the new bar widget." \
+            || echo "Could not restart Omarchy's shell; the bar widget changes on its next start." >&2
     fi
     echo "Installed $(git rev-parse --short HEAD) into $PREFIX (source checkout)"
     # Another Pinhole found first on PATH (a package's, an older install)
