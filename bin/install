@@ -104,9 +104,11 @@ run_install() {
     # Not Pinhole's window, so also from an update in the window, which
     # keeps the window running (PINHOLE_KEEP_RUNNING) to restart it itself.
     bar_sum="$PREFIX/share/pinhole/omarchy-bar.cksum"
-    bar_now="$(cd "$PREFIX/lib/pinhole/omarchy-bar" 2>/dev/null && find -L . -type f -print0 | sort -z \
-        | xargs -0 cksum 2>/dev/null | cksum)"
-    if [ -L "$omarchy_plugin" ] && [ "$bar_now" != "$(cat "$bar_sum" 2>/dev/null)" ]; then
+    bar_now=
+    if [ -L "$omarchy_plugin" ] && [ -d "$PREFIX/lib/pinhole/omarchy-bar" ]; then
+        bar_now="$(cd "$PREFIX/lib/pinhole/omarchy-bar" && find -L . -type f -print0 | sort -z | xargs -0 cksum | cksum)"
+    fi
+    if [ -n "$bar_now" ] && [ "$bar_now" != "$(cat "$bar_sum" 2>/dev/null || true)" ]; then
         if ! pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; then
             printf '%s\n' "$bar_now" >"$bar_sum"
         elif command -v omarchy-restart-shell >/dev/null 2>&1 && omarchy-restart-shell >/dev/null 2>&1; then
