@@ -249,8 +249,7 @@ PlainClock plainClock(const QColor &colour, int px) {
     if (digitHeight <= 0)
         return clock;
     const double scale = 0.42 / digitHeight, baseline = 0.5 + 0.21;
-    const auto light = [](int c) { return c + (255 - c) / 5; };
-    const QColor ink(light(colour.red()), light(colour.green()), light(colour.blue()));
+    const QColor ink = colour;
     for (int i = 0; i < kClockChars; ++i) {
         const QChar c = i < 10 ? QChar(QLatin1Char(char('0' + i))) : QChar(QLatin1Char(':'));
         const double own = metrics.horizontalAdvance(c);

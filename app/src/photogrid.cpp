@@ -665,6 +665,16 @@ void PhotoGrid::setMarkKinds(const QVariantList &kinds) {
     update();
 }
 
+void PhotoGrid::setCaptionColor(const QColor &colour) {
+    if (colour == m_captionColor)
+        return;
+    m_captionColor = colour;
+    // Drawn into the marks' strip, as the kinds' colours are.
+    ++m_markKindsVersion;
+    update();
+    emit captionColorChanged();
+}
+
 void PhotoGrid::setMarksShown(const QStringList &ids) {
     if (ids == m_marksShown)
         return;
@@ -2546,24 +2556,23 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
 
     // The marks, drawn once for this screen's pixels and these kinds, side
     // by side in their order (a slot for each, one at least), and under
-    // them the characters of a video's length in the video mark's colour,
-    // their shadows (plainClock()) then their cores.
+    // them the characters of a video's length, their shadows (plainClock())
+    // then their cores. Up close the video mark and its length are in the
+    // caption's colour; its own is its neon's.
     const int markSlots = std::max(1, int(m_markKinds.size()));
     const int stripSlots = std::max(markSlots, kClockChars);
     if (!rs.marks || rs.marksDpr != dpr || rs.marksVersion != m_markKindsVersion) {
         const int px = int(std::lround(kMarkMaxPx * dpr));
         QImage strip(px * stripSlots, px * 3, QImage::Format_ARGB32_Premultiplied);
         strip.fill(Qt::transparent);
-        QColor videoColour(Qt::white);
         {
             QPainter p(&strip);
             for (size_t k = 0; k < m_markKinds.size(); ++k) {
-                p.drawImage(int(k) * px, 0, plainMark(m_markKinds[k].shape, m_markKinds[k].colour, px));
-                if (m_markKinds[k].shape.builtin == QLatin1String("video"))
-                    videoColour = m_markKinds[k].colour;
+                const bool video = m_markKinds[k].shape.builtin == QLatin1String("video");
+                p.drawImage(int(k) * px, 0, plainMark(m_markKinds[k].shape, video ? m_captionColor : m_markKinds[k].colour, px));
             }
         }
-        const PlainClock clock = plainClock(videoColour, px);
+        const PlainClock clock = plainClock(m_captionColor, px);
         rs.clockAdvance = clock.advance;
         for (int y = 0; y < clock.strip.height(); ++y)
             std::memcpy(strip.scanLine(px + y), clock.strip.constScanLine(y), size_t(clock.strip.width()) * 4);

@@ -38,9 +38,8 @@ QImage plainMark(const MarkShape &mark, const QColor &colour, int px);
 // "12:05", "1:02:33", rounded to the second; empty for none.
 QString clockText(double seconds);
 
-// The characters a length is written in, "0123456789:", drawn as
-// plainMark() draws a mark (in `colour`, a little lighter, over a soft dark
-// shadow), each in a cell `px` square of a strip twice `px` tall: their
+// The characters a length is written in, "0123456789:", in `colour` over a
+// soft dark shadow as plainMark() draws a mark, each in a cell `px` square of a strip twice `px` tall: their
 // shadows in the top row, their cores in the bottom, so the grid draws a
 // length's shadows first and none falls on a neighbour's core. As tall as
 // the plain marks' shapes, about the middle of the cell, which the
