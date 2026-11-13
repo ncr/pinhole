@@ -175,6 +175,9 @@ signals:
     // or read again.
     void imageChanged();
     void videoChanged();
+    // The video playing from its download goes on from the whole file: sent
+    // just before videoChanged, for the player to keep its place.
+    void videoSwapping();
     void messageChanged();
     void loadingChanged();
     void motionChanged();
@@ -210,6 +213,9 @@ private:
     // fingers left the row.
     void slide(int delta);
     void request(int index, const QString &kind);
+    // Once the video shown, streamed while it downloads, is whole: its file
+    // in place of the stream, if it is still the one shown.
+    void swapToFile(int generation, const QByteArray &id);
     void setMessage(const QString &message);
     void fitPhoto();
     // Where a photo comes in the order the row follows.

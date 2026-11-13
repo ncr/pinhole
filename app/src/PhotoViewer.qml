@@ -271,7 +271,42 @@ Item {
             source: viewer.video ? viewer.videoSource : ""
             videoOutput: videoOutput
             audioOutput: AudioOutput { muted: root.muted || silent }
-            onSourceChanged: if (source.toString() !== "" && viewer.open) play()
+            // Where the stream was, as it goes on from the whole file
+            // (viewer.videoSwapping); -1 for a video started anew. Taken up
+            // as the source changes: the stream's own last statuses come
+            // before that.
+            property real swappedAt: -1
+            property real resumeAt: -1
+            property bool resumePaused: false
+            onSourceChanged: {
+                resumeAt = swappedAt
+                swappedAt = -1
+                if (source.toString() === "" || !viewer.open) {
+                    resumeAt = -1
+                    return
+                }
+                if (resumeAt >= 0)
+                    setPosition(resumeAt)
+                if (resumeAt >= 0 && resumePaused)
+                    pause()
+                else
+                    play()
+            }
+            onMediaStatusChanged: {
+                // Kept until the file is loaded, where the place takes.
+                if (resumeAt >= 0 && (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia)) {
+                    if (Math.abs(position - resumeAt) > 100)
+                        setPosition(resumeAt)
+                    resumeAt = -1
+                }
+            }
+        }
+        Connections {
+            target: viewer
+            function onVideoSwapping() {
+                videoPlayer.swappedAt = videoPlayer.position
+                videoPlayer.resumePaused = videoPlayer.playbackState !== MediaPlayer.PlayingState
+            }
         }
         // HDR video (an iPhone's HLG, Dolby Vision) tone mapped as it is
         // drawn (videoview.h); any other as Qt draws it.

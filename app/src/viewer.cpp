@@ -671,6 +671,11 @@ void Viewer::request(int index, const QString &kind) {
             m_video = playable;
             setMessage({});
             emit videoChanged();
+            // Played as it downloads, it goes on from the file once that is
+            // whole: a player starved by a slow download can show broken
+            // frames until it is opened again.
+            if (!stream.isEmpty())
+                swapToFile(generation, id);
         } else {
             m_image = providerUrl(path);
             // The last, sharpest stage: the photo as edited at full size (the
@@ -685,6 +690,21 @@ void Viewer::request(int index, const QString &kind) {
                 request(index, QStringLiteral("full"));
         }
     }, kind == QLatin1String("video"));
+}
+
+void Viewer::swapToFile(int generation, const QByteArray &id) {
+    // Not streamed: answered when the download is done.
+    m_service->fetch(id, QStringLiteral("video"), [this, generation, id](bool ok, const QJsonObject &result, const QString &) {
+        if (!ok || generation != m_generation || m_index < 0 || m_index >= m_library->count()
+            || m_library->at(m_index).id != id || m_video.isLocalFile())
+            return;
+        const QString path = result.value("path").toString();
+        if (path.isEmpty())
+            return;
+        emit videoSwapping();
+        m_video = QUrl::fromLocalFile(path);
+        emit videoChanged();
+    });
 }
 
 void Viewer::readHdrOf(const QString &path) {

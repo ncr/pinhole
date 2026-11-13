@@ -274,8 +274,10 @@ void runViewerSelfTest(QQuickWindow *window, const Library &library, Viewer &vie
                     finish();
             }
         }));
-        connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, clock, finish] {
-            if (viewer.videoSource().isEmpty())
+        // Played once: a stream going on from the whole file is the same video.
+        auto played = std::make_shared<bool>(false);
+        connections->append(QObject::connect(&viewer, &Viewer::videoChanged, &viewer, [&viewer, c, report, clock, finish, played] {
+            if (viewer.videoSource().isEmpty() || std::exchange(*played, true))
                 return;
             report(c.name, viewer.videoSource().isLocalFile() ? "file" : "stream", QString());
             playFirstFrame(viewer.videoSource(), c.name, clock, finish);
