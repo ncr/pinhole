@@ -147,10 +147,10 @@ Item {
     layer.enabled: true
   }
 
-  // A video's mark and its length, as Pinhole's grid draws them on a cell
-  // of this size (app/src/marks.cpp, photogrid.cpp): a play triangle in a
-  // square `markPx` big, 4 in from the corner, then the length, white over
-  // a thin dark outline.
+  // A video's mark and its length: the play triangle lit as Pinhole's grid
+  // lights it from afar, a cyan neon tube (NeonMark), in a square `markPx`
+  // big, 4 in from the corner; then the length, white over a thin dark
+  // outline as the grid writes it up close.
   Item {
     id: videoMark
     readonly property real markPx: Style.space(22)
@@ -160,29 +160,12 @@ Item {
     height: markPx
     visible: !!cell.item && cell.item.video
 
-    Shape {
-      anchors.fill: parent
-      preferredRendererType: Shape.CurveRenderer
-      ShapePath {
-        strokeColor: Qt.rgba(0, 0, 0, 0.75)
-        strokeWidth: videoMark.markPx * 0.15
-        fillColor: Qt.rgba(0, 0, 0, 0.75)
-        joinStyle: ShapePath.RoundJoin
-        startX: videoMark.markPx * 0.35; startY: videoMark.markPx * 0.25
-        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.75 }
-        PathLine { x: videoMark.markPx * 0.77; y: videoMark.markPx * 0.5 }
-        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.25 }
-      }
-      ShapePath {
-        strokeColor: "white"
-        strokeWidth: videoMark.markPx * 0.08
-        fillColor: "white"
-        joinStyle: ShapePath.RoundJoin
-        startX: videoMark.markPx * 0.35; startY: videoMark.markPx * 0.25
-        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.75 }
-        PathLine { x: videoMark.markPx * 0.77; y: videoMark.markPx * 0.5 }
-        PathLine { x: videoMark.markPx * 0.35; y: videoMark.markPx * 0.25 }
-      }
+    NeonMark {
+      id: videoNeon
+      shape: "video"
+      colour: cell.store ? cell.store.cyan : "#449dab"
+      markPx: videoMark.markPx
+      seed: cell.photoId
     }
 
     // The digits as tall as the triangle's middle, on the grid's baseline.
@@ -201,19 +184,31 @@ Item {
     }
   }
 
-  // New since the panel was last looked at.
-  Rectangle {
+  // New since the panel was last looked at: a dot of the accent, lit as
+  // the video mark is.
+  NeonMark {
+    id: freshNeon
     anchors.top: parent.top
     anchors.right: parent.right
-    anchors.margins: Style.space(6)
-    width: Style.space(8)
-    height: width
-    radius: width / 2
+    anchors.margins: Style.space(2)
+    shape: "dot"
+    colour: Commons.Color.accent
+    markPx: Style.space(16)
+    seed: cell.photoId + "/fresh"
     visible: cell.fresh && !cell.chosen
-    color: Commons.Color.accent
-    border.width: Math.max(1, Style.space(1.5))
-    border.color: Qt.rgba(0, 0, 0, 0.35)
   }
+
+  // The tubes strike each time the panel opens, and a cell that comes while
+  // it is open strikes as it comes.
+  function strike() {
+    videoNeon.strike()
+    freshNeon.strike()
+  }
+  Connections {
+    target: cell.store
+    function onOpenChanged() { if (cell.store.open) cell.strike() }
+  }
+  Component.onCompleted: if (store && store.open) strike()
 
   // Chosen: the accent around it, inside the cell, and a tick.
   Rectangle {

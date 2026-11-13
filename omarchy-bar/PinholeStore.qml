@@ -441,6 +441,21 @@ Singleton {
 
   // ---- What was seen, kept --------------------------------------------
 
+  // The theme's cyan, the colour Pinhole's video mark is lit in
+  // (plugins.cpp's pinhole/video): from the theme's colors.toml, as
+  // Pinhole's own window reads it; Tokyo Night's where it says none.
+  property color cyan: "#449dab"
+  FileView {
+    path: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/current/theme/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      var found = String(text()).match(/^\s*cyan\s*=\s*["'](#[0-9A-Fa-f]{6})["']/m)
+      root.cyan = found ? found[1] : "#449dab"
+    }
+  }
+
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/pinhole"
 
   FileView {
