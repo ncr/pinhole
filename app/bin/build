@@ -10,6 +10,15 @@ cd "$ROOT/build"
 if [ ! -f Makefile ] || [ "$ROOT/pinhole.pro" -nt Makefile ] || [ "$ROOT/src/sources.pri" -nt Makefile ]; then
     qmake6 "$ROOT/pinhole.pro"
 fi
+# The commit the binary says it is (the updater's "running" revision) is
+# written by qmake, which the line above may skip: write it here too when
+# HEAD moved, or an up-to-date window keeps offering an update.
+version="$ROOT/build/generated/buildversion.h"
+commit="$(git -C "$ROOT/.." rev-parse HEAD 2>/dev/null || true)"
+wanted="$(printf '#pragma once\n#define PINHOLE_BUILD_COMMIT "%s"' "$commit")"
+if [ -n "$commit" ] && [ "$(cat "$version" 2>/dev/null)" != "$wanted" ]; then
+    printf '%s\n' "$wanted" > "$version"
+fi
 make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}"
 
 # Pinhole's own plugins' native QML modules, against the window's Qt, each
