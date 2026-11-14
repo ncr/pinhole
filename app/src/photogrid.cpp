@@ -101,7 +101,7 @@ constexpr double kNeonMarksFromPx = 20;
 constexpr double kNeonMarkShare = 0.42;
 constexpr double kNeonTintFill = 0.3;
 constexpr double kNeonTintEdge = 0.7;
-constexpr double kNeonTintEdgeShare = 0.12;
+constexpr double kNeonTintEdgeShare = 0.07;
 // Once the grid rests at such a level, coming from a closer one, the photos
 // first dim by kDusk over kDuskFall seconds, smoothly, so the tubes stand
 // out from them while the grid is still; then the tubes strike (lit ones
