@@ -92,11 +92,16 @@ constexpr double kMarksFromPx = 72;
 // bigger. A zoom cross-fades the white marks into them with the level.
 // Unlike white marks they are on cells down to kNeonMarksFromPx, which
 // is what they are for: 29 columns on a window 1600 wide are 54 px. On
-// cells too small for kNeonMarkPx they shrink to kNeonMarkShare of one.
+// cells too small for kNeonMarkPx they shrink to kNeonMarkShare of one,
+// and on cells too small for any mark, the cell itself is lit in its first
+// mark's colour: a faint wash in a tube along its edge (kNeonTint...).
 constexpr int kNeonFromColumns = 13;
 constexpr double kNeonMarkPx = 22;
 constexpr double kNeonMarksFromPx = 20;
 constexpr double kNeonMarkShare = 0.42;
+constexpr double kNeonTintFill = 0.3;
+constexpr double kNeonTintEdge = 0.95;
+constexpr double kNeonTintEdgeShare = 0.12;
 // Once the grid rests at such a level, coming from a closer one, the photos
 // first dim by kDusk over kDuskFall seconds, smoothly, so the tubes stand
 // out from them while the grid is still; then the tubes strike (lit ones
@@ -203,9 +208,11 @@ struct GridRenderState {
         // The cells' rounded corners: the background drawn over each
         // corner outside its arc, above the photos of the same layer.
         QSGGeometryNode *corners = nullptr;
-        // The dusk over the photos of a lit level (kDusk), then the
-        // marks, over the corners.
+        // The dusk over the photos of a lit level (kDusk), the cells lit
+        // where they are too small for marks, then the marks, over the
+        // corners.
         QSGGeometryNode *dusk = nullptr;
+        QSGGeometryNode *tints = nullptr;
         QSGGeometryNode *marks = nullptr;
     };
     Slot drawSlots[2];
@@ -1960,6 +1967,14 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             slot.dusk->setMaterial(new QSGVertexColorMaterial);
             slot.dusk->setFlag(QSGNode::OwnsMaterial);
             slot.opacity->appendChildNode(slot.dusk);
+            slot.tints = new QSGGeometryNode;
+            auto *tintGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0, 0);
+            tintGeometry->setDrawingMode(QSGGeometry::DrawTriangles);
+            slot.tints->setGeometry(tintGeometry);
+            slot.tints->setFlag(QSGNode::OwnsGeometry);
+            slot.tints->setMaterial(new QSGVertexColorMaterial);
+            slot.tints->setFlag(QSGNode::OwnsMaterial);
+            slot.opacity->appendChildNode(slot.tints);
             slot.marks = new QSGGeometryNode;
             auto *markGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
             markGeometry->setDrawingMode(QSGGeometry::DrawTriangles);
@@ -2221,7 +2236,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         const double cellDevicePx = (strideFor(l.columns) - gapFor(l.columns)) * l.scale * dpr;
         // Small cells, and anything flying past too fast to see detail.
         const bool mosaic = cellDevicePx < kMosaicBelowPx || scrubbing;
-        const double marksFromPx = neonAt(l.columns) ? kNeonMarksFromPx : kMarksFromPx;
+        // Lit levels mark every cell: with marks, or too small for them,
+        // with a tint.
+        const double marksFromPx = neonAt(l.columns) ? 0 : kMarksFromPx;
         int lastWantedPage = -1;
         for (int row = r.firstRow; row <= r.lastRow; ++row) {
             for (int col = r.firstCol; col <= r.lastCol; ++col) {
@@ -2730,6 +2747,45 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                 }
                 slot.dusk->markDirty(QSGNode::DirtyGeometry);
             }
+            const double cellWidthHere = cells.empty() ? 0 : cells.front().rect.width();
+            // Cells too small for a mark are lit themselves, in their first
+            // mark's colour, each as far as it has struck.
+            const bool tinted = neon && cellWidthHere < kNeonMarksFromPx;
+            {
+                QSGGeometry *tg = slot.tints->geometry();
+                tg->allocate(tinted ? int(cells.size()) * 30 : 0);
+                if (tinted) {
+                    auto *tv = tg->vertexDataAsColoredPoint2D();
+                    const double edge = std::max(1.0 / dpr, cellWidthHere * kNeonTintEdgeShare);
+                    auto quad = [&](double x0, double y0, double x1, double y1, const QColor &c, double a) {
+                        // Premultiplied, as the vertex colour material wants.
+                        const auto ch = [&](int v) { return uchar(std::lround(v * a)); };
+                        const uchar r = ch(c.red()), g = ch(c.green()), b = ch(c.blue()), al = uchar(std::lround(255 * a));
+                        const float fx0 = float(x0), fy0 = float(y0), fx1 = float(x1), fy1 = float(y1);
+                        tv[0].set(fx0, fy0, r, g, b, al);
+                        tv[1].set(fx1, fy0, r, g, b, al);
+                        tv[2].set(fx0, fy1, r, g, b, al);
+                        tv[3].set(fx1, fy0, r, g, b, al);
+                        tv[4].set(fx1, fy1, r, g, b, al);
+                        tv[5].set(fx0, fy1, r, g, b, al);
+                        tv += 6;
+                    };
+                    for (const Marked &c : cells) {
+                        const int m = std::countr_zero(c.marks);
+                        const QColor colour = size_t(m) < m_markKinds.size() ? m_markKinds[size_t(m)].colour : QColor(Qt::white);
+                        const double lit = since < kDuskFall ? 0 : neonLit(since - kDuskFall, quint32(c.photo));
+                        const QRectF r(snap(c.rect.left()), snap(c.rect.top()), snap(c.rect.width()), snap(c.rect.height()));
+                        quad(r.left() + edge, r.top() + edge, r.right() - edge, r.bottom() - edge, colour,
+                             kNeonTintFill * lit);
+                        const double e = kNeonTintEdge * lit;
+                        quad(r.left(), r.top(), r.right(), r.top() + edge, colour, e);
+                        quad(r.left(), r.bottom() - edge, r.right(), r.bottom(), colour, e);
+                        quad(r.left(), r.top() + edge, r.left() + edge, r.bottom() - edge, colour, e);
+                        quad(r.right() - edge, r.top() + edge, r.right(), r.bottom() - edge, colour, e);
+                    }
+                }
+                slot.tints->markDirty(QSGNode::DirtyGeometry);
+            }
             const int passes = neon ? 2 : 1;
             const double cellWidthNow = cells.empty() ? 0 : cells.front().rect.width();
             const double markSize = std::clamp(cellWidthNow * kMarkShare, kMarkPx, kMarkMaxPx);
@@ -2749,7 +2805,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                                + clockWidth(c.clock) <= c.rect.width();
             };
             int quads = 0;
-            for (const Marked &c : cells)
+            for (const Marked &c : tinted ? none : cells)
                 quads += std::popcount(c.marks) * passes + (clockFits(c) ? int(c.clock.size()) * 2 : 0);
             QSGGeometry *mg = slot.marks->geometry();
             mg->allocate(quads * 6);
@@ -2762,7 +2818,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             // same middle.
             const double grow = neon ? size * (kNeonSpread - 1) / 2 : 0;
             for (int pass = 0; pass < passes; ++pass) {
-                for (const Marked &c : cells) {
+                for (const Marked &c : tinted ? none : cells) {
                     float v0 = 0, v1 = neon ? 1.0f : 1.0f / 3;
                     if (neon) {
                         const double lit = since < kDuskFall ? 0 : neonLit(since - kDuskFall, quint32(c.photo));
@@ -2793,7 +2849,7 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
             }
             // The lengths: every outline, then every core.
             for (int row = 1; row <= 2; ++row) {
-                for (const Marked &c : cells) {
+                for (const Marked &c : tinted ? none : cells) {
                     if (!clockFits(c))
                         continue;
                     double pen = c.rect.right() - kMarkInset - size * 0.05 - clockWidth(c.clock);
