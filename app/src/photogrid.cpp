@@ -100,7 +100,7 @@ constexpr double kNeonMarkPx = 22;
 constexpr double kNeonMarksFromPx = 20;
 constexpr double kNeonMarkShare = 0.42;
 constexpr double kNeonTintFill = 0.3;
-constexpr double kNeonTintEdge = 0.95;
+constexpr double kNeonTintEdge = 0.7;
 constexpr double kNeonTintEdgeShare = 0.12;
 // Once the grid rests at such a level, coming from a closer one, the photos
 // first dim by kDusk over kDuskFall seconds, smoothly, so the tubes stand
@@ -2778,8 +2778,9 @@ QSGNode *PhotoGrid::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
                         quad(r.left() + edge, r.top() + edge, r.right() - edge, r.bottom() - edge, colour,
                              kNeonTintFill * lit);
                         const double e = kNeonTintEdge * lit;
-                        quad(r.left(), r.top(), r.right(), r.top() + edge, colour, e);
-                        quad(r.left(), r.bottom() - edge, r.right(), r.bottom(), colour, e);
+                        // The tube stops short of the corners, so they round.
+                        quad(r.left() + edge, r.top(), r.right() - edge, r.top() + edge, colour, e);
+                        quad(r.left() + edge, r.bottom() - edge, r.right() - edge, r.bottom(), colour, e);
                         quad(r.left(), r.top() + edge, r.left() + edge, r.bottom() - edge, colour, e);
                         quad(r.right() - edge, r.top() + edge, r.right(), r.bottom() - edge, colour, e);
                     }
