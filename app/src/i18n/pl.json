@@ -179,6 +179,7 @@
   "Where to keep photos": "Gdzie trzymać zdjęcia",
   "Yours": "Twój",
   "%1 could not be reached": "brak połączenia z %1",
+  "%1 is no longer the library shown, so nothing was added to it": "%1 nie jest już pokazywaną biblioteką, więc nic do niej nie dodano",
   "%1 has them already": "%1 już je ma",
   "%1 storage is full": "brak miejsca w %1",
   "%1: added as a still photo, since iCloud on the web does not take a Live Photo's motion": "%1: dodano jako zwykłe zdjęcie, bo iCloud w przeglądarce nie przyjmuje ruchu zdjęcia Live",
@@ -204,6 +205,7 @@
     "other": "Dodano %n pliku do %1"
   },
   "Added, with a note": "Dodano, z uwagą",
+  "Adding the photos and videos to %1…": "Dodawanie zdjęć i filmów do %1…",
   "Adding %n file(s) to %1…": {
     "one": "Dodawanie %n pliku do %1…",
     "few": "Dodawanie %n plików do %1…",

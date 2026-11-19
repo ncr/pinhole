@@ -1312,6 +1312,13 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
         return Err(("bad_request", "add needs files, as absolute paths".into()));
     }
     let source = shared.source();
+    // Dropped on one source's photos (`source`): never added to another
+    // switched to since.
+    if let Some(asked) = params["source"].as_str() {
+        if asked != source.id() {
+            return Err(("other_source", format!("{asked:?} is not the source shown")));
+        }
+    }
     let accepts = source.accepts();
     if accepts.is_empty() {
         return Err(("unsupported", format!("{} cannot be added to", if source.kind() == "none" { "Nothing".into() } else { source.name() })));

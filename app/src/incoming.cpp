@@ -4,30 +4,8 @@
 #include "serviceclient.h"
 
 #include <QDir>
-#include <QDirIterator>
 #include <QFileInfo>
 #include <QJsonArray>
-
-namespace {
-
-// A Live Photo's motion counts as a file of its own here, as the person
-// dropped it; the service pairs it with its photo.
-int filesIn(const QStringList &paths, const QStringList &takes) {
-    int n = 0;
-    for (const QString &path : paths) {
-        const QFileInfo info(path);
-        if (info.isDir()) {
-            QDirIterator it(path, QDir::Files, QDirIterator::Subdirectories);
-            while (it.hasNext())
-                n += takes.contains(QFileInfo(it.next()).suffix().toLower()) ? 1 : 0;
-        } else if (takes.contains(info.suffix().toLower())) {
-            ++n;
-        }
-    }
-    return n;
-}
-
-} // namespace
 
 Incoming::Incoming(ServiceClient *service, QObject *parent) : QObject(parent), m_service(service) {
     connect(service, &ServiceClient::announced, this, &Incoming::heard);
@@ -84,19 +62,40 @@ void Incoming::add(const QList<QUrl> &urls) {
     }
     if (paths.isEmpty())
         return;
+    // For the source shown when they were dropped: one switched to while
+    // they wait their turn is not where they go (the service refuses).
+    const Drop drop{paths, m_service->source().value("id").toString(), place()};
     if (m_busy) {
-        m_queue.append(paths);
+        m_queue.append(drop);
         return;
     }
+    start(drop);
+}
+
+void Incoming::start(const Drop &drop) {
     m_problems.clear();
     m_failed = 0;
     m_busy = true;
     m_progress = 0;
-    m_files = filesIn(paths, accepts());
-    m_status = tr("Adding %n file(s) to %1…", "", std::max(1, m_files)).arg(place());
+    m_place = drop.place;
+    // Files dropped as they are; a folder's are counted by the service,
+    // which walks it anyway, and said as it goes: a big folder on a slow
+    // disk must not hold the window still before anything is sent.
+    const QStringList takes = accepts();
+    m_files = 0;
+    m_folders = false;
+    for (const QString &path : drop.paths) {
+        const QFileInfo info(path);
+        if (info.isDir())
+            m_folders = true;
+        else if (takes.contains(info.suffix().toLower()))
+            ++m_files;
+    }
+    m_status = m_folders ? tr("Adding the photos and videos to %1…").arg(m_place)
+                         : tr("Adding %n file(s) to %1…", "", std::max(1, m_files)).arg(m_place);
     m_fade.stop();
     emit changed();
-    m_service->call(QStringLiteral("add"), {{"files", QJsonArray::fromStringList(paths)}},
+    m_service->call(QStringLiteral("add"), {{"files", QJsonArray::fromStringList(drop.paths)}, {"source", drop.source}},
                     [this](bool ok, const QJsonObject &result, const QString &code) {
                         if (ok) {
                             finished(result);
@@ -113,6 +112,12 @@ void Incoming::heard(const QString &name, const QJsonObject &details) {
         return;
     const double bytes = details.value("bytes").toDouble();
     m_progress = bytes > 0 ? details.value("sent").toDouble() / bytes : 0;
+    // A folder's files, as many as the service found in it.
+    if (m_folders && details.value("total").toInt() > 0) {
+        m_folders = false;
+        m_files = details.value("total").toInt();
+        m_status = tr("Adding %n file(s) to %1…", "", m_files).arg(m_place);
+    }
     emit changed();
 }
 
@@ -129,7 +134,7 @@ void Incoming::finished(const QJsonObject &result) {
                 m_problems.append(tr("%1: added as a still photo, since iCloud on the web does not take a Live Photo's motion").arg(name));
         } else if (state == QLatin1String("duplicate")) {
             duplicates += files;
-            m_problems.append(tr("%1: already in %2").arg(name, place()));
+            m_problems.append(tr("%1: already in %2").arg(name, m_place));
         } else {
             m_failed += files;
             const QJsonObject error = file.value("error").toObject();
@@ -138,19 +143,15 @@ void Incoming::finished(const QJsonObject &result) {
     }
     m_busy = false;
     m_progress = 1;
-    m_status = added > 0 ? tr("Added %n file(s) to %1", "", added).arg(place())
-             : duplicates > 0 && m_failed == 0 ? tr("%1 has them already").arg(place())
+    m_status = added > 0 ? tr("Added %n file(s) to %1", "", added).arg(m_place)
+             : duplicates > 0 && m_failed == 0 ? tr("%1 has them already").arg(m_place)
                                                : QString();
     m_fade.start();
     emit changed();
     if (!m_queue.isEmpty()) {
-        const QStringList next = m_queue.takeFirst();
-        QList<QUrl> urls;
-        for (const QString &p : next)
-            urls.append(QUrl::fromLocalFile(p));
         const QStringList before = m_problems;
         const int failed = m_failed;
-        add(urls);
+        start(m_queue.takeFirst());
         // The problems of the drop before stay in view with these.
         m_problems = before + m_problems;
         m_failed += failed;
@@ -159,18 +160,20 @@ void Incoming::finished(const QJsonObject &result) {
 }
 
 QString Incoming::reason(const QString &code, const QString &message) const {
+    if (code == QLatin1String("other_source"))
+        return tr("%1 is no longer the library shown, so nothing was added to it").arg(m_place);
     if (code == QLatin1String("unsupported"))
-        return tr("not a photo or a video that %1 takes").arg(place());
+        return tr("not a photo or a video that %1 takes").arg(m_place);
     if (code == QLatin1String("too_large"))
-        return tr("too large for %1").arg(place());
+        return tr("too large for %1").arg(m_place);
     if (code == QLatin1String("over_quota"))
-        return tr("%1 storage is full").arg(place());
+        return tr("%1 storage is full").arg(m_place);
     if (code == QLatin1String("protected"))
         return tr("Advanced Data Protection keeps iCloud.com out of the library, so nothing can be added from here");
     if (code == QLatin1String("needs_sign_in"))
-        return tr("not signed in to %1").arg(place());
+        return tr("not signed in to %1").arg(m_place);
     if (code == QLatin1String("unavailable"))
-        return tr("%1 could not be reached").arg(place());
+        return tr("%1 could not be reached").arg(m_place);
     if (code == QLatin1String("read_only"))
         return tr("this library is only being looked at here: nothing can be added to it");
     return message.isEmpty() ? tr("could not be added") : message;

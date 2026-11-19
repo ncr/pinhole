@@ -86,7 +86,7 @@ service tripped over (a panic, a bug): the rest go on.
 | `status` | | `library`, `cache`, `cache_bytes`, `in_flight`, `windows` (how many are connected), `health`, `source` (as the `source` event), `progress` (as the `progress` event, or null), `rounds` (as the `rounds` event), `synced` (how carrying what is synced last went: `at`, milliseconds since 1970, and `error`, or null before it has been carried; see Synced) |
 | `workers` | | `workers`: the plugins' workers it runs or would, as the `workers` event; see Workers |
 | `sync` | | `{}`: look for changes in the source now rather than at the next round |
-| `add` | `files`: absolute paths of photos, videos or folders of them | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
+| `add` | `files`: absolute paths of photos, videos or folders of them; `source`: the source they were dropped on (`other_source` when another is shown now) | how each went, once all are done; meanwhile `adding` events to this window (see Adding) |
 | `set_favorite` | `assets` (ids from the index), `favorite` (true or false), and `source` (the id of the source they are of, optional) | `changed`: how many were not so already; see Favourites |
 | `sources` | | every source added whose kind is on, as the `sources` event |
 | `kinds` | | every kind of source, as the `kinds` event |

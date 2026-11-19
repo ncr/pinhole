@@ -397,6 +397,47 @@ private slots:
         QVERIFY(!Incoming::ownCopy(QDir::homePath() + "/Pictures/IMG_8191.jpg"));
     }
 
+    // A drop waiting its turn goes to the source shown when it was dropped,
+    // not to one switched to meanwhile; a folder is not walked here.
+    void aDropWaitingItsTurnGoesToTheSourceItWasDroppedOn() {
+        QTemporaryDir dir;
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        auto shown = [&](const QString &id, const QString &name) {
+            fake.send({{"event", "source"}, {"id", id}, {"kind", "folder"}, {"name", name}, {"accepts", QJsonArray{"jpg"}}});
+        };
+        shown("folder:/local", "Local");
+        QTRY_COMPARE(service.source().value("id").toString(), QString("folder:/local"));
+        Incoming incoming(&service);
+        QDir(dir.path()).mkpath("folder");
+        incoming.add({QUrl::fromLocalFile(dir.path() + "/a.jpg")});
+        QVERIFY(incoming.busy());
+        incoming.add({QUrl::fromLocalFile(dir.path() + "/folder")});
+        QVERIFY(incoming.status().contains("Local"));
+        shown("icloud:someone", "Someone");
+        QTRY_COMPARE(service.source().value("id").toString(), QString("icloud:someone"));
+        auto adds = [&] {
+            fake.read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(fake.asked))
+                if (line.value("method").toString() == QLatin1String("add"))
+                    found.append(line);
+            return found;
+        };
+        QTRY_COMPARE(adds().size(), 1);
+        fake.send({{"id", adds().first().value("id")}, {"ok", true}, {"result", QJsonObject{{"files", QJsonArray{}}}}});
+        QTRY_COMPARE(adds().size(), 2);
+        for (const QJsonObject &add : adds())
+            QCOMPARE(add.value("params").toObject().value("source").toString(), QString("folder:/local"));
+        QCOMPARE(adds().last().value("params").toObject().value("files").toArray(), QJsonArray{dir.path() + "/folder"});
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void texturesFollowEveryReloadBetweenFrames() {
         // 0..5; the photo at 1 goes, then the one now at 3 (once 4).
         const std::vector<int> first{0, -1, 1, 2, 3, 4};
