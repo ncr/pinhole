@@ -1,7 +1,6 @@
 # Working on Pinhole
 
-[CLAUDE.md](CLAUDE.md) is the author's setup for his own two computers and applies only on them. Elsewhere, work
-on a branch and open a pull request; its rule that test windows go to a hidden workspace applies everywhere.
+Read [CLAUDE.md](CLAUDE.md): work on a branch, open a pull request, and run test windows on a hidden workspace.
 Build Rust with Cargo and the checked-in lockfiles.
 
 Start with [README.md](README.md). The current architecture and measured

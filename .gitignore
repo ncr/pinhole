@@ -12,3 +12,6 @@ __pycache__/
 /plugins/series/pinhole-series
 /plugins/send/pinhole-send
 /plugins/*/qml/
+
+# The author's own agent setup, kept in his dotfiles
+/CLAUDE.local.md
