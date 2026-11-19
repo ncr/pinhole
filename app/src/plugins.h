@@ -709,7 +709,7 @@ class Plugins : public QObject {
 public:
     // The version of what a plugin is given: a manifest's "api" is this,
     // neither less nor more.
-    static constexpr int api = 15;
+    static constexpr int api = 16;
     static constexpr int kMaxMarks = 32;
     static constexpr int kMaxMarksEach = 4;
 

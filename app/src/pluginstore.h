@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QFileSystemWatcher>
 #include <QHash>
 #include <QJsonObject>
 #include <QObject>
@@ -46,7 +47,10 @@ private:
 // written once whatever else changes in the same turn of the event loop
 // has, by KeptFiles: only the keys changed, merged into the file as it is
 // then, under its folder's lock, so two windows that change other keys
-// both keep theirs.
+// both keep theirs. A file there that cannot be read is never written
+// over. A key stays to be written until a write of it succeeds: tried
+// again with the next one. A file another window changes is read again,
+// and the keys it changed told (those set here and not yet written stay).
 class PluginStore : public QObject {
     Q_OBJECT
 public:
@@ -63,30 +67,35 @@ public:
     QByteArray merged(const QString &id, const QJsonObject &values);
     // Every change so far written.
     void flush();
-    // Every change to plugin `id`'s so far written, and whether all of
-    // them were.
+    // Every change to plugin `id`'s so far written, those that failed
+    // before tried again, and whether all of them are.
     bool kept(const QString &id);
 
 signals:
     // A change to plugin `id`'s could not be written.
     void failed(const QString &id);
+    // Keys of plugin `id`'s changed in its file by another window.
+    void changed(const QString &id, const QStringList &keys);
 
 private:
     void writeChanged();
+    // Its folder followed, once there.
+    void follow(const QString &id);
+    void reread(const QString &folder);
+    QFileSystemWatcher m_watcher;
 
     QString m_root, m_name;
     KeptFiles *m_files;
     std::map<QString, QJsonObject> m_values;
-    // Set and not yet written, by plugin: each key's value, null when taken
-    // out.
-    QHash<QString, QJsonObject> m_pending;
     bool m_writing = false;
-    // The plugins whose last write failed, as the writing thread found.
-    struct Failed {
+    // Set and not yet written, by plugin: each key's value, null when taken
+    // out; a key leaves once a write of that value succeeds (on the writing
+    // thread, hence the lock).
+    struct Unsaved {
         std::mutex lock;
-        QSet<QString> ids;
+        QHash<QString, QJsonObject> keys;
     };
-    std::shared_ptr<Failed> m_failed = std::make_shared<Failed>();
+    std::shared_ptr<Unsaved> m_unsaved = std::make_shared<Unsaved>();
 };
 
 // A plugin's state or cache as properties (pinhole.state, pinhole.cache),
@@ -103,6 +112,10 @@ public:
     // Everything assigned so far written now, waiting for it: whether it
     // was. For what must be safe before something else is let go.
     Q_INVOKABLE bool kept();
+
+signals:
+    // Some keys changed in another window.
+    void changed(const QStringList &keys);
 
 protected:
     QVariant updateValue(const QString &key, const QVariant &input) override;

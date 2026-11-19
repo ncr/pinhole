@@ -55,14 +55,29 @@ PinholePlugin {
         target: pinhole.synced
         function onChanged() { if (!plugin.local) plugin.reread() }
     }
+    // Another window chose where they are kept, or named a face here.
+    Connections {
+        target: pinhole.state
+        function onChanged(keys) {
+            if (keys.some(key => key === plugin.localMark || key.startsWith(plugin.localPrefix)))
+                plugin.reread()
+        }
+    }
     Component.onCompleted: reread()
-    onSourceChanged: reread()
+    onSourceChanged: {
+        leftIn = ""
+        reread()
+    }
 
     // The names of the library shown moved to where they are to be kept
     // (`here`: this computer's state, else synced), as the switch is
     // pressed: taken from where they were only once they are written where
     // they go. Taken off the other computers then; given back once synced.
+    // What could not be taken from where they were is left there (`leftIn`:
+    // "synced" or "state"), the switch trying again.
+    property string leftIn: ""
     function keepHere(here) {
+        if (leftIn !== "") return tryAgain()
         if (here === local) return
         const values = stored()
         const keys = Object.keys(values)
@@ -75,14 +90,20 @@ PinholePlugin {
                 return pinhole.warn(qsTr("The names could not be kept on this computer: they stay synced."))
             }
             for (const key of keys) pinhole.synced[key] = null
+            if (!pinhole.synced.kept()) leftIn = "synced"
         } else {
             for (const key of keys) pinhole.synced[key] = values[key]
             if (!pinhole.synced.kept())
                 return pinhole.warn(qsTr("The names could not be synced: they stay on this computer."))
             for (const key of keys) pinhole.state[localPrefix + key] = null
             pinhole.state[localMark] = null
+            if (!pinhole.state.kept()) leftIn = "state"
         }
         reread()
+    }
+    // What was left where they were, taken out again.
+    function tryAgain() {
+        if (leftIn === "synced" ? pinhole.synced.kept() : pinhole.state.kept()) leftIn = ""
     }
 
     function writeEdits(patch) {
@@ -320,7 +341,11 @@ PinholePlugin {
                 onToggled: plugin.keepHere(!plugin.local)
             }
             SettingNote {
-                text: plugin.local
+                text: plugin.leftIn === "synced"
+                      ? qsTr("Kept on this computer, but the names are still synced to your other computers: they could not be taken off. Press the switch to try again.")
+                      : plugin.leftIn === "state"
+                      ? qsTr("Synced again, but a copy of the names is still kept on this computer: it could not be taken out. Press the switch to try again.")
+                      : plugin.local
                       ? qsTr("The names given in this library, and what was said of its faces, are kept on this computer alone. Turned off, they go with it to your other computers again.")
                       : qsTr("The names given in this library go with it to your other computers, for an iCloud library through iCloud Drive. Turned on, they are kept here alone and taken off the others.")
             }

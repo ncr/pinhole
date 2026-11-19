@@ -1577,12 +1577,12 @@ QtObject {
         QJsonObject manifest;
         QString main;
         // No Main.qml: said.
-        write("manifest.json", R"({"api": 15, "name": "Short"})");
+        write("manifest.json", R"({"api": 16, "name": "Short"})");
         QVERIFY(Plugins::manifestProblem(dir, &manifest, &main).contains("no Main.qml"));
         write("Main.qml", "import Pinhole.Plugin\nPinholePlugin {}\n");
         QCOMPARE(Plugins::manifestProblem(dir, &manifest, &main), QString());
         QCOMPARE(main, QStringLiteral("Main.qml"));
-        const QJsonObject old{{"api", 15}, {"schemaVersion", 1}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
+        const QJsonObject old{{"api", 16}, {"schemaVersion", 1}, {"entryPoints", QJsonObject{{"main", "Main.qml"}}}};
         const QString said = Plugins::manifestWarnings(dir, old).join('\n');
         QVERIFY2(said.contains("\"schemaVersion\" is not a manifest's key") && said.contains("\"entryPoints\" is not a manifest's key"),
                  qPrintable(said));
@@ -4224,7 +4224,7 @@ QtObject {
             QTemporaryDir root;
             const QString dir = root.path() + "/" + id;
             QDir().mkpath(dir + "/module");
-            write(dir + "/manifest.json", QStringLiteral(R"({"api": 15, "id": "%1", "name": "Map"})").arg(id).toUtf8());
+            write(dir + "/manifest.json", QStringLiteral(R"({"api": 16, "id": "%1", "name": "Map"})").arg(id).toUtf8());
             write(dir + "/Main.qml", "import QtQuick\nItem {}\n");
             write(dir + "/module/Gestures.qml", "import QtQuick\nItem {\n    PinchHandler {}\n}\n");
             const QString errors = Plugins::footguns(dir).errors.join('\n');
@@ -6589,7 +6589,7 @@ PinholePlugin {
         QDir().mkpath(QFileInfo(config).absolutePath());
         QFile::remove(config);
         write(config, R"({"enabled": {"t": true}})");
-        write(copy + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
+        write(copy + "/manifest.json", R"({"api": 16, "id": "t", "name": "t"})");
         write(copy + "/Main.qml", "import QtQuick\nItem {}\n");
         auto bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
                                                    QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
@@ -6605,7 +6605,7 @@ PinholePlugin {
         // Two copies with its id: neither loads, nor takes either switch.
         const QString second = Plugins::personalDir() + "/t-other";
         QVERIFY(QDir().mkpath(second));
-        write(second + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
+        write(second + "/manifest.json", R"({"api": 16, "id": "t", "name": "t"})");
         write(second + "/Main.qml", "import QtQuick\nItem {}\n");
         bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
                                               QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
@@ -6994,7 +6994,7 @@ PinholePlugin {
         QTemporaryDir root;
         const QString dir = root.path() + "/me.quiet";
         QDir().mkpath(dir);
-        write(dir + "/manifest.json", R"({"api": 15, "id": "me.quiet", "name": "Quiet"})");
+        write(dir + "/manifest.json", R"({"api": 16, "id": "me.quiet", "name": "Quiet"})");
         write(dir + "/Main.qml", R"(import QtQuick
 import Pinhole.Plugin
 import Pinhole.Internal
@@ -7022,7 +7022,7 @@ PinholePlugin {
         QVERIFY2(!errors.contains("Main.qml:12"), qPrintable(errors));
         QVERIFY2(warnings.contains("Main.qml:7: a Shortcut takes its keys everywhere"), qPrintable(warnings));
         // Pinhole's own (or a copy keeping its id) may use Pinhole.Internal.
-        write(dir + "/manifest.json", R"({"api": 15, "id": "pinhole.quiet", "name": "Quiet"})");
+        write(dir + "/manifest.json", R"({"api": 16, "id": "pinhole.quiet", "name": "Quiet"})");
         QVERIFY(!Plugins::footguns(dir).errors.join('\n').contains("Pinhole.Internal"));
     }
 
@@ -7597,10 +7597,28 @@ PinholePlugin {
         bench.js("people.keepHere(false)");
         bench.plugins->flush();
         QVERIFY(!bench.js("people.local").toBool());
+        QCOMPARE(bench.js("people.leftIn").toString(), QString());
         const QJsonObject back = SyncedStore::load(bench.dir.path(), "pinhole.people");
         QCOMPARE(back.keys(), (QStringList{"n", "r2", "reject\tn\tr2", "z"}));
         QCOMPARE(back.value("z").toObject().value("person").toString(), QString("Ewa"));
         QVERIFY(!bench.js("pinhole.state.keys().some(key => key.startsWith('local\\t'))").toBool());
+
+        // Kept here, but what is synced cannot be written: the names are
+        // said to be still there, and the switch tries again.
+        const QString synced = SyncedStore::fileIn(SyncedStore::folderFor(bench.dir.path()), "pinhole.people");
+        QVERIFY(QFile::remove(synced));
+        QVERIFY(QDir().mkpath(synced));
+        bench.js("people.keepHere(true)");
+        QVERIFY(bench.js("people.local").toBool());
+        QCOMPARE(bench.js("people.leftIn").toString(), QString("synced"));
+        bench.js("people.keepHere(false)");
+        QCOMPARE(bench.js("people.leftIn").toString(), QString("synced"));
+        QVERIFY(bench.js("people.local").toBool());
+        QVERIFY(QDir(synced).removeRecursively());
+        bench.js("people.keepHere(false)");
+        QCOMPARE(bench.js("people.leftIn").toString(), QString());
+        QVERIFY(bench.js("people.local").toBool());
+        QVERIFY(SyncedStore::load(bench.dir.path(), "pinhole.people").isEmpty());
     }
 
     // Two windows that keep other keys of one plugin's state both keep
@@ -7620,12 +7638,51 @@ PinholePlugin {
         QFile file(one.path("t"));
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(file.readAll()).object(), (QJsonObject{{"b", 2}}));
-        // One that cannot be written says so.
         file.close();
+        // What another window changed, told and read.
+        QSignalSpy told(&two, &PluginStore::changed);
+        one.set("t", "d", 4);
+        QVERIFY(one.kept("t"));
+        QTRY_VERIFY(!told.isEmpty());
+        QCOMPARE(told.last().at(1).toStringList(), QStringList{"d"});
+        QCOMPARE(two.values("t").value("d").toInt(), 4);
+
+        // One that cannot be written says so, and what failed stays to
+        // write: another key written meanwhile does not make it kept.
         QVERIFY(QFile::remove(one.path("t")));
         QVERIFY(QDir().mkpath(one.path("t")));
         one.set("t", "c", 3);
         QVERIFY(!one.kept("t"));
+        QVERIFY(QDir(one.path("t")).removeRecursively());
+        QVERIFY(one.kept("t"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("c").toInt(), 3);
+        file.close();
+
+        // One there that cannot be read is never written over.
+        QVERIFY(KeptFiles::write(one.path("t"), "{not json"));
+        one.set("t", "e", 5);
+        QVERIFY(!one.kept("t"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("{not json"));
+    }
+
+    // What People or Series set and could not be written stays to write,
+    // and is written once it can be, even set again to the same.
+    void syncedKeysThatFailedAreWrittenOnceTheyCanBe() {
+        PluginBench bench({{"t", {}}});
+        auto *store = bench.plugins->syncedStore();
+        const QString file = SyncedStore::fileIn(SyncedStore::folderFor(bench.dir.path()), "t");
+        QVERIFY(QDir().mkpath(file));
+        store->set("t", "a", 1);
+        QVERIFY(!store->kept("t"));
+        store->set("t", "b", 2);
+        QVERIFY(!store->kept("t"));
+        QVERIFY(QDir(file).removeRecursively());
+        QVERIFY(store->kept("t"));
+        const QJsonObject kept = SyncedStore::load(bench.dir.path(), "t");
+        QCOMPARE(kept.value("a").toInt(), 1);
+        QCOMPARE(kept.value("b").toInt(), 2);
     }
 
     void aPluginAskingForANewerApiSaysSo() {

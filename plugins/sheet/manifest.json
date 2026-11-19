@@ -1,5 +1,5 @@
 {
-  "api": 15,
+  "api": 16,
   "startsOff": true,
   "requires": ["magick"],
   "id": "pinhole.sheet",
