@@ -6416,6 +6416,20 @@ PinholePlugin {
         QTRY_COMPARE(bench->js(QStringLiteral("heard.join(' ')")).toString(), QStringLiteral("index:2"));
     }
 
+    // While an update rewrites the checkout, a plugin's QML changing loads
+    // nothing again; let go, it loads once.
+    void aPluginChangedDuringAnUpdateLoadsOnlyAfterIt() {
+        PluginBench bench({{"t", {}}});
+        const QString main = bench.dir.path() + "/plugins/t/Main.qml";
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=0"));
+        bench.plugins->holdReloads(true);
+        write(main, "import QtQuick\nItem { width: 2 }\n");
+        QTest::qWait(800);
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=0"));
+        bench.plugins->holdReloads(false);
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=1"));
+    }
+
     // A manifest that is a pipe no one writes to, or far too big, is that
     // plugin's problem, said at once: it does not hold the window still.
     void aManifestThatIsNotAPlainFileIsAProblemNotAWait() {

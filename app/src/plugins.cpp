@@ -742,7 +742,12 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     // one reload once they are done.
     m_settle.setSingleShot(true);
     m_settle.setInterval(300);
-    connect(&m_settle, &QTimer::timeout, this, &Plugins::rescan);
+    connect(&m_settle, &QTimer::timeout, this, [this] {
+        if (m_held)
+            m_changedWhileHeld = true;
+        else
+            rescan();
+    });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_settle, qOverload<>(&QTimer::start));
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_settle, qOverload<>(&QTimer::start));
     // Another window's switches and settings, as it writes them.
@@ -1069,6 +1074,14 @@ QString Plugins::builtInDir() {
     const QString app = QCoreApplication::applicationDirPath();
     const QString installed = QDir::cleanPath(app + "/../lib/pinhole/plugins");
     return QFileInfo::exists(installed) ? installed : QDir::cleanPath(app + "/../../plugins");
+}
+
+void Plugins::holdReloads(bool held) {
+    if (held == m_held)
+        return;
+    m_held = held;
+    if (!held && std::exchange(m_changedWhileHeld, false))
+        rescan();
 }
 
 void Plugins::libraryOpened() {

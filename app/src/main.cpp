@@ -263,6 +263,11 @@ int main(int argc, char *argv[]) {
     PluginGuide pluginGuide;
     startup.mark(QStringLiteral("hosts_ready"));
     plugins.setFavourites(&favourites);
+    // An update rewrites the checkout's plugins before its binary is built
+    // and the window restarted: none of them loaded again meanwhile.
+    QObject::connect(&updater, &Updater::changed, &plugins, [&updater, &plugins] {
+        plugins.holdReloads(updater.state() == QLatin1String("updating") || updater.state() == QLatin1String("ready"));
+    });
     plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
