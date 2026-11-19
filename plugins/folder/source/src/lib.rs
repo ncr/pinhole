@@ -92,9 +92,14 @@ impl Entry {
     }
 }
 
-/// The keys (`Found::key`) of videos named as a photo that are not its
-/// motion (`is_motion`), kept in the library so they are not read again.
+/// A photo and a video named as it that is not its motion (`is_motion`),
+/// by both their keys (`Found::key`, `unpaired_key`), kept in the library
+/// so they are not read again: either file changed, they are.
 const UNPAIRED: &str = "folder_unpaired";
+
+fn unpaired_key(root: &Path, photo: &Found, video: &Found) -> String {
+    format!("{} {}", photo.key(root), video.key(root))
+}
 
 fn unpaired(index: &Connection) -> Result<HashSet<String>> {
     index.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {UNPAIRED} (key TEXT PRIMARY KEY) WITHOUT ROWID"))?;
@@ -218,9 +223,9 @@ fn stem(rel: &str) -> String {
 /// The assets among the files found: a video named as a photo beside it
 /// (IMG_1234.HEIC with IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names
 /// it) is taken for that photo's motion, not an asset of its own, until
-/// describing them finds it is not (`is_motion`): `unpaired` has the keys
-/// of such videos. A photo has one motion at most, a QuickTime one first;
-/// any other video of its name is a video of its own.
+/// describing them finds it is not (`is_motion`): `unpaired` has such
+/// pairs (`unpaired_key`). A photo has one motion at most, a QuickTime one
+/// first; any other video of its name is a video of its own.
 fn pair(root: &Path, mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashMap<String, Entry> {
     let later = |f: &Found| f.media == Media::Video && !f.rel.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("mov"));
     found.sort_by(|a, b| (later(a), &a.rel).cmp(&(later(b), &b.rel)));
@@ -228,7 +233,7 @@ fn pair(root: &Path, mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashM
     let mut motion: HashMap<String, Vec<Found>> = HashMap::new();
     let mut entries: HashMap<String, Entry> = HashMap::new();
     for f in found {
-        if f.media == Media::Video && !unpaired.contains(&f.key(root)) {
+        if f.media == Media::Video {
             let s = stem(&f.rel);
             let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
                 .or_else(|| photos.contains(&s).then_some(s));
@@ -242,8 +247,9 @@ fn pair(root: &Path, mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashM
     let mut photos: Vec<&mut Entry> = entries.values_mut().filter(|e| e.file.media == Media::Photo).collect();
     photos.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
     for entry in photos {
-        if let Some(videos) = motion.get_mut(&stem(&entry.file.rel)).filter(|v| !v.is_empty()) {
-            entry.motion = Some(videos.remove(0));
+        let Some(videos) = motion.get_mut(&stem(&entry.file.rel)) else { continue };
+        if let Some(i) = videos.iter().position(|v| !unpaired.contains(&unpaired_key(root, &entry.file, v))) {
+            entry.motion = Some(videos.remove(i));
         }
     }
     for f in motion.into_values().flatten() {
@@ -366,7 +372,7 @@ impl FolderSource {
     }
 
     /// Every photo and video in the folder, with Live Photos' motion paired
-    /// to its photo (`pair`, but for the videos in `unpaired`), and what
+    /// to its photo (`pair`, but for the pairs in `unpaired`), and what
     /// could not be read. Hidden files and folders are skipped.
     fn look(&self, unpaired: &HashSet<String>) -> Result<Look> {
         if !self.root.is_dir() {
@@ -506,7 +512,8 @@ impl FolderSource {
             let described: Vec<Vec<Asset>> = batch.par_iter().map(|e| self.describe(e)).collect::<Result<_>>()?;
             for (entry, assets) in batch.iter().zip(&described) {
                 if let (Some(m), [_, _]) = (&entry.motion, assets.as_slice()) {
-                    index.conn.execute(&format!("INSERT OR IGNORE INTO {UNPAIRED} (key) VALUES (?1)"), [m.key(&self.root)])?;
+                    index.conn.execute(&format!("INSERT OR IGNORE INTO {UNPAIRED} (key) VALUES (?1)"),
+                                       [unpaired_key(&self.root, &entry.file, m)])?;
                 }
             }
             let mut assets: Vec<Asset> = described.into_iter().flatten().collect();
@@ -532,6 +539,11 @@ impl FolderSource {
     /// way leads to (out of the folder, maybe), nor a named pipe. Else
     /// NotFound: it is not one of this folder's.
     fn file(&self, rel: &str) -> std::io::Result<PathBuf> {
+        // Joined to the root, an absolute name would replace it, and `..`
+        // climb out of it: neither is a walk's.
+        if rel.is_empty() || !Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{rel} is not a path inside {}", self.root.display())));
+        }
         let real = self.root.join(rel).canonicalize()?;
         if real != self.root.canonicalize()?.join(rel) || !std::fs::symlink_metadata(&real)?.is_file() {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{rel} is not a file of {}", self.root.display())));
@@ -709,6 +721,9 @@ impl Source for FolderSource {
             .cloned()
             .collect();
         self.put(index, &changed, &|_, _| {}, changed.len() as u64)?;
+        // A video taken for a new photo's motion that is not one is put
+        // back as it was (`describe`): it stays, and its favourite with it.
+        let gone: Vec<String> = gone.into_iter().filter(|id| !index.seen.contains(id)).collect();
         index.remove(&gone)?;
         Ok(Listing {
             token: Some(pinhole_core::sync::now_secs().to_string()),
@@ -1072,9 +1087,19 @@ mod tests {
             ("trip.mp4".into(), None),
         ]);
         // The QuickTime ones found not to be its motion: the next is tried.
-        assert_eq!(pairs(pair(Path::new("/r"), files(), &[found("trip.mov").key(Path::new("/r")), found("TRIP.MOV").key(Path::new("/r"))].into())), [
+        let root = Path::new("/r");
+        let not = |video: &str| unpaired_key(root, &found("trip.jpg"), &found(video));
+        assert_eq!(pairs(pair(root, files(), &[not("trip.mov"), not("TRIP.MOV")].into())), [
             ("TRIP.MOV".into(), None),
             ("trip.jpg".into(), some("trip.mp4")),
+            ("trip.mov".into(), None),
+        ]);
+        // Another photo of that name: tried with them again.
+        let mut other = found("trip.jpg");
+        other.size = 2;
+        let files = vec![other, found("trip.mov"), found("TRIP.MOV")];
+        assert_eq!(pairs(pair(root, files, &[not("trip.mov"), not("TRIP.MOV")].into())), [
+            ("trip.jpg".into(), some("TRIP.MOV")),
             ("trip.mov".into(), None),
         ]);
     }
@@ -1112,7 +1137,6 @@ mod tests {
             return;
         }
         let dir = temp("unpaired");
-        image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(dir.join("presentation.jpg")).unwrap();
         let made = std::process::Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=d=10:s=64x48:r=2", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
             .arg(dir.join("presentation.mp4"))
@@ -1121,13 +1145,23 @@ mod tests {
         assert!(made.success());
         let source = FolderSource::new(dir.clone());
         let mut conn = pinhole_core::db::open(&dir.join(".library.sqlite")).unwrap();
+        // The video first, a favourite; then a photo of its name beside it.
         pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        source.set_favorite(&conn, &["presentation.mp4".into()], true).unwrap();
+        image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(dir.join("presentation.jpg")).unwrap();
+        let report = pinhole_core::sync::follow(&source, &mut conn).unwrap();
+        assert!(report.changes.removed.is_empty(), "{:?}", report.changes);
+        assert!(favorites(&conn).contains("presentation.mp4"));
         let kinds = |conn: &Connection| -> Vec<(String, bool, bool)> {
             let mut stmt = conn.prepare("SELECT id, is_live, is_video FROM assets ORDER BY id").unwrap();
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect()
         };
         let both = vec![("presentation.jpg".to_string(), false, false), ("presentation.mp4".to_string(), false, true)];
         assert_eq!(kinds(&conn), both);
+        // Listed afresh, the same.
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        assert_eq!(kinds(&conn), both);
+        assert!(favorites(&conn).contains("presentation.mp4"));
         // And it stays so, read no more.
         let report = pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert!(report.changes.updated.is_empty() && report.changes.added.is_empty(), "{:?}", report.changes);
@@ -1353,7 +1387,8 @@ mod tests {
         // Nor handed out, should the index name them: a link, a file
         // through a linked folder, a pipe (at once, not waiting on it), a
         // path out of the folder.
-        for rel in ["link.jpg", "linked/private.jpg", "pipe.jpg", "../regular-outside/private.jpg"] {
+        let absolute = outside.join("private.jpg").display().to_string();
+        for rel in ["link.jpg", "linked/private.jpg", "pipe.jpg", "../regular-outside/private.jpg", absolute.as_str()] {
             let rel = rel.replace("regular-outside", outside.file_name().unwrap().to_str().unwrap());
             assert!(source.file(&rel).is_err(), "{rel}");
             assert!(source.open(&Ticket(format!("original\t{rel}")), None).is_err(), "{rel}");
