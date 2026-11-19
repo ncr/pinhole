@@ -256,12 +256,14 @@ class Edits(unittest.TestCase):
         import json
         import tempfile
         with tempfile.TemporaryDirectory() as folder:
-            settings, state = Path(folder, "plugins.json"), Path(folder, "state.json")
-            self.assertFalse(worker.load_local(settings, None))
-            settings.write_text(json.dumps({"settings": {"pinhole.people": {"local": True}}}))
-            self.assertTrue(worker.load_local(settings, None))
-            state.write_text(json.dumps({"local\tlib\tboth": {"not": ["Anna"]}, "local\tlib\treject\tg\tx": True,
+            state = Path(folder, "state.json")
+            self.assertFalse(worker.load_local(state, "lib", None))
+            state.write_text(json.dumps({"local\tlib": True, "local\tlib\tboth": {"not": ["Anna"]},
+                                         "local\tlib\treject\tg\tx": True,
                                          "local\tother\treject\tg\ty": True, "shown": True}))
+            # Chosen for this library, not for another.
+            self.assertTrue(worker.load_local(state, "lib", None))
+            self.assertFalse(worker.load_local(state, "other", None))
             self.assertEqual(worker.load_edits(state, None, "local\tlib\t"), (["both"], {"g": ["x"]}))
 
 if __name__ == "__main__":

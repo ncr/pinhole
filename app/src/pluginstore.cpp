@@ -10,6 +10,10 @@
 #include <QPointer>
 #include <QSaveFile>
 
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 KeptFiles::KeptFiles(QObject *parent) : QObject(parent) {
     // One at a time, so what was asked for last is what is there.
     m_pool.setMaxThreadCount(1);
@@ -72,7 +76,7 @@ void PluginStore::set(const QString &id, const QString &key, const QJsonValue &v
             return;
         mine.insert(key, value);
     }
-    m_changed.insert(id);
+    m_pending[id].insert(key, value.isUndefined() ? QJsonValue(QJsonValue::Null) : value);
     // Written once whatever else is changed in this turn has been.
     if (!std::exchange(m_writing, true))
         QMetaObject::invokeMethod(this, &PluginStore::writeChanged, Qt::QueuedConnection);
@@ -87,21 +91,55 @@ QByteArray PluginStore::merged(const QString &id, const QJsonObject &more) {
         else
             mine.insert(it.key(), it.value());
     // Whatever was waiting to be written is in these bytes.
-    m_changed.remove(id);
+    m_pending.remove(id);
     return QJsonDocument(mine).toJson();
 }
 
 void PluginStore::writeChanged() {
     m_writing = false;
-    const QSet<QString> changed = std::exchange(m_changed, {});
-    for (const QString &id : changed) {
-        const QString file = path(id);
-        const QByteArray bytes = QJsonDocument(m_values[id]).toJson();
+    const auto pending = std::exchange(m_pending, {});
+    for (auto it = pending.begin(); it != pending.end(); ++it) {
+        const QString id = it.key(), file = path(id);
+        const QJsonObject changes = it.value(), mine = m_values[id];
         const QPointer<PluginStore> self(this);
-        m_files->run([file, bytes] { return KeptFiles::write(file, bytes); }, [self, id](bool ok) {
-            if (!ok && self)
-                emit self->failed(id);
-        });
+        m_files->run(
+            [file, changes, mine, id, failed = m_failed] {
+                // The folder's lock, while the file is read, merged into
+                // and written again: another window's keys stay.
+                const QString folder = QFileInfo(file).absolutePath();
+                QDir().mkpath(folder);
+                const int fd = ::open(QFile::encodeName(folder).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+                if (fd >= 0)
+                    ::flock(fd, LOCK_EX);
+                // As it is now; one that cannot be read is this window's.
+                QJsonObject now = mine;
+                QFile was(file);
+                if (was.open(QIODevice::ReadOnly)) {
+                    const QJsonDocument document = QJsonDocument::fromJson(was.readAll());
+                    if (document.isObject())
+                        now = document.object();
+                }
+                for (auto c = changes.begin(); c != changes.end(); ++c)
+                    if (c.value().isNull())
+                        now.remove(c.key());
+                    else
+                        now.insert(c.key(), c.value());
+                const bool ok = KeptFiles::write(file, QJsonDocument(now).toJson());
+                if (fd >= 0) {
+                    ::flock(fd, LOCK_UN);
+                    ::close(fd);
+                }
+                const std::lock_guard guard(failed->lock);
+                if (ok)
+                    failed->ids.remove(id);
+                else
+                    failed->ids.insert(id);
+                return ok;
+            },
+            [self, id](bool ok) {
+                if (!ok && self)
+                    emit self->failed(id);
+            });
     }
 }
 
@@ -109,6 +147,12 @@ void PluginStore::flush() {
     if (m_writing)
         writeChanged();
     m_files->wait();
+}
+
+bool PluginStore::kept(const QString &id) {
+    flush();
+    const std::lock_guard guard(m_failed->lock);
+    return !m_failed->ids.contains(id);
 }
 
 PluginStoreMap::PluginStoreMap(PluginStore *store, const QString &id, QObject *parent)
@@ -122,6 +166,10 @@ PluginStoreMap::PluginStoreMap(PluginStore *store, const QString &id, QObject *p
 }
 
 QStringList PluginStoreMap::keys() const { return m_store->values(m_id).keys(); }
+
+QJsonObject PluginStoreMap::values() const { return m_store->values(m_id); }
+
+bool PluginStoreMap::kept() { return m_store->kept(m_id); }
 
 QVariant PluginStoreMap::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.

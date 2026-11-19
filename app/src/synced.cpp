@@ -247,13 +247,21 @@ void SyncedStore::writeChanged() {
         // What the file holds once written, and how it is then.
         auto written = std::make_shared<std::pair<Doc, Seen>>();
         m_files.run(
-            [folder, path, changes, written] {
+            [folder, path, changes, written, plugin, failed = m_failed] {
+                const auto said = [&](bool ok) {
+                    const std::lock_guard guard(failed->lock);
+                    if (ok)
+                        failed->plugins.remove(plugin);
+                    else
+                        failed->plugins.insert(plugin);
+                    return ok;
+                };
                 const FolderLock lock(folder);
                 bool ok = false;
                 Doc file = read(path, &ok);
                 if (!lock.held() || !ok) {
                     qWarning("pinhole: %s could not be read: what was set is not kept", qPrintable(path));
-                    return false;
+                    return said(false);
                 }
                 for (auto c = changes.begin(); c != changes.end(); ++c) {
                     const auto there = file.clock.constFind(c.key());
@@ -271,10 +279,10 @@ void SyncedStore::writeChanged() {
                 const QByteArray bytes =
                     QJsonDocument(QJsonObject{{"values", file.values}, {"clock", clock}}).toJson(QJsonDocument::Compact);
                 if (!KeptFiles::write(path, bytes))
-                    return false;
+                    return said(false);
                 written->first = std::move(file);
                 written->second = seen(path);
-                return true;
+                return said(true);
             },
             [self = QPointer<SyncedStore>(this), plugin, folder, written](bool ok) {
                 if (!self)
@@ -340,6 +348,12 @@ void SyncedStore::flush() {
     m_files.wait();
 }
 
+bool SyncedStore::kept(const QString &plugin) {
+    flush();
+    const std::lock_guard guard(m_failed->lock);
+    return !m_dir.isEmpty() && !m_failed->plugins.contains(plugin);
+}
+
 PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObject *parent)
     : QQmlPropertyMap(this, parent), m_store(store), m_plugin(plugin) {
     // Each as JSON: read in JS, a copy (a list kept as a QVariantList
@@ -369,6 +383,8 @@ PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObj
 QStringList PluginSyncedMap::keys() const { return m_store->values(m_plugin).keys(); }
 
 QJsonObject PluginSyncedMap::values() const { return m_store->values(m_plugin); }
+
+bool PluginSyncedMap::kept() { return m_store->kept(m_plugin); }
 
 QVariant PluginSyncedMap::updateValue(const QString &key, const QVariant &input) {
     // A JS object or list as plain values, as JSON keeps them.

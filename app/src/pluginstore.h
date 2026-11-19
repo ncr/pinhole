@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonObject>
 #include <QObject>
 #include <QQmlPropertyMap>
@@ -9,6 +10,8 @@
 
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 
 // Files written away from the window's thread, one after another in the
 // order they were asked for, each in one step (written beside it, then
@@ -41,7 +44,9 @@ private:
 // (~/.cache/pinhole/plugins/<id>/cache.json, beside its cacheDirs). A
 // plugin's is read when first asked for. A change is there at once, and
 // written once whatever else changes in the same turn of the event loop
-// has, by KeptFiles.
+// has, by KeptFiles: only the keys changed, merged into the file as it is
+// then, under its folder's lock, so two windows that change other keys
+// both keep theirs.
 class PluginStore : public QObject {
     Q_OBJECT
 public:
@@ -58,6 +63,9 @@ public:
     QByteArray merged(const QString &id, const QJsonObject &values);
     // Every change so far written.
     void flush();
+    // Every change to plugin `id`'s so far written, and whether all of
+    // them were.
+    bool kept(const QString &id);
 
 signals:
     // A change to plugin `id`'s could not be written.
@@ -69,8 +77,16 @@ private:
     QString m_root, m_name;
     KeptFiles *m_files;
     std::map<QString, QJsonObject> m_values;
-    QSet<QString> m_changed;
+    // Set and not yet written, by plugin: each key's value, null when taken
+    // out.
+    QHash<QString, QJsonObject> m_pending;
     bool m_writing = false;
+    // The plugins whose last write failed, as the writing thread found.
+    struct Failed {
+        std::mutex lock;
+        QSet<QString> ids;
+    };
+    std::shared_ptr<Failed> m_failed = std::make_shared<Failed>();
 };
 
 // A plugin's state or cache as properties (pinhole.state, pinhole.cache),
@@ -82,6 +98,11 @@ public:
     // Those it has: one set to null is taken out (QQmlPropertyMap keeps
     // a key once it has had it, as undefined).
     Q_INVOKABLE QStringList keys() const;
+    // All of them at once, as an object (as pinhole.synced's).
+    Q_INVOKABLE QJsonObject values() const;
+    // Everything assigned so far written now, waiting for it: whether it
+    // was. For what must be safe before something else is let go.
+    Q_INVOKABLE bool kept();
 
 protected:
     QVariant updateValue(const QString &key, const QVariant &input) override;

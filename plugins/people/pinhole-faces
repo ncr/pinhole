@@ -743,10 +743,11 @@ def load_edits(path, previous, prefix=None):
         return previous
 
 
-def load_local(path, previous):
-    """Whether People's names are kept on this computer alone."""
+def load_local(path, source, previous):
+    """Whether the names of the library (`source`) are kept on this computer
+    alone: its mark in the plugin's state file (Main.qml's localMark)."""
     try:
-        return json.loads(path.read_text()).get("settings", {}).get("pinhole.people", {}).get("local") is True
+        return json.loads(path.read_text()).get(f"local\t{source}") is True
     except FileNotFoundError:
         return False
     except (OSError, ValueError, AttributeError):
@@ -780,7 +781,7 @@ def catalog_rows(catalog, source):
 def run_index(db, library, source, settings):
     synced = Path(os.environ["PINHOLE_SYNCED"]) if os.environ.get("PINHOLE_SYNCED") else None
     # Where the plugin keeps them when they are this computer's alone
-    # (Main.qml's localPrefix).
+    # (Main.qml's localMark and localPrefix).
     state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/pinhole.people/state.json"
     local = False
     path = library / "library.sqlite"
@@ -810,7 +811,7 @@ def run_index(db, library, source, settings):
                     catalog = readonly(path)
                     inode, version = identity, None
                 changed = catalog.execute("PRAGMA data_version").fetchone()[0]
-                local = load_local(settings, local)
+                local = load_local(state, source, local)
                 saved = (load_edits(state, edits, f"local\t{source}\t") if local else load_edits(synced, edits))
                 preference = load_grouping(settings, grouping)
                 refresh = changed != version or (errors and time.monotonic() >= retry)

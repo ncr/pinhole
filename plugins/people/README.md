@@ -9,11 +9,12 @@ computer. **The names you give, and which faces you said are or are not
 someone, are not local:** they go with the library to every computer it is
 shown on, and for an iCloud library they are written to a `Pinhole` folder
 in that account's iCloud Drive: whoever that folder is shared with can read
-them. **Names only on this computer** (Settings → Plugins → People) keeps
-them in People's state on this computer instead
-(`~/.local/state/pinhole/plugins/pinhole.people/state.json`): turning it on
-moves those of the library shown there and takes them off the other
-computers; turning it off moves them back.
+them. **Names only on this computer** (Settings → Plugins → People),
+chosen for the library shown, keeps that library's in People's state on
+this computer instead (`~/.local/state/pinhole/plugins/pinhole.people/state.json`):
+turning it on moves them there and, once they are written, takes them off
+the other computers; turning it off syncs them again and only then takes
+them out of the state.
 
 Choose **People** in the grid actions or press Shift+F. The people named
 so far come first, each a round face with their photo count, then the
