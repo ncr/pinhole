@@ -628,7 +628,7 @@ QJSValue PluginHost::copyFile(const QString &path) {
     // As Pinhole's own copy: an image pastes into a chat as one. Another
     // copy asked for while this one was made wins: this one `cancelled`.
     Outgoing::toClipboard(
-        {path}, this, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); },
+        {path}, this, 0, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); },
         [this, deferred, generation] {
             settle(generation, deferred.reject, error(QStringLiteral("cancelled"), tr("another copy came after it")));
         });

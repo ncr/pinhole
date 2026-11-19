@@ -41,6 +41,7 @@
 #include <libheif/heif.h>
 #include <turbojpeg.h>
 #include <ultrahdr_api.h>
+#include <sys/stat.h>
 
 #include <qpa/qwindowsysteminterface.h>
 
@@ -4853,6 +4854,15 @@ PinholePlugin {
         QCOMPARE(files, (QStringList{out.path() + "/IMG_0001.jpg", out.path() + "/IMG_0002.jpg", out.path() + "/IMG_0003.HEIC"}));
         QCOMPARE(read(out.path() + "/IMG_0001.jpg"), QString("jpeg of the heic"));
         QCOMPARE(read(out.path() + "/IMG_0002.jpg"), QString("jpeg"));
+        // Files of their own, never links to the library's: an editor that
+        // writes one in place leaves the original as it was.
+        for (const auto &[original, sent] : {std::pair{jpeg, QString("/IMG_0002.jpg")}, std::pair{video, QString("/IMG_0003.HEIC")}}) {
+            struct stat a {}, b {};
+            QCOMPARE(::stat(QFile::encodeName(original).constData(), &a), 0);
+            QCOMPARE(::stat(QFile::encodeName(out.path() + sent).constData(), &b), 0);
+            QVERIFY(a.st_ino != b.st_ino);
+            QCOMPARE(int(a.st_nlink), 1);
+        }
         QStringList asked;
         for (const QJsonObject &line : std::as_const(fake.asked)) {
             const QJsonObject params = line.value("params").toObject();
@@ -4887,6 +4897,31 @@ PinholePlugin {
         QVERIFY(files.isEmpty());
         QVERIFY(QDir(again.path()).isEmpty());
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // A catalog's filename is one name in the folder chosen, never a path
+    // out of it, and two photos of one name each get a file of their own.
+    void anOutgoingFileStaysInItsFolderUnderANameOfItsOwn() {
+        QCOMPARE(Outgoing::plainName("IMG_0001.HEIC"), QString("IMG_0001.HEIC"));
+        QCOMPARE(Outgoing::plainName("../../.bashrc"), QString(".bashrc"));
+        QCOMPARE(Outgoing::plainName("a/b/IMG_1.jpg"), QString("IMG_1.jpg"));
+        QCOMPARE(Outgoing::plainName(".."), QString());
+        QCOMPARE(Outgoing::plainName("x/.."), QString());
+        QCOMPARE(Outgoing::plainName("x/"), QString());
+        QCOMPARE(Outgoing::plainName(""), QString());
+        QTemporaryDir dir;
+        const QString first = Outgoing::reserve(dir.path(), "IMG_1.jpg");
+        const QString second = Outgoing::reserve(dir.path(), "IMG_1.jpg");
+        QCOMPARE(first, dir.path() + "/IMG_1.jpg");
+        QCOMPARE(second, dir.path() + "/IMG_1-2.jpg");
+        write(dir.path() + "/original.jpg", "the original");
+        QVERIFY(Outgoing::copyInto(dir.path() + "/original.jpg", first));
+        QCOMPARE(read(first), QString("the original"));
+        QFile edited(first);
+        QVERIFY(edited.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        edited.write("edited in place");
+        edited.close();
+        QCOMPARE(read(dir.path() + "/original.jpg"), QString("the original"));
     }
 
 private slots:
@@ -7404,13 +7439,26 @@ PinholePlugin {
         Outgoing::toClipboard({small}, &bench.engine);
         QTRY_COMPARE(set, QStringList({"small.jpg"}));
         bool dropped = false, then = false;
-        Outgoing::toClipboard({big}, &bench.engine, [&] { then = true; }, [&] { dropped = true; });
+        Outgoing::toClipboard({big}, &bench.engine, 0, [&] { then = true; }, [&] { dropped = true; });
         Outgoing::toClipboard({small, big}, &bench.engine);
         QTRY_COMPARE_WITH_TIMEOUT(set.size(), 2, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(dropped, 30000);
         QVERIFY(!then);
         QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(),
                  QList<QUrl>({QUrl::fromLocalFile(small), QUrl::fromLocalFile(big)}));
+
+        // Its place is when it was asked for: a photo still downloading,
+        // asked for first, does not take the clipboard from one asked for
+        // after it and set before.
+        const quint64 slow = Outgoing::askedToCopy(), quick = Outgoing::askedToCopy();
+        set.clear();
+        Outgoing::toClipboard({small}, &bench.engine, quick);
+        QTRY_COMPARE(set, QStringList({"small.jpg"}));
+        dropped = false;
+        Outgoing::toClipboard({big}, &bench.engine, slow, [&] { then = true; }, [&] { dropped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(dropped, 30000);
+        QVERIFY(!then);
+        QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(), QList<QUrl>({QUrl::fromLocalFile(small)}));
     }
 
     void aPluginsNoticeIsSaidAsItsOwn() {
