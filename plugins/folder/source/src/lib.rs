@@ -13,7 +13,7 @@ pub mod discover;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -138,7 +138,9 @@ struct Walk {
 }
 
 /// The photos and videos in a folder and the folders in it, hidden ones
-/// skipped, and whatever could not be read.
+/// skipped, and whatever could not be read. Only regular files: a link
+/// (which may lead out of the folder) or a named pipe called .jpg is not a
+/// photo of it, and links to folders are not followed.
 fn walk(root: &Path, deadline: Option<Instant>) -> Walk {
     let rel_of = |path: &Path| path.strip_prefix(root).map_or_else(|_| String::new(), |r| r.to_string_lossy().into_owned());
     let mut walk = Walk { found: Vec::new(), unread: Vec::new(), complete: false };
@@ -167,6 +169,9 @@ fn walk(root: &Path, deadline: Option<Instant>) -> Walk {
             };
             if meta.is_dir() {
                 dirs.push(path);
+                continue;
+            }
+            if !meta.is_file() {
                 continue;
             }
             let Some(media) = media_of(&path) else { continue };
@@ -425,9 +430,21 @@ impl FolderSource {
     /// A JPEG of a photo or of a video's frame, at most `edge` on the long
     /// side, the right way up (pinhole-core's render.rs).
     fn render(&self, rel: &str, edge: u32) -> Result<Vec<u8>> {
-        let path = self.root.join(rel);
+        let path = self.file(rel)?;
         pinhole_core::render::render_path(&path, edge, media_of(&path) == Some(Media::Video))
             .with_context(|| format!("could not make an image of {rel}"))
+    }
+
+    /// An asset's file, by its path inside the folder, as a walk would find
+    /// it: a regular file in the folder itself, not one that a link in the
+    /// way leads to (out of the folder, maybe), nor a named pipe. Else
+    /// NotFound: it is not one of this folder's.
+    fn file(&self, rel: &str) -> std::io::Result<PathBuf> {
+        let real = self.root.join(rel).canonicalize()?;
+        if real != self.root.canonicalize()?.join(rel) || !std::fs::symlink_metadata(&real)?.is_file() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{rel} is not a file of {}", self.root.display())));
+        }
+        Ok(real)
     }
 }
 
@@ -608,14 +625,15 @@ impl Source for FolderSource {
 
     fn local(&self, rendition: &Stored) -> Option<PathBuf> {
         matches!(rendition.want, Want::Full | Want::Original | Want::Video | Want::Live)
-            .then(|| self.root.join(&rendition.name))
+            .then(|| self.file(&rendition.name).ok())
+            .flatten()
     }
 
     fn prepare(&self, _index: &Connection, wanted: &[Stored]) -> Result<Vec<Result<Ticket, FetchError>>> {
         Ok(wanted
             .iter()
-            .map(|w| match std::fs::metadata(self.root.join(&w.name)) {
-                Ok(meta) if meta.is_file() => Ok(Ticket(format!("{}\t{}", w.want.name(), w.name))),
+            .map(|w| match self.file(&w.name) {
+                Ok(_) => Ok(Ticket(format!("{}\t{}", w.want.name(), w.name))),
                 // Not that it is not there: the folder's (a folder without
                 // permission, a failing disk), which its health says.
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
@@ -672,7 +690,7 @@ impl Source for FolderSource {
             // while the folder and the file are still there, as a disk
             // gone from under a program makes it fail too.
             let bytes = self.render(rel, edge).map_err(|e| match FetchError::from(e) {
-                FetchError::Unreadable(why) if !(self.root.is_dir() && self.root.join(rel).is_file()) => {
+                FetchError::Unreadable(why) if !(self.root.is_dir() && self.file(rel).is_ok()) => {
                     FetchError::Failed(anyhow!("{why}"))
                 }
                 e => e,
@@ -680,7 +698,7 @@ impl Source for FolderSource {
             return Ok(Body { length: Some(bytes.len() as u64), reader: Box::new(std::io::Cursor::new(bytes)) });
         }
         let path = self.root.join(rel);
-        let mut file = File::open(&path).map_err(|e| match e.kind() {
+        let mut file = self.file(rel).and_then(|real| open_regular(&real)).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => FetchError::NotFound(format!("{} is gone", path.display())),
             _ => FetchError::Failed(e.into()),
         })?;
@@ -696,6 +714,20 @@ impl Source for FolderSource {
     }
 }
 
+/// Opened for reading, and a regular file: never waiting on a named pipe
+/// with no one writing to it, nor following a link at its end.
+fn open_regular(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} is not a file", path.display())));
+    }
+    Ok(file)
+}
+
+/// What of a TIFF its tags are looked for in (`read_exif`).
+const EXIF_BUDGET: u64 = 8 << 20;
+
 #[derive(Default)]
 struct Exif {
     taken: Option<i64>,
@@ -707,10 +739,22 @@ struct Exif {
 /// it wrote one, else this computer's), which way up it is, and whether it
 /// has a place.
 fn read_exif(path: &Path) -> Exif {
-    let Ok(file) = File::open(path) else { return Exif::default() };
-    let Ok(exif) = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(file)) else {
-        return Exif::default();
+    let Ok(file) = open_regular(path) else { return Exif::default() };
+    let mut reader = std::io::BufReader::new(file);
+    // A TIFF is read whole by kamadak-exif, image and all, for its few
+    // tags: of a large one, only as much as `EXIF_BUDGET`, where they
+    // nearly always are (at the start). Several are read at once.
+    let tiff = reader.fill_buf().is_ok_and(|b| b.starts_with(b"II*\0") || b.starts_with(b"MM\0*"));
+    let read = if tiff {
+        let mut head = Vec::new();
+        match reader.take(EXIF_BUDGET).read_to_end(&mut head) {
+            Ok(_) => exif::Reader::new().read_raw(head),
+            Err(e) => Err(e.into()),
+        }
+    } else {
+        exif::Reader::new().read_from_container(&mut reader)
     };
+    let Ok(exif) = read else { return Exif::default() };
     let text = |tag| {
         exif.get_field(tag, exif::In::PRIMARY).map(|f| f.display_value().to_string().trim_matches('"').to_owned())
     };
@@ -1056,6 +1100,54 @@ mod tests {
         assert!(!unread_holds(&unread, "a/b.JPG.MOV"));
         assert!(unread_holds(&["".to_string()], "anything.JPG"));
         assert!(!unread_holds(&[], "anything.JPG"));
+    }
+
+    #[test]
+    fn only_regular_files_in_the_folder_are_its_photos() {
+        let (dir, outside) = (temp("regular"), temp("regular-outside"));
+        touch(&dir.join("IMG_1.JPG"));
+        touch(&outside.join("private.jpg"));
+        std::os::unix::fs::symlink(outside.join("private.jpg"), dir.join("link.jpg")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("linked")).unwrap();
+        let fifo = std::ffi::CString::new(dir.join("pipe.jpg").into_os_string().into_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o644) }, 0);
+        let source = FolderSource::new(dir.clone());
+        let entries = source.look().unwrap().entries;
+        assert_eq!(entries.keys().collect::<Vec<_>>(), ["IMG_1.JPG"]);
+        // Nor handed out, should the index name them: a link, a file
+        // through a linked folder, a pipe (at once, not waiting on it), a
+        // path out of the folder.
+        for rel in ["link.jpg", "linked/private.jpg", "pipe.jpg", "../regular-outside/private.jpg"] {
+            let rel = rel.replace("regular-outside", outside.file_name().unwrap().to_str().unwrap());
+            assert!(source.file(&rel).is_err(), "{rel}");
+            assert!(source.open(&Ticket(format!("original\t{rel}")), None).is_err(), "{rel}");
+            let stored = Stored { asset: rel.clone(), want: Want::Original, name: rel.clone(), key: String::new(), file_type: String::new() };
+            assert!(source.local(&stored).is_none(), "{rel}");
+        }
+        assert_eq!(read_exif(&dir.join("pipe.jpg")).taken, None);
+        assert!(source.file("IMG_1.JPG").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_large_tiff_keeps_its_date_read_from_its_start() {
+        // A TIFF of one IFD, its date in it, then 64 MB of image.
+        let date = b"2024:05:01 12:00:00\0";
+        let mut tiff = b"II*\0".to_vec();
+        tiff.extend(8u32.to_le_bytes());
+        tiff.extend(1u16.to_le_bytes());
+        tiff.extend(0x0132u16.to_le_bytes()); // DateTime
+        tiff.extend(2u16.to_le_bytes());
+        tiff.extend((date.len() as u32).to_le_bytes());
+        tiff.extend(26u32.to_le_bytes());
+        tiff.extend(0u32.to_le_bytes());
+        tiff.extend(date);
+        tiff.resize(64 << 20, 0);
+        let dir = temp("tiff");
+        std::fs::write(dir.join("scan.tif"), &tiff).unwrap();
+        assert_eq!(read_exif(&dir.join("scan.tif")).taken, exif_time("2024:05:01 12:00:00", None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

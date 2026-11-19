@@ -1070,6 +1070,7 @@ dependencies = [
  "chrono",
  "image",
  "kamadak-exif",
+ "libc",
  "pinhole-core",
  "rayon",
  "rusqlite",

@@ -11,6 +11,7 @@ anyhow.workspace = true
 chrono.workspace = true
 image.workspace = true
 kamadak-exif.workspace = true
+libc.workspace = true
 pinhole-core.workspace = true
 rayon.workspace = true
 rusqlite.workspace = true
