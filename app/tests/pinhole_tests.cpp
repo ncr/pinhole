@@ -6346,6 +6346,19 @@ PinholePlugin {
         QTRY_COMPARE(bench->js(QStringLiteral("heard.join(' ')")).toString(), QStringLiteral("index:2"));
     }
 
+    // A manifest that is a pipe no one writes to, or far too big, is that
+    // plugin's problem, said at once: it does not hold the window still.
+    void aManifestThatIsNotAPlainFileIsAProblemNotAWait() {
+        QTemporaryDir dir;
+        QVERIFY(::mkfifo(QFile::encodeName(dir.path() + "/manifest.json").constData(), 0600) == 0);
+        QJsonObject manifest;
+        QString main;
+        QCOMPARE(Plugins::manifestProblem(dir.path(), &manifest, &main), QString("manifest.json is not a file of at most 1 MB"));
+        QFile::remove(dir.path() + "/manifest.json");
+        write(dir.path() + "/manifest.json", QByteArray(2 << 20, ' '));
+        QCOMPARE(Plugins::manifestProblem(dir.path(), &manifest, &main), QString("manifest.json is not a file of at most 1 MB"));
+    }
+
     // One's own copy of a built-in plugin: off until it is turned on
     // itself, whatever the built-in's switch says.
     void aCopyOfABuiltInPluginHasASwitchOfItsOwn() {
@@ -6369,6 +6382,18 @@ PinholePlugin {
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("enabled").toObject().value("copy:t"), QJsonValue(true));
         bench.reset();
+
+        // Two copies with its id: neither loads, nor takes either switch.
+        const QString second = Plugins::personalDir() + "/t-other";
+        QVERIFY(QDir().mkpath(second));
+        write(second + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
+        write(second + "/Main.qml", "import QtQuick\nItem {}\n");
+        bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
+                                              QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
+        QVERIFY(bench->plugins->at("t").value("copy").toBool());
+        QVERIFY(bench->plugins->at("t").value("error").toString().contains("same id"));
+        bench.reset();
+        QDir(second).removeRecursively();
         QDir(copy).removeRecursively();
         QFile::remove(config);
     }
