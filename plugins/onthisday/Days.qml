@@ -265,6 +265,7 @@ Item {
         y: 16
         spacing: 6
         Chip {
+            textFormat: Text.StyledText
             text: qsTr("On this day") + " <font color=\"" + theme.darkForeground + "\">· </font>"
                   + days.plugin.today.toLocaleDateString(Qt.locale(), qsTr("d MMMM"))
                   + (days.plugin.span > 0 ? " <font color=\"" + theme.darkForeground + "\">· ± "

@@ -315,6 +315,7 @@ Item {
         spacing: 6
         Chip {
             readonly property var date: editor.positions.length > 0 ? new Date(pinhole.library.item(editor.positions[0]).date) : null
+            textFormat: Text.StyledText
             text: date ? date.toLocaleDateString(Qt.locale(), Locale.LongFormat) + " <font color=\"" + theme.darkForeground + "\">· "
                          + date.toLocaleTimeString(Qt.locale(), Locale.ShortFormat) + "</font>" : ""
             textColor: theme.brightForeground

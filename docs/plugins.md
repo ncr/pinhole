@@ -873,7 +873,9 @@ its settings, is there as the window first shows. It sets:
 `placeholder`, `password`, `done`, `accepted()`), `Command` (a key,
 with what it does in the help), the kit (above), and `Scroller`, what
 `ScrollList`, `ScrollGrid` and `ScrollArea` are made of, and `theme` has the Omarchy theme's colours and type, so a plugin can look
-like the rest.
+like the rest. `UiText` and `Chip` show plain text, so a photo's or a
+source's words never read as markup; one that styles its own text sets
+`textFormat: Text.StyledText`.
 
 One word for each thing across them: **`triggered()`** when it
 is used (a `PluginAction`, a `Command`, a `ShellButton`, a `Panel` where no
