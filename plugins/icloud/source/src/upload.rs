@@ -89,7 +89,7 @@ impl Uploader {
         let (tx, rx) = std::sync::mpsc::channel::<Sending>();
         let progress = tx.clone();
         let body = Counted { inner: file, done: 0, sent: move |n| { let _ = progress.send(Sending::Sent(n)); } };
-        let deadline = self.stalled + Duration::from_secs(size / SLOWEST);
+        let deadline = 2 * self.stalled + Duration::from_secs(size / SLOWEST);
         let request = self.http.post(url).headers(headers).timeout(deadline).body(Body::sized(body, size));
         std::thread::spawn(move || {
             let _ = tx.send(Sending::Answered(request.send().map_err(reqwest::Error::without_url)));
