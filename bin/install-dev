@@ -55,5 +55,8 @@ desktop.write_text((root / "pkgbuild/pinhole.desktop").read_text().replace("Exec
 subprocess.run([str(root / "bin/install-metadata"), str(prefix)], check=True,
                env={**os.environ, "PINHOLE_INSTALL_MODE": "developer", "PINHOLE_RUNTIME_PREFIX": str(runtime_prefix)})
 subprocess.run([str(root / "bin/install-record"), str(prefix)], check=True)
-subprocess.run([str(root / "bin/activate-install"), str(prefix), str(runtime_prefix)], check=True)
+# activate-install says itself what stopped it; no traceback after that.
+activated = subprocess.run([str(root / "bin/activate-install"), str(prefix), str(runtime_prefix)])
 staging.cleanup()
+if activated.returncode:
+    sys.exit(activated.returncode)
