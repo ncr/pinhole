@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     let out = cli.out.unwrap_or_else(|| {
         PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share/pinhole/fake")
     });
+    disposable(&out)?;
     std::fs::create_dir_all(out.join("thumbs"))?;
     let specs = plan(cli.count, cli.seed);
 
@@ -89,6 +90,31 @@ fn main() -> Result<()> {
     // No source syncs into it.
     db::set_meta(&conn, "source", "fake")?;
     println!("{} assets in {}", specs.len(), out.display());
+    Ok(())
+}
+
+/// Whether a library may be made in `out`: a folder not there yet, an
+/// empty one, or one this made before (its index says `fake`). Never a real
+/// library, nor a folder of anything else.
+fn disposable(out: &Path) -> Result<()> {
+    let empty = match std::fs::read_dir(out) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(e) => return Err(e.into()),
+    };
+    if empty {
+        return Ok(());
+    }
+    let db = out.join("library.sqlite");
+    let fake = db.is_file()
+        && rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()
+            .and_then(|conn| db::meta(&conn, "source"))
+            .as_deref()
+            == Some("fake");
+    if !fake {
+        anyhow::bail!("{} has something in it other than a synthetic library: give an empty folder or a new one", out.display());
+    }
     Ok(())
 }
 
