@@ -34,11 +34,19 @@ def entries(prefix):
     return found
 
 
+def through_link(destination, relative):
+    """A folder on the way to it is a link (into a checkout, say): what is
+    there is not the installation's, whatever it holds."""
+    parts = PurePosixPath(relative).parts
+    return any((destination / PurePosixPath(*parts[:depth])).is_symlink() for depth in range(1, len(parts)))
+
+
 def owned(destination, previous, relative):
-    """The path as the previous install put it there."""
+    """The path as the previous install put it there, never reached through
+    a link."""
     entry = previous.get(relative)
     path = destination / relative
-    if entry is None or not os.path.lexists(path):
+    if entry is None or not os.path.lexists(path) or through_link(destination, relative):
         return False
     if "link" in entry:
         return path.is_symlink() and os.readlink(path) == entry["link"]
@@ -103,10 +111,22 @@ def plan(stage, destination):
     return away, wanted
 
 
+def make_parents(path, made):
+    """Its missing folders, each made noted, so a rollback takes them away."""
+    missing = []
+    for parent in path.parents:
+        if os.path.lexists(parent):
+            break
+        missing.append(parent)
+    for parent in reversed(missing):
+        parent.mkdir()
+        made.append(parent)
+
+
 def activate(stage, destination):
     backup = stage / ".previous"
     away, wanted = plan(stage, destination)
-    taken, placed = [], []
+    taken, placed, made = [], [], []
     try:
         for relative in away:
             current = destination / relative
@@ -117,7 +137,7 @@ def activate(stage, destination):
             taken.append(relative)
         for relative in wanted:
             current = destination / relative
-            current.parent.mkdir(parents=True, exist_ok=True)
+            make_parents(current, made)
             if os.path.lexists(current) and not (current.is_dir() and not current.is_symlink()):
                 (backup / relative).parent.mkdir(parents=True, exist_ok=True)
                 os.replace(current, backup / relative)
@@ -126,14 +146,30 @@ def activate(stage, destination):
             placed.append(relative)
     except BaseException:
         # Renames can fail (permissions, storage, external removal) even
-        # after every input copied successfully. Put every previous path back.
-        for relative in reversed(placed):
-            recovered = stage / relative
-            recovered.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(destination / relative, recovered)
-        for relative in reversed(taken):
+        # after every input copied successfully. Put every previous path
+        # back: what was placed out, the folders made for it gone (where a
+        # link of the previous install's was, say), then what was there.
+        # One that cannot be put back does not keep the rest from it.
+        failures = []
+        def step(do, *args):
+            try:
+                do(*args)
+            except OSError as error:
+                failures.append(error)
+        def back(relative):
+            (stage / relative).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(destination / relative, stage / relative)
+        def restore(relative):
             (destination / relative).parent.mkdir(parents=True, exist_ok=True)
             os.replace(backup / relative, destination / relative)
+        for relative in reversed(placed):
+            step(back, relative)
+        for folder in reversed(made):
+            step(folder.rmdir)
+        for relative in reversed(taken):
+            step(restore, relative)
+        for error in failures:
+            print(f"pinhole: could not put back {error.filename}: {error.strerror}", file=sys.stderr)
         raise
     # Folders the previous install's files left empty.
     for relative in sorted(away, key=lambda r: -len(PurePosixPath(r).parts)):

@@ -23,9 +23,6 @@ put_program() {
 put_program app/build/pinhole "$PREFIX/bin/pinhole"
 put_program core/target/release/pinholed "$PREFIX/bin/pinholed"
 put_program bin/update "$PREFIX/bin/pinhole-update"
-# pinhole-sync was the commands before `pinhole <command>`, and wrote the
-# library itself: gone, so nothing but pinholed writes it.
-rm -f "$PREFIX/bin/pinhole-sync"
 # iCloud's sign-in provider: a uv script that fetches icloudpd into uv's
 # cache on first use (see plugins/icloud/auth/PROTOCOL.md). It is the
 # pinhole.icloud plugin's, but goes beside pinholed, where pinholed looks
@@ -123,4 +120,3 @@ fi
 "$ROOT/bin/install-record" "$PREFIX"
 # Only a complete staged tree can replace the running installation.
 "$ROOT/bin/activate-install" "$PREFIX" "$DESTINATION"
-rm -f "$DESTINATION/bin/pinhole-sync"

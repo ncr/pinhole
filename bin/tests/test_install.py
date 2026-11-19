@@ -124,6 +124,41 @@ class ActivationTests(unittest.TestCase):
             self.assertEqual(self.activate(stage, destination).returncode, 0)
             self.assertFalse((destination / "lib/pinhole/retired").exists())
 
+    def test_a_retired_file_reached_through_a_link_is_left_where_it_is(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            def extra(destination):
+                (destination / "lib/pinhole/retired").mkdir()
+                (destination / "lib/pinhole/retired/plugin.qml").write_text("same")
+            destination, stage = self.prepare(root, extra)
+            # Since: the folder made a link into a checkout holding the same file.
+            checkout = root / "checkout"
+            checkout.mkdir()
+            (checkout / "plugin.qml").write_text("same")
+            shutil.rmtree(destination / "lib/pinhole/retired")
+            (destination / "lib/pinhole/retired").symlink_to(checkout)
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
+            self.assertEqual((checkout / "plugin.qml").read_text(), "same")
+            self.assertTrue((destination / "lib/pinhole/retired").is_symlink())
+
+    def test_a_late_failure_puts_a_developer_link_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checkout = root / "checkout"
+            checkout.mkdir()
+            (checkout / "version").write_text("checkout")
+            def linked(destination):
+                shutil.rmtree(destination / "lib/pinhole/plugins")
+                (destination / "lib/pinhole/plugins").symlink_to(checkout)
+            destination, stage = self.prepare(root, linked)
+            before = {path: (destination / path).read_bytes() for path in PATHS if "plugins" not in path}
+            (stage / "bin/pinhole").unlink()
+            self.assertNotEqual(self.activate(stage, destination).returncode, 0)
+            self.assertTrue((destination / "lib/pinhole/plugins").is_symlink())
+            self.assertEqual(os.readlink(destination / "lib/pinhole/plugins"), str(checkout))
+            self.assertEqual({path: (destination / path).read_bytes() for path in before}, before)
+            self.assertEqual((checkout / "version").read_text(), "checkout")
+
 
 class UninstallTests(unittest.TestCase):
     def record(self, prefix, mode="local"):
