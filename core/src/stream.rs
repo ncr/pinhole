@@ -6,9 +6,10 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::FileExt;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,12 @@ pub type Ranged = Box<dyn Fn(u64, u64) -> Result<Box<dyn Read + Send>> + Send + 
 const AHEAD: u64 = 4 << 20;
 /// A stream nobody has read for this long is forgotten.
 const IDLE: Duration = Duration::from_secs(3600);
+/// Connections served at once: a player opens a few.
+const CONNECTIONS_MAX: usize = 32;
+/// The longest head of a request: a player's are a few hundred bytes.
+const HEAD_MAX: usize = 8 << 10;
+/// How long the whole of a request's head may take to come.
+const HEAD_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, PartialEq)]
 enum State {
@@ -70,11 +77,21 @@ impl Streams {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let streams = Arc::new(Streams { port: listener.local_addr()?.port(), by_token: Mutex::new(HashMap::new()) });
         let serving = streams.clone();
+        let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         std::thread::spawn(move || {
-            for conn in listener.incoming().flatten() {
-                let streams = serving.clone();
+            for mut conn in listener.incoming().flatten() {
+                // Any program can connect, a token or not: past the most at
+                // once, turned away before a thread is spent on it.
+                if open.fetch_add(1, Ordering::SeqCst) >= CONNECTIONS_MAX {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    let _ = conn.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = conn.write_all(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+                    continue;
+                }
+                let (streams, open) = (serving.clone(), open.clone());
                 std::thread::spawn(move || {
                     let _ = streams.serve(conn);
+                    open.fetch_sub(1, Ordering::SeqCst);
                 });
             }
         });
@@ -104,19 +121,16 @@ impl Streams {
     }
 
     fn serve(&self, conn: TcpStream) -> Result<()> {
-        conn.set_read_timeout(Some(Duration::from_secs(30)))?;
-        let mut reader = BufReader::new(conn.try_clone()?);
         let mut out = conn;
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        let mut parts = line.split_whitespace();
+        let Some(head) = read_head(&mut out)? else {
+            return respond(&mut out, "431 Request Header Fields Too Large", &[]);
+        };
+        let head = String::from_utf8_lossy(&head);
+        let mut lines = head.lines();
+        let mut parts = lines.next().unwrap_or("").split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
         let mut range = None;
-        loop {
-            let mut header = String::new();
-            if reader.read_line(&mut header)? == 0 || header.trim().is_empty() {
-                break;
-            }
+        for header in lines {
             if let Some((name, value)) = header.split_once(':') {
                 if name.eq_ignore_ascii_case("range") {
                     range = parse_range(value.trim());
@@ -174,6 +188,30 @@ impl Streams {
         }
         Ok(())
     }
+}
+
+/// A request's head, up to the blank line after it, read within `HEAD_WAIT`
+/// in all: none (`None`) if it is longer than `HEAD_MAX`. A request for a
+/// file has no body, so nothing after it is wanted.
+fn read_head(conn: &mut TcpStream) -> Result<Option<Vec<u8>>> {
+    let started = Instant::now();
+    let mut head = Vec::new();
+    let mut buf = [0u8; 1024];
+    while !head.windows(4).any(|w| w == b"\r\n\r\n") && !head.windows(2).any(|w| w == b"\n\n") {
+        if head.len() > HEAD_MAX {
+            return Ok(None);
+        }
+        let left = HEAD_WAIT.checked_sub(started.elapsed()).filter(|d| !d.is_zero());
+        let Some(left) = left else { anyhow::bail!("no request within {} s", HEAD_WAIT.as_secs()) };
+        conn.set_read_timeout(Some(left))?;
+        let n = conn.read(&mut buf)?;
+        if n == 0 {
+            anyhow::bail!("hung up part way");
+        }
+        head.extend_from_slice(&buf[..n]);
+    }
+    conn.set_read_timeout(Some(Duration::from_secs(30)))?;
+    Ok(Some(head))
 }
 
 /// Bytes `start..=end` of the file, waiting for the download where they
@@ -289,5 +327,38 @@ mod tests {
         assert!(reply.contains("Content-Range: bytes 2-9/10"), "{reply}");
         assert!(reply.ends_with("\r\n\r\n23456789"), "{reply}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn ask(port: u16, head: &[u8]) -> String {
+        let mut conn = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let _ = conn.write_all(head);
+        let mut reply = Vec::new();
+        let _ = conn.read_to_end(&mut reply);
+        String::from_utf8_lossy(&reply).into_owned()
+    }
+
+    /// Before a token is looked at: no long head, nor many at once.
+    #[test]
+    fn takes_no_long_head_nor_many_at_once() {
+        let streams = Streams::start().unwrap();
+        let mut long = b"GET /x HTTP/1.1\r\n".to_vec();
+        long.extend(std::iter::repeat_n(b'a', 64 << 10));
+        assert!(ask(streams.port, &long).starts_with("HTTP/1.1 431"));
+        let quiet: Vec<TcpStream> = (0..CONNECTIONS_MAX).map(|_| TcpStream::connect(("127.0.0.1", streams.port)).unwrap()).collect();
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        assert!(ask(streams.port, b"GET /x HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 503"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(quiet);
+        let back = Instant::now();
+        let answer = loop {
+            let answer = ask(streams.port, b"GET /x HTTP/1.1\r\n\r\n");
+            if !answer.starts_with("HTTP/1.1 503") || back.elapsed() > Duration::from_secs(5) {
+                break answer;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(answer.starts_with("HTTP/1.1 404"), "{answer}");
     }
 }
