@@ -39,19 +39,37 @@ fn unsent(e: &reqwest::Error) -> bool {
 
 pub struct Drive {
     http: Client,
-    /// The folder as this round's `list` judged it (or `write` made it):
-    /// its drivewsid and docwsid.
-    folder: Mutex<Option<(String, String)>>,
-    /// Its files as last listed, by name: their docwsid.
-    files: Mutex<HashMap<String, String>>,
+    /// The folder as this round's `list` judged it (or `write` found or
+    /// made it), with its files: none once a `list` finds none it takes.
+    approved: Mutex<Option<Approved>>,
+}
+
+/// A folder taken for Pinhole's, and what is in it, together: a file's
+/// document is never looked for in another folder.
+struct Approved {
+    /// Its docwsid.
+    folder: String,
+    /// Its files, by name: their docwsid.
+    files: HashMap<String, String>,
+}
+
+impl Approved {
+    fn new(folder: String, items: &[Value]) -> Self {
+        let files = items
+            .iter()
+            .filter(|i| i["type"] == "FILE")
+            .filter_map(|i| Some((full_name(i)?, i["docwsid"].as_str()?.to_owned())))
+            .filter(|(name, _)| name != MARK)
+            .collect();
+        Approved { folder, files }
+    }
 }
 
 impl Default for Drive {
     fn default() -> Self {
         Drive {
             http: Client::builder().timeout(Duration::from_secs(120)).gzip(true).build().expect("an HTTP client"),
-            folder: Mutex::new(None),
-            files: Mutex::new(HashMap::new()),
+            approved: Mutex::new(None),
         }
     }
 }
@@ -207,25 +225,23 @@ impl Drive {
     /// as the file does). The folder is judged again first, every round:
     /// one shared since, or its mark gone, is used no more.
     pub fn list(&self, session: &Session) -> Result<Vec<Carried>> {
-        *self.folder.lock().unwrap() = None;
-        let Some((drivewsid, docwsid, items)) = self.find(session, false)? else { return Ok(Vec::new()) };
-        *self.folder.lock().unwrap() = Some((drivewsid, docwsid));
-        let mut files = self.files.lock().unwrap();
-        files.clear();
-        let mut carried = Vec::new();
-        for item in items.iter().filter(|i| i["type"] == "FILE") {
-            let (Some(name), Some(id), Some(etag)) = (full_name(item), item["docwsid"].as_str(), item["etag"].as_str()) else { continue };
-            if name == MARK {
-                continue;
-            }
-            files.insert(name.clone(), id.to_owned());
-            carried.push(Carried { name, version: etag.to_owned() });
-        }
+        // Nothing of the last round's folder is used again unless it is
+        // taken again now.
+        *self.approved.lock().unwrap() = None;
+        let Some((_, folder, items)) = self.find(session, false)? else { return Ok(Vec::new()) };
+        let carried = items
+            .iter()
+            .filter(|i| i["type"] == "FILE")
+            .filter_map(|i| Some(Carried { name: full_name(i)?, version: i["etag"].as_str()?.to_owned() }))
+            .filter(|c| c.name != MARK)
+            .collect();
+        *self.approved.lock().unwrap() = Some(Approved::new(folder, &items));
         Ok(carried)
     }
 
     pub fn read(&self, session: &Session, name: &str) -> Result<Vec<u8>> {
-        let id = self.files.lock().unwrap().get(name).cloned().ok_or_else(|| anyhow!("no {name} in iCloud Drive's {FOLDER}"))?;
+        let id = self.approved.lock().unwrap().as_ref().and_then(|a| a.files.get(name).cloned());
+        let id = id.ok_or_else(|| anyhow!("no {name} in iCloud Drive's {FOLDER}"))?;
         self.download(session, &id, name)
     }
 
@@ -241,16 +257,23 @@ impl Drive {
     /// or written over where it is: the folder as this round's `list`
     /// judged it, else found and judged now.
     pub fn write(&self, session: &Session, name: &str, bytes: &[u8]) -> Result<()> {
-        let judged = self.folder.lock().unwrap().clone();
-        let (drivewsid, folder) = match judged {
-            Some(found) => found,
-            None => self.find(session, true)?.map(|(d, f, _)| (d, f)).expect("made"),
+        let judged = self.approved.lock().unwrap().as_ref().map(|a| (a.folder.clone(), a.files.get(name).cloned()));
+        let (folder, existing) = match judged {
+            Some(judged) => judged,
+            None => {
+                let (_, folder, items) = self.find(session, true)?.expect("made");
+                let approved = Approved::new(folder.clone(), &items);
+                let existing = approved.files.get(name).cloned();
+                *self.approved.lock().unwrap() = Some(approved);
+                (folder, existing)
+            }
         };
-        *self.folder.lock().unwrap() = Some((drivewsid, folder.clone()));
-        let existing = self.files.lock().unwrap().get(name).cloned();
         let id = self.put(session, &folder, name, bytes, existing.as_deref())?;
         if let Some(id) = id {
-            self.files.lock().unwrap().insert(name.to_owned(), id);
+            // Kept with the folder it is in, if that is still the one taken.
+            if let Some(approved) = self.approved.lock().unwrap().as_mut().filter(|a| a.folder == folder) {
+                approved.files.insert(name.to_owned(), id);
+            }
         }
         Ok(())
     }
@@ -348,6 +371,8 @@ mod tests {
         requests: Vec<String>,
         /// The Pinhole folder shared with someone.
         shared: bool,
+        /// The documents written, in order.
+        written: Vec<String>,
     }
 
     impl FakeDrive {
@@ -392,6 +417,7 @@ mod tests {
                     assert_eq!(r["path"]["starting_document_id"], "PIN");
                     let bytes = self.sent[r["data"]["signature"].as_str().unwrap()].clone();
                     let doc = r["document_id"].as_str().unwrap().to_owned();
+                    self.written.push(doc.clone());
                     let (name, ext) = r["path"]["path"].as_str().unwrap().rsplit_once('.').unwrap();
                     let etag = self.files.get(&doc).map_or(1, |f| f.2 + 1);
                     self.files.insert(doc.clone(), (name.into(), ext.into(), etag, bytes));
@@ -477,6 +503,24 @@ mod tests {
         let drive = Drive::default();
         assert!(drive.list(&session).unwrap().is_empty());
         assert_eq!(fake.lock().unwrap().requests, ["/retrieveItemDetailsInFolders"]);
+    }
+
+    #[test]
+    fn a_folder_moved_away_takes_its_files_documents_with_it() {
+        let fake = there(&[("Pinhole", "txt"), ("spawner-0123456789ab", "json")]);
+        let session = serve(fake.clone());
+        let drive = Drive::default();
+        assert_eq!(drive.list(&session).unwrap().len(), 1);
+        // Moved out of the top of iCloud Drive: none there now, and its
+        // files are no more this computer's to write over or read.
+        fake.lock().unwrap().folders.clear();
+        assert!(drive.list(&session).unwrap().is_empty());
+        assert!(drive.read(&session, "spawner-0123456789ab.json").is_err());
+        drive.write(&session, "spawner-0123456789ab.json", b"{}").unwrap();
+        // A new document in the folder made anew, not the old one's.
+        let fake = fake.lock().unwrap();
+        assert_eq!(fake.folders.len(), 1);
+        assert!(fake.written.last().is_some_and(|doc| doc != "OLD1"), "{:?}", fake.written);
     }
 
     #[test]
