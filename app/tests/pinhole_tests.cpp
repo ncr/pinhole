@@ -3217,6 +3217,50 @@ QtObject {
         plugin.reset();
     }
 
+    // A step of Series' writes only the keys of the series it changed, and
+    // undone puts back only those: a series made on another computer, or
+    // one that shares a photo with it, is left as it is.
+    void seriesStepsTouchOnlyTheirOwnSeries() {
+        PluginBench bench({{"pinhole.series", {}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}, {"e", 5000}, {"f", 6000}});
+        auto *store = bench.plugins->syncedStore();
+        // Made on two computers offline: they share c.
+        store->set("pinhole.series", "group\tA", QJsonArray{"a", "b", "c"});
+        store->set("pinhole.series", "group\tB", QJsonArray{"c", "d", "e"});
+        bench.plugins->flush();
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/series/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.series&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("series", bench.engine.newQObject(plugin.get()));
+        bench.js("series.take('[]')");
+        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,1,2],[3,4]]"));
+        const auto kept = [&] {
+            bench.plugins->flush();
+            return SyncedStore::load(bench.dir.path(), "pinhole.series");
+        };
+        // b out of the first: B, which holds c too, stays whole.
+        bench.js("series.takeOut(1)");
+        QCOMPARE(kept().value("group\tA").toArray(), (QJsonArray{"a", "c"}));
+        QCOMPARE(kept().value("group\tB").toArray(), (QJsonArray{"c", "d", "e"}));
+        QCOMPARE(kept().value("apart\tb"), QJsonValue(true));
+        // Another series made elsewhere meanwhile; the step undone.
+        store->set("pinhole.series", "group\tC", QJsonArray{"e", "f"});
+        QTRY_COMPARE(bench.js("Object.keys(series.edits.manual).sort().join(' ')").toString(), QString("A B C"));
+        bench.history.undo();
+        const QJsonObject after = kept();
+        QCOMPARE(after.value("group\tA").toArray(), (QJsonArray{"a", "b", "c"}));
+        QCOMPARE(after.value("group\tB").toArray(), (QJsonArray{"c", "d", "e"}));
+        QCOMPARE(after.value("group\tC").toArray(), (QJsonArray{"e", "f"}));
+        QVERIFY(!after.contains("apart\tb"));
+        plugin.reset();
+    }
+
     void whatDecodingAndColourCostOnRealPhotos() {
         // PINHOLE_DECODE_SAMPLE: a file listing real photos' files, one a
         // line (thumbnails, HEIC originals), for what decoding them and
@@ -7524,15 +7568,29 @@ PinholePlugin {
         bench.plugins->flush();
         QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.people").keys(), (QStringList{"n", "r2", "reject\tn\tr2"}));
 
-        // Names only on this computer: moved into its state, by library,
-        // and nothing left synced; turned off, moved back.
+        // Names only on this computer, where its state cannot be written:
+        // nothing is taken from what is synced.
+        const QString state = Plugins::stateRoot() + "/pinhole.people/state.json";
+        QVERIFY(QDir().mkpath(state));
+        bench.js("people.keepHere(true)");
+        bench.plugins->flush();
+        QVERIFY(!bench.js("people.local").toBool());
+        QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.people").keys(), (QStringList{"n", "r2", "reject\tn\tr2"}));
+        QVERIFY(QDir(state).removeRecursively());
+
+        // Where it can: moved into its state, for this library alone, and
+        // nothing left synced; turned off, moved back.
         bench.js("people.keepHere(true)");
         bench.plugins->flush();
         QVERIFY(bench.js("people.local").toBool());
+        QVERIFY(bench.js("pinhole.state['local\\t' + people.source] === true").toBool());
         QVERIFY(SyncedStore::load(bench.dir.path(), "pinhole.people").isEmpty());
         QCOMPARE(bench.js("people.edits.n.person").toString(), QString("Anna"));
         QCOMPARE(bench.js("pinhole.state[people.localPrefix + 'n'].person").toString(), QString("Anna"));
+        // Told at once, as synced edits are once kept: the view reads again.
+        bench.js("var told = 0; people.edited.connect(() => ++told)");
         bench.js("people.nameFace({ key: 'z' }, 'Ewa')");
+        QVERIFY(bench.js("told").toInt() > 0);
         bench.plugins->flush();
         QVERIFY(SyncedStore::load(bench.dir.path(), "pinhole.people").isEmpty());
         QCOMPARE(bench.js("pinhole.state[people.localPrefix + 'z'].person").toString(), QString("Ewa"));
@@ -7543,6 +7601,31 @@ PinholePlugin {
         QCOMPARE(back.keys(), (QStringList{"n", "r2", "reject\tn\tr2", "z"}));
         QCOMPARE(back.value("z").toObject().value("person").toString(), QString("Ewa"));
         QVERIFY(!bench.js("pinhole.state.keys().some(key => key.startsWith('local\\t'))").toBool());
+    }
+
+    // Two windows that keep other keys of one plugin's state both keep
+    // theirs: each writes only the keys it changed, into the file as it is.
+    void twoWindowsStateKeysAreBothKept() {
+        QTemporaryDir root;
+        KeptFiles files;
+        PluginStore one(root.path(), "state.json", &files), two(root.path(), "state.json", &files);
+        one.values("t");
+        two.values("t");
+        one.set("t", "a", 1);
+        two.set("t", "b", 2);
+        QVERIFY(one.kept("t"));
+        QVERIFY(two.kept("t"));
+        one.set("t", "a", QJsonValue::Null);
+        QVERIFY(one.kept("t"));
+        QFile file(one.path("t"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll()).object(), (QJsonObject{{"b", 2}}));
+        // One that cannot be written says so.
+        file.close();
+        QVERIFY(QFile::remove(one.path("t")));
+        QVERIFY(QDir().mkpath(one.path("t")));
+        one.set("t", "c", 3);
+        QVERIFY(!one.kept("t"));
     }
 
     void aPluginAskingForANewerApiSaysSo() {

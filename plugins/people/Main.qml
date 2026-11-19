@@ -11,11 +11,13 @@ PinholePlugin {
     // by face ({ person, not, unknown }), and each face taken out of a
     // group under a key of its own (rejectKey: true), so two computers that
     // each take another face out of one group keep both. Synced with the
-    // library to every computer it is shown on, or with "Names only on this
-    // computer" in its state here, by library (localPrefix).
+    // library to every computer it is shown on, or, with "Names only on this
+    // computer" chosen for that library (its `localMark` in the state), in
+    // its state here, each under localPrefix.
     readonly property string source: pinhole.library.key || pinhole.library.dir
-    readonly property bool local: pinhole.settings.local === true
-    readonly property string localPrefix: "local\t" + source + "\t"
+    readonly property string localMark: "local\t" + source
+    readonly property string localPrefix: localMark + "\t"
+    property bool local: false
     property var edits: ({})
     // What is said of faces changed, here or elsewhere: the view reads
     // again.
@@ -32,10 +34,10 @@ PinholePlugin {
     function stored() {
         if (!local)
             return pinhole.synced.values()
-        const values = {}
-        for (const key of pinhole.state.keys()) {
+        const all = pinhole.state.values(), values = {}
+        for (const key of Object.keys(all)) {
             if (key.startsWith(localPrefix))
-                values[key.slice(localPrefix.length)] = pinhole.state[key]
+                values[key.slice(localPrefix.length)] = all[key]
         }
         return values
     }
@@ -44,6 +46,7 @@ PinholePlugin {
         else pinhole.synced[key] = value
     }
     function reread() {
+        local = pinhole.state[localMark] === true
         edits = stored()
         edited()
         if (shownId !== "") lookSoon.restart()
@@ -54,23 +57,30 @@ PinholePlugin {
     }
     Component.onCompleted: reread()
     onSourceChanged: reread()
-    onLocalChanged: reread()
 
     // The names of the library shown moved to where they are to be kept
     // (`here`: this computer's state, else synced), as the switch is
-    // pressed. Taken off the other computers then; given back once synced.
+    // pressed: taken from where they were only once they are written where
+    // they go. Taken off the other computers then; given back once synced.
     function keepHere(here) {
         if (here === local) return
         const values = stored()
         const keys = Object.keys(values)
         if (here) {
             for (const key of keys) pinhole.state[localPrefix + key] = values[key]
-            pinhole.settings.local = true
+            pinhole.state[localMark] = true
+            if (!pinhole.state.kept()) {
+                for (const key of keys) pinhole.state[localPrefix + key] = null
+                pinhole.state[localMark] = null
+                return pinhole.warn(qsTr("The names could not be kept on this computer: they stay synced."))
+            }
             for (const key of keys) pinhole.synced[key] = null
         } else {
-            pinhole.settings.local = null
             for (const key of keys) pinhole.synced[key] = values[key]
+            if (!pinhole.synced.kept())
+                return pinhole.warn(qsTr("The names could not be synced: they stay on this computer."))
             for (const key of keys) pinhole.state[localPrefix + key] = null
+            pinhole.state[localMark] = null
         }
         reread()
     }
@@ -84,8 +94,13 @@ PinholePlugin {
             if (kept) now[face] = edit
             else delete now[face]
         }
-        // There at once for the next step; told again as it is kept.
+        // There at once for the next step; told again as it is kept, when
+        // synced.
         edits = now
+        if (local) {
+            edited()
+            if (shownId !== "") lookSoon.restart()
+        }
     }
     // Said of faces since found again in a new thumbnail (turned or cropped
     // in iCloud, edited on a phone): moved to their keys now, as
@@ -306,8 +321,8 @@ PinholePlugin {
             }
             SettingNote {
                 text: plugin.local
-                      ? qsTr("The names given, and what was said of faces, are kept on this computer alone. Turned off, those of the library shown go with it to your other computers again.")
-                      : qsTr("The names given go with the library to your other computers, for an iCloud library through iCloud Drive. Turned on, those of the library shown are kept here alone and taken off the others.")
+                      ? qsTr("The names given in this library, and what was said of its faces, are kept on this computer alone. Turned off, they go with it to your other computers again.")
+                      : qsTr("The names given in this library go with it to your other computers, for an iCloud library through iCloud Drive. Turned on, they are kept here alone and taken off the others.")
             }
         }
     }

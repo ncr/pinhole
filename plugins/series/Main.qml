@@ -116,26 +116,37 @@ PinholePlugin {
             withSeries(indexes[i]).forEach(id => ids.add(id))
         return [...ids]
     }
-    // An edit, `name` in the history: undone, the edits go back to what
-    // they were before it (the history is the library's: another shown
-    // starts it afresh).
-    function keep(manual, apart, name) {
-        const before = edits, after = { manual: manual, apart: apart }
-        setEdits(after)
-        pinhole.did(name, () => setEdits(before), () => setEdits(after))
+    // An edit, `name` in the history: `changes` to the synced keys, each
+    // series' and each kept apart photo's ({ key: value, null taking it
+    // out }). Undone, those keys alone go back to what they were, so what
+    // was changed since, here or on another computer, stays (the history
+    // is the library's: another shown starts it afresh).
+    function keep(changes, name) {
+        const before = {}
+        for (const key of Object.keys(changes))
+            before[key] = valueOf(key)
+        change(changes)
+        pinhole.did(name, () => change(before), () => change(changes))
     }
-    // Only the keys that differ from the edits as they are are written:
-    // undone, a step puts back its own and leaves what came since.
-    function setEdits(state) {
-        const now = edits
-        for (const key of new Set(Object.keys(now.manual).concat(Object.keys(state.manual)))) {
-            if (JSON.stringify(now.manual[key]) !== JSON.stringify(state.manual[key]))
-                pinhole.synced["group\t" + key] = state.manual[key] || null
+    function valueOf(key) {
+        if (key.startsWith("group\t")) return edits.manual[key.slice(6)] || null
+        return edits.apart.includes(key.slice(6)) ? true : null
+    }
+    function change(changes) {
+        const manual = Object.assign({}, edits.manual), apart = new Set(edits.apart)
+        for (const key of Object.keys(changes)) {
+            const value = changes[key]
+            pinhole.synced[key] = value
+            if (key.startsWith("group\t")) {
+                if (value) manual[key.slice(6)] = value
+                else delete manual[key.slice(6)]
+            } else if (value) {
+                apart.add(key.slice(6))
+            } else {
+                apart.delete(key.slice(6))
+            }
         }
-        const was = new Set(now.apart), will = new Set(state.apart)
-        for (const id of was) if (!will.has(id)) pinhole.synced["apart\t" + id] = null
-        for (const id of will) if (!was.has(id)) pinhole.synced["apart\t" + id] = true
-        edits = state
+        edits = { manual: manual, apart: [...apart].sort() }
         apply()
     }
     function syncedEdits() {
@@ -176,41 +187,41 @@ PinholePlugin {
                 plugin.apply()
         }
     }
-    // The series made by hand, without any that holds one of `ids`, and
-    // with those in `added` (by id).
-    function manualWithout(ids, added = {}) {
-        const set = new Set(ids), kept = {}
+    // `ids` taken out of the series made by hand that hold any of them:
+    // the changes to those series' keys alone, one left with fewer than two
+    // photos taken out.
+    function without(ids, changes = {}) {
+        const set = new Set(ids)
         for (const key of Object.keys(edits.manual)) {
-            if (!edits.manual[key].some(id => set.has(id)))
-                kept[key] = edits.manual[key]
+            const series = edits.manual[key]
+            if (!series.some(id => set.has(id))) continue
+            const rest = series.filter(id => !set.has(id))
+            changes["group\t" + key] = rest.length >= 2 ? rest : null
         }
-        return Object.assign(kept, added)
-    }
-    // The id of the series made by hand that holds `id`, or a new one.
-    function idWith(id) {
-        return Object.keys(edits.manual).find(key => edits.manual[key].includes(id)) || newId()
+        return changes
     }
     // One series of all these photos, and the series they are in.
     function group(indexes, name = qsTr("grouping")) {
         const ids = allWithSeries(indexes)
         if (ids.length < 2)
             return
-        const set = new Set(ids)
-        keep(manualWithout(ids, { [newId()]: ids }), edits.apart.filter(id => !set.has(id)), name)
+        const changes = without(ids, { ["group\t" + newId()]: ids })
+        for (const id of ids)
+            if (edits.apart.includes(id)) changes["apart\t" + id] = null
+        keep(changes, name)
     }
+    // A photo out of its series, and kept out of any the finder finds.
     function takeOut(index) {
-        const k = of(index)
-        if (k < 0)
+        if (of(index) < 0)
             return
         const id = idOf(index)
-        const all = idsOf(k)
-        const rest = all.filter(other => other !== id)
-        keep(manualWithout(all, rest.length >= 2 ? { [idWith(id)]: rest } : {}), edits.apart.concat([id]),
-             qsTr("taking out of a series"))
+        keep(without([id], { ["apart\t" + id]: true }), qsTr("taking out of a series"))
     }
     function ungroup(indexes) {
         const ids = allWithSeries(Array.from(indexes).filter(i => of(i) >= 0))
-        keep(manualWithout(ids), [...new Set(edits.apart.concat(ids))], qsTr("ungrouping"))
+        const changes = without(ids)
+        for (const id of ids) changes["apart\t" + id] = true
+        keep(changes, qsTr("ungrouping"))
     }
     // The series right beside a photo not in one, the nearer in time when
     // there is one on each side; -1 if none.
