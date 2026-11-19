@@ -29,7 +29,8 @@ pub fn open(path: &Path) -> Result<Connection> {
 fn create(db: &Connection) -> Result<()> {
     // A library of another schema is not brought up to this one: it is
     // made again, its source listing it whole at the next round. Nothing
-    // is kept there that its source does not have.
+    // is kept there that its source does not have, but what was chosen
+    // here (`KEPT`).
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let made: bool = db.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'assets'", [], |r| r.get::<_, i64>(0))? > 0;
     if made && version != SCHEMA {
@@ -39,7 +40,7 @@ fn create(db: &Connection) -> Result<()> {
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         let tx = db.unchecked_transaction()?;
-        for table in tables {
+        for table in tables.iter().filter(|t| !KEPT.contains(&t.as_str())) {
             tx.execute_batch(&format!("DROP TABLE IF EXISTS \"{}\"", table.replace('"', "\"\"")))?;
         }
         tx.commit()?;
@@ -109,6 +110,11 @@ fn create(db: &Connection) -> Result<()> {
     db.pragma_update(None, "user_version", SCHEMA)?;
     Ok(())
 }
+
+/// A source's tables of what someone chose, which the source itself does
+/// not have and could not list again: kept when the library is made again
+/// (`create`). A folder's favourites (plugins/folder).
+const KEPT: [&str; 1] = ["folder_favorites"];
 
 /// The index's schema, kept as `PRAGMA user_version`. A writer never
 /// writes one later than its own, and makes one of an earlier again
@@ -428,6 +434,8 @@ mod tests {
                 "CREATE TABLE assets (id TEXT PRIMARY KEY, favorite INTEGER);
                  INSERT INTO assets VALUES ('old', 1);
                  CREATE TABLE icloud_assets (asset_id TEXT);
+                 CREATE TABLE folder_favorites (asset_id TEXT PRIMARY KEY);
+                 INSERT INTO folder_favorites VALUES ('IMG_1.JPG');
                  CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
                  INSERT INTO meta VALUES ('change_token', 'stale');",
             )
@@ -439,6 +447,9 @@ mod tests {
         assert_eq!(meta(&conn, "change_token"), None);
         let tables: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'icloud_assets'", [], |r| r.get(0)).unwrap();
         assert_eq!(tables, 0);
+        // But the favourites chosen in a folder, which it has not.
+        let kept: String = conn.query_row("SELECT asset_id FROM folder_favorites", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, "IMG_1.JPG");
         // Of this schema, every column of it there.
         conn.query_row("SELECT edit, subtype, camera_make, latitude FROM assets LIMIT 1", [], |_| Ok(())).optional().unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
