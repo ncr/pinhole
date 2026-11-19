@@ -12,7 +12,7 @@ paths = [
     # Activate only these owned resources, never replace that directory.
     "share/pinhole/sRGB.icc", "share/pinhole/update.json", "share/pinhole/install-manifest.json",
     "share/icons/hicolor/scalable/apps/pinhole.svg",
-    "share/applications/pinhole.desktop",
+    "share/applications/pinhole.desktop", "share/licenses/pinhole",
     # Resources are in place before any next launch can use the new binary.
     "bin/pinhole-auth", "bin/pinhole-update", "bin/pinholed", "bin/pinhole",
 ]

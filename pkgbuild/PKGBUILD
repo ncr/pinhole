@@ -1,28 +1,41 @@
-# Package maintainers build from this checkout with: cd pkgbuild && makepkg -s.
-pkgname=pinhole
-pkgver=1.0.0
+# The AUR's pinhole-git: main as it is on GitHub. After changing this file,
+# write .SRCINFO again with: makepkg --printsrcinfo > .SRCINFO
+pkgname=pinhole-git
+_pkgname=pinhole
+pkgver=1.0.0.r451.g69d8b26
 pkgrel=1
 pkgdesc='A fast, on-demand iCloud Photos browser for Omarchy'
 arch=('x86_64' 'aarch64')
+url='https://github.com/ncr/pinhole'
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
-         'libjpeg-turbo' 'libheif' 'libplist' 'libultrahdr' 'lcms2' 'wayland' 'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv' 'sqlite' 'python' 'git')
+         'libjpeg-turbo' 'libheif' 'libplist' 'libultrahdr' 'lcms2' 'wayland' 'sqlite'
+         'imagemagick' 'ffmpeg' 'xdg-desktop-portal' 'uv' 'python' 'ttf-jetbrains-mono-nerd')
 optdepends=('localsend: Send to phone opens its window for a device not listed'
             'python-opencv: automatic face grouping' 'python-numpy: automatic face grouping')
-makedepends=('rust' 'gcc' 'make' 'wayland-protocols' 'qt6-shadertools')
+makedepends=('git' 'cargo' 'gcc' 'make' 'pkgconf' 'wayland-protocols' 'qt6-shadertools')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
 # makepkg's LTO makes GCC bitcode of the C in sqlite and ring, which the
 # core's linker (lld) cannot read.
 options=('!lto')
-source=()
-sha256sums=()
+source=("$_pkgname::git+https://github.com/ncr/pinhole.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  # Since the last release's tag; a clone without tags counts from the start.
+  ( set -o pipefail
+    git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' ||
+    printf 'r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)" )
+}
 
 build() {
-  cd "$startdir/.."
+  cd "$_pkgname"
   bin/build
 }
 
 package() {
-  cd "$startdir/.."
+  cd "$_pkgname"
   PINHOLE_INSTALL_MODE=package PINHOLE_RUNTIME_PREFIX=/usr bin/install-files "$pkgdir/usr"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

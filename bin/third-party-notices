@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""The licenses of the Rust crates linked into Pinhole's programs, as a text
+to ship beside them: bin/third-party-notices [file] (stdout without one).
+
+Read from what Cargo resolved for pinholed, pinhole-series and pinhole-send
+on this computer's platform: the crates they link, not those that only run
+while building (build scripts' dependencies, procedural macros) nor the
+tests'. Each crate's license and the license files it ships with, each text
+once, with every crate it is for. cargo-about is not needed."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+# The programs shipped, by the Cargo package each is built from.
+PROGRAMS = [("core/Cargo.toml", "pinholed"),
+            ("plugins/series/finder/Cargo.toml", None),
+            ("plugins/send/sender/Cargo.toml", None)]
+NAMES = ("LICENSE", "LICENCE", "COPYING", "NOTICE", "COPYRIGHT", "UNLICENSE")
+
+
+def host():
+    for line in subprocess.check_output(["rustc", "-vV"], text=True).splitlines():
+        if line.startswith("host: "):
+            return line.split(None, 1)[1]
+    raise RuntimeError("rustc did not say its host platform")
+
+
+def linked(manifest, root_name, platform):
+    """The registry and git crates one program links, as Cargo packages."""
+    data = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--offline",
+         "--filter-platform", platform, "--manifest-path", str(ROOT / manifest)],
+        cwd=ROOT))
+    packages = {p["id"]: p for p in data["packages"]}
+    nodes = {n["id"]: n for n in data["resolve"]["nodes"]}
+    if root_name:
+        start = [p["id"] for p in data["packages"]
+                 if p["name"] == root_name and p["id"] in data["workspace_members"]]
+    else:
+        start = [data["resolve"]["root"]]
+    seen, todo = set(), list(start)
+    while todo:
+        current = todo.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for dep in nodes[current]["deps"]:
+            if not any(kind["kind"] is None for kind in dep["dep_kinds"]):
+                continue
+            package = packages[dep["pkg"]]
+            # A procedural macro runs in the compiler; nothing of it is linked.
+            if any("proc-macro" in target["kind"] for target in package["targets"]):
+                continue
+            todo.append(dep["pkg"])
+    # Pinhole's own crates (path dependencies) are under its LICENSE.
+    return [packages[i] for i in seen if packages[i]["source"]]
+
+
+def texts(package):
+    folder = Path(package["manifest_path"]).parent
+    found = []
+    if package.get("license_file"):
+        found.append(folder / package["license_file"])
+    for path in sorted(folder.iterdir()):
+        if path.is_file() and path.name.upper().startswith(NAMES):
+            found.append(path)
+    # A crate of a git repository's (Cargo's checkout of it is marked
+    # .cargo-ok) may have its license at the repository's top only.
+    if not found and package["source"].startswith("git+"):
+        for parent in folder.parents:
+            found = [path for path in sorted(parent.iterdir())
+                     if path.is_file() and path.name.upper().startswith(NAMES)]
+            if found or (parent / ".cargo-ok").exists():
+                break
+    unique = []
+    for path in found:
+        if path.is_file() and path.resolve() not in [p.resolve() for p in unique]:
+            unique.append(path)
+    return [(path.name, path.read_text(errors="replace").strip()) for path in unique]
+
+
+def notices():
+    platform = host()
+    crates = {}
+    for manifest, root_name in PROGRAMS:
+        for package in linked(manifest, root_name, platform):
+            crates[(package["name"], package["version"])] = package
+    lines = ["Third-party software in Pinhole's programs (pinholed, pinhole-series, pinhole-send).",
+             "Pinhole itself is under the MIT license in LICENSE.", "",
+             "Crates:", ""]
+    by_text = {}
+    for key in sorted(crates):
+        package = crates[key]
+        name = f"{package['name']} {package['version']}"
+        where = package.get("repository") or package.get("homepage") or ""
+        lines.append(f"  {name}: {package.get('license') or 'see its license file'}" + (f" ({where})" if where else ""))
+        found = texts(package)
+        if not found:
+            by_text.setdefault((f"{package['name']}: no license file in the crate; its license is "
+                                f"{package.get('license') or 'unstated'}", ""), []).append(name)
+        for filename, text in found:
+            by_text.setdefault((filename, text), []).append(name)
+    lines += ["", "License texts, each once, with the crates they are for:", ""]
+    for (filename, text), names in sorted(by_text.items(), key=lambda item: item[1]):
+        lines += ["=" * 78, f"{filename}: {', '.join(names)}", "=" * 78]
+        if text:
+            lines += [text]
+        lines += [""]
+    return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    try:
+        result = notices()
+    except (OSError, subprocess.CalledProcessError, RuntimeError, KeyError, ValueError) as error:
+        print(f"third-party-notices: {error}", file=sys.stderr)
+        sys.exit(1)
+    if len(sys.argv) > 1:
+        target = Path(sys.argv[1])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".new")
+        temporary.write_text(result)
+        os.replace(temporary, target)
+    else:
+        sys.stdout.write(result)

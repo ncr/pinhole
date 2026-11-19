@@ -29,6 +29,8 @@ links = {
     "lib/pinhole/plugins": "plugins",
     "share/pinhole/sRGB.icc": "app/assets/sRGB.icc",
     "share/icons/hicolor/scalable/apps/pinhole.svg": "pkgbuild/pinhole.svg",
+    "share/licenses/pinhole/LICENSE": "LICENSE",
+    "share/licenses/pinhole/THIRD-PARTY-NOTICES.txt": "app/build/THIRD-PARTY-NOTICES.txt",
     # Omarchy's bar widget (omarchy-bar/), linked into the shell by bin/install.
     "lib/pinhole/omarchy-bar": "omarchy-bar",
     # Plugins look beside their QML for their compiled helper.

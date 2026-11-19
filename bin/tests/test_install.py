@@ -13,7 +13,7 @@ UNINSTALL = ACTIVATE.with_name("uninstall-files")
 PATHS = ["lib/pinhole/plugins/version", "share/pinhole/update.json", "share/pinhole/sRGB.icc",
          "share/pinhole/install-manifest.json",
          "share/icons/hicolor/scalable/apps/pinhole.svg",
-         "share/applications/pinhole.desktop", "bin/pinhole-auth",
+         "share/applications/pinhole.desktop", "share/licenses/pinhole/LICENSE", "bin/pinhole-auth",
          "bin/pinhole-update", "bin/pinholed", "bin/pinhole"]
 
 
@@ -149,6 +149,50 @@ class UninstallTests(unittest.TestCase):
             plugin.parent.symlink_to(personal)
             self.assertEqual(self.remove(prefix).returncode, 0)
             self.assertEqual((personal / "main.qml").read_text(), "same content")
+
+
+class MetadataTests(unittest.TestCase):
+    def write(self, root, mode, remote="https://user:secret-token@example.invalid/pinhole.git", git=True):
+        checkout = root / "checkout"
+        (checkout / "bin").mkdir(parents=True)
+        shutil.copy2(ACTIVATE.with_name("install-metadata"), checkout / "bin/install-metadata")
+        if git:
+            for arguments in [["init", "-b", "main"], ["config", "user.name", "Install test"],
+                              ["config", "user.email", "install@example.invalid"], ["add", "."],
+                              ["commit", "-m", "Fixture"]]:
+                subprocess.run(["git", *arguments], cwd=checkout, check=True, capture_output=True)
+            if remote:
+                subprocess.run(["git", "remote", "add", "origin", remote], cwd=checkout, check=True)
+        prefix = root / "stage"
+        subprocess.run([str(checkout / "bin/install-metadata"), str(prefix)], check=True,
+                       env={**os.environ, "PINHOLE_INSTALL_MODE": mode, "PINHOLE_RUNTIME_PREFIX": "/usr"})
+        text = (prefix / "share/pinhole/update.json").read_text()
+        return checkout, text, json.loads(text)
+
+    def test_package_names_neither_remote_nor_build_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout, text, metadata = self.write(Path(temporary), "package")
+            self.assertNotIn("secret-token", text)
+            self.assertNotIn(str(checkout), text)
+            self.assertEqual(metadata["mode"], "package")
+            self.assertEqual(metadata["prefix"], "/usr")
+            self.assertRegex(metadata["commit"], "^[0-9a-f]{40}$")
+
+    def test_developer_names_its_checkout_never_the_remote(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout, text, metadata = self.write(Path(temporary), "developer")
+            self.assertNotIn("secret-token", text)
+            self.assertNotIn("example.invalid", text)
+            self.assertEqual(metadata["mode"], "developer")
+            self.assertEqual(metadata["source"], str(checkout.resolve()))
+
+    def test_source_archive_or_no_origin_installs_without_updates(self):
+        for git, remote in [(False, None), (True, None)]:
+            with self.subTest(git=git), tempfile.TemporaryDirectory() as temporary:
+                _, _, metadata = self.write(Path(temporary), "developer", remote=remote, git=git)
+                self.assertEqual(metadata["mode"], "local")
+                self.assertNotIn("source", metadata)
+                self.assertEqual("commit" in metadata, git)
 
 
 class BuildGuardTests(unittest.TestCase):
