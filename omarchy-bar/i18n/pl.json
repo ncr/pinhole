@@ -56,5 +56,6 @@
   "add.reason.read_only": "ta biblioteka jest tu tylko przeglądana: nie można nic do niej dodać",
   "add.reason.no_service": "nie udało się uruchomić usługi Pinhole",
   "add.reason.not_found": "pliku już nie ma",
+  "add.reason.other_source": "%1 pokazuje teraz inne źródło: upuść je jeszcze raz, by je tam dodać",
   "add.reason.other": "nie udało się dodać"
 }

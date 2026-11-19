@@ -44,5 +44,6 @@
   "add.reason.read_only": "this library is only being looked at here: nothing can be added to it",
   "add.reason.no_service": "the Pinhole service could not be started",
   "add.reason.not_found": "the file is gone",
+  "add.reason.other_source": "%1 shows another source now: drop them again to add them there",
   "add.reason.other": "could not be added"
 }

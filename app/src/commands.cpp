@@ -44,8 +44,9 @@ With no command, the window opens. A command asks the Pinhole service
                          unless another kind is named
   sign-out <source>      forget a source's session; its library stays
   sync                   look for changes now, and follow until that is done
-  add <file>... [--json] add photos and videos, or folders of them, to the
-                         source shown
+  add [--source <id>] <file>... [--json]
+                         add photos and videos, or folders of them, to the
+                         source shown; with --source, only if it is that one
   recent [--count <n>] [--follow]
                          the photos added most lately, newest first, as JSON
   export [--to <folder>] [--json] [--] <id>...
@@ -431,9 +432,22 @@ private:
     // (progress of all of them, 0 to 1), then {"place", "files"} with the
     // service's answer for each (docs/service.md, Adding): for what drops
     // files without a window, as Omarchy's bar does.
-    void add(QStringList files) {
-        if (files.removeAll(QStringLiteral("--json")) > 0)
-            m_json = true;
+    void add(const QStringList &args) {
+        QStringList files;
+        QString source;
+        bool options = true;
+        for (int i = 0; i < args.size(); ++i) {
+            if (options && args[i] == QLatin1String("--"))
+                options = false;
+            else if (options && args[i] == QLatin1String("--json"))
+                m_json = true;
+            else if (options && args[i] == QLatin1String("--source") && i + 1 < args.size())
+                source = args[++i];
+            else if (options && args[i].startsWith(QLatin1Char('-')))
+                return usage();
+            else
+                files.append(args[i]);
+        }
         if (files.isEmpty())
             return usage();
         QJsonArray paths;
@@ -462,7 +476,12 @@ private:
                     note(QStringLiteral("%1 of %2: %3 (%4%)").arg(done + 1).arg(of).arg(file).arg(tenth * 10));
             }
         });
-        call("add", {{"files", paths}}, [this](const QJsonObject &result) {
+        // The source they were dropped on: added to it alone, refused
+        // (other_source) once another is shown.
+        QJsonObject params{{"files", paths}};
+        if (!source.isEmpty())
+            params.insert("source", source);
+        call("add", params, [this](const QJsonObject &result) {
             int failed = 0;
             const QJsonArray answers = result.value("files").toArray();
             for (const QJsonValue &v : answers) {

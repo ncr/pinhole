@@ -369,13 +369,16 @@ Singleton {
 
   function add(paths) {
     if (paths.length === 0) return
-    addQueue = addQueue.concat([paths])
+    // With the source it was dropped on: one shown by the time its turn
+    // comes is not where it goes (the service refuses, other_source).
+    addQueue = addQueue.concat([{ paths: paths, source: source }])
     addNext()
   }
 
   function addNext() {
     if (adder.running || addQueue.length === 0) return
-    var paths = addQueue[0]
+    var drop = addQueue[0]
+    var paths = drop.paths
     addQueue = addQueue.slice(1)
     adding = true
     addProgress = 0
@@ -384,7 +387,8 @@ Singleton {
     adder.answer = null
     adder.paths = paths
     // The paths are arguments, never part of the command line's text.
-    adder.command = ["sh", "-c", root.runner, "pinhole", "add", "--json"].concat(paths)
+    adder.command = ["sh", "-c", root.runner, "pinhole", "add", "--json"]
+      .concat(drop.source ? ["--source", drop.source] : []).concat(["--"]).concat(paths)
     adder.running = true
   }
 
@@ -461,7 +465,8 @@ Singleton {
   }
 
   function reason(code, place) {
-    var known = ["unsupported", "too_large", "over_quota", "protected", "needs_sign_in", "unavailable", "read_only", "no_service", "not_found"]
+    var known = ["unsupported", "too_large", "over_quota", "protected", "needs_sign_in", "unavailable", "read_only", "no_service",
+                 "not_found", "other_source"]
     return known.indexOf(code) >= 0 ? strings.t("add.reason." + code).arg(place) : strings.t("add.reason.other")
   }
 
