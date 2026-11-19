@@ -395,7 +395,7 @@ And warns of:
 
 ```json
 {
-  "api": 15,
+  "api": 16,
   "id": "me.favourites",
   "name": "Favourites count",
   "version": "1.0.0",
@@ -408,7 +408,7 @@ And warns of:
 | `id` | its folder's name if left out: letters, digits, `.`, `_` and `-`, beginning with a letter or a digit; yours (`me.…`), as `pinhole.…` are Pinhole's own plugins'. It names the plugin's switch, settings, state and cache |
 | `name`, `description` | what the side panel says of it (translated in `i18n/<language>.json` too) |
 | `version` | yours, shown with its name |
-| `api` | the plugin API it is written for, this Pinhole's: 15, required (below) |
+| `api` | the plugin API it is written for, this Pinhole's: 16, required (below) |
 | `sources`, `workers`, `makes` | the kinds of source it brings, the programs pinholed runs for it, and what it makes (below) |
 | `startsOff` | `true`: one of Pinhole's own that is off until turned on in the side panel, there for whoever wants it (Series, People, the calendar…); left out, it is on. Yours start off anyway |
 | `requires` | the programs it needs, by their names on PATH: `["magick", "ffprobe"]`. One not installed is said under the plugin in the side panel; it is loaded all the same. `pinhole.has(name)` asks for one it can do without |
@@ -482,7 +482,7 @@ without a window:
 
 ```json
 {
-  "api": 15,
+  "api": 16,
   "id": "pinhole.people",
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
@@ -950,7 +950,7 @@ this API. A library position is not a visual grid position.
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `fileActions` | what the plugins on do with a file: their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
 | `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. `kept()` writes what was assigned now and says whether it could be (as `state`'s). Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own, and each face taken out of a group too; Series each series made by hand, and each photo kept apart). See Settings, state and cache |
-| `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out; `values()` all of them as an object), kept in `~/.local/state/pinhole/plugins/<id>/state.json`. `kept()` writes everything assigned so far now and says whether it was: before letting go of what it is a copy of (People's names moved here from `synced`) |
+| `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out; `values()` all of them as an object; `changed(keys)` says which another window changed), kept in `~/.local/state/pinhole/plugins/<id>/state.json`. `kept()` writes everything assigned so far now, what could not be before tried again, and says whether all of it is: before letting go of what it is a copy of (People's names moved here from `synced`) |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number, for `dropStep` |
 | `dropStep(step)` | a step it recorded (`did`'s number) that did not happen after all: what it changed was refused and put back, as a favourite the source would not set. Out of the history, so Ctrl Z undoes what was done before it, and no longer offered at the foot of the window. Record a step as the change is made, so Ctrl Z straight after works however slow the service is, and drop it if it fails |
@@ -1129,8 +1129,9 @@ pinholed follow that file, and each change is written over what is there
 now, so no window undoes another's. State and cache follow soon after,
 away from the window, in one step (written beside it, then renamed over
 it), each write only the keys that changed merged into the file as it is
-then, so two windows that keep other keys both keep theirs, and only if
-something changed, so assigning the same again costs
+then, so two windows that keep other keys both keep theirs (a file there
+that cannot be read is never written over, and a key not written is tried
+again with the next write), and only if something changed, so assigning the same again costs
 nothing; several changes in a moment are one write. What could not be
 written is said under the plugin in the side panel. Each is read whole the
 first time the plugin uses it, before the window's first frame if it does

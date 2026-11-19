@@ -230,7 +230,10 @@ void SyncedStore::keep(const QString &plugin, const QString &key, const Change &
     else
         mine.values.insert(key, change.value);
     mine.clock.insert(key, change.stamp);
-    m_pending[plugin].insert(key, change);
+    if (!m_dir.isEmpty()) {
+        const std::lock_guard guard(m_unsaved->lock);
+        m_unsaved->changes[{m_dir, plugin}].insert(key, change);
+    }
     // Written once whatever else is set in this turn has been.
     if (!std::exchange(m_writing, true))
         QMetaObject::invokeMethod(this, &SyncedStore::writeChanged, Qt::QueuedConnection);
@@ -238,23 +241,33 @@ void SyncedStore::keep(const QString &plugin, const QString &key, const Change &
 
 void SyncedStore::writeChanged() {
     m_writing = false;
-    const auto pending = std::exchange(m_pending, {});
-    if (m_dir.isEmpty())
-        return;
+    QHash<std::pair<QString, QString>, QHash<QString, Change>> pending;
+    {
+        const std::lock_guard guard(m_unsaved->lock);
+        pending = m_unsaved->changes;
+    }
     for (auto it = pending.begin(); it != pending.end(); ++it) {
-        const QString plugin = it.key(), folder = m_dir, path = fileIn(m_dir, plugin);
+        const QString folder = it.key().first, plugin = it.key().second, path = fileIn(folder, plugin);
         const QHash<QString, Change> changes = it.value();
         // What the file holds once written, and how it is then.
         auto written = std::make_shared<std::pair<Doc, Seen>>();
         m_files.run(
-            [folder, path, changes, written, plugin, failed = m_failed] {
+            [folder, path, changes, written, plugin, unsaved = m_unsaved] {
+                // Written: no longer to write, unless set again since.
                 const auto said = [&](bool ok) {
-                    const std::lock_guard guard(failed->lock);
-                    if (ok)
-                        failed->plugins.remove(plugin);
-                    else
-                        failed->plugins.insert(plugin);
-                    return ok;
+                    if (!ok)
+                        return false;
+                    const std::lock_guard guard(unsaved->lock);
+                    auto &left = unsaved->changes[{folder, plugin}];
+                    for (auto c = changes.begin(); c != changes.end(); ++c) {
+                        const auto now = left.constFind(c.key());
+                        if (now != left.cend() && now.value().stamp.at == c.value().stamp.at
+                            && now.value().stamp.by == c.value().stamp.by)
+                            left.remove(c.key());
+                    }
+                    if (left.isEmpty())
+                        unsaved->changes.remove({folder, plugin});
+                    return true;
                 };
                 const FolderLock lock(folder);
                 bool ok = false;
@@ -349,9 +362,16 @@ void SyncedStore::flush() {
 }
 
 bool SyncedStore::kept(const QString &plugin) {
-    flush();
-    const std::lock_guard guard(m_failed->lock);
-    return !m_dir.isEmpty() && !m_failed->plugins.contains(plugin);
+    m_files.wait();
+    const auto left = [&] {
+        const std::lock_guard guard(m_unsaved->lock);
+        return m_unsaved->changes.contains({m_dir, plugin});
+    };
+    // What failed before, tried again now.
+    if (left())
+        writeChanged();
+    m_files.wait();
+    return !m_dir.isEmpty() && !left();
 }
 
 PluginSyncedMap::PluginSyncedMap(SyncedStore *store, const QString &plugin, QObject *parent)

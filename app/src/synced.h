@@ -46,7 +46,8 @@ public:
     void set(const QString &plugin, const QJsonObject &changes);
     // Everything set so far written.
     void flush();
-    // Everything of a plugin's set so far written, and whether it was.
+    // Everything of a plugin's set so far written, what failed before
+    // tried again, and whether all of it is.
     bool kept(const QString &plugin);
 
 signals:
@@ -96,18 +97,18 @@ private:
     QString m_dir;
     QString m_device;
     std::map<QString, Doc> m_docs;
-    // Set here and not yet written, by plugin.
-    QHash<QString, QHash<QString, Change>> m_pending;
     bool m_writing = false;
     QHash<QString, QStringList> m_told;
     bool m_telling = false;
     QFileSystemWatcher m_watcher;
-    // The plugins whose last write failed, as the writing thread found.
-    struct Failed {
+    // Set here and not yet written, by library folder and plugin: a key
+    // leaves once a write of that change succeeds (on the writing thread,
+    // hence the lock), and is tried again with the next write until then.
+    struct Unsaved {
         std::mutex lock;
-        QSet<QString> plugins;
+        QHash<std::pair<QString, QString>, QHash<QString, Change>> changes;
     };
-    std::shared_ptr<Failed> m_failed = std::make_shared<Failed>();
+    std::shared_ptr<Unsaved> m_unsaved = std::make_shared<Unsaved>();
 };
 
 // A plugin's synced keys as properties (pinhole.synced), as pinhole.state
