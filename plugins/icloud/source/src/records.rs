@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use base64::Engine;
 use serde_json::Value;
 
@@ -174,7 +174,12 @@ impl Pager {
     /// the change token iCloud reported with the page.
     pub fn page(&mut self, start: u64, limit: u32) -> Result<Page> {
         let response = self.client.list_page(start, limit * 2)?;
-        let records = response["records"].as_array().cloned().unwrap_or_default();
+        // A page without its records is no page of an empty library: what
+        // it leaves out would be taken for gone from iCloud.
+        let records = response["records"]
+            .as_array()
+            .cloned()
+            .ok_or_else(|| anyhow!("iCloud's list from {start} came without its records: {}", response.to_string().chars().take(200).collect::<String>()))?;
         let (assets, leftovers) = pair_records_with_leftovers(&records, self.keep_raw);
         Ok(Page {
             records: records.len(),
