@@ -886,6 +886,18 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         QVERIFY(history.canRedo());
         QCOMPARE(undone, QStringList({"unfavourite", "favourite"}));
     }
+    // A plugin turned off that took no steps: the others' still undo.
+    void forgettingAnOwnerWithNoStepsKeepsTheOthersWhole() {
+        History history;
+        int value = 1;
+        history.did({}, "favourite", [&] { value = 0; }, [&] { value = 1; });
+        history.forget("series");
+        QVERIFY(history.canUndo());
+        history.undo();
+        QCOMPARE(value, 0);
+        history.redo();
+        QCOMPARE(value, 1);
+    }
 
     void aFlickCoastsAboutHalfASecondOfItsSpeed() {
         ScrollPhysics p = flicked(20, 12);

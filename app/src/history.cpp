@@ -1,5 +1,7 @@
 #include "history.h"
 
+#include <algorithm>
+
 namespace {
 // Far more than anyone takes back, and little to keep.
 constexpr int Most = 200;
@@ -60,19 +62,16 @@ void History::redo() {
 
 void History::forget(const QString &owner) {
     // Only its own: each step puts back what one owner keeps, so the
-    // others' still undo as they were.
-    std::vector<Entry> kept;
-    int done = 0;
-    for (int i = 0; i < int(m_steps.size()); ++i) {
+    // others' still undo as they were. Taken out where they are: the
+    // others' steps stay whole when the owner has none.
+    int done = m_done;
+    for (int i = 0; i < m_done; ++i)
         if (m_steps[i].owner == owner)
-            continue;
-        if (i < m_done)
-            ++done;
-        kept.push_back(std::move(m_steps[i]));
-    }
-    if (kept.size() == m_steps.size())
+            --done;
+    const auto gone = std::remove_if(m_steps.begin(), m_steps.end(), [&](const Entry &e) { return e.owner == owner; });
+    if (gone == m_steps.end())
         return;
-    m_steps = std::move(kept);
+    m_steps.erase(gone, m_steps.end());
     m_done = done;
     emit changed();
 }
