@@ -18,7 +18,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use url::Url;
 
-use pinhole_core::synced::{is_computers, Carried, TooBig, SYNCED_MAX};
+use pinhole_core::synced::{Carried, TooBig, SYNCED_MAX};
 use crate::cloudkit::session_headers;
 use crate::session::Session;
 
@@ -161,10 +161,9 @@ impl Drive {
     }
 
     /// The folder, found at the top of iCloud Drive, or made there
-    /// (`make`): None if there is none and it is not to be made. A folder
-    /// of that name is Pinhole's only if nobody else shares it and Pinhole
-    /// put its mark in it, or, from before the mark, it holds nothing but
-    /// Pinhole's own files (then marked); anything else is an error, and
+    /// (`make`, and marked as made): None if there is none and it is not to
+    /// be made. A folder of that name is Pinhole's only if nobody else
+    /// shares it and Pinhole's mark is in it; any other is an error, and
     /// nothing is read from or written to it.
     fn folder(&self, session: &Session, make: bool) -> Result<Option<(String, String)>> {
         if let Some(found) = self.folder.lock().unwrap().clone() {
@@ -181,10 +180,7 @@ impl Drive {
                     return Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has"));
                 }
                 if !items.iter().any(|i| full_name(i).as_deref() == Some(MARK) && i["type"] == "FILE") {
-                    if !items.iter().all(|i| i["type"] == "FILE" && full_name(i).is_some_and(|n| is_computers(&n))) {
-                        return Err(anyhow!("iCloud Drive's {FOLDER} folder holds what Pinhole did not put there: rename it, and Pinhole makes its own"));
-                    }
-                    self.put(session, &docwsid, MARK, MARK_TEXT.as_bytes(), None)?;
+                    return Err(anyhow!("iCloud Drive's {FOLDER} folder is not one Pinhole made: rename it, and Pinhole makes its own"));
                 }
                 Some((drivewsid, docwsid))
             }
@@ -518,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_is_pinholes_only_if_marked_or_holding_only_its_files() {
+    fn the_folder_is_pinholes_only_if_marked() {
         // Made by Pinhole: marked as it is made; the mark is no
         // computer's file.
         let fake = Arc::new(Mutex::new(FakeDrive::default()));
@@ -527,27 +523,22 @@ mod tests {
         assert_eq!(names(&fake), [MARK, "spawner-ab12.json"]);
         assert_eq!(Drive::default().list(&session).unwrap().len(), 1);
 
-        // Pinhole's from before the mark: its files kept and read, the
-        // folder marked.
-        let fake = there(&[("fixer-0123456789cd", "json")]);
+        // Marked: its files read.
+        let fake = there(&[("Pinhole", "txt"), ("fixer-0123456789cd", "json")]);
         let session = serve(fake.clone());
         let carried = Drive::default().list(&session).unwrap();
         assert_eq!(carried.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["fixer-0123456789cd.json"]);
-        assert_eq!(names(&fake), [MARK, "fixer-0123456789cd.json"]);
 
-        // Someone's own folder of that name: neither read nor written.
-        let fake = there(&[("Tax return", "pdf"), ("fixer-0123456789cd", "json")]);
-        let session = serve(fake.clone());
-        let e = Drive::default().list(&session).unwrap_err();
-        assert!(format!("{e}").contains("did not put there"), "{e}");
-        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
-        assert_eq!(names(&fake), ["Tax return.pdf", "fixer-0123456789cd.json"]);
-        // JSON, but not a computer's.
-        let fake = there(&[("budget", "json")]);
-        let session = serve(fake.clone());
-        assert!(Drive::default().list(&session).is_err());
-        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
-        assert_eq!(names(&fake), ["budget.json"]);
+        // Unmarked, whatever it holds: neither read nor written.
+        for files in [&[("Tax return", "pdf")][..], &[("fixer-0123456789cd", "json")], &[]] {
+            let fake = there(files);
+            let session = serve(fake.clone());
+            let e = Drive::default().list(&session).unwrap_err();
+            assert!(format!("{e}").contains("not one Pinhole made"), "{e}");
+            assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
+            assert!(!names(&fake).contains(&MARK.to_owned()));
+            assert!(!fake.lock().unwrap().requests.iter().any(|p| p.contains("upload") || p.contains("download")));
+        }
 
         // Shared with others, even marked: neither read nor written.
         let fake = there(&[("Pinhole", "txt"), ("fixer-0123456789cd", "json")]);
