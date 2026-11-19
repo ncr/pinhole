@@ -355,11 +355,8 @@ Panel {
             const patch = {}
             for (const face of Object.keys(edits)) {
                 const previous = edits[face]
-                if (previous.name === from || previous.person === from) {
-                    patch[face] = Object.assign({}, previous)
-                    if (previous.name === from) patch[face].name = name
-                    if (previous.person === from) patch[face].person = name
-                }
+                if (previous.person === from)
+                    patch[face] = Object.assign({}, previous, { person: name })
             }
             closePicker()
             person = name

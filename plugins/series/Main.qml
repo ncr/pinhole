@@ -65,9 +65,9 @@ PinholePlugin {
         onDone: result => { if (result) plugin.take(result.stdout) }
         onFailed: error => pinhole.warn(error)
     }
-    // The finder's lines, each a series' ids.
+    // The finder's series, each its ids.
     function take(out) {
-        foundIds = out.split("\n").filter(line => line !== "").map(line => line.split(" "))
+        foundIds = JSON.parse(out)
         found = true
         apply()
     }

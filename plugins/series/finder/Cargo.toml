@@ -9,6 +9,7 @@ description = "Finds series of photos in a Pinhole library, for the Series plugi
 anyhow = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = 3

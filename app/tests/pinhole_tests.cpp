@@ -3010,7 +3010,7 @@ QtObject {
         QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
         bench.engine.globalObject().setProperty("series", bench.engine.newQObject(plugin.get()));
         // As if its finder found nothing: what was made by hand, shown.
-        bench.js("series.take('')");
+        bench.js("series.take('[]')");
         QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
         // What is synced of the library.
         const auto kept = [&] {

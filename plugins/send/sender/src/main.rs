@@ -668,10 +668,17 @@ async fn send(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// Out as one JSON array of the staged paths: a name may hold a newline.
 fn stage(args: &[String]) -> Result<()> {
     let folder = PathBuf::from(args.first().context("no folder")?);
-    let files = files_in()?;
-    std::fs::create_dir_all(&folder).with_context(|| format!("making {}", folder.display()))?;
+    let staged = stage_into(&folder, files_in()?)?;
+    say(&Value::from(staged).to_string());
+    Ok(())
+}
+
+fn stage_into(folder: &Path, files: Vec<(PathBuf, String)>) -> Result<Vec<String>> {
+    std::fs::create_dir_all(folder).with_context(|| format!("making {}", folder.display()))?;
+    let mut staged = Vec::new();
     for (from, name) in files {
         // Two photos of one name (a camera's counter come round) both go.
         let mut to = folder.join(&name);
@@ -685,9 +692,9 @@ fn stage(args: &[String]) -> Result<()> {
         if std::fs::hard_link(&from, &to).is_err() {
             std::fs::copy(&from, &to).with_context(|| format!("copying {}", from.display()))?;
         }
-        say(&to.to_string_lossy());
+        staged.push(to.to_string_lossy().into_owned());
     }
-    Ok(())
+    Ok(staged)
 }
 
 fn tidy(args: &[String]) -> Result<()> {
@@ -762,6 +769,22 @@ mod tests {
         let given: Value = serde_json::from_str(r#"{"files": [{"path": "/a/IMG_1.HEIC", "name": "../IMG_1.HEIC"}], "pin": "1+2"}"#).unwrap();
         assert_eq!(files_of(&given["files"]).unwrap(), vec![(PathBuf::from("/a/IMG_1.HEIC"), "IMG_1.HEIC".to_string())]);
         assert_eq!(given["pin"].as_str().map(query_value).as_deref(), Some("1%2B2"));
+    }
+
+    #[test]
+    fn a_name_with_a_newline_is_staged_as_one_path() {
+        let root = std::env::temp_dir().join(format!("pinhole-send-stage-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let original = root.join("original.jpg");
+        std::fs::write(&original, b"x").unwrap();
+        let given = vec![(original.clone(), "a\nb.jpg".to_string()), (original, "a\nb.jpg".to_string())];
+        let staged = stage_into(&root.join("staged"), given).unwrap();
+        let out: Value = serde_json::from_str(&Value::from(staged).to_string()).unwrap();
+        let paths: Vec<&str> = out.as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(paths.len(), 2);
+        assert!(paths[0].ends_with("staged/a\nb.jpg") && paths[1].ends_with("staged/a\nb (2).jpg"), "{paths:?}");
+        assert!(paths.iter().all(|path| Path::new(path).exists()));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

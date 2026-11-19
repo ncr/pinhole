@@ -27,8 +27,9 @@ use std::sync::{mpsc, Mutex};
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags};
 
-/// Bumped when finding changes, so every library is looked through again.
-const VERSION: u32 = 2;
+/// Bumped when finding changes, or how what was found is kept, so every
+/// library is looked through again.
+const VERSION: u32 = 3;
 /// Derived pixels/features made with the corrected JPEG SIMD decoder.
 const FEATURE_VERSION: i64 = 1;
 const MIN_SHOTS: usize = 3;
@@ -203,10 +204,10 @@ fn main() -> Result<()> {
     let out = std::io::stdout();
     let mut out = std::io::BufWriter::new(out.lock());
     match args.first().map(String::as_str) {
+        // One JSON array of series, each its ids: a folder photo's id is
+        // its path, spaces and all.
         Some("find") if args.len() == 3 => {
-            for series in find(Path::new(&args[1]), Path::new(&args[2]))? {
-                writeln!(out, "{}", series.join(" "))?;
-            }
+            writeln!(out, "{}", serde_json::to_string(&find(Path::new(&args[1]), Path::new(&args[2]))?)?)?;
         }
         Some("steady") if args.len() >= 3 => {
             for (dx, dy) in steady(Path::new(&args[1]), &args[2..])? {
@@ -293,7 +294,9 @@ fn find(library: &Path, cache: &Path) -> Result<Vec<Vec<String>>> {
     let last: Option<(String, String)> = kept.query_row("SELECT state, series FROM found", [], |r| Ok((r.get(0)?, r.get(1)?))).ok();
     if let Some((was, series)) = last {
         if was == state {
-            return Ok(series.lines().map(|l| l.split(' ').map(str::to_owned).collect()).collect());
+            if let Ok(series) = serde_json::from_str(&series) {
+                return Ok(series);
+            }
         }
     }
 
@@ -347,10 +350,9 @@ fn find(library: &Path, cache: &Path) -> Result<Vec<Vec<String>>> {
 
     let found: Vec<Vec<String>> =
         runs(&shots, &features).into_iter().map(|run| run.into_iter().map(|i| shots[i].id.clone()).collect()).collect();
-    let text: Vec<String> = found.iter().map(|s| s.join(" ")).collect();
     let tx = kept.transaction()?;
     tx.execute("DELETE FROM found", [])?;
-    tx.execute("INSERT INTO found (state, series) VALUES (?1, ?2)", params![state, text.join("\n")])?;
+    tx.execute("INSERT INTO found (state, series) VALUES (?1, ?2)", params![state, serde_json::to_string(&found)?])?;
     tx.commit()?;
     eprintln!("pinhole-series: {} series in {} shots", found.len(), shots.len());
     Ok(found)
@@ -501,6 +503,31 @@ mod tests {
         let db = cache_db(&directory).unwrap();
         let id: String = db.query_row("SELECT asset_id FROM likeness", [], |r| r.get(0)).unwrap();
         assert_eq!(id, "corrected");
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn ids_with_spaces_stay_whole_found_and_kept() {
+        let directory = std::env::temp_dir().join(format!("pinhole-series-spaces-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let library = directory.join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let db = Connection::open(library.join("library.sqlite")).unwrap();
+        db.execute_batch("CREATE TABLE meta (key TEXT, value TEXT);
+            CREATE TABLE assets (id TEXT, asset_date INTEGER, item_type TEXT, filename TEXT, thumb_path TEXT, is_video INTEGER);").unwrap();
+        let ids = ["Family trip/IMG_0001.JPG", "Family trip/IMG_0002.JPG", "Family trip/IMG_0003.JPG"];
+        let picture = image::RgbImage::from_fn(480, 360, |x, y| image::Rgb([(x * 255 / 480) as u8, (y * 255 / 360) as u8, 90]));
+        for (n, id) in ids.iter().enumerate() {
+            let thumb = format!("thumb{n}.jpg");
+            picture.save(library.join(&thumb)).unwrap();
+            db.execute("INSERT INTO assets VALUES (?1, ?2, 'public.jpeg', ?3, ?4, 0)",
+                       params![id, n as i64 * 1000, format!("IMG_000{n}.JPG"), thumb]).unwrap();
+        }
+        let whole = vec![ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()];
+        let cache = directory.join("cache");
+        assert_eq!(find(&library, &cache).unwrap(), whole);
+        // As kept, when the library is the same.
+        assert_eq!(find(&library, &cache).unwrap(), whole);
         let _ = std::fs::remove_dir_all(directory);
     }
 
