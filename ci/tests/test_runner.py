@@ -50,7 +50,11 @@ if '/source/ci/in-container' not in sys.argv:
     raise SystemExit(0)
 mounts=[arg for arg in sys.argv if 'target=/etc/' in arg]
 paths=[pathlib.Path(arg.split('source=',1)[1].split(',target=',1)[0]) for arg in mounts]
+source=pathlib.Path([arg for arg in sys.argv if 'target=/source,' in arg][0].split('source=',1)[1].split(',target=',1)[0])
 proof={'mounts':mounts,'paths':[str(p) for p in paths],
+       'source':str(source),'source_git_is_folder':(source/'.git').is_dir(),
+       'source_has_runner':(source/'ci/run').is_file(),'source_has_tools':(source/'.tools').exists(),
+       'source_remotes':__import__('subprocess').check_output(['git','-C',str(source),'remote'],text=True),
        'files':[p.read_text() for p in paths],
        'directory_mode':paths[0].parent.stat().st_mode & 0o777,
        'modes':[p.stat().st_mode & 0o777 for p in paths]}
@@ -75,6 +79,12 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
                     self.assertTrue(all(mount.endswith(',readonly') for mount in record['mounts']))
                     self.assertIn('/tmp/pinhole-ci-home', record['files'][0])
                     self.assertTrue(all(not Path(path).parent.exists() for path in record['paths']))
+                    # A snapshot of its own, also from a linked worktree, and gone after.
+                    self.assertNotEqual(Path(record['source']).resolve(), ROOT.resolve())
+                    self.assertTrue(record['source_git_is_folder'] and record['source_has_runner'])
+                    self.assertFalse(record['source_has_tools'])
+                    self.assertEqual(record['source_remotes'], '')
+                    self.assertFalse(Path(record['source']).exists())
 
     def test_failure_stops_and_records_the_actual_command_status(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -102,7 +112,7 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
     def test_empty_handbook_is_not_a_success(self):
         with self.assertRaises(RuntimeError):
             ci.validate_handbook({'api': 7, 'documents': []})
-        ids = ['plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents']
+        ids = ['plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents', 'plugin-kit']
         valid = {'api': 7, 'documents': [{'id': name, 'markdown': '# text'} for name in ids]}
         ci.validate_handbook(valid)
         with self.assertRaises(RuntimeError):
@@ -112,6 +122,26 @@ raise SystemExit(int(os.environ['PINHOLE_IDENTITY_EXIT']))
         valid['documents'][0]['markdown'] = '  '
         with self.assertRaises(RuntimeError):
             ci.validate_handbook(valid)
+
+    def test_package_must_hold_every_plugin_file_and_tell_nothing_of_its_build(self):
+        expected = ci.package_expectations(ROOT)
+        self.assertIn('usr/lib/pinhole/plugins/screenshots/Main.qml', expected)
+        self.assertIn('usr/lib/pinhole/plugins/screenshots/i18n/pl.json', expected)
+        self.assertIn('usr/lib/pinhole/omarchy-bar/PinholeStore.qml', expected)
+        self.assertFalse(any(name.endswith(('.md', '.gitignore')) for name in expected))
+        self.assertFalse(any('/tests/' in name or '/source/' in name for name in expected))
+        good = json.dumps({'mode': 'package', 'prefix': '/usr', 'commit': 'a' * 40})
+        names = sorted(expected) + ['.PKGINFO', '.MTREE', 'usr/', 'usr/bin/']
+        ci.validate_package(names, good, '/tmp/build-here', expected)
+        with self.assertRaisesRegex(RuntimeError, 'lacks usr/bin/pinhole$'):
+            ci.validate_package([n for n in names if n != 'usr/bin/pinhole'], good, '/tmp/build-here', expected)
+        with self.assertRaisesRegex(RuntimeError, 'outside'):
+            ci.validate_package(names + ['home/build/pinhole'], good, '/tmp/build-here', expected)
+        for bad in [{'mode': 'package', 'prefix': '/usr', 'repository': 'https://token@example.invalid/p.git'},
+                    {'mode': 'package', 'prefix': '/usr', 'source': '/tmp/build-here/src/pinhole'},
+                    {'mode': 'developer', 'prefix': '/usr'}]:
+            with self.subTest(bad=bad), self.assertRaises(RuntimeError):
+                ci.validate_package(names, json.dumps(bad), '/tmp/build-here', expected)
 
     def test_scroll_requires_measured_finite_consistent_frames(self):
         for body in ['', 'scroll 5,000 px/s 0 0 0 0 0', 'scroll 5,000 px/s nan 1 2 3 4',
