@@ -1,10 +1,15 @@
 # People
 
-People is enabled by default. The shared `pinholed` service indexes
-still thumbnails in the current source, even with the window closed.
-It uses Python 3 with OpenCV and NumPy, two CPU threads and lower
-scheduling priority. On the first scan it downloads and verifies the
-two public model files (39 MB). Photo data stays on the computer; only what you say of faces is synced.
+People is off until turned on in the side panel. The shared `pinholed`
+service then indexes still thumbnails in the current source, even with the
+window closed. It uses Python 3 with OpenCV and NumPy, two CPU threads and
+lower scheduling priority. On the first scan it downloads and verifies the
+two public model files (39 MB). Photos, faces and their vectors stay on the
+computer. **The names you give, and which faces you said are or are not
+someone, are not local:** they go with the library to every computer it is
+shown on, and for an iCloud library they are written to a `Pinhole` folder
+in that account's iCloud Drive: whoever that folder is shared with can read
+them. There is no setting to keep them on one computer.
 
 Choose **People** in the grid actions or press Shift+F. The people named
 so far come first, each a round face with their photo count, then the
@@ -65,8 +70,7 @@ on every computer the library is shown on: for an iCloud library they go
 through a Pinhole folder in that account's iCloud Drive within a minute or
 so, and each computer finds the same faces under the same keys in the same
 thumbnails. They survive cache rebuilds with the same thumbnails and
-recipe. Those kept on one computer before (in the plugin's state) are
-taken in as the library is first shown there. When a photo's thumbnail changes (turned or cropped in iCloud,
+recipe. When a photo's thumbnail changes (turned or cropped in iCloud,
 edited on a phone), each face found again in it, as alike as faces grouped
 together, keeps what was said of it: the finder keeps its old key as an
 alias, and the plugin moves its edits to the new key.
