@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Record the runtime prefix, never a makepkg staging directory."""
+"""Record the runtime prefix, never a makepkg staging directory.
+
+What is written goes to everyone a package is given to: never the remote's
+URL (it can carry a token) and, for a package, not where it was built. A
+developer installation names its checkout, which the updater fetches into
+from the checkout's own origin; one without a Git checkout and an origin
+(a source archive) gets no in-app updates."""
 import json
 import os
 from pathlib import Path
@@ -11,16 +17,26 @@ prefix = Path(sys.argv[1])
 mode = os.environ.get("PINHOLE_INSTALL_MODE", "local")
 runtime = os.environ.get("PINHOLE_RUNTIME_PREFIX", str(prefix))
 
-def git(*args):
-    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
 
-metadata = {
-    "repository": git("remote", "get-url", "origin"),
-    "source": str(root),
-    "commit": git("rev-parse", "HEAD"),
-    "mode": mode,
-    "prefix": runtime,
-}
+def git(*args):
+    try:
+        return subprocess.check_output(["git", "-C", str(root), *args], text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+# Only this checkout's own repository: an unpacked archive inside some other
+# one is not it.
+own = git("rev-parse", "--show-toplevel") and Path(git("rev-parse", "--show-toplevel")).resolve() == root
+commit = git("rev-parse", "HEAD") if own else ""
+if mode == "developer" and not (commit and git("remote", "get-url", "origin")):
+    mode = "local"
+metadata = {"mode": mode, "prefix": runtime}
+if commit:
+    metadata["commit"] = commit
+if mode == "developer":
+    metadata["source"] = str(root)
 destination = prefix / "share/pinhole/update.json"
 destination.parent.mkdir(parents=True, exist_ok=True)
 temporary = destination.with_suffix(".new")

@@ -522,7 +522,7 @@ private:
     // The photos as a drag out of the window hands them over (Outgoing,
     // compatible form), into a staging folder of their own unless --to
     // names one. Each as it is ready: its path, or with --json a line
-    // {"id", "path"} or {"id", "error"}.
+    // {"id", "path", "source"} or {"id", "error"}.
     void exportPhotos(const QStringList &args) {
         QStringList ids;
         QString folder;
@@ -575,7 +575,9 @@ private:
         if (!error.isEmpty())
             ++m_failed;
         if (m_json)
-            say(QString::fromUtf8(QJsonDocument(error.isEmpty() ? QJsonObject{{"id", id}, {"path", path}}
+            // With the source it is of: an id names a photo in one source only.
+            say(QString::fromUtf8(QJsonDocument(error.isEmpty() ? QJsonObject{{"id", id}, {"path", path},
+                                                                            {"source", m_library.source()}}
                                                                 : QJsonObject{{"id", id}, {"error", error}})
                                       .toJson(QJsonDocument::Compact)));
         else if (error.isEmpty())

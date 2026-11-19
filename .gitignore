@@ -6,6 +6,7 @@ build-profile/
 __pycache__/
 /pkgbuild/pkg/
 /pkgbuild/src/
+/pkgbuild/pinhole/
 *.pkg.tar.*
 .tools/
 .ci-results/

@@ -3,6 +3,9 @@
 
 stdout is one JSON reply. Checks fetch Git objects without changing source
 files. Applying requires a clean main and never discards or rebases work.
+The new revision is built apart, in a worktree of the checkout's kept in
+the cache; only once all of it is built does the checkout move to it and
+take its programs, so a failed build leaves the installation as it was.
 """
 import argparse
 from contextlib import contextmanager
@@ -103,42 +106,79 @@ def check(metadata, running=None, log=None):
     return {"state": state, "revision": target, "available": state == "available"}
 
 
+# What bin/build makes that the installation runs: the programs, the
+# licenses of what they link, and each plugin's native QML module.
+OUTPUTS = ["app/build/pinhole", "app/build/THIRD-PARTY-NOTICES.txt", "core/target/release/pinholed",
+           "plugins/series/finder/target/release/pinhole-series",
+           "plugins/send/sender/target/release/pinhole-send"]
+
+
+def build_tree(checkout):
+    key = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return cache / "pinhole" / ("update-build-" + key)
+
+
+def build_apart(checkout, target, log):
+    """target built in a worktree of its own, kept between updates so the
+    next build only makes what changed. The checkout is not touched."""
+    tree = build_tree(checkout)
+    # One that is not a worktree of the checkout's any more (its record
+    # pruned, or half made) is made again.
+    if tree.exists():
+        top = git("rev-parse", "--show-toplevel", cwd=tree, log=log, okay=(0, 128))
+        common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=tree, log=log, okay=(0, 128))
+        mine = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=checkout, log=log)
+        if not top or Path(top).resolve() != tree.resolve() or Path(common).resolve() != Path(mine).resolve():
+            shutil.rmtree(tree)
+    if tree.exists():
+        git("checkout", "--quiet", "--force", "--detach", target, cwd=tree, log=log)
+        git("clean", "--quiet", "--force", "-d", cwd=tree, log=log)
+    else:
+        tree.parent.mkdir(parents=True, exist_ok=True)
+        git("worktree", "prune", cwd=checkout, log=log)
+        git("worktree", "add", "--quiet", "--force", "--detach", str(tree), target, cwd=checkout, log=log)
+    if subprocess.run([str(tree / "bin/build")], cwd=tree, stdout=log, stderr=log,
+                      stdin=subprocess.DEVNULL, close_fds=True).returncode:
+        raise UpdateError("build")
+    return tree
+
+
 def apply(metadata, target, log):
     checkout, head = validate_checkout(metadata, target, log)
     # Fetch again on pressing Update; a force-push or a new main requires
     # a fresh check rather than building an unseen revision.
     if remote_revision(metadata, log) != target:
         raise UpdateError("changed")
-    # Recheck after network I/O; never merge edits made while fetching.
-    validate_checkout(metadata, target, log)
-    if head != target:
-        git("merge", "--ff-only", target, cwd=checkout, log=log)
-    outputs = ["app/build/pinhole", "core/target/release/pinholed",
-               "plugins/series/finder/target/release/pinhole-series",
-               "plugins/send/sender/target/release/pinhole-send"]
-    # The linker can remove its old output on a failed link. Preserve the
-    # last working programs until the entire build/install has succeeded.
-    with tempfile.TemporaryDirectory(prefix="pinhole-update-backup-") as backup_dir:
-        backups = []
-        for index, output in enumerate(outputs):
+    tree = build_apart(checkout, target, log)
+    # Recheck after the build; never merge edits made meanwhile.
+    _, head = validate_checkout(metadata, target, log)
+    built = [output for output in OUTPUTS if (tree / output).exists()]
+    built += [str(path.relative_to(tree)) for path in sorted(tree.glob("plugins/*/qml/**/*")) if path.is_file()]
+    # Its programs copied beside the checkout's first, so that the source
+    # and the programs change together, the moment the checkout moves.
+    staged = []
+    try:
+        for output in built:
             path = checkout / output
-            if path.exists():
-                backup = Path(backup_dir) / str(index)
-                shutil.copy2(path, backup)
-                backups.append((path, backup))
-        env = dict(os.environ, PREFIX=str(Path(metadata["prefix"]).resolve()),
-                   PINHOLE_KEEP_RUNNING="1", PINHOLE_UPDATE_LOCK_HELD="1", PINHOLE_EXPECTED_COMMIT=target)
-        try:
-            result = subprocess.run([str(checkout / "bin/install"), "--dev", "--non-interactive"],
-                                    cwd=checkout, env=env, stdout=log, stderr=log)
-            if result.returncode:
-                raise UpdateError("build")
-        except BaseException:
-            for path, backup in backups:
-                temporary = path.with_name(path.name + ".restore")
-                shutil.copy2(backup, temporary)
-                temporary.replace(path)
-            raise
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + ".update")
+            shutil.copy2(tree / output, temporary)
+            staged.append((temporary, path))
+        if head != target:
+            git("merge", "--ff-only", target, cwd=checkout, log=log)
+        for temporary, path in staged:
+            temporary.replace(path)
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+    # Links the installation to it as bin/install does, without building again.
+    env = dict(os.environ, PREFIX=str(Path(metadata["prefix"]).resolve()), PINHOLE_BUILT="1",
+               PINHOLE_KEEP_RUNNING="1", PINHOLE_UPDATE_LOCK_HELD="1", PINHOLE_EXPECTED_COMMIT=target)
+    result = subprocess.run([str(checkout / "bin/install"), "--non-interactive"],
+                            cwd=checkout, env=env, stdout=log, stderr=log)
+    if result.returncode:
+        raise UpdateError("build")
     return Path(metadata["prefix"]).resolve() / "share/pinhole/update.json"
 
 

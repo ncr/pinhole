@@ -4,7 +4,7 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mode="${1:-all}"
 if [ "$#" -gt 1 ]; then
-    echo 'Usage: ci/run [rust|ui|visual|native|all]' >&2
+    echo 'Usage: ci/run [rust|ui|visual|native|package|all]' >&2
     exit 2
 fi
 cache="${PINHOLE_CI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/pinhole-ci}"
@@ -19,10 +19,17 @@ if [ "$uid" -eq 0 ]; then
     exit 2
 fi
 identity="$(mktemp -d "${TMPDIR:-/tmp}/pinhole-ci-identity.XXXXXX")"
-trap 'rm -rf "$identity"' EXIT
+snapshot="$(mktemp -d "${TMPDIR:-/tmp}/pinhole-ci-source.XXXXXX")"
+trap 'rm -rf "$identity" "$snapshot"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# What the checks see: this checkout's commit with its edits, in a
+# repository of its own (a linked worktree's .git is elsewhere), never the
+# checkout itself, its Git config or its ignored files.
+git -c safe.directory="$root" clone --quiet --no-hardlinks --depth 1 "file://$root" "$snapshot/source"
+git -C "$snapshot/source" remote remove origin
+python3 "$root/ci/export-source.py" "$root" "$snapshot/source"
 docker build --tag pinhole-ci --file "$root/ci/Dockerfile" "$root/ci"
 # Copy only the image's account database, never host users or group membership.
 docker run --rm --network none --user "$uid:$gid" pinhole-ci python -c \
@@ -33,7 +40,7 @@ docker run --rm --init --user "$uid:$gid" --cpus="${PINHOLE_CI_CPUS:-2}" --memor
     --pids-limit=2048 \
     --mount "type=bind,source=$identity/passwd,target=/etc/passwd,readonly" \
     --mount "type=bind,source=$identity/group,target=/etc/group,readonly" \
-    --mount "type=bind,source=$root,target=/source,readonly" \
+    --mount "type=bind,source=$snapshot/source,target=/source,readonly" \
     --mount "type=bind,source=$cache,target=/cache" \
     --mount "type=bind,source=$output,target=/artifacts" \
     pinhole-ci sh /source/ci/in-container "$mode"

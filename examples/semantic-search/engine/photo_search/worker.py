@@ -13,6 +13,7 @@ import numpy as np
 
 from .ane import hash_file
 from .engines import create_engine
+from .managed import CATALOG_PAGE
 from .store import Store
 
 MAX_MESSAGE = 24 << 20
@@ -22,6 +23,8 @@ HOLD_SECONDS = 90
 # A search holds indexing off this long past each question: one photo
 # indexed takes the GPU about a second, which a question would wait for.
 ASKING = 10
+# The most photos a catalog of pages may have in all.
+CATALOG_MAX = 2_000_000
 
 # Stable ids and Polish prompts for the prototype's fixed vocabulary.
 TAGS = (
@@ -115,6 +118,8 @@ class Worker:
         # after, so the next question of a search being typed never waits
         # for a photo being indexed on the GPU.
         self.asked_at = None
+        # A catalog's pages so far, until its last one comes.
+        self.incoming = None
 
     def close(self):
         try:
@@ -264,8 +269,16 @@ class Worker:
             auto = message.get('auto_index')
             if 'auto_index' in message and type(auto) is not bool:
                 raise ValueError('auto_index must be boolean')
-            if not isinstance(assets, list) or len(assets) > 100000:
-                raise ValueError('invalid or excessive catalog')
+            page, more = message.get('page', 0), message.get('more', False)
+            if type(page) is not int or type(more) is not bool:
+                raise ValueError('page must be a number and more a boolean')
+            if not isinstance(assets, list) or len(assets) > CATALOG_PAGE:
+                raise ValueError('invalid or excessive catalog page')
+            if page == 0:
+                self.incoming = None
+            elif self.incoming is None or page != self.incoming[0]:
+                self.incoming = None
+                raise ValueError('catalog page out of order')
             # Validate all paths before changing the previous catalog. A
             # missing thumbnail is a per-photo indexing error, not fatal here.
             for asset in assets:
@@ -274,6 +287,16 @@ class Worker:
                 relative = asset['path']
                 if not relative or Path(relative).is_absolute() or not (self.args.library / relative).resolve().is_relative_to(self.args.library.resolve()):
                     raise ValueError('catalog path escapes the library')
+            if page or more:
+                received = (self.incoming[1] if self.incoming else []) + assets
+                if len(received) > CATALOG_MAX:
+                    self.incoming = None
+                    raise ValueError('invalid or excessive catalog')
+                if more:
+                    # Removals are reconciled with the whole catalog, at its last page.
+                    self.incoming = (page + 1, received)
+                    return self.status()
+                assets, self.incoming = received, None
             before = self.store.generation
             self.store.catalog(assets)
             active = {x['id'] for x in assets}

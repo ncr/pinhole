@@ -13,7 +13,7 @@ UNINSTALL = ACTIVATE.with_name("uninstall-files")
 PATHS = ["lib/pinhole/plugins/version", "share/pinhole/update.json", "share/pinhole/sRGB.icc",
          "share/pinhole/install-manifest.json",
          "share/icons/hicolor/scalable/apps/pinhole.svg",
-         "share/applications/pinhole.desktop", "bin/pinhole-auth",
+         "share/applications/pinhole.desktop", "share/licenses/pinhole/LICENSE", "bin/pinhole-auth",
          "bin/pinhole-update", "bin/pinholed", "bin/pinhole"]
 
 
@@ -149,6 +149,121 @@ class UninstallTests(unittest.TestCase):
             plugin.parent.symlink_to(personal)
             self.assertEqual(self.remove(prefix).returncode, 0)
             self.assertEqual((personal / "main.qml").read_text(), "same content")
+
+
+class InstallerTests(unittest.TestCase):
+    def checkout(self, root):
+        checkout = root / "checkout"
+        scripts = checkout / "bin"
+        scripts.mkdir(parents=True)
+        for name in ["install", "restart-installed", "uninstall-files"]:
+            shutil.copy2(ACTIVATE.with_name(name), scripts / name)
+        install_dev = (
+            'mkdir -p "$1/bin" "$1/share/pinhole"; printf x > "$1/bin/pinhole"\n'
+            'printf \'{"version": 1, "mode": "developer", "prefix": "%s", "entries": []}\' "$1"'
+            ' > "$1/share/pinhole/install-manifest.json"')
+        for name, contents in {"build": "exit 0", "install-dev": install_dev}.items():
+            (scripts / name).write_text("#!/bin/sh\n" + contents + "\n")
+            (scripts / name).chmod(0o755)
+        for arguments in [["init", "-b", "main"], ["config", "user.name", "Install test"],
+                          ["config", "user.email", "install@example.invalid"], ["add", "."], ["commit", "-m", "Fixture"]]:
+            subprocess.run(["git", *arguments], cwd=checkout, check=True, capture_output=True)
+        return scripts / "install"
+
+    def run_installer(self, root, *args):
+        env = {**os.environ, "PREFIX": str(root / "prefix"), "XDG_STATE_HOME": str(root / "state"),
+               "XDG_CONFIG_HOME": str(root / "config"), "PINHOLE_KEEP_RUNNING": "1"}
+        return subprocess.run([str(root / "checkout/bin/install"), "--non-interactive", *args], env=env,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_refuses_root_before_building_or_writing_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.checkout(root)
+            fake = root / "fakebin"
+            fake.mkdir()
+            (fake / "id").write_text("#!/bin/sh\necho 0\n")
+            (fake / "id").chmod(0o755)
+            env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "PREFIX": str(root / "prefix"),
+                   "XDG_STATE_HOME": str(root / "state")}
+            for args in [[], ["--uninstall"]]:
+                result = subprocess.run([str(root / "checkout/bin/install"), "--non-interactive", *args], env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("not as root", result.stderr)
+            self.assertFalse((root / "state").exists() or (root / "prefix").exists())
+
+    def test_own_omarchy_widget_link_is_kept_and_a_previous_installs_is_moved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.checkout(root)
+            plugins = root / "config/omarchy/plugins"
+            plugins.mkdir(parents=True)
+            widget = plugins / "io.github.ncr.pinhole"
+            mine = root / "dotfiles/pinhole-bar"
+            widget.symlink_to(mine)
+            result = self.run_installer(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Kept your own", result.stdout)
+            self.assertEqual(os.readlink(widget), str(mine))
+            launcher = (root / "state/pinhole/bar-launcher").read_text().strip()
+            self.assertEqual(launcher, str((root / "prefix").resolve() / "bin/pinhole"))
+            result = self.run_installer(root, "--uninstall")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(os.readlink(widget), str(mine))
+            self.assertFalse((root / "state/pinhole/bar-launcher").exists())
+
+            widget.unlink()
+            widget.symlink_to(root / "older/lib/pinhole/omarchy-bar")
+            self.assertEqual(self.run_installer(root).returncode, 0)
+            made = str((root / "prefix").resolve() / "lib/pinhole/omarchy-bar")
+            self.assertEqual(os.readlink(widget), made)
+            self.assertEqual(self.run_installer(root, "--uninstall").returncode, 0)
+            self.assertFalse(os.path.lexists(widget))
+
+
+class MetadataTests(unittest.TestCase):
+    def write(self, root, mode, remote="https://user:secret-token@example.invalid/pinhole.git", git=True):
+        checkout = root / "checkout"
+        (checkout / "bin").mkdir(parents=True)
+        shutil.copy2(ACTIVATE.with_name("install-metadata"), checkout / "bin/install-metadata")
+        if git:
+            for arguments in [["init", "-b", "main"], ["config", "user.name", "Install test"],
+                              ["config", "user.email", "install@example.invalid"], ["add", "."],
+                              ["commit", "-m", "Fixture"]]:
+                subprocess.run(["git", *arguments], cwd=checkout, check=True, capture_output=True)
+            if remote:
+                subprocess.run(["git", "remote", "add", "origin", remote], cwd=checkout, check=True)
+        prefix = root / "stage"
+        subprocess.run([str(checkout / "bin/install-metadata"), str(prefix)], check=True,
+                       env={**os.environ, "PINHOLE_INSTALL_MODE": mode, "PINHOLE_RUNTIME_PREFIX": "/usr"})
+        text = (prefix / "share/pinhole/update.json").read_text()
+        return checkout, text, json.loads(text)
+
+    def test_package_names_neither_remote_nor_build_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout, text, metadata = self.write(Path(temporary), "package")
+            self.assertNotIn("secret-token", text)
+            self.assertNotIn(str(checkout), text)
+            self.assertEqual(metadata["mode"], "package")
+            self.assertEqual(metadata["prefix"], "/usr")
+            self.assertRegex(metadata["commit"], "^[0-9a-f]{40}$")
+
+    def test_developer_names_its_checkout_never_the_remote(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout, text, metadata = self.write(Path(temporary), "developer")
+            self.assertNotIn("secret-token", text)
+            self.assertNotIn("example.invalid", text)
+            self.assertEqual(metadata["mode"], "developer")
+            self.assertEqual(metadata["source"], str(checkout.resolve()))
+
+    def test_source_archive_or_no_origin_installs_without_updates(self):
+        for git, remote in [(False, None), (True, None)]:
+            with self.subTest(git=git), tempfile.TemporaryDirectory() as temporary:
+                _, _, metadata = self.write(Path(temporary), "developer", remote=remote, git=git)
+                self.assertEqual(metadata["mode"], "local")
+                self.assertNotIn("source", metadata)
+                self.assertEqual("commit" in metadata, git)
 
 
 class BuildGuardTests(unittest.TestCase):

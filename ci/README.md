@@ -9,6 +9,7 @@ ci/run rust       # Cargo workspace tests and independent JPEG regressions
 ci/run ui         # Qt, query/accessibility/frame contracts, plugins, installer
 ci/run visual     # Xvfb rendering and application interactions
 ci/run native     # private headless Wayland compositor, startup and scrolling
+ci/run package    # pkgbuild/PKGBUILD built with makepkg, then looked into
 ci/run all
 ```
 
@@ -17,9 +18,17 @@ in `Dockerfile`, including the Rust and Cargo packages.
 Every job records its exact package versions, compiler, command, duration
 and exit status, retaining logs even on failure. Results are written under
 `.ci-results/<mode>/` (ignored by Git). CI uploads them as artifacts.
-The source mount is read-only. A private source clone receives tracked and
-unignored working files so local checks include uncommitted changes;
-credentials and ignored build output are never copied into it.
+The container never sees the checkout. `ci/run` first makes a snapshot of
+it in a temporary folder: a clone of its commit, without the remote, with
+its tracked and unignored working files laid over, so local checks include
+uncommitted changes and work from a linked worktree too. Git config,
+credentials and ignored files (build output, `.tools/`) are never in it.
+That snapshot is mounted read-only, and the checks run on a private copy.
+
+The package job builds the recipe the AUR gets, from that source instead
+of GitHub's, and fails when the package lacks a program or any runtime file
+of a plugin or the bar widget, or when its `update.json` names a Git remote
+or the folder it was built in. The package's file list is kept as evidence.
 
 Cargo resolves against the checked-in lockfiles. The dependency download
 cache is keyed by the container recipe and those lockfiles. The Rust job

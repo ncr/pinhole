@@ -86,3 +86,22 @@ jobs:
           path: .ci-results/native/
           if-no-files-found: warn
           retention-days: 14
+  package:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/ci-environment
+      - name: Build the package and look into it
+        run: ci/run package
+      - name: Keep evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-evidence
+          path: .ci-results/package/
+          if-no-files-found: warn
+          retention-days: 14

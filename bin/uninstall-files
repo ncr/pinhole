@@ -10,7 +10,7 @@ import sys
 def uninstall(prefix):
     prefix = Path(prefix).resolve()
     if prefix == Path("/usr") or prefix == Path("/"):
-        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole")
+        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole-git")
     manifest_path = prefix / "share/pinhole/install-manifest.json"
     if not manifest_path.exists():
         raise ValueError("No Pinhole install manifest here; nothing was removed. Use the OS package manager for packages.")
@@ -18,7 +18,7 @@ def uninstall(prefix):
         raise ValueError("Install manifest is behind a symbolic link; nothing was removed.")
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("mode") == "package":
-        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole")
+        raise ValueError("System packages are managed by your OS. Use: sudo pacman -R pinhole-git")
     if manifest.get("version") != 1 or manifest.get("prefix") != str(prefix):
         raise ValueError("Install manifest does not match this installation; nothing was removed.")
     kept = []

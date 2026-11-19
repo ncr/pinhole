@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Restart only windows belonging to this install, after successful activation."""
+"""Restart only windows belonging to this install, after successful activation.
+
+--stop (on uninstalling) stops them instead, with this installation's
+service, which ends its plugins' workers as it ends, and starts nothing."""
 import functools
 import os
 from pathlib import Path
@@ -66,13 +69,15 @@ def launch(program, args, env, cwd, logfile):
                          start_new_session=True, close_fds=True)
 
 
-def restart(prefix, checkout, followers_only=False):
+def restart(prefix, checkout, followers_only=False, stop_only=False):
     prefix, checkout = Path(prefix).resolve(), Path(checkout).resolve()
     executables = {str(prefix / 'bin/pinhole'), str(checkout / 'app/build/pinhole')}
     executables.add(str((prefix / 'bin/pinhole').resolve()))
+    services = {str(prefix / 'bin/pinholed'), str((prefix / 'bin/pinholed').resolve()),
+                str(checkout / 'core/target/release/pinholed')}
     runtime = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
     sockets = {os.environ.get('PINHOLE_SOCKET', runtime + '/pinhole.sock')}
-    windows, daemons, followers = [], [], []
+    windows, daemons, followers, window_sockets = [], [], [], set()
     for process in Path('/proc').iterdir():
         if not process.name.isdigit():
             continue
@@ -91,12 +96,13 @@ def restart(prefix, checkout, followers_only=False):
                 # command (an `add` under way in a terminal) is left alone.
                 env, cwd = session(process)
                 window_runtime = env.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-                sockets.add(env.get('PINHOLE_SOCKET', window_runtime + '/pinhole.sock'))
+                window_sockets.add(env.get('PINHOLE_SOCKET', window_runtime + '/pinhole.sock'))
                 windows.append((process, started, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
             elif Path(executable).name == 'pinholed' and b'--socket' in argv:
                 socket = os.fsdecode(argv[argv.index(b'--socket') + 1])
                 env, cwd = session(process)
-                daemons.append((process, started, socket, [os.fsdecode(arg) for arg in argv[1:]], env, cwd))
+                daemons.append((process, started, socket, [os.fsdecode(arg) for arg in argv[1:]], env, cwd,
+                                executable in services))
         except (OSError, IndexError):
             continue
     if followers_only:
@@ -105,8 +111,17 @@ def restart(prefix, checkout, followers_only=False):
         stop(followers)
         return
     stop([(process, started) for process, started, *_ in windows] + followers)
-    daemons = [daemon for daemon in daemons if daemon[2] in sockets]
+    if stop_only:
+        # This installation's service, and one its windows were using; not
+        # another installation's (a package's) on the usual socket.
+        daemons = [daemon for daemon in daemons if daemon[6] or daemon[2] in window_sockets]
+    else:
+        daemons = [daemon for daemon in daemons if daemon[2] in sockets | window_sockets]
     stop([(process, started) for process, started, *_ in daemons])
+    if stop_only:
+        if windows or daemons:
+            print('Stopped Pinhole and its service.')
+        return
     for _, _, args, env, cwd in windows:
         launch(prefix / 'bin/pinhole', args, env, cwd, 'install-restart.log')
     if windows:
@@ -116,7 +131,7 @@ def restart(prefix, checkout, followers_only=False):
         # workers: it starts again and decides itself which (core/src/workers.rs).
         # One of a library given ends with its window.
         service = prefix / 'bin/pinholed'
-        for _, _, _, args, env, cwd in daemons:
+        for _, _, _, args, env, cwd, _ in daemons:
             if '--given' not in args and service.exists():
                 launch(service, args, env, cwd, 'pinholed.log')
                 print('Restarted the Pinhole service.')
@@ -125,8 +140,8 @@ def restart(prefix, checkout, followers_only=False):
 if __name__ == '__main__':
     try:
         args = sys.argv[1:]
-        followers_only = '--followers' in args
-        restart(*[arg for arg in args if arg != '--followers'], followers_only=followers_only)
+        restart(*[arg for arg in args if arg not in ('--followers', '--stop')],
+                followers_only='--followers' in args, stop_only='--stop' in args)
     except (OSError, RuntimeError) as error:
         print(f'Installed Pinhole, but could not restart it: {error}', file=sys.stderr)
         sys.exit(1)

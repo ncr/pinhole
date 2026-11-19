@@ -205,6 +205,24 @@ int main(int argc, char **argv) {
         self.assertIsNone(service.poll())
         self.assertEqual(len(self.lines()), 2)
 
+    def test_uninstall_stops_this_installations_window_follower_and_service_and_starts_nothing(self):
+        other = self.root / 'other/pinholed'
+        other.parent.mkdir()
+        shutil.copy2(self.program, other)
+        window = self.start(self.binary)
+        follower = self.start(self.binary, 'recent', '--follow')
+        service = self.start(self.daemon, '--socket', self.socket + '.elsewhere')
+        packaged = self.start(other, '--socket', self.socket + '.package')
+        result = subprocess.run([sys.executable, str(HELPER), '--stop', str(self.prefix), str(self.checkout)],
+                                env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self.lines()
+        for process in (window, follower, service):
+            self.assertIn(f'stop|{process.pid}', lines)
+        self.assertIsNone(packaged.poll())
+        time.sleep(.3)
+        self.assertEqual(len([line for line in self.lines() if line.startswith('start|')]), 4)
+
     def installer(self, build):
         scripts = self.checkout / 'bin'
         scripts.mkdir()

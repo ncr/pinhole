@@ -29,6 +29,12 @@ HELP
     esac
     shift
 done
+# One account's installation, from a checkout that account can change: as
+# root, it would make what every account runs that checkout owner's to change.
+if [ "$(id -u)" -eq 0 ]; then
+    echo 'Run bin/install as yourself, not as root: it installs for your account alone. For every account, use the package.' >&2
+    exit 2
+fi
 ui=0
 if [ "$interactive" = 1 ] && [ -t 0 ] && [ -t 1 ] && command -v gum >/dev/null 2>&1; then ui=1; fi
 if [ "$ui" = 1 ]; then
@@ -53,9 +59,21 @@ if [ "${PINHOLE_UPDATE_LOCK_HELD:-0}" != 1 ]; then
 fi
 # Omarchy's shell finds the bar widget (omarchy-bar/) among its plugins.
 omarchy_plugin="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.ncr.pinhole"
+# The launcher the bar widget runs: the last source installation's.
+bar_launcher="${XDG_STATE_HOME:-$HOME/.local/state}/pinhole/bar-launcher"
 if [ "$mode" = uninstall ]; then
-    if [ -L "$omarchy_plugin" ] && [ "$(readlink "$omarchy_plugin")" = "$(CDPATH= cd -- "${PREFIX:-$HOME/.local}" 2>/dev/null && pwd -P)/lib/pinhole/omarchy-bar" ]; then
+    installed="$(CDPATH= cd -- "${PREFIX:-$HOME/.local}" 2>/dev/null && pwd -P || true)"
+    # Its windows, the bar's follower and its service, whose plugins'
+    # workers end with it: nothing of it keeps reading the library.
+    if [ -n "$installed" ] && [ -f "$installed/share/pinhole/install-manifest.json" ]; then
+        bin/restart-installed --stop "$installed" "$ROOT" || true
+    fi
+    # Only the link this installer made, never one of the person's own.
+    if [ -n "$installed" ] && [ -L "$omarchy_plugin" ] && [ "$(readlink "$omarchy_plugin")" = "$installed/lib/pinhole/omarchy-bar" ]; then
         rm "$omarchy_plugin"
+    fi
+    if [ -n "$installed" ] && [ "$(cat "$bar_launcher" 2>/dev/null)" = "$installed/bin/pinhole" ]; then
+        rm -f "$bar_launcher"
     fi
     rm -f "${PREFIX:-$HOME/.local}/share/pinhole/omarchy-bar.cksum"
     bin/uninstall-files "${PREFIX:-$HOME/.local}"
@@ -72,7 +90,10 @@ run_install() {
         exit 2
     fi
     # Keep the update lock in the installer and close it for build subprocesses.
-    python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
+    # bin/update has built it apart already (PINHOLE_BUILT).
+    if [ "${PINHOLE_BUILT:-0}" != 1 ]; then
+        python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
+    fi
     if [ -n "${PINHOLE_EXPECTED_COMMIT:-}" ]; then
         if [ "$(git rev-parse HEAD)" != "$PINHOLE_EXPECTED_COMMIT" ] || [ -n "$(git status --porcelain)" ]; then
             echo 'Checkout changed while Pinhole was building; no installation was activated. Your edits were kept.' >&2
@@ -82,12 +103,22 @@ run_install() {
     bin/install-dev "$PREFIX"
     update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
     # On Omarchy, the bar widget: linked unless one of the person's own is
-    # there (a clone they edit). It goes on the bar with
-    # `omarchy bar put io.github.ncr.pinhole`.
-    if [ -d "$(dirname -- "$(dirname -- "$omarchy_plugin")")" ] && { [ -L "$omarchy_plugin" ] || [ ! -e "$omarchy_plugin" ]; }; then
-        mkdir -p "$(dirname -- "$omarchy_plugin")"
-        ln -sfn "$PREFIX/lib/pinhole/omarchy-bar" "$omarchy_plugin"
+    # there (a clone they edit, a link of their dotfiles'). A link this
+    # installer made points at an installation's lib/pinhole/omarchy-bar.
+    # It goes on the bar with `omarchy bar put io.github.ncr.pinhole`.
+    if [ -d "$(dirname -- "$(dirname -- "$omarchy_plugin")")" ]; then
+        if [ ! -e "$omarchy_plugin" ] && [ ! -L "$omarchy_plugin" ]; then
+            mkdir -p "$(dirname -- "$omarchy_plugin")"
+            ln -s "$PREFIX/lib/pinhole/omarchy-bar" "$omarchy_plugin"
+        elif [ -L "$omarchy_plugin" ] && case "$(readlink "$omarchy_plugin")" in */lib/pinhole/omarchy-bar) true ;; *) false ;; esac; then
+            ln -sfn "$PREFIX/lib/pinhole/omarchy-bar" "$omarchy_plugin"
+        else
+            echo "Kept your own Omarchy bar widget at $omarchy_plugin."
+        fi
     fi
+    mkdir -p "$(dirname -- "$bar_launcher")"
+    printf '%s\n' "$PREFIX/bin/pinhole" >"$bar_launcher.new"
+    mv -f "$bar_launcher.new" "$bar_launcher"
     if [ "${PINHOLE_KEEP_RUNNING:-0}" != 1 ]; then
         bin/restart-installed "$PREFIX" "$ROOT"
     else
@@ -118,7 +149,7 @@ run_install() {
             echo "Could not restart Omarchy's shell; the bar widget changes on its next start." >&2
         fi
     fi
-    echo "Installed $(git rev-parse --short HEAD) into $PREFIX (source checkout)"
+    echo "Installed $(git rev-parse --short HEAD 2>/dev/null || echo 'this source') into $PREFIX (source checkout)"
     # Another Pinhole found first on PATH (a package's, an older install)
     # runs in its place in a terminal: `pinhole plugin …` is that one's.
     first="$(command -v pinhole 2>/dev/null || true)"

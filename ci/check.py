@@ -17,11 +17,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def validate_handbook(api):
-    required = {'plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents'}
+    required = {'plugin-quickstart', 'plugins', 'plugin-examples', 'source-providers', 'plugin-agents', 'plugin-kit'}
     documents = api.get('documents', [])
     found = {d.get('id') for d in documents if d.get('markdown', '').strip()}
     if api.get('api', 0) < 7 or found != required or len(documents) != len(required):
         raise RuntimeError('The installed plugin handbook is incomplete')
+
+
+def package_expectations(root):
+    """What the package must hold: the programs, and every runtime file of
+    every plugin and of the bar widget as the checkout has them."""
+    expected = {'usr/bin/pinhole', 'usr/bin/pinholed', 'usr/bin/pinhole-update', 'usr/bin/pinhole-auth',
+                'usr/share/applications/pinhole.desktop', 'usr/share/icons/hicolor/scalable/apps/pinhole.svg',
+                'usr/share/pinhole/sRGB.icc', 'usr/share/pinhole/update.json',
+                'usr/share/pinhole/install-manifest.json', 'usr/share/licenses/pinhole/LICENSE',
+                'usr/share/licenses/pinhole/THIRD-PARTY-NOTICES.txt',
+                'usr/lib/pinhole/plugins/series/pinhole-series', 'usr/lib/pinhole/plugins/send/pinhole-send',
+                'usr/lib/pinhole/plugins/info/qml/Pinhole/Internal/Info/qmldir',
+                'usr/lib/pinhole/plugins/info/qml/Pinhole/Internal/Info/libpinholeinfo.so'}
+    listed = subprocess.check_output(['git', 'ls-files', '-z', 'plugins', 'omarchy-bar'], cwd=root)
+    plugins = {Path(os.fsdecode(raw)).parent.name for raw in listed.split(b'\0')
+               if os.fsdecode(raw).count('/') == 2 and os.fsdecode(raw).endswith('/manifest.json')}
+    for raw in set(listed.split(b'\0')) - {b''}:
+        parts = Path(os.fsdecode(raw)).parts
+        if parts[-1].endswith('.md') or parts[-1].startswith('.'):
+            continue
+        if parts[0] == 'omarchy-bar' and (len(parts) == 2 or (len(parts) == 3 and parts[1] == 'i18n')):
+            expected.add('usr/lib/pinhole/' + '/'.join(parts))
+        elif parts[0] == 'plugins' and len(parts) > 2 and parts[1] in plugins and (
+                len(parts) == 3 or (len(parts) == 4 and parts[2] == 'i18n')):
+            expected.add('usr/lib/pinhole/' + '/'.join(parts))
+    return expected
+
+
+def validate_package(names, metadata, built_in, expected):
+    """A package's file list and its update.json, against what it must hold
+    and must not tell: where it was built, or a Git remote."""
+    names = {name.rstrip('/') for name in names}
+    missing = sorted(expected - names)
+    if missing:
+        raise RuntimeError('The package lacks ' + ', '.join(missing))
+    stray = sorted(name for name in names if name != 'usr' and not name.startswith(('usr/', '.')))
+    if stray:
+        raise RuntimeError('The package has files outside /usr: ' + ', '.join(stray))
+    recorded = json.loads(metadata)
+    if recorded.get('mode') != 'package' or recorded.get('prefix') != '/usr':
+        raise RuntimeError('The package does not say it is a package installed in /usr')
+    if {'source', 'repository'} & recorded.keys() or built_in in metadata:
+        raise RuntimeError('The package tells where it was built or its Git remote')
 
 
 def validate_scroll(log):
@@ -49,13 +92,13 @@ class Checks:
         self.env = os.environ | {'QT_QPA_PLATFORMTHEME': 'generic', 'QT_FORCE_STDERR_LOGGING': '1',
                                  'PINHOLE_SILENT': '1'}
 
-    def run(self, name, command, *, env=None, timeout=1800):
+    def run(self, name, command, *, env=None, timeout=1800, cwd=ROOT):
         print(f'[{name}] running', flush=True)
         started = time.monotonic()
         log = self.output / f'{name}.log'
         with log.open('w') as stream:
             try:
-                result = subprocess.run(command, cwd=ROOT, env=env or self.env, stdout=stream,
+                result = subprocess.run(command, cwd=cwd, env=env or self.env, stdout=stream,
                                         stderr=subprocess.STDOUT, timeout=timeout)
                 code = result.returncode
             except subprocess.TimeoutExpired:
@@ -164,6 +207,35 @@ class Checks:
                 self.run(f'visual-{mode}', ['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24',
                                           'app/build/pinhole', '--library', str(library)], env=test_env, timeout=90)
 
+    def package(self):
+        """The package the recipe in pkgbuild/ makes, of this source as it is
+        (its edits too), built as the AUR's helpers build it and looked into."""
+        with tempfile.TemporaryDirectory(prefix='pinhole-ci-package-') as temporary:
+            scratch = Path(temporary)
+            source, recipe = scratch / 'source', scratch / 'recipe'
+            git = ['git', '-c', 'user.name=Pinhole CI', '-c', 'user.email=ci@localhost', '-c', 'safe.directory=*']
+            subprocess.run([*git, 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(source)], check=True)
+            subprocess.run([sys.executable, str(ROOT / 'ci/export-source.py'), str(ROOT), str(source)], check=True)
+            subprocess.run([*git, '-C', str(source), 'add', '-A'], check=True)
+            subprocess.run([*git, '-C', str(source), 'commit', '--quiet', '--allow-empty', '-m', 'Checked'], check=True)
+            recipe.mkdir()
+            text = (ROOT / 'pkgbuild/PKGBUILD').read_text()
+            published = 'git+https://github.com/ncr/pinhole.git'
+            if published not in text:
+                raise RuntimeError('The recipe no longer builds from ' + published)
+            (recipe / 'PKGBUILD').write_text(text.replace(published, f'git+file://{source}'))
+            self.run('package-build', ['makepkg', '--nodeps', '--noconfirm', '--noprogressbar'],
+                     cwd=recipe, timeout=3600)
+            built = [path for path in recipe.glob('*.pkg.tar.*') if '-debug-' not in path.name]
+            if len(built) != 1:
+                raise RuntimeError(f'makepkg made {len(built)} packages, not one')
+            names = subprocess.check_output(['bsdtar', '-tf', str(built[0])], text=True).splitlines()
+            (self.output / 'package-files.txt').write_text('\n'.join(sorted(names)) + '\n')
+            metadata = subprocess.check_output(['bsdtar', '-xOf', str(built[0]), 'usr/share/pinhole/update.json'],
+                                               text=True)
+            validate_package(names, metadata, str(scratch), package_expectations(ROOT))
+            print('[package] looked into: everything there, nothing told', flush=True)
+
     def native(self):
         with tempfile.TemporaryDirectory(prefix='pinhole-ci-wayland-') as temporary:
             scratch = Path(temporary)
@@ -213,7 +285,7 @@ class Checks:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['rust', 'ui', 'visual', 'native', 'all'])
+    parser.add_argument('mode', choices=['rust', 'ui', 'visual', 'native', 'package', 'all'])
     parser.add_argument('--output', type=Path, default=ROOT / '.ci-results/local')
     args = parser.parse_args()
     check = Checks(args.output)
@@ -229,8 +301,9 @@ def main():
                 check.run('qt-render-build', ['app/bin/test', 'bundledPluginDocumentsAreReadableAndTheirLinksResolve'])
             check.visuals()
         if args.mode in ('native', 'all'): check.native()
+        if args.mode in ('package', 'all'): check.package()
         return 0
-    except (RuntimeError, OSError) as error:
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         return 1
     finally:

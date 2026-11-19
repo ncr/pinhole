@@ -6,3 +6,5 @@ cargo build --release --locked --workspace --manifest-path core/Cargo.toml
 cargo build --release --locked --manifest-path plugins/series/finder/Cargo.toml
 cargo build --release --locked --manifest-path plugins/send/sender/Cargo.toml
 app/bin/build
+# The licenses of what those programs link, to ship beside them.
+bin/third-party-notices app/build/THIRD-PARTY-NOTICES.txt

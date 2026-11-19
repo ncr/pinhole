@@ -43,9 +43,15 @@ Singleton {
     return n
   }
 
-  // id -> { path, at }: the file made for it, and when.
+  // The source the photos are of, as the library says it. Two sources can
+  // have a photo of one id (two folders' IMG_0001.jpg), so what is made
+  // for one is kept by both: key(id).
+  property string source: ""
+  function key(id) { return source + "\n" + id }
+
+  // key -> { path, at }: the file made for it, and when.
   property var prepared: ({})
-  // id -> true while its file is being made; id -> message when it failed.
+  // key -> true while its file is being made; key -> message when it failed.
   property var preparing: ({})
   property var failed: ({})
   // Chosen for a drag of several: id -> true.
@@ -66,7 +72,7 @@ Singleton {
 
   function isFresh(item) { return seenBefore >= 0 && item.added > seenBefore }
   function isReady(id) {
-    var p = prepared[id]
+    var p = prepared[key(id)]
     return !!p && Date.now() - p.at < freshFor
   }
 
@@ -112,7 +118,7 @@ Singleton {
   function uriList(ids) {
     var lines = []
     for (var i = 0; i < ids.length; i++) {
-      var p = prepared[ids[i]]
+      var p = prepared[key(ids[i])]
       if (p) lines.push(fileUrl(p.path))
     }
     return lines
@@ -124,7 +130,7 @@ Singleton {
 
   // Opened as the file it is dragged as, in the desktop's own viewer.
   function openPhoto(id) {
-    var p = prepared[id]
+    var p = prepared[key(id)]
     if (p && String(p.path).charAt(0) === "/") Quickshell.execDetached(["xdg-open", p.path])
     else { pendingOpen = id; prepare([id]) }
   }
@@ -139,7 +145,8 @@ Singleton {
       'a=$(hyprctl clients -j | jq -r \'[.[] | select(.class == "pinhole")] | sort_by(.focusHistoryID) | .[0].address // empty\'); '
       + 'if [ -n "$a" ]; then hyprctl dispatch "hl.dsp.focus({ window = \\"address:$a\\" })" >/dev/null 2>&1 || hyprctl dispatch focuswindow "address:$a"; '
       + 'elif command -v uwsm-app >/dev/null; then exec setsid uwsm-app -- pinhole.desktop; '
-      + 'else PATH="$HOME/.local/bin:$PATH" exec setsid pinhole; fi'])
+      + 'else l=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/pinhole/bar-launcher" 2>/dev/null) && [ -x "$l" ] && exec setsid "$l"; '
+      + 'PATH="$HOME/.local/bin:$PATH" exec setsid pinhole; fi'])
   }
 
   // Pinhole's window where the pointer is, the bar's strip apart: opened
@@ -152,9 +159,11 @@ Singleton {
 
   // ---- The library, followed --------------------------------------------
 
-  // A launcher in ~/.local/bin (a source install) comes before the
-  // package's: the shell's PATH may not have it.
-  readonly property string runner: 'PATH="$HOME/.local/bin:$PATH" exec pinhole "$@"'
+  // The launcher the last source installation wrote down (bin/install,
+  // under any PREFIX); else one in ~/.local/bin before the package's: the
+  // shell's PATH may not have it.
+  readonly property string runner: 'l=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/pinhole/bar-launcher" 2>/dev/null) '
+    + '&& [ -x "$l" ] && exec "$l" "$@"; PATH="$HOME/.local/bin:$PATH" exec pinhole "$@"'
 
   Process {
     id: follower
@@ -174,6 +183,20 @@ Singleton {
     var said
     try { said = JSON.parse(line) } catch (e) { return }
     if (!said || !Array.isArray(said.items)) return
+    var shown = typeof said.source === "string" ? said.source : ""
+    if (shown !== source) {
+      // Another source: nothing under way or chosen is of it, and the
+      // files made for the one before are no use to it.
+      source = shown
+      var kept = {}
+      for (var made in prepared) if (made.indexOf(shown + "\n") === 0) kept[made] = prepared[made]
+      prepared = kept
+      preparing = ({})
+      failed = ({})
+      queue = []
+      pendingOpen = ""
+      selected = ({})
+    }
     var list = []
     for (var i = 0; i < said.items.length && list.length < capacity; i++) {
       var item = clean(said.items[i])
@@ -192,9 +215,9 @@ Singleton {
     prepare(fresh)
     var known = {}
     for (var k = 0; k < list.length; k++) known[list[k].id] = true
-    var kept = {}
-    for (var id in selected) if (known[id]) kept[id] = true
-    selected = kept
+    var still = {}
+    for (var id in selected) if (known[id]) still[id] = true
+    selected = still
   }
 
   // Everything new is what was just dropped on the bar from here.
@@ -242,7 +265,7 @@ Singleton {
     var wanted = queue.slice()
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i]
-      if (isReady(id) || preparing[id] || wanted.indexOf(id) >= 0) continue
+      if (isReady(id) || preparing[key(id)] || wanted.indexOf(id) >= 0) continue
       wanted.push(id)
     }
     if (wanted.length === queue.length) return
@@ -256,24 +279,30 @@ Singleton {
     queue = queue.slice(8)
     var now = Object.assign({}, preparing)
     var failedNow = Object.assign({}, failed)
-    for (var i = 0; i < batch.length; i++) { now[batch[i]] = true; delete failedNow[batch[i]] }
+    for (var i = 0; i < batch.length; i++) { now[key(batch[i])] = true; delete failedNow[key(batch[i])] }
     preparing = now
     failed = failedNow
     exporter.batch = batch
-    exporter.command = ["sh", "-c", root.runner, "pinhole", "export", "--json"].concat(batch)
+    exporter.source = source
+    // The ids are the library's, any text: after "--", never an option.
+    exporter.command = ["sh", "-c", root.runner, "pinhole", "export", "--json", "--"].concat(batch)
     exporter.running = true
   }
 
   Process {
     id: exporter
     property var batch: []
+    // The source it was asked for.
+    property string source: ""
     stdout: SplitParser { onRead: function(line) { root.exported(line) } }
     onExited: {
-      // Whatever it did not answer for failed.
+      // Whatever it did not answer for failed (unless the source changed
+      // meanwhile, and nothing of it is waited for).
       var left = Object.assign({}, root.preparing)
       var failedNow = Object.assign({}, root.failed)
       for (var i = 0; i < batch.length; i++) {
-        if (left[batch[i]]) { delete left[batch[i]]; failedNow[batch[i]] = "failed" }
+        var at = source + "\n" + batch[i]
+        if (left[at]) { delete left[at]; failedNow[at] = "failed" }
       }
       root.preparing = left
       root.failed = failedNow
@@ -286,19 +315,24 @@ Singleton {
     var said
     try { said = JSON.parse(line) } catch (e) { return }
     if (!said || typeof said.id !== "string") return
+    // Asked of a source no longer shown: of no use, and not this one's.
+    if (exporter.source !== source) return
+    var at = key(said.id)
     var left = Object.assign({}, preparing)
-    delete left[said.id]
+    delete left[at]
     preparing = left
     var path = typeof said.path === "string" ? said.path : ""
-    // Only what Pinhole made for handing over.
-    if (path.charAt(0) === "/" && path.indexOf("/pinhole/outgoing/") > 0 && path.indexOf("/../") < 0) {
+    // Only what Pinhole made for handing over, from the source it was
+    // asked for (the library shown may have changed as it started).
+    if (said.source === exporter.source && path.charAt(0) === "/" && path.indexOf("/pinhole/outgoing/") > 0
+        && path.indexOf("/../") < 0) {
       var next = Object.assign({}, prepared)
-      next[said.id] = { path: path, at: Date.now() }
+      next[at] = { path: path, at: Date.now() }
       prepared = next
       if (pendingOpen === said.id) { pendingOpen = ""; openPhoto(said.id) }
     } else {
       var failedNow = Object.assign({}, failed)
-      failedNow[said.id] = "failed"
+      failedNow[at] = "failed"
       failed = failedNow
     }
   }

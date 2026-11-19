@@ -25,6 +25,13 @@ if [ -e "$target" ] || [ -L "$target" ]; then
     echo "WeMM environment already exists at $target." >&2
     exit 1
 fi
+# The engine's Python, beside this script: found before anything large is
+# installed.
+engine="$PWD/examples/semantic-search/engine"
+PYTHONPATH="$engine" python3 -c 'from photo_search.wemm import FILES, REPO, REVISION, verify_snapshot' || {
+    echo "Cannot import photo_search.wemm from $engine." >&2
+    exit 1
+}
 stage=$(mktemp -d "$base/.wemm-setup.XXXXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
 trap 'exit 1' HUP INT TERM
@@ -32,7 +39,7 @@ uv venv --relocatable --python 3.12 "$stage/.venv"
 python="$stage/.venv/bin/python"
 uv pip install --python "$python" --index-url https://pypi.org/simple \
     torch==2.9.1 torchvision==0.24.1 transformers==5.2.0 qwen-vl-utils==0.0.14 accelerate==1.15.0
-PYTHONPATH="$PWD/bin" HF_HUB_DISABLE_TELEMETRY=1 "$python" - "$stage/weights" "$snapshot" <<'PY'
+PYTHONPATH="$engine" HF_HUB_DISABLE_TELEMETRY=1 "$python" - "$stage/weights" "$snapshot" <<'PY'
 from pathlib import Path
 import shutil
 import sys
