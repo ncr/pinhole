@@ -132,8 +132,19 @@ Item {
     function catalog() {
         if (!ready || managed) return
         catalogReady = false
-        cataloguer.start(() => pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001")
-            .then(assets => request({ op: "catalog", assets: assets, auto_index: !paused })))
+        cataloguer.start(() => cataloguePage("", 0))
+    }
+    // A page of 50,000 photos at a time, each after the last one's id (a
+    // query reads at most 100,000 rows); the worker takes the whole
+    // catalog at the last page, the one with no more after it.
+    function cataloguePage(after, page) {
+        return pinhole.query("SELECT id, thumb_path AS path FROM assets WHERE is_video=0 AND thumb_path IS NOT NULL "
+                             + "AND thumb_path<>'' AND id > ? ORDER BY id LIMIT 50000", [after])
+            .then(assets => {
+                const more = assets.length === 50000
+                return request({ op: "catalog", assets: assets, auto_index: !paused, page: page, more: more })
+                    .then(value => more ? cataloguePage(assets[assets.length - 1].id, page + 1) : value)
+            })
     }
     Job {
         id: cataloguer

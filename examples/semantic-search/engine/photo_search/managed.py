@@ -7,6 +7,10 @@ import sqlite3
 import time
 
 PLUGIN = "me.semantic-search"
+# A catalog goes to the worker in pages of at most this many photos, the
+# last one saying so (no "more"): a library of any size, each message and
+# each of the window's queries (100,000 rows at most) bounded.
+CATALOG_PAGE = 50000
 
 
 def service_manages(library, key):
@@ -90,11 +94,13 @@ class Catalog:
                     worker.catalog_ready = False
                     return
                 rows = self.db.execute("""SELECT id,thumb_path FROM assets WHERE is_video=0
-                    AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id LIMIT 100001""").fetchall()
+                    AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id""").fetchall()
             finally:
                 self.db.execute("ROLLBACK")
-            worker.request({"op": "catalog", "assets": [{"id": asset, "path": path} for asset, path in rows],
-                            "auto_index": not paused})
+            pages = [rows[at:at + CATALOG_PAGE] for at in range(0, len(rows), CATALOG_PAGE)] or [[]]
+            for number, page in enumerate(pages):
+                worker.request({"op": "catalog", "assets": [{"id": asset, "path": path} for asset, path in page],
+                                "auto_index": not paused, "page": number, "more": number < len(pages) - 1})
             worker.catalog_ready = True
             self.version, self.paused = version, paused
             self.last_error = None
