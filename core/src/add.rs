@@ -212,7 +212,7 @@ mod tests {
         write(&from.join("trip.jpg"), b"photo");
         write(&from.join("trip.mov"), b"motion");
         write(&from.join("trip.mp4"), b"video");
-        let (additions, _) = gather(&[from.clone()]);
+        let (additions, _) = gather(std::slice::from_ref(&from));
         let got: Vec<(PathBuf, Option<PathBuf>)> = additions.into_iter().map(|a| (a.file, a.motion)).collect();
         assert_eq!(got, vec![(from.join("trip.jpg"), Some(from.join("trip.mov"))), (from.join("trip.mp4"), None)]);
         let _ = std::fs::remove_dir_all(&from);
@@ -226,7 +226,7 @@ mod tests {
         std::os::unix::fs::symlink(&elsewhere, from.join("album")).unwrap();
         std::os::unix::fs::symlink(elsewhere.join("private.jpg"), from.join("b.jpg")).unwrap();
         std::os::unix::fs::symlink(&from, from.join("again")).unwrap();
-        let (additions, other) = gather(&[from.clone()]);
+        let (additions, other) = gather(std::slice::from_ref(&from));
         let files: Vec<PathBuf> = additions.into_iter().map(|a| a.file).collect();
         assert_eq!(files, [from.join("a.jpg")]);
         assert!(other.is_empty(), "{other:?}");
