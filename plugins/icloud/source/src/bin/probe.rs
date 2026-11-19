@@ -138,7 +138,7 @@ fn main() -> Result<()> {
     }
     let provider = Box::new(ProcessProvider::spawn(
         cli.auth.clone().unwrap_or_else(pinhole_icloud::auth::default_provider),
-        cli.account.as_deref().map(pinhole_icloud::auth::state_dir),
+        cli.account.as_deref().map(pinhole_icloud::auth::state_dir).transpose()?,
     )?);
     let mut client = PhotosClient::new(provider)?;
 

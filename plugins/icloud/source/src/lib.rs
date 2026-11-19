@@ -113,7 +113,7 @@ impl IcloudSource {
             let Some(account) = &self.account else {
                 return Err(ProviderError { code: "needs_sign_in".into(), message: "no Apple ID signed in to".into() }.into());
             };
-            let provider = ProcessProvider::spawn(self.auth.clone(), Some(auth::state_dir(account)))?;
+            let provider = ProcessProvider::spawn(self.auth.clone(), Some(auth::state_dir(account)?))?;
             let c = PhotosClient::new(Box::new(provider))?;
             if std::ptr::eq(slot, &self.links) {
                 eprintln!("pinholed: signed in as {}", c.session().apple_id);

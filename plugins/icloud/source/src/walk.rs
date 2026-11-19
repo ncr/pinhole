@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 use serde_json::Value;
 
@@ -83,6 +83,7 @@ pub fn walk(
     let mut leftovers: Vec<Value> = Vec::new();
     let fetched_at = now_secs();
     let mut failure = None;
+    let mut pages = 0u64;
     for message in rx {
         let (rank, page, t) = match message {
             Ok(m) => m,
@@ -91,8 +92,13 @@ pub fn walk(
                 continue;
             }
         };
+        pages += 1;
         if rank == 0 {
             report.token = page.sync_token.clone();
+        }
+        // Nothing where the library goes on: not a library that ends here.
+        if page.records == 0 && rank + (per_page as u64) < total {
+            failure.get_or_insert(anyhow!("iCloud's list from {rank} came empty, of {total}"));
         }
         if (page.assets.len() as u32) < per_page && rank + (per_page as u64) < total {
             report.short_pages += 1;
@@ -104,10 +110,17 @@ pub fn walk(
         progress(report.assets, total);
     }
     for w in workers {
-        let _ = w.join();
+        if w.join().is_err() {
+            failure.get_or_insert(anyhow!("a thread reading iCloud's list panicked"));
+        }
     }
     if let Some(e) = failure {
         return Err(e);
+    }
+    // Every page, or the caller would take what is missing for gone.
+    let wanted = total.div_ceil(per_page.max(1) as u64);
+    if pages != wanted {
+        return Err(anyhow!("iCloud's list came in {pages} of its {wanted} pages"));
     }
 
     // Halves split across page boundaries.
@@ -238,4 +251,84 @@ pub fn changes(client: &mut PhotosClient, index: &mut Index, token: &str) -> Res
     index.remove(&removed)?;
     report.token = token;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::session::Session;
+
+    /// CloudKit's list of a library of `total`, its page at each rank as
+    /// `page` answers it.
+    fn client(total: u64, page: fn(u64) -> Value) -> PhotosClient {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let (mut line, mut length) = (String::new(), 0);
+                reader.read_line(&mut line).unwrap();
+                let path = line.split(' ').nth(1).unwrap_or_default().split('?').next().unwrap_or_default().to_owned();
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                let answer = if path.ends_with("query/batch") {
+                    json!({"batch": [{"records": [{"fields": {"itemCount": {"value": total}}}]}]})
+                } else {
+                    page(body["query"]["filterBy"][0]["fieldValue"]["value"].as_u64().unwrap())
+                }
+                .to_string();
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len());
+            }
+        });
+        let session: Session = serde_json::from_value(json!({
+            "apple_id": "a@example.com", "dsid": "1", "services": {"ckdatabasews": format!("http://127.0.0.1:{port}")},
+            "params": {}, "headers": {}, "cookies": [], "validated_at": ""
+        }))
+        .unwrap();
+        PhotosClient::new(Box::new(FixedSession(session))).unwrap()
+    }
+
+    fn walked(total: u64, page: fn(u64) -> Value) -> Result<WalkReport> {
+        let path = std::env::temp_dir().join(format!("pinhole-walk-{}-{total}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut conn = pinhole_core::db::open(&path).unwrap();
+        let mut index = Index::new(&mut conn);
+        let result = walk(&mut client(total, page), &mut index, 2, 2, false, &|_, _| {});
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
+    #[test]
+    fn a_listing_with_a_page_missing_is_no_listing() {
+        fn master() -> Value {
+            json!({"records": [{"recordName": "M", "recordType": "CPLMaster", "fields": {}}]})
+        }
+        // A page without its records.
+        let e = walked(4, |rank| if rank == 2 { json!({}) } else { master() }).unwrap_err();
+        assert!(format!("{e:#}").contains("without its records"), "{e:#}");
+        // An empty page where the library goes on.
+        let e = walked(6, |rank| if rank == 2 { json!({"records": []}) } else { master() }).unwrap_err();
+        assert!(format!("{e:#}").contains("came empty"), "{e:#}");
+        // The last one empty: the library got shorter meanwhile.
+        assert!(walked(4, |rank| if rank == 2 { json!({"records": []}) } else { master() }).is_ok());
+    }
 }

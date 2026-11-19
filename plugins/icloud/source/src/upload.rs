@@ -26,16 +26,31 @@ const MIN_BYTES: u64 = 125;
 /// How long iCloud may take over one file once it has it.
 const PROCESSING: Duration = Duration::from_secs(15 * 60);
 
+/// How long a file being sent may go without iCloud taking more of it, or
+/// without an answer once it has it all.
+const STALLED: Duration = Duration::from_secs(120);
+/// Bytes a second, the slowest a file is still being sent at: a long
+/// video at that takes hours, and is let take them.
+const SLOWEST: u64 = 16 * 1024;
+
 pub struct Uploader {
     http: Client,
     session: Session,
+    stalled: Duration,
+}
+
+/// How a file being sent goes: so much of it sent, then iCloud's answer.
+enum Sending {
+    Sent(u64),
+    Answered(reqwest::Result<reqwest::blocking::Response>),
 }
 
 impl Uploader {
     pub fn new(session: Session) -> Result<Self> {
-        // No deadline for the whole request: a long video takes minutes.
+        // No deadline for the whole client: a long video takes minutes,
+        // and each file has one of its own.
         let http = Client::builder().connect_timeout(Duration::from_secs(30)).timeout(None).build()?;
-        Ok(Uploader { http, session })
+        Ok(Uploader { http, session, stalled: STALLED })
     }
 
     /// One asset: its photo or video (a Live Photo's motion is left out,
@@ -66,18 +81,29 @@ impl Uploader {
         let url = Url::parse(&link)?;
         let mut headers = session_headers(&self.session, &url, true)?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-        // The body goes to reqwest for good: how far it has got comes back
-        // over a channel, read here while another thread sends.
-        let (tx, rx) = std::sync::mpsc::channel::<u64>();
-        let body = Counted { inner: file, done: 0, sent: move |n| { let _ = tx.send(n); } };
-        let request = self.http.post(url).headers(headers).body(Body::sized(body, size));
-        let response = std::thread::scope(|scope| {
-            let sending = scope.spawn(move || request.send());
-            for n in rx {
-                sent(n, size);
+        // The body goes to reqwest for good: how far it has got, and then
+        // its answer, come back over a channel, read here while another
+        // thread sends. Nothing for `stalled` (iCloud taking no more of it,
+        // or never answering) gives up on it here; reqwest's own deadline,
+        // which a sending as slow as SLOWEST still meets, ends it there.
+        let (tx, rx) = std::sync::mpsc::channel::<Sending>();
+        let progress = tx.clone();
+        let body = Counted { inner: file, done: 0, sent: move |n| { let _ = progress.send(Sending::Sent(n)); } };
+        let deadline = 2 * self.stalled + Duration::from_secs(size / SLOWEST);
+        let request = self.http.post(url).headers(headers).timeout(deadline).body(Body::sized(body, size));
+        std::thread::spawn(move || {
+            let _ = tx.send(Sending::Answered(request.send().map_err(reqwest::Error::without_url)));
+        });
+        let response = loop {
+            match rx.recv_timeout(self.stalled) {
+                Ok(Sending::Sent(n)) => sent(n, size),
+                Ok(Sending::Answered(response)) => break response?,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(anyhow!("iCloud took nothing more of {name} for {} s", self.stalled.as_secs()));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err(anyhow!("the upload thread panicked")),
             }
-            sending.join().map_err(|_| anyhow!("the upload thread panicked"))
-        })??;
+        };
         let status = response.status();
         let text = response.text()?;
         if !status.is_success() {
@@ -219,6 +245,63 @@ mod tests {
         assert_eq!(code(424), Some("protected"));
         // Anything else is the source's, for `health` to judge.
         assert_eq!(code(502), None);
+    }
+
+    #[test]
+    fn a_file_icloud_stops_taking_or_never_answers_is_given_up_on() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+        // Where the file goes: a connection taken, and nothing ever said.
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let link = format!("http://127.0.0.1:{}/upload?token=t", silent.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let held: Vec<_> = silent.incoming().collect();
+            drop(held);
+        });
+        // photosupload, giving that link.
+        let api = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = format!("http://127.0.0.1:{}", api.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            for stream in api.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let (mut line, mut length) = (String::new(), 0);
+                reader.read_line(&mut line).unwrap();
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                let key = body["assets"].as_object().unwrap().keys().next().unwrap().clone();
+                let answer = json!({"uploadUrls": {key: link}}).to_string();
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len());
+            }
+        });
+        let dir = std::env::temp_dir().join(format!("pinhole-upload-stall-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("IMG_1.jpg"), [0u8; 300]).unwrap();
+        let session: Session = serde_json::from_value(json!({
+            "apple_id": "a@example.com", "dsid": "1", "services": {"photosupload": root}, "params": {}, "headers": {},
+            "cookies": [], "validated_at": ""
+        })).unwrap();
+        let mut uploader = Uploader::new(session).unwrap();
+        uploader.stalled = Duration::from_millis(500);
+        let started = Instant::now();
+        let addition = Addition { file: dir.join("IMG_1.jpg"), motion: None, group: "g".into() };
+        let e = uploader.upload(&addition, &|_, _| {}).unwrap_err();
+        assert!(format!("{e}").contains("took nothing more"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

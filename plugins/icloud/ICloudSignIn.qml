@@ -23,7 +23,10 @@ Item {
     readonly property bool needsCode: stage === "needs_code"
     // Past the password: the code is what is asked for.
     property bool codeStage: false
-    readonly property bool fromIcloudpd: !codeStage && icloudpdHas(account.text)
+    // The password asked for though icloudpd is signed in here: its
+    // session was not taken (run out).
+    property bool withPassword: false
+    readonly property bool fromIcloudpd: !codeStage && !withPassword && icloudpdHas(account.text)
     readonly property bool ready: account.text.indexOf("@") > 0 && (fromIcloudpd || password.text !== "")
 
     // Whether icloudpd is signed in to this Apple ID here, so no password is
@@ -106,6 +109,7 @@ Item {
         // Whether icloudpd is signed in here, afresh.
         pinhole.sources.discover()
         codeStage = false
+        withPassword = false
         account.text = appleId
         password.text = ""
         code.text = ""
@@ -351,6 +355,18 @@ Item {
                 wrapMode: Text.WordWrap
                 color: theme.red
                 text: root.error
+            }
+            // icloudpd's session not taken: the password, then.
+            ShellButton {
+                objectName: "usePassword"
+                visible: root.fromIcloudpd && root.error !== "" && !root.busy
+                flat: true
+                text: qsTr("Use the password instead")
+                onTriggered: {
+                    root.withPassword = true
+                    root.settle("")
+                    password.input.forceActiveFocus()
+                }
             }
 
             Rectangle {
