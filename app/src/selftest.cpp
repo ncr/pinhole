@@ -2668,7 +2668,7 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
     auto plain = [](const QVariant &v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; };
     auto manual = [=]() {
         QList<QStringList> series;
-        for (const QVariant &ids : plain(plugin()->property("edits")).toMap().value("manual").toList())
+        for (const QVariant &ids : plain(plugin()->property("edits")).toMap().value("manual").toMap())
             series.append(ids.toStringList());
         return series;
     };
@@ -2677,8 +2677,10 @@ void runOtherSeriesSelfTest(QQuickWindow *window, const Library &library, Librar
         if (auto *plugins = qobject_cast<Plugins *>(qmlEngine(window)->rootContext()->contextProperty("plugins").value<QObject *>()))
             plugins->flush();
         QList<QStringList> series;
-        for (const QVariant &ids : SyncedStore::load(libraryDir, "pinhole.series").value("manual").toArray().toVariantList())
-            series.append(ids.toStringList());
+        const QJsonObject values = SyncedStore::load(libraryDir, "pinhole.series");
+        for (auto it = values.begin(); it != values.end(); ++it)
+            if (it.key().startsWith(QStringLiteral("group\t")))
+                series.append(it.value().toVariant().toStringList());
         return series;
     };
     auto failed = std::make_shared<bool>(false);

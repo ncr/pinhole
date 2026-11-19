@@ -33,13 +33,14 @@ PinholePlugin {
     property var seriesAt: ({})
     // What the finder found, each series its photos' ids.
     property var foundIds: []
-    // The edits: series made or changed by hand (ids), and photos kept out
-    // of any series. The user's own work of the library shown, so synced
-    // with it (pinhole.synced: its "manual" and "apart") to every computer
-    // it is shown on, each library's apart: a folder's photos are named by
-    // their paths, and one folder's edits must not group another's photos
-    // of the same names.
-    property var edits: ({ manual: [], apart: [] })
+    // The edits: series made or changed by hand ({ id: photo ids }), and
+    // photos kept out of any series. The user's own work of the library
+    // shown, so synced with it to every computer it is shown on, each a key
+    // of its own (pinhole.synced: "group\t<id>" a series' ids, "apart\t<photo>"
+    // true), so what two computers change at once is both kept. Each
+    // library's apart: a folder's photos are named by their paths, and one
+    // folder's edits must not group another's photos of the same names.
+    property var edits: ({ manual: {}, apart: [] })
     // The library they are of (its key).
     property string editsKey: ""
     // Bumped when the series or the edits change, for bindings to follow.
@@ -77,7 +78,10 @@ PinholePlugin {
         const positions = ids => ids.map(id => pinhole.library.indexOf(id)).filter(i => i >= 0).sort((a, b) => a - b)
         const taken = new Set(edits.apart)
         const list = []
-        for (const ids of edits.manual) {
+        // By id, so every computer shows the same when two series made on
+        // two of them share a photo: the first keeps it.
+        for (const key of Object.keys(edits.manual).sort()) {
+            const ids = edits.manual[key].filter(id => !taken.has(id))
             const shots = positions(ids)
             if (shots.length >= 2) {
                 list.push(shots)
@@ -120,14 +124,31 @@ PinholePlugin {
         setEdits(after)
         pinhole.did(name, () => setEdits(before), () => setEdits(after))
     }
+    // Only the keys that differ from the edits as they are are written:
+    // undone, a step puts back its own and leaves what came since.
     function setEdits(state) {
-        pinhole.synced.manual = state.manual
-        pinhole.synced.apart = state.apart
+        const now = edits
+        for (const key of new Set(Object.keys(now.manual).concat(Object.keys(state.manual)))) {
+            if (JSON.stringify(now.manual[key]) !== JSON.stringify(state.manual[key]))
+                pinhole.synced["group\t" + key] = state.manual[key] || null
+        }
+        const was = new Set(now.apart), will = new Set(state.apart)
+        for (const id of was) if (!will.has(id)) pinhole.synced["apart\t" + id] = null
+        for (const id of will) if (!was.has(id)) pinhole.synced["apart\t" + id] = true
         edits = state
         apply()
     }
     function syncedEdits() {
-        return { manual: pinhole.synced.manual || [], apart: pinhole.synced.apart || [] }
+        const values = pinhole.synced.values(), manual = {}, apart = []
+        for (const key of Object.keys(values)) {
+            if (key.startsWith("group\t") && Array.isArray(values[key])) manual[key.slice(6)] = values[key]
+            else if (key.startsWith("apart\t") && values[key] === true) apart.push(key.slice(6))
+        }
+        return { manual: manual, apart: apart.sort() }
+    }
+    // A new series' id: its own on every computer.
+    function newId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
     }
     // The edits of the library shown, when another is: true then.
     function loadEdits() {
@@ -155,10 +176,19 @@ PinholePlugin {
                 plugin.apply()
         }
     }
-    // The series made by hand, without any that holds one of `ids`.
-    function manualWithout(ids) {
-        const set = new Set(ids)
-        return edits.manual.filter(series => !series.some(id => set.has(id)))
+    // The series made by hand, without any that holds one of `ids`, and
+    // with those in `added` (by id).
+    function manualWithout(ids, added = {}) {
+        const set = new Set(ids), kept = {}
+        for (const key of Object.keys(edits.manual)) {
+            if (!edits.manual[key].some(id => set.has(id)))
+                kept[key] = edits.manual[key]
+        }
+        return Object.assign(kept, added)
+    }
+    // The id of the series made by hand that holds `id`, or a new one.
+    function idWith(id) {
+        return Object.keys(edits.manual).find(key => edits.manual[key].includes(id)) || newId()
     }
     // One series of all these photos, and the series they are in.
     function group(indexes, name = qsTr("grouping")) {
@@ -166,7 +196,7 @@ PinholePlugin {
         if (ids.length < 2)
             return
         const set = new Set(ids)
-        keep(manualWithout(ids).concat([ids]), edits.apart.filter(id => !set.has(id)), name)
+        keep(manualWithout(ids, { [newId()]: ids }), edits.apart.filter(id => !set.has(id)), name)
     }
     function takeOut(index) {
         const k = of(index)
@@ -175,7 +205,8 @@ PinholePlugin {
         const id = idOf(index)
         const all = idsOf(k)
         const rest = all.filter(other => other !== id)
-        keep(manualWithout(all).concat(rest.length >= 2 ? [rest] : []), edits.apart.concat([id]), qsTr("taking out of a series"))
+        keep(manualWithout(all, rest.length >= 2 ? { [idWith(id)]: rest } : {}), edits.apart.concat([id]),
+             qsTr("taking out of a series"))
     }
     function ungroup(indexes) {
         const ids = allWithSeries(Array.from(indexes).filter(i => of(i) >= 0))

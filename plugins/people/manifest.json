@@ -4,8 +4,8 @@
   "id": "pinhole.people",
   "name": "People",
   "version": "0.7.0",
-  "description": "Finds the faces in your photos on this computer, to review and name. Photos and faces stay here; the names you give go with the library to your other computers, for an iCloud library through iCloud Drive.",
-  "settings": { "grouping": "careful" },
+  "description": "Finds the faces in your photos on this computer, to review and name. Photos and faces stay here; the names you give go with the library to your other computers (for an iCloud library through iCloud Drive), unless kept on this computer alone in its settings.",
+  "settings": { "grouping": "careful", "local": false },
   "workers": [
     { "name": "faces", "program": "pinhole-faces", "args": ["daemon"], "per": "source" }
   ]

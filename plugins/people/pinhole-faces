@@ -238,6 +238,28 @@ def aliases(db):
     return dict(db.execute("SELECT old, new FROM aliases"))
 
 
+def reject_key(anchor, face):
+    """A face taken out of a group: a key of its own, so two computers that
+    each take another face out of one group keep both."""
+    return f"reject\t{anchor}\t{face}"
+
+
+def rejection(key):
+    """(anchor, face) of a rejection's key, or None."""
+    parts = key.split("\t")
+    return (parts[1], parts[2]) if len(parts) == 3 and parts[0] == "reject" else None
+
+
+def rejections(edits):
+    """{anchor: [faces taken out of its group]}."""
+    out = {}
+    for key, edit in edits.items():
+        pair = rejection(key)
+        if pair and edit is True:
+            out.setdefault(pair[0], []).append(pair[1])
+    return out
+
+
 def translated(alias, edits):
     """The edits on the faces' keys now, and {old key: new key} of those
     moved: an edit saved on the new key wins over one on the old."""
@@ -245,13 +267,16 @@ def translated(alias, edits):
     out = {}
     for key in sorted(edits, key=lambda key: key in alias):
         edit = edits[key]
+        pair = rejection(key)
+        if pair:
+            if edit is True:
+                for face in pair:
+                    if face in alias:
+                        moved[face] = alias[face]
+                out[reject_key(*(alias.get(face, face) for face in pair))] = True
+            continue
         if not isinstance(edit, dict):
             continue
-        for face in edit.get("rejected", ()):
-            if face in alias:
-                moved[face] = alias[face]
-        if edit.get("rejected"):
-            edit = dict(edit, rejected=[alias.get(face, face) for face in edit["rejected"]])
         now = alias.get(key, key)
         if now != key:
             moved[key] = now
@@ -471,17 +496,17 @@ def review_labels(db, edits):
     db.execute("CREATE TEMP TABLE labels (key TEXT PRIMARY KEY, name TEXT NOT NULL)")
     db.execute("CREATE TEMP TABLE rejected (anchor TEXT, member TEXT, PRIMARY KEY (anchor, member))")
     db.executemany("INSERT INTO labels VALUES (?,?)",
-                   ((key, edit["person"]) for key, edit in edits.items() if edit.get("person")))
+                   ((key, edit["person"]) for key, edit in edits.items() if isinstance(edit, dict) and edit.get("person")))
     db.executemany("INSERT OR IGNORE INTO rejected VALUES (?,?)",
-                   ((key, face) for key, edit in edits.items() for face in edit.get("rejected", ())))
+                   ((anchor, face) for anchor, faces in rejections(edits).items() for face in faces))
     # A group someone said is not a person is not guessed to be them again.
     db.execute("CREATE TEMP TABLE refused (anchor TEXT, name TEXT, PRIMARY KEY (anchor, name))")
     db.executemany("INSERT OR IGNORE INTO refused VALUES (?,?)",
-                   ((key, name) for key, edit in edits.items() for name in edit.get("not", ())))
+                   ((key, name) for key, edit in edits.items() if isinstance(edit, dict) for name in edit.get("not", ())))
     # Groups the person did not recognise: kept apart, at the end.
     db.execute("CREATE TEMP TABLE unknown (anchor TEXT PRIMARY KEY)")
     db.executemany("INSERT OR IGNORE INTO unknown VALUES (?)",
-                   ((key,) for key, edit in edits.items() if edit.get("unknown")))
+                   ((key,) for key, edit in edits.items() if isinstance(edit, dict) and edit.get("unknown")))
     db.execute("""
         CREATE TEMP VIEW pending AS
         SELECT s.* FROM suggestions s LEFT JOIN labels l ON l.key=s.member
@@ -696,20 +721,34 @@ def readonly(path):
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
 
 
-def load_edits(synced, previous):
+def load_edits(path, previous, prefix=None):
     """What is said of faces: the library's synced file (PINHOLE_SYNCED, its
-    "values" by face)."""
+    "values"), or with names kept on this computer the plugin's state file,
+    its keys that start with `prefix`."""
     try:
         try:
-            entries = json.loads(synced.read_text()).get("values", {}) if synced else {}
+            data = json.loads(path.read_text()) if path else {}
         except FileNotFoundError:
-            entries = {}
+            data = {}
+        if prefix is None:
+            entries = data.get("values", {})
+        else:
+            entries = {key[len(prefix):]: value for key, value in data.items() if key.startswith(prefix)}
         # Groups with a saved word about them keep their anchor through
         # regrouping, so the word stays with the faces it was said of.
         names = sorted(key for key, edit in entries.items()
-                       if edit.get("unknown") or edit.get("not"))
-        excluded = {key: edit["rejected"] for key, edit in entries.items() if edit.get("rejected")}
-        return names, excluded
+                       if isinstance(edit, dict) and (edit.get("unknown") or edit.get("not")))
+        return names, rejections(entries)
+    except (OSError, ValueError, AttributeError):
+        return previous
+
+
+def load_local(path, previous):
+    """Whether People's names are kept on this computer alone."""
+    try:
+        return json.loads(path.read_text()).get("settings", {}).get("pinhole.people", {}).get("local") is True
+    except FileNotFoundError:
+        return False
     except (OSError, ValueError, AttributeError):
         return previous
 
@@ -740,6 +779,10 @@ def catalog_rows(catalog, source):
 
 def run_index(db, library, source, settings):
     synced = Path(os.environ["PINHOLE_SYNCED"]) if os.environ.get("PINHOLE_SYNCED") else None
+    # Where the plugin keeps them when they are this computer's alone
+    # (Main.qml's localPrefix).
+    state = xdg("XDG_STATE_HOME", ".local/state") / "pinhole/plugins/pinhole.people/state.json"
+    local = False
     path = library / "library.sqlite"
     inode = version = catalog = None
     edits = ([], {})
@@ -767,7 +810,8 @@ def run_index(db, library, source, settings):
                     catalog = readonly(path)
                     inode, version = identity, None
                 changed = catalog.execute("PRAGMA data_version").fetchone()[0]
-                saved = load_edits(synced, edits)
+                local = load_local(settings, local)
+                saved = (load_edits(state, edits, f"local\t{source}\t") if local else load_edits(synced, edits))
                 preference = load_grouping(settings, grouping)
                 refresh = changed != version or (errors and time.monotonic() >= retry)
                 if refresh:

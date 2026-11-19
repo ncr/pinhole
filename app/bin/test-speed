@@ -42,7 +42,11 @@ def people(faces, out):
     values, clock = {}, {}
     for i in range(faces):
         key = f'{i:064x}'
-        values[key] = {'name': f'Person {i % 900}'} if i % 7 else {'rejected': [f'{i + 1:064x}']}
+        if i % 7:
+            values[key] = {'person': f'Person {i % 900}'}
+        else:
+            key = f'reject\t{key}\t{i + 1:064x}'
+            values[key] = True
         clock[key] = [1794035753792, 'speedtest0000']
     (out / 'pinhole.people.json').write_text(json.dumps({'values': values, 'clock': clock}, separators=(',', ':')))
 
