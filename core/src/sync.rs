@@ -325,6 +325,23 @@ fn run_thumb_jobs(
     Ok(())
 }
 
+/// The most of a thumbnail read from its source: iCloud's are tens of
+/// kilobytes.
+const THUMB_MAX: u64 = 16 << 20;
+/// The longest side of a thumbnail decoded.
+const THUMB_EDGE_MAX: u32 = 8192;
+
+/// A thumbnail's JPEG, decoded only if it is no bigger than a thumbnail.
+fn decode_thumb(bytes: &[u8]) -> image::ImageResult<image::DynamicImage> {
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Jpeg);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(THUMB_EDGE_MAX);
+    limits.max_image_height = Some(THUMB_EDGE_MAX);
+    limits.max_alloc = Some(THUMB_EDGE_MAX as u64 * THUMB_EDGE_MAX as u64 * 4);
+    reader.limits(limits);
+    reader.decode()
+}
+
 fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResult {
     let rel = thumb_path(&job.stored.key);
     let path: PathBuf = library.join(&rel);
@@ -332,9 +349,16 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     let fetched = local.is_none();
     let mut attempt = 0;
     let bytes = if let Some(b) = local { b } else { loop {
-        let read = source.open(&job.ticket, None).and_then(|mut body| {
+        let read = source.open(&job.ticket, None).and_then(|body| {
+            let too_big = |bytes: u64| FetchError::Unreadable(format!("a thumbnail of {} MB, more than {} MB", bytes >> 20, THUMB_MAX >> 20));
+            if let Some(length) = body.length.filter(|l| *l > THUMB_MAX) {
+                return Err(too_big(length));
+            }
             let mut bytes = Vec::with_capacity(body.length.unwrap_or(64 << 10) as usize);
-            body.reader.read_to_end(&mut bytes).map_err(|e| FetchError::Failed(e.into()))?;
+            body.reader.take(THUMB_MAX + 1).read_to_end(&mut bytes).map_err(|e| FetchError::Failed(e.into()))?;
+            if bytes.len() as u64 > THUMB_MAX {
+                return Err(too_big(bytes.len() as u64));
+            }
             Ok(bytes)
         });
         match read {
@@ -358,7 +382,7 @@ fn fetch_thumb(source: &dyn Source, library: &Path, job: ThumbJob) -> ThumbResul
     // The grid draws the average colour until it has decoded the thumbnail,
     // and crops by the real dimensions. In sRGB, as the window shows the
     // thumbnail (colour.rs).
-    let image = match image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg) {
+    let image = match decode_thumb(&bytes) {
         Ok(i) => i.to_rgb8(),
         Err(e) => return ThumbResult::Failed(format!("not a JPEG: {e}")),
     };
@@ -714,6 +738,19 @@ mod tests {
         assert!(p.ends_with("/AQn-dI2mCHvNQz6vj_K4BvumTtZV.jpg"));
         assert_eq!(p.matches('/').count(), 2);
         assert_eq!(p, thumb_path("AQn+dI2mCHvNQz6vj/K4BvumTtZV"));
+    }
+
+    #[test]
+    fn a_thumbnail_bigger_than_one_is_not_decoded() {
+        let jpeg = |w: u32, h: u32| {
+            let mut bytes = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+                .encode(&vec![128u8; (w * h * 3) as usize], w, h, image::ExtendedColorType::Rgb8)
+                .unwrap();
+            bytes
+        };
+        assert!(decode_thumb(&jpeg(480, 360)).is_ok());
+        assert!(decode_thumb(&jpeg(THUMB_EDGE_MAX + 8, 8)).is_err());
     }
 
     #[test]

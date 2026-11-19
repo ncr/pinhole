@@ -330,7 +330,8 @@ pub struct Carried {
 pub trait Carrier: Send + Sync {
     /// The files there now, none if there is no folder yet.
     fn list(&self) -> Result<Vec<Carried>>;
-    /// One of them, as `list` last named it.
+    /// One of them, as `list` last named it; an error rather than more
+    /// than `SYNCED_MAX` bytes of it.
     fn read(&self, name: &str) -> Result<Vec<u8>>;
     /// This computer's, made or written over.
     fn write(&self, name: &str, bytes: &[u8]) -> Result<()>;
@@ -385,6 +386,19 @@ fn is_own(name: &str, device: &str) -> bool {
     name == format!("{device}.json") || name.ends_with(&format!("-{device}.json"))
 }
 
+/// Whether a file there is a computer's (`own_name`, or its id alone as
+/// before): its id last, twelve hex digits. Nothing else in the folder is
+/// read.
+fn is_computers(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".json") else { return false };
+    let id = stem.rsplit_once('-').map_or(stem, |(_, id)| id);
+    id.len() == 12 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The most a computer's file is read of (`Carrier::read`): years of
+/// faces named are a few megabytes.
+pub const SYNCED_MAX: u64 = 64 << 20;
+
 /// How a round of carrying went.
 #[derive(Debug, Default, PartialEq)]
 pub struct Carrying {
@@ -406,7 +420,7 @@ pub fn carry(dir: &Path, carrier: &dyn Carrier, device: &str, computer: &str) ->
     let there = carrier.list()?;
     let own = own_name(device, computer);
     for file in &there {
-        if is_own(&file.name, device) || !file.name.ends_with(".json") || mark.seen.get(&file.name) == Some(&file.version) {
+        if is_own(&file.name, device) || !is_computers(&file.name) || mark.seen.get(&file.name) == Some(&file.version) {
             continue;
         }
         // One that cannot be got (the network, a file Drive will not
@@ -420,7 +434,12 @@ pub fn carry(dir: &Path, carrier: &dyn Carrier, device: &str, computer: &str) ->
         };
         // One that is not what it should be is read again only once it
         // changes.
-        match serde_json::from_slice::<Value>(&bytes).map_err(anyhow::Error::from).and_then(|v| plugins_of(&v)) {
+        let checked = if bytes.len() as u64 > SYNCED_MAX {
+            Err(anyhow!("{} MB, more than {} MB", bytes.len() >> 20, SYNCED_MAX >> 20))
+        } else {
+            serde_json::from_slice::<Value>(&bytes).map_err(anyhow::Error::from).and_then(|v| plugins_of(&v))
+        };
+        match checked {
             Ok(plugins) => {
                 let mut all_in = true;
                 for (plugin, doc) in plugins {
@@ -600,29 +619,29 @@ mod tests {
         let (work, home) = (folder("work"), folder("home"));
         let drive = Elsewhere::default();
         set(&work, "pinhole.people", &named("f1", "Anna"), "w").unwrap();
-        let first = carry(&work, &drive, "w", "spawner").unwrap();
+        let first = carry(&work, &drive, "0000000000aa", "spawner").unwrap();
         assert!(first.sent && first.changed.is_empty());
-        assert!(drive.files.lock().unwrap().contains_key("spawner-w.json"));
+        assert!(drive.files.lock().unwrap().contains_key("spawner-0000000000aa.json"));
 
-        let at_home = carry(&home, &drive, "h", "fixer").unwrap();
+        let at_home = carry(&home, &drive, "0000000000bb", "fixer").unwrap();
         assert_eq!(at_home.changed, ["pinhole.people"]);
         assert_eq!(load(&file(&home, "pinhole.people")).unwrap().values["f1"], json!({"name": "Anna"}));
         // What came is sent back as this computer's: the same, both ways.
         assert!(at_home.sent);
 
         set(&home, "pinhole.people", &named("f1", "Ola"), "h").unwrap();
-        carry(&home, &drive, "h", "fixer").unwrap();
-        let back = carry(&work, &drive, "w", "spawner").unwrap();
+        carry(&home, &drive, "0000000000bb", "fixer").unwrap();
+        let back = carry(&work, &drive, "0000000000aa", "spawner").unwrap();
         assert_eq!(back.changed, ["pinhole.people"]);
         assert_eq!(load(&file(&work, "pinhole.people")).unwrap().values["f1"], json!({"name": "Ola"}));
 
         // Nothing new: nothing changes, nothing more is written.
         let writes = *drive.writes.lock().unwrap();
-        assert_eq!(carry(&work, &drive, "w", "spawner").unwrap(), Carrying::default());
-        let quiet = carry(&home, &drive, "h", "fixer").unwrap();
+        assert_eq!(carry(&work, &drive, "0000000000aa", "spawner").unwrap(), Carrying::default());
+        let quiet = carry(&home, &drive, "0000000000bb", "fixer").unwrap();
         assert!(quiet.changed.is_empty() && !quiet.sent, "{quiet:?}");
-        assert_eq!(carry(&work, &drive, "w", "spawner").unwrap(), Carrying::default());
-        assert_eq!(carry(&home, &drive, "h", "fixer").unwrap(), Carrying::default());
+        assert_eq!(carry(&work, &drive, "0000000000aa", "spawner").unwrap(), Carrying::default());
+        assert_eq!(carry(&home, &drive, "0000000000bb", "fixer").unwrap(), Carrying::default());
         assert_eq!(*drive.writes.lock().unwrap(), writes);
         let _ = std::fs::remove_dir_all(&work);
         let _ = std::fs::remove_dir_all(&home);
@@ -632,7 +651,7 @@ mod tests {
     fn a_computer_with_nothing_kept_makes_nothing_elsewhere() {
         let dir = folder("empty");
         let drive = Elsewhere::default();
-        assert_eq!(carry(&dir, &drive, "x", "fixer").unwrap(), Carrying::default());
+        assert_eq!(carry(&dir, &drive, "0000000000cc", "fixer").unwrap(), Carrying::default());
         assert!(drive.files.lock().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -641,13 +660,18 @@ mod tests {
     fn a_file_elsewhere_that_cannot_be_read_spoils_nothing() {
         let dir = folder("bad");
         let drive = Elsewhere::default();
-        drive.write("other-x.json", b"{\"plugins\": {\"../evil\": {}, \"me.ok\": 3}}").unwrap();
+        drive.write("other-0000000000cc.json", b"{\"plugins\": {\"../evil\": {}, \"me.ok\": 3}}").unwrap();
         set(&dir, "pinhole.people", &named("f1", "Anna"), "h").unwrap();
-        let done = carry(&dir, &drive, "h", "fixer").unwrap();
+        let done = carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
         assert!(done.changed.is_empty() && done.sent);
         assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f1"], json!({"name": "Anna"}));
         // Not read again until it changes.
-        assert!(carry(&dir, &drive, "h", "fixer").unwrap().read.is_empty());
+        assert!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().read.is_empty());
+        // Nor anything else someone keeps in the folder, a computer's file
+        // by its name or not.
+        drive.write("photos-export.json", b"{}").unwrap();
+        drive.write("0123456789ab.json", b"{\"plugins\": {}}").unwrap();
+        assert_eq!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().read, ["0123456789ab.json"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -659,7 +683,7 @@ mod tests {
             self.0.list()
         }
         fn read(&self, name: &str) -> Result<Vec<u8>> {
-            if name == "stuck-x.json" { Err(anyhow!("no data_token")) } else { self.0.read(name) }
+            if name == "stuck-0000000000cc.json" { Err(anyhow!("no data_token")) } else { self.0.read(name) }
         }
         fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
             self.0.write(name, bytes)
@@ -670,23 +694,23 @@ mod tests {
     fn a_file_elsewhere_that_cannot_be_got_holds_up_nothing_else() {
         let (dir, other) = (folder("stuck"), folder("stuck-other"));
         let drive = Stubborn(Elsewhere::default());
-        drive.write("stuck-x.json", b"{}").unwrap();
+        drive.write("stuck-0000000000cc.json", b"{}").unwrap();
         set(&other, "pinhole.people", &named("f2", "Ola"), "o").unwrap();
-        carry(&other, &drive, "o", "other").unwrap();
+        carry(&other, &drive, "0000000000dd", "other").unwrap();
         set(&dir, "pinhole.people", &named("f1", "Anna"), "h").unwrap();
-        let done = carry(&dir, &drive, "h", "fixer").unwrap();
+        let done = carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
         assert!(done.sent);
         assert_eq!(done.changed, ["pinhole.people"]);
         assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f2"], json!({"name": "Ola"}));
         // A plugin's file here that cannot be read: the others still go,
         // and it as it was last sent, never left out.
         set(&dir, "me.broken", &named("f9", "Ewa"), "h").unwrap();
-        assert!(carry(&dir, &drive, "h", "fixer").unwrap().sent);
+        assert!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().sent);
         std::fs::write(file(&dir, "me.broken"), b"{not json").unwrap();
         set(&dir, "pinhole.people", &named("f3", "Jan"), "h").unwrap();
-        assert!(carry(&dir, &drive, "h", "fixer").unwrap().sent);
+        assert!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().sent);
         assert_eq!(std::fs::read(file(&dir, "me.broken")).unwrap(), b"{not json");
-        let sent: Value = serde_json::from_slice(&drive.read("fixer-h.json").unwrap()).unwrap();
+        let sent: Value = serde_json::from_slice(&drive.read("fixer-0000000000bb.json").unwrap()).unwrap();
         assert_eq!(sent["plugins"]["me.broken"]["values"]["f9"], json!({"name": "Ewa"}), "{sent}");
         assert_eq!(sent["plugins"]["pinhole.people"]["values"]["f3"], json!({"name": "Jan"}), "{sent}");
         let _ = std::fs::remove_dir_all(&dir);
