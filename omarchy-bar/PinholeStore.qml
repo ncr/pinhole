@@ -205,6 +205,8 @@ Singleton {
     items = list
     loaded = true
     missing = false
+    // A drop held until now has its source.
+    Qt.callLater(addNext)
     if (seenAdded >= 0 && open) markSeen()
     else if (seenAdded >= 0 && ownOnly(list)) markSeen()
     // What has just come is what will be dragged: its file is made now,
@@ -371,13 +373,17 @@ Singleton {
     if (paths.length === 0) return
     // With the source it was dropped on: one shown by the time its turn
     // comes is not where it goes (the service refuses, other_source).
-    addQueue = addQueue.concat([{ paths: paths, source: source }])
+    // Dropped before the library has said which source it shows: held
+    // until it has, and taken as dropped on that one.
+    addQueue = addQueue.concat([{ paths: paths, source: loaded ? source : null }])
     addNext()
   }
 
   function addNext() {
     if (adder.running || addQueue.length === 0) return
+    if (addQueue[0].source === null && !loaded) return
     var drop = addQueue[0]
+    if (drop.source === null) drop.source = source
     var paths = drop.paths
     addQueue = addQueue.slice(1)
     adding = true
@@ -387,8 +393,8 @@ Singleton {
     adder.answer = null
     adder.paths = paths
     // The paths are arguments, never part of the command line's text.
-    adder.command = ["sh", "-c", root.runner, "pinhole", "add", "--json"]
-      .concat(drop.source ? ["--source", drop.source] : []).concat(["--"]).concat(paths)
+    // Always with its source, "" too: the service adds to no other.
+    adder.command = ["sh", "-c", root.runner, "pinhole", "add", "--json", "--source", drop.source, "--"].concat(paths)
     adder.running = true
   }
 

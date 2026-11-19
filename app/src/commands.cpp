@@ -435,14 +435,14 @@ private:
     void add(const QStringList &args) {
         QStringList files;
         QString source;
-        bool options = true;
+        bool sourced = false, options = true;
         for (int i = 0; i < args.size(); ++i) {
             if (options && args[i] == QLatin1String("--"))
                 options = false;
             else if (options && args[i] == QLatin1String("--json"))
                 m_json = true;
             else if (options && args[i] == QLatin1String("--source") && i + 1 < args.size())
-                source = args[++i];
+                source = args[++i], sourced = true;
             else if (options && args[i].startsWith(QLatin1Char('-')))
                 return usage();
             else
@@ -479,7 +479,8 @@ private:
         // The source they were dropped on: added to it alone, refused
         // (other_source) once another is shown.
         QJsonObject params{{"files", paths}};
-        if (!source.isEmpty())
+        // Even "": named, it is never left out (the service refuses it).
+        if (sourced)
             params.insert("source", source);
         call("add", params, [this](const QJsonObject &result) {
             int failed = 0;
