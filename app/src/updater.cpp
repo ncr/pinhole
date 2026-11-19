@@ -2,6 +2,7 @@
 #include "updater.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDateTime>
 #include <QDir>
@@ -29,6 +30,14 @@ Updater::Updater(QObject *parent) : QObject(parent) {
 #else
             m_runningRevision = installed.value("commit").toString();
 #endif
+            if (const QString source = installed.value("source").toString(); !source.isEmpty()) {
+                m_switchMarker = switchMarker(source);
+                const QString state = QFileInfo(m_switchMarker).path();
+                QDir().mkpath(state);
+                m_stateWatcher.addPath(state);
+                connect(&m_stateWatcher, &QFileSystemWatcher::directoryChanged, this, &Updater::lookForSwitch);
+                lookForSwitch();
+            }
         }
     }
     m_jobPoll.setInterval(1000);
@@ -78,6 +87,28 @@ Updater::Updater(QObject *parent) : QObject(parent) {
         m_checks.start();
         QTimer::singleShot(15000, this, &Updater::check);
     }
+}
+
+QString Updater::switchMarker(const QString &checkout) {
+    // As bin/update names it: by the checkout's real path, in Pinhole's
+    // state folder.
+    QString real = QFileInfo(checkout).canonicalFilePath();
+    if (real.isEmpty())
+        real = QDir::cleanPath(QDir(checkout).absolutePath());
+    const QString key = QString::fromLatin1(
+        QCryptographicHash::hash(QFile::encodeName(real), QCryptographicHash::Sha256).toHex().left(16));
+    QString state = qEnvironmentVariable("XDG_STATE_HOME");
+    if (state.isEmpty())
+        state = QDir::homePath() + QStringLiteral("/.local/state");
+    return state + QStringLiteral("/pinhole/update-") + key + QStringLiteral(".switch");
+}
+
+void Updater::lookForSwitch() {
+    const bool switching = !m_switchMarker.isEmpty() && QFileInfo::exists(m_switchMarker);
+    if (switching == m_switching)
+        return;
+    m_switching = switching;
+    emit changed();
 }
 
 void Updater::run(bool apply) {

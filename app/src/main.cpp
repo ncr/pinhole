@@ -263,11 +263,17 @@ int main(int argc, char *argv[]) {
     PluginGuide pluginGuide;
     startup.mark(QStringLiteral("hosts_ready"));
     plugins.setFavourites(&favourites);
-    // An update rewrites the checkout's plugins before its binary is built
-    // and the window restarted: none of them loaded again meanwhile.
-    QObject::connect(&updater, &Updater::changed, &plugins, [&updater, &plugins] {
-        plugins.holdReloads(updater.state() == QLatin1String("updating") || updater.state() == QLatin1String("ready"));
-    });
+    // An update switches the checkout's plugins with its programs, and the
+    // windows restart after: none of them loaded again by the binary from
+    // before, in any window, while the switch is under way, nor after one
+    // that failed part way (its marker stays), nor in the window that made
+    // it while it waits for its restart.
+    const auto holdForUpdate = [&updater, &plugins] {
+        plugins.holdReloads(updater.switching() || updater.state() == QLatin1String("updating")
+                            || updater.state() == QLatin1String("ready"));
+    };
+    QObject::connect(&updater, &Updater::changed, &plugins, holdForUpdate);
+    holdForUpdate();
     plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;

@@ -908,6 +908,43 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         }
     }
 
+    // Every window, not only the one that started it, knows an update is
+    // switching its checkout while bin/update's marker is there.
+    void everyWindowSeesAnUpdateSwitchingItsCheckout() {
+        QTemporaryDir prefix, state;
+        const auto before = qgetenv("PINHOLE_INSTALL_PREFIX"), stateBefore = qgetenv("XDG_STATE_HOME");
+        const auto restored = qScopeGuard([&] {
+            if (before.isNull()) qunsetenv("PINHOLE_INSTALL_PREFIX");
+            else qputenv("PINHOLE_INSTALL_PREFIX", before);
+            if (stateBefore.isNull()) qunsetenv("XDG_STATE_HOME");
+            else qputenv("XDG_STATE_HOME", stateBefore);
+        });
+        qputenv("PINHOLE_INSTALL_PREFIX", prefix.path().toUtf8());
+        qputenv("XDG_STATE_HOME", state.path().toUtf8());
+        // bin/update's name for it: sha256 of the checkout's real path.
+        QCOMPARE(Updater::switchMarker("/nonexistent/pinhole"), state.path() + "/pinhole/update-d6510f9d86bcfabe.switch");
+        QDir().mkpath(prefix.path() + "/bin");
+        QDir().mkpath(prefix.path() + "/share/pinhole");
+        const QString checkout = prefix.path() + "/checkout";
+        QDir().mkpath(checkout);
+        write(prefix.path() + "/share/pinhole/update.json",
+              QJsonDocument(QJsonObject{{"mode", "developer"}, {"source", checkout}}).toJson());
+        const QString helper = prefix.path() + "/bin/pinhole-update";
+        write(helper, "#!/bin/sh\nexit 99\n");
+        QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        Updater updater;
+        QVERIFY(updater.supported());
+        QVERIFY(!updater.switching());
+        const QString marker = Updater::switchMarker(checkout);
+        write(marker, "{}");
+        QTRY_VERIFY(updater.switching());
+        // Left by an update that failed part way: still switching.
+        QTest::qWait(200);
+        QVERIFY(updater.switching());
+        QFile::remove(marker);
+        QTRY_VERIFY(!updater.switching());
+    }
+
     void updaterTracksDetachedWorkerAndRejectsMissingRestartBinary() {
         QTemporaryDir prefix;
         const auto before = qgetenv("PINHOLE_INSTALL_PREFIX");
