@@ -28,6 +28,10 @@ constexpr int maxZoom = 19;
 // OpenFreeMap's tiles go to 14; closer, those are drawn larger.
 constexpr int dataZoom = 14;
 const QString planet = QStringLiteral("https://tiles.openfreemap.org/planet");
+bool sameOrigin(const QUrl &a, const QUrl &b) {
+    return a.isValid() && a.scheme() == b.scheme() && a.host() == b.host() && a.port(443) == b.port(443) &&
+           a.userInfo().isEmpty();
+}
 int wrap(int x, int n) { return ((x % n) + n) % n; }
 qreal delta(qreal x, qreal centre) { return x - centre - std::floor(x - centre + 0.5); }
 }
@@ -87,6 +91,7 @@ void MapTiles::requestTemplate(bool fromCache) {
     QNetworkRequest request{QUrl(planet)};
     request.setRawHeader("User-Agent", "Pinhole (https://github.com/ncr/pinhole)");
     request.setTransferTimeout(8000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
     request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
                          fromCache ? QNetworkRequest::AlwaysCache : QNetworkRequest::PreferNetwork);
     auto *reply = m_network.get(request);
@@ -94,7 +99,9 @@ void MapTiles::requestTemplate(bool fromCache) {
         reply->deleteLater();
         const auto tiles = QJsonDocument::fromJson(reply->readAll()).object().value(QStringLiteral("tiles")).toArray();
         const QString url = tiles.isEmpty() ? QString() : tiles.first().toString();
-        if (QUrl(url).scheme() == QStringLiteral("https")) {
+        // Tiles only from OpenFreeMap, which the README names: whatever
+        // its TileJSON says, no other host learns where the map looks.
+        if (sameOrigin(QUrl(url), QUrl(planet))) {
             m_template = url;
             m_failed.clear();
             schedule();
