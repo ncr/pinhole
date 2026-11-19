@@ -18,40 +18,60 @@ PATHS = ["lib/pinhole/plugins/version", "share/pinhole/update.json", "share/pinh
 
 
 class ActivationTests(unittest.TestCase):
-    def prepare(self, root):
+    def prepare(self, root, installed=None):
+        """A previous installation (recorded once `installed` has changed it,
+        as an install would have made it) and a complete stage."""
         destination, stage = root / "installed", root / "stage"
         for tree, value in [(destination, "old"), (stage, "new")]:
             for relative in PATHS:
                 path = tree / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(value)
+            (tree / "share/pinhole/update.json").write_text(json.dumps({"mode": "local", "prefix": str(destination)}))
+        if installed:
+            installed(destination)
+        for tree in [destination, stage]:
+            subprocess.run([str(RECORD), str(tree)], check=True)
         return destination, stage
+
+    def activate(self, stage, destination):
+        return subprocess.run([str(ACTIVATE), str(stage), str(destination)], capture_output=True, text=True)
 
     def test_complete_install(self):
         with tempfile.TemporaryDirectory() as temporary:
             destination, stage = self.prepare(Path(temporary))
-            subprocess.run([str(ACTIVATE), str(stage), str(destination)], check=True)
-            self.assertTrue(all((destination / path).read_text() == "new" for path in PATHS))
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
+            self.assertTrue(all((destination / path).read_text() == "new" for path in PATHS
+                                if path not in ["share/pinhole/update.json", "share/pinhole/install-manifest.json"]))
+
+    def test_first_install_into_an_empty_prefix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination, stage = self.prepare(root)
+            shutil.rmtree(destination)
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
+            self.assertEqual((destination / "bin/pinhole").read_text(), "new")
 
     def test_late_failure_restores_every_previous_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             destination, stage = self.prepare(Path(temporary))
+            before = {path: (destination / path).read_bytes() for path in PATHS}
             (stage / "bin/pinhole").unlink()
-            result = subprocess.run([str(ACTIVATE), str(stage), str(destination)], capture_output=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertTrue(all((destination / path).read_text() == "old" for path in PATHS))
+            self.assertNotEqual(self.activate(stage, destination).returncode, 0)
+            self.assertEqual({path: (destination / path).read_bytes() for path in PATHS}, before)
 
     def test_replaces_developer_link_without_writing_checkout(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            destination, stage = self.prepare(root)
             checkout = root / "checkout"
             checkout.mkdir()
             (checkout / "version").write_text("checkout")
-            (destination / "lib/pinhole/plugins/version").unlink()
-            (destination / "lib/pinhole/plugins").rmdir()
-            (destination / "lib/pinhole/plugins").symlink_to(checkout)
-            subprocess.run([str(ACTIVATE), str(stage), str(destination)], check=True)
+            def linked(destination):
+                (destination / "lib/pinhole/plugins/version").unlink()
+                (destination / "lib/pinhole/plugins").rmdir()
+                (destination / "lib/pinhole/plugins").symlink_to(checkout)
+            destination, stage = self.prepare(root, linked)
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
             self.assertEqual((checkout / "version").read_text(), "checkout")
             self.assertEqual((destination / "lib/pinhole/plugins/version").read_text(), "new")
 
@@ -64,8 +84,45 @@ class ActivationTests(unittest.TestCase):
             for photo in photos:
                 photo.parent.mkdir(parents=True, exist_ok=True)
                 photo.write_bytes(b"personal photo data")
-            subprocess.run([str(ACTIVATE), str(stage), str(destination)], check=True)
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
             self.assertTrue(all(photo.read_bytes() == b"personal photo data" for photo in photos))
+
+    def test_own_files_beside_the_installed_ones_are_kept(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination, stage = self.prepare(Path(temporary))
+            helper = destination / "lib/pinhole/my-helper"
+            helper.write_text("mine")
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
+            self.assertEqual(helper.read_text(), "mine")
+            self.assertEqual((destination / "lib/pinhole/plugins/version").read_text(), "new")
+
+    def test_a_replaced_launcher_stops_activation_and_nothing_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination, stage = self.prepare(Path(temporary))
+            (destination / "bin/pinhole").write_text("my own wrapper")
+            result = self.activate(stage, destination)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(str(destination / "bin/pinhole"), result.stderr)
+            self.assertIn("not installed by Pinhole", result.stderr)
+            self.assertEqual((destination / "bin/pinhole").read_text(), "my own wrapper")
+            self.assertEqual((destination / "lib/pinhole/plugins/version").read_text(), "old")
+
+    def test_without_a_manifest_a_file_in_the_way_stops_activation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination, stage = self.prepare(Path(temporary))
+            (destination / "share/pinhole/install-manifest.json").unlink()
+            result = self.activate(stage, destination)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not installed by Pinhole", result.stderr)
+            self.assertEqual((destination / "bin/pinhole").read_text(), "old")
+
+    def test_what_the_previous_install_had_and_this_one_does_not_goes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            def extra(destination):
+                (destination / "lib/pinhole/retired").write_text("old")
+            destination, stage = self.prepare(Path(temporary), extra)
+            self.assertEqual(self.activate(stage, destination).returncode, 0)
+            self.assertFalse((destination / "lib/pinhole/retired").exists())
 
 
 class UninstallTests(unittest.TestCase):

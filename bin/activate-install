@@ -1,43 +1,156 @@
 #!/usr/bin/env python3
-"""Activate a complete same-filesystem stage, restoring it on an error."""
-from pathlib import Path
+"""Activate a complete same-filesystem stage, restoring it on an error.
+
+Only what Pinhole installed is replaced or removed: the files and links its
+previous install manifest (share/pinhole/install-manifest.json) lists, as
+they were installed. Anything else in the way (a helper of one's own in
+lib/pinhole, a wrapper put in place of bin/pinhole) stops activation before
+anything is changed, saying which. Without a previous manifest, nothing may
+be in the way."""
+from pathlib import Path, PurePosixPath
+import hashlib
+import json
 import os
 import sys
 
-stage, destination = map(Path, sys.argv[1:])
-backup = stage / ".previous"
-paths = [
-    "lib/pinhole",
-    # ~/.local/share/pinhole also contains the user's actual photo library.
-    # Activate only these owned resources, never replace that directory.
-    "share/pinhole/sRGB.icc", "share/pinhole/update.json", "share/pinhole/install-manifest.json",
-    "share/icons/hicolor/scalable/apps/pinhole.svg",
-    "share/applications/pinhole.desktop", "share/licenses/pinhole",
-    # Resources are in place before any next launch can use the new binary.
-    "bin/pinhole-auth", "bin/pinhole-update", "bin/pinholed", "bin/pinhole",
-]
-activated = []
-try:
-    for relative in paths:
-        current = destination / relative
-        previous = backup / relative
-        current.parent.mkdir(parents=True, exist_ok=True)
-        previous.parent.mkdir(parents=True, exist_ok=True)
-        existed = os.path.lexists(current)
-        if existed:
-            os.replace(current, previous)
-        activated.append((relative, existed, False))
-        os.replace(stage / relative, current)
-        activated[-1] = (relative, existed, True)
-except BaseException:
-    # Renames can fail (permissions, storage, external removal) even after
-    # every input copied successfully. Put every previous path back.
-    for relative, existed, moved in reversed(activated):
-        current = destination / relative
-        if moved:
+MANIFEST = "share/pinhole/install-manifest.json"
+
+
+class NotOurs(Exception):
+    pass
+
+
+def entries(prefix):
+    path = prefix / MANIFEST
+    if not path.exists():
+        return {}
+    manifest = json.loads(path.read_text())
+    found = {}
+    for entry in manifest.get("entries", []):
+        relative = PurePosixPath(entry["path"])
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise NotOurs(f"{path} names {entry['path']!r}, which is not a path in the installation")
+        found[relative.as_posix()] = entry
+    return found
+
+
+def owned(destination, previous, relative):
+    """The path as the previous install put it there."""
+    entry = previous.get(relative)
+    path = destination / relative
+    if entry is None or not os.path.lexists(path):
+        return False
+    if "link" in entry:
+        return path.is_symlink() and os.readlink(path) == entry["link"]
+    return (path.is_file() and not path.is_symlink()
+            and hashlib.sha256(path.read_bytes()).hexdigest() == entry.get("sha256"))
+
+
+def owned_tree(destination, previous, relative):
+    """A real folder holding only what the previous install put there."""
+    root = destination / relative
+    for folder, directories, files in os.walk(root):
+        for name in files + [d for d in directories if (Path(folder) / d).is_symlink()]:
+            inside = (Path(folder) / name).relative_to(destination).as_posix()
+            if not owned(destination, previous, inside):
+                return False
+    return True
+
+
+def order(relative):
+    # Resources first; the programs after them, the launcher last, so a
+    # launch in the meantime never runs the new program with old resources.
+    return (relative.startswith("bin/"), relative == "bin/pinhole", relative)
+
+
+def plan(stage, destination):
+    """What is in the way, each checked to be the previous install's, before
+    anything is moved: (paths to take away, paths to put in)."""
+    previous = entries(destination)
+    wanted = sorted(set(entries(stage)) | {MANIFEST}, key=order)
+    away = []
+    for relative in wanted:
+        parts = PurePosixPath(relative).parts
+        # A folder on the way that is a link or a file now (a developer
+        # install's link to its checkout): never written through.
+        for depth in range(1, len(parts)):
+            parent = PurePosixPath(*parts[:depth]).as_posix()
+            path = destination / parent
+            if not os.path.lexists(path) or (path.is_dir() and not path.is_symlink()):
+                continue
+            if parent in away:
+                break
+            if not owned(destination, previous, parent):
+                raise NotOurs(str(path))
+            away.append(parent)
+            break
+        else:
+            path = destination / relative
+            if relative == MANIFEST or not os.path.lexists(path):
+                continue
+            if path.is_dir() and not path.is_symlink():
+                if not owned_tree(destination, previous, relative):
+                    raise NotOurs(str(path))
+                away.append(relative)
+            elif not owned(destination, previous, relative):
+                raise NotOurs(str(path))
+    # What the previous install had that this one does not: gone too, if
+    # it is still as installed.
+    for relative in sorted(previous):
+        if relative not in wanted and relative not in away and owned(destination, previous, relative) \
+                and not any(relative.startswith(a + "/") for a in away):
+            away.append(relative)
+    return away, wanted
+
+
+def activate(stage, destination):
+    backup = stage / ".previous"
+    away, wanted = plan(stage, destination)
+    taken, placed = [], []
+    try:
+        for relative in away:
+            current = destination / relative
+            if not os.path.lexists(current):
+                continue
+            (backup / relative).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(current, backup / relative)
+            taken.append(relative)
+        for relative in wanted:
+            current = destination / relative
+            current.parent.mkdir(parents=True, exist_ok=True)
+            if os.path.lexists(current) and not (current.is_dir() and not current.is_symlink()):
+                (backup / relative).parent.mkdir(parents=True, exist_ok=True)
+                os.replace(current, backup / relative)
+                taken.append(relative)
+            os.replace(stage / relative, current)
+            placed.append(relative)
+    except BaseException:
+        # Renames can fail (permissions, storage, external removal) even
+        # after every input copied successfully. Put every previous path back.
+        for relative in reversed(placed):
             recovered = stage / relative
             recovered.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(current, recovered)
-        if existed:
-            os.replace(backup / relative, current)
-    raise
+            os.replace(destination / relative, recovered)
+        for relative in reversed(taken):
+            (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(backup / relative, destination / relative)
+        raise
+    # Folders the previous install's files left empty.
+    for relative in sorted(away, key=lambda r: -len(PurePosixPath(r).parts)):
+        for parent in (destination / relative).parents:
+            if parent == destination or destination not in parent.parents:
+                break
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+
+
+if __name__ == "__main__":
+    stage, destination = map(Path, sys.argv[1:])
+    try:
+        activate(stage, destination)
+    except NotOurs as error:
+        print(f"pinhole: {error} is in the way and was not installed by Pinhole (or was changed since): "
+              "nothing was installed. Move it aside and install again.", file=sys.stderr)
+        sys.exit(1)
