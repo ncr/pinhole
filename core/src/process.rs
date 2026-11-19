@@ -1506,6 +1506,17 @@ fn text(v: &Value, field: &str, max: usize) -> std::result::Result<Option<String
     }
 }
 
+/// An asset's file name, which a photo sent elsewhere is saved under: one
+/// name, never a path.
+fn file_name(v: &Value) -> std::result::Result<Option<String>, String> {
+    let name = text(v, "filename", 1024)?;
+    match name.as_deref() {
+        Some("" | "." | "..") => Err("filename is not a file's name".into()),
+        Some(n) if n.contains('/') => Err("filename is not a file's name".into()),
+        _ => Ok(name),
+    }
+}
+
 fn whole(v: &Value, field: &str, range: std::ops::RangeInclusive<i64>) -> std::result::Result<Option<i64>, String> {
     match &v[field] {
         Value::Null => Ok(None),
@@ -1579,7 +1590,7 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
     };
     Ok(Asset {
         id: id.to_owned(),
-        filename: text(v, "filename", 1024).map_err(wrong)?,
+        filename: file_name(v).map_err(wrong)?,
         item_type: text(v, "item_type", 256).map_err(wrong)?,
         taken: whole(v, "taken", i64::MIN..=i64::MAX).map_err(wrong)?,
         added: whole(v, "added", i64::MIN..=i64::MAX).map_err(wrong)?,
@@ -2226,6 +2237,10 @@ mod tests {
             json!({"favorite": "yes"}),
             json!({"duration": -1}),
             json!({"filename": "a\u{0}b"}),
+            json!({"filename": "../IMG_1.JPG"}),
+            json!({"filename": "a/b.jpg"}),
+            json!({"filename": ".."}),
+            json!({"filename": ""}),
             json!({"renditions": [{"kind": "thumb", "name": "t", "key": "a"}, {"kind": "thumb", "name": "t", "key": "b"}]}),
             rendition(json!({"kind": "jpeg", "name": "t", "key": "a"})),
             rendition(json!({"kind": "poster", "name": "t", "key": "a"})),

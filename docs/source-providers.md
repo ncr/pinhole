@@ -305,7 +305,7 @@ A `put` note's `assets`, at most 1,000 in one note:
 |---|---|---|
 | `id` | required | Unique in the source and stable while the asset is there. 1 to 512 bytes, no control characters. |
 | `kind` | required | `photo`, `video` or `live` (a photo with motion). |
-| `filename`, `item_type` | | The original's name and UTI (`public.jpeg`, `public.heic`, `com.apple.quicktime-movie`…). |
+| `filename`, `item_type` | | The original's name (one name, no `/`, not `.` or `..`) and UTI (`public.jpeg`, `public.heic`, `com.apple.quicktime-movie`…). |
 | `taken`, `added` | | Milliseconds since 1970: capture time and addition time. The library API keeps capture-date order; the visual grid independently uses Automatic, Date taken or Date added. |
 | `favorite`, `has_location` | `false` | The location flag can be true even when no coordinates are available. A valid pair implies it. |
 | `latitude`, `longitude` | | Both absent/null or both numbers in signed WGS 84 decimal degrees, latitude from −90 to 90, longitude from −180 to 180. |
