@@ -389,7 +389,7 @@ fn is_own(name: &str, device: &str) -> bool {
 /// Whether a file there is a computer's (`own_name`, or its id alone as
 /// before): its id last, twelve hex digits. Nothing else in the folder is
 /// read.
-fn is_computers(name: &str) -> bool {
+pub fn is_computers(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".json") else { return false };
     let id = stem.rsplit_once('-').map_or(stem, |(_, id)| id);
     id.len() == 12 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
