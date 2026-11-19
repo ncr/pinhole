@@ -78,20 +78,22 @@ void Incoming::start(const Drop &drop) {
     m_busy = true;
     m_progress = 0;
     m_place = drop.place;
-    // Files dropped as they are; a folder's are counted by the service,
-    // which walks it anyway, and said as it goes: a big folder on a slow
-    // disk must not hold the window still before anything is sent.
+    // Files dropped as they are; a folder's are not counted here (a big
+    // folder on a slow disk must not hold the window still before anything
+    // is sent), and the service counts assets, a Live Photo's two files as
+    // one, where "Added" counts files: the folder is said as photos and
+    // videos until they are in.
     const QStringList takes = accepts();
     m_files = 0;
-    m_folders = false;
+    bool folders = false;
     for (const QString &path : drop.paths) {
         const QFileInfo info(path);
         if (info.isDir())
-            m_folders = true;
+            folders = true;
         else if (takes.contains(info.suffix().toLower()))
             ++m_files;
     }
-    m_status = m_folders ? tr("Adding the photos and videos to %1…").arg(m_place)
+    m_status = folders ? tr("Adding the photos and videos to %1…").arg(m_place)
                          : tr("Adding %n file(s) to %1…", "", std::max(1, m_files)).arg(m_place);
     m_fade.stop();
     emit changed();
@@ -112,12 +114,6 @@ void Incoming::heard(const QString &name, const QJsonObject &details) {
         return;
     const double bytes = details.value("bytes").toDouble();
     m_progress = bytes > 0 ? details.value("sent").toDouble() / bytes : 0;
-    // A folder's files, as many as the service found in it.
-    if (m_folders && details.value("total").toInt() > 0) {
-        m_folders = false;
-        m_files = details.value("total").toInt();
-        m_status = tr("Adding %n file(s) to %1…", "", m_files).arg(m_place);
-    }
     emit changed();
 }
 

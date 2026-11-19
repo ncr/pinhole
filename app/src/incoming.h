@@ -83,6 +83,5 @@ private:
     // has (a folder's once the service has counted them).
     QString m_place;
     int m_files = 0;
-    bool m_folders = false;
     QTimer m_fade;
 };
