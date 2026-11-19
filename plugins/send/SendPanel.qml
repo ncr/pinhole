@@ -346,7 +346,7 @@ Item {
                 return outcome(missing === 0 && unconverted > 0 ? "unconverted" : "unfetched")
             const folder = pinhole.cacheDir + "/localsend/" + Date.now()
             pinhole.run(plugin.sender, ["stage", folder], { json: list }).then(result => {
-                const paths = result.stdout.split("\n").filter(l => l !== "")
+                const paths = JSON.parse(result.stdout)
                 // The folder for very many, which LocalSend takes as a folder.
                 const given = paths.length > 500 ? [folder] : paths
                 return pinhole.run("sh", ["-c", 'if command -v uwsm-app >/dev/null; then set -- uwsm-app -- localsend "$@"; else set -- localsend "$@"; fi; setsid -f "$@" >/dev/null 2>&1 </dev/null',
