@@ -1046,15 +1046,8 @@ fn pass_on(conn: std::net::TcpStream, passing: &Passing) -> Result<()> {
         out.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
         return Ok(());
     }
-    let client = &passing.client;
-    let mut request = if method == "HEAD" { client.head(&passing.url) } else { client.get(&passing.url) };
-    for (name, value) in &passing.headers {
-        request = request.header(name.as_str(), value.as_str().unwrap_or(""));
-    }
-    if let Some(range) = &range {
-        request = request.header(reqwest::header::RANGE, range.as_str());
-    }
-    let Ok(mut response) = request.send() else {
+    let method = if method == "HEAD" { reqwest::Method::HEAD } else { reqwest::Method::GET };
+    let Ok(mut response) = send_to_provider(&passing.client, method.clone(), &passing.url, &passing.headers, range.as_deref()) else {
         out.write_all(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")?;
         return Ok(());
     };
@@ -1070,10 +1063,53 @@ fn pass_on(conn: std::net::TcpStream, passing: &Passing) -> Result<()> {
     }
     head.push_str("\r\n");
     out.write_all(head.as_bytes())?;
-    if method == "GET" {
+    if method == reqwest::Method::GET {
         std::io::copy(&mut response, &mut out)?;
     }
     Ok(())
+}
+
+/// The client a provider's URLs are fetched with: one that follows no
+/// redirect itself (`send_to_provider` does).
+fn provider_client(gap: Duration) -> reqwest::Result<reqwest::blocking::Client> {
+    crate::source::download_client(gap).redirect(reqwest::redirect::Policy::none()).build()
+}
+
+/// The most redirects one request to a provider's URL follows.
+const REDIRECTS_MAX: usize = 10;
+
+/// A provider's URL asked for with its ticket's headers (its sign-in) and
+/// the range, if any, its redirects followed here: the headers go to the
+/// URL's own origin alone, never to another one a redirect leads to (its
+/// media server's CDN).
+fn send_to_provider(
+    client: &reqwest::blocking::Client,
+    method: reqwest::Method,
+    url: &str,
+    headers: &serde_json::Map<String, Value>,
+    range: Option<&str>,
+) -> Result<reqwest::blocking::Response> {
+    let first = reqwest::Url::parse(url)?;
+    let mut at = first.clone();
+    for _ in 0..=REDIRECTS_MAX {
+        let mut request = client.request(method.clone(), at.clone());
+        if at.origin() == first.origin() {
+            for (name, value) in headers {
+                request = request.header(name.as_str(), value.as_str().unwrap_or(""));
+            }
+        }
+        if let Some(range) = range {
+            request = request.header(reqwest::header::RANGE, range);
+        }
+        let response = request.send()?;
+        let location = response.headers().get(reqwest::header::LOCATION).and_then(|l| l.to_str().ok());
+        let Some(location) = location.filter(|_| response.status().is_redirection()) else { return Ok(response) };
+        at = at.join(location)?;
+        if !matches!(at.scheme(), "http" | "https") {
+            return Err(anyhow!("a redirect to a URL that is not http or https"));
+        }
+    }
+    Err(anyhow!("more than {REDIRECTS_MAX} redirects"))
 }
 
 /// A kind of source of a plugin's own, its provider out of process.
@@ -1402,19 +1438,13 @@ impl ProcessSource {
         if let Some(client) = self.http.get() {
             return Ok(client);
         }
-        let client = crate::source::download_client(crate::source::READ_GAP).build().map_err(|e| FetchError::Failed(e.into()))?;
+        let client = provider_client(crate::source::READ_GAP).map_err(|e| FetchError::Failed(e.into()))?;
         Ok(self.http.get_or_init(|| client))
     }
 
     fn get(&self, url: &str, headers: &serde_json::Map<String, Value>, range: Option<(u64, u64)>) -> std::result::Result<Body, FetchError> {
-        let mut request = self.http()?.get(url);
-        for (name, value) in headers {
-            request = request.header(name.as_str(), value.as_str().unwrap_or(""));
-        }
-        if let Some((start, end)) = range {
-            request = request.header(reqwest::header::RANGE, format!("bytes={start}-{end}"));
-        }
-        let response = request.send().map_err(|e| FetchError::Failed(e.into()))?;
+        let range = range.map(|(start, end)| format!("bytes={start}-{end}"));
+        let response = send_to_provider(self.http()?, reqwest::Method::GET, url, headers, range.as_deref()).map_err(FetchError::Failed)?;
         let status = response.status();
         if matches!(status.as_u16(), 401 | 403 | 404 | 410) {
             return Err(FetchError::Expired);
@@ -1506,6 +1536,17 @@ fn text(v: &Value, field: &str, max: usize) -> std::result::Result<Option<String
     }
 }
 
+/// An asset's file name, which a photo sent elsewhere is saved under: one
+/// name, never a path.
+fn file_name(v: &Value) -> std::result::Result<Option<String>, String> {
+    let name = text(v, "filename", 1024)?;
+    match name.as_deref() {
+        Some("" | "." | "..") => Err("filename is not a file's name".into()),
+        Some(n) if n.contains('/') => Err("filename is not a file's name".into()),
+        _ => Ok(name),
+    }
+}
+
 fn whole(v: &Value, field: &str, range: std::ops::RangeInclusive<i64>) -> std::result::Result<Option<i64>, String> {
     match &v[field] {
         Value::Null => Ok(None),
@@ -1579,7 +1620,7 @@ fn asset_of(v: &Value, prefix: &str) -> std::result::Result<Asset, (Option<Strin
     };
     Ok(Asset {
         id: id.to_owned(),
-        filename: text(v, "filename", 1024).map_err(wrong)?,
+        filename: file_name(v).map_err(wrong)?,
         item_type: text(v, "item_type", 256).map_err(wrong)?,
         taken: whole(v, "taken", i64::MIN..=i64::MAX).map_err(wrong)?,
         added: whole(v, "added", i64::MIN..=i64::MAX).map_err(wrong)?,
@@ -2103,6 +2144,53 @@ mod tests {
         port
     }
 
+    /// A server on 127.0.0.1 that sends `/go` to `to`, and answers
+    /// anything else as `upstream` does, with `NEAR`.
+    fn redirecting(to: String) -> u16 {
+        let up = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = up.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for conn in up.incoming() {
+                let Ok(mut conn) = conn else { continue };
+                let to = to.clone();
+                std::thread::spawn(move || {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") && conn.read(&mut byte).unwrap_or(0) == 1 {
+                        head.push(byte[0]);
+                    }
+                    let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
+                    let answer = if head.starts_with("get /go ") {
+                        format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    } else if head.contains("x-secret: s3cret") {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nNEAR".to_owned()
+                    } else {
+                        "HTTP/1.1 403 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned()
+                    };
+                    let _ = conn.write_all(answer.as_bytes());
+                });
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn a_providers_headers_follow_a_redirect_to_its_own_origin_alone() {
+        let client = provider_client(Duration::from_secs(5)).unwrap();
+        let mut headers = serde_json::Map::new();
+        headers.insert("x-secret".into(), json!("s3cret"));
+        let get = |port: u16| {
+            let mut response = send_to_provider(&client, reqwest::Method::GET, &format!("http://127.0.0.1:{port}/go"), &headers, None).unwrap();
+            let mut body = String::new();
+            response.read_to_string(&mut body).unwrap();
+            (response.status().as_u16(), body)
+        };
+        assert_eq!(get(redirecting("/v.mp4".into())), (200, "NEAR".into()));
+        // Another port is another origin: it gets none of them.
+        let far = upstream("FAR");
+        assert_eq!(get(redirecting(format!("http://127.0.0.1:{far}/v.mp4"))), (403, String::new()));
+    }
+
     #[test]
     fn whose_end_of_a_connection_on_the_loopback_is_found() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -2226,6 +2314,10 @@ mod tests {
             json!({"favorite": "yes"}),
             json!({"duration": -1}),
             json!({"filename": "a\u{0}b"}),
+            json!({"filename": "../IMG_1.JPG"}),
+            json!({"filename": "a/b.jpg"}),
+            json!({"filename": ".."}),
+            json!({"filename": ""}),
             json!({"renditions": [{"kind": "thumb", "name": "t", "key": "a"}, {"kind": "thumb", "name": "t", "key": "b"}]}),
             rendition(json!({"kind": "jpeg", "name": "t", "key": "a"})),
             rendition(json!({"kind": "poster", "name": "t", "key": "a"})),

@@ -63,11 +63,15 @@ struct Found {
 impl Found {
     /// Names its thumbnail and cached files; changes when the file does,
     /// and a video's when how its cover is made does (cover::VERSION), so
-    /// that it is made again.
-    fn key(&self) -> String {
+    /// that it is made again. Its folder's (`root`) too: the cache is
+    /// shared, and another folder's file of this name, size and time is
+    /// another file.
+    fn key(&self, root: &Path) -> String {
+        use std::os::unix::ffi::OsStrExt;
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         let cover = if self.media == Media::Video { pinhole_core::cover::VERSION } else { "" };
-        for b in self.rel.bytes().chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()).chain(cover.bytes()) {
+        let root = root.as_os_str().as_bytes().iter().copied().chain([0]);
+        for b in root.chain(self.rel.bytes()).chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()).chain(cover.bytes()) {
             hash = (hash ^ b as u64).wrapping_mul(0x0100_0000_01b3);
         }
         format!("f{hash:016x}")
@@ -83,8 +87,8 @@ struct Entry {
 
 impl Entry {
     /// What the index keeps to tell whether it changed since.
-    fn signature(&self) -> (String, Option<String>) {
-        (self.file.key(), self.motion.as_ref().map(Found::key))
+    fn signature(&self, root: &Path) -> (String, Option<String>) {
+        (self.file.key(root), self.motion.as_ref().map(|m| m.key(root)))
     }
 }
 
@@ -217,14 +221,14 @@ fn stem(rel: &str) -> String {
 /// describing them finds it is not (`is_motion`): `unpaired` has the keys
 /// of such videos. A photo has one motion at most, a QuickTime one first;
 /// any other video of its name is a video of its own.
-fn pair(mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashMap<String, Entry> {
+fn pair(root: &Path, mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashMap<String, Entry> {
     let later = |f: &Found| f.media == Media::Video && !f.rel.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("mov"));
     found.sort_by(|a, b| (later(a), &a.rel).cmp(&(later(b), &b.rel)));
     let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
     let mut motion: HashMap<String, Vec<Found>> = HashMap::new();
     let mut entries: HashMap<String, Entry> = HashMap::new();
     for f in found {
-        if f.media == Media::Video && !unpaired.contains(&f.key()) {
+        if f.media == Media::Video && !unpaired.contains(&f.key(root)) {
             let s = stem(&f.rel);
             let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
                 .or_else(|| photos.contains(&s).then_some(s));
@@ -277,7 +281,7 @@ pub struct Count {
 pub fn count(root: &Path, deadline: Option<Instant>) -> Count {
     let Walk { found, complete, .. } = walk(root, deadline);
     let bytes = found.iter().map(|f| f.size).sum();
-    let entries = pair(found, &HashSet::new());
+    let entries = pair(root, found, &HashSet::new());
     Count {
         assets: entries.len() as u64,
         live: entries.values().filter(|e| e.motion.is_some()).count() as u64,
@@ -384,7 +388,7 @@ impl FolderSource {
         }
         unread.sort();
         unread.dedup();
-        Ok(Look { entries: pair(walk.found, unpaired), unread })
+        Ok(Look { entries: pair(&self.root, walk.found, unpaired), unread })
     }
 
     /// A look that finds nothing where the index has photos, with the folder
@@ -431,7 +435,7 @@ impl FolderSource {
     fn asset(&self, f: &Found, motion: Option<&Found>, details: Details) -> Asset {
         let Details { taken, duration, orientation, location, .. } = details;
         let modified_ms = (f.modified_ns / 1_000_000) as i64;
-        let key = f.key();
+        let key = f.key(&self.root);
         let file_type = file_type(&f.rel);
         let made = |want: Want| Rendition {
             want,
@@ -459,7 +463,7 @@ impl FolderSource {
             renditions.push(Rendition {
                 want: Want::Live,
                 name: m.rel.clone(),
-                key: m.key(),
+                key: m.key(&self.root),
                 width: None,
                 height: None,
                 size: Some(m.size as i64),
@@ -502,7 +506,7 @@ impl FolderSource {
             let described: Vec<Vec<Asset>> = batch.par_iter().map(|e| self.describe(e)).collect::<Result<_>>()?;
             for (entry, assets) in batch.iter().zip(&described) {
                 if let (Some(m), [_, _]) = (&entry.motion, assets.as_slice()) {
-                    index.conn.execute(&format!("INSERT OR IGNORE INTO {UNPAIRED} (key) VALUES (?1)"), [m.key()])?;
+                    index.conn.execute(&format!("INSERT OR IGNORE INTO {UNPAIRED} (key) VALUES (?1)"), [m.key(&self.root)])?;
                 }
             }
             let mut assets: Vec<Asset> = described.into_iter().flatten().collect();
@@ -696,7 +700,7 @@ impl Source for FolderSource {
         }
         let changed: Vec<&Entry> = entries
             .values()
-            .filter(|e| known.get(&e.file.rel) != Some(&e.signature()))
+            .filter(|e| known.get(&e.file.rel) != Some(&e.signature(&self.root)))
             .filter(|e| !(known.contains_key(&e.file.rel) && look.motion_unread(e)))
             .collect();
         let gone: Vec<String> = known
@@ -1062,13 +1066,13 @@ mod tests {
             pairs
         };
         let some = |s: &str| Some(s.to_owned());
-        assert_eq!(pairs(pair(files(), &HashSet::new())), [
+        assert_eq!(pairs(pair(Path::new("/r"), files(), &HashSet::new())), [
             ("trip.jpg".into(), some("TRIP.MOV")),
             ("trip.mov".into(), None),
             ("trip.mp4".into(), None),
         ]);
         // The QuickTime ones found not to be its motion: the next is tried.
-        assert_eq!(pairs(pair(files(), &[found("trip.mov").key(), found("TRIP.MOV").key()].into())), [
+        assert_eq!(pairs(pair(Path::new("/r"), files(), &[found("trip.mov").key(Path::new("/r")), found("TRIP.MOV").key(Path::new("/r"))].into())), [
             ("TRIP.MOV".into(), None),
             ("trip.jpg".into(), some("trip.mp4")),
             ("trip.mov".into(), None),
@@ -1258,10 +1262,18 @@ mod tests {
     }
 
     #[test]
+    fn two_folders_files_of_one_name_size_and_time_have_their_own_keys() {
+        let file = Found { rel: "2026/IMG_0001.JPG".into(), media: Media::Photo, size: 10, modified_ns: 5 };
+        let (a, b) = (Path::new("/home/me/Pictures"), Path::new("/media/disk/Pictures"));
+        assert_ne!(file.key(a), file.key(b));
+        assert_eq!(file.key(a), file.key(a));
+    }
+
+    #[test]
     fn a_live_photo_whose_motion_cannot_be_read_stays_as_it_is() {
         let found = |rel: &str, media| Found { rel: rel.into(), media, size: 1, modified_ns: 0 };
         let look = |unread: &[&str], files: Vec<Found>| Look {
-            entries: pair(files, &HashSet::new()),
+            entries: pair(Path::new("/r"), files, &HashSet::new()),
             unread: unread.iter().map(|u| u.to_string()).collect(),
         };
         let photo = || found("2026/IMG_1.HEIC", Media::Photo);

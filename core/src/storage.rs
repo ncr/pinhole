@@ -68,11 +68,52 @@ fn all_making() -> PathBuf {
     cache.unwrap_or_else(|| std::env::temp_dir().join("pinhole-cache")).join("making")
 }
 
-/// What services that have ended left in making/: the folders of pids no
-/// longer running (and files from before there were any). Never what one
-/// still running is making.
+/// Where an edit's renders are made (`Source::set_edit`), each edit in a
+/// new folder in it (`edit_work`): `pinhole-edits/<pid>/` in the account's
+/// runtime folder (in memory, its own), else `making()`.
+fn edits() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute() && d.is_dir()) {
+        Some(runtime) => runtime.join("pinhole-edits").join(std::process::id().to_string()),
+        None => making(),
+    }
+}
+
+/// A new folder for one edit's renders, only this account's: the caller
+/// removes it once done, and what a service that ended left is removed as
+/// one starts (`forget_making`).
+pub fn edit_work() -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let edits = edits();
+    private_dir(&edits)?;
+    let work = edits.join(crate::add::uuid());
+    // Not recursive: made here and now, never one already there.
+    std::fs::DirBuilder::new().mode(0o700).create(&work)?;
+    Ok(work)
+}
+
+/// A folder of Pinhole's own (a library, the cache, its state), made if it
+/// is not there, that only this account can open, whatever the umask or
+/// it was before: what is in it, photos and their index, is read by no one
+/// else. Never a folder of the user's photos.
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+/// What services that have ended left in making/ and in the runtime
+/// folder's pinhole-edits/: the folders of pids no longer running (and
+/// files from before there were any). Never what one still running is
+/// making.
 pub fn forget_making() {
-    let Ok(entries) = std::fs::read_dir(all_making()) else { return };
+    forget_ended(&all_making());
+    if let Some(edits) = edits().parent() {
+        forget_ended(edits);
+    }
+}
+
+fn forget_ended(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let running = name.to_str().and_then(|n| n.parse::<u32>().ok()).is_some_and(|pid| Path::new("/proc").join(pid.to_string()).exists());
@@ -370,7 +411,7 @@ impl Storage {
     /// Another source's library from now on (the caller holds
     /// `library_lock`): whoever reads the library is told, as after a move.
     pub fn switch_library(&self, library: PathBuf) {
-        let _ = std::fs::create_dir_all(&library);
+        let _ = private_dir(&library);
         self.state.lock().unwrap().library = library.clone();
         self.library_generation.fetch_add(1, Ordering::Relaxed);
         if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
@@ -486,18 +527,25 @@ impl Storage {
         if folder.starts_with(&from) || from.starts_with(&folder) {
             return Err(anyhow!("{} and {} are inside one another", folder.display(), from.display()));
         }
-        std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
-        let probe = folder.join(".pinhole-write-test");
-        std::fs::write(&probe, b"").with_context(|| format!("{} is not writable", folder.display()))?;
-        let _ = std::fs::remove_file(&probe);
-
         // Every source's library, all in `library/`, the one in use among
         // them, unless it was opened from elsewhere.
         let (old_libraries, new_libraries) = (from.join("library"), folder.join("library"));
         let library_moves = old_library.starts_with(&old_libraries);
-        if new_libraries.exists() {
-            return Err(anyhow!("{} already has a library", folder.display()));
+        // What a move makes there, and removes again should it be given
+        // up, is never anything there already: not Pinhole's to remove.
+        for name in ["library", "library.part", "cache"] {
+            if folder.join(name).symlink_metadata().is_ok() {
+                return Err(anyhow!("{} already has a {name}", folder.display()));
+            }
         }
+        std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
+        let probe = folder.join(format!(".pinhole-write-test-{}", crate::add::uuid()));
+        std::fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .with_context(|| format!("{} is not writable", folder.display()))?;
+        let _ = std::fs::remove_file(&probe);
         let total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum::<u64>()
             + if library_moves { size_of(&old_libraries) } else { 0 };
         {
@@ -550,6 +598,11 @@ impl Storage {
             settings["location"] = json!(to);
             settings["moving"] = json!({"from": from, "to": to, "cache": old_cache, "phase": "photos"});
         })?;
+        // Only this account's there too.
+        if to.join("library").exists() {
+            let _ = private_dir(&to.join("library"));
+        }
+        let _ = private_dir(&to.join("cache"));
         let mut state = self.state.lock().unwrap();
         state.location = to.to_owned();
         state.cache = to.join("cache");
@@ -713,6 +766,7 @@ impl Storage {
         };
         if across {
             let _ = std::fs::remove_dir_all(&part);
+            private_dir(&part)?;
             copy_tree(from, &part, &self.moved, false).with_context(|| format!("copying the libraries to {}", to.display()))?;
         }
         // Nothing writes them meanwhile: not a round (library_lock), not a
@@ -735,6 +789,7 @@ impl Storage {
             if !across {
                 let _ = std::fs::remove_dir_all(&part);
             }
+            private_dir(&part)?;
             copy_tree(from, &part, &self.moved, across).with_context(|| format!("copying the libraries to {}", to.display()))?;
             std::fs::rename(&part, to)?;
             true
@@ -1077,6 +1132,11 @@ mod tests {
         assert!(to.join("library/cloud/thumbs/aa/one.jpg").exists());
         assert!(to.join("cache/full/aa/one.jpg").exists());
         assert!(to.join("cache/video/bb/two.mov").exists());
+        // Only this account's in the new folder too.
+        for dir in ["library", "cache"] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(to.join(dir)).unwrap().permissions().mode() & 0o777, 0o700, "{dir}");
+        }
         assert!(!from.exists());
         assert_eq!(storage.library(), to.join("library/cloud"));
         assert_eq!(*told.lock().unwrap(), Some(to.join("library/cloud")));
@@ -1085,6 +1145,36 @@ mod tests {
         // And no plan left.
         let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
+    }
+
+    #[test]
+    fn each_edit_is_made_in_a_new_folder_of_this_accounts_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let (a, b) = (edit_work().unwrap(), edit_work().unwrap());
+        assert_ne!(a, b);
+        for dir in [&a, &b, &a.parent().unwrap().to_owned()] {
+            assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700, "{}", dir.display());
+        }
+        let _ = std::fs::remove_dir(&a);
+        let _ = std::fs::remove_dir(&b);
+    }
+
+    #[test]
+    fn a_move_into_a_folder_with_what_it_would_make_there_already_touches_nothing() {
+        let dir = temp("move-occupied");
+        let from = dir.join("old");
+        file(&from.join("library/cloud/library.sqlite"), 50, 0);
+        let storage = storage_in(&from, &dir.join("settings.json"));
+        for name in ["library", "library.part", "cache"] {
+            let to = dir.join(format!("new-{name}"));
+            file(&to.join(name).join("theirs.txt"), 5, 0);
+            file(&to.join(".pinhole-write-test"), 5, 0);
+            let error = storage.set_location(to.clone()).unwrap_err().to_string();
+            assert!(error.contains(&format!("already has a {name}")), "{error}");
+            assert_eq!(std::fs::read(to.join(name).join("theirs.txt")).unwrap().len(), 5);
+            assert_eq!(std::fs::read(to.join(".pinhole-write-test")).unwrap().len(), 5);
+        }
+        assert_eq!(storage.location(), from);
     }
 
     #[test]

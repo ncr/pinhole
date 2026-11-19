@@ -532,7 +532,7 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         shared.broadcast(health_event(Health::Fine));
         // There before windows are told to read it, if only empty.
         let library = crate::storage::library_for(&shared.storage.location(), &*source);
-        std::fs::create_dir_all(&library)?;
+        crate::storage::private_dir(&library)?;
         crate::db::open(&library.join("library.sqlite"))?;
         shared.storage.switch_library(library);
     }
@@ -752,12 +752,29 @@ impl Shared {
     }
 }
 
-/// The part files of a file being got or made (storage::is_part): its
-/// download's `<name>.part`, and what a program making it writes,
-/// `<name>.part.<ext>` and beside it `<name>.part.trf`.
+/// What this service's part files are named by (`part_of`): its own, so
+/// that another pinholed sharing the cache (a window's, of a library
+/// given) never writes, publishes nor removes one of this one's.
+fn part_tag() -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| format!("{}-{:08x}", std::process::id(), rand::random::<u32>()))
+}
+
+/// The part file a file is got or made in (storage::is_part), this
+/// service's: `<name>.<tag>.part` for a download, and for a program making
+/// it `<name>.<tag>.part.<ext>` (`extension`), which may write
+/// `<name>.<tag>.part.trf` beside it.
+fn part_of(path: &Path, extension: Option<&str>) -> PathBuf {
+    match extension {
+        Some(extension) => path.with_extension(format!("{}.part.{extension}", part_tag())),
+        None => path.with_extension(format!("{}.part", part_tag())),
+    }
+}
+
+/// The part files of a file being got or made by this service (`part_of`).
 fn remove_parts(path: &Path) {
     let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return };
-    let part = format!("{stem}.part");
+    let part = format!("{stem}.{}.part", part_tag());
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -790,7 +807,19 @@ fn touch(path: &Path) {
 }
 
 pub fn run(config: Config) -> Result<()> {
-    std::fs::create_dir_all(&config.cache)?;
+    // Pinhole's own folders, only this account's: the photos fetched, the
+    // libraries (their index and thumbnails), what the plugins keep of them
+    // and what is synced. A library given is left as it is.
+    crate::storage::private_dir(&config.cache)?;
+    if config.given.is_none() {
+        let state = crate::synced::root().parent().map(Path::to_path_buf);
+        let plugins_cache = crate::workers::cache_root().parent().map(Path::to_path_buf);
+        for dir in [Some(config.location.join("library")), state, plugins_cache].into_iter().flatten() {
+            if let Err(e) = crate::storage::private_dir(&dir) {
+                eprintln!("pinholed: {} could not be made private: {e}", dir.display());
+            }
+        }
+    }
     eprintln!("pinholed: photos from {}", if config.source.kind() == "none" { "nowhere".to_owned() } else { config.source.id() });
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());
@@ -1377,22 +1406,14 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
 
 /// Turn and crop a photo in its source (`asset`, `turn`, `crop` as
 /// [x, y, width, height] of it turned, or neither to take the edit off;
-/// `original`, its original as fetched into this service's cache; `source`,
-/// the source it is of): where the source keeps edits (iCloud). Then a
-/// round, which brings the photo's new renditions. `unsupported` where it
-/// keeps none: the window keeps the edit itself.
+/// `source`, the source it is of), from its original as fetched already
+/// (`fetch` of its `original`): where the source keeps edits (iCloud).
+/// Then a round, which brings the photo's new renditions. `unsupported`
+/// where it keeps none: the window keeps the edit itself.
 fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (&'static str, String)> {
     let Some(id) = params["asset"].as_str() else {
         return Err(("bad_request", "set_edit needs an asset".into()));
     };
-    let original = std::path::PathBuf::from(params["original"].as_str().unwrap_or_default());
-    // Only a file of this service's own cache: nothing else of the
-    // computer's is read and sent.
-    let cache = shared.storage.cache();
-    match (original.canonicalize(), cache.canonicalize()) {
-        (Ok(file), Ok(root)) if file.starts_with(&root) && file.is_file() => {}
-        _ => return Err(("bad_request", "set_edit's original is a file the service fetched".into())),
-    }
     let edit = match (params["turn"].as_u64(), params["crop"].as_array()) {
         (Some(turn), Some(crop)) if crop.len() == 4 => {
             let c: Vec<f64> = crop.iter().filter_map(Value::as_f64).collect();
@@ -1412,7 +1433,23 @@ fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, 
         (Some(asked), Some(owner)) if asked == owner && owner == source.id() => {}
         _ => return Err(("other_source", "not the source shown".into())),
     }
-    let work = std::env::temp_dir().join(format!("pinholed-edit-{}-{}", std::process::id(), id.replace('/', "_")));
+    // This photo's original, found here: never a file a window names.
+    let original = db
+        .query_row(
+            "SELECT name, key, coalesce(file_type, '') FROM renditions WHERE asset_id = ?1 AND kind = 'original'",
+            [id],
+            |r| Ok(Stored { asset: id.to_owned(), want: Want::Original, name: r.get(0)?, key: r.get(1)?, file_type: r.get(2)? }),
+        )
+        .ok()
+        .and_then(|stored| {
+            source.local(&stored).filter(|f| f.is_file()).or_else(|| {
+                shared.storage.find(&cached_path(Want::Original, &stored.key, extension(&stored.file_type), false))
+            })
+        });
+    let Some(original) = original else {
+        return Err(("not_found", format!("{id}'s original is not fetched yet")));
+    };
+    let work = crate::storage::edit_work().map_err(|e| ("unavailable", format!("a folder to edit in: {e}")))?;
     let result = source.set_edit(&db, id, &original, edit, &work);
     let _ = std::fs::remove_dir_all(&work);
     if let Err(e) = result {
@@ -1751,7 +1788,7 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, kind: &str, reply: R
                 std::fs::create_dir_all(dir).map_err(|e| ("unavailable".to_owned(), e.to_string()))?;
             }
             // Made beside the target and renamed: a reader never sees half a file.
-            let part = path.with_extension(format!("part.{extension}"));
+            let part = part_of(&path, Some(extension));
             let result = match &maker {
                 Some(maker) => run_maker(maker, &source, &part),
                 None => crate::jpeg::make(&source, &part),
@@ -1949,13 +1986,14 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
         std::fs::create_dir_all(dir).map_err(|e| FetchError::Failed(e.into()))?;
     }
     // Written beside the target and renamed: a reader never sees half a file.
-    let part = job.path.with_extension("part");
+    let part = part_of(&job.path, None);
     let mut stream = None;
     // A panic in the source's reader fails the download as an error would:
     // whoever plays it as it comes hears it has ended.
     let result = catch_unwind(AssertUnwindSafe(|| -> std::io::Result<()> {
-        // Readable too: a stream serves from this same handle.
-        let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&part)?;
+        // Readable too: a stream serves from this same handle. Made new:
+        // never one something else is writing.
+        let mut file = std::fs::File::options().read(true).write(true).create_new(true).mode(0o600).open(&part)?;
         if job.stored.want.streamable() {
             let (source, ticket) = (source.clone(), ticket.clone());
             let ranged: crate::stream::Ranged = Box::new(move |start, end| {
@@ -2206,7 +2244,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
-    std::fs::create_dir_all(&library)?;
+    crate::storage::private_dir(&library)?;
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
     crate::sync::claim(source.as_ref(), &mut db, &library)?;
     let first = shared.rounds_shown.swap(shown, Ordering::SeqCst) != shown;
@@ -2316,6 +2354,24 @@ fn owe_thumbs(shared: &Shared, owed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_service_removes_its_own_part_files_alone() {
+        let dir = std::env::temp_dir().join(format!("pinhole-parts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("k1.mov");
+        let ours = [part_of(&path, None), part_of(&path, Some("mp4")), part_of(&path, None).with_extension("part.trf")];
+        let theirs = [dir.join("k1.1-0000abcd.part"), dir.join("k1.1-0000abcd.part.mp4")];
+        for file in ours.iter().chain(&theirs) {
+            assert!(crate::storage::is_part(file), "{}", file.display());
+            std::fs::write(file, b"x").unwrap();
+        }
+        remove_parts(&path);
+        assert!(ours.iter().all(|f| !f.exists()));
+        assert!(theirs.iter().all(|f| f.exists()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A folder as the rounds see it: its id, and nothing in it.
     struct Pictures;
