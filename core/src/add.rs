@@ -87,16 +87,17 @@ pub fn uuid() -> String {
 }
 
 /// The assets the given files and folders make, in the order given (a
-/// folder's files by name; hidden ones skipped), with a Live Photo's motion
-/// paired to its photo as a folder pairs them: a video named as a photo
-/// beside it (IMG_1234.HEIC with IMG_1234.MOV or IMG_1234_HEVC.MOV). Files
+/// folder's files by name; hidden ones and links skipped), with a Live
+/// Photo's motion paired to its photo as a folder pairs them: a video named
+/// as a photo beside it (IMG_1234.HEIC with IMG_1234.MOV or
+/// IMG_1234_HEVC.MOV), the first such, any other a video of its own. Files
 /// that are neither a photo nor a video come back on their own.
 pub fn gather(paths: &[PathBuf]) -> (Vec<Addition>, Vec<PathBuf>) {
     let mut files = Vec::new();
     let mut other = Vec::new();
     let mut seen = HashSet::new();
     for path in paths {
-        expand(path, &mut files, &mut other, &mut seen);
+        expand(path, true, &mut files, &mut other, &mut seen);
     }
     // Photos by folder and name without extension, for their motion.
     let stem = |p: &Path| -> String { p.with_extension("").to_string_lossy().to_lowercase() };
@@ -109,8 +110,10 @@ pub fn gather(paths: &[PathBuf]) -> (Vec<Addition>, Vec<PathBuf>) {
             let s = stem(&f);
             let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
                 .or_else(|| photos.contains(&s).then_some(s));
-            if let Some(photo) = photo {
-                motion.insert(photo, f);
+            // The first of a photo's videos is its motion, any other one a
+            // video of its own.
+            if let Some(std::collections::hash_map::Entry::Vacant(free)) = photo.map(|p| motion.entry(p)) {
+                free.insert(f);
                 continue;
             }
         }
@@ -127,11 +130,18 @@ pub fn gather(paths: &[PathBuf]) -> (Vec<Addition>, Vec<PathBuf>) {
     (additions, other)
 }
 
-fn expand(path: &Path, files: &mut Vec<PathBuf>, other: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
-    if !seen.insert(path.to_owned()) {
+/// A file or folder given (`given`: as it was named, a link followed), or
+/// one found in a folder given: a link there is passed over, so that
+/// nothing outside the folders given is added. Each file once, however
+/// it is reached.
+fn expand(path: &Path, given: bool, files: &mut Vec<PathBuf>, other: &mut Vec<PathBuf>, seen: &mut HashSet<(u64, u64)>) {
+    use std::os::unix::fs::MetadataExt;
+    let meta = if given { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
+    let Ok(meta) = meta else { return other.push(path.to_owned()) };
+    if meta.file_type().is_symlink() || !seen.insert((meta.dev(), meta.ino())) {
         return;
     }
-    if path.is_dir() {
+    if meta.is_dir() {
         let Ok(entries) = std::fs::read_dir(path) else { return other.push(path.to_owned()) };
         let mut inside: Vec<PathBuf> = entries
             .flatten()
@@ -140,12 +150,12 @@ fn expand(path: &Path, files: &mut Vec<PathBuf>, other: &mut Vec<PathBuf>, seen:
             .collect();
         inside.sort();
         for p in inside {
-            expand(&p, files, other, seen);
+            expand(&p, false, files, other, seen);
         }
         return;
     }
     let ext = extension(path);
-    if path.is_file() && (PHOTOS.contains(&ext.as_str()) || VIDEOS.contains(&ext.as_str())) {
+    if meta.is_file() && (PHOTOS.contains(&ext.as_str()) || VIDEOS.contains(&ext.as_str())) {
         files.push(path.to_owned());
     } else {
         other.push(path.to_owned());
@@ -194,6 +204,38 @@ mod tests {
         assert_eq!(other, vec![from.join("notes.txt")]);
         assert!(additions.iter().all(|a| a.group == additions[0].group));
         let _ = std::fs::remove_dir_all(&from);
+    }
+
+    #[test]
+    fn a_photos_second_video_is_added_on_its_own() {
+        let from = temp("two-videos");
+        write(&from.join("trip.jpg"), b"photo");
+        write(&from.join("trip.mov"), b"motion");
+        write(&from.join("trip.mp4"), b"video");
+        let (additions, _) = gather(&[from.clone()]);
+        let got: Vec<(PathBuf, Option<PathBuf>)> = additions.into_iter().map(|a| (a.file, a.motion)).collect();
+        assert_eq!(got, vec![(from.join("trip.jpg"), Some(from.join("trip.mov"))), (from.join("trip.mp4"), None)]);
+        let _ = std::fs::remove_dir_all(&from);
+    }
+
+    #[test]
+    fn a_link_in_a_folder_given_is_not_followed() {
+        let (from, elsewhere) = (temp("links"), temp("links-elsewhere"));
+        write(&elsewhere.join("private.jpg"), b"photo");
+        write(&from.join("a.jpg"), b"photo");
+        std::os::unix::fs::symlink(&elsewhere, from.join("album")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("private.jpg"), from.join("b.jpg")).unwrap();
+        std::os::unix::fs::symlink(&from, from.join("again")).unwrap();
+        let (additions, other) = gather(&[from.clone()]);
+        let files: Vec<PathBuf> = additions.into_iter().map(|a| a.file).collect();
+        assert_eq!(files, [from.join("a.jpg")]);
+        assert!(other.is_empty(), "{other:?}");
+        // A link given itself is what was asked for; a file reached twice
+        // is added once.
+        let (additions, _) = gather(&[from.join("b.jpg"), elsewhere.join("private.jpg")]);
+        assert_eq!(additions.len(), 1);
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&elsewhere);
     }
 
     #[test]
