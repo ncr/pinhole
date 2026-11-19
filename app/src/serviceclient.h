@@ -97,6 +97,8 @@ private:
     QString m_health = QStringLiteral("fine");
     QLocalSocket m_socket;
     QTimer m_retry;
+    // From connecting until the service's first line.
+    QTimer m_hello;
     int m_attempts = 0;
     bool m_started = false;
     // The service connected to has said its protocol (its first line):

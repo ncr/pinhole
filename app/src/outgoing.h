@@ -80,8 +80,19 @@ public:
     // read away from the window's thread first; `then` once it is set. The
     // last asked for wins: one another was asked for after, while it was
     // made, is not set, and `dropped` is called instead.
-    static void toClipboard(const QStringList &files, QObject *context, std::function<void()> then = {},
-                            std::function<void()> dropped = {});
+    // `generation`, from askedToCopy() when the copy was asked for (0: now).
+    static void toClipboard(const QStringList &files, QObject *context, quint64 generation = 0,
+                            std::function<void()> then = {}, std::function<void()> dropped = {});
+    // A copy asked for now: its place among them, for toClipboard().
+    static quint64 askedToCopy();
+    // A catalog's filename as one name in a folder: empty when it has none
+    // (a path, ".", "..").
+    static QString plainName(const QString &name);
+    // `name` made in `folder`, empty, under a name nothing there has yet
+    // ("IMG_1-2.jpg" beside "IMG_1.jpg"); its path, or empty if it could not be.
+    static QString reserve(const QString &folder, const QString &name);
+    // `from`'s bytes into `out`, a file of its own (a reflink or a copy).
+    static bool copyInto(const QString &from, const QString &out);
 
 signals:
     void statusChanged();
@@ -97,7 +108,6 @@ private:
     // whose photo it is, for the JPEG of a HEIC asked for next.
     void place(const QString &source, const QString &type, const LibraryItem &item, const QString &of, bool compatible,
                const QString &folder, std::function<void(const QString &)> placed);
-    static QString uniqueName(const QString &folder, const QString &name);
 
     const Library *m_library;
     ServiceClient *m_service;

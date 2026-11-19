@@ -116,7 +116,12 @@ Adjustment Adjustment::turned(int quarters) const {
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QStandardPaths>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 AdjustmentStore::AdjustmentStore(QObject *parent) : QObject(parent) {
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { read(); });
@@ -157,27 +162,42 @@ void AdjustmentStore::setLibrary(const QString &dir) {
 }
 
 namespace {
-Adjustments readFile(const QString &path) {
-    Adjustments all;
+// False when the file is there but could not be read as edits: what it
+// holds must not be written over as though it were none.
+bool readFile(const QString &path, Adjustments *all) {
+    all->clear();
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return true;
     QFile file(path);
-    if (!path.isEmpty() && file.open(QIODevice::ReadOnly)) {
-        const QJsonObject kept = QJsonDocument::fromJson(file.readAll()).object();
-        for (auto it = kept.begin(); it != kept.end(); ++it) {
-            const Adjustment a = Adjustment::fromMap(it.value().toObject().toVariantMap());
-            if (!a.isIdentity())
-                all.insert(it.key().toUtf8(), a);
-        }
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return false;
+    const QJsonObject kept = document.object();
+    for (auto it = kept.begin(); it != kept.end(); ++it) {
+        const Adjustment a = Adjustment::fromMap(it.value().toObject().toVariantMap());
+        if (!a.isIdentity())
+            all->insert(it.key().toUtf8(), a);
     }
-    return all;
+    return true;
 }
 } // namespace
 
 Adjustments AdjustmentStore::load(const QString &libraryDir) {
-    return libraryDir.isEmpty() ? Adjustments() : readFile(fileFor(libraryDir));
+    Adjustments all;
+    if (!libraryDir.isEmpty())
+        readFile(fileFor(libraryDir), &all);
+    return all;
 }
 
 void AdjustmentStore::read() {
-    const Adjustments all = readFile(m_file);
+    Adjustments all;
+    // Half written by another (never, as it is renamed into place) or
+    // damaged: what was read before stays.
+    if (!readFile(m_file, &all))
+        return;
     {
         std::lock_guard lock(m_mutex);
         if (all == m_all)
@@ -200,11 +220,18 @@ Adjustment AdjustmentStore::of(const QByteArray &id) const {
 bool AdjustmentStore::set(const Adjustments &changes) {
     if (m_file.isEmpty())
         return false;
+    // Another window may have written its own since this one read the
+    // file: under a lock they share, the file read afresh and only these
+    // changed in it, so neither's crop is lost to the other's.
+    const int lock = ::open(QFile::encodeName(m_file + QStringLiteral(".lock")).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock < 0)
+        return false;
+    const auto unlock = qScopeGuard([lock] { ::close(lock); });
+    if (::flock(lock, LOCK_EX) != 0)
+        return false;
     Adjustments all;
-    {
-        std::lock_guard lock(m_mutex);
-        all = m_all;
-    }
+    if (!readFile(m_file, &all))
+        return false;
     for (auto it = changes.begin(); it != changes.end(); ++it) {
         const Adjustment a = it.value().normalized();
         if (a.isIdentity())

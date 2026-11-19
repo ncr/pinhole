@@ -29,6 +29,10 @@
 #include <QTimer>
 
 #include <memory>
+#include <cerrno>
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *parent)
@@ -39,11 +43,19 @@ Outgoing::Outgoing(const Library *library, ServiceClient *service, QObject *pare
                          : tr("Copied %n, some could not be fetched", "", files));
     });
     // Staged files from earlier days have long been dropped wherever they
-    // were going.
+    // were going. Only the folders prepare() makes (named by the time, never
+    // a link): a link there is not followed into what it points at, and
+    // removeRecursively() removes a link inside as itself.
     const QDateTime dayAgo = QDateTime::currentDateTime().addDays(-1);
-    for (const QFileInfo &dir : QDir(stagingFolder()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
-        if (dir.lastModified() < dayAgo)
-            QDir(dir.filePath()).removeRecursively();
+    const QString staging = stagingFolder();
+    if (!QFileInfo(staging).isSymLink()) {
+        for (const QFileInfo &dir : QDir(staging).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks)) {
+            bool number = false;
+            dir.fileName().toLongLong(&number);
+            if (number && !dir.isSymLink() && dir.lastModified() < dayAgo)
+                QDir(dir.filePath()).removeRecursively();
+        }
+    }
 }
 
 void Outgoing::flash(const QString &status) {
@@ -180,18 +192,30 @@ void Outgoing::drag(QObject *source, const QList<int> &indexes) {
     emit draggingChanged();
 }
 
+namespace {
+// The last copy asked for, which the clipboard keeps (the window's thread
+// only).
+quint64 latestCopy = 0;
+} // namespace
+
+quint64 Outgoing::askedToCopy() { return ++latestCopy; }
+
 void Outgoing::copy(const QList<int> &indexes, bool quiet) {
     const Chosen items = snapshot(indexes);
     if (items.isEmpty())
         return;
+    // Its place among copies is when it was asked for: an uncached photo
+    // copied first and downloaded after a cached one copied next is not
+    // what the clipboard keeps.
+    const quint64 generation = askedToCopy();
     // Prepare asynchronously: clipboard managers ask for the bytes as soon
     // as the clipboard changes. Confirm only once those bytes are set.
-    prepare(items, true, {}, [this, quiet](const QStringList &files, int failed) {
+    prepare(items, true, {}, [this, quiet, generation](const QStringList &files, int failed) {
         if (files.isEmpty()) {
             emit copyFailed(0, failed);
             return;
         }
-        toClipboard(files, this, [this, files, failed, quiet] {
+        toClipboard(files, this, generation, [this, files, failed, quiet] {
             emit copied(int(files.size()), failed);
             if (failed)
                 emit copyFailed(int(files.size()), failed);
@@ -248,7 +272,7 @@ QMimeData *Outgoing::clipboardData(const QStringList &files, const ClipboardImag
     return mime;
 }
 
-void Outgoing::toClipboard(const QStringList &files, QObject *context, std::function<void()> then,
+void Outgoing::toClipboard(const QStringList &files, QObject *context, quint64 generation, std::function<void()> then,
                            std::function<void()> dropped) {
     // Made here as finished bytes: left to Qt, a request for PNG (Omarchy's
     // clipboard history asks at once) encoded the full-size photo then and
@@ -256,13 +280,13 @@ void Outgoing::toClipboard(const QStringList &files, QObject *context, std::func
     const QString single = files.size() == 1 ? files.first() : QString();
     // The last copy asked for wins: each is made on its own thread, and a
     // big photo's PNG asked for first can be ready after a small one asked
-    // for later, which the clipboard must keep. (The window's thread only.)
-    static quint64 latest = 0;
-    const quint64 generation = ++latest;
+    // for later, which the clipboard must keep.
+    if (generation == 0)
+        generation = askedToCopy();
     auto *watcher = new QFutureWatcher<ClipboardImage>(context);
     QObject::connect(watcher, &QFutureWatcherBase::finished, context, [watcher, files, then, dropped, generation] {
         watcher->deleteLater();
-        if (generation != latest) {
+        if (generation != latestCopy) {
             if (dropped)
                 dropped();
             return;
@@ -302,12 +326,54 @@ QString Outgoing::stagingFolder() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/pinhole/outgoing";
 }
 
-QString Outgoing::uniqueName(const QString &folder, const QString &name) {
+QString Outgoing::plainName(const QString &name) {
+    // One name in the folder, never a path out of it: a catalog's filename
+    // is the provider's, and may hold a slash or be "..".
+    const QString last = name.section(QLatin1Char('/'), -1);
+    if (last.isEmpty() || last == QLatin1String(".") || last == QLatin1String("..") || last.contains(QChar(0)))
+        return {};
+    return last;
+}
+
+QString Outgoing::reserve(const QString &folder, const QString &name) {
+    // Made here and now, for this file alone: two photos of one name (from
+    // two folders) placed at once each get a name of their own, and nothing
+    // already there is written over.
     const QFileInfo info(name);
-    QString candidate = folder + '/' + name;
-    for (int n = 2; QFileInfo::exists(candidate); ++n)
-        candidate = QStringLiteral("%1/%2-%3.%4").arg(folder, info.completeBaseName()).arg(n).arg(info.suffix());
-    return candidate;
+    for (int n = 1; n < 10000; ++n) {
+        const QString candidate =
+            n == 1 ? folder + '/' + name
+                   : QStringLiteral("%1/%2-%3.%4").arg(folder, info.completeBaseName()).arg(n).arg(info.suffix());
+        const int fd = ::open(QFile::encodeName(candidate).constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+        if (fd >= 0) {
+            ::close(fd);
+            return candidate;
+        }
+        if (errno != EEXIST)
+            return {};
+    }
+    return {};
+}
+
+bool Outgoing::copyInto(const QString &from, const QString &out) {
+    // A file of its own, never a link to the library's: what an editor does
+    // to it in place stays there. A reflink where the disk shares unchanged
+    // blocks (free and instant), the bytes copied otherwise.
+    QFile in(from), to(out);
+    if (!in.open(QIODevice::ReadOnly) || !to.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    if (::ioctl(to.handle(), FICLONE, in.handle()) == 0)
+        return true;
+    QByteArray buffer(1 << 20, Qt::Uninitialized);
+    for (;;) {
+        const qint64 got = in.read(buffer.data(), buffer.size());
+        if (got < 0)
+            return false;
+        if (got == 0)
+            return to.flush();
+        if (to.write(buffer.constData(), got) != got)
+            return false;
+    }
 }
 
 void Outgoing::prepare(const Chosen &items, bool compatible, const QString &folder, Done done, bool quiet) {
@@ -360,26 +426,32 @@ void Outgoing::prepare(const Chosen &items, bool compatible, const QString &fold
 
 void Outgoing::place(const QString &source, const QString &type, const LibraryItem &item, const QString &of,
                      bool compatible, const QString &folder, std::function<void(const QString &)> placed) {
-    QString name = item.filename.isEmpty() ? QFileInfo(source).fileName() : item.filename;
+    QString name = plainName(item.filename);
+    if (name.isEmpty())
+        name = plainName(QFileInfo(source).fileName());
+    if (name.isEmpty())
+        name = QStringLiteral("photo");
     // An edit comes as a JPEG whatever the camera wrote: name it so.
     if (type == QLatin1String("public.jpeg") && !name.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive) &&
         !name.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive))
         name = QFileInfo(name).completeBaseName() + QStringLiteral(".jpg");
 
-    // A hard link where the cache and the target share a disk (free and
-    // instant), a copy otherwise.
     // Turned or cut in Pinhole, the photo as it looks here: made afresh,
     // away from the window, as a JPEG (its date and place are the file's,
     // which this leaves behind). An original stays as it was taken.
     const Adjustment adjust = compatible ? item.adjust : Adjustment();
-    auto hand = [placed, adjust, this](const QString &from, const QString &out) {
+    auto hand = [placed, adjust, folder, this](const QString &from, const QString &name) {
         if (!adjust.isIdentity()) {
-            const QString jpeg = QFileInfo(out).path() + '/' + QFileInfo(out).completeBaseName() + QStringLiteral(".jpg");
-            const QString to = uniqueName(QFileInfo(out).path(), QFileInfo(jpeg).fileName());
+            const QString to = reserve(folder, QFileInfo(name).completeBaseName() + QStringLiteral(".jpg"));
+            if (to.isEmpty())
+                return placed({});
             auto *watcher = new QFutureWatcher<bool>(this);
             connect(watcher, &QFutureWatcherBase::finished, this, [watcher, placed, to] {
                 watcher->deleteLater();
-                placed(watcher->result() ? to : QString());
+                if (watcher->result())
+                    return placed(to);
+                QFile::remove(to);
+                placed({});
             });
             watcher->setFuture(QtConcurrent::run([from, to, adjust] {
                 QImage image = adjust.applied(decodePhoto(from, QSize()));
@@ -390,11 +462,13 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
             }));
             return;
         }
-        if (::link(QFile::encodeName(from).constData(), QFile::encodeName(out).constData()) == 0 ||
-            QFile::copy(from, out))
-            placed(out);
-        else
-            placed({});
+        const QString out = reserve(folder, name);
+        if (out.isEmpty())
+            return placed({});
+        if (copyInto(from, out))
+            return placed(out);
+        QFile::remove(out);
+        placed({});
     };
 
     // A HEIC, which much that takes a photo does not read, as the service's
@@ -403,13 +477,13 @@ void Outgoing::place(const QString &source, const QString &type, const LibraryIt
     if (compatible && type == QLatin1String("public.heic")) {
         const QString jpeg = QFileInfo(name).completeBaseName() + QStringLiteral(".jpg");
         m_service->fetch(item.id, QStringLiteral("jpeg"),
-                         [folder, jpeg, hand, placed](bool ok, const QJsonObject &result, const QString &) {
+                         [jpeg, hand, placed](bool ok, const QJsonObject &result, const QString &) {
                              if (!ok)
                                  return placed({});
-                             hand(result.value("path").toString(), uniqueName(folder, jpeg));
+                             hand(result.value("path").toString(), jpeg);
                          }, false, of);
         return;
     }
 
-    hand(source, uniqueName(folder, name));
+    hand(source, name);
 }

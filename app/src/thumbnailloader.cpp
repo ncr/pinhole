@@ -15,6 +15,11 @@
 
 namespace {
 
+// Far more than any thumbnail, compressed or drawn: a damaged cache file
+// claiming more is not read, rather than made room for.
+constexpr long kMostBytes = 64L << 20;
+constexpr qint64 kMostPixels = 40'000'000;
+
 // Reads and decodes one JPEG at 1/(2^level) of its size into RGBX, the
 // layout the GPU takes without conversion, in sRGB: its ICC profile, read
 // with it, says what it was in (colour.h). Given `icc`, the profile is
@@ -28,7 +33,7 @@ QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<un
     std::fseek(f, 0, SEEK_END);
     const long size = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
-    if (size <= 0) {
+    if (size <= 0 || size > kMostBytes) {
         std::fclose(f);
         return {};
     }
@@ -45,8 +50,11 @@ QImage decodeJpeg(tjhandle tj, const QByteArray &path, int level, std::vector<un
     const tjscalingfactor factor{1, 1 << level};
     if (tj3SetScalingFactor(tj, factor) != 0)
         return {};
-    QImage image(TJSCALED(width, factor), TJSCALED(height, factor), QImage::Format_RGBX8888);
-    if (tj3Decompress8(tj, buffer.data(), buffer.size(), image.bits(), int(image.bytesPerLine()), TJPF_RGBX) != 0)
+    const int w = TJSCALED(width, factor), h = TJSCALED(height, factor);
+    if (w <= 0 || h <= 0 || qint64(w) * h > kMostPixels)
+        return {};
+    QImage image(w, h, QImage::Format_RGBX8888);
+    if (image.isNull() || tj3Decompress8(tj, buffer.data(), buffer.size(), image.bits(), int(image.bytesPerLine()), TJPF_RGBX) != 0)
         return {};
     QByteArray profile;
     unsigned char *data = nullptr;

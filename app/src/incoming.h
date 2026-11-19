@@ -64,6 +64,12 @@ private:
     void heard(const QString &name, const QJsonObject &details);
     void finished(const QJsonObject &result);
     QString place() const;
+    // Files dropped, with the source shown then (its id, what to call it).
+    struct Drop {
+        QStringList paths;
+        QString source, place;
+    };
+    void start(const Drop &drop);
 
     ServiceClient *m_service;
     bool m_busy = false;
@@ -72,7 +78,11 @@ private:
     QStringList m_problems;
     int m_failed = 0;
     // Files dropped while others are being added, sent after them.
-    QList<QStringList> m_queue;
+    QList<Drop> m_queue;
+    // The drop being added: what its source is called, how many files it
+    // has (a folder's once the service has counted them).
+    QString m_place;
     int m_files = 0;
+    bool m_folders = false;
     QTimer m_fade;
 };

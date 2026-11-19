@@ -6,6 +6,7 @@
 #include <QQuickWindow>
 #include <QRunnable>
 #include <QSGGeometryNode>
+#include <QSGImageNode>
 #include <QSGMaterial>
 #include <QSGMaterialShader>
 #include <QtMultimedia/private/qhwvideobuffer_p.h>
@@ -441,7 +442,6 @@ void VideoView::releaseResources() {
 }
 
 QSGNode *VideoView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
-    auto *node = static_cast<VideoNode *>(old);
     QVideoFrame frame;
     bool changed = false;
     {
@@ -451,6 +451,49 @@ QSGNode *VideoView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         m_frameChanged = false;
     }
     QRhi *rhi = window() ? window()->rhi() : nullptr;
+    // Where the picture goes, and which part of it shows (0 to 1), cropped
+    // as the fill mode has it.
+    const QRectF bounds = boundingRect();
+    QRectF target = m_contentRect;
+    QRectF shown(0, 0, 1, 1);
+    if (m_fillMode == PreserveAspectCrop && !m_contentRect.isEmpty()) {
+        target = m_contentRect.intersected(bounds);
+        shown = QRectF((target.left() - m_contentRect.left()) / m_contentRect.width(),
+                       (target.top() - m_contentRect.top()) / m_contentRect.height(),
+                       target.width() / m_contentRect.width(), target.height() / m_contentRect.height());
+    }
+    // Qt Quick's software renderer has no RHI to draw the planes with: the
+    // frame made an image (turned as it says), plain SDR, drawn as one.
+    if (frame.isValid() && !rhi && window() && !m_contentRect.isEmpty()) {
+        auto *image = dynamic_cast<QSGImageNode *>(old);
+        if (!image) {
+            delete old;
+            image = window()->createImageNode();
+            image->setOwnsTexture(true);
+            changed = true;
+        }
+        if (changed) {
+            const QImage picture = frame.toImage();
+            if (!picture.isNull()) {
+                image->setTexture(window()->createTextureFromImage(picture));
+                ++m_drawn;
+            }
+        }
+        if (!image->texture()) {
+            delete image;
+            return nullptr;
+        }
+        const QSizeF size = image->texture()->textureSize();
+        image->setRect(target);
+        image->setSourceRect(QRectF(shown.x() * size.width(), shown.y() * size.height(), shown.width() * size.width(),
+                                    shown.height() * size.height()));
+        return image;
+    }
+    auto *node = dynamic_cast<VideoNode *>(old);
+    if (old && !node) {
+        delete old;
+        changed = true;
+    }
     if (!frame.isValid() || !rhi || m_contentRect.isEmpty()) {
         delete node;
         if (!frame.isValid())
@@ -489,17 +532,7 @@ QSGNode *VideoView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
     node->markDirty(QSGNode::DirtyMaterial);
 
     // Where each corner of the picture shown is in the frame: its
-    // viewport, turned and mirrored as it says, cropped as the fill mode
-    // has it.
-    const QRectF bounds = boundingRect();
-    QRectF target = m_contentRect;
-    QRectF shown(0, 0, 1, 1); // of the picture as shown, 0 to 1
-    if (m_fillMode == PreserveAspectCrop) {
-        target = m_contentRect.intersected(bounds);
-        shown = QRectF((target.left() - m_contentRect.left()) / m_contentRect.width(),
-                       (target.top() - m_contentRect.top()) / m_contentRect.height(),
-                       target.width() / m_contentRect.width(), target.height() / m_contentRect.height());
-    }
+    // viewport, turned and mirrored as it says.
     const VideoTransformation turn = qNormalizedFrameTransformation(frame);
     const QSizeF size = frame.size();
     const QRect viewport = format.viewport().isEmpty() ? QRect(QPoint(), frame.size()) : format.viewport();

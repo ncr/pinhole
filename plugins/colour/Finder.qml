@@ -478,6 +478,7 @@ Item {
                 UiText {
                     anchors.verticalCenter: parent.verticalCenter
                     color: theme.brightForeground
+                    textFormat: Text.StyledText
                     text: finder.nameOf(Colour.hueName(finder.targetC, finder.targetH)) + "  <font color=\"" + theme.darkForeground + "\">"
                           + finder.targetHex + "</font>"
                 }

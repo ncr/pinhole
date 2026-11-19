@@ -742,7 +742,12 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
     // one reload once they are done.
     m_settle.setSingleShot(true);
     m_settle.setInterval(300);
-    connect(&m_settle, &QTimer::timeout, this, &Plugins::rescan);
+    connect(&m_settle, &QTimer::timeout, this, [this] {
+        if (m_held)
+            m_changedWhileHeld = true;
+        else
+            rescan();
+    });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_settle, qOverload<>(&QTimer::start));
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_settle, qOverload<>(&QTimer::start));
     // Another window's switches and settings, as it writes them.
@@ -1071,12 +1076,22 @@ QString Plugins::builtInDir() {
     return QFileInfo::exists(installed) ? installed : QDir::cleanPath(app + "/../../plugins");
 }
 
+void Plugins::holdReloads(bool held) {
+    if (held == m_held)
+        return;
+    m_held = held;
+    if (!held && std::exchange(m_changedWhileHeld, false))
+        rescan();
+}
+
 void Plugins::libraryOpened() {
     m_cacheName = cacheName();
     m_syncedStore->setLibrary(m_library->dir());
     if (m_ready)
         return;
     m_ready = true;
+    // The library read is the one plugins start with, not a switch to it.
+    m_libraryApi->opened();
     // Each on loads as this is said (Main.qml), then the window gathers
     // them all at once.
     m_loadingAll = true;
@@ -1493,6 +1508,8 @@ void Plugins::scan() {
         stamps.insert(p->id, p->stamp);
 
     std::vector<std::unique_ptr<Plugin>> found;
+    // Pinhole's own ids, whatever one's own take of them and in which order.
+    QSet<QString> builtIns;
     auto look = [&](const QString &root, bool personal) {
         const QDir dir(root);
         for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
@@ -1514,10 +1531,7 @@ void Plugins::scan() {
             // the id of one there is): it may change with any version, so
             // another's does not load with it, as check says, a made-up
             // pinhole.* id of one's own included.
-            const bool own = plugin->id.startsWith(QLatin1String("pinhole."))
-                && (!personal || std::any_of(found.begin(), found.end(), [&](const auto &p) {
-                       return !p->personal && p->id == plugin->id;
-                   }));
+            const bool own = plugin->id.startsWith(QLatin1String("pinhole.")) && (!personal || builtIns.contains(plugin->id));
             if (plugin->error.isEmpty() && !own && importsInternal(plugin->dir))
                 plugin->error = tr("imports Pinhole.Internal, which is Pinhole's own plugins': use what Pinhole.Plugin gives");
             if (plugin->error.isEmpty())
@@ -1532,12 +1546,19 @@ void Plugins::scan() {
             for (const QJsonValue &each : manifest.value("requires").toArray())
                 if (const QString name = each.toString(); !name.isEmpty() && !name.contains('/'))
                     plugin->required << name;
-            // One's own with a built-in's id takes its place.
+            // One's own with a built-in's id takes its place. Two of one's
+            // own with one id: which is meant is not known, so neither loads.
             const auto same = std::find_if(found.begin(), found.end(), [&](const auto &p) { return p->id == plugin->id; });
             if (same != found.end()) {
-                plugin->copy = personal && !(*same)->personal;
+                if (personal && (*same)->personal) {
+                    plugin->error = tr("%1 has the same id as %2: give one of them another").arg(name, QFileInfo((*same)->dir).fileName());
+                    plugin->main.clear();
+                }
                 found.erase(same);
             }
+            plugin->copy = personal && builtIns.contains(plugin->id);
+            if (!personal)
+                builtIns.insert(plugin->id);
             found.push_back(std::move(plugin));
         }
     };

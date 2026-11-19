@@ -26,20 +26,51 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickItemGrabResult>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
 
 #include <algorithm>
+#include <cerrno>
 #include <utility>
 
+#include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <unistd.h>
 
 namespace {
 
+// `from` given the name `to`, never over a file there: "to-2.gif" and on
+// when that is taken. The name it got, or empty.
+QString publish(const QString &from, const QString &to) {
+    const QFileInfo info(to);
+    for (int n = 1; n < 10000; ++n) {
+        const QString name = n == 1 ? to
+                                    : QStringLiteral("%1/%2-%3.%4").arg(info.path(), info.completeBaseName()).arg(n).arg(info.suffix());
+        const QByteArray target = QFile::encodeName(name);
+        if (::renameat2(AT_FDCWD, QFile::encodeName(from).constData(), AT_FDCWD, target.constData(), RENAME_NOREPLACE) == 0)
+            return name;
+        if (errno == EEXIST)
+            continue;
+        // A disk that cannot rename without replacing: a link, which never does.
+        if (errno != EINVAL && errno != ENOSYS)
+            return {};
+        if (::link(QFile::encodeName(from).constData(), target.constData()) == 0) {
+            ::unlink(QFile::encodeName(from).constData());
+            return name;
+        }
+        if (errno != EEXIST)
+            return {};
+    }
+    return {};
+}
+
 // An item's frames on their way into ffmpeg: each frame is asked for
 // (seek), taken from the item as the window draws it, and written to
-// ffmpeg's input, into a file beside the one wanted until it is whole.
+// ffmpeg's input, into a file of this recording's own beside the one
+// wanted until it is whole: two windows recording one series at once
+// each make their own, and neither removes the other's.
 class Recording : public QObject {
 public:
     // The file made, or why not: code "cancelled" or "failed", and what
@@ -61,6 +92,12 @@ public:
         if (!m_item || m_path.isEmpty())
             return fail(QStringLiteral("nothing to record"));
         QDir().mkpath(QFileInfo(m_path).absolutePath());
+        QTemporaryFile part(QFileInfo(m_path).absolutePath() + QStringLiteral("/.") + QFileInfo(m_path).fileName() +
+                            QStringLiteral(".XXXXXX.part"));
+        part.setAutoRemove(false);
+        if (!part.open())
+            return fail(QStringLiteral("could not write %1").arg(m_path));
+        m_part = part.fileName();
         QStringList args{"-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "bgra",
                          "-s", QStringLiteral("%1x%2").arg(m_size.width()).arg(m_size.height()),
                          "-r", QString::number(m_fps), "-i", "-"};
@@ -70,16 +107,16 @@ public:
         else
             args << "-c:v" << "libx264" << "-preset" << "medium" << "-crf" << "23" << "-pix_fmt" << "yuv420p"
                  << "-movflags" << "+faststart" << "-f" << "mp4";
-        args << part();
+        args << m_part;
         m_encoder = new FrameEncoder(QStringLiteral("ffmpeg"), args, m_size, this);
         connect(m_encoder, &FrameEncoder::ready, this, &Recording::next);
         connect(m_encoder, &FrameEncoder::finished, this, [this](const QString &error) {
             if (!error.isEmpty())
                 return fail(error);
-            QFile::remove(m_path);
-            if (!QFile::rename(part(), m_path))
+            const QString made = publish(m_part, m_path);
+            if (made.isEmpty())
                 return fail(QStringLiteral("could not write %1").arg(m_path));
-            finish(m_path, {}, {});
+            finish(made, {}, {});
         });
         m_encoder->start();
         next();
@@ -95,8 +132,6 @@ public:
     }
 
 private:
-    QString part() const { return m_path + QStringLiteral(".part"); }
-
     void next() {
         if (m_ended || m_grab)
             return;
@@ -131,7 +166,8 @@ private:
             return;
         if (m_encoder)
             m_encoder->stop();
-        QFile::remove(part());
+        if (!m_part.isEmpty())
+            QFile::remove(m_part);
         finish({}, code, error.isEmpty() ? QStringLiteral("ffmpeg failed") : error);
     }
 
@@ -146,7 +182,7 @@ private:
     QPointer<QQuickItem> m_item;
     QJSValue m_seek, m_progress;
     Done m_done;
-    QString m_path, m_format;
+    QString m_path, m_part, m_format;
     QSize m_size;
     int m_fps = 20, m_frames = 1, m_at = 0;
     bool m_ended = false;
@@ -195,8 +231,10 @@ QJSValue PluginHost::chooseFolder(const QString &title) {
     auto deferred = std::make_shared<Deferred>();
     const std::weak_ptr<Deferred> weak = deferred;
     const int generation = m_generation;
-    *deferred = defer([this, weak, generation] {
-        if (const auto d = weak.lock())
+    *deferred = defer([this, alive = QPointer<PluginHost>(this), weak, generation] {
+        // A plugin's job may be cancelled after its host is gone (the
+        // folder removed and read again): nothing to settle then.
+        if (const auto d = weak.lock(); d && alive)
             settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
     });
     auto *picker = new PortalFolderPicker(this);
@@ -314,8 +352,10 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
     // The service's answer cannot be stopped, only no longer waited for.
     auto deferred = std::make_shared<Deferred>();
     const std::weak_ptr<Deferred> weak = deferred;
-    *deferred = defer([this, weak, generation] {
-        if (const auto d = weak.lock())
+    *deferred = defer([this, alive = QPointer<PluginHost>(this), weak, generation] {
+        // A plugin's job may be cancelled after its host is gone (the
+        // folder removed and read again): nothing to settle then.
+        if (const auto d = weak.lock(); d && alive)
             settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
     });
     const QJSValue promise = deferred->promise;
@@ -323,7 +363,12 @@ QJSValue PluginHost::fetch(const QJSValue &photo, const QString &kind, const QJS
         settle(generation, deferred->reject, error(QStringLiteral("not_found"), tr("no such photo")));
         return promise;
     }
-    m_plugins->service()->fetch(id, kind, [this, deferred, generation, stream](bool ok, const QJsonObject &result, const QString &code) {
+    // Answered after the host is gone, maybe: a plugin's folder removed or
+    // replaced while a slow request waits.
+    const QPointer<PluginHost> alive(this);
+    m_plugins->service()->fetch(id, kind, [this, alive, deferred, generation, stream](bool ok, const QJsonObject &result, const QString &code) {
+        if (!alive)
+            return;
         if (!ok) {
             settle(generation, deferred->reject, error(code, result.value("message").toString()));
             return;
@@ -342,15 +387,20 @@ QJSValue PluginHost::ask(const QString &name, const QJSValue &request, const QJS
     auto deferred = std::make_shared<Deferred>();
     const std::weak_ptr<Deferred> weak = deferred;
     const int generation = m_generation;
-    *deferred = defer([this, weak, generation] {
-        if (const auto d = weak.lock())
+    *deferred = defer([this, alive = QPointer<PluginHost>(this), weak, generation] {
+        // A plugin's job may be cancelled after its host is gone (the
+        // folder removed and read again): nothing to settle then.
+        if (const auto d = weak.lock(); d && alive)
             settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
     });
     const QJSValue promise = deferred->promise;
     QJsonObject params{{"plugin", m_id}, {"name", name}, {"request", QJsonValue::fromVariant(request.toVariant())}};
     if (const QJSValue timeout = options.property(QStringLiteral("timeout")); timeout.isNumber() && timeout.toNumber() > 0)
         params.insert("timeout", qint64(timeout.toNumber()));
-    m_plugins->service()->call(QStringLiteral("ask"), params, [this, deferred, generation](bool ok, const QJsonObject &result, const QString &code) {
+    const QPointer<PluginHost> alive(this);
+    m_plugins->service()->call(QStringLiteral("ask"), params, [this, alive, deferred, generation](bool ok, const QJsonObject &result, const QString &code) {
+        if (!alive)
+            return;
         if (!ok) {
             settle(generation, deferred->reject, error(code, result.value("message").toString()));
             return;
@@ -367,8 +417,10 @@ QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
     auto deferred = std::make_shared<Deferred>();
     const std::weak_ptr<Deferred> weak = deferred;
     const int generation = m_generation;
-    *deferred = defer([this, weak, generation] {
-        if (const auto d = weak.lock())
+    *deferred = defer([this, alive = QPointer<PluginHost>(this), weak, generation] {
+        // A plugin's job may be cancelled after its host is gone (the
+        // folder removed and read again): nothing to settle then.
+        if (const auto d = weak.lock(); d && alive)
             settle(generation, d->reject, error(QStringLiteral("cancelled"), tr("cancelled")));
     });
     const QJSValue promise = deferred->promise;
@@ -398,7 +450,10 @@ QJSValue PluginHost::setFavorite(const QJSValue &photos, bool favorite) {
     // Known once set() returns; its answer comes before that only when
     // there is none to change.
     auto changed = std::make_shared<QList<QByteArray>>();
-    *changed = favourites->set(ids, favorite, [this, deferred, generation, changed](const QString &code, const QString &message) {
+    const QPointer<PluginHost> alive(this);
+    *changed = favourites->set(ids, favorite, [this, alive, deferred, generation, changed](const QString &code, const QString &message) {
+        if (!alive)
+            return;
         if (!code.isEmpty()) {
             settle(generation, deferred->reject, error(code, message));
             return;
@@ -628,7 +683,7 @@ QJSValue PluginHost::copyFile(const QString &path) {
     // As Pinhole's own copy: an image pastes into a chat as one. Another
     // copy asked for while this one was made wins: this one `cancelled`.
     Outgoing::toClipboard(
-        {path}, this, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); },
+        {path}, this, 0, [this, deferred, generation, path] { settle(generation, deferred.resolve, path); },
         [this, deferred, generation] {
             settle(generation, deferred.reject, error(QStringLiteral("cancelled"), tr("another copy came after it")));
         });
@@ -804,14 +859,18 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
         settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such photo")));
         return deferred.promise;
     }
-    auto done = [this, generation, deferred, targets](const QString &kept) {
+    // What was done to `ids`: { photos: [{ id, turn, crop }], kept }.
+    auto what = [targets](const QList<QByteArray> &ids, const QString &kept) {
         QVariantList photos;
-        for (auto it = targets.begin(); it != targets.end(); ++it) {
-            QVariantMap one = mapOf(it.value());
-            one.insert("id", QString::fromUtf8(it.key()));
+        for (const QByteArray &id : ids) {
+            QVariantMap one = mapOf(targets.value(id));
+            one.insert("id", QString::fromUtf8(id));
             photos.append(one);
         }
-        settle(generation, deferred.resolve, engine()->toScriptValue(QVariantMap{{"photos", photos}, {"kept", kept}}));
+        return QVariantMap{{"photos", photos}, {"kept", kept}};
+    };
+    auto done = [this, generation, deferred, targets, what](const QString &kept) {
+        settle(generation, deferred.resolve, engine()->toScriptValue(what(targets.keys(), kept)));
     };
     const QString source = data->source();
     // A library no source fills (pinhole-fake's), a folder's, or no
@@ -825,7 +884,27 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
         return deferred.promise;
     }
     auto left = std::make_shared<QList<QByteArray>>(targets.keys());
+    // Those in the source already: one that fails after them leaves them
+    // done, and says which (the error's `photos`), so they can be undone.
+    auto committed = std::make_shared<QList<QByteArray>>();
+    auto failed = [this, generation, deferred, store, committed, what](const QString &code, const QString &message) {
+        Adjustments none;
+        for (const QByteArray &id : std::as_const(*committed))
+            none.insert(id, Adjustment());
+        if (!none.isEmpty())
+            store->set(none);
+        QJSValue e = error(code.isEmpty() ? QStringLiteral("unavailable") : code, message);
+        if (QJSEngine *js = engine(); js && !committed->isEmpty()) {
+            const QVariantMap partly = what(*committed, QStringLiteral("source"));
+            e.setProperty("photos", js->toScriptValue(partly.value("photos")));
+            e.setProperty("kept", QStringLiteral("source"));
+        }
+        settle(generation, deferred.reject, e);
+    };
+    // Each photo after the one before: the step to the next is held by the
+    // answer it waits for, never by itself, so it is gone once all are.
     auto next = std::make_shared<std::function<void()>>();
+    const std::weak_ptr<std::function<void()>> again = next;
     const QPointer<PluginHost> alive(this);
     *next = [=]() {
         if (!alive)
@@ -838,16 +917,14 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
             store->set(none);
             return done(QStringLiteral("source"));
         }
+        const auto self = again.lock();
         const QByteArray id = left->takeFirst();
         const Adjustment target = targets.value(id);
         service->fetch(id, QStringLiteral("original"), [=](bool ok, const QJsonObject &result, const QString &code) {
             if (!alive)
                 return;
-            if (!ok) {
-                settle(generation, deferred.reject, error(code.isEmpty() ? QStringLiteral("unavailable") : code,
-                                                          result.value("message").toString(code)));
-                return;
-            }
+            if (!ok)
+                return failed(code, result.value("message").toString(code));
             QJsonObject params{{"asset", QString::fromUtf8(id)}, {"original", result.value("path").toString()},
                                {"source", source}};
             if (!target.isIdentity()) {
@@ -860,15 +937,14 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
                 // A source that keeps no edits (a provider's): all of
                 // them here.
                 if (!ok && code == QLatin1String("unsupported")) {
-                    store->set(targets);
+                    if (!store->set(targets))
+                        return failed(QStringLiteral("unavailable"), tr("could not keep the edit"));
                     return done(QStringLiteral("here"));
                 }
-                if (!ok) {
-                    settle(generation, deferred.reject, error(code.isEmpty() ? QStringLiteral("unavailable") : code,
-                                                              answer.value("message").toString(code)));
-                    return;
-                }
-                (*next)();
+                if (!ok)
+                    return failed(code, answer.value("message").toString(code));
+                committed->append(id);
+                (*self)();
             });
         }, false, source);
     };

@@ -90,6 +90,9 @@ class PluginLibrary : public QObject {
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 public:
     explicit PluginLibrary(const Library *library, QObject *parent = nullptr);
+    // The library first read is the one it starts with: its next read is
+    // a switch only if another source's (settled's `switched`).
+    void opened();
     int count() const;
     QString dir() const;
     QString key() const;
@@ -780,6 +783,10 @@ public:
     QStringList sourceKindsOf(const QString &id) const;
     // What setFavorite sets through (the window's one).
     void setFavourites(Favourites *favourites);
+    // While held (an update of this checkout under way, or made and waiting
+    // for the restart), its plugins' files changing load nothing again: new
+    // QML is never run by the binary from before it. Read once let go.
+    void holdReloads(bool held);
     Favourites *favourites() const { return m_favourites; }
     // The engine plugins load in: what it keeps of a plugin's files is
     // dropped when they change, and what it warns of in them is theirs.
@@ -1029,6 +1036,7 @@ private:
     std::vector<int> markPhotos(const QVariantList &photos) const;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
+    bool m_held = false, m_changedWhileHeld = false;
     // plugins.json's folder (it is replaced, not written in place).
     QFileSystemWatcher m_configWatcher;
     QTimer m_configSettle;

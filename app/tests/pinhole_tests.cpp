@@ -41,6 +41,7 @@
 #include <libheif/heif.h>
 #include <turbojpeg.h>
 #include <ultrahdr_api.h>
+#include <sys/stat.h>
 
 #include <qpa/qwindowsysteminterface.h>
 
@@ -82,6 +83,7 @@
 #include "viewer.h"
 #include "vectortile.h"
 #include "places.h"
+#include "portal.h"
 #include "viewermotion.h"
 #include "zoomer.h"
 
@@ -394,6 +396,97 @@ private slots:
         QVERIFY(Incoming::ownCopy(own + "/x/../1794483454603/IMG_8191.jpg"));
         QVERIFY(!Incoming::ownCopy(own + "-elsewhere/IMG_8191.jpg"));
         QVERIFY(!Incoming::ownCopy(QDir::homePath() + "/Pictures/IMG_8191.jpg"));
+    }
+
+    // A drop waiting its turn goes to the source shown when it was dropped,
+    // not to one switched to meanwhile; a folder is not walked here.
+    void aDropWaitingItsTurnGoesToTheSourceItWasDroppedOn() {
+        QTemporaryDir dir;
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        auto shown = [&](const QString &id, const QString &name) {
+            fake.send({{"event", "source"}, {"id", id}, {"kind", "folder"}, {"name", name}, {"accepts", QJsonArray{"jpg"}}});
+        };
+        shown("folder:/local", "Local");
+        QTRY_COMPARE(service.source().value("id").toString(), QString("folder:/local"));
+        Incoming incoming(&service);
+        QDir(dir.path()).mkpath("folder");
+        incoming.add({QUrl::fromLocalFile(dir.path() + "/a.jpg")});
+        QVERIFY(incoming.busy());
+        incoming.add({QUrl::fromLocalFile(dir.path() + "/folder")});
+        QVERIFY(incoming.status().contains("Local"));
+        shown("icloud:someone", "Someone");
+        QTRY_COMPARE(service.source().value("id").toString(), QString("icloud:someone"));
+        auto adds = [&] {
+            fake.read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(fake.asked))
+                if (line.value("method").toString() == QLatin1String("add"))
+                    found.append(line);
+            return found;
+        };
+        QTRY_COMPARE(adds().size(), 1);
+        fake.send({{"id", adds().first().value("id")}, {"ok", true}, {"result", QJsonObject{{"files", QJsonArray{}}}}});
+        QTRY_COMPARE(adds().size(), 2);
+        for (const QJsonObject &add : adds())
+            QCOMPARE(add.value("params").toObject().value("source").toString(), QString("folder:/local"));
+        QCOMPARE(adds().last().value("params").toObject().value("files").toArray(), QJsonArray{dir.path() + "/folder"});
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // A service that takes the line and never says hello: what was asked
+    // is told it failed, not left waiting.
+    void aServiceThatNeverSaysHelloFailsWhatWaits() {
+        QTemporaryDir dir;
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QString failed;
+        service.call(QStringLiteral("status"), {}, [&](bool ok, const QJsonObject &, const QString &code) {
+            failed = ok ? QStringLiteral("ok") : code;
+        });
+        QTRY_COMPARE_WITH_TIMEOUT(failed, QString("unavailable"), 15000);
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // No desktop folder picker: Qt's own, in the window, says the folder
+    // chosen, and its Cancel is a cancel.
+    void withoutTheDesktopsFolderPickerQtsOwnChooses() {
+        QQmlEngine engine;
+        QQmlComponent windowComponent(&engine);
+        windowComponent.setData("import QtQuick\nWindow { width: 800; height: 600; visible: true }\n", QUrl());
+        std::unique_ptr<QObject> window(windowComponent.create());
+        QVERIFY2(window, qPrintable(windowComponent.errorString()));
+        QTemporaryDir dir;
+        PortalFolderPicker picker;
+        QSignalSpy picked(&picker, &PortalFolderPicker::picked);
+        picker.fallBack("Export to");
+        QObject *dialog = nullptr;
+        for (QObject *child : picker.children())
+            if (child->property("selectedFolder").isValid())
+                dialog = child;
+        QVERIFY(dialog);
+        QCOMPARE(dialog->property("title").toString(), QString("Export to"));
+        dialog->setProperty("selectedFolder", QUrl::fromLocalFile(dir.path()));
+        QMetaObject::invokeMethod(dialog, "accept");
+        QTRY_COMPARE(picked.size(), 1);
+        QCOMPARE(picked.first().first().toString(), dir.path());
+        PortalFolderPicker other;
+        QSignalSpy cancelled(&other, &PortalFolderPicker::picked);
+        other.fallBack("Export to");
+        for (QObject *child : other.children())
+            if (child->property("selectedFolder").isValid())
+                QMetaObject::invokeMethod(child, "reject");
+        QTRY_COMPARE(cancelled.size(), 1);
+        QVERIFY(cancelled.first().first().toString().isEmpty());
     }
 
     void texturesFollowEveryReloadBetweenFrames() {
@@ -885,6 +978,18 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         QVERIFY(!history.canUndo());
         QVERIFY(history.canRedo());
         QCOMPARE(undone, QStringList({"unfavourite", "favourite"}));
+    }
+    // A plugin turned off that took no steps: the others' still undo.
+    void forgettingAnOwnerWithNoStepsKeepsTheOthersWhole() {
+        History history;
+        int value = 1;
+        history.did({}, "favourite", [&] { value = 0; }, [&] { value = 1; });
+        history.forget("series");
+        QVERIFY(history.canUndo());
+        history.undo();
+        QCOMPARE(value, 0);
+        history.redo();
+        QCOMPARE(value, 1);
     }
 
     void aFlickCoastsAboutHalfASecondOfItsSpeed() {
@@ -4841,6 +4946,15 @@ PinholePlugin {
         QCOMPARE(files, (QStringList{out.path() + "/IMG_0001.jpg", out.path() + "/IMG_0002.jpg", out.path() + "/IMG_0003.HEIC"}));
         QCOMPARE(read(out.path() + "/IMG_0001.jpg"), QString("jpeg of the heic"));
         QCOMPARE(read(out.path() + "/IMG_0002.jpg"), QString("jpeg"));
+        // Files of their own, never links to the library's: an editor that
+        // writes one in place leaves the original as it was.
+        for (const auto &[original, sent] : {std::pair{jpeg, QString("/IMG_0002.jpg")}, std::pair{video, QString("/IMG_0003.HEIC")}}) {
+            struct stat a {}, b {};
+            QCOMPARE(::stat(QFile::encodeName(original).constData(), &a), 0);
+            QCOMPARE(::stat(QFile::encodeName(out.path() + sent).constData(), &b), 0);
+            QVERIFY(a.st_ino != b.st_ino);
+            QCOMPARE(int(a.st_nlink), 1);
+        }
         QStringList asked;
         for (const QJsonObject &line : std::as_const(fake.asked)) {
             const QJsonObject params = line.value("params").toObject();
@@ -4875,6 +4989,31 @@ PinholePlugin {
         QVERIFY(files.isEmpty());
         QVERIFY(QDir(again.path()).isEmpty());
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // A catalog's filename is one name in the folder chosen, never a path
+    // out of it, and two photos of one name each get a file of their own.
+    void anOutgoingFileStaysInItsFolderUnderANameOfItsOwn() {
+        QCOMPARE(Outgoing::plainName("IMG_0001.HEIC"), QString("IMG_0001.HEIC"));
+        QCOMPARE(Outgoing::plainName("../../.bashrc"), QString(".bashrc"));
+        QCOMPARE(Outgoing::plainName("a/b/IMG_1.jpg"), QString("IMG_1.jpg"));
+        QCOMPARE(Outgoing::plainName(".."), QString());
+        QCOMPARE(Outgoing::plainName("x/.."), QString());
+        QCOMPARE(Outgoing::plainName("x/"), QString());
+        QCOMPARE(Outgoing::plainName(""), QString());
+        QTemporaryDir dir;
+        const QString first = Outgoing::reserve(dir.path(), "IMG_1.jpg");
+        const QString second = Outgoing::reserve(dir.path(), "IMG_1.jpg");
+        QCOMPARE(first, dir.path() + "/IMG_1.jpg");
+        QCOMPARE(second, dir.path() + "/IMG_1-2.jpg");
+        write(dir.path() + "/original.jpg", "the original");
+        QVERIFY(Outgoing::copyInto(dir.path() + "/original.jpg", first));
+        QCOMPARE(read(first), QString("the original"));
+        QFile edited(first);
+        QVERIFY(edited.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        edited.write("edited in place");
+        edited.close();
+        QCOMPARE(read(dir.path() + "/original.jpg"), QString("the original"));
     }
 
 private slots:
@@ -5380,6 +5519,25 @@ private slots:
         QVERIFY(store.set({{"a", turned}}));
         QVERIFY(QFileInfo::exists(AdjustmentStore::fileFor(bench.dir.path())));
         QCOMPARE(AdjustmentStore::load(bench.dir.path()).value("a"), turned);
+        // Another window's, written before this one heard of it: both kept.
+        {
+            AdjustmentStore other;
+            other.setLibrary(bench.dir.path());
+            QVERIFY(other.set({{"c", turned}}));
+            QVERIFY(store.set({{"b", turned}}));
+            const Adjustments both = AdjustmentStore::load(bench.dir.path());
+            QCOMPARE(both.value("a"), turned);
+            QCOMPARE(both.value("b"), turned);
+            QCOMPARE(both.value("c"), turned);
+            QVERIFY(store.set({{"b", Adjustment()}, {"c", Adjustment()}}));
+            // A file that is not edits is never written over as none.
+            const QString file = AdjustmentStore::fileFor(bench.dir.path());
+            const QString kept = read(file);
+            write(file, "{ not json");
+            QVERIFY(!store.set({{"b", turned}}));
+            QCOMPARE(read(file), QString("{ not json"));
+            write(file, kept.toUtf8());
+        }
         Library library;
         QString error;
         QVERIFY(library.open(bench.dir.path(), &error));
@@ -5399,6 +5557,42 @@ private slots:
         bench.js("var kept = ''; pinhole.adjust(['a', 'b'], { turn: 0, crop: null }).then(r => kept = r.kept)");
         QTRY_COMPARE(bench.js("kept").toString(), QString("here"));
         QVERIFY(store.snapshot().isEmpty());
+    }
+
+    // Several turned in iCloud, one failing after another is in: the
+    // error says which were done, so they can be undone.
+    void anEditThatFailsPartWaySaysWhichPhotosWereDone() {
+        PluginBench bench({{"t", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}}, true);
+        AdjustmentStore store;
+        store.setLibrary(bench.dir.path());
+        bench.plugins->setAdjustments(&store);
+        QTemporaryDir other;
+        makeLibrary(other.path(), {{"a", 1000}, {"b", 2000}}, false, "icloud:x");
+        Library cloud;
+        QString error;
+        QVERIFY(cloud.open(other.path(), &error));
+        bench.library.swap(cloud);
+        QByteArray first;
+        QObject::connect(bench.fake.peer, &QLocalSocket::readyRead, bench.fake.peer, [&] {
+            const qsizetype seen = bench.fake.asked.size();
+            bench.fake.read();
+            for (qsizetype i = seen; i < bench.fake.asked.size(); ++i) {
+                const QJsonObject line = bench.fake.asked[i];
+                const QByteArray asset = line.value("params").toObject().value("asset").toString().toUtf8();
+                if (line.value("method").toString() == "fetch" && (first.isEmpty() || first == asset)) {
+                    first = asset;
+                    bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/x"}, {"type", "public.jpeg"}}}});
+                } else if (line.value("method").toString() == "set_edit") {
+                    bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{}}});
+                } else {
+                    bench.fake.send({{"id", line.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "unavailable"}, {"message", "offline"}}}});
+                }
+            }
+        });
+        bench.js(R"(pinhole.turn(['a', 'b'], 1).then(() => said.push("done"),
+                    e => said.push(e.code + " " + e.kept + " " + e.photos.map(p => p.id + p.turn).join())))");
+        QTRY_COMPARE(bench.said().size(), 1);
+        QCOMPARE(bench.said().first(), QString("unavailable source " + QString::fromUtf8(first) + "1"));
     }
 
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {
@@ -6222,6 +6416,33 @@ PinholePlugin {
         QTRY_COMPARE(bench->js(QStringLiteral("heard.join(' ')")).toString(), QStringLiteral("index:2"));
     }
 
+    // While an update rewrites the checkout, a plugin's QML changing loads
+    // nothing again; let go, it loads once.
+    void aPluginChangedDuringAnUpdateLoadsOnlyAfterIt() {
+        PluginBench bench({{"t", {}}});
+        const QString main = bench.dir.path() + "/plugins/t/Main.qml";
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=0"));
+        bench.plugins->holdReloads(true);
+        write(main, "import QtQuick\nItem { width: 2 }\n");
+        QTest::qWait(800);
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=0"));
+        bench.plugins->holdReloads(false);
+        QVERIFY(bench.plugins->at("t").value("main").toString().endsWith("load=1"));
+    }
+
+    // A manifest that is a pipe no one writes to, or far too big, is that
+    // plugin's problem, said at once: it does not hold the window still.
+    void aManifestThatIsNotAPlainFileIsAProblemNotAWait() {
+        QTemporaryDir dir;
+        QVERIFY(::mkfifo(QFile::encodeName(dir.path() + "/manifest.json").constData(), 0600) == 0);
+        QJsonObject manifest;
+        QString main;
+        QCOMPARE(Plugins::manifestProblem(dir.path(), &manifest, &main), QString("manifest.json is not a file of at most 1 MB"));
+        QFile::remove(dir.path() + "/manifest.json");
+        write(dir.path() + "/manifest.json", QByteArray(2 << 20, ' '));
+        QCOMPARE(Plugins::manifestProblem(dir.path(), &manifest, &main), QString("manifest.json is not a file of at most 1 MB"));
+    }
+
     // One's own copy of a built-in plugin: off until it is turned on
     // itself, whatever the built-in's switch says.
     void aCopyOfABuiltInPluginHasASwitchOfItsOwn() {
@@ -6245,6 +6466,18 @@ PinholePlugin {
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("enabled").toObject().value("copy:t"), QJsonValue(true));
         bench.reset();
+
+        // Two copies with its id: neither loads, nor takes either switch.
+        const QString second = Plugins::personalDir() + "/t-other";
+        QVERIFY(QDir().mkpath(second));
+        write(second + "/manifest.json", R"({"api": 15, "id": "t", "name": "t"})");
+        write(second + "/Main.qml", "import QtQuick\nItem {}\n");
+        bench = std::make_unique<PluginBench>(QList<std::pair<QString, QJsonObject>>{{"t", {}}},
+                                              QList<std::pair<QByteArray, qint64>>{{"a", 1000}}, false, false);
+        QVERIFY(bench->plugins->at("t").value("copy").toBool());
+        QVERIFY(bench->plugins->at("t").value("error").toString().contains("same id"));
+        bench.reset();
+        QDir(second).removeRecursively();
         QDir(copy).removeRecursively();
         QFile::remove(config);
     }
@@ -7392,13 +7625,26 @@ PinholePlugin {
         Outgoing::toClipboard({small}, &bench.engine);
         QTRY_COMPARE(set, QStringList({"small.jpg"}));
         bool dropped = false, then = false;
-        Outgoing::toClipboard({big}, &bench.engine, [&] { then = true; }, [&] { dropped = true; });
+        Outgoing::toClipboard({big}, &bench.engine, 0, [&] { then = true; }, [&] { dropped = true; });
         Outgoing::toClipboard({small, big}, &bench.engine);
         QTRY_COMPARE_WITH_TIMEOUT(set.size(), 2, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(dropped, 30000);
         QVERIFY(!then);
         QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(),
                  QList<QUrl>({QUrl::fromLocalFile(small), QUrl::fromLocalFile(big)}));
+
+        // Its place is when it was asked for: a photo still downloading,
+        // asked for first, does not take the clipboard from one asked for
+        // after it and set before.
+        const quint64 slow = Outgoing::askedToCopy(), quick = Outgoing::askedToCopy();
+        set.clear();
+        Outgoing::toClipboard({small}, &bench.engine, quick);
+        QTRY_COMPARE(set, QStringList({"small.jpg"}));
+        dropped = false;
+        Outgoing::toClipboard({big}, &bench.engine, slow, [&] { then = true; }, [&] { dropped = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(dropped, 30000);
+        QVERIFY(!then);
+        QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(), QList<QUrl>({QUrl::fromLocalFile(small)}));
     }
 
     void aPluginsNoticeIsSaidAsItsOwn() {

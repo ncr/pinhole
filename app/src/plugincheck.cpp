@@ -18,6 +18,10 @@
 #include <algorithm>
 #include <tuple>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace {
 // A path a manifest names, kept inside the plugin's folder.
 bool safeEntry(const QString &path) {
@@ -1205,11 +1209,25 @@ QStringList Plugins::manifestWarnings(const QString &dir, const QJsonObject &man
 }
 
 QString Plugins::manifestProblem(const QString &dir, QJsonObject *manifest, QString *main) {
-    QFile file(dir + "/manifest.json");
-    if (!file.open(QIODevice::ReadOnly))
+    // Read only as a plain file of a manifest's size, opened without
+    // waiting: a pipe no one writes to, or a huge file, in a plugin's
+    // folder must not hold the window still as it starts.
+    constexpr qint64 most = 1 << 20;
+    const int fd = ::open(QFile::encodeName(dir + "/manifest.json").constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
         return tr("There is no manifest.json in %1").arg(dir);
+    struct stat st {};
+    QFile file;
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > most ||
+        !file.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+        ::close(fd);
+        return tr("manifest.json is not a file of at most 1 MB");
+    }
+    const QByteArray bytes = file.read(most + 1);
+    if (bytes.size() > most)
+        return tr("manifest.json is not a file of at most 1 MB");
     QJsonParseError parseError;
-    *manifest = QJsonDocument::fromJson(file.readAll(), &parseError).object();
+    *manifest = QJsonDocument::fromJson(bytes, &parseError).object();
     const QString id = manifest->value("id").toString(QFileInfo(dir).fileName());
     // What it shows is always its Main.qml.
     *main = QStringLiteral("Main.qml");

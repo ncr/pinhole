@@ -434,6 +434,7 @@ Item {
         Chip {
             readonly property var item: studio.positions.length > 0 ? pinhole.library.item(studio.positions[0]) : null
             readonly property var date: item ? new Date(item.date) : null
+            textFormat: Text.StyledText
             text: date ? date.toLocaleDateString(Qt.locale(), Locale.LongFormat) + " <font color=\"" + theme.darkForeground + "\">· "
                          + date.toLocaleTimeString(Qt.locale(), Locale.ShortFormat) + "</font>" : ""
             textColor: theme.brightForeground

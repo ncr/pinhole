@@ -428,6 +428,7 @@ Item {
         y: 16
         readonly property var first: studio.photos.length > 0 ? new Date(studio.photos[0].date) : null
         readonly property var last: studio.photos.length > 0 ? new Date(studio.photos[studio.photos.length - 1].date) : null
+        textFormat: Text.StyledText
         text: !first || !last ? ""
             : (studio.oneDay ? first.toLocaleDateString(Qt.locale(), "d MMM yyyy")
                : first.toLocaleDateString(Qt.locale(), first.getFullYear() === last.getFullYear() ? "d MMM" : "d MMM yyyy")

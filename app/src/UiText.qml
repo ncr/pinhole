@@ -1,8 +1,12 @@
 import QtQuick
 
 // Text as Omarchy sets it: its typeface, size and the theme's text colour.
+// Plain text: what it shows may be a photo's, a source's or a plugin's
+// words, never markup to read; one that styles its own text says
+// Text.StyledText.
 Text {
     id: uiText
+    textFormat: Text.PlainText
     font.family: theme.font
     font.pixelSize: theme.fontSize
     color: theme.foreground

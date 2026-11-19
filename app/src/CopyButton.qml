@@ -68,6 +68,7 @@ ControlSurface {
         id: label
         anchors.horizontalCenter: parent.horizontalCenter
         y: centredIn(button.height)
+        textFormat: Text.StyledText
         text: qsTr("Copy") + (button.hint ? "  <font color=\"" + theme.darkForeground + "\">" + button.hint + "</font>" : "")
         opacity: button.phase === "done" ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 90 } }

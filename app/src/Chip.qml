@@ -8,6 +8,8 @@ Rectangle {
     property string text
     property alias label: label
     property color textColor: theme.foreground
+    // Plain, as UiText; Text.StyledText for a text that styles itself.
+    property int textFormat: Text.PlainText
     // While true, a new text morphs from the old: what the two share at the
     // start stays, what they share at the end slides to its new place, and
     // only what differs between cross-fades ("24–28 July" to "25–28 July"
@@ -109,6 +111,7 @@ Rectangle {
             x: chip.centred ? Math.round((parent.width - implicitWidth) / 2) : chip.padding - parent.x
             y: centredIn(chip.height) - parent.y
             color: chip.textColor
+            textFormat: chip.textFormat
             text: chip.shownText
             visible: chip.morphed >= 1
         }
@@ -120,6 +123,7 @@ Rectangle {
                 x: label.x
                 y: label.y
                 color: chip.textColor
+                textFormat: chip.textFormat
                 font: label.font
                 text: chip.morphStart
             }
@@ -127,6 +131,7 @@ Rectangle {
                 x: label.x + metrics.advanceWidth(chip.morphStart)
                 y: label.y
                 color: chip.textColor
+                textFormat: chip.textFormat
                 font: label.font
                 text: chip.morphGoing
                 opacity: 1 - Math.min(1, chip.morphed / 0.5)
@@ -135,6 +140,7 @@ Rectangle {
                 x: label.x + metrics.advanceWidth(chip.morphStart)
                 y: label.y
                 color: chip.textColor
+                textFormat: chip.textFormat
                 font: label.font
                 text: chip.morphComing
                 opacity: Math.max(0, (chip.morphed - 0.3) / 0.7)
@@ -145,6 +151,7 @@ Rectangle {
                 x: label.x + from + (to - from) * chip.slid
                 y: label.y
                 color: chip.textColor
+                textFormat: chip.textFormat
                 font: label.font
                 text: chip.morphEnd
             }

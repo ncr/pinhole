@@ -216,15 +216,17 @@ int main(int argc, char *argv[]) {
     QString error;
     QElapsedTimer loadTimer;
     loadTimer.start();
-    // Read while the window loads (both take some 50 ms): nothing touches
-    // the library until opening.join() below. No library yet is not fatal:
-    // the window opens and says how to make one, and picks it up once it is
-    // there.
+    // Read while the window loads (both take some 50 ms), into a library
+    // of the reader's own, and made the window's once opening.join() below
+    // has it: what the window makes meanwhile sees an empty one, never one
+    // half read. No library yet is not fatal: the window opens and says how
+    // to make one, and picks it up once it is there.
     bool haveLibrary = false;
+    Library reading;
     std::thread opening([&] {
-        haveLibrary = library.open(libraryDir, &error);
+        haveLibrary = reading.open(libraryDir, &error);
         if (haveLibrary)
-            library.applyAdjustments(AdjustmentStore::load(libraryDir));
+            reading.applyAdjustments(AdjustmentStore::load(libraryDir));
         startup.mark(QStringLiteral("index_read"));
     });
 
@@ -261,6 +263,11 @@ int main(int argc, char *argv[]) {
     PluginGuide pluginGuide;
     startup.mark(QStringLiteral("hosts_ready"));
     plugins.setFavourites(&favourites);
+    // An update rewrites the checkout's plugins before its binary is built
+    // and the window restarted: none of them loaded again meanwhile.
+    QObject::connect(&updater, &Updater::changed, &plugins, [&updater, &plugins] {
+        plugins.holdReloads(updater.state() == QLatin1String("updating") || updater.state() == QLatin1String("ready"));
+    });
     plugins.setSources(&sources);
     // Which marks the grid draws (the side panel's "In the grid").
     MarkChoices markChoices;
@@ -318,6 +325,7 @@ int main(int argc, char *argv[]) {
     engine.load(QUrl("qrc:/Main.qml"));
     startup.mark(QStringLiteral("qml_ready"));
     opening.join();
+    library.swap(reading);
     service.setShown(library.source());
     if (!haveLibrary)
         std::fprintf(stderr, "pinhole: %s\n", qPrintable(error));

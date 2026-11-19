@@ -48,11 +48,11 @@ With no command, the window opens. A command asks the Pinhole service
                          source shown
   recent [--count <n>] [--follow]
                          the photos added most lately, newest first, as JSON
-  export <id>... [--to <folder>] [--json]
+  export [--to <folder>] [--json] [--] <id>...
                          photos of the library shown (ids from `recent`) as
                          files to hand over, as a drag out of the window
                          makes them: a HEIC as a JPEG, an edit as it looks;
-                         prints each file's path
+                         prints each file's path. After --, ids only
   storage [--limit <GB>] [--move-to <folder>]
                          where Pinhole keeps its files, and how much room
                          they may take
@@ -526,8 +526,14 @@ private:
     void exportPhotos(const QStringList &args) {
         QStringList ids;
         QString folder;
+        // After "--" every word is an id, one beginning with "-" too.
+        bool options = true;
         for (int i = 0; i < args.size(); ++i) {
-            if (args[i] == QLatin1String("--json"))
+            if (!options)
+                ids.append(args[i]);
+            else if (args[i] == QLatin1String("--"))
+                options = false;
+            else if (args[i] == QLatin1String("--json"))
                 m_json = true;
             else if (args[i] == QLatin1String("--to") && i + 1 < args.size())
                 folder = QDir::cleanPath(QFileInfo(args[++i]).absoluteFilePath());
