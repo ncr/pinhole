@@ -532,7 +532,7 @@ fn switch(shared: &Arc<Shared>, source: Arc<dyn Source>) -> Result<()> {
         shared.broadcast(health_event(Health::Fine));
         // There before windows are told to read it, if only empty.
         let library = crate::storage::library_for(&shared.storage.location(), &*source);
-        std::fs::create_dir_all(&library)?;
+        crate::storage::private_dir(&library)?;
         crate::db::open(&library.join("library.sqlite"))?;
         shared.storage.switch_library(library);
     }
@@ -807,7 +807,19 @@ fn touch(path: &Path) {
 }
 
 pub fn run(config: Config) -> Result<()> {
-    std::fs::create_dir_all(&config.cache)?;
+    // Pinhole's own folders, only this account's: the photos fetched, the
+    // libraries (their index and thumbnails), what the plugins keep of them
+    // and what is synced. A library given is left as it is.
+    crate::storage::private_dir(&config.cache)?;
+    if config.given.is_none() {
+        let state = crate::synced::root().parent().map(Path::to_path_buf);
+        let plugins_cache = crate::workers::cache_root().parent().map(Path::to_path_buf);
+        for dir in [Some(config.location.join("library")), state, plugins_cache].into_iter().flatten() {
+            if let Err(e) = crate::storage::private_dir(&dir) {
+                eprintln!("pinholed: {} could not be made private: {e}", dir.display());
+            }
+        }
+    }
     eprintln!("pinholed: photos from {}", if config.source.kind() == "none" { "nowhere".to_owned() } else { config.source.id() });
     let listener = bind(&config.socket)?;
     eprintln!("pinholed: listening on {}", config.socket.display());
@@ -2241,7 +2253,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
     // Not while the library moves.
     let _writing = shared.storage.library_lock.lock().unwrap();
     let library = shared.storage.library();
-    std::fs::create_dir_all(&library)?;
+    crate::storage::private_dir(&library)?;
     let mut db = crate::db::open(&library.join("library.sqlite"))?;
     crate::sync::claim(source.as_ref(), &mut db, &library)?;
     let first = shared.rounds_shown.swap(shown, Ordering::SeqCst) != shown;

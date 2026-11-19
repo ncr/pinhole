@@ -411,7 +411,7 @@ impl Storage {
     /// Another source's library from now on (the caller holds
     /// `library_lock`): whoever reads the library is told, as after a move.
     pub fn switch_library(&self, library: PathBuf) {
-        let _ = std::fs::create_dir_all(&library);
+        let _ = private_dir(&library);
         self.state.lock().unwrap().library = library.clone();
         self.library_generation.fetch_add(1, Ordering::Relaxed);
         if let Some(tell) = self.on_library_moved.lock().unwrap().as_ref() {
@@ -598,6 +598,11 @@ impl Storage {
             settings["location"] = json!(to);
             settings["moving"] = json!({"from": from, "to": to, "cache": old_cache, "phase": "photos"});
         })?;
+        // Only this account's there too.
+        if to.join("library").exists() {
+            let _ = private_dir(&to.join("library"));
+        }
+        let _ = private_dir(&to.join("cache"));
         let mut state = self.state.lock().unwrap();
         state.location = to.to_owned();
         state.cache = to.join("cache");
@@ -761,6 +766,7 @@ impl Storage {
         };
         if across {
             let _ = std::fs::remove_dir_all(&part);
+            private_dir(&part)?;
             copy_tree(from, &part, &self.moved, false).with_context(|| format!("copying the libraries to {}", to.display()))?;
         }
         // Nothing writes them meanwhile: not a round (library_lock), not a
@@ -783,6 +789,7 @@ impl Storage {
             if !across {
                 let _ = std::fs::remove_dir_all(&part);
             }
+            private_dir(&part)?;
             copy_tree(from, &part, &self.moved, across).with_context(|| format!("copying the libraries to {}", to.display()))?;
             std::fs::rename(&part, to)?;
             true
@@ -1125,6 +1132,11 @@ mod tests {
         assert!(to.join("library/cloud/thumbs/aa/one.jpg").exists());
         assert!(to.join("cache/full/aa/one.jpg").exists());
         assert!(to.join("cache/video/bb/two.mov").exists());
+        // Only this account's in the new folder too.
+        for dir in ["library", "cache"] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(to.join(dir)).unwrap().permissions().mode() & 0o777, 0o700, "{dir}");
+        }
         assert!(!from.exists());
         assert_eq!(storage.library(), to.join("library/cloud"));
         assert_eq!(*told.lock().unwrap(), Some(to.join("library/cloud")));

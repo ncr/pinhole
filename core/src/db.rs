@@ -20,6 +20,13 @@ pub fn open(path: &Path) -> Result<Connection> {
     if version > SCHEMA {
         anyhow::bail!("this library was made by a later Pinhole (schema {version}, this one knows {SCHEMA})");
     }
+    // Only this account's, as its folder is (storage::private_dir); SQLite
+    // gives its -wal and -shm the index's own mode as it makes them.
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = path.as_os_str().to_owned();
+        file.push(suffix);
+        let _ = std::fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+    }
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.pragma_update(None, "synchronous", "NORMAL")?;
     create(&db)?;
@@ -335,6 +342,11 @@ mod tests {
     fn put_tells_new_from_changed_and_forgets_an_edited_thumbnail() {
         let dir = temp("put");
         let mut conn = open(&dir.join("library.sqlite")).unwrap();
+        for file in ["library.sqlite", "library.sqlite-wal", "library.sqlite-shm"] {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(file)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "{file}");
+        }
         Index::new(&mut conn).put(&[asset("a", false, "k1"), asset("b", false, "k1")]).unwrap();
         conn.execute("UPDATE assets SET thumb_path = 'thumbs/x.jpg'", []).unwrap();
 

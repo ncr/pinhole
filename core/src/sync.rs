@@ -485,7 +485,9 @@ fn average_colour(image: &image::RgbImage) -> u32 {
 fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(path.parent().expect("thumb folder"))?;
     let tmp = path.with_extension("jpg.part");
-    std::fs::write(&tmp, bytes)?;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::File::options().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?.write_all(bytes)?;
     std::fs::rename(&tmp, path)
 }
 
