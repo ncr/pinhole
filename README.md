@@ -6,9 +6,11 @@ photos on this computer. Working name.
 Pinhole keeps an index of the whole library on disk (metadata and small
 thumbnails) and fetches everything else from iCloud only when it is looked at,
 dragged or exported, the way Photos on a Mac does with "Optimize Mac Storage".
-It changes the library only by adding to it: photos and videos dropped on
-the window go into it (uploaded to iCloud, copied into a folder). Nothing
-in it is ever edited or deleted.
+It adds to the library: photos and videos dropped on the window go into it
+(uploaded to iCloud, copied into a folder). It never deletes from it. It
+edits a photo only when you ask: Turn and crop (R, K) on an iCloud photo
+changes that photo in iCloud, so your iPhone shows it turned or cropped
+too; Ctrl Z turns it back.
 
 A folder works too: in the side panel (Tab), Add a source → a folder.
 Pinhole indexes it and makes the thumbnails in the background, shows its
@@ -123,6 +125,10 @@ groups that look like that person say so, and C on the person checks them
 one after another. On a photo shown full window, a button says who is in it
 (Anna, or Anna? for who a face looks like); W rings the faces and names each
 one in turn: ⏎ for the likely one, a name typed, or Not Anna when it is wrong.
+The names you give, and which faces are or are not someone, go to a Pinhole
+folder in the iCloud Drive of the library's Apple ID, with the name of the
+computer they were given on, so your other computers know them too. The
+photos and faces themselves stay on the computer.
 
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
@@ -171,8 +177,41 @@ form a history card with the library's years, colours and a jump to the newest.
 
 ## Install
 
-Binary releases are installed, updated and removed with the OS package manager.
-For development or running your own checkout:
+Pinhole is for Arch Linux, and made for and tried on Omarchy. These parts
+need Omarchy itself: the bar widget, Background and Theme (they set
+Omarchy's background and theme), and opening Pinhole where the bar's icon
+is dropped (Hyprland). Elsewhere the window, its sources and the other
+plugins are there, in Pinhole's own colours rather than the theme's.
+
+### From the AUR
+
+The `pinhole-git` package builds the newest `main` from GitHub:
+
+```bash
+yay -S pinhole-git           # install, and update with the rest of the system
+sudo pacman -R pinhole-git   # remove; photos and settings stay
+```
+
+A package has no Update button: it updates with `yay`.
+
+### From source
+
+On a fresh Arch install, the tools to build it and what it runs with, then
+the code, then the install into `~/.local` (no root password):
+
+```bash
+sudo pacman -S --needed git base-devel rust qt6-base qt6-declarative qt6-svg qt6-wayland \
+  qt6-multimedia qt6-multimedia-ffmpeg qt6-shadertools wayland-protocols libjpeg-turbo libheif \
+  libplist libultrahdr lcms2 sqlite imagemagick ffmpeg xdg-desktop-portal uv python \
+  ttf-jetbrains-mono-nerd
+git clone https://github.com/ncr/pinhole.git
+cd pinhole
+bin/install
+```
+
+The first build takes several minutes. `gum`, if installed, gives
+`bin/install` a small menu and a spinner. Run it as yourself, not with
+`sudo`: it installs for your account alone.
 
 ```bash
 bin/install                  # terminal UI; build and run directly from this checkout
@@ -219,18 +258,29 @@ leaves running processes alone. `PREFIX` changes the installation folder;
 `--non-interactive` bypasses the menu for scripts. `--dev` remains an alias
 for existing developer update helpers.
 
-Package maintainers build separately with `cd pkgbuild && makepkg -s`;
-`bin/install` does not build or install packages.
+`pkgbuild/` holds the AUR's recipe and its `.SRCINFO`; after changing the
+recipe, write that again with `makepkg --printsrcinfo > .SRCINFO`.
+`bin/install` does not build or install packages. Both install
+`share/licenses/pinhole/`: Pinhole's license and those of the Rust crates
+its programs link, which `bin/build` writes (`bin/third-party-notices`).
 
 Developer installations quietly check `main` hourly. A small Update button, also in the
-side panel under Pinhole updates, builds the new version while you browse;
+side panel under Pinhole updates, builds the new version while you browse,
+apart from your checkout, which moves to it only once all of it is built;
 choose Restart when it is ready. Package updates and removal use the OS
 package manager. Developer updates require a clean `main`
-checkout and only fast-forward it, preserving local work.
+checkout and only fast-forward it, preserving local work. A checkout
+without Git or an `origin` (a downloaded source archive) installs too, with
+no Update button.
 
-`--uninstall` removes only files recorded by the local/developer installer;
+`--uninstall` stops this installation's Pinhole and its service (and with
+it the plugins' work in the background, People's and the search's), then
+removes only files recorded by the local/developer installer;
 changed or replaced files are preserved, as are your photos, preferences,
-custom plugins and source checkout. It never removes a system package.
+custom plugins and source checkout. It never removes a system package. A
+source's saved sign-in (an Apple ID's session) stays too: to forget it,
+run `pinhole sign-out <source>` first, a source as `pinhole sources` lists
+it.
 
 ## Development
 
