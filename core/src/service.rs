@@ -1443,7 +1443,7 @@ fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, 
         .ok()
         .and_then(|stored| {
             source.local(&stored).filter(|f| f.is_file()).or_else(|| {
-                shared.storage.find(&cached_path(&source.id(), Want::Original, &stored.key, extension(&stored.file_type), false))
+                shared.storage.find(&cached_path(Want::Original, &stored.key, extension(&stored.file_type), false))
             })
         });
     let Some(original) = original else {

@@ -63,11 +63,15 @@ struct Found {
 impl Found {
     /// Names its thumbnail and cached files; changes when the file does,
     /// and a video's when how its cover is made does (cover::VERSION), so
-    /// that it is made again.
-    fn key(&self) -> String {
+    /// that it is made again. Its folder's (`root`) too: the cache is
+    /// shared, and another folder's file of this name, size and time is
+    /// another file.
+    fn key(&self, root: &Path) -> String {
+        use std::os::unix::ffi::OsStrExt;
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         let cover = if self.media == Media::Video { pinhole_core::cover::VERSION } else { "" };
-        for b in self.rel.bytes().chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()).chain(cover.bytes()) {
+        let root = root.as_os_str().as_bytes().iter().copied().chain([0]);
+        for b in root.chain(self.rel.bytes()).chain(self.size.to_le_bytes()).chain(self.modified_ns.to_le_bytes()).chain(cover.bytes()) {
             hash = (hash ^ b as u64).wrapping_mul(0x0100_0000_01b3);
         }
         format!("f{hash:016x}")
@@ -83,8 +87,8 @@ struct Entry {
 
 impl Entry {
     /// What the index keeps to tell whether it changed since.
-    fn signature(&self) -> (String, Option<String>) {
-        (self.file.key(), self.motion.as_ref().map(Found::key))
+    fn signature(&self, root: &Path) -> (String, Option<String>) {
+        (self.file.key(root), self.motion.as_ref().map(|m| m.key(root)))
     }
 }
 
@@ -345,7 +349,7 @@ impl FolderSource {
                 (probe.taken, probe.duration, None, probe.location)
             }
         };
-        let key = f.key();
+        let key = f.key(&self.root);
         let file_type = file_type(&f.rel);
         let made = |want: Want| Rendition {
             want,
@@ -373,7 +377,7 @@ impl FolderSource {
             renditions.push(Rendition {
                 want: Want::Live,
                 name: m.rel.clone(),
-                key: m.key(),
+                key: m.key(&self.root),
                 width: None,
                 height: None,
                 size: Some(m.size as i64),
@@ -590,7 +594,7 @@ impl Source for FolderSource {
         }
         let changed: Vec<&Entry> = entries
             .values()
-            .filter(|e| known.get(&e.file.rel) != Some(&e.signature()))
+            .filter(|e| known.get(&e.file.rel) != Some(&e.signature(&self.root)))
             .filter(|e| !(known.contains_key(&e.file.rel) && look.motion_unread(e)))
             .collect();
         let gone: Vec<String> = known
@@ -987,6 +991,14 @@ mod tests {
         pinhole_core::sync::follow(&source, &mut conn).unwrap();
         assert_eq!(ids(&conn), ["2026/deeper/IMG_3.JPG", "2026b/IMG_4.JPG"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_folders_files_of_one_name_size_and_time_have_their_own_keys() {
+        let file = Found { rel: "2026/IMG_0001.JPG".into(), media: Media::Photo, size: 10, modified_ns: 5 };
+        let (a, b) = (Path::new("/home/me/Pictures"), Path::new("/media/disk/Pictures"));
+        assert_ne!(file.key(a), file.key(b));
+        assert_eq!(file.key(a), file.key(a));
     }
 
     #[test]
