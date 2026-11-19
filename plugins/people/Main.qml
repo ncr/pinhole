@@ -8,31 +8,79 @@ PinholePlugin {
     id: plugin
 
     // What is said of faces here and in the view, as pinhole-faces takes it:
-    // by face, synced with the library to every computer it is shown on.
+    // by face ({ person, not, unknown }), and each face taken out of a
+    // group under a key of its own (rejectKey: true), so two computers that
+    // each take another face out of one group keep both. Synced with the
+    // library to every computer it is shown on, or with "Names only on this
+    // computer" in its state here, by library (localPrefix).
     readonly property string source: pinhole.library.key || pinhole.library.dir
+    readonly property bool local: pinhole.settings.local === true
+    readonly property string localPrefix: "local\t" + source + "\t"
     property var edits: ({})
     // What is said of faces changed, here or elsewhere: the view reads
     // again.
     signal edited()
 
+    function rejectKey(anchor, face) { return "reject\t" + anchor + "\t" + face }
+    // [anchor, face] of a rejection's key, or null.
+    function rejection(key) {
+        const parts = key.split("\t")
+        return parts.length === 3 && parts[0] === "reject" ? [parts[1], parts[2]] : null
+    }
+
+    // What is kept of the library shown, where it is kept.
+    function stored() {
+        if (!local)
+            return pinhole.synced.values()
+        const values = {}
+        for (const key of pinhole.state.keys()) {
+            if (key.startsWith(localPrefix))
+                values[key.slice(localPrefix.length)] = pinhole.state[key]
+        }
+        return values
+    }
+    function store(key, value) {
+        if (local) pinhole.state[localPrefix + key] = value
+        else pinhole.synced[key] = value
+    }
     function reread() {
-        edits = pinhole.synced.values()
+        edits = stored()
         edited()
         if (shownId !== "") lookSoon.restart()
     }
     Connections {
         target: pinhole.synced
-        function onChanged() { plugin.reread() }
+        function onChanged() { if (!plugin.local) plugin.reread() }
     }
     Component.onCompleted: reread()
     onSourceChanged: reread()
+    onLocalChanged: reread()
+
+    // The names of the library shown moved to where they are to be kept
+    // (`here`: this computer's state, else synced), as the switch is
+    // pressed. Taken off the other computers then; given back once synced.
+    function keepHere(here) {
+        if (here === local) return
+        const values = stored()
+        const keys = Object.keys(values)
+        if (here) {
+            for (const key of keys) pinhole.state[localPrefix + key] = values[key]
+            pinhole.settings.local = true
+            for (const key of keys) pinhole.synced[key] = null
+        } else {
+            pinhole.settings.local = null
+            for (const key of keys) pinhole.synced[key] = values[key]
+            for (const key of keys) pinhole.state[localPrefix + key] = null
+        }
+        reread()
+    }
 
     function writeEdits(patch) {
         const now = Object.assign({}, edits)
         for (const face of Object.keys(patch)) {
             const edit = patch[face]
-            const kept = edit.person || edit.rejected?.length || edit.not?.length || edit.unknown
-            pinhole.synced[face] = kept ? edit : null
+            const kept = edit === true || !!edit && !!(edit.person || edit.not?.length || edit.unknown)
+            store(face, kept ? edit : null)
             if (kept) now[face] = edit
             else delete now[face]
         }
@@ -56,12 +104,15 @@ PinholePlugin {
         }
         // Rejections too, of the keys as they are now.
         for (const key of Object.keys(now)) {
-            const rejected = now[key].rejected
-            if (rejected && rejected.some(face => face in moved))
-                now[key] = patch[key] = Object.assign({}, now[key], { rejected: rejected.map(face => moved[face] || face) })
+            const pair = rejection(key)
+            if (!pair || !(pair[0] in moved || pair[1] in moved)) continue
+            const next = rejectKey(moved[pair[0]] || pair[0], moved[pair[1]] || pair[1])
+            delete now[key]
+            patch[key] = null
+            now[next] = patch[next] = true
         }
         for (const key of Object.keys(patch))
-            pinhole.synced[key] = patch[key]
+            store(key, patch[key])
         edits = now
     }
     // Worked out once for each `edits`, not each time asked: they are of
@@ -92,7 +143,7 @@ PinholePlugin {
     function edit(patch, label) {
         const before = {}
         for (const face of Object.keys(patch))
-            before[face] = Object.assign({}, edits[face])
+            before[face] = edits[face] === true ? true : Object.assign({}, edits[face])
         writeEdits(patch)
         pinhole.did(label, () => plugin.writeEdits(before), () => plugin.writeEdits(patch))
     }
@@ -247,6 +298,16 @@ PinholePlugin {
                 numbered: false
                 setting: "grouping"
                 options: [{ value: "off", text: qsTr("Apart") }, { value: "careful", text: qsTr("Careful") }, { value: "wider", text: qsTr("Wider") }]
+            }
+            SettingSwitch {
+                text: qsTr("Names only on this computer")
+                checked: plugin.local
+                onToggled: plugin.keepHere(!plugin.local)
+            }
+            SettingNote {
+                text: plugin.local
+                      ? qsTr("The names given, and what was said of faces, are kept on this computer alone. Turned off, those of the library shown go with it to your other computers again.")
+                      : qsTr("The names given go with the library to your other computers, for an iCloud library through iCloud Drive. Turned on, those of the library shown are kept here alone and taken off the others.")
             }
         }
     }

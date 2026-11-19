@@ -9,7 +9,11 @@ computer. **The names you give, and which faces you said are or are not
 someone, are not local:** they go with the library to every computer it is
 shown on, and for an iCloud library they are written to a `Pinhole` folder
 in that account's iCloud Drive: whoever that folder is shared with can read
-them. There is no setting to keep them on one computer.
+them. **Names only on this computer** (Settings → Plugins → People) keeps
+them in People's state on this computer instead
+(`~/.local/state/pinhole/plugins/pinhole.people/state.json`): turning it on
+moves those of the library shown there and takes them off the other
+computers; turning it off moves them back.
 
 Choose **People** in the grid actions or press Shift+F. The people named
 so far come first, each a round face with their photo count, then the
@@ -65,7 +69,9 @@ pass. Changing the setting regroups the existing index in the background.
 Inspect groups before naming them.
 Face vectors and suggestions are in the plugin's per-source cache.
 Names, assignments and rejections are kept with the library
-(`pinhole.synced`), keyed by the face and its thumbnail bytes, so they are
+(`pinhole.synced`), keyed by the face and its thumbnail bytes (a face taken
+out of a group by `reject<TAB><group><TAB><face>`, so two computers that each
+take another face out of one group keep both), so they are
 on every computer the library is shown on: for an iCloud library they go
 through a Pinhole folder in that account's iCloud Drive within a minute or
 so, and each computer finds the same faces under the same keys in the same

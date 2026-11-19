@@ -949,7 +949,7 @@ this API. A library position is not a visual grid position.
 | `warn(error)` | something gone wrong, under the plugin in the side panel and on stderr |
 | `settings` | its settings, the user's choices (what its part of the side panel sets), kept in `~/.config/pinhole/plugins.json`: read one (`pinhole.settings.size`), bind to one, assign one and it is kept at once. Nothing else goes there (see below) |
 | `fileActions` | what the plugins on do with a file: their `PluginAction`s of `place: "file"`, each with `takes(path)` and `trigger(path)` (Actions, above). Series offers them on the video it made |
-| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own). See Settings, state and cache |
+| `synced` | what the user made of the library shown, which goes with it to every computer it is shown on: People's names, Series' series made by hand. As `state` is (read one, bind to one, assign one; `null` takes one out; `keys()`), each library's its own, and `values()` all of them at once, as an object; `changed(keys)` says which changed, here, in another window or on another computer, or that another library is shown (all of them). What is read is a copy. Two computers that set one key before they hear of each other agree on the later: a key is kept whole, so keep what is changed apart under keys of its own (People keeps each face under its own, and each face taken out of a group too; Series each series made by hand, and each photo kept apart). See Settings, state and cache |
 | `state` | what the user made with it, which must outlive Pinhole but is no setting, on this computer: Info's panel left open, the devices Send sent to. As `settings` is (read one, bind to one, assign one; `null` takes one out: it reads `undefined`, and `keys()`, the names it has, leaves it out), kept in `~/.local/state/pinhole/plugins/<id>/state.json` |
 | `cache` | what it can work out again, kept to have it at once: what Screenshots found in each library, so they are hidden in the first frame. The same, kept in `~/.cache/pinhole/plugins/<id>/cache.json` |
 | `did(name, undo, redo)` | a change just made, to undo with Ctrl Z and do again with Ctrl ⇧ Z: `name` says what in a word or two ("ungrouping"), `undo()` and `redo()` do it. Forgotten when the plugin is turned off or loaded again, and when another source's library is shown, however it came to be. It gives the step's number, for `dropStep` |
@@ -1114,7 +1114,10 @@ Keep each thing in the one it is:
   that change one key before they hear of each other agree on the later,
   so a key is the most that can be lost to another computer's change:
   keep each thing the user changes on its own under a key of its own
-  (People: one to a face), not all of them under one.
+  (People: one to a face, and one to each face taken out of a group,
+  `reject\t<group>\t<face>`; Series: one to each series made by hand,
+  `group\t<id>`, and to each photo kept apart), not all of them under one,
+  nor a list that two computers would each change.
 - `state`: what the user made and would miss, on this computer: a panel
   left open, the devices they sent to.
 - `cache`: what can be worked out again, and is kept only to be quick; it

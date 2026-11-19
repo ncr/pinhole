@@ -565,14 +565,14 @@ mod tests {
 
     #[test]
     fn the_later_of_a_key_wins_whichever_is_heard_first() {
-        let a = doc(&[("face", Some(json!({"name": "Anna"})), 10, "a"), ("other", Some(json!(1)), 5, "a")]);
-        let b = doc(&[("face", Some(json!({"name": "Ola"})), 20, "b"), ("other", None, 4, "b")]);
+        let a = doc(&[("face", Some(json!({"person": "Anna"})), 10, "a"), ("other", Some(json!(1)), 5, "a")]);
+        let b = doc(&[("face", Some(json!({"person": "Ola"})), 20, "b"), ("other", None, 4, "b")]);
         let mut ab = a.clone();
         ab.merge(&b);
         let mut ba = b.clone();
         ba.merge(&a);
         assert_eq!(ab, ba);
-        assert_eq!(ab.values["face"], json!({"name": "Ola"}));
+        assert_eq!(ab.values["face"], json!({"person": "Ola"}));
         assert_eq!(ab.values["other"], json!(1));
     }
 
@@ -629,7 +629,7 @@ mod tests {
 
     fn named(face: &str, name: &str) -> Map<String, Value> {
         let mut m = Map::new();
-        m.insert(face.into(), json!({"name": name}));
+        m.insert(face.into(), json!({"person": name}));
         m
     }
 
@@ -644,7 +644,7 @@ mod tests {
 
         let at_home = carry(&home, &drive, "0000000000bb", "fixer").unwrap();
         assert_eq!(at_home.changed, ["pinhole.people"]);
-        assert_eq!(load(&file(&home, "pinhole.people")).unwrap().values["f1"], json!({"name": "Anna"}));
+        assert_eq!(load(&file(&home, "pinhole.people")).unwrap().values["f1"], json!({"person": "Anna"}));
         // What came is sent back as this computer's: the same, both ways.
         assert!(at_home.sent);
 
@@ -652,7 +652,7 @@ mod tests {
         carry(&home, &drive, "0000000000bb", "fixer").unwrap();
         let back = carry(&work, &drive, "0000000000aa", "spawner").unwrap();
         assert_eq!(back.changed, ["pinhole.people"]);
-        assert_eq!(load(&file(&work, "pinhole.people")).unwrap().values["f1"], json!({"name": "Ola"}));
+        assert_eq!(load(&file(&work, "pinhole.people")).unwrap().values["f1"], json!({"person": "Ola"}));
 
         // Nothing new: nothing changes, nothing more is written.
         let writes = *drive.writes.lock().unwrap();
@@ -662,6 +662,38 @@ mod tests {
         assert_eq!(carry(&work, &drive, "0000000000aa", "spawner").unwrap(), Carrying::default());
         assert_eq!(carry(&home, &drive, "0000000000bb", "fixer").unwrap(), Carrying::default());
         assert_eq!(*drive.writes.lock().unwrap(), writes);
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// People's face taken out of a group and Series' series each under a
+    /// key of their own: what two computers did before they heard of each
+    /// other is all kept on both.
+    #[test]
+    fn two_computers_rejections_and_series_made_apart_are_both_kept() {
+        let (work, home) = (folder("apart-work"), folder("apart-home"));
+        let drive = Elsewhere::default();
+        let change = |key: &str, value: Value| Map::from_iter([(key.to_string(), value)]);
+        set(&work, "pinhole.people", &change("g", json!({"person": "Anna"})), "w").unwrap();
+        carry(&work, &drive, "0000000000aa", "spawner").unwrap();
+        carry(&home, &drive, "0000000000bb", "fixer").unwrap();
+        // Offline, each takes another face out of the same group and makes
+        // another series.
+        set(&work, "pinhole.people", &change("reject\tg\tf1", json!(true)), "w").unwrap();
+        set(&home, "pinhole.people", &change("reject\tg\tf2", json!(true)), "h").unwrap();
+        set(&work, "pinhole.series", &change("group\tw1", json!(["a", "b"])), "w").unwrap();
+        set(&home, "pinhole.series", &change("group\th1", json!(["c", "d"])), "h").unwrap();
+        set(&home, "pinhole.series", &change("apart\te", json!(true)), "h").unwrap();
+        for _ in 0..2 {
+            carry(&work, &drive, "0000000000aa", "spawner").unwrap();
+            carry(&home, &drive, "0000000000bb", "fixer").unwrap();
+        }
+        for dir in [&work, &home] {
+            let people = load(&file(dir, "pinhole.people")).unwrap().values;
+            assert_eq!(people.keys().collect::<Vec<_>>(), ["g", "reject\tg\tf1", "reject\tg\tf2"]);
+            let series = load(&file(dir, "pinhole.series")).unwrap().values;
+            assert_eq!(series.keys().collect::<Vec<_>>(), ["apart\te", "group\th1", "group\tw1"]);
+        }
         let _ = std::fs::remove_dir_all(&work);
         let _ = std::fs::remove_dir_all(&home);
     }
@@ -683,7 +715,7 @@ mod tests {
         set(&dir, "pinhole.people", &named("f1", "Anna"), "h").unwrap();
         let done = carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
         assert!(done.changed.is_empty() && done.sent);
-        assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f1"], json!({"name": "Anna"}));
+        assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f1"], json!({"person": "Anna"}));
         // Not read again until it changes.
         assert!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().read.is_empty());
         // Nor anything else someone keeps in the folder, a computer's file
@@ -720,7 +752,7 @@ mod tests {
         let done = carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
         assert!(done.sent);
         assert_eq!(done.changed, ["pinhole.people"]);
-        assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f2"], json!({"name": "Ola"}));
+        assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f2"], json!({"person": "Ola"}));
         // A plugin's file here that cannot be read: the others still go,
         // and it as it was last sent, never left out.
         set(&dir, "me.broken", &named("f9", "Ewa"), "h").unwrap();
@@ -730,8 +762,8 @@ mod tests {
         assert!(carry(&dir, &drive, "0000000000bb", "fixer").unwrap().sent);
         assert_eq!(std::fs::read(file(&dir, "me.broken")).unwrap(), b"{not json");
         let sent: Value = serde_json::from_slice(&drive.read("fixer-0000000000bb.json").unwrap()).unwrap();
-        assert_eq!(sent["plugins"]["me.broken"]["values"]["f9"], json!({"name": "Ewa"}), "{sent}");
-        assert_eq!(sent["plugins"]["pinhole.people"]["values"]["f3"], json!({"name": "Jan"}), "{sent}");
+        assert_eq!(sent["plugins"]["me.broken"]["values"]["f9"], json!({"person": "Ewa"}), "{sent}");
+        assert_eq!(sent["plugins"]["pinhole.people"]["values"]["f3"], json!({"person": "Jan"}), "{sent}");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
     }

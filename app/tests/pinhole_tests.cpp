@@ -3108,7 +3108,7 @@ QtObject {
         bench.plugins = std::make_unique<Plugins>(&bench.library, bench.service.get(), bench.viewer.get(), bench.translator.get(), &bench.history);
         bench.plugins->setEngine(&bench.engine);
         bench.plugins->libraryOpened();
-        bench.plugins->syncedStore()->set("pinhole.series", "manual", QJsonArray{QJsonArray{"a", "c"}});
+        bench.plugins->syncedStore()->set("pinhole.series", "group\tfirst", QJsonArray{"a", "c"});
         bench.plugins->flush();
         QCOMPARE(bench.plugins->settingsOf("pinhole.series"), (QJsonObject{{"recipe", QJsonObject{{"look", "warm"}}}}));
         const QDateTime moved = QFileInfo(config).lastModified();
@@ -3127,10 +3127,15 @@ QtObject {
         // As if its finder found nothing: what was made by hand, shown.
         bench.js("series.take('[]')");
         QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
-        // What is synced of the library.
+        // What is synced of the library: each series under a key of its own.
         const auto kept = [&] {
             bench.plugins->flush();
-            return SyncedStore::load(bench.dir.path(), "pinhole.series").value("manual").toArray();
+            const QJsonObject values = SyncedStore::load(bench.dir.path(), "pinhole.series");
+            QJsonArray groups;
+            for (auto it = values.begin(); it != values.end(); ++it)
+                if (it.key().startsWith("group\t"))
+                    groups.append(it.value());
+            return groups;
         };
         QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
         // b grouped with them: kept, then undone and done again.
@@ -3142,6 +3147,15 @@ QtObject {
         QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
         bench.history.redo();
         QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
+        // Taken out: the rest keeps its series' key, and the photo is kept
+        // apart under its own.
+        bench.js("series.takeOut(1)");
+        QCOMPARE(bench.js("JSON.stringify(series.series)").toString(), QString("[[0,2]]"));
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"a", "c"}}));
+        QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.series").value("apart\tb"), QJsonValue(true));
+        bench.history.undo();
+        QCOMPARE(kept(), (QJsonArray{QJsonArray{"b", "a", "c"}}));
+        QVERIFY(!SyncedStore::load(bench.dir.path(), "pinhole.series").contains("apart\tb"));
         QTest::qWait(20);
         bench.plugins->flush();
         QCOMPARE(QFileInfo(config).lastModified(), moved);
@@ -7435,7 +7449,8 @@ PinholePlugin {
     void peoplesNamesMoveWithTheirFaces() {
         PluginBench bench({{"pinhole.people", {{"api", Plugins::api}}}});
         auto *host = bench.host;
-        bench.plugins->syncedStore()->set("pinhole.people", "o", QJsonObject{{"person", "Anna"}, {"rejected", QJsonArray{"r"}}});
+        bench.plugins->syncedStore()->set("pinhole.people", "o", QJsonObject{{"person", "Anna"}});
+        bench.plugins->syncedStore()->set("pinhole.people", "reject\to\tr", true);
         bench.plugins->syncedStore()->set("pinhole.people", "r", QJsonObject{{"person", "Ola"}});
         Keymap keymap;
         Theme theme(bench.dir.path());
@@ -7451,11 +7466,39 @@ PinholePlugin {
         QCOMPARE(bench.js("people.edits.o.person").toString(), QString("Anna"));
         bench.js("people.moveEdits({ o: 'n', r: 'r2' })");
         QCOMPARE(bench.js("JSON.stringify(people.edits)").toString(),
-                 QString(R"({"n":{"person":"Anna","rejected":["r2"]},"r2":{"person":"Ola"}})"));
+                 QString(R"({"n":{"person":"Anna"},"r2":{"person":"Ola"},"reject\tn\tr2":true})"));
         bench.plugins->flush();
         const QJsonObject kept = SyncedStore::load(bench.dir.path(), "pinhole.people");
-        QCOMPARE(kept.keys(), (QStringList{"n", "r2"}));
-        QCOMPARE(kept.value("n").toObject().value("rejected").toArray(), (QJsonArray{"r2"}));
+        QCOMPARE(kept.keys(), (QStringList{"n", "r2", "reject\tn\tr2"}));
+        QCOMPARE(kept.value("reject\tn\tr2"), QJsonValue(true));
+
+        // A face taken out of a group, undone: its key goes, the rest stays.
+        bench.js("people.edit({ [people.rejectKey('n', 'x')]: true }, 'out')");
+        bench.plugins->flush();
+        QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.people").value("reject\tn\tx"), QJsonValue(true));
+        bench.history.undo();
+        bench.plugins->flush();
+        QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.people").keys(), (QStringList{"n", "r2", "reject\tn\tr2"}));
+
+        // Names only on this computer: moved into its state, by library,
+        // and nothing left synced; turned off, moved back.
+        bench.js("people.keepHere(true)");
+        bench.plugins->flush();
+        QVERIFY(bench.js("people.local").toBool());
+        QVERIFY(SyncedStore::load(bench.dir.path(), "pinhole.people").isEmpty());
+        QCOMPARE(bench.js("people.edits.n.person").toString(), QString("Anna"));
+        QCOMPARE(bench.js("pinhole.state[people.localPrefix + 'n'].person").toString(), QString("Anna"));
+        bench.js("people.nameFace({ key: 'z' }, 'Ewa')");
+        bench.plugins->flush();
+        QVERIFY(SyncedStore::load(bench.dir.path(), "pinhole.people").isEmpty());
+        QCOMPARE(bench.js("pinhole.state[people.localPrefix + 'z'].person").toString(), QString("Ewa"));
+        bench.js("people.keepHere(false)");
+        bench.plugins->flush();
+        QVERIFY(!bench.js("people.local").toBool());
+        const QJsonObject back = SyncedStore::load(bench.dir.path(), "pinhole.people");
+        QCOMPARE(back.keys(), (QStringList{"n", "r2", "reject\tn\tr2", "z"}));
+        QCOMPARE(back.value("z").toObject().value("person").toString(), QString("Ewa"));
+        QVERIFY(!bench.js("pinhole.state.keys().some(key => key.startsWith('local\\t'))").toBool());
     }
 
     void aPluginAskingForANewerApiSaysSo() {

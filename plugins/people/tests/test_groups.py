@@ -98,6 +98,16 @@ class Review(unittest.TestCase):
             self.assertEqual([(row["anchor"], row["key"]) for row in groups], [("new", "pending")])
             self.assertEqual(worker.assignment_keys(db, "new"), ["pending"])
 
+    def test_faces_taken_out_of_one_group_on_two_computers_are_both_out(self):
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE suggestions (anchor TEXT, member TEXT, score REAL)")
+            db.executemany("INSERT INTO suggestions VALUES ('group', ?, 0.9)", ((str(i),) for i in range(4)))
+            # Each computer's under a key of its own, so both are in what
+            # is synced once the two have heard of each other.
+            here, there = {worker.reject_key("group", "1"): True}, {worker.reject_key("group", "2"): True}
+            worker.review_labels(db, {**here, **there, worker.reject_key("group", "3"): None})
+            self.assertEqual(worker.assignment_keys(db, "group"), ["0", "3"])
+
     def test_assignment_covers_faces_beyond_the_visible_page(self):
         with sqlite3.connect(":memory:") as db:
             db.execute("CREATE TABLE suggestions (anchor TEXT, member TEXT, score REAL)")
@@ -197,8 +207,8 @@ class Guesses(unittest.TestCase):
             worker.carry(db, np, [("a1-turned", vector(8))], [("a1-again", vector(7))])
             self.assertEqual(worker.aliases(db), {"a1": "a1-again", "a1-turned": "a1-again"})
             edits, moved = worker.translated(worker.aliases(db), {
-                "a1": {"person": "Anna"}, "anna": {"rejected": ["a1-turned"]}})
-            self.assertEqual(edits, {"a1-again": {"person": "Anna"}, "anna": {"rejected": ["a1-again"]}})
+                "a1": {"person": "Anna"}, "reject\tanna\ta1-turned": True})
+            self.assertEqual(edits, {"a1-again": {"person": "Anna"}, "reject\tanna\ta1-again": True})
             self.assertEqual(moved, {"a1": "a1-again", "a1-turned": "a1-again"})
             # An edit on the new key wins over the old one's.
             edits, _ = worker.translated(worker.aliases(db), {"a1": {"person": "Anna"}, "a1-again": {"person": "Ola"}})
@@ -230,16 +240,29 @@ class Edits(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as folder:
             synced = Path(folder, "pinhole.people.json")
-            synced.write_text(json.dumps({"values": {"both": {"not": ["Anna"]}, "new": {"rejected": ["x"]},
-                                                     "named": {"person": "Ola"}}, "clock": {}}))
+            synced.write_text(json.dumps({"values": {"both": {"not": ["Anna"]}, "reject\tnew\tx": True,
+                                                     "reject\tnew\ty": True, "named": {"person": "Ola"}},
+                                          "clock": {}}))
             names, excluded = worker.load_edits(synced, None)
             self.assertEqual(names, ["both"])
-            self.assertEqual(excluded, {"new": ["x"]})
+            self.assertEqual(excluded, {"new": ["x", "y"]})
             # Not there yet: nothing said; a file that cannot be read keeps
             # what was read before.
             self.assertEqual(worker.load_edits(Path(folder, "none"), None), ([], {}))
             synced.write_text("{not json")
             self.assertEqual(worker.load_edits(synced, "before"), "before")
+
+    def test_names_kept_on_this_computer_come_from_its_state(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            settings, state = Path(folder, "plugins.json"), Path(folder, "state.json")
+            self.assertFalse(worker.load_local(settings, None))
+            settings.write_text(json.dumps({"settings": {"pinhole.people": {"local": True}}}))
+            self.assertTrue(worker.load_local(settings, None))
+            state.write_text(json.dumps({"local\tlib\tboth": {"not": ["Anna"]}, "local\tlib\treject\tg\tx": True,
+                                         "local\tother\treject\tg\ty": True, "shown": True}))
+            self.assertEqual(worker.load_edits(state, None, "local\tlib\t"), (["both"], {"g": ["x"]}))
 
 if __name__ == "__main__":
     unittest.main()

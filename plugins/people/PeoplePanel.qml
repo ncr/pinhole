@@ -340,10 +340,7 @@ Panel {
         }
         const owner = page === "group" ? anchor : likely[checking]
         if (!owner || face.key === owner.anchor) return
-        const previous = edits[owner.anchor] || {}
-        edit({ [owner.anchor]: Object.assign({}, previous, {
-            rejected: (previous.rejected || []).concat([face.key])
-        }) }, qsTr("removing a face from a group"))
+        edit({ [view.plugin.rejectKey(owner.anchor, face.key)]: true }, qsTr("removing a face from a group"))
     }
     function assignPicked(name) {
         if (picking === "photo") {
