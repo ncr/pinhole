@@ -68,11 +68,52 @@ fn all_making() -> PathBuf {
     cache.unwrap_or_else(|| std::env::temp_dir().join("pinhole-cache")).join("making")
 }
 
-/// What services that have ended left in making/: the folders of pids no
-/// longer running (and files from before there were any). Never what one
-/// still running is making.
+/// Where an edit's renders are made (`Source::set_edit`), each edit in a
+/// new folder in it (`edit_work`): `pinhole-edits/<pid>/` in the account's
+/// runtime folder (in memory, its own), else `making()`.
+fn edits() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute() && d.is_dir()) {
+        Some(runtime) => runtime.join("pinhole-edits").join(std::process::id().to_string()),
+        None => making(),
+    }
+}
+
+/// A new folder for one edit's renders, only this account's: the caller
+/// removes it once done, and what a service that ended left is removed as
+/// one starts (`forget_making`).
+pub fn edit_work() -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let edits = edits();
+    private_dir(&edits)?;
+    let work = edits.join(crate::add::uuid());
+    // Not recursive: made here and now, never one already there.
+    std::fs::DirBuilder::new().mode(0o700).create(&work)?;
+    Ok(work)
+}
+
+/// A folder of Pinhole's own (a library, the cache, its state), made if it
+/// is not there, that only this account can open, whatever the umask or
+/// it was before: what is in it, photos and their index, is read by no one
+/// else. Never a folder of the user's photos.
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+/// What services that have ended left in making/ and in the runtime
+/// folder's pinhole-edits/: the folders of pids no longer running (and
+/// files from before there were any). Never what one still running is
+/// making.
 pub fn forget_making() {
-    let Ok(entries) = std::fs::read_dir(all_making()) else { return };
+    forget_ended(&all_making());
+    if let Some(edits) = edits().parent() {
+        forget_ended(edits);
+    }
+}
+
+fn forget_ended(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let running = name.to_str().and_then(|n| n.parse::<u32>().ok()).is_some_and(|pid| Path::new("/proc").join(pid.to_string()).exists());
@@ -1092,6 +1133,18 @@ mod tests {
         // And no plan left.
         let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
+    }
+
+    #[test]
+    fn each_edit_is_made_in_a_new_folder_of_this_accounts_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let (a, b) = (edit_work().unwrap(), edit_work().unwrap());
+        assert_ne!(a, b);
+        for dir in [&a, &b, &a.parent().unwrap().to_owned()] {
+            assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700, "{}", dir.display());
+        }
+        let _ = std::fs::remove_dir(&a);
+        let _ = std::fs::remove_dir(&b);
     }
 
     #[test]

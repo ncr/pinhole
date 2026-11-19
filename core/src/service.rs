@@ -1394,22 +1394,14 @@ fn add(shared: &Shared, params: &Value, reply: &Reply) -> std::result::Result<Va
 
 /// Turn and crop a photo in its source (`asset`, `turn`, `crop` as
 /// [x, y, width, height] of it turned, or neither to take the edit off;
-/// `original`, its original as fetched into this service's cache; `source`,
-/// the source it is of): where the source keeps edits (iCloud). Then a
-/// round, which brings the photo's new renditions. `unsupported` where it
-/// keeps none: the window keeps the edit itself.
+/// `source`, the source it is of), from its original as fetched already
+/// (`fetch` of its `original`): where the source keeps edits (iCloud).
+/// Then a round, which brings the photo's new renditions. `unsupported`
+/// where it keeps none: the window keeps the edit itself.
 fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, (&'static str, String)> {
     let Some(id) = params["asset"].as_str() else {
         return Err(("bad_request", "set_edit needs an asset".into()));
     };
-    let original = std::path::PathBuf::from(params["original"].as_str().unwrap_or_default());
-    // Only a file of this service's own cache: nothing else of the
-    // computer's is read and sent.
-    let cache = shared.storage.cache();
-    match (original.canonicalize(), cache.canonicalize()) {
-        (Ok(file), Ok(root)) if file.starts_with(&root) && file.is_file() => {}
-        _ => return Err(("bad_request", "set_edit's original is a file the service fetched".into())),
-    }
     let edit = match (params["turn"].as_u64(), params["crop"].as_array()) {
         (Some(turn), Some(crop)) if crop.len() == 4 => {
             let c: Vec<f64> = crop.iter().filter_map(Value::as_f64).collect();
@@ -1429,7 +1421,23 @@ fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, 
         (Some(asked), Some(owner)) if asked == owner && owner == source.id() => {}
         _ => return Err(("other_source", "not the source shown".into())),
     }
-    let work = std::env::temp_dir().join(format!("pinholed-edit-{}-{}", std::process::id(), id.replace('/', "_")));
+    // This photo's original, found here: never a file a window names.
+    let original = db
+        .query_row(
+            "SELECT name, key, coalesce(file_type, '') FROM renditions WHERE asset_id = ?1 AND kind = 'original'",
+            [id],
+            |r| Ok(Stored { asset: id.to_owned(), want: Want::Original, name: r.get(0)?, key: r.get(1)?, file_type: r.get(2)? }),
+        )
+        .ok()
+        .and_then(|stored| {
+            source.local(&stored).filter(|f| f.is_file()).or_else(|| {
+                shared.storage.find(&cached_path(&source.id(), Want::Original, &stored.key, extension(&stored.file_type), false))
+            })
+        });
+    let Some(original) = original else {
+        return Err(("not_found", format!("{id}'s original is not fetched yet")));
+    };
+    let work = crate::storage::edit_work().map_err(|e| ("unavailable", format!("a folder to edit in: {e}")))?;
     let result = source.set_edit(&db, id, &original, edit, &work);
     let _ = std::fs::remove_dir_all(&work);
     if let Err(e) = result {
