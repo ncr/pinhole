@@ -83,6 +83,7 @@
 #include "viewer.h"
 #include "vectortile.h"
 #include "places.h"
+#include "portal.h"
 #include "viewermotion.h"
 #include "zoomer.h"
 
@@ -454,6 +455,38 @@ private slots:
         });
         QTRY_COMPARE_WITH_TIMEOUT(failed, QString("unavailable"), 15000);
         qunsetenv("PINHOLE_SOCKET");
+    }
+
+    // No desktop folder picker: Qt's own, in the window, says the folder
+    // chosen, and its Cancel is a cancel.
+    void withoutTheDesktopsFolderPickerQtsOwnChooses() {
+        QQmlEngine engine;
+        QQmlComponent windowComponent(&engine);
+        windowComponent.setData("import QtQuick\nWindow { width: 800; height: 600; visible: true }\n", QUrl());
+        std::unique_ptr<QObject> window(windowComponent.create());
+        QVERIFY2(window, qPrintable(windowComponent.errorString()));
+        QTemporaryDir dir;
+        PortalFolderPicker picker;
+        QSignalSpy picked(&picker, &PortalFolderPicker::picked);
+        picker.fallBack("Export to");
+        QObject *dialog = nullptr;
+        for (QObject *child : picker.children())
+            if (child->property("selectedFolder").isValid())
+                dialog = child;
+        QVERIFY(dialog);
+        QCOMPARE(dialog->property("title").toString(), QString("Export to"));
+        dialog->setProperty("selectedFolder", QUrl::fromLocalFile(dir.path()));
+        QMetaObject::invokeMethod(dialog, "accept");
+        QTRY_COMPARE(picked.size(), 1);
+        QCOMPARE(picked.first().first().toString(), dir.path());
+        PortalFolderPicker other;
+        QSignalSpy cancelled(&other, &PortalFolderPicker::picked);
+        other.fallBack("Export to");
+        for (QObject *child : other.children())
+            if (child->property("selectedFolder").isValid())
+                QMetaObject::invokeMethod(child, "reject");
+        QTRY_COMPARE(cancelled.size(), 1);
+        QVERIFY(cancelled.first().first().toString().isEmpty());
     }
 
     void texturesFollowEveryReloadBetweenFrames() {
