@@ -88,6 +88,17 @@ impl Entry {
     }
 }
 
+/// The keys (`Found::key`) of videos named as a photo that are not its
+/// motion (`is_motion`), kept in the library so they are not read again.
+const UNPAIRED: &str = "folder_unpaired";
+
+fn unpaired(index: &Connection) -> Result<HashSet<String>> {
+    index.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {UNPAIRED} (key TEXT PRIMARY KEY) WITHOUT ROWID"))?;
+    let mut stmt = index.prepare(&format!("SELECT key FROM {UNPAIRED}"))?;
+    let keys = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(keys)
+}
+
 /// The assets made favourites here (`set_favorite`), none before the first.
 fn favorites(index: &Connection) -> HashSet<String> {
     let Ok(mut stmt) = index.prepare("SELECT asset_id FROM folder_favorites") else { return HashSet::new() };
@@ -194,37 +205,62 @@ fn unread_holds(unread: &[String], id: &str) -> bool {
     unread.iter().any(|u| u.is_empty() || id == u || id.strip_prefix(u.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
-/// The assets among the files found: a video named as a photo beside it
-/// (IMG_1234.HEIC with IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names
-/// it) is that photo's motion, not an asset of its own.
 /// A file's folder and name without its extension, lower case: a photo and
 /// its motion share it (the motion maybe with `_hevc` after).
 fn stem(rel: &str) -> String {
     rel.rsplit_once('.').map_or(rel, |(s, _)| s).to_ascii_lowercase()
 }
 
-fn pair(found: Vec<Found>) -> HashMap<String, Entry> {
+/// The assets among the files found: a video named as a photo beside it
+/// (IMG_1234.HEIC with IMG_1234.MOV, or IMG_1234_HEVC.MOV as icloudpd names
+/// it) is taken for that photo's motion, not an asset of its own, until
+/// describing them finds it is not (`is_motion`): `unpaired` has the keys
+/// of such videos. A photo has one motion at most, a QuickTime one first;
+/// any other video of its name is a video of its own.
+fn pair(mut found: Vec<Found>, unpaired: &HashSet<String>) -> HashMap<String, Entry> {
+    let later = |f: &Found| f.media == Media::Video && !f.rel.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("mov"));
+    found.sort_by(|a, b| (later(a), &a.rel).cmp(&(later(b), &b.rel)));
     let photos: HashSet<String> = found.iter().filter(|f| f.media == Media::Photo).map(|f| stem(&f.rel)).collect();
-    let mut motion: HashMap<String, Found> = HashMap::new();
+    let mut motion: HashMap<String, Vec<Found>> = HashMap::new();
     let mut entries: HashMap<String, Entry> = HashMap::new();
     for f in found {
-        if f.media == Media::Video {
+        if f.media == Media::Video && !unpaired.contains(&f.key()) {
             let s = stem(&f.rel);
             let photo = s.strip_suffix("_hevc").filter(|p| photos.contains(*p)).map(str::to_owned)
                 .or_else(|| photos.contains(&s).then_some(s));
             if let Some(photo) = photo {
-                motion.insert(photo, f);
+                motion.entry(photo).or_default().push(f);
                 continue;
             }
         }
         entries.insert(f.rel.clone(), Entry { file: f, motion: None });
     }
-    for entry in entries.values_mut() {
-        if entry.file.media == Media::Photo {
-            entry.motion = motion.remove(&stem(&entry.file.rel));
+    let mut photos: Vec<&mut Entry> = entries.values_mut().filter(|e| e.file.media == Media::Photo).collect();
+    photos.sort_by(|a, b| a.file.rel.cmp(&b.file.rel));
+    for entry in photos {
+        if let Some(videos) = motion.get_mut(&stem(&entry.file.rel)).filter(|v| !v.is_empty()) {
+            entry.motion = Some(videos.remove(0));
         }
     }
+    for f in motion.into_values().flatten() {
+        entries.insert(f.rel.clone(), Entry { file: f, motion: None });
+    }
     entries
+}
+
+/// The longest a Live Photo's motion is, in seconds: about three, and a
+/// little more (`is_motion`).
+const LIVE_SECONDS: f64 = 6.0;
+
+/// Whether a video named as a photo is its motion: when both carry
+/// Apple's content identifier, the same one, as a Live Photo's two files
+/// do; without it (a Live Photo out of Google Takeout), a video as short
+/// as a motion, or one whose length could not be read.
+fn is_motion(photo: &Details, video: &Details) -> bool {
+    match (&photo.content_id, &video.content_id) {
+        (Some(a), Some(b)) => a == b,
+        _ => video.duration.is_none_or(|d| d <= LIVE_SECONDS),
+    }
 }
 
 /// What a folder would bring, counted from its files' names and sizes
@@ -241,7 +277,7 @@ pub struct Count {
 pub fn count(root: &Path, deadline: Option<Instant>) -> Count {
     let Walk { found, complete, .. } = walk(root, deadline);
     let bytes = found.iter().map(|f| f.size).sum();
-    let entries = pair(found);
+    let entries = pair(found, &HashSet::new());
     Count {
         assets: entries.len() as u64,
         live: entries.values().filter(|e| e.motion.is_some()).count() as u64,
@@ -326,9 +362,9 @@ impl FolderSource {
     }
 
     /// Every photo and video in the folder, with Live Photos' motion paired
-    /// to its photo (`pair`), and what could not be read. Hidden files and
-    /// folders are skipped.
-    fn look(&self) -> Result<Look> {
+    /// to its photo (`pair`, but for the videos in `unpaired`), and what
+    /// could not be read. Hidden files and folders are skipped.
+    fn look(&self, unpaired: &HashSet<String>) -> Result<Look> {
         if !self.root.is_dir() {
             // Never "everything was deleted": a disk not mounted, say.
             return Err(anyhow!("{} is not there", self.root.display()));
@@ -348,7 +384,7 @@ impl FolderSource {
         }
         unread.sort();
         unread.dedup();
-        Ok(Look { entries: pair(walk.found), unread })
+        Ok(Look { entries: pair(walk.found, unpaired), unread })
     }
 
     /// A look that finds nothing where the index has photos, with the folder
@@ -372,21 +408,29 @@ impl FolderSource {
     }
 
     /// The asset for an entry: its dates and details read from the file.
-    /// An error only when the folder does not answer (`probe_video`).
-    fn describe(&self, entry: &Entry) -> Result<Asset> {
+    /// A photo and a video taken for its motion that turn out not to be one
+    /// (`is_motion`) are two assets. An error only when the folder does not
+    /// answer (`probe_video`).
+    fn describe(&self, entry: &Entry) -> Result<Vec<Asset>> {
         let f = &entry.file;
         let path = self.root.join(&f.rel);
+        if f.media == Media::Video {
+            return Ok(vec![self.asset(f, None, probe_video(&path)?)]);
+        }
+        let exif = read_exif(&path);
+        let Some(m) = &entry.motion else { return Ok(vec![self.asset(f, None, exif)]) };
+        let probe = probe_video(&self.root.join(&m.rel))?;
+        Ok(if is_motion(&exif, &probe) {
+            vec![self.asset(f, Some(m), exif)]
+        } else {
+            vec![self.asset(f, None, exif), self.asset(m, None, probe)]
+        })
+    }
+
+    /// The asset of a file, with its motion's.
+    fn asset(&self, f: &Found, motion: Option<&Found>, details: Details) -> Asset {
+        let Details { taken, duration, orientation, location, .. } = details;
         let modified_ms = (f.modified_ns / 1_000_000) as i64;
-        let (taken, duration, orientation, location) = match f.media {
-            Media::Photo => {
-                let exif = read_exif(&path);
-                (exif.taken, None, exif.orientation, exif.location)
-            }
-            Media::Video => {
-                let probe = probe_video(&path)?;
-                (probe.taken, probe.duration, None, probe.location)
-            }
-        };
         let key = f.key();
         let file_type = file_type(&f.rel);
         let made = |want: Want| Rendition {
@@ -411,7 +455,7 @@ impl FolderSource {
         if f.media == Media::Video {
             renditions.push(itself(Want::Video));
         }
-        if let Some(m) = &entry.motion {
+        if let Some(m) = motion {
             renditions.push(Rendition {
                 want: Want::Live,
                 name: m.rel.clone(),
@@ -422,13 +466,13 @@ impl FolderSource {
                 file_type: Some(self::file_type(&m.rel).into()),
             });
         }
-        Ok(Asset {
+        Asset {
             id: f.rel.clone(),
             filename: Path::new(&f.rel).file_name().map(|n| n.to_string_lossy().into_owned()),
             item_type: Some(file_type.into()),
             taken: taken.or(Some(modified_ms)),
             added: Some(modified_ms),
-            kind: match (f.media, &entry.motion) {
+            kind: match (f.media, motion) {
                 (Media::Video, _) => Kind::Video,
                 (Media::Photo, Some(_)) => Kind::Live,
                 (Media::Photo, None) => Kind::Photo,
@@ -443,18 +487,25 @@ impl FolderSource {
             renditions,
             edit: None,
             subtype: None,
-        })
+        }
     }
 
     /// Describe entries (reading files takes a while: in parallel) and put
-    /// them, a batch at a time, the favourites as the library keeps them.
+    /// them, a batch at a time, the favourites as the library keeps them,
+    /// and which videos are not the motion they were taken for (`unpaired`).
     fn put(&self, index: &mut Index, entries: &[&Entry], progress: &(dyn Fn(u64, u64) + Sync), total: u64) -> Result<()> {
         let favorites = favorites(index.conn);
         for batch in entries.chunks(PUT_BATCH) {
             if index.stopping() {
                 return Err(pinhole_core::source::Stopped.into());
             }
-            let mut assets: Vec<Asset> = batch.par_iter().map(|e| self.describe(e)).collect::<Result<_>>()?;
+            let described: Vec<Vec<Asset>> = batch.par_iter().map(|e| self.describe(e)).collect::<Result<_>>()?;
+            for (entry, assets) in batch.iter().zip(&described) {
+                if let (Some(m), [_, _]) = (&entry.motion, assets.as_slice()) {
+                    index.conn.execute(&format!("INSERT OR IGNORE INTO {UNPAIRED} (key) VALUES (?1)"), [m.key()])?;
+                }
+            }
+            let mut assets: Vec<Asset> = described.into_iter().flatten().collect();
             for a in &mut assets {
                 a.favorite = favorites.contains(&a.id);
             }
@@ -597,7 +648,7 @@ impl Source for FolderSource {
     }
 
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
-        let look = self.look()?;
+        let look = self.look(&unpaired(index.conn)?)?;
         self.same_disk(index.conn, &look)?;
         let entries = &look.entries;
         // What could not be read is not gone: the listing leaves it be, and
@@ -626,7 +677,7 @@ impl Source for FolderSource {
     }
 
     fn changes(&self, index: &mut Index, _token: &str) -> Result<Listing> {
-        let look = self.look()?;
+        let look = self.look(&unpaired(index.conn)?)?;
         self.same_disk(index.conn, &look)?;
         let entries = &look.entries;
         // What the index has, by the keys of each asset's file and motion.
@@ -766,18 +817,22 @@ fn open_regular(path: &Path) -> std::io::Result<File> {
 /// What of a TIFF its tags are looked for in (`read_exif`).
 const EXIF_BUDGET: u64 = 8 << 20;
 
+/// What is read of a photo's or a video's file.
 #[derive(Default)]
-struct Exif {
+struct Details {
     taken: Option<i64>,
+    duration: Option<f64>,
     orientation: Option<i64>,
     location: Option<Location>,
+    /// Apple's, the same in a Live Photo's still and its motion.
+    content_id: Option<String>,
 }
 
 /// When a photo was taken (the camera's local time, with its offset when
 /// it wrote one, else this computer's), which way up it is, and whether it
-/// has a place.
-fn read_exif(path: &Path) -> Exif {
-    let Ok(file) = open_regular(path) else { return Exif::default() };
+/// has a place, and Apple's content identifier.
+fn read_exif(path: &Path) -> Details {
+    let Ok(file) = open_regular(path) else { return Details::default() };
     let mut reader = std::io::BufReader::new(file);
     // A TIFF is read whole by kamadak-exif, image and all, for its few
     // tags: of a large one, only as much as `EXIF_BUDGET`, where they
@@ -792,7 +847,7 @@ fn read_exif(path: &Path) -> Exif {
     } else {
         exif::Reader::new().read_from_container(&mut reader)
     };
-    let Ok(exif) = read else { return Exif::default() };
+    let Ok(exif) = read else { return Details::default() };
     let text = |tag| {
         exif.get_field(tag, exif::In::PRIMARY).map(|f| f.display_value().to_string().trim_matches('"').to_owned())
     };
@@ -816,7 +871,31 @@ fn read_exif(path: &Path) -> Exif {
     let location = axis(exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef, "N", "S")
         .zip(axis(exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef, "E", "W"))
         .and_then(|(lat, lon)| Location::new(lat, lon));
-    Exif { taken, orientation, location }
+    let content_id = exif.get_field(exif::Tag::MakerNote, exif::In::PRIMARY).and_then(|f| match &f.value {
+        exif::Value::Undefined(note, _) => apple_content_id(note),
+        _ => None,
+    });
+    Details { taken, orientation, location, content_id, ..Details::default() }
+}
+
+/// The ContentIdentifier (tag 0x11) in Apple's maker note: "Apple iOS\0",
+/// a version, "MM", then a big-endian IFD whose offsets count from the
+/// note's start.
+fn apple_content_id(note: &[u8]) -> Option<String> {
+    if !note.starts_with(b"Apple iOS\0") || note.get(12..14)? != b"MM" {
+        return None;
+    }
+    let u16_at = |i: usize| note.get(i..i + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+    let u32_at = |i: usize| note.get(i..i + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
+    (0..u16_at(14)? as usize).map(|n| 16 + 12 * n).find_map(|e| {
+        if u16_at(e)? != 0x11 || u16_at(e + 2)? != 2 {
+            return None;
+        }
+        let len = u32_at(e + 4)? as usize;
+        let at = if len <= 4 { e + 8 } else { u32_at(e + 8)? as usize };
+        let text = std::str::from_utf8(note.get(at..at.checked_add(len)?)?).ok()?.trim_end_matches('\0');
+        (!text.is_empty()).then(|| text.to_owned())
+    })
 }
 
 /// "2024-05-01 12:34:56" (as kamadak-exif shows EXIF's 2024:05:01
@@ -834,19 +913,12 @@ fn exif_time(text: &str, offset: Option<&str>) -> Option<i64> {
     Local.from_local_datetime(&naive).earliest().map(|t| t.timestamp_millis())
 }
 
-#[derive(Default)]
-struct Probe {
-    taken: Option<i64>,
-    duration: Option<f64>,
-    location: Option<Location>,
-}
-
 /// A video's length and when it was recorded, from ffprobe: Apple's own
 /// creation date (with the place's offset) when there is one, else the
-/// container's. Nothing of a video it cannot read, or spins on (a damaged
+/// container's; and Apple's content identifier. Nothing of a video it cannot read, or spins on (a damaged
 /// one); an error when it hangs, on a folder that does not answer (a mount
 /// gone), so that the listing fails rather than keep the video without.
-fn probe_video(path: &Path) -> Result<Probe> {
+fn probe_video(path: &Path) -> Result<Details> {
     let _slot = pinhole_core::background::slot();
     let mut ffprobe = pinhole_core::background::command("ffprobe");
     ffprobe
@@ -858,9 +930,9 @@ fn probe_video(path: &Path) -> Result<Probe> {
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut && !pinhole_core::background::spun(&e) => {
             return Err(anyhow!("reading {}: {e}", path.display()));
         }
-        Err(_) => return Ok(Probe::default()),
+        Err(_) => return Ok(Details::default()),
     };
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return Ok(Probe::default()) };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return Ok(Details::default()) };
     let format = &v["format"];
     let duration = format["duration"].as_str().and_then(|d| d.parse().ok());
     let tags = &format["tags"];
@@ -873,7 +945,8 @@ fn probe_video(path: &Path) -> Result<Probe> {
         .map(|t| t.timestamp_millis());
     let location = ["com.apple.quicktime.location.ISO6709", "location"]
         .iter().filter_map(|k| tags[*k].as_str()).find_map(video_location);
-    Ok(Probe { taken, duration, location })
+    let content_id = tags["com.apple.quicktime.content.identifier"].as_str().filter(|c| !c.is_empty()).map(str::to_owned);
+    Ok(Details { taken, duration, location, content_id, ..Details::default() })
 }
 
 // The QuickTime/MP4 tags produced by ffprobe, e.g. "+52.2319+021.0067+100/".
@@ -964,7 +1037,7 @@ mod tests {
                   "2026/notes.txt", ".hidden/IMG_9.JPG", "other/IMG_1.MOV"] {
             touch(&dir.join(f));
         }
-        let entries = FolderSource::new(dir.clone()).look().unwrap().entries;
+        let entries = FolderSource::new(dir.clone()).look(&HashSet::new()).unwrap().entries;
         let mut ids: Vec<(&str, Option<&str>)> =
             entries.values().map(|e| (e.file.rel.as_str(), e.motion.as_ref().map(|m| m.rel.as_str()))).collect();
         ids.sort();
@@ -979,6 +1052,86 @@ mod tests {
     }
 
     #[test]
+    fn a_photo_has_one_motion_and_every_other_video_of_its_name_stands_alone() {
+        let found = |rel: &str| Found { rel: rel.into(), media: media_of(Path::new(rel)).unwrap(), size: 1, modified_ns: 0 };
+        let files = || vec![found("trip.mp4"), found("trip.jpg"), found("trip.mov"), found("TRIP.MOV")];
+        let pairs = |entries: HashMap<String, Entry>| {
+            let mut pairs: Vec<(String, Option<String>)> =
+                entries.into_values().map(|e| (e.file.rel, e.motion.map(|m| m.rel))).collect();
+            pairs.sort();
+            pairs
+        };
+        let some = |s: &str| Some(s.to_owned());
+        assert_eq!(pairs(pair(files(), &HashSet::new())), [
+            ("trip.jpg".into(), some("TRIP.MOV")),
+            ("trip.mov".into(), None),
+            ("trip.mp4".into(), None),
+        ]);
+        // The QuickTime ones found not to be its motion: the next is tried.
+        assert_eq!(pairs(pair(files(), &[found("trip.mov").key(), found("TRIP.MOV").key()].into())), [
+            ("TRIP.MOV".into(), None),
+            ("trip.jpg".into(), some("trip.mp4")),
+            ("trip.mov".into(), None),
+        ]);
+    }
+
+    #[test]
+    fn a_video_is_a_photos_motion_by_apples_identifier_else_by_its_length() {
+        let details = |id: Option<&str>, duration| Details { content_id: id.map(str::to_owned), duration, ..Details::default() };
+        let (a, b) = (Some("8E82EB40"), Some("574219FF"));
+        assert!(is_motion(&details(a, None), &details(a, Some(2.2))));
+        assert!(!is_motion(&details(a, None), &details(b, Some(2.2))));
+        // Without both identifiers: short enough, or of a length unknown.
+        assert!(is_motion(&details(None, None), &details(a, Some(2.9))));
+        assert!(is_motion(&details(a, None), &details(None, None)));
+        assert!(!is_motion(&details(a, None), &details(None, Some(95.0))));
+        assert!(!is_motion(&details(None, None), &details(None, Some(12.0))));
+        // Apple's maker note, as an iPhone writes it, the identifier past
+        // another entry.
+        let id = b"8E82EB40-AAB9-4D44-B96D-DFA7BC925D60\0";
+        let mut note = b"Apple iOS\0\0\x01MM".to_vec();
+        note.extend(2u16.to_be_bytes());
+        note.extend([0, 1, 0, 9, 0, 0, 0, 1, 0, 0, 0, 7]);
+        note.extend([0, 0x11, 0, 2]);
+        note.extend((id.len() as u32).to_be_bytes());
+        note.extend(((16 + 24 + 4) as u32).to_be_bytes());
+        note.extend([0; 4]);
+        note.extend(id);
+        assert_eq!(apple_content_id(&note).as_deref(), Some("8E82EB40-AAB9-4D44-B96D-DFA7BC925D60"));
+        assert_eq!(apple_content_id(&note[..50]), None);
+        assert_eq!(apple_content_id(b"Nikon\0\x02\x10\0\0MM*\0"), None);
+    }
+
+    #[test]
+    fn a_long_video_named_as_a_photo_is_a_video_of_its_own() {
+        if !std::process::Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).status().is_ok_and(|s| s.success()) {
+            return;
+        }
+        let dir = temp("unpaired");
+        image::RgbImage::from_pixel(64, 48, image::Rgb([200, 40, 40])).save(dir.join("presentation.jpg")).unwrap();
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=d=10:s=64x48:r=2", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            .arg(dir.join("presentation.mp4"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let source = FolderSource::new(dir.clone());
+        let mut conn = pinhole_core::db::open(&dir.join(".library.sqlite")).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        let kinds = |conn: &Connection| -> Vec<(String, bool, bool)> {
+            let mut stmt = conn.prepare("SELECT id, is_live, is_video FROM assets ORDER BY id").unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect()
+        };
+        let both = vec![("presentation.jpg".to_string(), false, false), ("presentation.mp4".to_string(), false, true)];
+        assert_eq!(kinds(&conn), both);
+        // And it stays so, read no more.
+        let report = pinhole_core::sync::follow(&source, &mut conn).unwrap();
+        assert!(report.changes.updated.is_empty() && report.changes.added.is_empty(), "{:?}", report.changes);
+        assert_eq!(kinds(&conn), both);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn what_is_added_is_copied_in_and_found_by_the_next_look() {
         let (from, dir) = (temp("add-from"), temp("add-to"));
         touch(&from.join("IMG_1.HEIC"));
@@ -988,7 +1141,7 @@ mod tests {
         let (additions, _) = pinhole_core::add::gather(&[from.join("IMG_1.HEIC"), from.join("IMG_1.MOV")]);
         let added = source.add(&additions[0], &|_, _| {}).unwrap();
         assert_eq!(added.id.as_deref(), Some("IMG_1 (2).HEIC"));
-        let entries = source.look().unwrap().entries;
+        let entries = source.look(&HashSet::new()).unwrap().entries;
         assert_eq!(entries["IMG_1 (2).HEIC"].motion.as_ref().map(|m| m.rel.as_str()), Some("IMG_1 (2).MOV"));
         assert!(entries["IMG_1.HEIC"].motion.is_none());
         // The originals stay where they were.
@@ -1108,7 +1261,7 @@ mod tests {
     fn a_live_photo_whose_motion_cannot_be_read_stays_as_it_is() {
         let found = |rel: &str, media| Found { rel: rel.into(), media, size: 1, modified_ns: 0 };
         let look = |unread: &[&str], files: Vec<Found>| Look {
-            entries: pair(files),
+            entries: pair(files, &HashSet::new()),
             unread: unread.iter().map(|u| u.to_string()).collect(),
         };
         let photo = || found("2026/IMG_1.HEIC", Media::Photo);
@@ -1183,7 +1336,7 @@ mod tests {
         let fifo = std::ffi::CString::new(dir.join("pipe.jpg").into_os_string().into_encoded_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o644) }, 0);
         let source = FolderSource::new(dir.clone());
-        let entries = source.look().unwrap().entries;
+        let entries = source.look(&HashSet::new()).unwrap().entries;
         assert_eq!(entries.keys().collect::<Vec<_>>(), ["IMG_1.JPG"]);
         // Nor handed out, should the index name them: a link, a file
         // through a linked folder, a pipe (at once, not waiting on it), a
@@ -1229,7 +1382,7 @@ mod tests {
 
     #[test]
     fn a_folder_that_is_not_there_is_an_error_not_an_empty_library() {
-        assert!(FolderSource::new(PathBuf::from("/nonexistent/pinhole")).look().is_err());
+        assert!(FolderSource::new(PathBuf::from("/nonexistent/pinhole")).look(&HashSet::new()).is_err());
     }
 
     #[test]
