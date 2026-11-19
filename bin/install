@@ -90,7 +90,10 @@ run_install() {
         exit 2
     fi
     # Keep the update lock in the installer and close it for build subprocesses.
-    python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
+    # bin/update has built it apart already (PINHOLE_BUILT).
+    if [ "${PINHOLE_BUILT:-0}" != 1 ]; then
+        python3 -c 'import subprocess, sys; sys.exit(subprocess.call(["bin/build"], close_fds=True))'
+    fi
     if [ -n "${PINHOLE_EXPECTED_COMMIT:-}" ]; then
         if [ "$(git rev-parse HEAD)" != "$PINHOLE_EXPECTED_COMMIT" ] || [ -n "$(git status --porcelain)" ]; then
             echo 'Checkout changed while Pinhole was building; no installation was activated. Your edits were kept.' >&2

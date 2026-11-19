@@ -30,16 +30,32 @@ class Updates(unittest.TestCase):
         (self.remote / "bin").mkdir()
         installer = self.remote / "bin/install"
         installer.write_text('''#!/usr/bin/env python3
-import json, os, subprocess, sys, time
-time.sleep(float(os.environ.get("PINHOLE_TEST_BUILD_WAIT", "0")))
+import json, os, subprocess, sys
 from pathlib import Path
 p=Path(os.environ["PREFIX"])
 p.mkdir(parents=True, exist_ok=True)
 (p/"installed").write_text(Path("version").read_text() + os.environ["PINHOLE_KEEP_RUNNING"])
 (p/"install-args").write_text(" ".join(sys.argv[1:]))
+(p/"built-apart").write_text(os.environ.get("PINHOLE_BUILT", ""))
+(p/"program").write_text(Path("app/build/pinhole").read_text())
 ''')
         installer.chmod(0o755)
-        (self.remote / ".gitignore").write_text("build/\ntarget/\n")
+        # A build that takes a while, says what the checkout held as it
+        # ran, and makes the programs and a plugin's module of this version.
+        build = self.remote / "bin/build"
+        build.write_text('''#!/usr/bin/env python3
+import os, time
+from pathlib import Path
+time.sleep(float(os.environ.get("PINHOLE_TEST_BUILD_WAIT", "0")))
+if os.environ.get("PINHOLE_TEST_SEEN"):
+    Path(os.environ["PINHOLE_TEST_SEEN"]).write_text(Path(os.environ["PINHOLE_TEST_LIVE"], "version").read_text())
+version = Path("version").read_text()
+for output in ["app/build/pinhole", "core/target/release/pinholed", "plugins/info/qml/Module/libmodule.so"]:
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    Path(output).write_text("built " + version)
+''')
+        build.chmod(0o755)
+        (self.remote / ".gitignore").write_text("build/\ntarget/\n/plugins/*/qml/\n")
         (self.remote / "version").write_text("one\n")
         self.commit("initial")
         self.source = self.root / "working"
@@ -49,7 +65,9 @@ p.mkdir(parents=True, exist_ok=True)
         self.metadata = {"repository": str(self.remote), "source": str(self.source),
                          "prefix": str(self.root / "prefix"), "mode": "developer",
                          "commit": self.git("rev-parse", "HEAD", cwd=self.source)}
-        self.env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")})
+        self.env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"),
+                                           "XDG_CACHE_HOME": str(self.root / "cache"),
+                                           "PINHOLE_TEST_LIVE": str(self.source)})
         self.env.start()
 
     def tearDown(self):
@@ -90,12 +108,39 @@ p.mkdir(parents=True, exist_ok=True)
         self.assertEqual((self.source / "version").read_text(), "one\n")
         self.assertEqual((self.source / ".git/FETCH_HEAD").read_bytes(), fetch_head)
 
-    def test_developer_update_fast_forwards_builds_and_keeps_running(self):
+    def test_developer_update_builds_apart_then_moves_checkout_and_programs_together(self):
         target = self.newer()
-        self.apply(target)
+        seen = self.root / "seen-during-build"
+        with patch.dict(os.environ, {"PINHOLE_TEST_SEEN": str(seen)}):
+            self.apply(target)
+        # The checkout was still the old one while the new one was built.
+        self.assertEqual(seen.read_text(), "one\n")
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.source), target)
+        for output in ["app/build/pinhole", "core/target/release/pinholed", "plugins/info/qml/Module/libmodule.so"]:
+            self.assertEqual((self.source / output).read_text(), "built two\n")
         self.assertEqual((self.root / "prefix/installed").read_text(), "two\n1")
-        self.assertEqual((self.root / "prefix/install-args").read_text(), "--dev --non-interactive")
+        self.assertEqual((self.root / "prefix/program").read_text(), "built two\n")
+        self.assertEqual((self.root / "prefix/install-args").read_text(), "--non-interactive")
+        self.assertEqual((self.root / "prefix/built-apart").read_text(), "1")
+        self.assertEqual(list(self.source.glob("**/*.update")), [])
+
+    def test_the_build_tree_is_kept_for_the_next_update(self):
+        self.apply(self.newer())
+        tree = update.build_tree(self.source.resolve())
+        (tree / "app/build/kept-object").write_text("compiled")
+        (self.remote / "version").write_text("three\n")
+        self.commit("third")
+        target = update.remote_revision(self.metadata)
+        self.apply(target)
+        self.assertEqual((tree / "app/build/kept-object").read_text(), "compiled")
+        self.assertEqual((self.source / "app/build/pinhole").read_text(), "built three\n")
+        # A tree whose worktree record is gone is made again.
+        self.git("worktree", "remove", "--force", str(tree), cwd=self.source)
+        tree.mkdir(parents=True)
+        (self.remote / "version").write_text("four\n")
+        self.commit("fourth")
+        self.apply(update.remote_revision(self.metadata))
+        self.assertEqual((self.source / "app/build/pinhole").read_text(), "built four\n")
 
     def test_dirty_checkout_is_never_changed(self):
         target = self.newer()
@@ -170,23 +215,27 @@ p.mkdir(parents=True, exist_ok=True)
         (self.source / "version").write_text("unfinished")
         self.assertEqual(update.check(self.metadata, running=target)["state"], "current")
 
-    def test_build_failure_restores_working_programs_and_allows_retry(self):
+    def test_build_failure_leaves_checkout_programs_and_installation_as_they_were(self):
         old_binary = self.binary(self.metadata["commit"])
         old_bytes = old_binary.read_bytes()
-        installer = self.remote / "bin/install"
-        installer.write_text('''#!/usr/bin/env python3
+        build = self.remote / "bin/build"
+        build.write_text('''#!/usr/bin/env python3
 from pathlib import Path
+Path("app/build").mkdir(parents=True, exist_ok=True)
 Path("app/build/pinhole").write_text("broken link output")
 raise SystemExit(1)
 ''')
+        (self.remote / "version").write_text("two\n")
         self.commit("broken build")
         target = update.remote_revision(self.metadata)
         with self.assertRaisesRegex(update.UpdateError, "build"):
             self.apply(target)
         self.assertEqual(old_binary.read_bytes(), old_bytes)
         self.assertTrue(os.access(old_binary, os.X_OK))
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.source), self.metadata["commit"])
+        self.assertEqual((self.source / "version").read_text(), "one\n")
+        self.assertFalse((self.root / "prefix").exists())
         self.assertEqual(update.check(self.metadata)["state"], "available")
-        self.assertFalse((self.root / "prefix/share/pinhole/update.json").exists())
 
     def test_updaters_on_same_repository_are_serialized(self):
         with update.update_lock(self.metadata):
