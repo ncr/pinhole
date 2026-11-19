@@ -486,18 +486,25 @@ impl Storage {
         if folder.starts_with(&from) || from.starts_with(&folder) {
             return Err(anyhow!("{} and {} are inside one another", folder.display(), from.display()));
         }
-        std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
-        let probe = folder.join(".pinhole-write-test");
-        std::fs::write(&probe, b"").with_context(|| format!("{} is not writable", folder.display()))?;
-        let _ = std::fs::remove_file(&probe);
-
         // Every source's library, all in `library/`, the one in use among
         // them, unless it was opened from elsewhere.
         let (old_libraries, new_libraries) = (from.join("library"), folder.join("library"));
         let library_moves = old_library.starts_with(&old_libraries);
-        if new_libraries.exists() {
-            return Err(anyhow!("{} already has a library", folder.display()));
+        // What a move makes there, and removes again should it be given
+        // up, is never anything there already: not Pinhole's to remove.
+        for name in ["library", "library.part", "cache"] {
+            if folder.join(name).symlink_metadata().is_ok() {
+                return Err(anyhow!("{} already has a {name}", folder.display()));
+            }
         }
+        std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
+        let probe = folder.join(format!(".pinhole-write-test-{}", crate::add::uuid()));
+        std::fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .with_context(|| format!("{} is not writable", folder.display()))?;
+        let _ = std::fs::remove_file(&probe);
         let total = KINDS.iter().map(|k| size_of(&old_cache.join(k))).sum::<u64>()
             + if library_moves { size_of(&old_libraries) } else { 0 };
         {
@@ -1085,6 +1092,24 @@ mod tests {
         // And no plan left.
         let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert!(written.get("moving").is_none());
+    }
+
+    #[test]
+    fn a_move_into_a_folder_with_what_it_would_make_there_already_touches_nothing() {
+        let dir = temp("move-occupied");
+        let from = dir.join("old");
+        file(&from.join("library/cloud/library.sqlite"), 50, 0);
+        let storage = storage_in(&from, &dir.join("settings.json"));
+        for name in ["library", "library.part", "cache"] {
+            let to = dir.join(format!("new-{name}"));
+            file(&to.join(name).join("theirs.txt"), 5, 0);
+            file(&to.join(".pinhole-write-test"), 5, 0);
+            let error = storage.set_location(to.clone()).unwrap_err().to_string();
+            assert!(error.contains(&format!("already has a {name}")), "{error}");
+            assert_eq!(std::fs::read(to.join(name).join("theirs.txt")).unwrap().len(), 5);
+            assert_eq!(std::fs::read(to.join(".pinhole-write-test")).unwrap().len(), 5);
+        }
+        assert_eq!(storage.location(), from);
     }
 
     #[test]
