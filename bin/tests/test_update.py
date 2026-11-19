@@ -136,12 +136,16 @@ for output in ["app/build/pinhole", "core/target/release/pinholed", "plugins/inf
             self.apply(target)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.source), target)
         self.assertNotEqual((self.source / "app/build/pinhole").read_text(), "built two\n")
+        # Its marker stays, so every window holds its plugins' QML from
+        # being loaded again by the binary from before (Updater::switching).
+        self.assertTrue(update.switch_path(self.metadata).exists())
         # Whatever the window says it runs, not current until it is done.
         self.assertEqual(update.check(self.metadata, running=target)["state"], "available")
         self.apply(target)
         for output in ["app/build/pinhole", "core/target/release/pinholed"]:
             self.assertEqual((self.source / output).read_text(), "built two\n")
         self.assertEqual(update.check(self.metadata, running=target)["state"], "current")
+        self.assertFalse(update.switch_path(self.metadata).exists())
 
     def test_the_build_tree_is_kept_for_the_next_update(self):
         self.apply(self.newer())
