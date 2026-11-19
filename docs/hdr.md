@@ -395,10 +395,8 @@ workspace 5, as CLAUDE.md says.
     original 69–78 ms, Live Photo original 476–493 ms.
 - **The panel check is not made yet.** The photo for it, found in the
   library by how much of it is red and green beyond sRGB:
-  `IMG_4520.HEIC`, a night photo under red and green
-  lights.
-  A daylight one beside it:
-  `IMG_3841.HEIC`, a saturated red on green.
+  `IMG_4520.HEIC`, a night photo under red and green lights. A daylight
+  one beside it: `IMG_3841.HEIC`, a saturated red on green.
   - Both screens at full brightness, Night Light and True Tone off.
   - Open it full window in Pinhole and in Photos on the iPhone, side by
     side.
@@ -487,8 +485,9 @@ before):
 
 **Tests** (`app/tests/pinhole_tests.cpp`, `core/src/colour.rs`,
 `core/src/sync.rs`):
-- A JPEG of P3 green, a deep red and a grey, tagged with Apple's own
-  Display P3 profile (from a real thumbnail, `app/tests/data`): through
+- A JPEG of P3 green, a deep red and a grey, tagged with a Display P3
+  profile made as iPhones make theirs (v4, parametric curves,
+  `app/tests/data`): through
   `decodePhoto`, the loader (`decodeThumbnail`) and `image://file` the
   green is sRGB (0, 255, 0) clipped, the red within 2 of lcms2's, the grey
   unchanged.
@@ -506,8 +505,7 @@ before):
 **Proof on real photos** (frames from `PINHOLE_SELFTEST=colour`, before and
 after, on the library copy; the reference is lcms2 converting the before
 frame's codes, which are the photo's own):
-- `IMG_4520.HEIC` (a night photo under red and green
-  lights), its thumbnail in the grid at 3 columns: the after frame is
+- `IMG_4520.HEIC` (a night photo under red and green lights), its thumbnail in the grid at 3 columns: the after frame is
   lcms2's to 0.44 of a code on average (median 0); its reddest patch was
   (254.6, 6.0, 81.7) as P3 codes drawn as sRGB, is (255.0, 0.0, 76.0), and
   lcms2 says (255.0, 0.0, 75.9). Full window: 0.30 on average, 99 % within

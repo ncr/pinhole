@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+> **Only for the author's own machines.** This file describes how Jacek Becela, Pinhole's author, works on his two
+> computers, fixer and spawner. It applies only in a session on one of them (`hostname` says `fixer` or `spawner`).
+> Anywhere else, ignore the delivery steps below: do not push to `main`, do not run `bin/install` unasked and do not
+> `ssh` anywhere. Follow [AGENTS.md](AGENTS.md), work on a branch and open a pull request. The last section, test
+> windows on a hidden workspace, is good practice on any Hyprland desktop.
+
 ## After every feature
 
 Jacek develops Pinhole and tries each change in the app he opens with Super+Space. When a feature or fix is done,
