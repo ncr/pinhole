@@ -14,14 +14,19 @@ build/test-all/<name>.log; a line a suite as each ends, the failures' logs'
 last lines after, and how long it all took. Exits 1 if anything failed.
 
 Its windows are Xvfb's alone (xorg-server-xvfb): without it, it stops
-rather than show one."""
+rather than show one. Nothing of the person's is read: every suite has
+config, data, state and cache folders of its own, emptied after, and Info's
+check reads photos made for it (a turned, geotagged JPEG and a video), not
+the library's, whose places would go into its log."""
 import concurrent.futures
 import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -31,11 +36,53 @@ PRINTING = threading.Lock()
 # What every run is given: no display or compositor of the desktop's, and
 # Xvfb alone for a window.
 QUIET = {"PINHOLE_X_ONLY": "1", "QT_QPA_PLATFORMTHEME": "generic"}
+# A profile of no one's (main makes it): the person's settings, library and
+# caches are never read or written.
+PROFILE = {}
 
 
 def env():
     kept = {k: v for k, v in os.environ.items() if not k.startswith(("WAYLAND", "DISPLAY", "HYPRLAND"))}
-    return kept | QUIET
+    return kept | QUIET | PROFILE
+
+
+def profile(folder):
+    made = {}
+    for key, name in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state"),
+                      ("XDG_CACHE_HOME", "cache"), ("XDG_PICTURES_DIR", "Pictures")]:
+        (folder / name).mkdir(parents=True, exist_ok=True)
+        made[key] = str(folder / name)
+    return made
+
+
+def exif():
+    """An APP1 segment: turned a quarter (orientation 6) and placed at
+    49.5 N, 18.25 W, in nobody's photo."""
+    def entry(tag, kind, count, value):
+        return struct.pack(">HHI", tag, kind, count) + value.ljust(4, b"\0")
+    gps_at = 8 + 2 + 2 * 12 + 4
+    rationals_at = gps_at + 2 + 4 * 12 + 4
+    ifd0 = struct.pack(">H", 2) + entry(0x0112, 3, 1, struct.pack(">H", 6)) \
+        + entry(0x8825, 4, 1, struct.pack(">I", gps_at)) + struct.pack(">I", 0)
+    gps = struct.pack(">H", 4) + entry(1, 2, 2, b"N") + entry(2, 5, 3, struct.pack(">I", rationals_at)) \
+        + entry(3, 2, 2, b"W") + entry(4, 5, 3, struct.pack(">I", rationals_at + 24)) + struct.pack(">I", 0)
+    rationals = struct.pack(">6I", 49, 1, 30, 1, 0, 1) + struct.pack(">6I", 18, 1, 15, 1, 0, 1)
+    tiff = b"MM\0*" + struct.pack(">I", 8) + ifd0 + gps + rationals
+    body = b"Exif\0\0" + tiff
+    return b"\xff\xe1" + struct.pack(">H", len(body) + 2) + body
+
+
+def fixtures(folder):
+    """What Info's check reads: made here, of no one."""
+    folder.mkdir(parents=True, exist_ok=True)
+    plain, placed, clip = folder / "plain.jpg", folder / "placed.jpg", folder / "clip.mp4"
+    subprocess.run(["magick", "-size", "64x48", "xc:#3060c0", str(plain)], check=True)
+    data = plain.read_bytes()
+    at = 2 + (2 + int.from_bytes(data[4:6], "big") if data[2:4] == b"\xff\xe0" else 0)
+    placed.write_bytes(data[:at] + exif() + data[at:])
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=#c03030:s=64x48:d=0.3",
+                    "-pix_fmt", "yuv420p", str(clip)], check=True)
+    return [str(placed), str(plain), str(clip)]
 
 
 def say(line):
@@ -77,11 +124,22 @@ def main():
         print("test-all: needs Xvfb (xorg-server-xvfb): its windows are never on the desktop")
         return 2
     LOGS.mkdir(parents=True, exist_ok=True)
+    scratch = tempfile.TemporaryDirectory(prefix="pinhole-test-all-")
+    try:
+        PROFILE.update(profile(Path(scratch.name)))
+        return everything(Path(scratch.name))
+    finally:
+        scratch.cleanup()
+
+
+def everything(scratch):
     started = time.monotonic()
     # Built first, one after another: each build uses every core itself.
+    # The script's path is an argument, never part of the program's text.
     for name, command in [("build", [str(ROOT / "bin/build")]),
-                          ("build-qt-tests", [sys.executable, "-c", "import runpy,sys; sys.argv=['test']; "
-                                              f"m=runpy.run_path('{ROOT}/app/bin/test'); m['build']()"])]:
+                          ("build-qt-tests", [sys.executable, "-c", "import runpy,sys; path=sys.argv[1]; "
+                                              "sys.argv=['test']; runpy.run_path(path)['build']()",
+                                              str(ROOT / "app/bin/test")])]:
         _, passed, log = run(name, command)
         if not passed:
             print(log.read_text(errors="replace")[-3000:])
@@ -103,7 +161,8 @@ def main():
               ("kit-reference", [str(ROOT / "bin/kit-reference"), "--check"], ROOT, None),
               ("rust-series-finder", ["cargo", "test", "--locked", "-q"], ROOT / "plugins/series/finder", None),
               ("rust-send-sender", ["cargo", "test", "--locked", "-q"], ROOT / "plugins/send/sender", None)]
-    suites += [(f"check-{c}", ["sh", f"plugins/{c}/check/check"], ROOT, None) for c in ("background", "theme", "info")]
+    suites += [(f"check-{c}", ["sh", f"plugins/{c}/check/check"], ROOT, None) for c in ("background", "theme")]
+    suites += [("check-info", ["sh", "plugins/info/check/check", *fixtures(scratch / "fixtures")], ROOT, None)]
     suites += [(name, [program], crate, None) for name, program, crate in programs]
     with concurrent.futures.ThreadPoolExecutor(len(suites)) as pool:
         results = list(pool.map(lambda s: run(s[0], s[1], cwd=s[2], extra=s[3]), suites))
