@@ -86,6 +86,12 @@ def validate_checkout(metadata, target, log=None):
 def check(metadata, running=None, log=None):
     target = remote_revision(metadata, log)
     running = running or metadata["commit"]
+    # A switch to a built revision that did not finish (the helper killed
+    # between the window's program and the service's): not current, whatever
+    # the window says, until an update finishes it.
+    if switch_path(metadata).exists():
+        validate_checkout(metadata, target, log)
+        return {"state": "available", "revision": target, "available": True}
     # A developer may be working on a branch or with unsaved changes. No
     # notification is needed if the running binary already is current.
     if running == target:
@@ -107,10 +113,12 @@ def check(metadata, running=None, log=None):
 
 
 # What bin/build makes that the installation runs: the programs, the
-# licenses of what they link, and each plugin's native QML module.
-OUTPUTS = ["app/build/pinhole", "app/build/THIRD-PARTY-NOTICES.txt", "core/target/release/pinholed",
+# licenses of what they link, and each plugin's native QML module. The
+# window's program last: the revision it says is the one an update checks.
+OUTPUTS = ["app/build/THIRD-PARTY-NOTICES.txt", "core/target/release/pinholed",
            "plugins/series/finder/target/release/pinhole-series",
            "plugins/send/sender/target/release/pinhole-send"]
+WINDOW = "app/build/pinhole"
 
 
 def build_tree(checkout):
@@ -155,9 +163,11 @@ def apply(metadata, target, log):
     _, head = validate_checkout(metadata, target, log)
     built = [output for output in OUTPUTS if (tree / output).exists()]
     built += [str(path.relative_to(tree)) for path in sorted(tree.glob("plugins/*/qml/**/*")) if path.is_file()]
+    built += [WINDOW]
     # Its programs copied beside the checkout's first, so that the source
     # and the programs change together, the moment the checkout moves.
     staged = []
+    switch = switch_path(metadata)
     try:
         for output in built:
             path = checkout / output
@@ -165,6 +175,12 @@ def apply(metadata, target, log):
             temporary = path.with_name(path.name + ".update")
             shutil.copy2(tree / output, temporary)
             staged.append((temporary, path))
+        # From here until the installation is linked, a switch under way:
+        # stopped part way, the next check offers the update again, which
+        # builds nothing new and does it all again (every step is one that
+        # can be done twice).
+        switch.parent.mkdir(parents=True, exist_ok=True)
+        write_job(switch, {"revision": target})
         if head != target:
             git("merge", "--ff-only", target, cwd=checkout, log=log)
         for temporary, path in staged:
@@ -179,6 +195,7 @@ def apply(metadata, target, log):
                             cwd=checkout, env=env, stdout=log, stderr=log)
     if result.returncode:
         raise UpdateError("build")
+    switch.unlink(missing_ok=True)
     return Path(metadata["prefix"]).resolve() / "share/pinhole/update.json"
 
 
@@ -229,6 +246,11 @@ def restart(metadata, pid, args):
             except (OSError, IndexError):
                 continue
     os.execv(str(launcher), [str(launcher), *args])
+
+
+def switch_path(metadata):
+    key = hashlib.sha256(os.fsencode(developer_checkout(metadata))).hexdigest()[:16]
+    return state_directory() / ("update-" + key + ".switch")
 
 
 def job_path(metadata):

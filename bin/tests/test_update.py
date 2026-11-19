@@ -124,6 +124,25 @@ for output in ["app/build/pinhole", "core/target/release/pinholed", "plugins/inf
         self.assertEqual((self.root / "prefix/built-apart").read_text(), "1")
         self.assertEqual(list(self.source.glob("**/*.update")), [])
 
+    def test_a_switch_stopped_part_way_is_offered_again_and_finished(self):
+        self.binary(self.metadata["commit"])
+        target = self.newer()
+        replace = Path.replace
+        def stopped(path, other):
+            if Path(other).name == "pinholed":
+                raise KeyboardInterrupt("killed between the programs")
+            return replace(path, other)
+        with patch.object(Path, "replace", stopped), self.assertRaises(KeyboardInterrupt):
+            self.apply(target)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.source), target)
+        self.assertNotEqual((self.source / "app/build/pinhole").read_text(), "built two\n")
+        # Whatever the window says it runs, not current until it is done.
+        self.assertEqual(update.check(self.metadata, running=target)["state"], "available")
+        self.apply(target)
+        for output in ["app/build/pinhole", "core/target/release/pinholed"]:
+            self.assertEqual((self.source / output).read_text(), "built two\n")
+        self.assertEqual(update.check(self.metadata, running=target)["state"], "current")
+
     def test_the_build_tree_is_kept_for_the_next_update(self):
         self.apply(self.newer())
         tree = update.build_tree(self.source.resolve())
