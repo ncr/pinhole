@@ -265,11 +265,10 @@ int main(int argc, char *argv[]) {
     plugins.setFavourites(&favourites);
     // An update switches the checkout's plugins with its programs, and the
     // windows restart after: none of them loaded again by the binary from
-    // before, in any window, while the switch is under way, nor after one
-    // that failed part way (its marker stays), nor in the window that made
-    // it while it waits for its restart.
+    // before, in any window, once a switch has begun (finished, failed part
+    // way or under way), nor in the window that started it, until restarted.
     const auto holdForUpdate = [&updater, &plugins] {
-        plugins.holdReloads(updater.switching() || updater.state() == QLatin1String("updating")
+        plugins.holdReloads(updater.switched() || updater.state() == QLatin1String("updating")
                             || updater.state() == QLatin1String("ready"));
     };
     QObject::connect(&updater, &Updater::changed, &plugins, holdForUpdate);

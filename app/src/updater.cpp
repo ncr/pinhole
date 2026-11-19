@@ -104,10 +104,11 @@ QString Updater::switchMarker(const QString &checkout) {
 }
 
 void Updater::lookForSwitch() {
-    const bool switching = !m_switchMarker.isEmpty() && QFileInfo::exists(m_switchMarker);
-    if (switching == m_switching)
+    // Once seen, for good: the checkout this window's binary was built from
+    // is gone, whether the switch finished (its marker removed) or not.
+    if (m_switched || m_switchMarker.isEmpty() || !QFileInfo::exists(m_switchMarker))
         return;
-    m_switching = switching;
+    m_switched = true;
     emit changed();
 }
 

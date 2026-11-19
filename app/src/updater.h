@@ -21,10 +21,12 @@ public:
     QString error() const { return m_error; }
     QString logPath() const { return m_log; }
     bool supported() const { return !m_helper.isEmpty(); }
-    // An update of this installation's checkout is switching it (bin/update's
-    // update-<key>.switch is there), whichever window started it, or one
-    // stopped part way left it switched only in part.
-    bool switching() const { return m_switching; }
+    // An update of this installation's checkout has switched it, or is
+    // switching it, since this window started (bin/update's
+    // update-<key>.switch was there), whichever window started the update:
+    // the checkout is no longer the one this binary was built from, until
+    // the window is restarted.
+    bool switched() const { return m_switched; }
     // That marker, for a checkout: bin/update's name for it.
     static QString switchMarker(const QString &checkout);
     Q_INVOKABLE void check();
@@ -46,6 +48,6 @@ private:
     bool m_applying = false;
     QString m_switchMarker;
     QFileSystemWatcher m_stateWatcher;
-    bool m_switching = false;
+    bool m_switched = false;
     QString m_runningRevision;
 };

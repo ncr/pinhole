@@ -934,15 +934,22 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         QVERIFY(QFile::setPermissions(helper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         Updater updater;
         QVERIFY(updater.supported());
-        QVERIFY(!updater.switching());
+        QVERIFY(!updater.switched());
         const QString marker = Updater::switchMarker(checkout);
         write(marker, "{}");
-        QTRY_VERIFY(updater.switching());
-        // Left by an update that failed part way: still switching.
-        QTest::qWait(200);
-        QVERIFY(updater.switching());
+        QTRY_VERIFY(updater.switched());
+        // Finished by another window (its marker removed): this window's
+        // binary is still the one from before, until it is restarted.
         QFile::remove(marker);
-        QTRY_VERIFY(!updater.switching());
+        QTest::qWait(300);
+        QVERIFY(updater.switched());
+        // A window started after it: its binary is the new one.
+        Updater restarted;
+        QVERIFY(!restarted.switched());
+        // One started while a switch is left unfinished: switched at once.
+        write(marker, "{}");
+        Updater during;
+        QVERIFY(during.switched());
     }
 
     void updaterTracksDetachedWorkerAndRejectsMissingRestartBinary() {
