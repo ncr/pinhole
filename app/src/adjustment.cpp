@@ -158,6 +158,16 @@ void AdjustmentStore::setLibrary(const QString &dir) {
         if (QFileInfo::exists(m_file))
             m_watcher.addPath(m_file);
     }
+    // Another library's edits are never this one's: none known until its
+    // file is read (an unreadable one stays none, and is not written).
+    bool had = false;
+    {
+        std::lock_guard lock(m_mutex);
+        had = !m_all.isEmpty();
+        m_all.clear();
+    }
+    if (had)
+        emit changed();
     read();
 }
 

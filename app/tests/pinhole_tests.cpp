@@ -436,6 +436,16 @@ private slots:
         for (const QJsonObject &add : adds())
             QCOMPARE(add.value("params").toObject().value("source").toString(), QString("folder:/local"));
         QCOMPARE(adds().last().value("params").toObject().value("files").toArray(), QJsonArray{dir.path() + "/folder"});
+        // A Live Photo in it: the service's one asset is not said as one
+        // file, as its two files are said once added.
+        const QString adding = incoming.status();
+        QVERIFY(adding.startsWith("Adding the photos and videos to Local"));
+        fake.send({{"event", "adding"}, {"request", adds().last().value("id")}, {"done", 0}, {"total", 1}, {"sent", 0}, {"bytes", 10}});
+        QTest::qWait(100);
+        QCOMPARE(incoming.status(), adding);
+        fake.send({{"id", adds().last().value("id")}, {"ok", true}, {"result", QJsonObject{{"files", QJsonArray{
+            QJsonObject{{"file", "IMG_1.HEIC"}, {"files", QJsonArray{"IMG_1.HEIC", "IMG_1.MOV"}}, {"state", "added"}}}}}}});
+        QTRY_COMPARE(incoming.status(), QString("Added 2 file(s) to Local"));
         qunsetenv("PINHOLE_SOCKET");
     }
 
@@ -5537,6 +5547,24 @@ private slots:
             QVERIFY(!store.set({{"b", turned}}));
             QCOMPARE(read(file), QString("{ not json"));
             write(file, kept.toUtf8());
+
+            // Another library, whose file cannot be read: none of this
+            // one's edits carried over to its photos of the same ids, and
+            // nothing written.
+            QTemporaryDir otherRoot;
+            const QString elsewhere = otherRoot.path() + "/folder/b";
+            QVERIFY(QDir().mkpath(elsewhere));
+            const QString otherFile = AdjustmentStore::fileFor(elsewhere);
+            write(otherFile, "{ not json");
+            QCOMPARE(store.of("a"), turned);
+            store.setLibrary(elsewhere);
+            QCOMPARE(store.of("a"), Adjustment());
+            QVERIFY(store.snapshot().isEmpty());
+            QVERIFY(!store.set({{"a", turned.turned(1)}}));
+            QCOMPARE(read(otherFile), QString("{ not json"));
+            QFile::remove(otherFile);
+            store.setLibrary(bench.dir.path());
+            QCOMPARE(store.of("a"), turned);
         }
         Library library;
         QString error;
