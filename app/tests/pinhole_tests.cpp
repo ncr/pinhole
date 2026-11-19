@@ -5468,6 +5468,25 @@ private slots:
         QVERIFY(store.set({{"a", turned}}));
         QVERIFY(QFileInfo::exists(AdjustmentStore::fileFor(bench.dir.path())));
         QCOMPARE(AdjustmentStore::load(bench.dir.path()).value("a"), turned);
+        // Another window's, written before this one heard of it: both kept.
+        {
+            AdjustmentStore other;
+            other.setLibrary(bench.dir.path());
+            QVERIFY(other.set({{"c", turned}}));
+            QVERIFY(store.set({{"b", turned}}));
+            const Adjustments both = AdjustmentStore::load(bench.dir.path());
+            QCOMPARE(both.value("a"), turned);
+            QCOMPARE(both.value("b"), turned);
+            QCOMPARE(both.value("c"), turned);
+            QVERIFY(store.set({{"b", Adjustment()}, {"c", Adjustment()}}));
+            // A file that is not edits is never written over as none.
+            const QString file = AdjustmentStore::fileFor(bench.dir.path());
+            const QString kept = read(file);
+            write(file, "{ not json");
+            QVERIFY(!store.set({{"b", turned}}));
+            QCOMPARE(read(file), QString("{ not json"));
+            write(file, kept.toUtf8());
+        }
         Library library;
         QString error;
         QVERIFY(library.open(bench.dir.path(), &error));
