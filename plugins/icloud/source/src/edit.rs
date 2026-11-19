@@ -73,10 +73,13 @@ pub struct Render {
 }
 
 /// The photo as edited, from its original: full size, medium, thumbnail,
-/// JPEGs at quality 92 with its colour profile, in `dir`. ImageMagick reads
-/// the HEIC upright (`-auto-orient`), then turns and crops it.
+/// JPEGs at quality 92 with its colour profile, in `dir`: a private folder
+/// the caller made for this edit alone, never one made here. ImageMagick
+/// reads the HEIC upright (`-auto-orient`), then turns and crops it.
 pub fn render(original: &Path, upright: Upright, adjustment: &Adjustment, dir: &Path) -> Result<[Render; 3]> {
-    std::fs::create_dir_all(dir)?;
+    if !std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir()) {
+        return Err(anyhow!("no folder {} to render the edit in", dir.display()));
+    }
     let (x, y, w, h) = crop_pixels(upright, adjustment);
     let full = dir.join("full.jpg");
     let status = Command::new("magick")
@@ -183,16 +186,60 @@ pub fn needs_apple(previous: &Value) -> Option<String> {
 /// A photo's recipe as its asset has it (`adjustmentSimpleDataEnc`), if
 /// it is Photos' own.
 pub fn previous_recipe(asset: &Value) -> Option<Value> {
-    if asset["fields"]["adjustmentType"]["value"] != "com.apple.photo" {
-        return None;
-    }
-    let data = base64::engine::general_purpose::STANDARD
-        .decode(asset["fields"]["adjustmentSimpleDataEnc"]["value"].as_str()?)
-        .ok()?;
-    let mut json = String::new();
-    std::io::Read::read_to_string(&mut flate2::read::DeflateDecoder::new(&data[..]), &mut json).ok()?;
-    serde_json::from_str(&json).ok()
+    existing_recipe(asset).ok().flatten()
 }
+
+/// The edit an asset has now: none for a photo never edited, Photos' own
+/// recipe for one Pinhole can carry on from, and an error for any other
+/// (another app's, or one that cannot be read), which an edit from here
+/// would lose.
+pub fn existing_recipe(asset: &Value) -> Result<Option<Value>> {
+    let fields = &asset["fields"];
+    let has = |name: &str| !fields[name]["value"].is_null();
+    if !["adjustmentType", "adjustmentSimpleDataEnc", "resJPEGFullRes"].iter().any(|n| has(n)) {
+        return Ok(None);
+    }
+    let kind = fields["adjustmentType"]["value"].as_str().unwrap_or("");
+    if kind != "com.apple.photo" {
+        return Err(anyhow!("edited elsewhere ({kind}), which an edit from here would lose: edit it there or on the iPhone"));
+    }
+    let unreadable = || anyhow!("its edit in Photos cannot be read here, and an edit from here would lose it: edit it on the iPhone");
+    let data = fields["adjustmentSimpleDataEnc"]["value"].as_str().ok_or_else(unreadable)?;
+    let data = base64::engine::general_purpose::STANDARD.decode(data).map_err(|_| unreadable())?;
+    let mut json = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::DeflateDecoder::new(&data[..]), &mut json).map_err(|_| unreadable())?;
+    let recipe: Value = serde_json::from_str(&json).map_err(|_| unreadable())?;
+    if !recipe["adjustments"].is_array() {
+        return Err(unreadable());
+    }
+    Ok(Some(recipe))
+}
+
+/// What of an asset its edit is (`fields` writes and `revert_fields` takes
+/// off): two looks at it alike are the same edit.
+fn edit_of(asset: &Value) -> Value {
+    let fields = &asset["fields"];
+    let mut edit = serde_json::Map::new();
+    for name in EDIT_FIELDS.iter().copied().chain(["orientation"]) {
+        edit.insert(name.to_owned(), fields[name]["value"].clone());
+    }
+    for prefix in RENDITIONS {
+        // A rendition's own value holds a link that changes from one look
+        // to the next; its fingerprint is the file.
+        for part in ["Width", "Height", "FileType", "FileSize", "Fingerprint"] {
+            let name = format!("{prefix}{part}");
+            edit.insert(name.clone(), fields[&name]["value"].clone());
+        }
+        edit.insert(format!("{prefix}Res"), fields[format!("{prefix}Res")]["value"]["fileChecksum"].clone());
+    }
+    Value::Object(edit)
+}
+
+/// The asset's fields an edit is written in, besides its renditions.
+const EDIT_FIELDS: [&str; 8] = ["adjustmentType", "adjustmentCreatorCode", "adjustmentCompoundVersion", "adjustmentSimpleDataEnc",
+                                "adjustmentTimestampEnc", "adjustmentRenderType", "adjustedMediaMetaDataEnc", "adjustedMediaMetaDataStrType"];
+/// The edit's renditions: full size, medium, thumbnail.
+const RENDITIONS: [&str; 3] = ["resJPEGFull", "resJPEGMed", "resJPEGThumb"];
 
 fn deflate(data: &Value) -> Result<Vec<u8>> {
     let mut deflated = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
@@ -256,11 +303,10 @@ pub fn fields(
 pub fn revert_fields(original_orientation: i64) -> Value {
     // Shown again as the original is turned.
     let mut fields = json!({"orientation": {"value": original_orientation}});
-    for name in ["adjustmentType", "adjustmentCreatorCode", "adjustmentCompoundVersion", "adjustmentSimpleDataEnc",
-                 "adjustmentTimestampEnc", "adjustmentRenderType", "adjustedMediaMetaDataEnc", "adjustedMediaMetaDataStrType"] {
+    for name in EDIT_FIELDS {
         fields[name] = json!({"value": null});
     }
-    for prefix in ["resJPEGFull", "resJPEGMed", "resJPEGThumb"] {
+    for prefix in RENDITIONS {
         for part in ["Res", "Width", "Height", "FileType", "FileSize", "Fingerprint"] {
             fields[format!("{prefix}{part}")] = json!({"value": null});
         }
@@ -286,15 +332,17 @@ pub fn upright_of(original: &Path) -> Result<Upright> {
 
 /// The edit written to the asset `record` (its change tag as last read):
 /// rendered from `original` in `dir`, the three renders sent, the recipe
-/// and them put on the asset in one modify. Changed since on a device, it
-/// is looked up for its tag now and written once more. Its new tag.
+/// and them put on the asset in one modify. Changed since on a device
+/// (another change tag), it is written once more only if its edit is still
+/// the one this was made from: an edit made meanwhile elsewhere is never
+/// written over. Its new tag.
 pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, original: &Path, adjustment: &Adjustment,
              dir: &Path) -> Result<String> {
     // What the photo's recipe has now (the camera's style, an earlier
     // crop), all its fields asked for.
-    let found = client.lookup_all(&[record])?;
-    let asset = found["records"].as_array().into_iter().flatten().find(|r| r["recordName"] == record).cloned().unwrap_or_default();
-    let previous = previous_recipe(&asset);
+    let asset = look_up_asset(client, record)?;
+    // Only an edit Pinhole can carry on from is written over.
+    let previous = existing_recipe(&asset)?;
     if let Some(effect) = previous.as_ref().and_then(needs_apple) {
         return Err(anyhow!("edited with {effect}, which only Photos renders: edit it on the iPhone"));
     }
@@ -335,13 +383,28 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
     if first["serverErrorCode"] != "CONFLICT" {
         return Err(anyhow!("iCloud would not take the edit: {first}"));
     }
-    let now = client.lookup(&[record])?;
-    let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
+    // Changed since: something else (a favourite) is let be; another edit
+    // is not written over.
+    let now = look_up_asset(client, record)?;
+    if edit_of(&now) != edit_of(&asset) {
+        return Err(anyhow!("the photo was edited elsewhere meanwhile, so this edit was not written: look at it again"));
+    }
+    let tag = now["recordChangeTag"].as_str().map(str::to_owned);
     let answer = client.modify(&[(record, tag.as_deref())], &fields)?;
     let first = &answer["records"][0];
     match first["recordChangeTag"].as_str().filter(|_| first["serverErrorCode"].is_null()) {
         Some(tag) => Ok(tag.to_owned()),
         None => Err(anyhow!("iCloud would not take the edit: {first}")),
+    }
+}
+
+/// The asset's record as iCloud has it now, all its fields.
+fn look_up_asset(client: &mut PhotosClient, record: &str) -> Result<Value> {
+    let found = client.lookup_all(&[record])?;
+    let asset = found["records"].as_array().into_iter().flatten().find(|r| r["recordName"] == record).cloned();
+    match asset {
+        Some(asset) if asset["serverErrorCode"].is_null() && asset["fields"].is_object() => Ok(asset),
+        _ => Err(anyhow!("iCloud has no record of {record}")),
     }
 }
 
@@ -561,6 +624,137 @@ mod tests {
         assert_eq!(data["versionInfo"]["platform"], "iOS");
         assert_eq!(needs_apple(&previous), None);
         assert_eq!(needs_apple(&json!({"adjustments": [{"identifier": "DepthEffect"}]})).as_deref(), Some("DepthEffect"));
+    }
+
+    #[test]
+    fn an_edit_made_elsewhere_or_unreadable_is_never_written_over() {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let photos = |data: &str| json!({"fields": {"adjustmentType": {"value": "com.apple.photo"}, "adjustmentSimpleDataEnc": {"value": data}}});
+        // Never edited.
+        assert_eq!(existing_recipe(&json!({"fields": {"isFavorite": {"value": 1}}})).unwrap(), None);
+        // Photos' own, readable.
+        let recipe = json!({"adjustments": [{"identifier": "Crop"}]});
+        assert_eq!(existing_recipe(&photos(&b64.encode(deflate(&recipe).unwrap()))).unwrap(), Some(recipe));
+        // Another app's, Photos' unreadable, Photos' without its recipe,
+        // or renditions without a recipe: none of them is lost.
+        assert!(existing_recipe(&json!({"fields": {"adjustmentType": {"value": "com.example.editor"}}})).is_err());
+        assert!(existing_recipe(&photos("not base64!")).is_err());
+        assert!(existing_recipe(&photos(&b64.encode(b"not deflated"))).is_err());
+        assert!(existing_recipe(&json!({"fields": {"adjustmentType": {"value": "com.apple.photo"}}})).is_err());
+        assert!(existing_recipe(&json!({"fields": {"resJPEGFullRes": {"value": {"fileChecksum": "c"}}}})).is_err());
+        assert_eq!(previous_recipe(&json!({"fields": {"adjustmentType": {"value": "com.example.editor"}}})), None);
+    }
+
+    #[test]
+    fn a_render_goes_only_into_the_folder_it_is_given() {
+        let dir = std::env::temp_dir().join(format!("pinhole-edit-none-{}", std::process::id()));
+        let e = render(Path::new("/nonexistent.heic"), Upright { width: 4, height: 3 },
+                       &Adjustment { turn: 1, crop: [0.0, 0.0, 1.0, 1.0] }, &dir).unwrap_err();
+        assert!(format!("{e}").contains("no folder"), "{e}");
+        assert!(!dir.exists());
+    }
+
+    /// CloudKit as far as one asset's edit goes: its fields and change tag,
+    /// modified only with the tag it has now; `meanwhile` is what another
+    /// device changes in it just before the first modify gets there.
+    struct FakeAsset {
+        fields: Value,
+        tag: u32,
+        meanwhile: Option<Value>,
+        modifies: u32,
+    }
+
+    fn edit_client(fake: std::sync::Arc<std::sync::Mutex<FakeAsset>>) -> PhotosClient {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let (mut line, mut length) = (String::new(), 0);
+                reader.read_line(&mut line).unwrap();
+                let path = line.split(' ').nth(1).unwrap_or_default().split('?').next().unwrap_or_default().to_owned();
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                let mut fake = fake.lock().unwrap();
+                let record = |f: &FakeAsset| json!({"recordName": "A", "recordType": "CPLAsset", "recordChangeTag": format!("t{}", f.tag), "fields": f.fields});
+                let answer = if path.ends_with("records/modify") {
+                    fake.modifies += 1;
+                    if let Some(change) = fake.meanwhile.take() {
+                        for (k, v) in change.as_object().unwrap() {
+                            fake.fields[k] = v.clone();
+                        }
+                        fake.tag += 1;
+                    }
+                    let r = &body["operations"][0]["record"];
+                    if r["recordChangeTag"] != format!("t{}", fake.tag) {
+                        json!({"records": [{"recordName": "A", "serverErrorCode": "CONFLICT"}]})
+                    } else {
+                        for (k, v) in r["fields"].as_object().unwrap() {
+                            fake.fields[k] = v.clone();
+                        }
+                        fake.tag += 1;
+                        json!({"records": [record(&fake)]})
+                    }
+                } else {
+                    json!({"records": [record(&fake)]})
+                };
+                let answer = answer.to_string();
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len());
+            }
+        });
+        let session: crate::session::Session = serde_json::from_value(json!({
+            "apple_id": "a@example.com", "dsid": "1", "services": {"ckdatabasews": format!("http://127.0.0.1:{port}")},
+            "params": {}, "headers": {}, "cookies": [], "validated_at": ""
+        }))
+        .unwrap();
+        PhotosClient::new(Box::new(crate::auth::FixedSession(session))).unwrap()
+    }
+
+    #[test]
+    fn a_change_made_meanwhile_is_written_over_only_if_it_is_not_an_edit() {
+        use std::sync::{Arc, Mutex};
+        let whole = Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] };
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pinholes = json!({"adjustmentType": {"value": "com.apple.photo"},
+            "adjustmentSimpleDataEnc": {"value": b64.encode(deflate(&json!({"adjustments": [{"identifier": "Crop"}]})).unwrap())},
+            "orientation": {"value": 1}});
+        // Made a favourite on the iPhone meanwhile: the edit (taken back
+        // here) is written again with the tag now.
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1,
+            meanwhile: Some(json!({"isFavorite": {"value": 1}})), modifies: 0 }));
+        let tag = write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
+        let f = fake.lock().unwrap();
+        assert_eq!((tag.as_str(), f.modifies), ("t3", 2));
+        assert!(f.fields["adjustmentType"]["value"].is_null() && f.fields["isFavorite"]["value"] == 1);
+        drop(f);
+        // Edited on the iPhone meanwhile: that edit stays, and this says so.
+        let theirs = json!({"adjustmentSimpleDataEnc": {"value": "theirs"}, "adjustmentTimestampEnc": {"value": "now"}});
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1, meanwhile: Some(theirs), modifies: 0 }));
+        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).unwrap_err();
+        assert!(format!("{e}").contains("edited elsewhere"), "{e}");
+        let f = fake.lock().unwrap();
+        assert_eq!((f.modifies, f.fields["adjustmentSimpleDataEnc"]["value"].as_str()), (1, Some("theirs")));
+        drop(f);
+        // Another app's edit is not touched at all.
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: json!({"adjustmentType": {"value": "com.example.editor"}}),
+            tag: 1, meanwhile: None, modifies: 0 }));
+        assert!(write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).is_err());
+        assert_eq!(fake.lock().unwrap().modifies, 0);
     }
 
     #[test]
