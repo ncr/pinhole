@@ -438,6 +438,24 @@ private slots:
         qunsetenv("PINHOLE_SOCKET");
     }
 
+    // A service that takes the line and never says hello: what was asked
+    // is told it failed, not left waiting.
+    void aServiceThatNeverSaysHelloFailsWhatWaits() {
+        QTemporaryDir dir;
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        QString failed;
+        service.call(QStringLiteral("status"), {}, [&](bool ok, const QJsonObject &, const QString &code) {
+            failed = ok ? QStringLiteral("ok") : code;
+        });
+        QTRY_COMPARE_WITH_TIMEOUT(failed, QString("unavailable"), 15000);
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void texturesFollowEveryReloadBetweenFrames() {
         // 0..5; the photo at 1 goes, then the one now at 3 (once 4).
         const std::vector<int> first{0, -1, 1, 2, 3, 4};

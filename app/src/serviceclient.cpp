@@ -23,6 +23,18 @@ ServiceClient::ServiceClient(const QString &library, QObject *parent)
         // What was asked meanwhile goes once it has said its protocol.
         m_greeted = false;
         setHealth(QStringLiteral("fine"));
+        m_hello.start();
+    });
+    // A service that took the line and never says hello is stuck: what
+    // waits is told so, and the line tried again, rather than waiting on.
+    m_hello.setSingleShot(true);
+    m_hello.setInterval(10000);
+    connect(&m_hello, &QTimer::timeout, this, [this] {
+        if (m_greeted || !connected())
+            return;
+        failWaiting(QStringLiteral("unavailable"));
+        m_socket.abort();
+        m_retry.start();
     });
     connect(&m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
         // Nothing listening: start the service once, then keep trying for a
@@ -206,6 +218,7 @@ void ServiceClient::readReplies() {
             // Its first line says its protocol; one from before there was a
             // hello speaks 0, which no window of now does.
             m_greeted = true;
+            m_hello.stop();
             const int protocol = event == QLatin1String("hello") ? reply.value("protocol").toInt() : 0;
             if (protocol != kProtocol) {
                 qWarning("pinhole: the service speaks protocol %d, this window %d", protocol, kProtocol);
