@@ -752,12 +752,29 @@ impl Shared {
     }
 }
 
-/// The part files of a file being got or made (storage::is_part): its
-/// download's `<name>.part`, and what a program making it writes,
-/// `<name>.part.<ext>` and beside it `<name>.part.trf`.
+/// What this service's part files are named by (`part_of`): its own, so
+/// that another pinholed sharing the cache (a window's, of a library
+/// given) never writes, publishes nor removes one of this one's.
+fn part_tag() -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| format!("{}-{:08x}", std::process::id(), rand::random::<u32>()))
+}
+
+/// The part file a file is got or made in (storage::is_part), this
+/// service's: `<name>.<tag>.part` for a download, and for a program making
+/// it `<name>.<tag>.part.<ext>` (`extension`), which may write
+/// `<name>.<tag>.part.trf` beside it.
+fn part_of(path: &Path, extension: Option<&str>) -> PathBuf {
+    match extension {
+        Some(extension) => path.with_extension(format!("{}.part.{extension}", part_tag())),
+        None => path.with_extension(format!("{}.part", part_tag())),
+    }
+}
+
+/// The part files of a file being got or made by this service (`part_of`).
 fn remove_parts(path: &Path) {
     let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return };
-    let part = format!("{stem}.part");
+    let part = format!("{stem}.{}.part", part_tag());
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -1751,7 +1768,7 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, kind: &str, reply: R
                 std::fs::create_dir_all(dir).map_err(|e| ("unavailable".to_owned(), e.to_string()))?;
             }
             // Made beside the target and renamed: a reader never sees half a file.
-            let part = path.with_extension(format!("part.{extension}"));
+            let part = part_of(&path, Some(extension));
             let result = match &maker {
                 Some(maker) => run_maker(maker, &source, &part),
                 None => crate::jpeg::make(&source, &part),
@@ -1949,13 +1966,14 @@ fn download(shared: &Shared, job: &Job) -> std::result::Result<(), FetchError> {
         std::fs::create_dir_all(dir).map_err(|e| FetchError::Failed(e.into()))?;
     }
     // Written beside the target and renamed: a reader never sees half a file.
-    let part = job.path.with_extension("part");
+    let part = part_of(&job.path, None);
     let mut stream = None;
     // A panic in the source's reader fails the download as an error would:
     // whoever plays it as it comes hears it has ended.
     let result = catch_unwind(AssertUnwindSafe(|| -> std::io::Result<()> {
-        // Readable too: a stream serves from this same handle.
-        let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&part)?;
+        // Readable too: a stream serves from this same handle. Made new:
+        // never one something else is writing.
+        let mut file = std::fs::File::options().read(true).write(true).create_new(true).mode(0o600).open(&part)?;
         if job.stored.want.streamable() {
             let (source, ticket) = (source.clone(), ticket.clone());
             let ranged: crate::stream::Ranged = Box::new(move |start, end| {
@@ -2316,6 +2334,24 @@ fn owe_thumbs(shared: &Shared, owed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_service_removes_its_own_part_files_alone() {
+        let dir = std::env::temp_dir().join(format!("pinhole-parts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("k1.mov");
+        let ours = [part_of(&path, None), part_of(&path, Some("mp4")), part_of(&path, None).with_extension("part.trf")];
+        let theirs = [dir.join("k1.1-0000abcd.part"), dir.join("k1.1-0000abcd.part.mp4")];
+        for file in ours.iter().chain(&theirs) {
+            assert!(crate::storage::is_part(file), "{}", file.display());
+            std::fs::write(file, b"x").unwrap();
+        }
+        remove_parts(&path);
+        assert!(ours.iter().all(|f| !f.exists()));
+        assert!(theirs.iter().all(|f| f.exists()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A folder as the rounds see it: its id, and nothing in it.
     struct Pictures;
