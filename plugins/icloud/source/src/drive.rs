@@ -39,7 +39,8 @@ fn unsent(e: &reqwest::Error) -> bool {
 
 pub struct Drive {
     http: Client,
-    /// The folder once found or made: its drivewsid and docwsid.
+    /// The folder as this round's `list` judged it (or `write` made it):
+    /// its drivewsid and docwsid.
     folder: Mutex<Option<(String, String)>>,
     /// Its files as last listed, by name: their docwsid.
     files: Mutex<HashMap<String, String>>,
@@ -160,18 +161,17 @@ impl Drive {
         Ok(folder.clone())
     }
 
-    /// The folder, found at the top of iCloud Drive, or made there
-    /// (`make`, and marked as made): None if there is none and it is not to
-    /// be made. A folder of that name is Pinhole's only if nobody else
-    /// shares it and Pinhole's mark is in it; any other is an error, and
-    /// nothing is read from or written to it.
-    fn folder(&self, session: &Session, make: bool) -> Result<Option<(String, String)>> {
-        if let Some(found) = self.folder.lock().unwrap().clone() {
-            return Ok(Some(found));
-        }
+    /// The folder at the top of iCloud Drive, judged afresh, or made there
+    /// (`make`) and marked: its ids and its items, None if there is none
+    /// and it is not to be made. A folder of that name is Pinhole's only if
+    /// nobody else shares it and Pinhole's mark is in it as Pinhole writes
+    /// it, or it is empty (then marked: one Pinhole made, its mark not sent
+    /// yet); any other is an error, and nothing is read from or written to
+    /// it.
+    fn find(&self, session: &Session, make: bool) -> Result<Option<(String, String, Vec<Value>)>> {
         let ids = |item: &Value| Some((item["drivewsid"].as_str()?.to_owned(), item["docwsid"].as_str()?.to_owned()));
         let top = self.details(session, ROOT)?;
-        let found = match top["items"].as_array().into_iter().flatten().find(|i| i["name"] == FOLDER && i["type"] == "FOLDER") {
+        match top["items"].as_array().into_iter().flatten().find(|i| i["name"] == FOLDER && i["type"] == "FOLDER") {
             Some(item) => {
                 let (drivewsid, docwsid) = ids(item).ok_or_else(|| anyhow!("iCloud Drive's {FOLDER} folder has no ids"))?;
                 let folder = self.details(session, &drivewsid)?;
@@ -179,10 +179,15 @@ impl Drive {
                 if shared(item) || shared(&folder) {
                     return Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has"));
                 }
-                if !items.iter().any(|i| full_name(i).as_deref() == Some(MARK) && i["type"] == "FILE") {
-                    return Err(anyhow!("iCloud Drive's {FOLDER} folder is not one Pinhole made: rename it, and Pinhole makes its own"));
+                let mark = items.iter().find(|i| full_name(i).as_deref() == Some(MARK) && i["type"] == "FILE");
+                match mark.and_then(|m| m["docwsid"].as_str()) {
+                    Some(mark) if self.download(session, mark, MARK)?.starts_with(MARK_TEXT.as_bytes()) => {}
+                    None if items.is_empty() => {
+                        self.put(session, &docwsid, MARK, MARK_TEXT.as_bytes(), None)?;
+                    }
+                    _ => return Err(anyhow!("iCloud Drive's {FOLDER} folder is not one Pinhole made: rename it, and Pinhole makes its own")),
                 }
-                Some((drivewsid, docwsid))
+                Ok(Some((drivewsid, docwsid, items)))
             }
             None if make => {
                 let client = session.params.get("clientId").cloned().unwrap_or_else(pinhole_core::add::uuid);
@@ -190,34 +195,21 @@ impl Drive {
                     "destinationDrivewsId": ROOT,
                     "folders": [{"clientId": client, "name": FOLDER}],
                 }))?;
-                let made = ids(&r["folders"][0]).ok_or_else(|| anyhow!("iCloud Drive made no {FOLDER} folder: {r}"))?;
-                self.put(session, &made.1, MARK, MARK_TEXT.as_bytes(), None)?;
-                Some(made)
+                let (drivewsid, docwsid) = ids(&r["folders"][0]).ok_or_else(|| anyhow!("iCloud Drive made no {FOLDER} folder: {r}"))?;
+                self.put(session, &docwsid, MARK, MARK_TEXT.as_bytes(), None)?;
+                Ok(Some((drivewsid, docwsid, Vec::new())))
             }
-            None => None,
-        };
-        *self.folder.lock().unwrap() = found.clone();
-        Ok(found)
+            None => Ok(None),
+        }
     }
 
     /// The files there now, by name and version (its etag, which changes
-    /// as the file does).
+    /// as the file does). The folder is judged again first, every round:
+    /// one shared since, or its mark gone, is used no more.
     pub fn list(&self, session: &Session) -> Result<Vec<Carried>> {
-        let Some((folder, _)) = self.folder(session, false)? else { return Ok(Vec::new()) };
-        let details = self.details(session, &folder).and_then(|details| match shared(&details) {
-            // Shared since it was found: nothing more read from it.
-            true => Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has")),
-            false => Ok(details),
-        });
-        let items = match details {
-            Ok(details) => details["items"].as_array().cloned().unwrap_or_default(),
-            // Gone (moved or deleted in Finder), or shared: looked for and
-            // judged again next time.
-            Err(e) => {
-                *self.folder.lock().unwrap() = None;
-                return Err(e);
-            }
-        };
+        *self.folder.lock().unwrap() = None;
+        let Some((drivewsid, docwsid, items)) = self.find(session, false)? else { return Ok(Vec::new()) };
+        *self.folder.lock().unwrap() = Some((drivewsid, docwsid));
         let mut files = self.files.lock().unwrap();
         files.clear();
         let mut carried = Vec::new();
@@ -234,16 +226,27 @@ impl Drive {
 
     pub fn read(&self, session: &Session, name: &str) -> Result<Vec<u8>> {
         let id = self.files.lock().unwrap().get(name).cloned().ok_or_else(|| anyhow!("no {name} in iCloud Drive's {FOLDER}"))?;
-        let bytes = self.send(session, Method::GET, Some("docws"), &format!("/ws/{ZONE}/download/by_id"), &[("document_id", &id)], None)?;
+        self.download(session, &id, name)
+    }
+
+    /// The document `id` (`name` in the folder).
+    fn download(&self, session: &Session, id: &str, name: &str) -> Result<Vec<u8>> {
+        let bytes = self.send(session, Method::GET, Some("docws"), &format!("/ws/{ZONE}/download/by_id"), &[("document_id", id)], None)?;
         let r: Value = serde_json::from_slice(&bytes).context("iCloud Drive's download answered with something other than JSON")?;
         let link = r["data_token"]["url"].as_str().ok_or_else(|| anyhow!("iCloud Drive gave no link to {name}"))?;
         self.send(session, Method::GET, None, link, &[], None)
     }
 
     /// This computer's file, made in the folder (and the folder with it),
-    /// or written over where it is.
+    /// or written over where it is: the folder as this round's `list`
+    /// judged it, else found and judged now.
     pub fn write(&self, session: &Session, name: &str, bytes: &[u8]) -> Result<()> {
-        let (_, folder) = self.folder(session, true)?.expect("made");
+        let judged = self.folder.lock().unwrap().clone();
+        let (drivewsid, folder) = match judged {
+            Some(found) => found,
+            None => self.find(session, true)?.map(|(d, f, _)| (d, f)).expect("made"),
+        };
+        *self.folder.lock().unwrap() = Some((drivewsid, folder.clone()));
         let existing = self.files.lock().unwrap().get(name).cloned();
         let id = self.put(session, &folder, name, bytes, existing.as_deref())?;
         if let Some(id) = id {
@@ -502,7 +505,8 @@ mod tests {
     fn there(files: &[(&str, &str)]) -> Arc<Mutex<FakeDrive>> {
         let mut fake = FakeDrive { folders: vec![(FOLDER.to_owned(), "PIN".to_owned())], ..Default::default() };
         for (n, (name, ext)) in files.iter().enumerate() {
-            fake.files.insert(format!("OLD{n}"), (name.to_string(), ext.to_string(), 1, b"{}".to_vec()));
+            let bytes = if format!("{name}.{ext}") == MARK { MARK_TEXT.as_bytes().to_vec() } else { b"{}".to_vec() };
+            fake.files.insert(format!("OLD{n}"), (name.to_string(), ext.to_string(), 1, bytes));
         }
         Arc::new(Mutex::new(fake))
     }
@@ -529,8 +533,8 @@ mod tests {
         let carried = Drive::default().list(&session).unwrap();
         assert_eq!(carried.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["fixer-0123456789cd.json"]);
 
-        // Unmarked, whatever it holds: neither read nor written.
-        for files in [&[("Tax return", "pdf")][..], &[("fixer-0123456789cd", "json")], &[]] {
+        // Unmarked, holding anything: neither read nor written.
+        for files in [&[("Tax return", "pdf")][..], &[("fixer-0123456789cd", "json")]] {
             let fake = there(files);
             let session = serve(fake.clone());
             let e = Drive::default().list(&session).unwrap_err();
@@ -539,6 +543,29 @@ mod tests {
             assert!(!names(&fake).contains(&MARK.to_owned()));
             assert!(!fake.lock().unwrap().requests.iter().any(|p| p.contains("upload") || p.contains("download")));
         }
+        // A Pinhole.txt of someone else's: neither.
+        let fake = there(&[("fixer-0123456789cd", "json")]);
+        fake.lock().unwrap().files.insert("THEIRS".into(), ("Pinhole".into(), "txt".into(), 1, b"my notes".to_vec()));
+        let session = serve(fake.clone());
+        assert!(Drive::default().list(&session).is_err());
+        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
+        assert!(!fake.lock().unwrap().requests.iter().any(|p| p.contains("upload")));
+        // Empty (Pinhole's own, its mark not sent when it was made): marked
+        // and used.
+        let fake = there(&[]);
+        let session = serve(fake.clone());
+        assert!(Drive::default().list(&session).unwrap().is_empty());
+        assert_eq!(names(&fake), [MARK]);
+
+        // Its mark taken away after a round: written to no more.
+        let fake = there(&[("Pinhole", "txt"), ("fixer-0123456789cd", "json")]);
+        let session = serve(fake.clone());
+        let drive = Drive::default();
+        drive.list(&session).unwrap();
+        drive.write(&session, "spawner-ab12.json", b"{}").unwrap();
+        fake.lock().unwrap().files.retain(|_, f| f.0 != "Pinhole");
+        assert!(drive.list(&session).is_err());
+        assert!(drive.write(&session, "spawner-ab12.json", b"{}").is_err());
 
         // Shared with others, even marked: neither read nor written.
         let fake = there(&[("Pinhole", "txt"), ("fixer-0123456789cd", "json")]);
@@ -557,6 +584,7 @@ mod tests {
         drive.list(&session).unwrap();
         fake.lock().unwrap().shared = true;
         assert!(drive.list(&session).is_err());
+        assert!(drive.write(&session, "spawner-ab12.json", b"{}").is_err());
     }
 
     #[test]
