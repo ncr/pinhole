@@ -18,7 +18,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use url::Url;
 
-use pinhole_core::synced::{is_computers, Carried, SYNCED_MAX};
+use pinhole_core::synced::{is_computers, Carried, TooBig, SYNCED_MAX};
 use crate::cloudkit::session_headers;
 use crate::session::Session;
 
@@ -122,7 +122,7 @@ impl Drive {
         let status = response.status();
         // Nothing Pinhole keeps there is bigger than a computer's file may
         // be: anything over that is not read into memory, past what says so.
-        let too_big = || anyhow!("{what} answered with more than {} MB", SYNCED_MAX >> 20);
+        let too_big = || anyhow::Error::new(TooBig(what.clone()));
         if response.content_length().is_some_and(|n| n > SYNCED_MAX) {
             return Err(too_big());
         }
@@ -597,7 +597,7 @@ mod tests {
         let link = format!("http://127.0.0.1:{port}/file");
         for _ in 0..2 {
             let e = Drive::default().send(&session, Method::GET, None, &link, &[], None).unwrap_err();
-            assert!(format!("{e:#}").contains("more than 64 MB"), "{e:#}");
+            assert!(e.downcast_ref::<TooBig>().is_some() && format!("{e:#}").contains("more than 64 MB"), "{e:#}");
         }
     }
 

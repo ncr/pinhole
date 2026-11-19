@@ -330,7 +330,7 @@ pub struct Carried {
 pub trait Carrier: Send + Sync {
     /// The files there now, none if there is no folder yet.
     fn list(&self) -> Result<Vec<Carried>>;
-    /// One of them, as `list` last named it; an error rather than more
+    /// One of them, as `list` last named it; `TooBig` rather than more
     /// than `SYNCED_MAX` bytes of it.
     fn read(&self, name: &str) -> Result<Vec<u8>>;
     /// This computer's, made or written over.
@@ -399,6 +399,19 @@ pub fn is_computers(name: &str) -> bool {
 /// faces named are a few megabytes.
 pub const SYNCED_MAX: u64 = 64 << 20;
 
+/// A carrier's `read` of a file bigger than `SYNCED_MAX`, stopped there:
+/// that version of it is never got again.
+#[derive(Debug)]
+pub struct TooBig(pub String);
+
+impl std::fmt::Display for TooBig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}, more than {} MB", self.0, SYNCED_MAX >> 20)
+    }
+}
+
+impl std::error::Error for TooBig {}
+
 /// How a round of carrying went.
 #[derive(Debug, Default, PartialEq)]
 pub struct Carrying {
@@ -427,6 +440,12 @@ pub fn carry(dir: &Path, carrier: &dyn Carrier, device: &str, computer: &str) ->
         // give) is tried again next round; the rest go on meanwhile.
         let bytes = match carrier.read(&file.name) {
             Ok(bytes) => bytes,
+            // Too big to be one: not got again until it changes.
+            Err(e) if e.downcast_ref::<TooBig>().is_some() => {
+                eprintln!("pinholed: synced: {} could not be read: {e:#}", file.name);
+                mark.seen.insert(file.name.clone(), file.version.clone());
+                continue;
+            }
             Err(e) => {
                 eprintln!("pinholed: synced: {} could not be got: {e:#}", file.name);
                 continue;
@@ -715,6 +734,37 @@ mod tests {
         assert_eq!(sent["plugins"]["pinhole.people"]["values"]["f3"], json!({"name": "Jan"}), "{sent}");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
+    }
+
+    /// A folder elsewhere with one file too big to be a computer's.
+    struct Huge(Elsewhere, Mutex<u32>);
+
+    impl Carrier for Huge {
+        fn list(&self) -> Result<Vec<Carried>> {
+            self.0.list()
+        }
+        fn read(&self, name: &str) -> Result<Vec<u8>> {
+            *self.1.lock().unwrap() += 1;
+            Err(TooBig(name.to_owned()).into())
+        }
+        fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+            self.0.write(name, bytes)
+        }
+    }
+
+    #[test]
+    fn a_file_too_big_is_got_once_until_it_changes() {
+        let dir = folder("huge");
+        let drive = Huge(Elsewhere::default(), Mutex::new(0));
+        drive.write("huge-0000000000ee.json", b"{}").unwrap();
+        carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
+        carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
+        assert_eq!(*drive.1.lock().unwrap(), 1);
+        // Changed: got again.
+        drive.write("huge-0000000000ee.json", b"{}").unwrap();
+        carry(&dir, &drive, "0000000000bb", "fixer").unwrap();
+        assert_eq!(*drive.1.lock().unwrap(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
