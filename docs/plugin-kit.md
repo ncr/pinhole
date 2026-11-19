@@ -206,6 +206,7 @@ Properties:
 - `string text`
 - `alias label`
 - `color textColor`
+- `int textFormat`: Plain, as UiText; Text.StyledText for a text that styles itself.
 - `bool morphing`: While true, a new text morphs from the old: what the two share at the start stays, what they share at the end slides to its new place, and only what differs between cross-fades ("24–28 July" to "25–28 July" changes the one digit). The chip's width eases to fit. A morph waits for the text to hold still a moment, and is never cut short: texts coming faster (scrolling quickly past the days, zooming out all the way in one pinch) change at once, as a counter does. Morphs cut off by the next text, or one after another, flickered.
 - `bool centred`: The text inside, centred; or from the left, the chip's right edge moving as it changes.
 - `real naturalWidth` (readonly): Omarchy's control metrics (shell.toml: control-height 28 and control-padding-x 10 at a base size of 12), with the type scale.
@@ -226,7 +227,7 @@ Functions:
 
 ## UiText
 
-Text as Omarchy sets it: its typeface, size and the theme's text colour.
+Text as Omarchy sets it: its typeface, size and the theme's text colour. Plain text: what it shows may be a photo's, a source's or a plugin's words, never markup to read; one that styles its own text says Text.StyledText.
 
 Its root is a `Text` (Qt Quick's: its properties too).
 
