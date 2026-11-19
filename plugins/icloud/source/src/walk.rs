@@ -96,8 +96,11 @@ pub fn walk(
         if rank == 0 {
             report.token = page.sync_token.clone();
         }
-        // Nothing where the library goes on: not a library that ends here.
-        if page.records == 0 && rank + (per_page as u64) < total {
+        // Nothing where the library goes on, or at its very start (a
+        // library iCloud counts photos in): not a library that ends here.
+        // Only the last page of several may come empty, the library
+        // having got shorter meanwhile.
+        if page.records == 0 && (rank == 0 || rank + (per_page as u64) < total) {
             failure.get_or_insert(anyhow!("iCloud's list from {rank} came empty, of {total}"));
         }
         if (page.assets.len() as u32) < per_page && rank + (per_page as u64) < total {
@@ -330,5 +333,10 @@ mod tests {
         assert!(format!("{e:#}").contains("came empty"), "{e:#}");
         // The last one empty: the library got shorter meanwhile.
         assert!(walked(4, |rank| if rank == 2 { json!({"records": []}) } else { master() }).is_ok());
+        // A library of some, all on one page that comes empty.
+        let e = walked(1, |_| json!({"records": []})).unwrap_err();
+        assert!(format!("{e:#}").contains("came empty"), "{e:#}");
+        // One iCloud counts nothing in: nothing listed, rightly.
+        assert_eq!(walked(0, |_| json!({"records": []})).unwrap().assets, 0);
     }
 }

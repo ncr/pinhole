@@ -330,14 +330,15 @@ pub fn upright_of(original: &Path) -> Result<Upright> {
     }
 }
 
-/// The edit written to the asset `record` (its change tag as last read):
-/// rendered from `original` in `dir`, the three renders sent, the recipe
-/// and them put on the asset in one modify. Changed since on a device
-/// (another change tag), it is written once more only if its edit is still
-/// the one this was made from: an edit made meanwhile elsewhere is never
-/// written over. Its new tag.
-pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, original: &Path, adjustment: &Adjustment,
-             dir: &Path) -> Result<String> {
+/// The edit written to the asset `record`, made on the photo as last read
+/// (`tag` its change tag then, `seen` its edit then, as `from_record` says
+/// it): rendered from `original` in `dir`, the three renders sent, the
+/// recipe and them put on the asset in one modify. Changed since on a
+/// device (another change tag), at any point until the modify, it is
+/// written only if its edit is still the one this was made on: an edit
+/// made meanwhile elsewhere is never written over. Its new tag.
+pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, seen: Option<&str>, original: &Path,
+             adjustment: &Adjustment, dir: &Path) -> Result<String> {
     // What the photo's recipe has now (the camera's style, an earlier
     // crop), all its fields asked for.
     let asset = look_up_asset(client, record)?;
@@ -346,11 +347,17 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, origina
     if let Some(effect) = previous.as_ref().and_then(needs_apple) {
         return Err(anyhow!("edited with {effect}, which only Photos renders: edit it on the iPhone"));
     }
-    let tag = asset["recordChangeTag"].as_str().or(tag);
     // The original's own orientation, from its master, to show it so again.
     let master_name = asset["fields"]["masterRef"]["value"]["recordName"].as_str().unwrap_or_default().to_owned();
     let master = if master_name.is_empty() { Value::Null } else { client.lookup_all(&[master_name.as_str()])? };
     let original_orientation = master["records"][0]["fields"]["originalOrientation"]["value"].as_i64().unwrap_or(1);
+    // Changed since it was read: written over only if what changed is
+    // not its edit (a favourite).
+    let now_tag = asset["recordChangeTag"].as_str();
+    if (tag.is_none() || now_tag != tag) && from_record(&asset["fields"], &master["records"][0]["fields"]).as_deref() != seen {
+        return Err(anyhow!("the photo was edited elsewhere meanwhile, so this edit was not written: look at it again"));
+    }
+    let tag = now_tag.or(tag);
     let fields = if adjustment.is_identity() {
         revert_fields(original_orientation)
     } else {
@@ -710,6 +717,9 @@ mod tests {
                         fake.tag += 1;
                         json!({"records": [record(&fake)]})
                     }
+                } else if body["records"][0]["recordName"] == "M" {
+                    json!({"records": [{"recordName": "M", "recordType": "CPLMaster", "recordChangeTag": "m1", "fields": {
+                        "originalOrientation": {"value": 1}, "resOriginalWidth": {"value": 4000}, "resOriginalHeight": {"value": 3000}}}]})
                 } else {
                     json!({"records": [record(&fake)]})
                 };
@@ -737,7 +747,7 @@ mod tests {
         // here) is written again with the tag now.
         let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1,
             meanwhile: Some(json!({"isFavorite": {"value": 1}})), modifies: 0 }));
-        let tag = write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
+        let tag = write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
         let f = fake.lock().unwrap();
         assert_eq!((tag.as_str(), f.modifies), ("t3", 2));
         assert!(f.fields["adjustmentType"]["value"].is_null() && f.fields["isFavorite"]["value"] == 1);
@@ -745,7 +755,7 @@ mod tests {
         // Edited on the iPhone meanwhile: that edit stays, and this says so.
         let theirs = json!({"adjustmentSimpleDataEnc": {"value": "theirs"}, "adjustmentTimestampEnc": {"value": "now"}});
         let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1, meanwhile: Some(theirs), modifies: 0 }));
-        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).unwrap_err();
+        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).unwrap_err();
         assert!(format!("{e}").contains("edited elsewhere"), "{e}");
         let f = fake.lock().unwrap();
         assert_eq!((f.modifies, f.fields["adjustmentSimpleDataEnc"]["value"].as_str()), (1, Some("theirs")));
@@ -753,8 +763,35 @@ mod tests {
         // Another app's edit is not touched at all.
         let fake = Arc::new(Mutex::new(FakeAsset { fields: json!({"adjustmentType": {"value": "com.example.editor"}}),
             tag: 1, meanwhile: None, modifies: 0 }));
-        assert!(write(&mut edit_client(fake.clone()), "A", Some("t1"), Path::new("/unused"), &whole, Path::new("/unused")).is_err());
+        assert!(write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).is_err());
         assert_eq!(fake.lock().unwrap().modifies, 0);
+    }
+
+    #[test]
+    fn an_edit_is_written_only_on_the_photo_as_it_was_shown() {
+        use std::sync::{Arc, Mutex};
+        let whole = Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] };
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let cropped = |width: u32| json!({"adjustmentType": {"value": "com.apple.photo"},
+            "masterRef": {"value": {"recordName": "M"}},
+            "adjustmentSimpleDataEnc": {"value": b64.encode(deflate(&recipe_json(Upright { width: 4000, height: 3000 },
+                &Adjustment { turn: 0, crop: [0.0, 0.0, width as f64 / 4000.0, 1.0] }, None)).unwrap())}});
+        let shown = from_record(&cropped(2000), &json!({"originalOrientation": {"value": 1},
+            "resOriginalWidth": {"value": 4000}, "resOriginalHeight": {"value": 3000}}));
+        assert!(shown.is_some());
+        // Cropped again on the iPhone after it was shown here (at t1),
+        // before this got there: the iPhone's crop stays.
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: cropped(3000), tag: 2, meanwhile: None, modifies: 0 }));
+        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), shown.as_deref(), Path::new("/unused"), &whole,
+                      Path::new("/unused")).unwrap_err();
+        assert!(format!("{e}").contains("edited elsewhere"), "{e}");
+        assert_eq!(fake.lock().unwrap().modifies, 0);
+        // Only made a favourite since: the edit shown is the edit there.
+        let mut favourite = cropped(2000);
+        favourite["isFavorite"] = json!({"value": 1});
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: favourite, tag: 2, meanwhile: None, modifies: 0 }));
+        write(&mut edit_client(fake.clone()), "A", Some("t1"), shown.as_deref(), Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
+        assert!(fake.lock().unwrap().fields["adjustmentType"]["value"].is_null());
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //! (docs/api-findings.md, iCloud Drive).
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use url::Url;
 
-use pinhole_core::synced::Carried;
+use pinhole_core::synced::{is_computers, Carried, SYNCED_MAX};
 use crate::cloudkit::session_headers;
 use crate::session::Session;
 
@@ -119,12 +120,29 @@ impl Drive {
             }
         };
         let status = response.status();
-        let bytes = response.bytes().map_err(reqwest::Error::without_url).with_context(|| what.clone())?;
+        // Nothing Pinhole keeps there is bigger than a computer's file may
+        // be: anything over that is not read into memory, past what says so.
+        let too_big = || anyhow!("{what} answered with more than {} MB", SYNCED_MAX >> 20);
+        if response.content_length().is_some_and(|n| n > SYNCED_MAX) {
+            return Err(too_big());
+        }
+        let mut bytes = Vec::new();
+        if let Err(e) = response.take(SYNCED_MAX + 1).read_to_end(&mut bytes) {
+            // reqwest's own, as health() knows it, without its link.
+            let e: anyhow::Error = match e.downcast::<reqwest::Error>() {
+                Ok(e) => e.without_url().into(),
+                Err(e) => e.into(),
+            };
+            return Err(e.context(what));
+        }
+        if bytes.len() as u64 > SYNCED_MAX {
+            return Err(too_big());
+        }
         if !status.is_success() {
             let text = String::from_utf8_lossy(&bytes);
             return Err(anyhow!("{what} answered {}: {}", status.as_u16(), text.chars().take(300).collect::<String>()));
         }
-        Ok(bytes.to_vec())
+        Ok(bytes)
     }
 
     fn json(&self, session: &Session, service: &str, path: &str, query: &[(&str, &str)], body: &Value) -> Result<Value> {
@@ -163,7 +181,7 @@ impl Drive {
                     return Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has"));
                 }
                 if !items.iter().any(|i| full_name(i).as_deref() == Some(MARK) && i["type"] == "FILE") {
-                    if !items.iter().all(|i| i["type"] == "FILE" && i["extension"] == "json") {
+                    if !items.iter().all(|i| i["type"] == "FILE" && full_name(i).is_some_and(|n| is_computers(&n))) {
                         return Err(anyhow!("iCloud Drive's {FOLDER} folder holds what Pinhole did not put there: rename it, and Pinhole makes its own"));
                     }
                     self.put(session, &docwsid, MARK, MARK_TEXT.as_bytes(), None)?;
@@ -511,28 +529,34 @@ mod tests {
 
         // Pinhole's from before the mark: its files kept and read, the
         // folder marked.
-        let fake = there(&[("fixer-cd34", "json")]);
+        let fake = there(&[("fixer-0123456789cd", "json")]);
         let session = serve(fake.clone());
         let carried = Drive::default().list(&session).unwrap();
-        assert_eq!(carried.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["fixer-cd34.json"]);
-        assert_eq!(names(&fake), [MARK, "fixer-cd34.json"]);
+        assert_eq!(carried.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["fixer-0123456789cd.json"]);
+        assert_eq!(names(&fake), [MARK, "fixer-0123456789cd.json"]);
 
         // Someone's own folder of that name: neither read nor written.
-        let fake = there(&[("Tax return", "pdf"), ("fixer-cd34", "json")]);
+        let fake = there(&[("Tax return", "pdf"), ("fixer-0123456789cd", "json")]);
         let session = serve(fake.clone());
         let e = Drive::default().list(&session).unwrap_err();
         assert!(format!("{e}").contains("did not put there"), "{e}");
         assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
-        assert_eq!(names(&fake), ["Tax return.pdf", "fixer-cd34.json"]);
+        assert_eq!(names(&fake), ["Tax return.pdf", "fixer-0123456789cd.json"]);
+        // JSON, but not a computer's.
+        let fake = there(&[("budget", "json")]);
+        let session = serve(fake.clone());
+        assert!(Drive::default().list(&session).is_err());
+        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
+        assert_eq!(names(&fake), ["budget.json"]);
 
         // Shared with others, even marked: neither read nor written.
-        let fake = there(&[("Pinhole", "txt"), ("fixer-cd34", "json")]);
+        let fake = there(&[("Pinhole", "txt"), ("fixer-0123456789cd", "json")]);
         fake.lock().unwrap().shared = true;
         let session = serve(fake.clone());
         let e = Drive::default().list(&session).unwrap_err();
         assert!(format!("{e}").contains("shared"), "{e}");
         assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
-        assert_eq!(names(&fake), [MARK, "fixer-cd34.json"]);
+        assert_eq!(names(&fake), [MARK, "fixer-0123456789cd.json"]);
         assert!(!fake.lock().unwrap().requests.iter().any(|p| p.contains("upload") || p.contains("download")));
 
         // Shared after it was found: read no more.
@@ -542,6 +566,39 @@ mod tests {
         drive.list(&session).unwrap();
         fake.lock().unwrap().shared = true;
         assert!(drive.list(&session).is_err());
+    }
+
+    #[test]
+    fn a_file_bigger_than_a_computers_may_be_is_not_read_into_memory() {
+        let fake = Arc::new(Mutex::new(FakeDrive::default()));
+        let session = serve(fake);
+        // One that says it is a gigabyte, and one that does not say and
+        // goes on past the most.
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = server.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for (n, stream) in server.incoming().enumerate() {
+                let Ok(mut stream) = stream else { return };
+                let mut line = [0u8; 1024];
+                let _ = stream.read(&mut line);
+                if n == 0 {
+                    let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{{", 1u64 << 30);
+                } else {
+                    let _ = write!(stream, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
+                    let chunk = vec![b' '; 1 << 20];
+                    for _ in 0..(SYNCED_MAX >> 20) + 2 {
+                        if stream.write_all(&chunk).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        let link = format!("http://127.0.0.1:{port}/file");
+        for _ in 0..2 {
+            let e = Drive::default().send(&session, Method::GET, None, &link, &[], None).unwrap_err();
+            assert!(format!("{e:#}").contains("more than 64 MB"), "{e:#}");
+        }
     }
 
     #[test]

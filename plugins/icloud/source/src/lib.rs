@@ -392,15 +392,18 @@ impl Source for IcloudSource {
     /// original untouched; its new change tag back into the index.
     fn set_edit(&self, index: &Connection, id: &str, original: &std::path::Path,
                 edit: Option<pinhole_core::source::Edit>, work: &std::path::Path) -> Result<()> {
-        let tag: Option<Option<String>> = index
-            .query_row("SELECT change_tag FROM icloud_assets WHERE asset_id = ?1", [id], |r| r.get(0))
+        // The photo as the window was shown it: its change tag and edit
+        // then, which an edit made since elsewhere is told from.
+        let seen: Option<(Option<String>, Option<String>)> = index
+            .query_row("SELECT i.change_tag, a.edit FROM icloud_assets i LEFT JOIN assets a ON a.id = i.asset_id
+                        WHERE i.asset_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
             .optional()?;
-        let Some(tag) = tag else { return Err(anyhow!("iCloud has no record of {id}")) };
+        let Some((tag, seen)) = seen else { return Err(anyhow!("iCloud has no record of {id}")) };
         let adjustment = match edit {
             Some(e) => edit::Adjustment { turn: e.turn, crop: e.crop },
             None => edit::Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] },
         };
-        let new_tag = self.with(&self.links, |client| edit::write(client, id, tag.as_deref(), original, &adjustment, work))?;
+        let new_tag = self.with(&self.links, |client| edit::write(client, id, tag.as_deref(), seen.as_deref(), original, &adjustment, work))?;
         index.execute("UPDATE icloud_assets SET change_tag = ?2 WHERE asset_id = ?1", params![id, new_tag])?;
         Ok(())
     }
