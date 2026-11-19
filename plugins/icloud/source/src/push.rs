@@ -72,7 +72,7 @@ pub fn listen(provider: PathBuf, account: String, tell: Box<dyn Fn(Heard) + Send
 
 /// One connection, from signing in to its end: Ok when stopped.
 fn connection(provider: &PathBuf, account: &str, tell: &dyn Fn(Heard), stop: &AtomicBool) -> Result<()> {
-    let session = ProcessProvider::spawn(provider.clone(), Some(auth::state_dir(account)))?.session()?;
+    let session = ProcessProvider::spawn(provider.clone(), Some(auth::state_dir(account)?))?.session()?;
     let http = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let key = keypair();
     let (mut socket, token) = open(&key)?;

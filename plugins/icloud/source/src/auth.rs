@@ -157,19 +157,31 @@ impl Drop for ProcessProvider {
     }
 }
 
-/// Where the provider keeps each account's session, one folder to an Apple
-/// ID: `~/.local/state/pinhole/auth/<apple-id>`.
-pub fn state_dir(apple_id: &str) -> PathBuf {
+/// Where the provider keeps every account's session.
+fn auth_root() -> PathBuf {
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"))
         .join("pinhole/auth")
-        .join(apple_id)
+}
+
+/// Where the provider keeps each account's session, one folder to an Apple
+/// ID: `~/.local/state/pinhole/auth/<apple-id>`. An Apple ID (an email
+/// address, a phone number) names its folder as it is, so one that could
+/// not be a single name there (a path, `..`) is no Apple ID.
+pub fn state_dir(apple_id: &str) -> Result<PathBuf> {
+    let one_name = !matches!(apple_id, "" | "." | "..")
+        && !apple_id.contains('/')
+        && !apple_id.chars().any(char::is_control);
+    if !one_name {
+        return Err(ProviderError { code: "bad_request".into(), message: format!("{apple_id:?} is not an Apple ID") }.into());
+    }
+    Ok(auth_root().join(apple_id))
 }
 
 /// The Apple ID's owner as Apple gives it, if the provider has kept it.
 pub fn account_name(apple_id: &str) -> Option<String> {
-    let text = std::fs::read_to_string(state_dir(apple_id).join("account.json")).ok()?;
+    let text = std::fs::read_to_string(state_dir(apple_id).ok()?.join("account.json")).ok()?;
     let account: Value = serde_json::from_str(&text).ok()?;
     account["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned)
 }
@@ -177,8 +189,7 @@ pub fn account_name(apple_id: &str) -> Option<String> {
 /// The Apple IDs signed in to on this computer, whether or not their
 /// session is still good.
 pub fn accounts() -> Vec<String> {
-    let Some(dir) = state_dir("x").parent().map(PathBuf::from) else { return Vec::new() };
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(auth_root()) else { return Vec::new() };
     let mut accounts: Vec<String> = entries
         .flatten()
         .filter(|e| e.path().join("account.json").exists())
@@ -211,6 +222,17 @@ pub fn default_provider() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_apple_id_is_one_folder_of_its_own_or_none() {
+        let root = auth_root();
+        assert_eq!(state_dir("a.b@example.com").unwrap(), root.join("a.b@example.com"));
+        assert_eq!(state_dir("+48123456789").unwrap(), root.join("+48123456789"));
+        for wrong in ["", ".", "..", "/home/someone", "../x", "a/b", "a\0b", "a\nb"] {
+            let e = state_dir(wrong).unwrap_err();
+            assert_eq!(e.downcast_ref::<ProviderError>().map(|e| e.code.as_str()), Some("bad_request"), "{wrong:?}");
+        }
+    }
 
     #[test]
     fn a_provider_that_stops_answering_is_given_up_on_and_started_again() {

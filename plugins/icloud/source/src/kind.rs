@@ -52,12 +52,12 @@ impl IcloudKind {
     /// Sign in with the password, or without one by taking over
     /// icloudpd's session for the Apple ID.
     fn start_sign_in(&self, apple_id: &str, password: Option<&str>) -> Result<SignedIn, Failure> {
-        let state_dir = auth::state_dir(apple_id);
-        let known = state_dir.join("account.json").exists();
+        let state_dir = auth::state_dir(apple_id).map_err(|e| failure(&e))?;
         // A sign-in that fails leaves no trace of an Apple ID that was not
-        // signed in to before.
+        // signed in to before: its folder goes, if this sign-in made it.
+        let made = make_private_dir(&state_dir).map_err(|e| Failure::new("unavailable", format!("{}: {e}", state_dir.display())))?;
         let forget = |e: Failure| {
-            if !known {
+            if made {
                 let _ = std::fs::remove_dir_all(&state_dir);
             }
             e
@@ -221,7 +221,8 @@ impl Kind for IcloudKind {
         let account = entry["account"].as_str().ok_or_else(|| Failure::bad_request(format!("{} is not an Apple ID", self.id_of(entry))))?;
         self.waiting().remove(account);
         // The provider keeps the whole session there (auth/PROTOCOL.md).
-        remove(&auth::state_dir(account).join("cookies")).map_err(|e| Failure::new("unavailable", e))?;
+        let state_dir = auth::state_dir(account).map_err(|e| failure(&e))?;
+        remove(&state_dir.join("cookies")).map_err(|e| Failure::new("unavailable", e))?;
         eprintln!("pinholed: signed out of {account}");
         Ok(())
     }
@@ -230,8 +231,24 @@ impl Kind for IcloudKind {
     fn removed(&self, entry: &Value) {
         if let Some(account) = entry["account"].as_str() {
             self.waiting().remove(account);
-            let _ = std::fs::remove_dir_all(auth::state_dir(account));
+            if let Ok(state_dir) = auth::state_dir(account) {
+                let _ = std::fs::remove_dir_all(state_dir);
+            }
         }
+    }
+}
+
+/// The folder made, private, its parents as needed: true if it is new,
+/// false if it was there already.
+fn make_private_dir(dir: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::DirBuilderExt;
+    if let Some(parent) = dir.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?;
+    }
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -265,5 +282,25 @@ mod tests {
         let two = IcloudKind::with_accounts(PathBuf::new(), vec!["a@x.com".into(), "b@x.com".into()]);
         assert_eq!(two.normal(&json!({"kind": "icloud"})), None);
         assert_eq!(two.implicit().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_sign_in_removes_only_a_folder_it_made() {
+        let dir = std::env::temp_dir().join(format!("pinhole-kind-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("someone's")).unwrap();
+        // A path for an Apple ID is none, and what is there stays.
+        let kind = IcloudKind::new(PathBuf::from("/nonexistent/pinhole-auth"));
+        let path = dir.join("someone's");
+        assert_eq!(kind.sign_in(&json!({"apple_id": path.to_str().unwrap(), "password": "p"})).unwrap_err().code, "bad_request");
+        assert_eq!(kind.sign_in(&json!({"apple_id": "..", "password": "p"})).unwrap_err().code, "bad_request");
+        assert!(path.is_dir());
+        // Made here: new, private; there already: not this sign-in's.
+        let fresh = dir.join("auth/a@x.com");
+        assert!(make_private_dir(&fresh).unwrap());
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o700);
+        assert!(!make_private_dir(&fresh).unwrap());
+        assert!(!make_private_dir(&path).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
