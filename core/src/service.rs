@@ -1421,16 +1421,26 @@ fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, 
     let Some(id) = params["asset"].as_str() else {
         return Err(("bad_request", "set_edit needs an asset".into()));
     };
-    let edit = match (params["turn"].as_u64(), params["crop"].as_array()) {
+    // An edit: turn and crop, or neither for none.
+    let edit_of = |what: &Value| match (what["turn"].as_u64(), what["crop"].as_array()) {
         (Some(turn), Some(crop)) if crop.len() == 4 => {
             let c: Vec<f64> = crop.iter().filter_map(Value::as_f64).collect();
             if c.len() != 4 {
-                return Err(("bad_request", "crop is four numbers".into()));
+                return Err(("bad_request", "crop is four numbers".to_owned()));
             }
-            Some(crate::source::Edit { turn: (turn % 4) as u8, crop: [c[0], c[1], c[2], c[3]] })
+            Ok(Some(crate::source::Edit { turn: (turn % 4) as u8, crop: [c[0], c[1], c[2], c[3]] }))
         }
-        (None, None) => None,
-        _ => return Err(("bad_request", "set_edit needs turn and crop, or neither".into())),
+        (None, None) => Ok(None),
+        _ => Err(("bad_request", "an edit is turn and crop, or neither".to_owned())),
+    };
+    let edit = edit_of(params)?;
+    // The edit the window showed the photo with, which this one was made
+    // from (null: none): without it, an edit made since elsewhere could
+    // not be told and would be written over.
+    let base = match params.get("base") {
+        Some(Value::Null) => None,
+        Some(base @ Value::Object(_)) => edit_of(base)?,
+        _ => return Err(("bad_request", "set_edit needs the edit it was made from (base)".into())),
     };
     let _moving = shared.storage.library_moving.read().unwrap();
     let source = shared.source();
@@ -1457,7 +1467,7 @@ fn set_edit(shared: &Arc<Shared>, params: &Value) -> std::result::Result<Value, 
         return Err(("not_found", format!("{id}'s original is not fetched yet")));
     };
     let work = crate::storage::edit_work().map_err(|e| ("unavailable", format!("a folder to edit in: {e}")))?;
-    let result = source.set_edit(&db, id, &original, edit, &work);
+    let result = source.set_edit(&db, id, &original, edit, base, &work);
     let _ = std::fs::remove_dir_all(&work);
     if let Err(e) = result {
         eprintln!("pinholed: set_edit: {e:#}");

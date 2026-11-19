@@ -389,21 +389,21 @@ impl Source for IcloudSource {
 
     /// Written to iCloud as Photos on an iPhone writes its own edit
     /// (`edit`): the recipe and the photo rendered, on the asset, the
-    /// original untouched; its new change tag back into the index.
+    /// original untouched, only on the edit the window showed (`base`);
+    /// its new change tag back into the index.
     fn set_edit(&self, index: &Connection, id: &str, original: &std::path::Path,
-                edit: Option<pinhole_core::source::Edit>, work: &std::path::Path) -> Result<()> {
-        // The photo as the window was shown it: its change tag and edit
-        // then, which an edit made since elsewhere is told from.
-        let seen: Option<(Option<String>, Option<String>)> = index
-            .query_row("SELECT i.change_tag, a.edit FROM icloud_assets i LEFT JOIN assets a ON a.id = i.asset_id
-                        WHERE i.asset_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
-            .optional()?;
-        let Some((tag, seen)) = seen else { return Err(anyhow!("iCloud has no record of {id}")) };
-        let adjustment = match edit {
+                edit: Option<pinhole_core::source::Edit>, base: Option<pinhole_core::source::Edit>,
+                work: &std::path::Path) -> Result<()> {
+        let known: Option<i64> = index.query_row("SELECT 1 FROM icloud_assets WHERE asset_id = ?1", [id], |r| r.get(0)).optional()?;
+        if known.is_none() {
+            return Err(anyhow!("iCloud has no record of {id}"));
+        }
+        let adjustment = |e: Option<pinhole_core::source::Edit>| match e {
             Some(e) => edit::Adjustment { turn: e.turn, crop: e.crop },
             None => edit::Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] },
         };
-        let new_tag = self.with(&self.links, |client| edit::write(client, id, tag.as_deref(), seen.as_deref(), original, &adjustment, work))?;
+        let (target, base) = (adjustment(edit), adjustment(base));
+        let new_tag = self.with(&self.links, |client| edit::write(client, id, &base, original, &target, work))?;
         index.execute("UPDATE icloud_assets SET change_tag = ?2 WHERE asset_id = ?1", params![id, new_tag])?;
         Ok(())
     }
