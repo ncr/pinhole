@@ -174,13 +174,40 @@ pub fn recipe_json(upright: Upright, adjustment: &Adjustment, previous: Option<&
 }
 
 /// What a recipe besides a crop and a style would need Apple to render (a
-/// portrait's blur, a Live Photo's key frame): Pinhole's render would be
-/// without it, so such a photo is edited on the iPhone.
+/// portrait's blur, a Live Photo's key frame), or a crop besides its
+/// rectangle (straightened, its perspective changed): Pinhole's render
+/// would be without it, and its recipe would put it back to none, so such
+/// a photo is edited on the iPhone.
 pub fn needs_apple(previous: &Value) -> Option<String> {
-    previous["adjustments"].as_array().into_iter().flatten()
-        .filter_map(|j| j["identifier"].as_str())
-        .find(|id| !["Crop", "SemanticStyle"].contains(id))
-        .map(str::to_owned)
+    let adjustments = previous["adjustments"].as_array().into_iter().flatten();
+    for j in adjustments {
+        let id = j["identifier"].as_str().unwrap_or_default();
+        if !["Crop", "SemanticStyle"].contains(&id) {
+            return Some(id.to_owned());
+        }
+        if id == "Crop" {
+            let moved = |name: &str| j["settings"][name].as_f64().is_some_and(|v| v.abs() > 1e-9);
+            if ["straightenAngle", "pitch", "yaw"].iter().any(|n| moved(n)) {
+                return Some("straightening".to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// An edit as `from_record` says it ("turn,x,y,width,height"), none the
+/// whole photo unturned.
+pub fn adjustment_of(edit: Option<&str>) -> Adjustment {
+    let parts: Vec<f64> = edit.unwrap_or_default().split(',').filter_map(|p| p.parse().ok()).collect();
+    match parts[..] {
+        [turn, x, y, w, h] => Adjustment { turn: (turn as i64).rem_euclid(4) as u8, crop: [x, y, w, h] },
+        _ => Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] },
+    }
+}
+
+/// Two edits alike, as near as a crop is kept (a pixel of a large photo).
+fn same(a: &Adjustment, b: &Adjustment) -> bool {
+    a.turn % 4 == b.turn % 4 && a.crop.iter().zip(b.crop).all(|(x, y)| (x - y).abs() < 1e-4)
 }
 
 /// A photo's recipe as its asset has it (`adjustmentSimpleDataEnc`), if
@@ -330,14 +357,15 @@ pub fn upright_of(original: &Path) -> Result<Upright> {
     }
 }
 
-/// The edit written to the asset `record`, made on the photo as last read
-/// (`tag` its change tag then, `seen` its edit then, as `from_record` says
-/// it): rendered from `original` in `dir`, the three renders sent, the
-/// recipe and them put on the asset in one modify. Changed since on a
-/// device (another change tag), at any point until the modify, it is
-/// written only if its edit is still the one this was made on: an edit
-/// made meanwhile elsewhere is never written over. Its new tag.
-pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, seen: Option<&str>, original: &Path,
+/// The edit written to the asset `record`, made on the photo as the window
+/// showed it (`base`, its turn and crop then): rendered from `original` in
+/// `dir`, the three renders sent, the recipe and them put on the asset in
+/// one modify. Only if the asset's edit is still `base` when looked up, and
+/// still the same when a change made meanwhile (another change tag) has
+/// the modify sent again: an edit made elsewhere is never written over.
+/// What else its recipe has is either kept (the camera's style) or makes
+/// this an error (needs_apple). Its new tag.
+pub fn write(client: &mut PhotosClient, record: &str, base: &Adjustment, original: &Path,
              adjustment: &Adjustment, dir: &Path) -> Result<String> {
     // What the photo's recipe has now (the camera's style, an earlier
     // crop), all its fields asked for.
@@ -351,13 +379,12 @@ pub fn write(client: &mut PhotosClient, record: &str, tag: Option<&str>, seen: O
     let master_name = asset["fields"]["masterRef"]["value"]["recordName"].as_str().unwrap_or_default().to_owned();
     let master = if master_name.is_empty() { Value::Null } else { client.lookup_all(&[master_name.as_str()])? };
     let original_orientation = master["records"][0]["fields"]["originalOrientation"]["value"].as_i64().unwrap_or(1);
-    // Changed since it was read: written over only if what changed is
-    // not its edit (a favourite).
-    let now_tag = asset["recordChangeTag"].as_str();
-    if (tag.is_none() || now_tag != tag) && from_record(&asset["fields"], &master["records"][0]["fields"]).as_deref() != seen {
+    // Edited since the window showed it: that edit stays.
+    let now = adjustment_of(from_record(&asset["fields"], &master["records"][0]["fields"]).as_deref());
+    if !same(&now, base) {
         return Err(anyhow!("the photo was edited elsewhere meanwhile, so this edit was not written: look at it again"));
     }
-    let tag = now_tag.or(tag);
+    let tag = asset["recordChangeTag"].as_str();
     let fields = if adjustment.is_identity() {
         revert_fields(original_orientation)
     } else {
@@ -747,7 +774,7 @@ mod tests {
         // here) is written again with the tag now.
         let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1,
             meanwhile: Some(json!({"isFavorite": {"value": 1}})), modifies: 0 }));
-        let tag = write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
+        let tag = write(&mut edit_client(fake.clone()), "A", &whole, Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
         let f = fake.lock().unwrap();
         assert_eq!((tag.as_str(), f.modifies), ("t3", 2));
         assert!(f.fields["adjustmentType"]["value"].is_null() && f.fields["isFavorite"]["value"] == 1);
@@ -755,7 +782,7 @@ mod tests {
         // Edited on the iPhone meanwhile: that edit stays, and this says so.
         let theirs = json!({"adjustmentSimpleDataEnc": {"value": "theirs"}, "adjustmentTimestampEnc": {"value": "now"}});
         let fake = Arc::new(Mutex::new(FakeAsset { fields: pinholes.clone(), tag: 1, meanwhile: Some(theirs), modifies: 0 }));
-        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).unwrap_err();
+        let e = write(&mut edit_client(fake.clone()), "A", &whole, Path::new("/unused"), &whole, Path::new("/unused")).unwrap_err();
         assert!(format!("{e}").contains("edited elsewhere"), "{e}");
         let f = fake.lock().unwrap();
         assert_eq!((f.modifies, f.fields["adjustmentSimpleDataEnc"]["value"].as_str()), (1, Some("theirs")));
@@ -763,7 +790,7 @@ mod tests {
         // Another app's edit is not touched at all.
         let fake = Arc::new(Mutex::new(FakeAsset { fields: json!({"adjustmentType": {"value": "com.example.editor"}}),
             tag: 1, meanwhile: None, modifies: 0 }));
-        assert!(write(&mut edit_client(fake.clone()), "A", Some("t1"), None, Path::new("/unused"), &whole, Path::new("/unused")).is_err());
+        assert!(write(&mut edit_client(fake.clone()), "A", &whole, Path::new("/unused"), &whole, Path::new("/unused")).is_err());
         assert_eq!(fake.lock().unwrap().modifies, 0);
     }
 
@@ -779,10 +806,10 @@ mod tests {
         let shown = from_record(&cropped(2000), &json!({"originalOrientation": {"value": 1},
             "resOriginalWidth": {"value": 4000}, "resOriginalHeight": {"value": 3000}}));
         assert!(shown.is_some());
-        // Cropped again on the iPhone after it was shown here (at t1),
+        // Cropped again on the iPhone after it was shown here,
         // before this got there: the iPhone's crop stays.
         let fake = Arc::new(Mutex::new(FakeAsset { fields: cropped(3000), tag: 2, meanwhile: None, modifies: 0 }));
-        let e = write(&mut edit_client(fake.clone()), "A", Some("t1"), shown.as_deref(), Path::new("/unused"), &whole,
+        let e = write(&mut edit_client(fake.clone()), "A", &adjustment_of(shown.as_deref()), Path::new("/unused"), &whole,
                       Path::new("/unused")).unwrap_err();
         assert!(format!("{e}").contains("edited elsewhere"), "{e}");
         assert_eq!(fake.lock().unwrap().modifies, 0);
@@ -790,8 +817,29 @@ mod tests {
         let mut favourite = cropped(2000);
         favourite["isFavorite"] = json!({"value": 1});
         let fake = Arc::new(Mutex::new(FakeAsset { fields: favourite, tag: 2, meanwhile: None, modifies: 0 }));
-        write(&mut edit_client(fake.clone()), "A", Some("t1"), shown.as_deref(), Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
+        write(&mut edit_client(fake.clone()), "A", &adjustment_of(shown.as_deref()), Path::new("/unused"), &whole, Path::new("/unused")).unwrap();
         assert!(fake.lock().unwrap().fields["adjustmentType"]["value"].is_null());
+        // Shown unedited, cropped on the iPhone since (however soon this
+        // computer's index learnt of it): the crop stays.
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: cropped(2000), tag: 2, meanwhile: None, modifies: 0 }));
+        let turned = Adjustment { turn: 1, crop: [0.0, 0.0, 1.0, 1.0] };
+        assert!(write(&mut edit_client(fake.clone()), "A", &whole, Path::new("/unused"), &turned, Path::new("/unused")).is_err());
+        assert_eq!(fake.lock().unwrap().modifies, 0);
+        // Straightened there, the rectangle the same: Pinhole's recipe
+        // would put it straight again, so it is left to the iPhone.
+        let mut recipe = recipe_json(Upright { width: 4000, height: 3000 }, &Adjustment { turn: 0, crop: [0.0, 0.0, 0.5, 1.0] }, None);
+        for j in recipe["adjustments"].as_array_mut().unwrap() {
+            if j["identifier"] == "Crop" {
+                j["settings"]["straightenAngle"] = json!(3.5);
+            }
+        }
+        let mut straightened = cropped(2000);
+        straightened["adjustmentSimpleDataEnc"] = json!({"value": b64.encode(deflate(&recipe).unwrap())});
+        let fake = Arc::new(Mutex::new(FakeAsset { fields: straightened, tag: 2, meanwhile: None, modifies: 0 }));
+        let e = write(&mut edit_client(fake.clone()), "A", &adjustment_of(shown.as_deref()), Path::new("/unused"), &whole,
+                      Path::new("/unused")).unwrap_err();
+        assert!(format!("{e}").contains("straightening"), "{e}");
+        assert_eq!(fake.lock().unwrap().modifies, 0);
     }
 
     #[test]

@@ -508,11 +508,14 @@ pub trait Source: Send + Sync {
 
     /// Turn and crop a photo where the source keeps edits (iCloud, as its
     /// devices do), from its `original` on this computer, rendered in
-    /// `work`; `None` takes any edit off. The original stays as it was.
-    /// The library learns of it at the next round. Unsupported where the
-    /// source keeps none: the window keeps the edit itself.
+    /// `work`; `None` takes any edit off. `base` is the edit the window
+    /// showed it with and made this one from (`None`: none): one the
+    /// source has since that differs is not written over. The original
+    /// stays as it was. The library learns of it at the next round.
+    /// Unsupported where the source keeps none: the window keeps the edit
+    /// itself.
     fn set_edit(&self, _index: &rusqlite::Connection, _id: &str, _original: &std::path::Path, _edit: Option<Edit>,
-                _work: &std::path::Path) -> Result<()> {
+                _base: Option<Edit>, _work: &std::path::Path) -> Result<()> {
         Err(Unsupported(format!("{} keeps no edits", self.name())).into())
     }
 

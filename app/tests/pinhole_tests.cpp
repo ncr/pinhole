@@ -5601,6 +5601,8 @@ private slots:
         QVERIFY(cloud.open(other.path(), &error));
         bench.library.swap(cloud);
         QByteArray first;
+        // Each edit says what it was made from: these, shown unedited.
+        bool based = true;
         QObject::connect(bench.fake.peer, &QLocalSocket::readyRead, bench.fake.peer, [&] {
             const qsizetype seen = bench.fake.asked.size();
             bench.fake.read();
@@ -5611,6 +5613,8 @@ private slots:
                     first = asset;
                     bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/x"}, {"type", "public.jpeg"}}}});
                 } else if (line.value("method").toString() == "set_edit") {
+                    const QJsonObject params = line.value("params").toObject();
+                    based = based && params.contains("base") && params.value("base").isNull();
                     bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{}}});
                 } else {
                     bench.fake.send({{"id", line.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "unavailable"}, {"message", "offline"}}}});
@@ -5621,6 +5625,7 @@ private slots:
                     e => said.push(e.code + " " + e.kept + " " + e.photos.map(p => p.id + p.turn).join())))");
         QTRY_COMPARE(bench.said().size(), 1);
         QCOMPARE(bench.said().first(), QString("unavailable source " + QString::fromUtf8(first) + "1"));
+        QVERIFY(based);
     }
 
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {

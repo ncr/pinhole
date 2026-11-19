@@ -112,6 +112,10 @@ enum Cmd {
         crop: String,
         #[arg(long)]
         revert: bool,
+        /// The edit it has now, as the index keeps it
+        /// (turn,x,y,width,height): written only on that one.
+        #[arg(long)]
+        base: Option<String>,
     },
     /// WRITES: an edit's fields as given (a JSON object of `{value}`s, read
     /// from a record), its full, medium and thumbnail renders sent from
@@ -152,17 +156,18 @@ fn main() -> Result<()> {
         Cmd::Sample { kind, n, threads, out, pool } => sample(&mut client, &db_path, &kind, n, threads, out, &pool),
         Cmd::Stream { n } => stream(&mut client, &db_path, n),
         Cmd::Page { rank } => page(&mut client, rank),
-        Cmd::EditWrite { record, original, turn, crop, revert } => {
+        Cmd::EditWrite { record, original, turn, crop, revert, base } => {
             let parts: Vec<f64> = crop.split(',').filter_map(|p| p.trim().parse().ok()).collect();
             let crop: [f64; 4] = parts.try_into().map_err(|_| anyhow!("--crop is x,y,w,h"))?;
             let adjustment = if revert { pinhole_icloud::edit::Adjustment { turn: 0, crop: [0.0, 0.0, 1.0, 1.0] } }
                              else { pinhole_icloud::edit::Adjustment { turn, crop } };
-            let now = client.lookup(&[record.as_str()])?;
-            let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
+            let base = pinhole_icloud::edit::adjustment_of(base.as_deref());
             let dir = std::env::temp_dir().join(format!("pinhole-edit-{}", std::process::id()));
             std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir)?;
-            let tag = pinhole_icloud::edit::write(&mut client, &record, tag.as_deref(), None, &original, &adjustment, &dir)?;
+            // Gone whether it worked or not.
+            let written = pinhole_icloud::edit::write(&mut client, &record, &base, &original, &adjustment, &dir);
             let _ = std::fs::remove_dir_all(&dir);
+            let tag = written?;
             println!("written: {record} now at tag {tag}");
             Ok(())
         }

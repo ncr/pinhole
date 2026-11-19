@@ -883,6 +883,17 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
         done(QStringLiteral("here"));
         return deferred.promise;
     }
+    // The edit each is shown with now, which its new one is made from: the
+    // source writes over no other (one made since on a device).
+    QHash<QByteArray, Adjustment> bases;
+    for (auto it = targets.begin(); it != targets.end(); ++it) {
+        const int at = m_plugins->library()->positionOf(QJSValue(QString::fromUtf8(it.key())));
+        if (at < 0) {
+            settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such photo")));
+            return deferred.promise;
+        }
+        bases.insert(it.key(), data->at(at).sourceEdit);
+    }
     auto left = std::make_shared<QList<QByteArray>>(targets.keys());
     // Those in the source already: one that fails after them leaves them
     // done, and says which (the error's `photos`), so they can be undone.
@@ -931,6 +942,11 @@ QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
                 params.insert("turn", target.turn);
                 params.insert("crop", QJsonArray{target.crop.x(), target.crop.y(), target.crop.width(), target.crop.height()});
             }
+            const Adjustment base = bases.value(id);
+            params.insert("base", base.isIdentity() ? QJsonValue()
+                                                    : QJsonObject{{"turn", base.turn},
+                                                                  {"crop", QJsonArray{base.crop.x(), base.crop.y(), base.crop.width(),
+                                                                                      base.crop.height()}}});
             service->call(QStringLiteral("set_edit"), params, [=](bool ok, const QJsonObject &answer, const QString &code) {
                 if (!alive)
                     return;
