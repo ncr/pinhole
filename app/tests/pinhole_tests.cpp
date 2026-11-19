@@ -5489,6 +5489,42 @@ private slots:
         QVERIFY(store.snapshot().isEmpty());
     }
 
+    // Several turned in iCloud, one failing after another is in: the
+    // error says which were done, so they can be undone.
+    void anEditThatFailsPartWaySaysWhichPhotosWereDone() {
+        PluginBench bench({{"t", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}}, true);
+        AdjustmentStore store;
+        store.setLibrary(bench.dir.path());
+        bench.plugins->setAdjustments(&store);
+        QTemporaryDir other;
+        makeLibrary(other.path(), {{"a", 1000}, {"b", 2000}}, false, "icloud:x");
+        Library cloud;
+        QString error;
+        QVERIFY(cloud.open(other.path(), &error));
+        bench.library.swap(cloud);
+        QByteArray first;
+        QObject::connect(bench.fake.peer, &QLocalSocket::readyRead, bench.fake.peer, [&] {
+            const qsizetype seen = bench.fake.asked.size();
+            bench.fake.read();
+            for (qsizetype i = seen; i < bench.fake.asked.size(); ++i) {
+                const QJsonObject line = bench.fake.asked[i];
+                const QByteArray asset = line.value("params").toObject().value("asset").toString().toUtf8();
+                if (line.value("method").toString() == "fetch" && (first.isEmpty() || first == asset)) {
+                    first = asset;
+                    bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/x"}, {"type", "public.jpeg"}}}});
+                } else if (line.value("method").toString() == "set_edit") {
+                    bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{}}});
+                } else {
+                    bench.fake.send({{"id", line.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "unavailable"}, {"message", "offline"}}}});
+                }
+            }
+        });
+        bench.js(R"(pinhole.turn(['a', 'b'], 1).then(() => said.push("done"),
+                    e => said.push(e.code + " " + e.kept + " " + e.photos.map(p => p.id + p.turn).join())))");
+        QTRY_COMPARE(bench.said().size(), 1);
+        QCOMPARE(bench.said().first(), QString("unavailable source " + QString::fromUtf8(first) + "1"));
+    }
+
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {
         PluginBench bench({{"t", {{"api", Plugins::api}, {"settings", QJsonObject{{"shuffle", true}, {"seconds", 8}}}}}});
         Keymap keymap;

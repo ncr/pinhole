@@ -39,21 +39,25 @@ PinholePlugin {
     // is iCloud's, else kept here), and a step that puts them back, or does
     // it again, in the library it was done in.
     function step(words, ids, apply) {
-        const before = ids.map(id => pinhole.adjustment(id))
+        const before = {}
+        ids.forEach(id => before[id] = pinhole.adjustment(id))
         const key = pinhole.library.key
+        // Those done, even when one after them failed: each undoes.
+        const record = after => pinhole.did(words,
+            () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, before[a.id]).catch(pinhole.warn)) },
+            () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, a).catch(pinhole.warn)) })
         saving = true
         said = false
         slow.restart()
         apply().then(done => {
             saving = false
-            const after = done.photos
-            pinhole.did(words,
-                        () => { if (pinhole.library.key === key) ids.forEach((id, i) => pinhole.adjust(id, before[i]).catch(pinhole.warn)) },
-                        () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, a).catch(pinhole.warn)) })
+            record(done.photos)
             if (said && done.kept === "source")
                 pinhole.notify(qsTr("Saved in iCloud"))
         }).catch(error => {
             saving = false
+            if (error.photos && error.photos.length > 0)
+                record(error.photos)
             pinhole.notify(qsTr("Could not save the edit: %1").arg(error.message))
         })
     }
