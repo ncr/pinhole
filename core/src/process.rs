@@ -2224,11 +2224,19 @@ mod tests {
         // Many at once, saying nothing: past the most, closed at once.
         let quiet: Vec<std::net::TcpStream> =
             (0..LOOPBACK_MAX).map(|_| std::net::TcpStream::connect(("127.0.0.1", lb.port)).unwrap()).collect();
-        std::thread::sleep(Duration::from_millis(200));
-        let started = Instant::now();
-        let answer = ask_loopback(lb.port, format!("GET /{token} HTTP/1.1\r\n\r\n").as_bytes());
+        // Taken in as the loopback gets to them, sooner or later on a busy
+        // machine: then one more is turned away, and at once.
+        let full = Instant::now();
+        let (answer, took) = loop {
+            let started = Instant::now();
+            let answer = ask_loopback(lb.port, format!("GET /{token} HTTP/1.1\r\n\r\n").as_bytes());
+            if answer.starts_with("HTTP/1.1 503") || full.elapsed() > Duration::from_secs(10) {
+                break (answer, started.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         assert!(answer.starts_with("HTTP/1.1 503"), "{answer}");
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert!(took < Duration::from_secs(2), "{took:?}");
         drop(quiet);
         let back = Instant::now();
         let answer = loop {
