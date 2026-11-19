@@ -160,7 +160,8 @@ fn main() -> Result<()> {
             let now = client.lookup(&[record.as_str()])?;
             let tag = now["records"][0]["recordChangeTag"].as_str().map(str::to_owned);
             let dir = std::env::temp_dir().join(format!("pinhole-edit-{}", std::process::id()));
-            let tag = pinhole_icloud::edit::write(&mut client, &record, tag.as_deref(), &original, &adjustment, &dir)?;
+            std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir)?;
+            let tag = pinhole_icloud::edit::write(&mut client, &record, tag.as_deref(), None, &original, &adjustment, &dir)?;
             let _ = std::fs::remove_dir_all(&dir);
             println!("written: {record} now at tag {tag}");
             Ok(())
