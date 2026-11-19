@@ -1612,7 +1612,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
             Err(("not_found", format!("{} is not there", path.display())))
         });
     }
-    let relative = cached_path(&source.id(), want, &stored.key, extension(&file_type), false);
+    let relative = cached_path(want, &stored.key, extension(&file_type), false);
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
         return reply.send(Ok(json!({"path": path, "type": file_type, "rendition": rendition, "cached": true})));
@@ -1651,8 +1651,7 @@ fn fetch(shared: &Arc<Shared>, db: &Connection, params: &Value, reply: Reply) {
 /// the same file as `full`. Made ones are named after the key of what they
 /// are made from: the motion's, or for a `jpeg` the `full` it goes beside
 /// (and is counted with): `-jpeg2` since a HEIC's JPEG keeps its gain map.
-/// Each source's in a folder of its own (`source_folder`).
-fn cached_path(source: &str, want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
+fn cached_path(want: Want, key: &str, extension: &str, made: bool) -> PathBuf {
     let folder = match want {
         Want::LongExposure if !made => Want::Full,
         Want::Loop | Want::Bounce | Want::LongExposure => Want::Live,
@@ -1663,21 +1662,14 @@ fn cached_path(source: &str, want: Want, key: &str, extension: &str, made: bool)
     // gain map (jpeg.rs) is made again.
     let version = if want == Want::Jpeg { crate::jpeg::VERSION } else { "" };
     let suffix = if made { format!("-{}{version}", want.name()) } else { String::new() };
-    source_folder(folder, source).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
+    Path::new(folder.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
 }
 
 /// Where a kind a plugin makes of its own goes: beside what it is made
 /// from, and counted with it, named after that and the kind.
-fn own_made_path(source: &str, from: Want, kind: &str, key: &str, extension: &str) -> PathBuf {
+fn own_made_path(from: Want, kind: &str, key: &str, extension: &str) -> PathBuf {
     let suffix = format!("-{}", kind.replace('/', "-"));
-    source_folder(from, source).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
-}
-
-/// A source's files of a kind in the cache, `<kind>/<its id's hash>/`: two
-/// sources' keys may be the same (two folders' IMG_0001.JPG of one size
-/// and time), their files never.
-fn source_folder(kind: Want, source: &str) -> PathBuf {
-    Path::new(kind.name()).join(format!("{:016x}", crate::storage::stable_hash(source.as_bytes())))
+    Path::new(from.name()).join(thumb_path(key).replacen("thumbs/", "", 1).replace(".jpg", &format!("{suffix}.{extension}")))
 }
 
 /// `full` as a JPEG: `full` itself when it is one, else one made from it.
@@ -1761,10 +1753,9 @@ fn make(shared: &Arc<Shared>, db: &Connection, asset: &str, kind: &str, reply: R
         None => ("public.jpeg".to_owned(), "jpg".to_owned()),
     };
     let (file_type, extension) = (file_type.as_str(), extension.as_str());
-    let source = shared.source().id();
     let relative = match want {
-        Some(want) => cached_path(&source, want, &key, extension, true),
-        None => own_made_path(&source, from, kind, &key, extension),
+        Some(want) => cached_path(want, &key, extension, true),
+        None => own_made_path(from, kind, &key, extension),
     };
     if let Some(path) = shared.storage.find(&relative) {
         touch(&path);
@@ -2315,7 +2306,7 @@ fn sync_round(shared: &Shared) -> Result<()> {
         // queries read them.
         let at_hand = |stored: &Stored| {
             source.local(stored).filter(|f| f.exists()).or_else(|| {
-                shared.storage.find(&cached_path(&source.id(), stored.want, &stored.key, extension(&stored.file_type), false))
+                shared.storage.find(&cached_path(stored.want, &stored.key, extension(&stored.file_type), false))
             })
         };
         let cameras = crate::sync::read_cameras(&mut db, &at_hand, 4000, &stop)?;
@@ -2363,17 +2354,6 @@ fn owe_thumbs(shared: &Shared, owed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn two_sources_files_of_one_key_are_cached_apart() {
-        let (a, b) = ("folder:/home/me/Pictures", "folder:/media/disk/Pictures");
-        assert_ne!(cached_path(a, Want::Medium, "f1", "jpg", false), cached_path(b, Want::Medium, "f1", "jpg", false));
-        assert_ne!(cached_path(a, Want::Jpeg, "f1", "jpg", true), cached_path(b, Want::Jpeg, "f1", "jpg", true));
-        assert_ne!(own_made_path(a, Want::Live, "x/y", "f1", "mp4"), own_made_path(b, Want::Live, "x/y", "f1", "mp4"));
-        // Under its kind still, which the limit counts it by.
-        assert!(cached_path(a, Want::Jpeg, "f1", "jpg", true).starts_with("full"));
-        assert_eq!(cached_path(a, Want::Medium, "f1", "jpg", false), cached_path(a, Want::Medium, "f1", "jpg", false));
-    }
 
     #[test]
     fn a_service_removes_its_own_part_files_alone() {

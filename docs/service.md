@@ -141,7 +141,7 @@ map ISO 21496-1's (Apple's legacy map turned into ISO's form) in an MPF
 second image, written by libultrahdr, the JPEG itself and its segments as
 they were (docs/hdr.md, H5). It is answered with
 `type: "public.jpeg"`, `rendition: "made"`, and kept in the cache beside
-`full`, as `cache/full/<source>/…/<full's key>-jpeg2.jpg` (`-jpeg.jpg` before HEICs
+`full`, as `cache/full/…/<full's key>-jpeg2.jpg` (`-jpeg.jpg` before HEICs
 kept their gain map, made again when asked for): counted as `full` in
 `storage`, under the limit like any photo, and made once (two at a time at
 most; those asking for one being made wait for it). A video has none:
@@ -551,8 +551,7 @@ making, removes its part files and its socket, and ends.
 Everything Pinhole keeps is in one folder, `~/.local/share/pinhole` unless
 the window chose another: each source's library in `library/<kind>/<name>/`
 (`library.sqlite` and `thumbs/`, built and kept by the service) and the photos fetched from the
-source in `cache/<kind>/<source>/` (a hash of its id: two folders' keys may
-be the same, their files never), named by the rendition's key (iCloud's checksum
+source in `cache/<kind>/`, named by the rendition's key (iCloud's checksum
 of the file), so a re-edited photo gets a new name and duplicates share
 one.
 
