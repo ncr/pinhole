@@ -271,13 +271,14 @@ pub fn set(dir: &Path, plugin: &str, changes: &Map<String, Value>, by: &str) -> 
     save(&path, &doc)
 }
 
-/// Every plugin's in a library's folder, by plugin: one that cannot be
-/// read is left out (and said), never taken as empty.
-pub fn all(dir: &Path) -> Result<BTreeMap<String, Doc>> {
+/// Every plugin's in a library's folder, by plugin, and the plugins whose
+/// file cannot be read: left out (and said), never taken as empty.
+pub fn all(dir: &Path) -> Result<(BTreeMap<String, Doc>, Vec<String>)> {
     let mut docs = BTreeMap::new();
+    let mut unreadable = Vec::new();
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(docs),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((docs, unreadable)),
         Err(e) => return Err(e.into()),
     };
     for entry in entries.flatten() {
@@ -288,11 +289,14 @@ pub fn all(dir: &Path) -> Result<BTreeMap<String, Doc>> {
                 Ok(doc) => {
                     docs.insert(plugin.to_owned(), doc);
                 }
-                Err(e) => eprintln!("pinholed: synced: {e:#}"),
+                Err(e) => {
+                    eprintln!("pinholed: synced: {e:#}");
+                    unreadable.push(plugin.to_owned());
+                }
             }
         }
     }
-    Ok(docs)
+    Ok((docs, unreadable))
 }
 
 /// How the files look now (their names, sizes and times): a change here
@@ -446,11 +450,34 @@ pub fn carry(dir: &Path, carrier: &dyn Carrier, device: &str, computer: &str) ->
     }
     mark.seen.retain(|name, _| there.iter().any(|f| &f.name == name));
 
-    let docs = all(dir)?;
-    let plugins: Map<String, Value> = docs.iter().map(|(p, d)| (p.clone(), d.to_json())).collect();
+    let (docs, unreadable) = all(dir)?;
+    let mut plugins: Map<String, Value> = docs.iter().map(|(p, d)| (p.clone(), d.to_json())).collect();
+    let present = there.iter().any(|f| f.name == own);
+    // A plugin's file here that cannot be read goes as this computer last
+    // sent it, never left out of what is there: that may be the only copy
+    // of it left. Should that not be got, nothing is sent this round.
+    if !unreadable.is_empty() && present {
+        let last = carrier
+            .read(&own)
+            .and_then(|bytes| Ok(serde_json::from_slice::<Value>(&bytes)?))
+            .and_then(|v| v["plugins"].as_object().cloned().ok_or_else(|| anyhow!("no plugins")));
+        match last {
+            Ok(last) => {
+                for plugin in &unreadable {
+                    if let Some(doc) = last.get(plugin) {
+                        plugins.insert(plugin.clone(), doc.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("pinholed: synced: {own} not sent: a file here cannot be read, nor what was sent got: {e:#}");
+                mark.save(dir)?;
+                return Ok(done);
+            }
+        }
+    }
     let plugins = Value::Object(plugins);
     let sum = hash(plugins.to_string().as_bytes());
-    let present = there.iter().any(|f| f.name == own);
     // Nothing kept and nothing sent before: no folder made for nothing.
     if (mark.sent != Some(sum) || !present) && !(docs.is_empty() && !present) {
         let body = json!({
@@ -651,11 +678,17 @@ mod tests {
         assert!(done.sent);
         assert_eq!(done.changed, ["pinhole.people"]);
         assert_eq!(load(&file(&dir, "pinhole.people")).unwrap().values["f2"], json!({"name": "Ola"}));
-        // A plugin's file here that cannot be read: the others still go.
+        // A plugin's file here that cannot be read: the others still go,
+        // and it as it was last sent, never left out.
+        set(&dir, "me.broken", &named("f9", "Ewa"), "h").unwrap();
+        assert!(carry(&dir, &drive, "h", "fixer").unwrap().sent);
         std::fs::write(file(&dir, "me.broken"), b"{not json").unwrap();
         set(&dir, "pinhole.people", &named("f3", "Jan"), "h").unwrap();
         assert!(carry(&dir, &drive, "h", "fixer").unwrap().sent);
         assert_eq!(std::fs::read(file(&dir, "me.broken")).unwrap(), b"{not json");
+        let sent: Value = serde_json::from_slice(&drive.read("fixer-h.json").unwrap()).unwrap();
+        assert_eq!(sent["plugins"]["me.broken"]["values"]["f9"], json!({"name": "Ewa"}), "{sent}");
+        assert_eq!(sent["plugins"]["pinhole.people"]["values"]["f3"], json!({"name": "Jan"}), "{sent}");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
     }
