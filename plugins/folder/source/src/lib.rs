@@ -266,6 +266,23 @@ pub fn display_name(path: &Path, home: &Path) -> String {
     }
 }
 
+/// Where the index keeps (`db::set_meta`) the device number (st_dev) of the
+/// disk the folder was on when last looked at (`FolderSource::same_disk`).
+const DEVICE: &str = "folder_device";
+
+/// The folder found empty on another disk than its photos were on: its own
+/// disk unmounted from a mount point that stays, empty, on the disk below.
+#[derive(Debug)]
+struct NotMounted(String);
+
+impl std::fmt::Display for NotMounted {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{} is empty and on another disk than its photos were: their disk is not mounted", self.0)
+    }
+}
+
+impl std::error::Error for NotMounted {}
+
 /// A look at the folder: its assets by id, and what could not be read
 /// (`Walk::unread`), where the index's assets are kept as they are.
 struct Look {
@@ -332,6 +349,26 @@ impl FolderSource {
         unread.sort();
         unread.dedup();
         Ok(Look { entries: pair(walk.found), unread })
+    }
+
+    /// A look that finds nothing where the index has photos, with the folder
+    /// on another disk than when it was last looked at, is its disk
+    /// unmounted (a removable disk or a network share at a fixed mount
+    /// point, /mnt/photos), not every photo deleted: an error, which
+    /// writes nothing, so the photos and their favourites stay. With photos
+    /// in it, the folder is as it is found (a share mounted again has
+    /// another number), and its disk is the one remembered from then on.
+    fn same_disk(&self, conn: &Connection, look: &Look) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let device = std::fs::metadata(&self.root)?.dev().to_string();
+        let was = pinhole_core::db::meta(conn, DEVICE);
+        if was.as_deref() == Some(device.as_str()) {
+            return Ok(());
+        }
+        if look.entries.is_empty() && was.is_some() && conn.query_row("SELECT EXISTS (SELECT 1 FROM assets)", [], |r| r.get(0))? {
+            return Err(NotMounted(self.root.display().to_string()).into());
+        }
+        pinhole_core::db::set_meta(conn, DEVICE, &device)
     }
 
     /// The asset for an entry: its dates and details read from the file.
@@ -549,10 +586,9 @@ impl Source for FolderSource {
     }
 
     fn health(&self, error: &anyhow::Error) -> Health {
-        if !self.root.is_dir() {
+        if !self.root.is_dir() || error.is::<NotMounted>() {
             return Health::Offline;
         }
-        let _ = error;
         Health::Failing
     }
 
@@ -562,6 +598,7 @@ impl Source for FolderSource {
 
     fn list(&self, index: &mut Index, progress: &(dyn Fn(u64, u64) + Sync)) -> Result<Listing> {
         let look = self.look()?;
+        self.same_disk(index.conn, &look)?;
         let entries = &look.entries;
         // What could not be read is not gone: the listing leaves it be, and
         // a Live Photo whose motion it is as the index has it.
@@ -590,6 +627,7 @@ impl Source for FolderSource {
 
     fn changes(&self, index: &mut Index, _token: &str) -> Result<Listing> {
         let look = self.look()?;
+        self.same_disk(index.conn, &look)?;
         let entries = &look.entries;
         // What the index has, by the keys of each asset's file and motion.
         let mut known: HashMap<String, (String, Option<String>)> = HashMap::new();
@@ -994,6 +1032,39 @@ mod tests {
         source.set_favorite(&conn, &["IMG_2.JPG".into()], true).unwrap();
         source.set_favorite(&conn, &["IMG_2.JPG".into()], false).unwrap();
         assert!(favorites(&conn).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_folder_left_empty_by_its_disk_unmounted_keeps_its_photos_and_favourites() {
+        let dir = temp("unmounted");
+        for f in ["IMG_1.JPG", "2026/IMG_2.JPG"] {
+            touch(&dir.join(f));
+        }
+        let source = FolderSource::new(dir.clone());
+        let mut conn = pinhole_core::db::open(&std::env::temp_dir().join(format!("pinhole-folder-unmounted-{}.sqlite", std::process::id()))).unwrap();
+        pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).unwrap();
+        source.set_favorite(&conn, &["IMG_1.JPG".into()], true).unwrap();
+        let count = |conn: &Connection| -> i64 { conn.query_row("SELECT COUNT(*) FROM assets", [], |r| r.get(0)).unwrap() };
+        // Its disk unmounted: the mount point empty, on the disk below
+        // (another device number than the one remembered).
+        pinhole_core::db::set_meta(&conn, DEVICE, "1").unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let error = pinhole_core::sync::follow(&source, &mut conn).unwrap_err();
+        assert!(matches!(source.health(&error), Health::Offline), "{error:#}");
+        assert!(pinhole_core::sync::list(&source, &mut conn, &|_, _| {}, &|| false).is_err());
+        assert_eq!(count(&conn), 2);
+        assert!(favorites(&conn).contains("IMG_1.JPG"));
+        // Mounted again: as it was, favourite and all.
+        touch(&dir.join("IMG_1.JPG"));
+        pinhole_core::sync::follow(&source, &mut conn).unwrap();
+        assert!(favorites(&conn).contains("IMG_1.JPG"));
+        assert_eq!(count(&conn), 1);
+        // Emptied on the disk it is on: its photos went.
+        std::fs::remove_file(dir.join("IMG_1.JPG")).unwrap();
+        pinhole_core::sync::follow(&source, &mut conn).unwrap();
+        assert_eq!(count(&conn), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
