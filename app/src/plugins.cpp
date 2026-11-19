@@ -1077,6 +1077,8 @@ void Plugins::libraryOpened() {
     if (m_ready)
         return;
     m_ready = true;
+    // The library read is the one plugins start with, not a switch to it.
+    m_libraryApi->opened();
     // Each on loads as this is said (Main.qml), then the window gathers
     // them all at once.
     m_loadingAll = true;

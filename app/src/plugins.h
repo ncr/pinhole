@@ -90,6 +90,9 @@ class PluginLibrary : public QObject {
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 public:
     explicit PluginLibrary(const Library *library, QObject *parent = nullptr);
+    // The library first read is the one it starts with: its next read is
+    // a switch only if another source's (settled's `switched`).
+    void opened();
     int count() const;
     QString dir() const;
     QString key() const;

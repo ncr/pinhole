@@ -28,6 +28,8 @@ int PluginLibrary::count() const { return m_library->count(); }
 
 QString PluginLibrary::dir() const { return m_library->dir(); }
 
+void PluginLibrary::opened() { m_settledKey = key(); }
+
 QString PluginLibrary::key() const {
     // The library's own word for its source, read with its photos: it
     // changes with them, never before (as the service's news of another
