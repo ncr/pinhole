@@ -88,7 +88,13 @@ impl Drive {
                 q.append_pair(k, v);
             }
         }
-        let what = format!("iCloud Drive {}", url.path());
+        // Named without its query, which can hold the session's token
+        // (`upload/web`'s), and a link Drive gave by its host alone: an
+        // error goes to the log and the window's status.
+        let what = match service {
+            Some(_) => format!("iCloud Drive {}", url.path()),
+            None => format!("a link of iCloud Drive's ({})", url.host_str().unwrap_or("")),
+        };
         let mut headers = session_headers(session, &url, true)?;
         if let Some((_, content_type)) = &body {
             headers.insert(CONTENT_TYPE, HeaderValue::from_str(content_type)?);
@@ -109,11 +115,11 @@ impl Drive {
                     tries += 1;
                     std::thread::sleep(Duration::from_millis(500 * (tries - 1)));
                 }
-                Err(e) => return Err(e).with_context(|| what.clone()),
+                Err(e) => return Err(e.without_url()).with_context(|| what.clone()),
             }
         };
         let status = response.status();
-        let bytes = response.bytes().with_context(|| what.clone())?;
+        let bytes = response.bytes().map_err(reqwest::Error::without_url).with_context(|| what.clone())?;
         if !status.is_success() {
             let text = String::from_utf8_lossy(&bytes);
             return Err(anyhow!("{what} answered {}: {}", status.as_u16(), text.chars().take(300).collect::<String>()));
@@ -126,33 +132,56 @@ impl Drive {
         serde_json::from_slice(&bytes).with_context(|| format!("iCloud Drive {path} answered with something other than JSON"))
     }
 
-    /// A folder's items.
-    fn items(&self, session: &Session, drivewsid: &str) -> Result<Vec<Value>> {
+    /// A folder, as Drive describes it, with its items.
+    fn details(&self, session: &Session, drivewsid: &str) -> Result<Value> {
         let r = self.json(session, "drivews", "/retrieveItemDetailsInFolders", &[], &json!([{"drivewsid": drivewsid, "partialData": false}]))?;
         let folder = &r[0];
-        if folder.get("items").is_none() {
+        if !folder["items"].is_array() {
             return Err(anyhow!("iCloud Drive has no folder {drivewsid}: {}", folder.to_string().chars().take(200).collect::<String>()));
         }
-        Ok(folder["items"].as_array().cloned().unwrap_or_default())
+        Ok(folder.clone())
     }
 
     /// The folder, found at the top of iCloud Drive, or made there
-    /// (`make`): None if there is none and it is not to be made.
+    /// (`make`): None if there is none and it is not to be made. A folder
+    /// of that name is Pinhole's only if nobody else shares it and Pinhole
+    /// put its mark in it, or, from before the mark, it holds nothing but
+    /// Pinhole's own files (then marked); anything else is an error, and
+    /// nothing is read from or written to it.
     fn folder(&self, session: &Session, make: bool) -> Result<Option<(String, String)>> {
         if let Some(found) = self.folder.lock().unwrap().clone() {
             return Ok(Some(found));
         }
         let ids = |item: &Value| Some((item["drivewsid"].as_str()?.to_owned(), item["docwsid"].as_str()?.to_owned()));
-        let top = self.items(session, ROOT)?;
-        let mut found = top.iter().find(|i| i["type"] == "FOLDER" && i["name"] == FOLDER).and_then(ids);
-        if found.is_none() && make {
-            let client = session.params.get("clientId").cloned().unwrap_or_else(pinhole_core::add::uuid);
-            let r = self.json(session, "drivews", "/createFolders", &[], &json!({
-                "destinationDrivewsId": ROOT,
-                "folders": [{"clientId": client, "name": FOLDER}],
-            }))?;
-            found = Some(ids(&r["folders"][0]).ok_or_else(|| anyhow!("iCloud Drive made no {FOLDER} folder: {r}"))?);
-        }
+        let top = self.details(session, ROOT)?;
+        let found = match top["items"].as_array().into_iter().flatten().find(|i| i["name"] == FOLDER && i["type"] == "FOLDER") {
+            Some(item) => {
+                let (drivewsid, docwsid) = ids(item).ok_or_else(|| anyhow!("iCloud Drive's {FOLDER} folder has no ids"))?;
+                let folder = self.details(session, &drivewsid)?;
+                let items = folder["items"].as_array().cloned().unwrap_or_default();
+                if shared(item) || shared(&folder) {
+                    return Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has"));
+                }
+                if !items.iter().any(|i| full_name(i).as_deref() == Some(MARK) && i["type"] == "FILE") {
+                    if !items.iter().all(|i| i["type"] == "FILE" && i["extension"] == "json") {
+                        return Err(anyhow!("iCloud Drive's {FOLDER} folder holds what Pinhole did not put there: rename it, and Pinhole makes its own"));
+                    }
+                    self.put(session, &docwsid, MARK, MARK_TEXT.as_bytes(), None)?;
+                }
+                Some((drivewsid, docwsid))
+            }
+            None if make => {
+                let client = session.params.get("clientId").cloned().unwrap_or_else(pinhole_core::add::uuid);
+                let r = self.json(session, "drivews", "/createFolders", &[], &json!({
+                    "destinationDrivewsId": ROOT,
+                    "folders": [{"clientId": client, "name": FOLDER}],
+                }))?;
+                let made = ids(&r["folders"][0]).ok_or_else(|| anyhow!("iCloud Drive made no {FOLDER} folder: {r}"))?;
+                self.put(session, &made.1, MARK, MARK_TEXT.as_bytes(), None)?;
+                Some(made)
+            }
+            None => None,
+        };
         *self.folder.lock().unwrap() = found.clone();
         Ok(found)
     }
@@ -161,9 +190,15 @@ impl Drive {
     /// as the file does).
     pub fn list(&self, session: &Session) -> Result<Vec<Carried>> {
         let Some((folder, _)) = self.folder(session, false)? else { return Ok(Vec::new()) };
-        let items = match self.items(session, &folder) {
-            Ok(items) => items,
-            // Gone (moved or deleted in Finder): looked for again next time.
+        let details = self.details(session, &folder).and_then(|details| match shared(&details) {
+            // Shared since it was found: nothing more read from it.
+            true => Err(anyhow!("iCloud Drive's {FOLDER} folder is shared: Pinhole keeps what it syncs only in a folder nobody else has")),
+            false => Ok(details),
+        });
+        let items = match details {
+            Ok(details) => details["items"].as_array().cloned().unwrap_or_default(),
+            // Gone (moved or deleted in Finder), or shared: looked for and
+            // judged again next time.
             Err(e) => {
                 *self.folder.lock().unwrap() = None;
                 return Err(e);
@@ -174,6 +209,9 @@ impl Drive {
         let mut carried = Vec::new();
         for item in items.iter().filter(|i| i["type"] == "FILE") {
             let (Some(name), Some(id), Some(etag)) = (full_name(item), item["docwsid"].as_str(), item["etag"].as_str()) else { continue };
+            if name == MARK {
+                continue;
+            }
             files.insert(name.clone(), id.to_owned());
             carried.push(Carried { name, version: etag.to_owned() });
         }
@@ -192,6 +230,17 @@ impl Drive {
     /// or written over where it is.
     pub fn write(&self, session: &Session, name: &str, bytes: &[u8]) -> Result<()> {
         let (_, folder) = self.folder(session, true)?.expect("made");
+        let existing = self.files.lock().unwrap().get(name).cloned();
+        let id = self.put(session, &folder, name, bytes, existing.as_deref())?;
+        if let Some(id) = id {
+            self.files.lock().unwrap().insert(name.to_owned(), id);
+        }
+        Ok(())
+    }
+
+    /// A file put in the folder whose docwsid is `folder`: written over
+    /// the document `existing`, else a new one. Its document id.
+    fn put(&self, session: &Session, folder: &str, name: &str, bytes: &[u8], existing: Option<&str>) -> Result<Option<String>> {
         let validate = session
             .cookies
             .iter()
@@ -220,7 +269,6 @@ impl Drive {
             return Err(anyhow!("iCloud Drive said nothing of {name} sent: {}", sent.to_string().chars().take(200).collect::<String>()));
         }
         // The document: the one there written over, else a new one.
-        let existing = self.files.lock().unwrap().get(name).cloned();
         let now = pinhole_core::synced::now_millis();
         let mut data = json!({
             "signature": file["fileChecksum"], "wrapping_key": file["wrappingKey"],
@@ -233,7 +281,7 @@ impl Drive {
             "data": data,
             "command": "add_file",
             "create_short_guid": true,
-            "document_id": existing.as_deref().unwrap_or(document),
+            "document_id": existing.unwrap_or(document),
             "path": {"starting_document_id": folder, "path": name},
             "allow_conflict": true,
             "file_flags": {"is_writable": true, "is_executable": false, "is_hidden": false},
@@ -244,11 +292,22 @@ impl Drive {
         if r["status"]["status_code"].as_i64() != Some(0) || made["status"]["status_code"].as_i64() != Some(0) {
             return Err(anyhow!("iCloud Drive did not keep {name}: {}", r.to_string().chars().take(300).collect::<String>()));
         }
-        if let Some(id) = made["document_id"].as_str() {
-            self.files.lock().unwrap().insert(name.to_owned(), id.to_owned());
-        }
-        Ok(())
+        Ok(made["document_id"].as_str().map(str::to_owned))
     }
+}
+
+/// Pinhole's mark in its folder: a folder of that name without it is not
+/// taken for Pinhole's. Not `.json`, so no Pinhole takes it for a
+/// computer's file.
+const MARK: &str = "Pinhole.txt";
+const MARK_TEXT: &str = "Pinhole keeps what it syncs between your computers in this folder (favourite folders, People's names). Do not share it.\n";
+
+/// Whether Drive says an item is shared with someone, or someone's shared
+/// with this account: a share of its own, or one it is in.
+fn shared(item: &Value) -> bool {
+    let counted = |name: &str| item.get(name).is_some_and(|n| n.as_u64() != Some(0));
+    counted("shareCount") || counted("shareAliasCount") || item.get("shareID").is_some_and(|s| !s.is_null())
+        || item.get("zone").is_some_and(|z| z != ZONE)
 }
 
 #[cfg(test)]
@@ -270,6 +329,8 @@ mod tests {
         sent: HashMap<String, Vec<u8>>,
         next: u32,
         requests: Vec<String>,
+        /// The Pinhole folder shared with someone.
+        shared: bool,
     }
 
     impl FakeDrive {
@@ -280,14 +341,16 @@ mod tests {
             let answer = match path {
                 "/retrieveItemDetailsInFolders" => {
                     let id = json_body()[0]["drivewsid"].as_str().unwrap().to_owned();
+                    let share = if self.shared { 1 } else { 0 };
                     let items: Vec<Value> = if id == ROOT {
-                        self.folders.iter().map(|(name, doc)| json!({"type": "FOLDER", "name": name,
-                            "drivewsid": format!("FOLDER::{ZONE}::{doc}"), "docwsid": doc})).collect()
+                        self.folders.iter().map(|(name, doc)| json!({"type": "FOLDER", "name": name, "zone": ZONE,
+                            "drivewsid": format!("FOLDER::{ZONE}::{doc}"), "docwsid": doc, "shareCount": share, "shareAliasCount": 0})).collect()
                     } else {
                         self.files.iter().map(|(doc, (name, ext, etag, _))| json!({"type": "FILE", "name": name, "extension": ext,
                             "docwsid": doc, "etag": format!("e{etag}")})).collect()
                     };
-                    json!([{"drivewsid": id, "items": items}])
+                    let share = if id == ROOT { 0 } else { share };
+                    json!([{"drivewsid": id, "zone": ZONE, "shareCount": share, "shareAliasCount": 0, "items": items}])
                 }
                 "/createFolders" => {
                     let name = json_body()["folders"][0]["name"].as_str().unwrap().to_owned();
@@ -419,6 +482,79 @@ mod tests {
         assert_eq!(second, [Carried { name: "spawner-ab12.json".into(), version: "e2".into() }]);
         assert_eq!(drive.read(&session, "spawner-ab12.json").unwrap(), b"{\"two\": 2}");
         assert_eq!(fake.lock().unwrap().requests.iter().filter(|p| *p == "/createFolders").count(), 1);
+    }
+
+    /// A Pinhole folder there already, with these files in it.
+    fn there(files: &[(&str, &str)]) -> Arc<Mutex<FakeDrive>> {
+        let mut fake = FakeDrive { folders: vec![(FOLDER.to_owned(), "PIN".to_owned())], ..Default::default() };
+        for (n, (name, ext)) in files.iter().enumerate() {
+            fake.files.insert(format!("OLD{n}"), (name.to_string(), ext.to_string(), 1, b"{}".to_vec()));
+        }
+        Arc::new(Mutex::new(fake))
+    }
+
+    fn names(fake: &Arc<Mutex<FakeDrive>>) -> Vec<String> {
+        let mut names: Vec<String> = fake.lock().unwrap().files.values().map(|f| format!("{}.{}", f.0, f.1)).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_folder_is_pinholes_only_if_marked_or_holding_only_its_files() {
+        // Made by Pinhole: marked as it is made; the mark is no
+        // computer's file.
+        let fake = Arc::new(Mutex::new(FakeDrive::default()));
+        let session = serve(fake.clone());
+        Drive::default().write(&session, "spawner-ab12.json", b"{}").unwrap();
+        assert_eq!(names(&fake), [MARK, "spawner-ab12.json"]);
+        assert_eq!(Drive::default().list(&session).unwrap().len(), 1);
+
+        // Pinhole's from before the mark: its files kept and read, the
+        // folder marked.
+        let fake = there(&[("fixer-cd34", "json")]);
+        let session = serve(fake.clone());
+        let carried = Drive::default().list(&session).unwrap();
+        assert_eq!(carried.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["fixer-cd34.json"]);
+        assert_eq!(names(&fake), [MARK, "fixer-cd34.json"]);
+
+        // Someone's own folder of that name: neither read nor written.
+        let fake = there(&[("Tax return", "pdf"), ("fixer-cd34", "json")]);
+        let session = serve(fake.clone());
+        let e = Drive::default().list(&session).unwrap_err();
+        assert!(format!("{e}").contains("did not put there"), "{e}");
+        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
+        assert_eq!(names(&fake), ["Tax return.pdf", "fixer-cd34.json"]);
+
+        // Shared with others, even marked: neither read nor written.
+        let fake = there(&[("Pinhole", "txt"), ("fixer-cd34", "json")]);
+        fake.lock().unwrap().shared = true;
+        let session = serve(fake.clone());
+        let e = Drive::default().list(&session).unwrap_err();
+        assert!(format!("{e}").contains("shared"), "{e}");
+        assert!(Drive::default().write(&session, "spawner-ab12.json", b"{}").is_err());
+        assert_eq!(names(&fake), [MARK, "fixer-cd34.json"]);
+        assert!(!fake.lock().unwrap().requests.iter().any(|p| p.contains("upload") || p.contains("download")));
+
+        // Shared after it was found: read no more.
+        let fake = there(&[("Pinhole", "txt")]);
+        let session = serve(fake.clone());
+        let drive = Drive::default();
+        drive.list(&session).unwrap();
+        fake.lock().unwrap().shared = true;
+        assert!(drive.list(&session).is_err());
+    }
+
+    #[test]
+    fn a_failed_request_never_tells_the_link_it_was_sent_to() {
+        let fake = Arc::new(Mutex::new(FakeDrive::default()));
+        let session = serve(fake);
+        // Nothing listens there.
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let link = format!("http://127.0.0.1:{closed}/upload/SECRETPATH?token=SECRET");
+        let e = Drive::default().send(&session, Method::POST, None, &link, &[], Some((b"x".to_vec(), "text/plain"))).unwrap_err();
+        let said = format!("{e:#} {e:?}");
+        assert!(!said.contains("SECRET"), "{said}");
+        assert!(said.contains("127.0.0.1"), "{said}");
     }
 
     #[test]
