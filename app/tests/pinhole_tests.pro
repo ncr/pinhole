@@ -2,6 +2,7 @@ CONFIG += testcase
 QT += testlib
 TARGET = pinhole_tests
 TEMPLATE = app
+include($$PWD/../headerdeps.pri)
 
 # The window's own files, every one (src/sources.pri), and the tests.
 include(../src/sources.pri)
