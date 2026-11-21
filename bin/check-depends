@@ -6,7 +6,7 @@ source installation is no package, so pacman does not know it needs them:
 one installed only for another package goes when that one is removed with
 `pacman -Rns` (as libheif went with imv), and Pinhole no longer starts.
 This says which are not installed and which pacman holds only for another
-package, with the one command that installs and keeps them all. It never
+package, with the command that installs and keeps them all. It never
 runs that command (an installation for one account asks no root password)
 and never fails the installation. Without pacman it says nothing.
 """
@@ -57,8 +57,14 @@ def main():
         said.append(f"pacman holds {', '.join(loose)} only for other packages, and removing those "
                     f"can take {'it' if len(loose) == 1 else 'them'} too")
     print(f"Warning: {'; '.join(said)}.", file=sys.stderr)
-    command = ["sudo", "pacman", "-S", "--needed", "--asexplicit", *missing, *loose]
-    print(f"  Install and keep them: {shlex.join(command)}", file=sys.stderr)
+    # -S --needed skips what is installed already, its reason too: those
+    # are kept with -D.
+    commands = []
+    if missing:
+        commands.append(shlex.join(["sudo", "pacman", "-S", "--asexplicit", *missing]))
+    if loose:
+        commands.append(shlex.join(["sudo", "pacman", "-D", "--asexplicit", *loose]))
+    print(f"  Install and keep them: {' && '.join(commands)}", file=sys.stderr)
     return 0
 
 

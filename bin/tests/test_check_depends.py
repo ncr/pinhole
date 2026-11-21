@@ -37,7 +37,7 @@ class CheckDependsTests(unittest.TestCase):
         self.assertEqual(len(lines), 2, result.stderr)
         self.assertTrue(lines[0].startswith("Warning: Pinhole needs libheif, which is not installed; "
                                             "pacman holds sqlite only"), lines[0])
-        self.assertEqual(lines[1], "  Install and keep them: sudo pacman -S --needed --asexplicit libheif sqlite")
+        self.assertEqual(lines[1], "  Install and keep them: sudo pacman -S --asexplicit libheif && sudo pacman -D --asexplicit sqlite")
 
     def test_silent_when_all_is_kept(self):
         result = self.run_with("#!/bin/sh\nexit 1\n")
