@@ -227,7 +227,8 @@ PanelWindow {
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.WordWrap
-        text: !popup.store ? "" : popup.store.missing ? strings.t("missing")
+        text: !popup.store ? "" : popup.store.unloadable !== "" ? strings.t("unloadable").arg(popup.store.unloadable)
+              : popup.store.missing ? strings.t("missing")
               : !popup.store.loaded ? strings.t("loading") : strings.t("empty")
         textFormat: Text.PlainText
         font.family: popup.store ? popup.store.fontFamily : Style.font.family

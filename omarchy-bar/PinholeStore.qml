@@ -29,6 +29,9 @@ Singleton {
   property bool loaded: false
   // pinhole could not be run at all.
   property bool missing: false
+  // pinhole is there but cannot start: the library it was built against
+  // that is gone (a system update took it), as the loader named it.
+  property string unloadable: ""
 
   // The newest addition looked at in the panel (ms since 1970); -1 until
   // read from its file. Kept per computer.
@@ -170,10 +173,21 @@ Singleton {
     command: ["sh", "-c", root.runner, "pinhole", "recent", "--count", String(root.capacity), "--follow"]
     running: true
     stdout: SplitParser { onRead: function(line) { root.take(line) } }
+    // The loader's word when pinhole is there but cannot start; it exits
+    // 127 too, as a pinhole that is not there does.
+    stderr: SplitParser {
+      onRead: function(line) {
+        var found = /error while loading shared libraries: ([^:]+):/.exec(line)
+        if (found) root.unloadable = found[1]
+      }
+    }
+    onStarted: root.unloadable = ""
     onExited: function(code) {
-      // 127: no pinhole on this computer. Looked for again now and then.
-      root.missing = code === 127
-      again.interval = root.missing ? 60000 : 5000
+      // 127: no pinhole on this computer, or one that cannot start.
+      // Looked for again now and then.
+      root.missing = code === 127 && root.unloadable === ""
+      if (code !== 127) root.unloadable = ""
+      again.interval = root.missing || root.unloadable !== "" ? 60000 : 5000
       again.restart()
     }
   }
@@ -205,6 +219,7 @@ Singleton {
     items = list
     loaded = true
     missing = false
+    unloadable = ""
     // A drop held until now has its source.
     Qt.callLater(addNext)
     if (seenAdded >= 0 && open) markSeen()

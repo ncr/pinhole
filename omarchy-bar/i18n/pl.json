@@ -29,6 +29,7 @@
   "empty": "W Pinhole nie ma jeszcze zdjęć",
   "loading": "Czytam bibliotekę…",
   "missing": "Pinhole nie jest zainstalowany na tym komputerze",
+  "unloadable": "Pinhole nie może się uruchomić: brakuje %1 na tym komputerze",
   "tooltip": "Pinhole: właśnie dodane",
   "tooltip.fresh": {
     "one": "%1 nowe zdjęcie w Pinhole",

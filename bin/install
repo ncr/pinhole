@@ -89,6 +89,10 @@ run_install() {
         echo 'Use your OS package manager for system installations.' >&2
         exit 2
     fi
+    # What it needs from the system and lacks, or could lose with another
+    # package: said first, since a library gone fails the build obscurely
+    # or the installed Pinhole at its start. Never fails the installation.
+    bin/check-depends || true
     # Keep the update lock in the installer and close it for build subprocesses.
     # bin/update has built it apart already (PINHOLE_BUILT).
     if [ "${PINHOLE_BUILT:-0}" != 1 ]; then
