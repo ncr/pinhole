@@ -1,0 +1,78 @@
+#!/bin/bash
+# What a source installation needs from the system, installed before it builds.
+#
+# The package's depends and makedepends (pkgbuild/PKGBUILD) are what Pinhole
+# runs and builds with. A source installation is no package, so pacman does
+# not know it needs them: this installs the missing ones, and keeps those
+# pacman holds only for another package (one such went with imv, as libheif
+# did, and Pinhole no longer started), both through sudo pacman. It asks for
+# the password in a terminal, or uses sudo without one where it can; where
+# it can do neither it says the command instead.
+#
+#   bin/install-depends          install what is missing; exit 1 if it could not
+#   bin/install-depends --check  only say what is missing or loose; exit 0
+#
+# Without pacman (not Arch) it does nothing.
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+check=0
+[ "${1:-}" = --check ] && check=1
+
+pacman_command="${PINHOLE_PACMAN-$(command -v pacman || true)}"
+[ -n "$pacman_command" ] || exit 0
+sudo_command="${PINHOLE_SUDO-$(command -v sudo || true)}"
+
+# The recipe is Pinhole's own: its arrays, read by bash itself.
+mapfile -t runtime < <(bash -c 'source "$1" && printf "%s\n" "${depends[@]}"' sh "$ROOT/pkgbuild/PKGBUILD")
+mapfile -t building < <(bash -c 'source "$1" && printf "%s\n" "${makedepends[@]}"' sh "$ROOT/pkgbuild/PKGBUILD")
+names=("${runtime[@]}" "${building[@]}")
+[ "${#names[@]}" -gt 0 ] || exit 0
+
+# -T: the names nothing installed satisfies (a provider counts).
+missing=()
+while IFS= read -r name; do
+    [ -n "$name" ] && missing+=("$name")
+done < <("$pacman_command" -T "${names[@]}" 2>/dev/null || true)
+# -Qqd: installed only as another package's dependency. Asked one by one,
+# since a name a provider satisfies is no package of its own. Only what
+# Pinhole runs with: a build tool gone fails the next build plainly.
+loose=()
+for name in "${runtime[@]}"; do
+    [[ " ${missing[*]-} " == *" $name "* ]] && continue
+    [ "$("$pacman_command" -Qqd "$name" 2>/dev/null || true)" = "$name" ] && loose+=("$name")
+done
+[ "${#missing[@]}" -eq 0 ] && [ "${#loose[@]}" -eq 0 ] && exit 0
+
+# -S --needed skips what is installed already, its reason too: those are
+# kept with -D.
+install=()
+[ "${#missing[@]}" -gt 0 ] && install=("$sudo_command" "$pacman_command" -S --needed --asexplicit --noconfirm "${missing[@]}")
+keep=()
+[ "${#loose[@]}" -gt 0 ] && keep=("$sudo_command" "$pacman_command" -D --asexplicit "${loose[@]}")
+
+can=0
+if [ "$check" = 0 ] && [ -n "$sudo_command" ]; then
+    if [ -t 0 ] || "$sudo_command" -n true 2>/dev/null; then can=1; fi
+fi
+if [ "$can" = 1 ]; then
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "Installing what Pinhole needs: ${missing[*]}"
+        "${install[@]}" || { echo "Could not install ${missing[*]}." >&2; exit 1; }
+    fi
+    if [ "${#loose[@]}" -gt 0 ]; then
+        "${keep[@]}" >/dev/null || echo "Warning: could not keep ${loose[*]}; removing other packages can take them." >&2
+    fi
+    exit 0
+fi
+
+said=()
+[ "${#missing[@]}" -gt 0 ] && said+=("Pinhole needs ${missing[*]}, not installed")
+[ "${#loose[@]}" -gt 0 ] && said+=("pacman holds ${loose[*]} only for other packages, and removing those can take them too")
+commands=()
+[ "${#missing[@]}" -gt 0 ] && commands+=("sudo pacman -S --needed --asexplicit ${missing[*]}")
+[ "${#loose[@]}" -gt 0 ] && commands+=("sudo pacman -D --asexplicit ${loose[*]}")
+joined="$(printf '%s; ' "${said[@]}")"
+echo "Warning: ${joined%; }." >&2
+joined="$(printf '%s && ' "${commands[@]}")"
+echo "  Install and keep them: ${joined% && }" >&2
+[ "$check" = 1 ] || [ "${#missing[@]}" -eq 0 ]

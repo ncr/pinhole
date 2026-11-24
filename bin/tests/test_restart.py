@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
         scripts.mkdir()
         for name in ['install', 'restart-installed']:
             shutil.copy2(ROOT / 'bin' / name, scripts / name)
-        for name, contents in {'build': build, 'install-dev': 'exit 0'}.items():
+        for name, contents in {'build': build, 'install-dev': 'exit 0', 'install-depends': 'exit 0'}.items():
             path = scripts / name
             path.write_text('#!/bin/sh\n' + contents + '\n')
             path.chmod(0o755)

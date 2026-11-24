@@ -183,23 +183,19 @@ Omarchy's background and theme), and opening Pinhole where the bar's icon
 is dropped (Hyprland). Elsewhere the window, its sources and the other
 plugins are there, in Pinhole's own colours rather than the theme's.
 
-There is no package yet: Pinhole installs from this repository. On a fresh
-Arch install, the tools to build it and what it runs with, then
-the code, then the install into `~/.local` (no root password):
+There is no package yet: Pinhole installs from this repository, in one
+command:
 
 ```bash
-sudo pacman -S --needed git base-devel rust qt6-base qt6-declarative qt6-svg qt6-wayland \
-  qt6-multimedia qt6-multimedia-ffmpeg qt6-shadertools wayland-protocols libjpeg-turbo libheif \
-  libplist libultrahdr lcms2 sqlite imagemagick ffmpeg xdg-desktop-portal uv python \
-  ttf-jetbrains-mono-nerd
-git clone https://github.com/ncr/pinhole.git
-cd pinhole
-bin/install
+git clone https://github.com/ncr/pinhole && pinhole/bin/install
 ```
 
-The first build takes several minutes. `gum`, if installed, gives
-`bin/install` a small menu and a spinner. Run it as yourself, not with
-`sudo`: it installs for your account alone.
+`bin/install` installs what Pinhole needs and builds with through pacman
+first (sudo asks for your password once), then builds it, which takes
+several minutes the first time, and links it into `~/.local` for your
+account. On Omarchy everything else is there already; a bare Arch install
+needs `git` and `sudo` before it. Run it as yourself, not with
+`sudo`. `gum`, if installed, gives it a small menu and a spinner.
 
 ```bash
 bin/install                  # terminal UI; build and run directly from this checkout

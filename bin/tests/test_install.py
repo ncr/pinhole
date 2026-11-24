@@ -254,7 +254,7 @@ class InstallerTests(unittest.TestCase):
             'mkdir -p "$1/bin" "$1/share/pinhole"; printf x > "$1/bin/pinhole"\n'
             'printf \'{"version": 1, "mode": "developer", "prefix": "%s", "entries": []}\' "$1"'
             ' > "$1/share/pinhole/install-manifest.json"')
-        for name, contents in {"build": "exit 0", "install-dev": install_dev}.items():
+        for name, contents in {"build": "exit 0", "install-dev": install_dev, "install-depends": "exit 0"}.items():
             (scripts / name).write_text("#!/bin/sh\n" + contents + "\n")
             (scripts / name).chmod(0o755)
         for arguments in [["init", "-b", "main"], ["config", "user.name", "Install test"],
@@ -367,6 +367,8 @@ class BuildGuardTests(unittest.TestCase):
             shutil.copy2(ACTIVATE.with_name("install"), scripts / "install")
             build = scripts / "build"
             build.write_text("#!/bin/sh\necho 'build failed' >&2\nexit 66\n")
+            (scripts / "install-depends").write_text("#!/bin/sh\nexit 0\n")
+            (scripts / "install-depends").chmod(0o755)
             build.chmod(0o755)
             program = root / "prefix/bin/pinhole"
             program.parent.mkdir(parents=True)
@@ -387,6 +389,7 @@ class BuildGuardTests(unittest.TestCase):
         for name, contents in {
             "build": "#!/bin/sh\n" + during_build + "\n",
             "install-dev": '#!/bin/sh\nprintf "new program" > "$1/bin/pinhole"\n',
+            "install-depends": "#!/bin/sh\nexit 0\n",
         }.items():
             script = scripts / name
             script.write_text(contents)

@@ -15,7 +15,8 @@ while [ "$#" -gt 0 ]; do
             cat <<'HELP'
 Usage: bin/install [--uninstall] [--non-interactive]
 
-Build this checkout and link Pinhole into ~/.local. No package or root password.
+Install what Pinhole needs with pacman (sudo asks for your password once),
+build this checkout and link Pinhole into ~/.local for your account.
 Running Pinhole windows reopen automatically after a successful installation.
 
   --uninstall Remove this account's installation; keep photos and settings.
@@ -90,9 +91,15 @@ run_install() {
         exit 2
     fi
     # What it needs from the system and lacks, or could lose with another
-    # package: said first, since a library gone fails the build obscurely
-    # or the installed Pinhole at its start. Never fails the installation.
-    bin/check-depends || true
+    # package: installed and kept first, since a library gone fails the
+    # build obscurely or the installed Pinhole at its start. Only said
+    # after a build already made (bin/update's) or once installed before
+    # the spinner, which leaves sudo no terminal to ask in.
+    if [ "${PINHOLE_BUILT:-0}" = 1 ]; then
+        bin/install-depends --check || true
+    elif [ "${PINHOLE_DEPENDS_DONE:-0}" != 1 ]; then
+        bin/install-depends
+    fi
     # Keep the update lock in the installer and close it for build subprocesses.
     # bin/update has built it apart already (PINHOLE_BUILT).
     if [ "${PINHOLE_BUILT:-0}" != 1 ]; then
@@ -170,6 +177,8 @@ if [ "$ui" = 1 ]; then
     state="${XDG_STATE_HOME:-$HOME/.local/state}/pinhole"
     mkdir -p "$state"
     log="$state/install.log"
+    bin/install-depends || exit 1
+    export PINHOLE_DEPENDS_DONE=1
     gum spin --title 'Building Pinhole and linking this checkout…' --show-error -- \
         sh -c '"$1/bin/install" --non-interactive >"$2" 2>&1 || { cat "$2"; exit 1; }' sh "$ROOT" "$log"
     gum style --foreground 78 --bold '✓  Pinhole is ready.'
