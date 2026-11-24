@@ -68,6 +68,34 @@ pub fn switches_in(path: &Path) -> HashMap<String, bool> {
     switches
 }
 
+/// Whether the plugins' background work is paused, as Settings has it:
+/// `"workersPaused": true` at the top of the file. Paused, pinholed runs
+/// none of their workers (workers.rs), so what they hold in memory (a
+/// model loaded for search) and the processor they use are free. No file
+/// is not paused; one that cannot be read as a JSON object leaves it as it
+/// was last read.
+pub fn workers_paused_in(path: &Path) -> bool {
+    static LAST: Mutex<Option<HashMap<PathBuf, bool>>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let last = last.get_or_insert_with(HashMap::new);
+    let written = match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            last.remove(path);
+            return false;
+        }
+        Err(_) => None,
+        Ok(text) => serde_json::from_str::<Value>(&text).ok().filter(Value::is_object),
+    };
+    match written {
+        Some(written) => {
+            let paused = written["workersPaused"] == Value::Bool(true);
+            last.insert(path.to_owned(), paused);
+            paused
+        }
+        None => last.get(path).copied().unwrap_or(false),
+    }
+}
+
 /// When the file last changed, and its size: read again only when these
 /// differ from the last time. None when there is no file.
 pub fn stamp(path: &Path) -> Option<(SystemTime, u64)> {

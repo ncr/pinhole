@@ -86,5 +86,6 @@
   "saying a group is someone else": "oznaczenie grupy jako innej osoby",
   "taking a name from a face": "odebranie twarzy imienia",
   "taking a photo from a person": "wyjęcie zdjęcia z osoby",
-  "unmarking a face as not known": "cofnięcie oznaczenia twarzy jako nieznanej"
+  "unmarking a face as not known": "cofnięcie oznaczenia twarzy jako nieznanej",
+  "Finding faces waits while background work is paused in Settings.": "Szukanie twarzy czeka, bo praca w tle jest wstrzymana w Ustawieniach."
 }

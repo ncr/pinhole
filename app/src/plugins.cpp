@@ -332,6 +332,8 @@ QVariantList PluginHost::workers() const {
         mine.append(QVariantMap{
             {"name", worker.value("name").toString()},
             {"running", worker.value("running").toBool()},
+            // Not running because Settings pauses background work.
+            {"paused", worker.value("paused").toBool()},
             {"since", worker.value("since").toDouble()},
             {"key", worker.value("key").toString()},
             {"lastExit", exit.isObject() ? exit.toObject().toVariantMap() : QVariant()},
@@ -688,6 +690,7 @@ Plugins::Plugins(const Library *library, ServiceClient *service, Viewer *viewer,
                 if (workers == m_workers)
                     return;
                 m_workers = workers;
+                emit workersChanged();
                 for (const auto &p : m_plugins)
                     if (p->host)
                         emit p->host->workersChanged();
@@ -1226,6 +1229,21 @@ void Plugins::setEnabled(const QString &id, bool on) {
         setMarks(id, {});
     }
     updateCatalogs();
+    ++m_revision;
+    emit changed();
+}
+
+void Plugins::setWorkersPaused(bool paused) {
+    if (paused == workersPaused())
+        return;
+    QJsonObject config = latestConfig();
+    if (paused)
+        config.insert("workersPaused", true);
+    else
+        config.remove("workersPaused");
+    // pinholed stops or starts them at its next look, two seconds at most.
+    if (writeConfig(config) && m_service)
+        m_service->call(QStringLiteral("plugins_changed"), {}, [](bool, const QJsonObject &, const QString &) {});
     ++m_revision;
     emit changed();
 }

@@ -1273,6 +1273,41 @@ Item {
                 }
                 Item { width: 1; height: theme.fontSize }
 
+                // The plugins' work through the whole library, paused:
+                // pinholed stops their workers, and what they hold goes.
+                Heading { visible: plugins.hasWorkers || plugins.workersPaused; text: qsTr("Background work") }
+                Item {
+                    visible: plugins.hasWorkers || plugins.workersPaused
+                    x: Math.round(theme.fontSize * 0.714)
+                    width: parent.width - 2 * x
+                    height: visible ? pauseSwitch.height : 0
+                    UiText {
+                        width: parent.width - pauseSwitch.width - theme.fontSize
+                        y: centredIn(parent.height)
+                        text: qsTr("Pause background work")
+                        color: theme.brightForeground
+                        elide: Text.ElideRight
+                    }
+                    Toggle {
+                        id: pauseSwitch
+                        objectName: "pauseWorkersSwitch"
+                        lit: root.focusedStop === pauseSwitch
+                        Component.onCompleted: root.addStop(pauseSwitch)
+                        Component.onDestruction: root.dropStop(pauseSwitch)
+                        anchors.right: parent.right
+                        checked: plugins.workersPaused
+                        Accessible.name: qsTr("Pause background work")
+                        onToggled: plugins.workersPaused = !plugins.workersPaused
+                    }
+                }
+                Note {
+                    visible: plugins.hasWorkers || plugins.workersPaused
+                    text: plugins.workersPaused
+                        ? qsTr("Paused: finding faces and indexing what photos show wait, and the memory and processor they used are free. Search by what photos show works again once this is off.")
+                        : qsTr("Finding faces and indexing what photos show go through the whole library while Pinhole runs. Paused, they stop and give back the memory and processor they use, until you turn this off.")
+                }
+                Item { width: 1; height: theme.fontSize; visible: plugins.hasWorkers || plugins.workersPaused }
+
                 // Each: its name and switch, what it does under them; on, and
                 // with settings or a tour, a tap on it (or ⏎ or Space) unfolds
                 // them, a line down from its chevron tying them to it.

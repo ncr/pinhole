@@ -54,6 +54,7 @@ Item {
     }
     function report(error) {
         if (error.code === "cancelled" || error.code === "reloaded") return
+        if (error.code === "paused") { failure = pausedText; return }
         let message = error.message || String(error)
         if (error.stdout) {
             try { message = JSON.parse(error.stdout).error || message } catch (_) {}
@@ -201,8 +202,11 @@ Item {
         }
         poller.cancel()
         ready = false; catalogReady = false
-        failure = qsTr("Waiting for Pinhole's background search service.")
+        failure = worker?.paused ? pausedText : qsTr("Waiting for Pinhole's background search service.")
     }
+    // Settings pauses Pinhole's background work: its worker, and the model
+    // it holds, are stopped until it is no longer.
+    readonly property string pausedText: qsTr("Search waits while background work is paused in Settings.")
     // A finished benchmark run's vectors, for the Apple Neural Engine
     // profile: the index without indexing.
     function importBenchmark() {

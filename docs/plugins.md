@@ -505,7 +505,11 @@ two seconds, so a manifest changed, a plugin added or a switch in
 `plugins.json` is followed without a restart. A worker runs while its
 plugin is on, as the side panel has it (a built-in plugin unless turned
 off, one of your own only once turned on), and a source with a library is
-shown. It is given, after `args`:
+shown, unless the person pauses background work in Settings (Plugins):
+then none runs, each stopped as below so that what it holds in memory and
+the processor it uses are free, and each starts again as soon as it is no
+longer paused. Hold a model as long as you run; the pause is how it is let
+go. It is given, after `args`:
 
 ```
 --library <the library's folder, with library.sqlite>
@@ -544,11 +548,13 @@ seconds later. A service started for a library given (`--given`) runs
 none.
 
 Its plugin's QML has `pinhole.workers`: each of its workers'
-`{ name, running, since, lastExit, key, said }`, as pinholed runs them,
+`{ name, running, paused, since, lastExit, key, said }`, as pinholed runs them,
 with `workersChanged()`; `said` is what it said last while it
 runs, or null, so a panel opened halfway through a scan shows how far it
 is at once. A worker that ends, or is killed, is `running: false` with
-its `lastExit`: notice it with `onWorkersChanged`, not a timer. A line the worker writes on its stdout that is a JSON
+its `lastExit`, and `paused: true` while Settings pauses background
+work: say so then (what it is waiting for is the person), not that it
+is starting. Notice it with `onWorkersChanged`, not a timer. A line the worker writes on its stdout that is a JSON
 object with an `"event"` is not logged but told to the plugin's windows:
 `pinhole.workerSaid(name, said)`, `said` the object, the latest of each
 quarter second (what it wrote meanwhile is left out). Say there what it got
@@ -592,7 +598,8 @@ the QML gave it; the worker answers on its stdout with a line of its own,
 "why"}`, in any order and while others wait (the `ask` number says which).
 What it says otherwise is as before: its news, its log. The promise is of
 the `result`; rejected with `code` `failed` (its `error` the message),
-`timeout` (none in `timeout` ms, 30 s unless said), `not_running` (not
+`timeout` (none in `timeout` ms, 30 s unless said), `paused` (background
+work is paused in Settings), `not_running` (not
 started yet, or it stopped before it answered: no source shown, the plugin
 turned off), `unsupported` (its manifest does not say it `answers`),
 `not_found` (no such worker of the plugin's), `cancelled` once `cancel()`
