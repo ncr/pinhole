@@ -47,7 +47,15 @@ def env():
 
 
 def profile(folder):
-    made = {}
+    # mise keeps its config, its trust in it and its tools in the XDG
+    # folders, so its shims (python3 among them) fail on a profile of no
+    # one's: its own folders stay the person's, as they were.
+    made = {f"MISE_{kind}_DIR": os.environ.get(f"MISE_{kind}_DIR") or os.path.join(
+                os.environ.get(xdg) or os.path.expanduser(default), "mise")
+            for kind, xdg, default in [("CONFIG", "XDG_CONFIG_HOME", "~/.config"),
+                                       ("STATE", "XDG_STATE_HOME", "~/.local/state"),
+                                       ("DATA", "XDG_DATA_HOME", "~/.local/share"),
+                                       ("CACHE", "XDG_CACHE_HOME", "~/.cache")]}
     for key, name in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state"),
                       ("XDG_CACHE_HOME", "cache"), ("XDG_PICTURES_DIR", "Pictures")]:
         (folder / name).mkdir(parents=True, exist_ok=True)
