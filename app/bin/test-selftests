@@ -37,7 +37,8 @@ ROOT = APP.parent
 # Each in a window of its own, all at once; through as two, a width each.
 # The longest first, so the last to end ends soonest.
 MODES = ["through:850:panel", "through:1700:panel", "through:850:rest", "through:1700:rest", "covering", "colour", "physics", "hidden", "stacks", "layers", "people", "help", "corner",
-         "edit", "info", "sheet", "background", "clashes"]
+         "edit", "info", "sheet", "background", "clashes",
+         "accessibility", "guide", "lazyplugins", "querylimits", "wheelzoom"]
 # On a folder of real photos (folder()), its originals there to read: the
 # fake library has thumbnails alone.
 ON_FOLDER = {"info", "sheet", "background"}

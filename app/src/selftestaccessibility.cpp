@@ -264,12 +264,19 @@ void runAccessibilitySelfTest(QQuickWindow *window, const QString &folder) {
         case 17:
             if (window->findChild<QQuickItem *>("selectCopyGroup")->property("open").toBool()) return fail("Escape did not close Copy menu");
             window->findChild<QQuickItem *>("grid")->setProperty("selecting", false);
-            window->resize(560, 640);
+            window->resize(400, 640);
             return;
         case 18: {
             auto *more = window->findChild<QQuickItem *>("gridMore");
             auto *button = more ? namedItem(more, "moreButton") : nullptr;
-            if (!more || !more->isVisible() || !button) return fail("narrow grid did not expose More");
+            if (!more || !more->isVisible() || !button) {
+                auto *actions = window->findChild<QQuickItem *>("gridActions");
+                std::fprintf(stderr, "selftest: accessibility: grid actions %d, fit %d, width %d, More %s\n",
+                             actions ? actions->property("actions").toList().size() : -1,
+                             actions ? actions->property("fit").toInt() : -1, window->width(),
+                             more && more->isVisible() ? "shown" : "hidden");
+                return fail("narrow grid did not expose More");
+            }
             auto *date = window->findChild<QQuickItem *>("dateLabel");
             if (date->mapToScene({date->width(), 0}).x() > button->mapToScene({0, 0}).x())
                 return fail("long date overlaps More's pointer area");
