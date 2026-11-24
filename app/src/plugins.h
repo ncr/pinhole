@@ -696,6 +696,14 @@ class Plugins : public QObject {
     // still being read on another thread, and what they keep of it shows
     // in the first frame already.
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
+    // Settings pausing the plugins' background work (finding faces,
+    // indexing what photos show): pinholed runs none of their workers, so
+    // what they hold in memory and the processor they use are free. Kept
+    // in plugins.json as workersPaused.
+    Q_PROPERTY(bool workersPaused READ workersPaused WRITE setWorkersPaused NOTIFY changed)
+    // Some plugin on has background work, running or paused: Settings
+    // offers to pause it.
+    Q_PROPERTY(bool hasWorkers READ hasWorkers NOTIFY workersChanged)
     // As they do, all those on at once: the window gathers what they add
     // once they all have (allLoaded), not as each does.
     Q_PROPERTY(bool loadingAll READ loadingAll NOTIFY allLoaded)
@@ -799,6 +807,9 @@ public:
     // The library has been read the first time (or is not there yet).
     void libraryOpened();
     bool ready() const { return m_ready; }
+    bool workersPaused() const { return m_config.value("workersPaused").toBool(); }
+    void setWorkersPaused(bool paused);
+    bool hasWorkers() const { return !m_workers.isEmpty(); }
     bool loadingAll() const { return m_loadingAll; }
     // The library was read again, or moved: `moved` has each old
     // position's new one, -1 for a photo gone.
@@ -922,6 +933,7 @@ signals:
     void notice(const QString &id, const QString &text);
     void coveredByChanged();
     void readyChanged();
+    void workersChanged();
     // Those on as the library was first read have all loaded.
     void allLoaded();
     // The library was read again: what plugins hide and stack (hiddenOf,

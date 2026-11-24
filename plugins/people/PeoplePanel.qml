@@ -169,7 +169,12 @@ Panel {
             pinhole.warn(error)
         }
     }
+    // Settings pauses Pinhole's background work: the face finder is
+    // stopped, whatever it last said, until it is no longer.
+    readonly property bool finderPaused: pinhole.workers.some(worker => worker.name === "faces" && worker.paused)
     function statusText() {
+        if (finderPaused && status.phase !== "ready")
+            return qsTr("Finding faces waits while background work is paused in Settings.")
         switch (status.phase) {
         case "scanning": return qsTr("Looking for faces: %1 of %2 photos so far.").arg(count(status.done)).arg(count(status.total))
         case "grouping": return qsTr("Grouping similar faces…")

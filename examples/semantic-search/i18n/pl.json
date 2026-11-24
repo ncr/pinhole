@@ -48,5 +48,6 @@
   "food on a plate": "jedzenie na talerzu",
   "mountains": "góry",
   "old car": "stary samochód",
-  "Indexing while you are away from the screen, so the desktop stays smooth: %1 of %2 photos can be found.": "Indeksuję, gdy nie ma Cię przy ekranie, żeby pulpit się nie zacinał: można znaleźć %1 z %2 zdjęć."
+  "Indexing while you are away from the screen, so the desktop stays smooth: %1 of %2 photos can be found.": "Indeksuję, gdy nie ma Cię przy ekranie, żeby pulpit się nie zacinał: można znaleźć %1 z %2 zdjęć.",
+  "Search waits while background work is paused in Settings.": "Wyszukiwanie czeka, bo praca w tle jest wstrzymana w Ustawieniach."
 }

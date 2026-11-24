@@ -619,11 +619,16 @@ optional photo search's indexer another. Each is started again with the
 source shown, stopped (its stdin closed, killed five seconds later) when
 its plugin is turned off, and started again ten seconds after it ended by
 itself. A service started with `--given` runs none, and says none.
+While Settings pauses background work (`"workersPaused": true` in
+`plugins.json`, written by the window, followed at the next look) it
+runs none either: each is stopped as above, which frees what it held
+(the photo search's model), and started again at once as it is no longer
+paused.
 
 ```json
 {"event": "workers", "workers": [
   {"plugin": "pinhole.people", "name": "faces", "library": "/home/me/.local/share/pinhole/library/folder/Pictures",
-   "key": "folder:/home/me/Pictures", "running": true, "since": 1793026800000, "last_exit": null}
+   "key": "folder:/home/me/Pictures", "running": true, "paused": false, "since": 1793026800000, "last_exit": null}
 ]}
 ```
 
@@ -635,7 +640,8 @@ false`. A program that asks whether the service runs its plugin's worker
 for a library (the photo search example's `config`) asks it, and finds its
 plugin there with that `library` and `key`. `library` and `key` are what it
 runs for, or would: null while no source with a library is shown.
-`running` is whether its process is there now, and `since` since when it
+`running` is whether its process is there now, `paused` whether it is
+not because Settings pauses background work, and `since` since when it
 has been, or not (milliseconds since 1970). `last_exit` is how it last
 ended by itself, or null: `code` (its exit code, or null) and `signal`
 (the signal that ended it, or null), and `at`. One stopped by the service

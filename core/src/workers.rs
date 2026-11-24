@@ -5,7 +5,9 @@
 //! ended by itself, and stopped by closing its stdin: killed if it is
 //! still there five seconds later. Its stdout and stderr go into
 //! pinholed's log after its plugin's id. A service of a library given
-//! (`--given`) runs none.
+//! (`--given`) runs none, and none runs while Settings pauses background
+//! work (`workersPaused` in plugins.json): each is stopped, which frees
+//! what it holds, and started again as it is no longer paused.
 
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -89,6 +91,8 @@ pub struct Status {
     /// shown.
     pub shown: Option<Shown>,
     pub running: bool,
+    /// Not running because Settings pauses background work.
+    pub paused: bool,
     /// Since when it has been running, or not, in milliseconds since 1970.
     pub since: u64,
     pub last_exit: Option<Exit>,
@@ -102,6 +106,7 @@ impl Status {
             "library": self.shown.as_ref().map(|s| &s.library),
             "key": self.shown.as_ref().map(|s| &s.key),
             "running": self.running,
+            "paused": self.paused,
             "since": self.since,
             "last_exit": self.last_exit.as_ref().map(|e| json!({"code": e.code, "signal": e.signal, "at": e.at})),
         })
@@ -233,6 +238,9 @@ impl Workers {
         let worker = (plugin.to_owned(), name.to_owned());
         let input = self.asking.inputs.lock().unwrap_or_else(|e| e.into_inner()).get(&worker).cloned();
         let Some(input) = input else {
+            if self.paused() {
+                return Err(("paused", format!("{plugin} {name} is not running: background work is paused in Settings")));
+            }
             let declared = self.wanted(None).into_iter().find(|(w, _)| w.plugin == plugin && w.name == name);
             return Err(match declared {
                 None => ("not_found", format!("{plugin} has no worker {name:?} that is on")),
@@ -265,6 +273,11 @@ impl Workers {
         }
     }
 
+    /// Whether Settings pauses background work: none runs then.
+    pub fn paused(&self) -> bool {
+        crate::plugins::workers_paused_in(&self.plugins)
+    }
+
     /// Who hears what the workers say, from now on.
     pub fn tell_with(&self, tell: Teller) {
         *self.tell.lock().unwrap_or_else(|e| e.into_inner()) = Some(tell);
@@ -291,6 +304,7 @@ impl Workers {
     /// left it.
     pub fn report_now(&self, shown: Option<&Shown>) -> Value {
         let status = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let paused = self.paused();
         let workers: Vec<Value> = self
             .wanted(shown)
             .into_iter()
@@ -298,7 +312,7 @@ impl Workers {
                 let last = status.iter().find(|s| s.plugin == w.plugin && s.name == w.name);
                 let shown = job.map(|j| Shown { library: j.library, key: j.key });
                 // Running for what it is wanted for now, else not (yet).
-                let running = last.is_some_and(|s| s.running && s.shown == shown);
+                let running = !paused && last.is_some_and(|s| s.running && s.shown == shown);
                 self.with_said(&Status {
                     plugin: w.plugin,
                     name: w.name,
@@ -306,6 +320,7 @@ impl Workers {
                     last_exit: last.and_then(|s| s.last_exit.clone()),
                     shown,
                     running,
+                    paused,
                 })
             })
             .collect();
@@ -358,6 +373,7 @@ impl Workers {
 
     fn round(&self, slots: &mut Vec<Slot>, shown: Option<Shown>, changed: &impl Fn(Value)) {
         let wanted = self.wanted(shown.as_ref());
+        let paused = self.paused();
         let now = Instant::now();
         // Those of a plugin turned off, gone, or whose manifest no longer
         // has them: stopped, and no longer told of.
@@ -391,9 +407,10 @@ impl Workers {
             slot.job = job;
         }
         for slot in slots.iter_mut() {
-            if slot.child.as_ref().is_some_and(|(job, _)| slot.job.as_ref() != Some(job)) {
+            if slot.child.as_ref().is_some_and(|(job, _)| paused || slot.job.as_ref() != Some(job)) {
                 // Another source shown, or the worker changed: started
-                // again at once for what it is now.
+                // again at once for what it is now. Paused: stopped, and
+                // started again at once as it is no longer.
                 let (_, child) = slot.child.take().unwrap();
                 self.asking.forget(&(slot.plugin.clone(), slot.name.clone()));
                 stopping.push(child);
@@ -417,7 +434,7 @@ impl Workers {
             slot.retry = now + RETRY;
         }
         stop(stopping);
-        for slot in slots.iter_mut().filter(|s| s.child.is_none() && now >= s.retry) {
+        for slot in slots.iter_mut().filter(|s| !paused && s.child.is_none() && now >= s.retry) {
             let Some(job) = slot.job.clone() else { continue };
             match self.spawn(&slot.plugin, &slot.name, &job) {
                 Ok(child) => {
@@ -437,6 +454,7 @@ impl Workers {
                 name: s.name.clone(),
                 shown: s.job.as_ref().map(|j| Shown { library: j.library.clone(), key: j.key.clone() }),
                 running: s.child.is_some(),
+                paused,
                 since: millis(s.since),
                 last_exit: s.last_exit.clone(),
             })
@@ -804,6 +822,49 @@ done
         s.switches(json!({"me.mine": false}));
         assert_eq!(s.workers.report_now(Some(&a))["workers"], json!([]));
         s.workers.round(&mut slots, Some(a), &|_| {});
+    }
+
+    #[test]
+    fn paused_in_settings_none_runs_until_it_is_no_longer() {
+        let s = Scratch::new("paused");
+        s.plugin(true, "people", "pinhole.people", None);
+        let at = s.dir.join("builtin/search");
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(at.join("Main.qml"), "import Pinhole.Plugin\nPinholePlugin {}\n").unwrap();
+        let manifest = json!({"api": 16, "id": "pinhole.search", "workers": [{"name": "index", "program": "work", "answers": true}]});
+        std::fs::write(at.join("manifest.json"), manifest.to_string()).unwrap();
+        std::fs::write(at.join("work"), "#!/bin/sh\ncat > /dev/null\n").unwrap();
+        std::fs::set_permissions(at.join("work"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let a = s.shown("A");
+        let mut slots = Vec::new();
+        let events = std::cell::RefCell::new(Vec::new());
+        rounds(&s, &mut slots, Some(a.clone()), |s| s.running().iter().all(|(_, running)| *running));
+        assert_eq!(s.workers.report()["workers"][0]["paused"], false);
+        // Paused: both stopped, still listed, and told of as paused.
+        let plugins = s.dir.join("plugins.json");
+        std::fs::write(&plugins, json!({"enabled": {}, "workersPaused": true}).to_string()).unwrap();
+        s.workers.round(&mut slots, Some(a.clone()), &|e| events.borrow_mut().push(e));
+        assert_eq!(s.running(), [("pinhole.people".to_owned(), false), ("pinhole.search".to_owned(), false)]);
+        let told = events.borrow().last().cloned().unwrap();
+        assert_eq!((told["workers"][0]["paused"].as_bool(), told["workers"][0]["running"].as_bool()), (Some(true), Some(false)), "{told:#}");
+        assert_eq!(s.workers.report_now(Some(&a))["workers"][1]["paused"], true);
+        // Asked meanwhile: paused, not merely not running.
+        assert_eq!(s.workers.ask("pinhole.search", "index", &json!({}), Duration::from_secs(1)).unwrap_err().0, "paused");
+        // Rounds go by: none starts.
+        for _ in 0..3 {
+            s.workers.round(&mut slots, Some(a.clone()), &|_| {});
+        }
+        assert_eq!(s.args("pinhole.people").len(), 1);
+        // A broken file keeps it paused; then no longer paused: started
+        // again at once, not ten seconds later.
+        std::fs::write(&plugins, "{broken").unwrap();
+        s.workers.round(&mut slots, Some(a.clone()), &|_| {});
+        assert!(s.running().iter().all(|(_, running)| !running));
+        std::fs::write(&plugins, json!({"enabled": {}, "workersPaused": false}).to_string()).unwrap();
+        s.workers.round(&mut slots, Some(a.clone()), &|_| {});
+        assert!(s.running().iter().all(|(_, running)| *running), "{:?}", s.running());
+        assert_eq!(s.workers.report()["workers"][0]["paused"], false);
+        s.workers.round(&mut slots, None, &|_| {});
     }
 
     #[test]

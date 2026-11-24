@@ -6549,6 +6549,27 @@ PinholePlugin {
         bench->fake.send({{"event", "worker_said"}, {"plugin", "u"}, {"name", "other"}, {"said", QJsonObject{{"event", "x"}, {"done", 1}}}});
         bench->fake.send({{"event", "worker_said"}, {"plugin", "t"}, {"name", "index"}, {"said", QJsonObject{{"event", "x"}, {"done", 2}}}});
         QTRY_COMPARE(bench->js(QStringLiteral("heard.join(' ')")).toString(), QStringLiteral("index:2"));
+        QVERIFY(!workers[0].toMap().value("paused").toBool());
+
+        // Settings pauses background work: kept in plugins.json, pinholed
+        // told, and a worker it says is paused is so for its plugin.
+        QVERIFY(bench->plugins->hasWorkers());
+        QVERIFY(!bench->plugins->workersPaused());
+        bench->plugins->setWorkersPaused(true);
+        QVERIFY(bench->plugins->workersPaused());
+        QTRY_COMPARE(askedFor(bench->fake, "plugins_changed").size(), 1);
+        QFile config(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/pinhole/plugins.json");
+        QVERIFY(config.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(config.readAll()).object().value("workersPaused"), QJsonValue(true));
+        config.close();
+        bench->fake.send({{"event", "workers"}, {"workers", QJsonArray{
+            QJsonObject{{"plugin", "t"}, {"name", "index"}, {"running", false}, {"paused", true}, {"since", 6}, {"key", "folder:/x"}}}}});
+        QTRY_COMPARE(bench->js(QStringLiteral("changes")).toInt(), 2);
+        QVERIFY(bench->js(QStringLiteral("pinhole.workers[0].paused")).toBool());
+        // No longer: gone from the file, not false in it.
+        bench->plugins->setWorkersPaused(false);
+        QVERIFY(config.open(QIODevice::ReadOnly));
+        QVERIFY(!QJsonDocument::fromJson(config.readAll()).object().contains("workersPaused"));
     }
 
     // While an update rewrites the checkout, a plugin's QML changing loads
