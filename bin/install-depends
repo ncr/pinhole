@@ -29,9 +29,12 @@ names=("${runtime[@]}" "${building[@]}")
 [ "${#names[@]}" -gt 0 ] || exit 0
 
 # -T: the names nothing installed satisfies (a provider counts).
+# A build tool on PATH counts too, however it came (cargo from rustup).
 missing=()
 while IFS= read -r name; do
-    [ -n "$name" ] && missing+=("$name")
+    [ -z "$name" ] && continue
+    [[ " ${building[*]} " == *" $name "* ]] && command -v "$name" >/dev/null 2>&1 && continue
+    missing+=("$name")
 done < <("$pacman_command" -T "${names[@]}" 2>/dev/null || true)
 # -Qqd: installed only as another package's dependency. Asked one by one,
 # since a name a provider satisfies is no package of its own. Only what

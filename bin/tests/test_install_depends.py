@@ -73,6 +73,21 @@ class InstallDependsTests(unittest.TestCase):
         self.assertEqual((result.returncode, ran), (0, []))
         self.assertIn("pacman holds sqlite only", result.stderr)
 
+    def test_a_build_tool_on_path_counts(self):
+        # cargo from rustup: pacman knows no cargo, PATH has one.
+        pacman = PACMAN.replace('[ "$n" = libheif ] && echo libheif', '[ "$n" = cargo ] && echo cargo')
+        pacman = pacman.replace('grep -qw libheif', 'grep -qw cargo')
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "cargo").write_text("#!/bin/sh\n")
+            (Path(temporary) / "cargo").chmod(0o755)
+            os.environ["PATH"], saved = f"{temporary}:{os.environ['PATH']}", os.environ["PATH"]
+            try:
+                result, ran = self.run_with(pacman, sudo=SUDO)
+            finally:
+                os.environ["PATH"] = saved
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ran, ["sudo", "pacman -D --asexplicit sqlite"])
+
     def test_silent_when_all_is_kept(self):
         result, ran = self.run_with("#!/bin/sh\nexit 1\n", sudo=SUDO)
         self.assertEqual((result.returncode, result.stderr, ran), (0, "", []))
