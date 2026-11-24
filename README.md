@@ -183,20 +183,8 @@ Omarchy's background and theme), and opening Pinhole where the bar's icon
 is dropped (Hyprland). Elsewhere the window, its sources and the other
 plugins are there, in Pinhole's own colours rather than the theme's.
 
-### From the AUR
-
-The `pinhole-git` package builds the newest `main` from GitHub:
-
-```bash
-yay -S pinhole-git           # install, and update with the rest of the system
-sudo pacman -R pinhole-git   # remove; photos and settings stay
-```
-
-A package has no Update button: it updates with `yay`.
-
-### From source
-
-On a fresh Arch install, the tools to build it and what it runs with, then
+There is no package yet: Pinhole installs from this repository. On a fresh
+Arch install, the tools to build it and what it runs with, then
 the code, then the install into `~/.local` (no root password):
 
 ```bash
@@ -258,7 +246,8 @@ leaves running processes alone. `PREFIX` changes the installation folder;
 `--non-interactive` bypasses the menu for scripts. `--dev` remains an alias
 for existing developer update helpers.
 
-`pkgbuild/` holds the AUR's recipe and its `.SRCINFO`; after changing the
+`pkgbuild/` holds a recipe for an Arch package, `pinhole-git`, not
+published anywhere yet, and its `.SRCINFO`; after changing the
 recipe, write that again with `makepkg --printsrcinfo > .SRCINFO`.
 `bin/install` does not build or install packages. Both install
 `share/licenses/pinhole/`: Pinhole's license and those of the Rust crates
