@@ -503,24 +503,18 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &di
     steps->append({"the calendar closed", [=] { press(window, Qt::Key_Escape); }, 800});
     view(QStringLiteral("On this day"), "pinhole.onthisday", Qt::Key_D);
     steps->append({"On this day closed", [=] { press(window, Qt::Key_Escape); }, 800});
-    view(QStringLiteral("Colours' photos of a colour"), "pinhole.colour", Qt::Key_H);
-    steps->append({"Colours' wall", [=] {
-                       if (QQuickItem *item = plugin("pinhole.colour"))
-                           if (QQuickItem *finder = withProperty(item, "mode"))
-                               finder->setProperty("mode", QStringLiteral("wall"));
-                   },
-                   1500});
-    steps->append({"Colours' wall pinched", [=] {
-                       QQuickItem *item = plugin("pinhole.colour");
+    steps->append({"Mosaic", [=] { press(window, Qt::Key_H); }, 1500});
+    steps->append({"Mosaic's tiles pinched", [=] {
+                       QQuickItem *item = plugin("pinhole.mosaic");
                        Zoomer *zoom = item ? largest<Zoomer>(item) : nullptr;
-                       check(zoom != nullptr, QStringLiteral("Colours' wall is in a PinchZoom"));
+                       check(zoom != nullptr, QStringLiteral("Mosaic's tiles are in a PinchZoom"));
                        if (!zoom)
                            return;
                        const QPointF at = zoom->mapToScene(QPointF(zoom->width() / 2, zoom->height() / 2));
-                       comparePinch(QStringLiteral("Colours' wall"), pinchCurve(zoom, at), *gridPinch);
+                       comparePinch(QStringLiteral("Mosaic's tiles"), pinchCurve(zoom, at), *gridPinch);
                    },
                    300});
-    steps->append({"Colours closed", [=] { press(window, Qt::Key_Escape); }, 800});
+    steps->append({"Mosaic closed", [=] { press(window, Qt::Key_Escape); }, 800});
 
     auto run = std::make_shared<std::function<void(int)>>();
     *run = [=](int k) {
@@ -540,13 +534,13 @@ void runPhysicsSelfTest(QQuickWindow *window, PhotoGrid *grid, const QString &di
     wait->setInterval(250);
     QObject::connect(wait.get(), &QTimer::timeout, window, [=] {
         QObject *days = plugin("pinhole.onthisday");
-        const bool ready = clock->elapsed() > 2500 && days && days->property("tourReady").toBool() && plugin("pinhole.colour")
+        const bool ready = clock->elapsed() > 2500 && days && days->property("tourReady").toBool() && plugin("pinhole.mosaic")
                            && plugin("pinhole.calendar");
         if (!ready && clock->elapsed() < 60000)
             return;
         wait->stop();
         if (!ready) {
-            say(QStringLiteral("FAIL On this day, Colours and the Calendar not all ready in 60 s (no photos on this day?)"));
+            say(QStringLiteral("FAIL On this day, Mosaic and the Calendar not all ready in 60 s (no photos on this day?)"));
             QCoreApplication::exit(1);
             return;
         }

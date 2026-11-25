@@ -537,7 +537,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
         auto switchInView = [=]() -> QQuickItem * {
             const QRectF r = panelRect();
             const QRectF middle(r.left(), r.top() + r.height() / 4, r.width(), r.height() / 2);
-            for (const char *id : {"pinhole.calendar", "pinhole.colour", "pinhole.favourites", "pinhole.frame",
+            for (const char *id : {"pinhole.calendar", "pinhole.favourites", "pinhole.frame",
+                                   "pinhole.mosaic",
                                    "pinhole.series", "pinhole.sheet", "pinhole.theme"}) {
                 const QByteArray name = QByteArray("pluginSwitch:") + id;
                 QQuickItem *toggle = item(name.constData());

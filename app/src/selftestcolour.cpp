@@ -1,4 +1,4 @@
-// PINHOLE_SELFTEST=colour:<dir>: photos as the grid, the viewer and Colours
+// PINHOLE_SELFTEST=colour:<dir>: photos as the grid, the viewer and Mosaic
 // draw them, to compare their colours with a reference (selftest.h).
 
 #include "selftest.h"
@@ -118,9 +118,7 @@ void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
         steps->push_back({0, [grab] { grab("grid-29"); }});
         steps->push_back({0, gridAt(7, first)});
         steps->push_back({800, [window] { press(window, Qt::Key_H, "h"); }});
-        steps->push_back({3000, [grab] { grab("colours-finder"); }});
-        steps->push_back({0, [window] { press(window, Qt::Key_W, "w"); }});
-        steps->push_back({4000, [grab] { grab("colours-wall"); }});
+        steps->push_back({6000, [grab] { grab("mosaic"); }});
         steps->push_back({0, [window] { press(window, Qt::Key_Escape, {}); }});
         (*next)(0);
     });

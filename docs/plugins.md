@@ -727,9 +727,9 @@ its settings, is there as the window first shows. It sets:
   opened from it closes, stays away while another's covers, and forgets
   coming back once another has covered meanwhile. When the one over the
   photos hands one over (`openPhoto`, `reveal`), those covering beneath
-  it are told with `pinhole.dismissed()`, and close for good: Colours
+  it are told with `pinhole.dismissed()`, and close for good: Mosaic
   opened over On this day, ⏎ opens a photo, and Esc then comes back to
-  Colours alone, then to the grid.
+  Mosaic alone, then to the grid.
 - `settings`: a `Component` shown under its row in the side panel while it
   is on, unfolded with a tap on the row (or ⏎ there), as its tour is. A
   `ScrollList` of its own in it has the wheel and the touchpad first while

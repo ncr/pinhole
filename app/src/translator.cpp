@@ -123,7 +123,7 @@ QStringList Translator::ownersOf(const QString &context, const QString &calling)
     // A plugin's main file is loaded from a URL that names the plugin
     // (Plugins::at: Main.qml?plugin=<id>&load=<n>), and Qt makes its
     // bindings' context of that whole name, less its last four letters:
-    // "Main.qml?plugin=pinhole.colour&lo".
+    // "Main.qml?plugin=pinhole.mosaic&lo".
     static const QRegularExpression named(QStringLiteral("\\?plugin=([^&]+)&"));
     if (const auto match = named.match(context); match.hasMatch())
         return {QUrl::fromPercentEncoding(match.captured(1).toUtf8()), QString()};

@@ -250,7 +250,7 @@ These are the open questions, decided.
   0.31 ms a tagged 480 px thumbnail, within one code of lcms2
   (`app/src/colour.cpp`). lcms2 becomes a dependency of the package.
 - **The average colour is sRGB too.** The design kept it as pinholed
-  computed it, a placeholder. But Colours finds photos by it, and the grid
+  computed it, a placeholder. But Mosaic picks its tiles by it, and the grid
   shows it until the converted thumbnail replaces it. pinholed puts each
   thumbnail's average through the thumbnail's profile
   (`core/src/colour.rs`), and a library from before has its averages made
@@ -452,7 +452,7 @@ Landed. What was built, and where it departs from the plan above it:
   the start of a round whether or not the source is ready.
 - `PINHOLE_SELFTEST=colour:<dir>` (`selftestcolour.cpp`): photos in the
   grid at 3, 13 and 29 columns, full window as they open and once sharp,
-  and Colours' finder and wall, for comparing frames. A window on a
+  and a mosaic (Mosaic's), for comparing frames. A window on a
   workspace not shown draws no frames of its own, and offscreen draws no
   grid, so it steps the grid itself and draws each frame with a grab.
 

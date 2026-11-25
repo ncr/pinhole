@@ -1,0 +1,10 @@
+{
+  "api": 16,
+  "startsOff": true,
+  "id": "pinhole.mosaic",
+  "name": "Mosaic",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Any photo as a mosaic of your other photos, each tile a photo of that colour: slide the tiles bigger and smaller, flip to the original and back, save it."
+}

@@ -22,7 +22,7 @@ Everything that is set is in that side panel: the sources, where Pinhole
 keeps its files and how much room they take, and the plugins. iCloud,
 Folders, Favourites, Turn and crop, Live Photos, Info, Send to phone and
 Screenshots are on from the start; Series, People, the calendar, On this
-day, Colours, Contact sheet, Photo frame, Background and Theme are there
+day, Mosaic, Contact sheet, Photo frame, Background and Theme are there
 too, off until turned on.
 
 Small marks in a photo's corner say what it is: a video, a Live Photo, a
@@ -80,10 +80,10 @@ libraries fill in their GPS data on the next catalog refresh. Pinhole sends
 only the requested map tile coordinates to OpenFreeMap; the photo index
 and thumbnails stay local. Cached tiles and photo markers work offline.
 
-Colours finds photos by colour (H): pick one on a wheel, or on a photo the
-ones closest to its colour, or lay the library out by hue as a rainbow wall
-(W). It goes by each photo's average colour, so it finds what is mostly one
-colour (a sunset, the sea, a forest) and not a red coat on a grey street.
+Mosaic makes any photo out of your other photos (H): each tile is a photo
+of the colour the picture has there. A slider, + and −, or the wheel make
+the tiles bigger and smaller, Space flips to the original and back, a
+click on a tile opens its photo, and S saves the mosaic to Pictures.
 
 Screenshots keeps screenshots from crowding out the photos: each day's one
 card, or (⇧ S, or the side panel) not in the grid at all, with a button
@@ -311,7 +311,7 @@ plugins/sheet/            the Contact sheet plugin: a grid or collage of what is
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             photo details and the library map; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files
 plugins/info/module/      Info's native QML module, Pinhole.Internal.Info: the map drawn from vector tiles, built with the window
-plugins/colour/           the Colours plugin: photos by their colour, and the rainbow wall
+plugins/mosaic/           the Mosaic plugin: a photo made of the library's photos (Mosaic.js picks them by colour, mosaic.frag draws them)
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
 plugins/frame/            the Photo frame plugin

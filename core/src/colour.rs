@@ -2,7 +2,7 @@
 //! pixels are in its profile's colours (an iPhone's Display P3, a camera's
 //! own), and the window makes them sRGB as it decodes them (app/src/colour.h).
 //! Its average colour, which the grid draws until it has the thumbnail and
-//! Colours finds photos by, is made sRGB here the same way: the average of
+//! Mosaic picks its tiles by, is made sRGB here the same way: the average of
 //! its codes, through the profile, to sRGB. Profiles of three curves and a
 //! matrix, which photos' are; any other is taken as sRGB, as untagged
 //! pixels are.

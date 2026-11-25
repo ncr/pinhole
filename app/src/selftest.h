@@ -216,11 +216,11 @@ void runDropSelfTest(QQuickWindow *window, const Library &library, Incoming &inc
 void runTourSelfTest(QQuickWindow *window, Viewer &viewer, const QString &folder);
 
 // PINHOLE_SELFTEST=covering (selftestcovering.cpp): one plugin over the
-// photos at a time. D (On this day), ⏎ on a photo, H (Colours' Same
-// colour), ⏎, Esc: Colours alone comes back, and Esc leaves for the grid;
-// then Colours over On this day: the last covers, the other unseen, and
-// Esc goes back to it; Colours over it again and ⏎: On this day closes for
-// good, Esc comes back to Colours alone; the Year calendar over it and ⏎:
+// photos at a time. D (On this day), ⏎ on a photo, H (Mosaic's of
+// it), ⏎, Esc: Mosaic alone comes back, and Esc leaves for the grid;
+// then Mosaic over On this day: the last covers, the other unseen, and
+// Esc goes back to it; Mosaic over it again and ⏎: On this day closes for
+// good, Esc comes back to Mosaic alone; the Year calendar over it and ⏎:
 // the grid. In each, whose the keys are and no key shared. Then On this
 // day again, and over it the help, the side panel, the undo notice and a
 // plugin's notice: each above it, by the items' stacking and by the
@@ -233,11 +233,11 @@ void runCoveringSelfTest(QQuickWindow *window, Viewer &viewer, Keymap &keymap);
 // Mac's momentum and a flick on a flick, given on one clock frame by frame
 // to the grid and to the side panel and the help (each given 4000 px of
 // room before and after, to be compared away from its ends), the Year
-// calendar, On this day and Colours' photos of a colour (each a ScrollList
-// or ScrollGrid), from the middle of each: their curves match
-// within a pixel and a half until one reaches an end. A pinch out, held
-// and let go, on the grid and on Colours' wall (a PinchZoom): the same size
-// under the fingers, and the same easing to where each lands. Offscreen
+// calendar and On this day (each a ScrollList or ScrollGrid), from the
+// middle of each: their curves match within a pixel and a half until one
+// reaches an end. A pinch out, held and let go, on the grid and on Mosaic's
+// tiles (a PinchZoom): the same size under the fingers, and the same easing
+// to where each lands. Offscreen
 // or anywhere: no frame of the window's drives them. Needs photos taken on
 // this day in other years. Then a hard flick into the top of the grid and
 // of the side panel: the bounce past the end goes a quarter of the view at
@@ -365,8 +365,7 @@ void runStacksSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
 // PINHOLE_SELFTEST=colour:<dir> (selftestcolour.cpp): each photo of
 // PINHOLE_SELFTEST_PHOTOS (ids, by commas; else the newest) in the grid at
 // 3 columns, then full window as it opens and once its sharpest has come;
-// the first at 13 and 29 columns (mosaics); then Colours' finder (H) and
-// its rainbow wall (W). Frames in <dir>, named by the photo's file name
+// the first at 13 and 29 columns (mosaics); then Mosaic's of it (H). Frames in <dir>, named by the photo's file name
 // and what they show, to compare their colours with a reference.
 void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer, const QString &dir);
 

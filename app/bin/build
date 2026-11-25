@@ -29,4 +29,14 @@ for module in "$ROOT"/../plugins/*/module/module.pro; do
     (cd "$(dirname -- "$module")/build" && qmake6 "$module" && make -j"${PINHOLE_BUILD_JOBS:-$(nproc)}")
 done
 
+# Pinhole's own plugins' shaders, baked as the window's are (sources.pri),
+# each beside its source: plugins/mosaic/mosaic.frag.qsb.
+qsb="$(qmake6 -query QT_HOST_BINS)/qsb"
+for shader in "$ROOT"/../plugins/*/*.frag; do
+    [ -f "$shader" ] || continue
+    if [ ! -f "$shader.qsb" ] || [ "$shader" -nt "$shader.qsb" ]; then
+        "$qsb" --glsl '300 es,150,120' --hlsl 50 --msl 12 -o "$shader.qsb" "$shader"
+    fi
+done
+
 echo "Built $ROOT/build/pinhole"
