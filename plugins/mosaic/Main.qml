@@ -20,7 +20,7 @@ PinholePlugin {
     // chosen when the view opens, and again when it next opens after the
     // library was read again. What it shows stays as it is while it is
     // open. `seed` says which of each colour's photos: R, others.
-    readonly property var none: ({ n: 0, ids: [], rgb: new Uint8Array(0), lab: new Float32Array(0) })
+    readonly property var none: ({ n: 0, ids: [], at: new Int32Array(0), rgb: new Uint8Array(0), lab: new Float32Array(0), revision: -1 })
     property var tiles: none
     property var matcher: null
     property bool stale: true
@@ -32,6 +32,8 @@ PinholePlugin {
         const library = pinhole.library
         const hidden = pinhole.hiddenCount > 0 ? i => pinhole.isHidden(i) : null
         const chosen = Mosaic.tiles(library.field("avgColor"), library.field("date"), library.field("id"), hidden, 1024, seed)
+        // Where its photos are holds until the library is read again.
+        chosen.revision = revision
         stale = false
         tiles = chosen
         matcher = Mosaic.matcher(chosen)

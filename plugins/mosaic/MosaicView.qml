@@ -41,7 +41,10 @@ Item {
     // The atlas: `side` by `side` photos, each `texels` square.
     readonly property int side: 32
     readonly property int texels: 128
-    readonly property var tiles: plugin.tiles
+    // The tiles the atlas shows: the plugin's, from the moment a mosaic of
+    // them is laid out and shows (showPlan). Other tiles chosen (R) take the
+    // old ones' place in that one frame, the plan and the atlas together.
+    property var tiles: plugin.none
 
     // The picture's pixels once read (sampler), r, g, b: { of, data, width, height }.
     property var pixels: null
@@ -97,7 +100,7 @@ Item {
     // Laid out again: for another picture, another size, other tiles. At
     // most once a frame, however fast the slider moves.
     function lay() {
-        if (!pixels || pixels.of !== photo || !plugin.matcher || tiles.n === 0)
+        if (!pixels || pixels.of !== photo || !plugin.matcher || plugin.tiles.n === 0)
             return
         const across = Math.max(6, Math.min(240, Math.round(fitWidth / tile)))
         const down = Math.max(1, Math.min(240, Math.round(across / shape)))
@@ -117,6 +120,8 @@ Item {
     // one by the other.
     function showPlan(made, image) {
         const first = !ready
+        if (tiles !== made.matcher.set)
+            tiles = made.matcher.set
         columns = made.columns
         rows = made.rows
         canvas.plan = image
@@ -130,6 +135,7 @@ Item {
     onPixelsChanged: laying.start()
     Connections {
         target: mosaic.plugin
+        // Other tiles: laid out, and shown once their plan is read.
         function onMatcherChanged() { laying.start() }
     }
 
@@ -493,15 +499,22 @@ Item {
             // it.
             Item {
                 id: photos
+                // How many of its photos are in.
+                property int arrived: 0
                 width: mosaic.side * mosaic.texels
                 height: width
                 Repeater {
                     model: mosaic.tiles.ids
+                    onModelChanged: photos.arrived = 0
                     delegate: Rectangle {
                         id: slot
                         required property int index
                         required property string modelData
-                        readonly property int position: (mosaic.plugin.revision, pinhole.library.indexOf(modelData))
+                        // Where it was as the tiles were chosen, while the
+                        // library is as it was then: a thousand looked up by
+                        // id take a second.
+                        readonly property int position: mosaic.plugin.revision === mosaic.tiles.revision ? mosaic.tiles.at[index]
+                                                                                                       : pinhole.library.indexOf(modelData)
                         readonly property var item: position >= 0 ? pinhole.library.item(position) : null
                         x: index % mosaic.side * mosaic.texels
                         y: Math.floor(index / mosaic.side) * mosaic.texels
@@ -511,7 +524,11 @@ Item {
                                       | mosaic.tiles.rgb[3 * index + 2]).toString(16).slice(1)
                         Image {
                             anchors.fill: parent
-                            source: slot.item ? slot.item.thumbnail : ""
+                            // A few dozen asked for at a time: all thousand
+                            // at once would keep the next plan waiting
+                            // behind them.
+                            source: slot.item && slot.index < photos.arrived + 32 ? slot.item.thumbnail : ""
+                            onStatusChanged: if (status === Image.Ready || status === Image.Error) ++photos.arrived
                             sourceSize: Qt.size(mosaic.texels, mosaic.texels)
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
@@ -621,7 +638,7 @@ Item {
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
         color: theme.darkForeground
-        text: mosaic.tiles.n === 0 ? qsTr("No photos with a colour to make a mosaic of yet.")
+        text: mosaic.plugin.tiles.n === 0 ? qsTr("No photos with a colour to make a mosaic of yet.")
             : !mosaic.ready ? ""
             : qsTr("%1 tiles from %2 photos")
               .arg(Number(mosaic.columns * mosaic.rows).toLocaleString(Qt.locale(), "f", 0))

@@ -46,7 +46,8 @@ const lightnessWeight = 1.5
 // choice of tiles. Of photos taken within minutes of each other, one. `seed`
 // picks which of each box: another seed, other photos.
 //
-// { n, ids, rgb, lab }: the photos' ids, and their colours, three to each.
+// { n, ids, at, rgb, lab }: the photos' ids, where each is in the library as
+// it was read, and their colours, three to each.
 function tiles(colours, dates, ids, isHidden, count, seed) {
     let random = (seed * 2654435761 + 12345) & 0x7fffffff
     const next = () => {
@@ -116,11 +117,12 @@ function tiles(colours, dates, ids, isHidden, count, seed) {
                 more = true
     }
     const n = chosen.length
-    const out = { n: n, ids: new Array(n), rgb: new Uint8Array(3 * n), lab: new Float32Array(3 * n) }
+    const out = { n: n, ids: new Array(n), at: new Int32Array(n), rgb: new Uint8Array(3 * n), lab: new Float32Array(3 * n) }
     for (let k = 0; k < n; ++k) {
         const i = chosen[k]
         const v = parseInt(colours[i].slice(1), 16)
         out.ids[k] = ids[i]
+        out.at[k] = i
         out.rgb[3 * k] = v >> 16 & 255
         out.rgb[3 * k + 1] = v >> 8 & 255
         out.rgb[3 * k + 2] = v & 255
@@ -133,17 +135,18 @@ function tiles(colours, dates, ids, isHidden, count, seed) {
 }
 
 // For a set of tiles, the closest of them to any colour, found once for
-// each of 32 × 32 × 32 colours as it is first asked for, and kept: a
-// picture has a few thousand of them, and the next size of the same
-// picture the same ones.
-const nearest = 64
+// each of 16 × 16 × 16 colours as it is first asked for, and kept: a
+// picture has a few hundred of them, and the next size of the same picture
+// the same ones. No finer: the tile is moved to the picture's colour as it
+// is drawn, and other tiles (R) should come at once.
+const nearest = 32
 function matcher(set) {
-    return { set: set, known: new Uint8Array(32768), close: new Uint16Array(32768 * nearest) }
+    return { set: set, known: new Uint8Array(4096), close: new Uint16Array(4096 * nearest) }
 }
 function learn(m, colour) {
     const set = m.set, base = colour * nearest
     const p = new Float64Array(3)
-    lab((colour >> 10 & 31) * 8 + 4, (colour >> 5 & 31) * 8 + 4, (colour & 31) * 8 + 4, p, 0)
+    lab((colour >> 8 & 15) * 16 + 8, (colour >> 4 & 15) * 16 + 8, (colour & 15) * 16 + 8, p, 0)
     const L = p[0], a = p[1], b = p[2]
     const far = new Float64Array(nearest)
     const most = Math.min(nearest, set.n)
@@ -211,8 +214,8 @@ function base64(bytes) {
 }
 
 // The mosaic of a picture: for each of its cells (`colours`, from cells())
-// the tile closest to its colour that none of the cells around it has (four
-// either side in its row and in the four rows above), so a sky is many photos
+// the tile closest to its colour that none of the cells around it has (three
+// either side in its row and in the three rows above), so a sky is many photos
 // and not one over and over.
 //
 // { which, used, image }: each cell's tile, how many different tiles there
@@ -226,7 +229,7 @@ function plan(m, colours, columns, rows) {
     const which = new Uint16Array(count)
     const seen = new Uint8Array(set.n)
     const beside = new Int32Array(set.n)
-    const reach = 4
+    const reach = 3
     let used = 0
     // A BMP: 54 bytes of header, rows from the last up, each padded to
     // four bytes, blue first.
@@ -252,7 +255,7 @@ function plan(m, colours, columns, rows) {
         for (let x = 0; x < columns; ++x) {
             const at = y * columns + x, o = at * 3
             const r = colours[o], g = colours[o + 1], b = colours[o + 2]
-            const colour = (r >> 3) << 10 | (g >> 3) << 5 | b >> 3
+            const colour = (r >> 4) << 8 | (g >> 4) << 4 | b >> 4
             if (!m.known[colour])
                 learn(m, colour)
             const base = colour * nearest
