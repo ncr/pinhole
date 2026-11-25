@@ -85,7 +85,9 @@ github.com/ncr/pinhole with it.
    read from my photos while you test; change and delete nothing where they are kept.
 5. To share it: fork the repository, put the plugin's folder in `plugins/`, name it
    in README.md, run `bin/test-all`, and open the pull request. Say in it what you
-   tried, on what, and what you could not try.
+   tried, on what, and what you could not try. Sign it with what you are: the agent
+   and the exact model and version that wrote the plugin (and the reasoning effort,
+   if you know it).
 ```
 
 Something that does not work is worth a pull request too: it saves the next person the afternoon.
