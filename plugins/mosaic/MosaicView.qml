@@ -661,13 +661,29 @@ Item {
             // it.
             Item {
                 id: photos
-                // How many of its photos are in.
+                // How many of its photos have been asked for: 48 more every
+                // 40 ms, whatever each of them does (one not in the library
+                // asks for nothing).
                 property int arrived: 0
+                function restart() {
+                    arrived = 0
+                    asking.restart()
+                }
+                Timer {
+                    id: asking
+                    interval: 40
+                    repeat: true
+                    onTriggered: {
+                        photos.arrived += 48
+                        if (photos.arrived >= mosaic.tiles.n)
+                            stop()
+                    }
+                }
                 width: mosaic.side * mosaic.texels
                 height: width
                 Repeater {
                     model: mosaic.tiles.ids
-                    onModelChanged: photos.arrived = 0
+                    onModelChanged: photos.restart()
                     delegate: Rectangle {
                         id: slot
                         required property int index
@@ -686,11 +702,10 @@ Item {
                                       | mosaic.tiles.rgb[3 * index + 2]).toString(16).slice(1)
                         Image {
                             anchors.fill: parent
-                            // A few dozen asked for at a time: all thousand
-                            // at once would keep the next plan waiting
-                            // behind them.
-                            source: slot.item && slot.index < photos.arrived + 32 ? slot.item.thumbnail : ""
-                            onStatusChanged: if (status === Image.Ready || status === Image.Error) ++photos.arrived
+                            // A few dozen more asked for each moment
+                            // (photos.arrived): all thousand at once would
+                            // keep the next plan waiting behind them.
+                            source: slot.item && slot.index < photos.arrived ? slot.item.thumbnail : ""
                             sourceSize: Qt.size(mosaic.texels, mosaic.texels)
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
