@@ -104,6 +104,10 @@ install -Dm644 -t "$PREFIX/lib/pinhole/plugins/frame/i18n" plugins/frame/i18n/*.
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/people" plugins/people/manifest.json plugins/people/*.qml
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/people/i18n" plugins/people/i18n/*.json
 install -Dm755 plugins/people/pinhole-faces "$PREFIX/lib/pinhole/plugins/people/pinhole-faces"
+install -d "$PREFIX/lib/pinhole/plugins/screens/i18n"
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/screens" plugins/screens/manifest.json plugins/screens/*.qml plugins/screens/head.json
+install -Dm644 -t "$PREFIX/lib/pinhole/plugins/screens/i18n" plugins/screens/i18n/*.json
+install -Dm755 plugins/screens/pinhole-screens "$PREFIX/lib/pinhole/plugins/screens/pinhole-screens"
 # Omarchy's bar widget: the newest photos, to drag out (omarchy-bar/).
 install -Dm644 -t "$PREFIX/lib/pinhole/omarchy-bar" omarchy-bar/manifest.json omarchy-bar/qmldir omarchy-bar/*.qml
 install -Dm755 -t "$PREFIX/lib/pinhole/omarchy-bar" omarchy-bar/open-here

@@ -141,6 +141,14 @@ folder in the iCloud Drive of the library's Apple ID, with the name of the
 computer they were given on, so your other computers know them too. The
 photos and faces themselves stay on the computer.
 
+[Photos of screens](plugins/screens/README.md) finds the photos taken of a
+screen, a game on the TV, an error on a monitor, a machine's display, in
+thumbnails on this computer, in pinholed. They are not screenshots: those
+are the Screenshots plugin's. Shift+D shows them together; the side panel
+can hide them from the grid, and so from the wall, the mosaic and the photo
+frame. On a photo, Photo of a screen says it is or is not one; the photos
+very like it follow, on your other computers too.
+
 Background: B on a photo shown full window makes it the desktop background;
 a video becomes a moving one, and on a Live Photo V its motion, as taken or
 as its Loop, and ⇧ V its Bounce (both also under ▾, ⇧ B). In Series' studio,
@@ -326,6 +334,7 @@ plugins/mosaic/           the Mosaic plugin: a photo made of the library's photo
 plugins/wall/             the Rainbow wall plugin: the library's most colourful photos laid out by hue
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin
+plugins/screens/          the Photos of screens plugin; pinhole-screens finds them (MobileNetV2 and a head of its own, head.json)
 plugins/frame/            the Photo frame plugin
 ```
 

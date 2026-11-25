@@ -1,0 +1,14 @@
+{
+  "api": 16,
+  "startsOff": true,
+  "id": "pinhole.screens",
+  "name": "Photos of screens",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "Finds the photos you took of a screen (a game on the TV, an error on a monitor, a machine's display) on this computer, shows them together, and can keep them out of the grid. It learns from what you say is or is not one.",
+  "settings": { "hide": false },
+  "workers": [
+    { "name": "screens", "program": "pinhole-screens", "args": ["daemon"], "per": "source" }
+  ]
+}

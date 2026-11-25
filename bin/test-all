@@ -163,6 +163,7 @@ def everything(scratch):
               ("python-bin", [sys.executable, "-m", "unittest", "discover", "-s", "bin/tests"], ROOT, None),
               ("python-people", [sys.executable, "-m", "unittest", "discover", "-s", "plugins/people/tests"], ROOT, None),
               ("python-mosaic", [sys.executable, "-m", "unittest", "discover", "-s", "plugins/mosaic/tests"], ROOT, None),
+              ("python-screens", [sys.executable, "-m", "unittest", "discover", "-s", "plugins/screens/tests"], ROOT, None),
               ("python-semantic-search", [sys.executable, "-B", "-m", "unittest", "discover", "-s",
                                           "examples/semantic-search/engine/tests"], ROOT, None),
               ("calendar", [str(ROOT / "plugins/calendar/tests/run")], ROOT, None),

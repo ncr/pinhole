@@ -1,0 +1,406 @@
+#!/usr/bin/python3
+"""Finds photos taken of a screen in a library's thumbnails, for pinholed.
+
+Each thumbnail goes once through MobileNetV2 (OpenCV Zoo's, on the
+processor, two threads), and what it makes of it, 1,280 numbers, is kept in
+the plugin's cache for the library. A small linear head (head.json, beside
+this file) says from those how likely the photo is of a screen. What the
+person said is or is not one (the library's synced file, from any of their
+computers) is so, and teaches it: the photos alike one said of go its way,
+judged again from the numbers kept, in a moment. What was found goes to
+found.json in the cache, which the plugin reads."""
+import argparse
+import base64
+from contextlib import closing
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import sys
+import threading
+import time
+from urllib.request import urlopen
+
+MODEL = ("image_classification_mobilenet", "image_classification_mobilenetv2_2022apr.onnx",
+         "c0c3f76d93fa3fd6580652a45618618a220fced18babf65774ed169de0432ad5")
+REVISION = "48b10fa505aeb51fbd127fc60a5c660040e823b7"
+# The pooled numbers, before the classes: OpenCV 4 names them by the ONNX
+# node (GlobalAveragePool_97), OpenCV 5 by the node's output tensor (464).
+LAYERS = ("onnx_node!GlobalAveragePool_97", "464")
+DIMENSION = 1280
+# The model's numbers are 0 to 6 (ReLU6, averaged): kept as bytes.
+QUANTUM = 6 / 255
+# Bump when the model or what a thumbnail is made into changes: the numbers
+# kept are then of another recipe, and are made again.
+RECIPE = "mobilenetv2-v1"
+# What was said of a photo teaches it about the photos alike it: from this
+# cosine likeness on (of the model's numbers, centred and scaled as the head
+# has them) a little, a twin wholly, to this sureness either way. In this
+# author's library a photo's tenth nearest is at 0.51 (median), its
+# nearest at 0.77 (README.md: what twenty answers moved).
+NEAR = 0.55
+SURE = 4.0
+
+
+def verified(path, digest):
+    try:
+        with path.open("rb") as file:
+            return hashlib.file_digest(file, "sha256").hexdigest() == digest
+    except FileNotFoundError:
+        return False
+
+
+def xdg(variable, fallback):
+    return Path(os.environ.get(variable) or Path.home() / fallback)
+
+
+def setup(progress):
+    models = xdg("XDG_CACHE_HOME", ".cache") / "pinhole/screen-models"
+    models.mkdir(parents=True, exist_ok=True, mode=0o700)
+    folder, name, digest = MODEL
+    path = models / name
+    with (models / "download.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not verified(path, digest):
+            progress()
+            part = path.with_suffix(".part")
+            base = "https://media.githubusercontent.com/media/opencv/opencv_zoo"
+            try:
+                with urlopen(f"{base}/{REVISION}/models/{folder}/{name}", timeout=60) as response, part.open("wb") as file:
+                    shutil.copyfileobj(response, file)
+                if not verified(part, digest):
+                    raise ValueError(f"SHA-256 mismatch: {name}")
+                part.replace(path)
+            finally:
+                part.unlink(missing_ok=True)
+    return path
+
+
+def load_head(path=None):
+    """The head: what the numbers are centred and scaled by, its weights,
+    its bias, and the likelihood from which a photo is of a screen."""
+    import numpy as np
+    data = json.loads((path or Path(__file__).resolve().parent / "head.json").read_text())
+    if data["recipe"] != RECIPE:
+        raise ValueError("head.json is of another recipe")
+
+    def floats(name):
+        values = np.frombuffer(base64.b64decode(data[name]), dtype="<f4")
+        if values.shape != (DIMENSION,) or not np.isfinite(values).all():
+            raise ValueError(f"head.json: {name}")
+        return values
+
+    return dict(size=int(data["size"]), mean=floats("mean"), scale=floats("scale"), weights=floats("weights"),
+                bias=float(data["bias"]), threshold=float(data["threshold"]))
+
+
+class Analyzer:
+    def __init__(self, size, progress):
+        import cv2
+        import numpy as np
+        self.cv, self.np, self.size = cv2, np, size
+        cv2.setNumThreads(2)
+        self.net = cv2.dnn.readNet(str(setup(progress)))
+        self.mean = np.array([0.485, 0.456, 0.406], np.float32)
+        self.std = np.array([0.229, 0.224, 0.225], np.float32)
+        self.layer = None
+        blank = np.zeros((1, 3, size, size), np.float32)
+        for layer in LAYERS:
+            try:
+                self.net.setInput(blank)
+                if self.net.forward(layer).size == DIMENSION:
+                    self.layer = layer
+                    break
+            except cv2.error:
+                continue
+        if self.layer is None:
+            raise RuntimeError(f"This OpenCV ({cv2.__version__}) does not give MobileNetV2's pooled numbers")
+
+    def vector(self, data):
+        """A thumbnail's bytes as the model's numbers, as bytes."""
+        cv, np = self.cv, self.np
+        try:
+            image = cv.imdecode(np.frombuffer(data, dtype=np.uint8), cv.IMREAD_COLOR)
+        except cv.error:
+            image = None
+        if image is None:
+            raise ValueError("Unreadable thumbnail")
+        # The whole picture, squeezed: a screen's edge is often at the photo's.
+        image = cv.resize(image, (self.size, self.size), interpolation=cv.INTER_AREA)[:, :, ::-1]
+        blob = ((image.astype(np.float32) / 255 - self.mean) / self.std).transpose(2, 0, 1)[None]
+        try:
+            self.net.setInput(np.ascontiguousarray(blob))
+            values = self.net.forward(self.layer).reshape(-1)
+        except cv.error as error:
+            raise ValueError(str(error)) from error
+        if values.shape != (DIMENSION,) or not np.isfinite(values).all():
+            raise ValueError("Unexpected model output")
+        return np.clip(np.rint(values / QUANTUM), 0, 255).astype(np.uint8).tobytes()
+
+
+def judged(head, ids, matrix, said, answered=None):
+    """The ids of the photos of screens: those the head finds likely
+    enough, and never against what was said of one. `answered`, the rows of
+    the photos something was said of (true or false, `said`'s), teaches it:
+    a photo alike one of them (the same game, the same machine, the same
+    page) goes the way that one was said to, the more the more alike it is
+    (NEAR), and a photo like none of them is as the head has it."""
+    import numpy as np
+    if len(ids) == 0:
+        return sorted(id for id, answer in said.items() if answer)
+    weights = head["weights"].astype(np.float32)
+    bias = np.float32(head["bias"])
+    least = np.log(head["threshold"] / (1 - head["threshold"]))
+
+    def standard(rows):
+        x = (rows.astype(np.float32) * QUANTUM - head["mean"]) / head["scale"]
+        return x, x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-6)
+
+    taught = [(vector, answer) for vector, answer in (answered or [])]
+    if taught:
+        _, alike = standard(np.asarray([vector for vector, _ in taught], dtype=np.uint8).reshape(-1, DIMENSION))
+        sure = np.array([SURE if answer else -SURE for _, answer in taught], np.float32)
+    found = set()
+    for start in range(0, len(ids), 4096):
+        block, unit = standard(matrix[start:start + 4096])
+        likely = block @ weights + bias
+        if taught:
+            near = np.clip((unit @ alike.T - NEAR) / (1 - NEAR), 0, 1) ** 2
+            which = near.argmax(axis=1)
+            pull = near[np.arange(len(near)), which]
+            likely = (1 - pull) * likely + pull * sure[which]
+        found.update(ids[start + i] for i in np.nonzero(likely >= least)[0])
+    return sorted({id for id in found if said.get(id) is not False} | {id for id, answer in said.items() if answer})
+
+
+def connect(cache):
+    cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Another recipe's numbers are of no use: gone, with what it found.
+    for old in cache.glob("*.sqlite*"):
+        if not old.name.startswith(RECIPE + ".sqlite"):
+            old.unlink(missing_ok=True)
+    db = sqlite3.connect(cache / (RECIPE + ".sqlite"))
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("""CREATE TABLE IF NOT EXISTS photos (
+        id TEXT PRIMARY KEY, stamp TEXT NOT NULL, vector BLOB)""")
+    return db
+
+
+def readonly(path):
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
+
+
+def catalog_rows(catalog, source):
+    catalog.execute("BEGIN")
+    try:
+        if catalog.execute("SELECT value FROM meta WHERE key='source'").fetchone() != (source,):
+            return None
+        return catalog.execute("""SELECT id, thumb_path FROM assets
+            WHERE is_video=0 AND thumb_path IS NOT NULL AND thumb_path<>'' ORDER BY id""").fetchall()
+    finally:
+        catalog.rollback()
+
+
+def load_said(path, previous):
+    """What the person said: { id: true or false }, from the library's
+    synced file ("is\\t<id>" in its values); as before if it cannot be read."""
+    try:
+        values = json.loads(path.read_text()).get("values", {}) if path else {}
+        return {key[3:]: value for key, value in values.items()
+                if key.startswith("is\t") and isinstance(value, bool)}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError, AttributeError):
+        return previous
+
+
+def say(phase, **values):
+    print(json.dumps(dict(event="status", phase=phase, **values)), flush=True)
+
+
+def scan(db, library, rows, analyzer, progress):
+    """Every photo's numbers made that are not kept, or whose thumbnail
+    changed; those of photos no longer there dropped. How many could not be
+    read."""
+    kept = dict(db.execute("SELECT id, stamp FROM photos"))
+    present = {asset for asset, _ in rows}
+    gone = [(asset,) for asset in kept if asset not in present]
+    if gone:
+        with db:
+            db.executemany("DELETE FROM photos WHERE id=?", gone)
+    errors = done = 0
+    engine = None
+    told = time.monotonic()
+    pending = []
+
+    def flush():
+        nonlocal pending
+        if pending:
+            with db:
+                db.executemany("INSERT OR REPLACE INTO photos VALUES (?,?,?)", pending)
+            pending = []
+
+    for asset, relative in rows:
+        done += 1
+        path = library / relative
+        try:
+            info = path.stat()
+        except OSError:
+            continue  # Not fetched yet: looked at once it is.
+        stamp = f"{relative}\t{info.st_size}\t{info.st_mtime_ns}"
+        if kept.get(asset) == stamp:
+            continue
+        try:
+            if not path.resolve().is_relative_to(library):
+                raise ValueError("Thumbnail outside the library")
+            engine = engine or analyzer()
+            vector = engine.vector(path.read_bytes())
+        except (OSError, ValueError):
+            # Kept without numbers, so one that cannot be read is not tried
+            # again until it changes.
+            vector = None
+            errors += 1
+        pending.append((asset, stamp, vector))
+        if len(pending) >= 200:
+            flush()
+        if time.monotonic() - told >= 1:
+            told = time.monotonic()
+            progress(done, len(rows))
+    flush()
+    return errors
+
+
+def write_found(cache, ids):
+    """found.json, written beside and renamed over; false if it says so
+    already."""
+    path = cache / "found.json"
+    text = json.dumps(dict(recipe=RECIPE, ids=ids), separators=(",", ":"))
+    try:
+        if path.read_text() == text:
+            return False
+    except (OSError, ValueError):
+        pass
+    part = cache / "found.json.part"
+    part.write_text(text)
+    part.replace(path)
+    return True
+
+
+def judge(db, head, said):
+    import numpy as np
+    rows = db.execute("SELECT id, vector FROM photos WHERE vector IS NOT NULL ORDER BY id").fetchall()
+    ids = [row[0] for row in rows]
+    matrix = (np.frombuffer(b"".join(row[1] for row in rows), dtype=np.uint8).reshape(len(rows), DIMENSION)
+              if rows else np.empty((0, DIMENSION), np.uint8))
+    place = {asset: i for i, asset in enumerate(ids)}
+    answered = [(matrix[place[asset]], answer) for asset, answer in sorted(said.items()) if asset in place]
+    return judged(head, ids, matrix, said, answered)
+
+
+def run(db, cache, library, source, synced):
+    path = library / "library.sqlite"
+    inode = version = catalog = None
+    said = {}
+    written = 0
+    errors = retry = 0
+    engine = head = None
+
+    def analyzer():
+        nonlocal engine
+        if engine is None:
+            engine = Analyzer(head["size"], lambda: say("models"))
+        return engine
+
+    try:
+        while True:
+            delay = 5
+            try:
+                import numpy  # noqa: F401  (said as "runtime" when it is not there)
+                head = head or load_head()
+                stat = path.stat()
+                identity = (stat.st_dev, stat.st_ino)
+                if catalog is None or identity != inode:
+                    if catalog is not None:
+                        catalog.close()
+                        catalog = None
+                    catalog = readonly(path)
+                    inode, version = identity, None
+                changed = catalog.execute("PRAGMA data_version").fetchone()[0]
+                answers = load_said(synced, said)
+                refresh = changed != version or (errors and time.monotonic() >= retry)
+                if refresh:
+                    rows = catalog_rows(catalog, source)
+                    if rows is None:
+                        say("waiting")
+                        time.sleep(delay)
+                        continue
+                    last = [time.monotonic()]
+
+                    def progress(done, total):
+                        nonlocal written
+                        # What was found so far, twice a minute, so a first
+                        # look of minutes shows them as it goes.
+                        if time.monotonic() - last[0] >= 30:
+                            last[0] = time.monotonic()
+                            written += write_found(cache, judge(db, head, answers))
+                        say("scanning", done=done, total=total, written=written)
+
+                    say("scanning", done=0, total=len(rows), written=written)
+                    errors = scan(db, library, rows, analyzer, progress)
+                    retry = time.monotonic() + 60
+                if refresh or answers != said:
+                    found = judge(db, head, answers)
+                    written += write_found(cache, found)
+                    version, said = changed, answers
+                    say("ready", found=len(found), errors=errors, written=written)
+            except ImportError as error:
+                print(f"pinhole-screens: {error}", file=sys.stderr, flush=True)
+                say("runtime")
+                delay = 60
+            except (OSError, sqlite3.Error, RuntimeError, ValueError, KeyError) as error:
+                print(f"pinhole-screens: {error}", file=sys.stderr, flush=True)
+                say("error")
+                delay = 60
+            time.sleep(delay)
+    finally:
+        if catalog is not None:
+            catalog.close()
+
+
+def exit_with_parent():
+    # pinholed closes this pipe when it shows another source, the plugin is
+    # turned off, background work is paused, or it ends.
+    sys.stdin.buffer.read()
+    os._exit(0)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("operation", choices=("daemon",))
+    parser.add_argument("--library", type=Path, required=True)
+    parser.add_argument("--library-key", required=True)
+    parser.add_argument("--cache-dir", type=Path, required=True)
+    parser.add_argument("--managed-plugins", type=Path)
+    args = parser.parse_args()
+    os.umask(0o077)
+    threading.Thread(target=exit_with_parent, daemon=True).start()
+    os.nice(10)
+    os.environ.update(OPENBLAS_NUM_THREADS="2", OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
+    synced = Path(os.environ["PINHOLE_SYNCED"]) if os.environ.get("PINHOLE_SYNCED") else None
+    cache = args.cache_dir
+    cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (cache / "scan.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with closing(connect(cache)) as db:
+            run(db, cache, args.library.resolve(), args.library_key, synced)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, sqlite3.Error) as error:
+        print(f"pinhole-screens: {error}", file=sys.stderr)
+        sys.exit(1)

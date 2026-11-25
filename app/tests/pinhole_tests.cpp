@@ -4745,6 +4745,71 @@ PinholePlugin {
         QVERIFY(QFile::remove(settings));
     }
 
+    // Photos of screens: what its worker found, less the library's
+    // screenshots, with what was said here or on another computer over
+    // both; hidden at once from what was kept, said and undone, kept for
+    // the library, and shown together in its view.
+    void screensAreWhatWasFoundAndWhatWasSaid() {
+        PluginBench bench({{"pinhole.screens", {}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}, {"d", 4000}});
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "shots");
+            db.setDatabaseName(bench.dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE assets ADD COLUMN has_location INTEGER DEFAULT 0"));
+            QVERIFY(q.exec("UPDATE assets SET filename = 'Screenshot b.png' WHERE id = 'b'"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("shots");
+        bench.plugins->setSettingOf("pinhole.screens", "hide", true);
+        // Said on another computer: d is one.
+        auto *store = bench.plugins->syncedStore();
+        store->set("pinhole.screens", "is\td", true);
+        bench.plugins->flush();
+        // What the worker found: a, and b, a screenshot, which is never one.
+        const QString cacheDir = bench.js("pinhole.cacheDir").toString();
+        QVERIFY(QDir().mkpath(cacheDir));
+        write(cacheDir + "/found.json", R"({"recipe": "mobilenetv2-v1", "ids": ["a", "b"]})");
+        Keymap keymap;
+        Theme theme(bench.dir.path());
+        bench.engine.rootContext()->setContextProperty("keymap", &keymap);
+        bench.engine.rootContext()->setContextProperty("theme", &theme);
+        Plugins::registerTypes();
+        const QString real = QStringLiteral(PINHOLE_I18N "/../../../plugins/screens/Main.qml");
+        QQmlComponent component(&bench.engine, QUrl::fromLocalFile(real).toString() + "?plugin=pinhole.screens&load=0");
+        std::unique_ptr<QObject> plugin(component.createWithInitialProperties({{"pinhole", QVariant::fromValue<QObject *>(bench.host)}}));
+        QVERIFY2(plugin, qPrintable(component.errorString()));
+        QQmlEngine::setObjectOwnership(plugin.get(), QQmlEngine::CppOwnership);
+        bench.engine.globalObject().setProperty("screens", bench.engine.newQObject(plugin.get()));
+        auto hidden = [&] { return bench.js("JSON.stringify(screens.hidden)").toString(); };
+        // As it loads, before it read the worker's file: what was said.
+        QCOMPARE(hidden(), QString("[3]"));
+        QTRY_VERIFY(plugin->property("read").toBool());
+        QCOMPARE(bench.js("JSON.stringify(screens.ids)").toString(), QString(R"(["a","d"])"));
+        QCOMPARE(hidden(), QString("[0,3]"));
+        QCOMPARE(bench.plugins->cacheStore()->values("pinhole.screens").value("found:folder:/x").toArray(), (QJsonArray{"a", "d"}));
+        // a said not to be one: synced, and undone.
+        bench.js("screens.say(['a'], false)");
+        QCOMPARE(hidden(), QString("[3]"));
+        bench.plugins->flush();
+        QCOMPARE(SyncedStore::load(bench.dir.path(), "pinhole.screens").value("is\ta"), QJsonValue(false));
+        bench.history.undo();
+        QCOMPARE(hidden(), QString("[0,3]"));
+        bench.plugins->flush();
+        QVERIFY(!SyncedStore::load(bench.dir.path(), "pinhole.screens").contains("is\ta"));
+        // Said on the other computer meanwhile: c is one, here too.
+        store->set("pinhole.screens", "is\tc", true);
+        QTRY_COMPARE(hidden(), QString("[0,2,3]"));
+        // Shown again: nothing hidden, still known.
+        bench.js("screens.setHiding(false)");
+        QCOMPARE(hidden(), QString("[]"));
+        QCOMPARE(bench.js("screens.screens.length").toInt(), 3);
+        // Its view: the newest first.
+        QVERIFY(bench.js("screens.gallery.make() !== null").toBool());
+        QCOMPARE(bench.js("JSON.stringify(screens.gallery.item.photos)").toString(), QString(R"(["d","c","a"])"));
+        plugin.reset();
+    }
+
     void aSweepStaysOnItsPhotosWhenTheCellsChange() {
         QTemporaryDir dir;
         makeLibrary(dir.path(), {{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}});

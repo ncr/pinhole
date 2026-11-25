@@ -1,0 +1,56 @@
+{
+  "%n photos": {
+    "one": "%n zdjęcie",
+    "few": "%n zdjęcia",
+    "many": "%n zdjęć",
+    "other": "%n zdjęć"
+  },
+  "%n photos of screens hidden": {
+    "one": "%n zdjęcie ekranu ukryte",
+    "few": "%n zdjęcia ekranów ukryte",
+    "many": "%n zdjęć ekranów ukrytych",
+    "other": "%n zdjęć ekranów ukrytych"
+  },
+  "%n photos of screens. ⇧ D shows them together.": {
+    "one": "%n zdjęcie ekranu. ⇧ D je pokaże.",
+    "few": "%n zdjęcia ekranów. ⇧ D pokaże je razem.",
+    "many": "%n zdjęć ekranów. ⇧ D pokaże je razem.",
+    "other": "%n zdjęć ekranów. ⇧ D pokaże je razem."
+  },
+  "%n so far, still looking": {
+    "one": "na razie %n, szukam dalej",
+    "few": "na razie %n, szukam dalej",
+    "many": "na razie %n, szukam dalej",
+    "other": "na razie %n, szukam dalej"
+  },
+  "A game on the TV, an error on a monitor, a machine's display: photos taken of a screen are found on this computer and shown together here.": "Gra na telewizorze, błąd na monitorze, wyświetlacz maszyny: zdjęcia ekranów są znajdowane na tym komputerze i pokazywane tutaj razem.",
+  "Could not look at the photos; trying again in a minute.": "Nie udało się obejrzeć zdjęć; spróbuję znów za minutę.",
+  "Fetching the model that tells a screen (14 MB, once)…": "Pobieram model rozpoznający ekran (14 MB, jeden raz)…",
+  "Finds the photos you took of a screen (a game on the TV, an error on a monitor, a machine's display) on this computer, shows them together, and can keep them out of the grid. It learns from what you say is or is not one.": "Znajduje na tym komputerze zdjęcia ekranów (gra na telewizorze, błąd na monitorze, wyświetlacz maszyny), pokazuje je razem i może trzymać je poza siatką. Uczy się z tego, co wskażesz jako zdjęcie ekranu albo nie.",
+  "Here, in the side panel (Tab), they can be hidden from the grid, and from the wall, the mosaic and the photo frame with it. On a photo, More says whether it is one: what you say there is learned from, on your other computers too.": "Tutaj, w panelu bocznym (Tab), można je ukryć w siatce, a z nią na ścianie, w mozaice i w ramce. Na zdjęciu „Więcej” mówi, czy to zdjęcie ekranu: z tego, co tam wskażesz, wtyczka się uczy, także na Twoich innych komputerach.",
+  "Hide from the grid": "Ukryj w siatce",
+  "Hide them from the grid": "Ukryj je w siatce",
+  "Looking at the photos: %1 of %2. %n photos of screens so far.": {
+    "one": "Oglądam zdjęcia: %1 z %2. Na razie %n zdjęcie ekranu.",
+    "few": "Oglądam zdjęcia: %1 z %2. Na razie %n zdjęcia ekranów.",
+    "many": "Oglądam zdjęcia: %1 z %2. Na razie %n zdjęć ekranów.",
+    "other": "Oglądam zdjęcia: %1 z %2. Na razie %n zdjęć ekranów."
+  },
+  "Looking for photos of screens waits while background work is paused in Settings.": "Szukanie zdjęć ekranów czeka, dopóki praca w tle jest wstrzymana w Ustawieniach.",
+  "Looking for photos of screens…": "Szukam zdjęć ekranów…",
+  "Needs Python 3 with OpenCV and NumPy (python-opencv).": "Wymaga Pythona 3 z OpenCV i NumPy (python-opencv).",
+  "No photos of screens here.": "Nie ma tu zdjęć ekranów.",
+  "Not a screen": "To nie ekran",
+  "Out of the grid, if you like": "Poza siatką, jeśli chcesz",
+  "Photo of a screen": "Zdjęcie ekranu",
+  "Photos of screens": "Zdjęcia ekranów",
+  "Say a photo is of a screen, or is not": "Wskaż, że zdjęcie przedstawia ekran albo nie",
+  "Say the photo is not of a screen": "Wskaż, że to nie zdjęcie ekranu",
+  "Screens": "Ekrany",
+  "Show the photos of screens again": "Pokaż znów zdjęcia ekranów",
+  "The Not a screen button": "Przycisk „To nie ekran”",
+  "hiding photos of screens": "ukrycie zdjęć ekranów",
+  "marking as a photo of a screen": "oznaczenie jako zdjęcie ekranu",
+  "marking as not a photo of a screen": "oznaczenie, że to nie zdjęcie ekranu",
+  "showing photos of screens": "pokazanie zdjęć ekranów"
+}
