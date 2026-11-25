@@ -60,7 +60,7 @@ def main(screenshot, crop=None):
 <defs><image id="shot" width="{shot_w:.1f}" height="{shot_h}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/></defs>
 <rect width="{WIDTH}" height="{HEIGHT}" rx="28" fill="{YELLOW}"/>
 {text(WIDTH - PAD, 82, "A fast photo browser for Omarchy.", 27, BOLD, INK, "end")}
-{text(WIDTH - PAD, 122, "iCloud Photos and folders today. More sources coming.", 27, REGULAR, INK, "end")}
+{text(WIDTH - PAD, 122, "iCloud Photos and folders today. More photo sources coming.", 27, REGULAR, INK, "end")}
 {camera(PAD + 24, hole_x - 14, HEIGHT - PAD, hole_y)}
 {name(small_x, small_y - 44, small_w)}
 <path d="M{hole_x} {hole_y} L{small_x + small_w:.1f} {small_y:.1f} L{small_x + small_w:.1f} {small_y + small_h:.1f} Z" fill="{YELLOW}" opacity="0.3"/>

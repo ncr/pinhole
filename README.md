@@ -1,10 +1,10 @@
-<img src="docs/readme/obscura.svg" alt="Pinhole: a fast photo browser for Omarchy. iCloud Photos and folders today, more sources coming. Its rainbow wall, seen through a camera obscura." width="100%">
+<img src="docs/readme/obscura.svg" alt="Pinhole: a fast photo browser for Omarchy. iCloud Photos and folders today, more photo sources coming. Its rainbow wall, seen through a camera obscura." width="100%">
 
 <img src="docs/readme/keys.svg" alt="Pinhole's keyboard: W rainbow wall, R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
 
 See your iCloud Photos on Omarchy: the whole library in one fast grid, with your favourites, Live Photos, people
 and places, and every view a key away. A folder of photos works too. Photos kept somewhere else (Google Photos,
-Immich, a NAS) are not there yet: see [Sources](#sources).
+Immich, a NAS) are not there yet: see [Photo sources](#photo-sources).
 
 ## Install
 
@@ -33,7 +33,7 @@ Pinhole is young, and some basics are not built: deleting a photo, albums, the i
 edit beyond turn and crop. For those you still need the app your photos come from. So nothing in Pinhole can
 remove a photo from your library.
 
-## Sources
+## Photo sources
 
 - **Work today:** iCloud Photos, folders.
 - **Not made yet:** Google Photos, Immich, a NAS, a phone. Each can be added as a plugin.
@@ -49,7 +49,7 @@ Build a Pinhole plugin for me. If I want to share it, open a pull request agains
 github.com/ncr/pinhole with it.
 0. Ask me first what I want, with questions such as: is it a new view of my photos,
    a tool that makes something from them, or a new source of photos (Immich, a NAS,
-   a phone, another cloud)? What should it do, and what is it called? For a source
+   a phone, another cloud)? What should it do, and what is it called? For a photo source
    also: its address and how you sign in there. Then pick a short id for the plugin
    yourself.
 1. If Pinhole is not installed yet:
@@ -73,6 +73,6 @@ A fix for something that does not work is worth a pull request too: it saves the
 
 ## For the curious and for developers
 
-- [Sources of your own](docs/source-providers.md), and [how sources fit in](docs/sources.md)
+- [Photo sources of your own](docs/source-providers.md), and [how photo sources fit in](docs/sources.md)
 - [Plugins](docs/plugins.md) and [the contract for agents](docs/plugin-agents.md)
 - [Developing Pinhole](docs/development.md): building, the layout, tests, the probe
