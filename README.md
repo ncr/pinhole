@@ -23,9 +23,9 @@ More in [Installing Pinhole](docs/install.md): what the installer does, the bar 
 From the ones I use every day to the ones that exist because I could imagine them. With AI an idea is enough to
 start building, and that is pure joy.
 
-<img src="docs/readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots Shift S, Photos of screens Shift D, Search Ctrl F, People Shift F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
+<a href="docs/tour/README.md"><img src="docs/readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots Shift S, Photos of screens Shift D, Search Ctrl F, People Shift F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%"></a>
 
-[What each plugin does](docs/features.md)
+[What each plugin does](docs/tour/README.md)
 
 ## What is missing
 
