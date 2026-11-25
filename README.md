@@ -1,6 +1,6 @@
 <img src="docs/readme/keys.svg" alt="Pinhole's keyboard: W rainbow wall, R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
 
-A fast photo browser for Omarchy: iCloud Photos and folders today, more sources coming. Working name.
+A fast photo browser for Omarchy: iCloud Photos and folders today, more sources coming.
 
 Pinhole keeps a small index of the whole library on disk and fetches the rest from its source only when you look
 at it, drag it or export it. It adds the photos you drop on its window.
@@ -23,32 +23,8 @@ iCloud Photos and folders are built in. Any other source is a plugin: Immich, a 
 provider is a program in any language that tells Pinhole what photos there are; Pinhole does the index, the
 thumbnails and the cache.
 
-Do you keep your photos somewhere else? A pull request with your source is very welcome. Paste this into your AI
-coding agent (Claude Code, Codex, OpenCode…):
-
-```text
-Build a Pinhole plugin that shows my photos from the place I keep them, and open a
-pull request against github.com/ncr/pinhole with it.
-0. Ask me first for the details you need, such as: where my photos are (Immich, a
-   NAS, a phone, another cloud), its address, how you sign in there, and what the
-   source should be called. Then pick a short id for the plugin yourself.
-1. If Pinhole is not installed yet:
-   git clone https://github.com/ncr/pinhole && pinhole/bin/install --non-interactive
-2. Read `pinhole plugin docs plugin-agents`, then `pinhole plugin docs source-providers`.
-   A source is a plugin with a provider: a program that answers pinholed in JSON lines.
-   Start from the complete example "Source: JPEG folder" in
-   `pinhole plugin docs plugin-examples`.
-3. Begin the plugin with `pinhole plugin new`, write the provider, and run
-   `pinhole plugin check` on it until it passes.
-4. Ask me to turn the plugin on (Tab, Plugins) and to add the source. Then try it on
-   my real library: `pinhole status` says how far it is built. Only read from my
-   photos while you test; change and delete nothing where they are kept.
-5. Fork the repository, put the plugin's folder in `plugins/`, name the source in the
-   Sources section of README.md, run `bin/test-all`, and open the pull request.
-   Say in it what you tried, on what, and what you could not try.
-```
-
-Something that does not work is worth a pull request too: it saves the next person the afternoon.
+Do you keep your photos somewhere else? A pull request with your source is very welcome:
+[the prompt below](#make-your-own) builds one.
 
 ## Plugins
 
@@ -78,8 +54,37 @@ imagine them. With AI an idea is enough to start building, and that is pure joy.
 <tr><th colspan="3" align="left">↓ Imagined it, so I built it</th></tr>
 </table>
 
-Each one in full is in [What Pinhole does](docs/features.md). A plugin of your own is a folder with a
-manifest.json and a QML file: start with [the quick start](docs/plugin-quickstart.md).
+Each one in full is in [What Pinhole does](docs/features.md).
+
+## Make your own
+
+A plugin is a folder with a manifest.json and a QML file, loaded again whenever you save it. Paste this into your
+AI coding agent (Claude Code, Codex, OpenCode…):
+
+```text
+Build a Pinhole plugin for me. If I want to share it, open a pull request against
+github.com/ncr/pinhole with it.
+0. Ask me first what I want, with questions such as: is it a new view of my photos,
+   a tool that makes something from them, or a new source of photos (Immich, a NAS,
+   a phone, another cloud)? What should it do, and what is it called? For a source
+   also: its address and how you sign in there. Then pick a short id for the plugin
+   yourself.
+1. If Pinhole is not installed yet:
+   git clone https://github.com/ncr/pinhole && pinhole/bin/install --non-interactive
+2. Read `pinhole plugin docs plugin-agents` and follow it. It is the contract that
+   Pinhole's own "Copy agent instructions" button gives (Tab, Plugins, Build a
+   plugin), for the version installed, and it names the other documents and the
+   complete examples to start from.
+3. Begin the plugin with `pinhole plugin new`, and run `pinhole plugin check` on it
+   until it passes.
+4. Ask me to turn the plugin on (Tab, Plugins), and try it on my real library. Only
+   read from my photos while you test; change and delete nothing where they are kept.
+5. To share it: fork the repository, put the plugin's folder in `plugins/`, name it
+   in README.md, run `bin/test-all`, and open the pull request. Say in it what you
+   tried, on what, and what you could not try.
+```
+
+Something that does not work is worth a pull request too: it saves the next person the afternoon.
 
 ## Not here yet
 
