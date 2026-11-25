@@ -13,7 +13,7 @@ FONTS = Path("/usr/share/fonts/TTF")
 BOLD = TTFont(FONTS / "JetBrainsMonoNerdFont-Bold.ttf")
 REGULAR = TTFont(FONTS / "JetBrainsMonoNerdFont-Regular.ttf")
 
-YELLOW, INK, PAPER, GREY, EDGE, DIM = "#FFD60A", "#1a1a1c", "#f4f3ee", "#8d8c86", "#3a3a3d", "#4a4a4e"
+YELLOW, INK, GREY, EDGE, DIM = "#FFD60A", "#1a1a1c", "#8d8c86", "#3a3a3d", "#4a4a4e"
 
 ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
 STAGGER = [0, 0.25, 0.75]  # of a key and its gap, as on a real keyboard
@@ -52,18 +52,12 @@ def key(x, y, w, h, top, label, size):
 
 
 def main():
-    rows_top, more_top, more_h = 150, 626, 96
+    rows_top, more_top, more_h = 120, 596, 96
     height = more_top + more_h + 56
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {height}" role="img">',
-           "<title>Pinhole: every view is one key away</title>",
+           "<title>Every view of Pinhole is one key away</title>",
            f'<rect width="{WIDTH}" height="{height}" rx="28" fill="{INK}"/>',
-           # the app's icon: a camera obscura from the front
-           f'<g transform="translate({LEFT} 48)"><rect width="64" height="64" rx="14" fill="{YELLOW}"/>'
-           f'<rect x="12" y="18" width="40" height="30" rx="5" fill="{INK}"/>'
-           f'<path d="M32 33 L48 22 L48 44 Z" fill="{YELLOW}" opacity="0.35"/>'
-           f'<circle cx="32" cy="33" r="3.5" fill="{YELLOW}"/></g>',
-           text(LEFT + 86, 97, "Pinhole", 48, BOLD, PAPER),
-           text(LEFT + 10 * KEY + 9 * GAP, 93, "every view is one key away", 26, REGULAR, GREY, "end")]
+           text(LEFT, 84, "every view is one key away", 26, REGULAR, GREY)]
     for r, row in enumerate(ROWS):
         for i, letter in enumerate(row):
             x = LEFT + (STAGGER[r] + i) * (KEY + GAP)

@@ -9,10 +9,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-from keys import BOLD, text
+from keys import BOLD, REGULAR, text
 
 YELLOW, INK = "#FFD60A", "#1a1a1c"
-WIDTH, PAD, TOP, SHOT_H = 1680, 36, 92, 250  # TOP: where the drawing starts, under the line of text
+WIDTH, PAD, TOP, SHOT_H = 1680, 36, 176, 250  # TOP: where the drawing starts, under the name and its two lines
+NAME = Path(__file__).with_name("BricolageGrotesque-ExtraBold.ttf")  # the name's typeface, if it is here
+
+
+def name(x, y, size):
+    if NAME.exists():
+        from fontTools.ttLib import TTFont
+        return text(x, y, "Pinhole", size, TTFont(NAME), INK)
+    # without the file: plain text, right only in a browser that has the typeface
+    return (f'<text x="{x}" y="{y}" font-family="Bricolage Grotesque, sans-serif" font-weight="800" '
+            f'font-size="{size}" letter-spacing="-5" fill="{INK}">Pinhole</text>')
+
 
 
 def main(screenshot, crop=None):
@@ -35,8 +46,9 @@ def main(screenshot, crop=None):
 <title>Pinhole, seen through a camera obscura</title>
 <defs><image id="shot" width="{shot_w:.1f}" height="{shot_h}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/></defs>
 <rect width="{WIDTH}" height="{HEIGHT}" rx="28" fill="{YELLOW}"/>
-{text(PAD, 62, "iCloud Photos and folders today.", 30, BOLD, INK)}
-{text(WIDTH - PAD, 62, "More sources coming.", 30, BOLD, INK, "end")}
+{name(PAD - 6, 132, 132)}
+{text(WIDTH - PAD, 76, "A fast photo browser for Omarchy.", 27, BOLD, INK, "end")}
+{text(WIDTH - PAD, 120, "iCloud Photos and folders today. More sources coming.", 27, REGULAR, INK, "end")}
 <rect x="{PAD}" y="{TOP}" width="{hole_x - PAD}" height="{shot_h}" rx="22" fill="{INK}"/>
 <path d="M{hole_x} {hole_y} L{hole_x - reach:.1f} {small_y:.1f} L{hole_x - reach:.1f} {small_y + small_h:.1f} Z" fill="{YELLOW}" opacity="0.3"/>
 <use xlink:href="#shot" opacity="0.8" transform="translate({small_x + small_w:.1f} {small_y + small_h:.1f}) rotate(180) scale({small_w / shot_w:.4f})"/>
