@@ -5074,6 +5074,80 @@ PinholePlugin {
         qunsetenv("PINHOLE_SOCKET");
     }
 
+    // Turned in iCloud, a photo's files are new (the source renders the
+    // edit): the viewer fetches them again, never drawing the old full size
+    // in the new shape.
+    void theViewerFetchesAPhotoAgainWhenItsSourceFilesChange() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}});
+        auto thumbIs = [&](const char *path) {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "thumb");
+            db.setDatabaseName(dir.path() + "/library.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            q.prepare("UPDATE assets SET thumb_path = ?");
+            q.addBindValue(QString::fromLatin1(path));
+            QVERIFY(q.exec());
+            db.close();
+        };
+        thumbIs("thumbs/old.jpg");
+        QSqlDatabase::removeDatabase("thumb");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        FakeService fake;
+        QVERIFY(fake.server.listen(dir.path() + "/s.sock"));
+        qputenv("PINHOLE_SOCKET", (dir.path() + "/s.sock").toUtf8());
+        ServiceClient service(dir.path());
+        QTRY_VERIFY(fake.server.hasPendingConnections());
+        fake.peer = fake.server.nextPendingConnection();
+        fake.greet();
+        auto asked = [&fake](const QString &kind) {
+            fake.read();
+            QList<QJsonObject> found;
+            for (const QJsonObject &line : std::as_const(fake.asked))
+                if (line.value("method").toString() == QLatin1String("fetch")
+                    && line.value("params").toObject().value("kind").toString() == kind)
+                    found << line;
+            return found;
+        };
+        auto answer = [&fake](const QJsonObject &line, const QString &path) {
+            fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{{"path", path}, {"type", "public.jpeg"}}}});
+        };
+
+        Viewer viewer(&library, &service);
+        viewer.setViewport(800, 600);
+        viewer.openAt(0, {});
+        QTRY_COMPARE(asked("medium").size(), 1);
+        answer(asked("medium").last(), "/x/old-medium.jpg");
+        QTRY_COMPARE(asked("full").size(), 1);
+        answer(asked("full").last(), "/x/old-full.jpg");
+        QTRY_COMPARE(viewer.stage(), QString("original"));
+        QVERIFY(viewer.image().toString().contains("old-full"));
+
+        // Read again with nothing changed: nothing fetched again.
+        QVERIFY(library.open(dir.path(), &error));
+        viewer.libraryReloaded({0});
+        QTest::qWait(50);
+        QCOMPARE(asked("medium").size(), 1);
+
+        // Its files new: fetched again, the new medium shown, then the new
+        // full size.
+        thumbIs("thumbs/new.jpg");
+        QSqlDatabase::removeDatabase("thumb");
+        QVERIFY(library.open(dir.path(), &error));
+        viewer.libraryReloaded({0});
+        QTRY_COMPARE(asked("medium").size(), 2);
+        answer(asked("medium").last(), "/x/new-medium.jpg");
+        QTRY_COMPARE(viewer.stage(), QString("medium"));
+        QVERIFY(viewer.image().toString().contains("new-medium"));
+        QTRY_COMPARE(asked("full").size(), 2);
+        answer(asked("full").last(), "/x/new-full.jpg");
+        QTRY_VERIFY(viewer.image().toString().contains("new-full"));
+        viewer.close();
+        qunsetenv("PINHOLE_SOCKET");
+    }
+
     void theViewersBriefTitleShortensTheDaysAndMonthsNames() {
         QTemporaryDir dir;
         // Wednesday 11 November 2026, at noon here.
