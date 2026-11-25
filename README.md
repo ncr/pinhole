@@ -24,24 +24,27 @@ provider is a program in any language that tells Pinhole what photos there are; 
 thumbnails and the cache.
 
 Do you keep your photos somewhere else? A pull request with your source is very welcome. Paste this into your AI
-coding agent (Claude Code, Codex, OpenCode…) and say where your photos are:
+coding agent (Claude Code, Codex, OpenCode…):
 
 ```text
-Build a Pinhole plugin that shows my photos from <where they are>, and open a pull
-request against github.com/ncr/pinhole with it.
+Build a Pinhole plugin that shows my photos from the place I keep them, and open a
+pull request against github.com/ncr/pinhole with it.
+0. Ask me first for the details you need, such as: where my photos are (Immich, a
+   NAS, a phone, another cloud), its address, how you sign in there, and what the
+   source should be called. Then pick a short id for the plugin yourself.
 1. If Pinhole is not installed yet:
    git clone https://github.com/ncr/pinhole && pinhole/bin/install --non-interactive
 2. Read `pinhole plugin docs plugin-agents`, then `pinhole plugin docs source-providers`.
    A source is a plugin with a provider: a program that answers pinholed in JSON lines.
    Start from the complete example "Source: JPEG folder" in
    `pinhole plugin docs plugin-examples`.
-3. `pinhole plugin new me.<name>`, write the provider, and run
-   `pinhole plugin check me.<name>` until it passes.
+3. Begin the plugin with `pinhole plugin new`, write the provider, and run
+   `pinhole plugin check` on it until it passes.
 4. Ask me to turn the plugin on (Tab, Plugins) and to add the source. Then try it on
    my real library: `pinhole status` says how far it is built. Only read from my
    photos while you test; change and delete nothing where they are kept.
-5. Fork the repository, put the plugin's folder in `plugins/<name>/`, name it in
-   the Sources section of README.md, run `bin/test-all`, and open the pull request.
+5. Fork the repository, put the plugin's folder in `plugins/`, name the source in the
+   Sources section of README.md, run `bin/test-all`, and open the pull request.
    Say in it what you tried, on what, and what you could not try.
 ```
 
