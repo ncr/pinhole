@@ -71,7 +71,7 @@ github.com/ncr/pinhole with it.
 
 A fix for something that does not work is worth a pull request too: it saves the next person the afternoon.
 
-## More
+## For the curious and for developers
 
 - [Sources of your own](docs/source-providers.md), and [how sources fit in](docs/sources.md)
 - [Plugins](docs/plugins.md) and [the contract for agents](docs/plugin-agents.md)
