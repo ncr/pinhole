@@ -37,6 +37,7 @@ Viewer::Viewer(const Library *library, ServiceClient *service, QObject *parent)
     // Another photo shown: its shape, and the adjustment drawn.
     connect(this, &Viewer::indexChanged, this, [this] {
         m_shownAdjust = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).adjust : Adjustment();
+        m_shownThumb = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).thumbPath : QByteArray();
         emit adjustChanged();
     });
 }
@@ -739,6 +740,7 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
     auto mapped = [&](int old) { return old >= 0 && old < int(moved.size()) ? moved[size_t(old)] : -1; };
     // The photo shown turned or cut since: its pictures and its shape.
     const Adjustment before = m_index >= 0 && m_index < m_library->count() ? m_shownAdjust : Adjustment();
+    const QByteArray thumbBefore = m_shownThumb;
     for (int &i : m_hiddenList)
         i = mapped(i);
     std::erase(m_hiddenList, -1);
@@ -766,6 +768,23 @@ void Viewer::libraryReloaded(const std::vector<int> &moved) {
         m_shownAdjust = now;
         emit imageChanged();
         emit adjustChanged();
+    }
+    // Its source's files changed (turned or cropped in iCloud, which keeps
+    // the edit and renders it anew; changed on the phone): the medium and
+    // the full size fetched again, the old ones shown until they come,
+    // never the old picture in the new shape.
+    // By its file's name, which is the files' key: not by the folder, which
+    // a library moved elsewhere changes.
+    const QByteArray thumb = m_index >= 0 && m_index < m_library->count() ? m_library->at(m_index).thumbPath : QByteArray();
+    const auto named = [](const QByteArray &path) { return path.mid(path.lastIndexOf('/') + 1); };
+    m_shownThumb = thumb;
+    if (named(thumb) != named(thumbBefore)) {
+        const bool same = !named(thumbBefore).isEmpty() && m_index >= 0;
+        if (same && m_open && !m_library->at(m_index).video) {
+            m_mediums.remove(m_library->at(m_index).id);
+            m_generation += 1;
+            request(m_index, QStringLiteral("medium"));
+        }
     }
     // Any photo's: what imageFor() and thumbnailAt() give follows.
     m_revision += 1;

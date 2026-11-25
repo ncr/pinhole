@@ -261,8 +261,11 @@ private:
     // Medium renditions fetched, by photo, while the viewer is open.
     QHash<QByteArray, QString> m_mediums;
     int m_revision = 0;
-    // The adjustment of the photo shown, as last drawn.
+    // The adjustment of the photo shown, as last drawn, and its thumbnail's
+    // path, which changes when its source's files do (an edit kept in
+    // iCloud brings new ones).
     Adjustment m_shownAdjust;
+    QByteArray m_shownThumb;
     int m_jumpFrom = -1;
     int m_jumpSide = 0;
     // Photos passing quicker than a person looks at them (a held key, the

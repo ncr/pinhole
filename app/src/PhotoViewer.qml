@@ -152,8 +152,18 @@ Item {
             layers.photoChanged()
         }
         function onImageChanged() {
-            if (viewer.stage === "original")
+            if (viewer.stage === "original") {
                 originalImage.source = viewer.image
+                // Zoomed in on it, the full size again too (turned since).
+                if (detailImage.source.toString() !== "")
+                    detailImage.source = viewer.image
+            } else {
+                // Fetched anew (its files changed in the source): the old
+                // full size goes, the new medium shows until the new one
+                // comes.
+                originalImage.source = ""
+                detailImage.source = ""
+            }
         }
         function onCloseRequested() { root.closeViewer() }
     }
