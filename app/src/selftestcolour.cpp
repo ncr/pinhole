@@ -1,5 +1,6 @@
-// PINHOLE_SELFTEST=colour:<dir>: photos as the grid, the viewer and Mosaic
-// draw them, to compare their colours with a reference (selftest.h).
+// PINHOLE_SELFTEST=colour:<dir>: photos as the grid, the viewer, Mosaic and
+// the rainbow wall draw them, to compare their colours with a reference
+// (selftest.h).
 
 #include "selftest.h"
 
@@ -9,6 +10,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
 #include <qpa/qwindowsysteminterface.h>
@@ -22,6 +24,25 @@ namespace {
 void press(QQuickWindow *window, int code, const QString &text) {
     QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, code, Qt::NoModifier, text);
     QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, code, Qt::NoModifier, text);
+}
+
+// The Loader Main.qml loads a plugin in.
+QQuickItem *loaderOf(QQuickItem *item, const QString &id) {
+    if (item->property("pluginId").toString() == id)
+        return item;
+    for (QQuickItem *child : item->childItems())
+        if (QQuickItem *found = loaderOf(child, id))
+            return found;
+    return nullptr;
+}
+
+QQuickItem *withProperty(QQuickItem *in, const char *name) {
+    if (in->metaObject()->indexOfProperty(name) >= 0)
+        return in;
+    for (QQuickItem *child : in->childItems())
+        if (QQuickItem *found = withProperty(child, name))
+            return found;
+    return nullptr;
 }
 
 } // namespace
@@ -42,9 +63,14 @@ void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
     };
     auto steps = std::make_shared<std::vector<Step>>();
     auto next = std::make_shared<std::function<void(size_t)>>();
-    *next = [window, steps, next](size_t i) {
+    auto failures = std::make_shared<int>(0);
+    auto check = [say, failures](bool ok, const QString &what) {
+        say((ok ? QStringLiteral("ok   ") : QStringLiteral("FAIL ")) + what);
+        *failures += ok ? 0 : 1;
+    };
+    *next = [window, steps, next, failures](size_t i) {
         if (i >= steps->size()) {
-            QCoreApplication::quit();
+            QCoreApplication::exit(*failures > 0 ? 1 : 0);
             return;
         }
         QTimer::singleShot((*steps)[i].wait, window, [steps, next, i] {
@@ -120,6 +146,51 @@ void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
         steps->push_back({800, [window] { press(window, Qt::Key_H, "h"); }});
         steps->push_back({6000, [grab] { grab("mosaic"); }});
         steps->push_back({0, [window] { press(window, Qt::Key_Escape, {}); }});
+        // The rainbow wall, where it is on: W lays it over the photos, a
+        // photo opened from it comes back to the same wall, W closes it.
+        QQuickItem *loader = loaderOf(window->contentItem(), QStringLiteral("pinhole.wall"));
+        if (!loader)
+            say(QStringLiteral("the rainbow wall is off: not looked at"));
+        auto covering = [loader] {
+            QObject *plugin = loader->property("item").value<QObject *>();
+            return plugin && plugin->property("covering").toBool() && !loader->property("away").toBool();
+        };
+        auto tiles = [loader] {
+            QQuickItem *wall = withProperty(loader, "shownCount");
+            return wall ? wall->property("tiles").toStringList() : QStringList();
+        };
+        auto laid = std::make_shared<QStringList>();
+        if (loader) {
+            steps->push_back({800, [window] { press(window, Qt::Key_W, "w"); }});
+            steps->push_back({4000, [=] {
+                                  QQuickItem *wall = withProperty(loader, "shownCount");
+                                  const int count = wall ? wall->property("shownCount").toInt() : 0;
+                                  *laid = tiles();
+                                  check(covering(), QStringLiteral("W in the grid: the rainbow wall covers the photos"));
+                                  check(count > 0, QStringLiteral("the rainbow wall has %1 photos on it").arg(count));
+                                  grab("wall");
+                              }});
+            steps->push_back({0, [=] {
+                                  QString photo;
+                                  for (const QString &id : *laid)
+                                      if (!id.isEmpty()) {
+                                          photo = id;
+                                          break;
+                                      }
+                                  if (QQuickItem *view = withProperty(loader, "canGrow"))
+                                      QMetaObject::invokeMethod(view, "open", Q_ARG(QVariant, photo));
+                              }});
+            steps->push_back({1500, [=, &viewer] {
+                                  check(viewer.isOpen(), QStringLiteral("a photo of the wall opens full window"));
+                                  press(window, Qt::Key_Escape, {});
+                              }});
+            steps->push_back({1500, [=, &viewer] {
+                                  check(!viewer.isOpen() && covering() && tiles() == *laid,
+                                        QStringLiteral("the photo closed (Esc): back on the same wall"));
+                                  press(window, Qt::Key_W, "w");
+                              }});
+            steps->push_back({800, [=] { check(!covering(), QStringLiteral("W on the wall closes it")); }});
+        }
         (*next)(0);
     });
     poll->start();

@@ -1,0 +1,21 @@
+{
+  "%1 of %2 photos are colourful enough for the wall; the rest average to grey. W in the grid.": "%1 z %2 zdjęć jest dość barwnych na ścianę; reszta uśrednia się do szarości. W w siatce.",
+  "%Ln of your most colourful photos, by hue": {
+    "one": "%Ln twoje najbarwniejsze zdjęcie, według odcienia",
+    "few": "%Ln twoje najbarwniejsze zdjęcia, według odcienia",
+    "many": "%Ln twoich najbarwniejszych zdjęć, według odcienia",
+    "other": "%Ln twoich najbarwniejszych zdjęć, według odcienia"
+  },
+  "A rainbow wall": "Tęczowa ściana",
+  "A rainbow wall of the library: as many of your most colourful photos as fill the window, laid out by hue, light at the top and dark at the foot.": "Tęczowa ściana biblioteki: tyle twoich najbarwniejszych zdjęć, ile mieści okno, ułożonych według odcieni, jasne u góry, ciemne u dołu.",
+  "Another": "Inna",
+  "Another rainbow wall": "Inna tęczowa ściana",
+  "No photos here yet.": "Nie ma tu jeszcze zdjęć.",
+  "Pinch": "Szczypnięcie",
+  "Rainbow wall": "Tęczowa ściana",
+  "Reading the photos' colours…": "Czytanie kolorów zdjęć…",
+  "The + button": "Przycisk +",
+  "The rainbow wall": "Tęczowa ściana",
+  "W lays your most colourful photos out by hue, light to dark: a rainbow of your own. Space makes another, and a click on a photo opens it.": "W układa twoje najbarwniejsze zdjęcia według odcienia, od jasnych do ciemnych: twoja własna tęcza. Space układa inną, a kliknięcie zdjęcia je otwiera.",
+  "Wall: bigger, smaller photos": "Ściana: większe, mniejsze zdjęcia"
+}

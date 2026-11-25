@@ -539,7 +539,8 @@ void runThroughSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, c
             const QRectF middle(r.left(), r.top() + r.height() / 4, r.width(), r.height() / 2);
             for (const char *id : {"pinhole.calendar", "pinhole.favourites", "pinhole.frame",
                                    "pinhole.mosaic",
-                                   "pinhole.series", "pinhole.sheet", "pinhole.theme"}) {
+                                   "pinhole.series", "pinhole.sheet", "pinhole.theme",
+                                   "pinhole.wall"}) {
                 const QByteArray name = QByteArray("pluginSwitch:") + id;
                 QQuickItem *toggle = item(name.constData());
                 if (toggle && toggle->isVisible()

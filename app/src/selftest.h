@@ -366,7 +366,10 @@ void runStacksSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &lib
 // PINHOLE_SELFTEST_PHOTOS (ids, by commas; else the newest) in the grid at
 // 3 columns, then full window as it opens and once its sharpest has come;
 // the first at 13 and 29 columns (mosaics); then Mosaic's of it (H). Frames in <dir>, named by the photo's file name
-// and what they show, to compare their colours with a reference.
+// and what they show, to compare their colours with a reference. Then the
+// rainbow wall, where it is on (W): it covers the photos and has tiles, a
+// photo opened from it comes back to the same wall, and W closes it. Exits
+// 1 if any of that fails.
 void runColourSelfTest(QQuickWindow *window, PhotoGrid *grid, const Library &library, Viewer &viewer, const QString &dir);
 
 // PINHOLE_SELFTEST=hdrvideo:<dir> (selftesthdr.cpp): each video of

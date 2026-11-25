@@ -1,0 +1,10 @@
+{
+  "api": 16,
+  "startsOff": true,
+  "id": "pinhole.wall",
+  "name": "Rainbow wall",
+  "version": "1.0.0",
+  "author": "Pinhole",
+  "license": "MIT",
+  "description": "A rainbow wall of the library: as many of your most colourful photos as fill the window, laid out by hue, light at the top and dark at the foot."
+}
