@@ -3,7 +3,7 @@
 Read [CLAUDE.md](CLAUDE.md): work on a branch, open a pull request, and run test windows on a hidden workspace.
 Build Rust with Cargo and the checked-in lockfiles.
 
-Start with [README.md](README.md). The current architecture and measured
+Start with [README.md](README.md) and [docs/development.md](docs/development.md). The current architecture and measured
 risks are in [the project review](docs/reviews/2026-11-03.md); the older
 [core/plugin migration](docs/core-and-plugins.md) is implementation history.
 
