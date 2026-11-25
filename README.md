@@ -83,7 +83,8 @@ and thumbnails stay local. Cached tiles and photo markers work offline.
 Mosaic makes any photo out of your other photos (H): each tile is a photo
 of the colour the picture has there. A slider, + and −, or the wheel make
 the tiles bigger and smaller, Space flips to the original and back, a
-click on a tile opens its photo, and S saves the mosaic to Pictures. A mosaic
+click on a tile opens its photo, and E exports the mosaic to a folder of
+your choosing, by pixels, by paper and dots an inch, or by megabytes. A mosaic
 shows large shapes that differ strongly, not small detail, so it looks
 through the library for the photos that have them and lists the best under
 the mosaic.

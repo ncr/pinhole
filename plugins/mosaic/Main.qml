@@ -148,7 +148,7 @@ PinholePlugin {
         },
         {
             title: qsTr("Bigger and smaller tiles"),
-            text: qsTr("In the mosaic, the slider, + and −, or the wheel make the tiles bigger and smaller. Space flips to the original and back, and S saves the mosaic to Pictures."),
+            text: qsTr("In the mosaic, the slider, + and −, or the wheel make the tiles bigger and smaller. Space flips to the original and back, and E exports the mosaic to a folder, at the size, the print size or the file size you choose."),
             action: gridAction
         },
         {
@@ -231,6 +231,7 @@ PinholePlugin {
         usable: mosaicView.shown
         mouse: qsTr("Click a tile")
         touchpad: qsTr("Tap a tile")
-        onTriggered: mosaicView.item.openPointed()
+        // In the card that asks how to export it, ⏎ exports.
+        onTriggered: mosaicView.item.exporting ? mosaicView.item.save() : mosaicView.item.openPointed()
     }
 }

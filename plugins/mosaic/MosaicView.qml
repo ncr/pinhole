@@ -25,7 +25,7 @@ Item {
     // A tile's size wanted, in the window's pixels; the columns follow. One
     // of `sizes`, and between two of them while it is on its way: under a
     // pinch, or eased after + and − (zoom, a PinchZoom).
-    readonly property real smallest: 5
+    readonly property real smallest: 9
     readonly property real biggest: 120
     readonly property var sizes: {
         const out = []
@@ -176,36 +176,179 @@ Item {
     // ⏎: the photo under the pointer, else the picture itself.
     function openPointed() { open(pointedId !== "" ? pointedId : photo) }
 
-    // The mosaic as a file in Pictures, each tile as sharp as the atlas
-    // has it, 6000 pixels across at most (grabToImage takes the size in the
-    // window's points); and on the clipboard.
+    // Exporting: E opens what to export it as (the card at the foot of this
+    // file), kept as the plugin's settings, so the next mosaic is exported
+    // the same way, to the same folder; ⏎ there exports, Esc puts the card
+    // away. A mosaic can be a picture of hundreds of megapixels: it goes to
+    // a folder of the person's choosing, never into the library shown nor
+    // onto the clipboard.
+    //
+    //   pixels   its longer side, in pixels;
+    //   print    a paper's size and how many dots an inch: as many pixels
+    //            as fit on it, and the file says its dots an inch;
+    //   size     no more megabytes than said, as sharp as the atlas has it.
+    //
+    // A tile is at most `texels` pixels of its photo: a file larger than
+    // that a tile is only the same photos drawn bigger.
+    property bool exporting: false
+    readonly property var papers: ({ "10x15": [15, 10], "13x18": [18, 13], "a4": [29.7, 21], "a3": [42, 29.7],
+                                     "30x40": [40, 30], "50x70": [70, 50] })
+    readonly property int longest: 12000
+    readonly property size exportSize: {
+        const shape = columns / rows, by = pinhole.settings.exportBy
+        let w, h
+        if (by === "print") {
+            const paper = papers[pinhole.settings.exportPaper] ?? papers.a4, dots = pinhole.settings.exportDpi / 2.54
+            const across = (shape >= 1 ? paper[0] : paper[1]) * dots, down = (shape >= 1 ? paper[1] : paper[0]) * dots
+            w = Math.min(across, down * shape)
+            h = w / shape
+        } else {
+            const side = by === "size" ? Math.max(columns, rows) * texels : pinhole.settings.exportPixels
+            w = shape >= 1 ? side : side * shape
+            h = w / shape
+        }
+        const most = Math.min(1, longest / Math.max(w, h))
+        return Qt.size(Math.round(w * most), Math.round(h * most))
+    }
+    function back() {
+        if (!exporting)
+            return false
+        exporting = false
+        return true
+    }
+    function askSave() {
+        if (ready && !saving)
+            exporting = true
+    }
+    // The folder it goes to: the one chosen last.
+    readonly property string folder: pinhole.settings.exportFolder ?? ""
+    function chooseFolder(thenExport) {
+        pinhole.chooseFolder(qsTr("Export the mosaic to")).then(path => {
+            pinhole.settings.exportFolder = path
+            if (thenExport)
+                mosaic.save()
+        }, () => {})
+    }
+    // The library a folder is in, when a source shown or added is a folder
+    // over it: its name, else "".
+    function inLibrary(path) {
+        const into = path + "/"
+        for (const source of pinhole.sources.list)
+            if (source.path && (into.startsWith(source.path.replace(/\/$/, "") + "/")))
+                return source.name || source.path
+        return ""
+    }
+    // A name of its own there: "<photo> mosaic.jpg", then "… mosaic 2.jpg".
+    function freeName() {
+        const stem = ((item && item.filename) || qsTr("Photo")).replace(/\.[^.\/]*$/, "").replace(/[\/]/g, "-")
+        for (let n = 1; n < 10000; ++n) {
+            const path = folder + "/" + qsTr("%1 mosaic").arg(stem) + (n > 1 ? " " + n : "") + ".jpg"
+            if (!pinhole.exists(path))
+                return path
+        }
+        return folder + "/" + qsTr("%1 mosaic").arg(stem) + " " + Date.now() + ".jpg"
+    }
     property bool saving: false
     property real savingTile: 0
+    function failed(error) {
+        saving = false
+        savingTile = 0
+        saveButton.complain(qsTr("Could not export"))
+        if (error)
+            pinhole.warn(error)
+    }
+    // Drawn at its size into a file of the cache as it is, which
+    // ImageMagick makes the JPEG of: of a quality, or of a size.
     function save() {
         if (saving || !ready)
             return
-        const each = Math.max(8, Math.min(texels, Math.floor(6000 / columns)))
-        const path = pinhole.picturePath(qsTr("Mosaic"), "jpg")
+        if (folder === "" || !pinhole.exists(folder)) {
+            chooseFolder(true)
+            return
+        }
+        exporting = false
         saving = true
-        savingTile = each
-        const done = canvas.grabToImage(result => {
-            mosaic.savingTile = 0
-            if (!result.saveToFile(path)) {
-                mosaic.saving = false
-                saveButton.complain(qsTr("Could not save"))
+        if (grabbed > 0) {
+            draw()
+            return
+        }
+        // How many pixels a grab makes of a point, asked once of a small
+        // one: on a display scaled by a fraction it is not what Screen says.
+        const asked = canvas.grabToImage(result => {
+            probe.held = result
+            probe.source = result.url
+        }, Qt.size(64, 64))
+        if (!asked)
+            failed(null)
+    }
+    property real grabbed: 0
+    Image {
+        id: probe
+        visible: false
+        cache: false
+        property var held: null
+        onStatusChanged: {
+            if (status !== Image.Ready && status !== Image.Error)
                 return
-            }
-            pinhole.deliver(path).then(how => {
-                mosaic.saving = false
-                pinhole.notify(how === "copied" ? qsTr("Mosaic saved to Pictures, and copied") : qsTr("Mosaic saved to Pictures"))
-            }).catch(pinhole.warn)
-        }, Qt.size(Math.round(columns * each / Screen.devicePixelRatio), Math.round(rows * each / Screen.devicePixelRatio)))
-        if (!done) {
-            saving = false
-            savingTile = 0
-            saveButton.complain(qsTr("Could not save"))
+            mosaic.grabbed = status === Image.Ready && implicitWidth > 0 ? implicitWidth / 64 : Screen.devicePixelRatio
+            held = null
+            source = ""
+            if (mosaic.saving)
+                mosaic.draw()
         }
     }
+    // A file of no more megabytes than said comes first from a lower JPEG
+    // quality; below `fineQuality` it is made smaller instead, a fifth at a
+    // time, until it is that good: a smaller picture of clean tiles rather
+    // than a large one of blocks.
+    readonly property int fineQuality: 80
+    function draw() {
+        const wide = exportSize.width, high = exportSize.height
+        const by = pinhole.settings.exportBy
+        const drawn = pinhole.cacheDir + "/mosaic.bmp", path = freeName()
+        savingTile = wide / columns
+        // grabToImage takes the size in the window's points; ImageMagick
+        // makes it the very size asked for.
+        const asked = canvas.grabToImage(result => {
+            mosaic.savingTile = 0
+            if (!result.saveToFile(drawn))
+                mosaic.failed(null)
+            else
+                mosaic.encode(drawn, path, by, 1)
+        }, Qt.size(Math.ceil(wide / grabbed), Math.ceil(high / grabbed)))
+        if (!asked)
+            failed(null)
+    }
+    function encode(drawn, path, by, scale) {
+        const wide = Math.round(exportSize.width * scale), high = Math.round(exportSize.height * scale)
+        const how = [drawn, "-resize", wide + "x" + high + "!"]
+        if (by === "print")
+            how.push("-units", "PixelsPerInch", "-density", String(pinhole.settings.exportDpi))
+        if (by === "size")
+            how.push("-define", "jpeg:extent=" + pinhole.settings.exportMb + "MB")
+        else
+            how.push("-quality", String(pinhole.settings.exportQuality))
+        how.push(path)
+        const done = () => {
+            pinhole.run("rm", ["-f", drawn]).catch(pinhole.warn)
+            mosaic.saving = false
+            pinhole.notify(qsTr("Mosaic exported to %1: %2 × %3 px, %4").arg(mosaic.folder.split("/").pop())
+                           .arg(wide).arg(high).arg(pinhole.sizeText(pinhole.fileSize(path))))
+        }
+        if (by !== "size") {
+            making.start(() => pinhole.run("magick", how, { timeout: 180000 }), done)
+            return
+        }
+        making.start(() => pinhole.run("magick", how, { timeout: 180000 })
+                               .then(() => pinhole.run("magick", ["identify", "-format", "%Q", path])), result => {
+            const quality = parseInt(result.stdout)
+            if (quality < mosaic.fineQuality && scale > 0.2)
+                mosaic.encode(drawn, path, by, scale * 0.8)
+            else
+                done()
+        })
+    }
+    Job { id: making; onFailed: error => mosaic.failed(error) }
 
     // The picture's pixels: its thumbnail drawn small and read back, once
     // for each picture. Under the panel, where it is not seen; a canvas
@@ -407,12 +550,12 @@ Item {
         }
         ShellButton {
             id: saveButton
-            text: qsTr("Save")
-            key: "S"
+            text: qsTr("Export…")
+            key: "E"
             keyLayer: "plugin"
             usable: mosaic.ready
             busy: mosaic.saving
-            onTriggered: mosaic.save()
+            onTriggered: mosaic.askSave()
         }
     }
     ShellButton {
@@ -442,7 +585,7 @@ Item {
             id: zoom
             anchors.fill: parent
             levels: mosaic.sizes
-            level: 10
+            level: 8
             Item {
                 id: room
                 width: stage.width
@@ -721,5 +864,151 @@ Item {
               + (mosaic.suited.length > 0 ? "  ·  " + qsTr("under it, the photos that suit a mosaic best")
                  : mosaic.plugin.paused ? "  ·  " + qsTr("background work is paused, so none are suggested")
                  : "  ·  " + qsTr("looking for the photos that suit a mosaic…"))
+    }
+
+    // What to save it as.
+    Panel {
+        visible: mosaic.exporting
+        color: Qt.rgba(0, 0, 0, 0.45)
+        onTriggered: mosaic.exporting = false
+    }
+    Card {
+        id: card
+        visible: mosaic.exporting
+        anchors.centerIn: parent
+        readonly property int pad: Math.round(theme.fontSize * 1.6)
+        width: Math.min(parent.width - 32, Math.max(choices.implicitWidth, theme.fontSize * 30) + 2 * pad)
+        height: choices.implicitHeight + 2 * pad
+        Column {
+            id: choices
+            x: card.pad
+            y: card.pad
+            width: card.width - 2 * card.pad
+            spacing: Math.round(theme.fontSize * 0.9)
+            readonly property string by: pinhole.settings.exportBy
+            UiText {
+                text: qsTr("Export the mosaic")
+                color: theme.brightForeground
+                font.pixelSize: Math.round(theme.fontSize * 1.25)
+            }
+            Choices {
+                setting: "exportBy"
+                numbered: false
+                options: [{ value: "pixels", text: qsTr("Pixels") }, { value: "print", text: qsTr("For print") },
+                          { value: "size", text: qsTr("File size") }]
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: choices.by === "pixels"
+                UiText { text: qsTr("Longer side"); color: theme.darkForeground; height: pixelChoices.height; verticalAlignment: Text.AlignVCenter }
+                Choices {
+                    id: pixelChoices
+                    setting: "exportPixels"
+                    numbered: false
+                    options: [2000, 3000, 4000, 6000, 8000, 12000].map(px => ({ value: px, text: Number(px).toLocaleString(Qt.locale(), "f", 0) }))
+                }
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: choices.by === "print"
+                UiText { text: qsTr("Paper, cm"); color: theme.darkForeground; height: paperChoices.height; verticalAlignment: Text.AlignVCenter }
+                Choices {
+                    id: paperChoices
+                    setting: "exportPaper"
+                    numbered: false
+                    options: [{ value: "10x15", text: "10 × 15" }, { value: "13x18", text: "13 × 18" }, { value: "a4", text: "A4" },
+                              { value: "a3", text: "A3" }, { value: "30x40", text: "30 × 40" }, { value: "50x70", text: "50 × 70" }]
+                }
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: choices.by === "print"
+                UiText { text: qsTr("Dots an inch"); color: theme.darkForeground; height: dpiChoices.height; verticalAlignment: Text.AlignVCenter }
+                Choices {
+                    id: dpiChoices
+                    setting: "exportDpi"
+                    numbered: false
+                    options: [150, 200, 300].map(dpi => ({ value: dpi, text: String(dpi) }))
+                }
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: choices.by === "size"
+                UiText { text: qsTr("At most, MB"); color: theme.darkForeground; height: mbChoices.height; verticalAlignment: Text.AlignVCenter }
+                Choices {
+                    id: mbChoices
+                    setting: "exportMb"
+                    numbered: false
+                    options: [1, 2, 5, 10, 20].map(mb => ({ value: mb, text: String(mb) }))
+                }
+            }
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: choices.by !== "size"
+                UiText { text: qsTr("JPEG quality"); color: theme.darkForeground; height: qualityChoices.height; verticalAlignment: Text.AlignVCenter }
+                Choices {
+                    id: qualityChoices
+                    setting: "exportQuality"
+                    numbered: false
+                    options: [70, 80, 90, 95, 100].map(q => ({ value: q, text: String(q) }))
+                }
+            }
+            // Where it goes.
+            Row {
+                width: parent.width
+                spacing: 8
+                UiText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, parent.width - changeFolder.width - 8)
+                    elide: Text.ElideMiddle
+                    color: mosaic.folder !== "" ? theme.foreground : theme.darkForeground
+                    text: mosaic.folder !== "" ? mosaic.folder.replace(/^\/home\/[^\/]+/, "~") : qsTr("No folder chosen yet")
+                }
+                ShellButton {
+                    id: changeFolder
+                    text: mosaic.folder !== "" ? qsTr("Change…") : qsTr("Choose…")
+                    onTriggered: mosaic.chooseFolder(false)
+                }
+            }
+            UiText {
+                readonly property string library: mosaic.folder !== "" ? mosaic.inLibrary(mosaic.folder) : ""
+                visible: library !== ""
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: theme.red
+                text: qsTr("This folder is in your library %1: the mosaic would show up among your photos.").arg(library)
+            }
+            // What that comes to, and when it is more than the tiles have.
+            UiText {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: theme.darkForeground
+                readonly property real each: mosaic.exportSize.width / mosaic.columns
+text: (choices.by === "size" ? qsTr("Up to %1 × %2 px: smaller if that is what keeps it sharp in so few megabytes.")
+                                              .arg(mosaic.exportSize.width).arg(mosaic.exportSize.height)
+                       : qsTr("%1 × %2 px, each tile %3 px").arg(mosaic.exportSize.width).arg(mosaic.exportSize.height).arg(Math.round(each)))
+                      + (choices.by !== "size" && each > mosaic.texels * 1.05
+                         ? ". " + qsTr("A tile's photo is %1 px: smaller tiles would fill this size sharper.").arg(mosaic.texels) : "")
+            }
+            Row {
+                spacing: 6
+                ShellButton {
+                    text: qsTr("Export")
+                    active: true
+                    hint: "⏎"
+                    onTriggered: mosaic.save()
+                }
+                ShellButton {
+                    text: qsTr("Cancel")
+                    hint: "Esc"
+                    onTriggered: mosaic.exporting = false
+                }
+            }
+        }
     }
 }

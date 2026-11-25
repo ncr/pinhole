@@ -6,8 +6,27 @@
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Any photo as a mosaic of your other photos, each tile a photo of that colour: slide the tiles bigger and smaller, flip to the original and back, save it. It finds the photos that make a good one.",
+  "description": "Any photo as a mosaic of your other photos, each tile a photo of that colour: slide the tiles bigger and smaller, flip to the original and back, export it at the size, print size or file size you choose. It finds the photos that make a good one.",
   "workers": [
-    { "name": "suited", "program": "pinhole-mosaic", "args": ["daemon"], "per": "source" }
-  ]
+    {
+      "name": "suited",
+      "program": "pinhole-mosaic",
+      "args": [
+        "daemon"
+      ],
+      "per": "source"
+    }
+  ],
+  "requires": [
+    "magick"
+  ],
+  "settings": {
+    "exportBy": "pixels",
+    "exportPixels": 6000,
+    "exportPaper": "a3",
+    "exportDpi": 300,
+    "exportMb": 5,
+    "exportQuality": 90,
+    "exportFolder": ""
+  }
 }
