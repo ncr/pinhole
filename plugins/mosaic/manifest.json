@@ -6,5 +6,8 @@
   "version": "1.0.0",
   "author": "Pinhole",
   "license": "MIT",
-  "description": "Any photo as a mosaic of your other photos, each tile a photo of that colour: slide the tiles bigger and smaller, flip to the original and back, save it."
+  "description": "Any photo as a mosaic of your other photos, each tile a photo of that colour: slide the tiles bigger and smaller, flip to the original and back, save it. It finds the photos that make a good one.",
+  "workers": [
+    { "name": "suited", "program": "pinhole-mosaic", "args": ["daemon"], "per": "source" }
+  ]
 }

@@ -83,7 +83,10 @@ and thumbnails stay local. Cached tiles and photo markers work offline.
 Mosaic makes any photo out of your other photos (H): each tile is a photo
 of the colour the picture has there. A slider, + and −, or the wheel make
 the tiles bigger and smaller, Space flips to the original and back, a
-click on a tile opens its photo, and S saves the mosaic to Pictures.
+click on a tile opens its photo, and S saves the mosaic to Pictures. A mosaic
+shows large shapes that differ strongly, not small detail, so it looks
+through the library for the photos that have them and lists the best under
+the mosaic.
 
 Rainbow wall lays as many of your most colourful photos as fill the window
 out by hue (W), light at the top and dark at the foot. Space makes a wall
@@ -318,7 +321,7 @@ plugins/sheet/            the Contact sheet plugin: a grid or collage of what is
 plugins/send/             Send to phone; sender/ is pinhole-send, LocalSend's protocol
 plugins/info/             photo details and the library map; pinhole-info reads an original's EXIF (ImageMagick) or a video's (ffprobe); check/ tries it on real files
 plugins/info/module/      Info's native QML module, Pinhole.Internal.Info: the map drawn from vector tiles, built with the window
-plugins/mosaic/           the Mosaic plugin: a photo made of the library's photos (Mosaic.js picks them by colour, mosaic.frag draws them)
+plugins/mosaic/           the Mosaic plugin: a photo made of the library's photos (Mosaic.js picks them by colour, mosaic.frag draws them, pinhole-mosaic finds the photos that suit one)
 plugins/wall/             the Rainbow wall plugin: the library's most colourful photos laid out by hue
 plugins/theme/            the Theme plugin: an Omarchy theme from a photo (Palette.js, pinhole-theme)
 plugins/screenshots/      the Screenshots plugin

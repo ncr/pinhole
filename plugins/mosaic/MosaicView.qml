@@ -65,8 +65,21 @@ Item {
             turnTo(1, 300)
         }
     }
-    // The photo before or after, the grid's hidden ones passed over.
+    // The photos that suit a mosaic (the plugin's `suited`), listed under
+    // the picture; ← → go through them, from the first when the picture is
+    // none of them. Before any are found: the photo before or after in the
+    // library, the grid's hidden ones passed over.
+    readonly property var suited: plugin.suited
+    readonly property int among: suited.indexOf(photo)
     function step(by) {
+        if (suited.length > 0) {
+            let k = among < 0 ? (by > 0 ? 0 : suited.length - 1) : among + by
+            while (k >= 0 && k < suited.length && !offered(suited[k]))
+                k += by
+            if (k >= 0 && k < suited.length)
+                photo = suited[k]
+            return
+        }
         let i = position + by
         while (i >= 0 && i < pinhole.library.count && pinhole.isHidden(i))
             i += by
@@ -74,6 +87,12 @@ Item {
             return
         photo = pinhole.library.item(i).id
     }
+    // In the library shown, and not hidden from its grid.
+    function offered(id) {
+        const i = pinhole.library.indexOf(id)
+        return i >= 0 && !pinhole.isHidden(i)
+    }
+    onAmongChanged: if (among >= 0) strip.positionViewAtIndex(among, ListView.Contain)
     function turnTo(to, duration) {
         fade.stop()
         fade.to = to
@@ -411,7 +430,7 @@ Item {
         id: stage
         anchors.fill: parent
         anchors.topMargin: top.y + top.height + 16
-        anchors.bottomMargin: 16 + words.height + 12
+        anchors.bottomMargin: 16 + words.height + 12 + (suitedRow.visible ? suitedRow.height + 12 : 0)
         anchors.leftMargin: 16
         anchors.rightMargin: 16
 
@@ -628,6 +647,62 @@ Item {
         }
     }
 
+    // The photos that suit a mosaic, best first: a click makes the mosaic
+    // of one. Each finds its photo as it comes into view.
+    Item {
+        id: suitedRow
+        visible: mosaic.suited.length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: words.top
+        anchors.bottomMargin: 12
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
+        readonly property int cell: Math.round(theme.fontSize * 5.5)
+        height: cell
+        ScrollList {
+            id: strip
+            anchors.fill: parent
+            orientation: ListView.Horizontal
+            clip: true
+            spacing: 4
+            model: mosaic.suited
+            delegate: Item {
+                id: offer
+                required property string modelData
+                readonly property int position: (mosaic.plugin.revision, pinhole.library.indexOf(modelData))
+                readonly property var item: position >= 0 && !(mosaic.plugin.hiddenRevision, pinhole.isHidden(position))
+                                            ? pinhole.library.item(position) : null
+                readonly property bool current: modelData === mosaic.photo
+                // One no longer in the library, or hidden from its grid,
+                // takes no room.
+                visible: item !== null
+                width: item !== null ? suitedRow.cell : -strip.spacing
+                height: suitedRow.cell
+                Rectangle {
+                    anchors.fill: parent
+                    color: offer.item && offer.item.avgColor ? offer.item.avgColor : theme.darkBackground
+                    Image {
+                        anchors.fill: parent
+                        source: offer.item ? offer.item.thumbnail : ""
+                        sourceSize: Qt.size(Math.round(width * Screen.devicePixelRatio), Math.round(height * Screen.devicePixelRatio))
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: offer.current || over.hovered
+                        color: "transparent"
+                        border.width: offer.current ? 3 : 1
+                        border.color: offer.current ? theme.accent : theme.brightForeground
+                    }
+                }
+                HoverHandler { id: over; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: mosaic.photo = offer.modelData }
+            }
+        }
+    }
+
     // What it is made of.
     UiText {
         id: words
@@ -643,5 +718,8 @@ Item {
             : qsTr("%1 tiles from %2 photos")
               .arg(Number(mosaic.columns * mosaic.rows).toLocaleString(Qt.locale(), "f", 0))
               .arg(Number(mosaic.laid.used).toLocaleString(Qt.locale(), "f", 0))
+              + (mosaic.suited.length > 0 ? "  ·  " + qsTr("under it, the photos that suit a mosaic best")
+                 : mosaic.plugin.paused ? "  ·  " + qsTr("background work is paused, so none are suggested")
+                 : "  ·  " + qsTr("looking for the photos that suit a mosaic…"))
     }
 }

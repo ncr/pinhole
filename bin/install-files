@@ -87,6 +87,7 @@ install -d "$PREFIX/lib/pinhole/plugins/mosaic/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/mosaic" plugins/mosaic/manifest.json plugins/mosaic/*.qml plugins/mosaic/Mosaic.js \
   plugins/mosaic/mosaic.frag.qsb
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/mosaic/i18n" plugins/mosaic/i18n/*.json
+install -Dm755 plugins/mosaic/pinhole-mosaic "$PREFIX/lib/pinhole/plugins/mosaic/pinhole-mosaic"
 install -d "$PREFIX/lib/pinhole/plugins/wall/i18n"
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/wall" plugins/wall/manifest.json plugins/wall/*.qml plugins/wall/Colour.js
 install -Dm644 -t "$PREFIX/lib/pinhole/plugins/wall/i18n" plugins/wall/i18n/*.json

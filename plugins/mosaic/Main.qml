@@ -41,6 +41,44 @@ PinholePlugin {
     function ensure() {
         if (stale)
             choose()
+        if (!asked) {
+            asked = true
+            readSuited()
+        }
+    }
+
+    // The photos that make a good mosaic, best first, by id: what its
+    // worker found (pinhole-mosaic: large shapes that differ strongly, in
+    // colour), read from the cache of the library shown once the view has
+    // opened, and again as the worker gets further. `looked` is how far it
+    // is: { done, total }.
+    property var suited: []
+    property var looked: ({ done: 0, total: 0 })
+    property bool asked: false
+    readonly property bool paused: pinhole.workers.some(worker => worker.name === "suited" && worker.paused)
+    function readSuited() {
+        reading.start(() => pinhole.readJson(pinhole.cacheDir + "/suited.json"))
+    }
+    Job {
+        id: reading
+        onDone: found => {
+            const photos = found.photos ?? []
+            if (photos.length !== plugin.suited.length || photos.some((id, i) => id !== plugin.suited[i]))
+                plugin.suited = photos
+            plugin.looked = { done: found.done ?? 0, total: found.total ?? 0 }
+        }
+        // None yet: the worker has not got that far.
+        onFailed: error => { if (error.code !== "not_found") pinhole.warn(error) }
+    }
+    Connections {
+        target: pinhole
+        function onWorkerSaid(name, said) { if (name === "suited" && plugin.asked) plugin.readSuited() }
+        function onCacheDirChanged() {
+            plugin.suited = []
+            plugin.looked = { done: 0, total: 0 }
+            if (plugin.asked)
+                plugin.readSuited()
+        }
     }
     function shuffle() {
         seed = seed + 1 + Math.floor(Math.random() * 1000)
@@ -55,9 +93,13 @@ PinholePlugin {
     }
     // What the grid hides (Screenshots' hide mode, say) is no tile, the
     // next time the tiles are chosen.
+    property int hiddenRevision: 0
     Connections {
         target: pinhole
-        function onHiddenChanged() { plugin.stale = true }
+        function onHiddenChanged() {
+            plugin.stale = true
+            ++plugin.hiddenRevision
+        }
     }
 
     actions: [
@@ -108,6 +150,11 @@ PinholePlugin {
             title: qsTr("Bigger and smaller tiles"),
             text: qsTr("In the mosaic, the slider, + and −, or the wheel make the tiles bigger and smaller. Space flips to the original and back, and S saves the mosaic to Pictures."),
             action: gridAction
+        },
+        {
+            title: qsTr("Photos that suit a mosaic"),
+            text: qsTr("A mosaic shows large shapes that differ strongly, not small detail. Pinhole looks through your photos for those that have them, and lists the best under the mosaic: a click, or ← and →, makes the mosaic of another."),
+            action: gridAction
         }
     ]
 
@@ -115,7 +162,7 @@ PinholePlugin {
         ["H", qsTr("A mosaic of the photo")],
         ["Space", qsTr("Mosaic: the original, and back")],
         ["+ −", qsTr("Mosaic: bigger, smaller tiles")],
-        ["← →", qsTr("Mosaic: the photo before, after")]
+        ["← →", qsTr("Mosaic: another photo that suits one")]
     ]
 
     settings: Component {
@@ -161,8 +208,8 @@ PinholePlugin {
         keyLayer: "plugin"
         usable: mosaicView.shown
         autoRepeat: true
-        noMouse: qsTr("Close it and pick another photo")
-        noTouchpad: qsTr("Close it and pick another photo")
+        mouse: qsTr("Click a photo under the mosaic")
+        touchpad: qsTr("Tap a photo under the mosaic")
         onTriggered: mosaicView.item.step(-1)
     }
     Command {
@@ -171,8 +218,8 @@ PinholePlugin {
         keyLayer: "plugin"
         usable: mosaicView.shown
         autoRepeat: true
-        noMouse: qsTr("Close it and pick another photo")
-        noTouchpad: qsTr("Close it and pick another photo")
+        mouse: qsTr("Click a photo under the mosaic")
+        touchpad: qsTr("Tap a photo under the mosaic")
         onTriggered: mosaicView.item.step(1)
     }
     Command {

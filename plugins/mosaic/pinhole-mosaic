@@ -1,0 +1,204 @@
+#!/usr/bin/python3
+"""Which photos make a good mosaic, for pinholed to keep finding (Mosaic's worker).
+
+A mosaic shows a picture in a few hundred tiles, each a photo with a
+picture of its own. What comes through is what the picture has in shapes a
+few tiles across that differ strongly from each other; small detail is
+gone, a faint difference is lost in what the tiles themselves show, and a
+picture that is one band over another (a sky over a field) is a mosaic of
+nothing. So a photo is scored by its thumbnail made small (48 by 48) and
+averaged over 12 by 12 cells of 4 by 4 pixels:
+
+    kept     the share of all its difference from pixel to pixel that the
+             cells still have (1 for flat cells, near 0 for noise and fine
+             pattern);
+    shapes   how far the cells are from each other beyond what their rows'
+             and their columns' averages say: bands across or down, a
+             horizon wherever it lies, count for nothing;
+    colour   how far its pixels are from grey, a sheet of paper and a
+             concrete wall counting for a third of a flower;
+    score    kept² × shapes × colour.
+
+The scores are kept in the plugin's cache for the library, each with the
+thumbnail it was made of, so only new and changed photos are looked at
+again; the best, one of each few minutes, are written to suited.json for
+the view to read.
+"""
+import argparse
+from contextlib import closing
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+
+# Bump when the score changes: every photo is then scored again.
+RECIPE = 1
+FINE = 48
+CELL = 4
+BATCH = 200
+BEST = 300
+# Photos taken this close together are one moment: its best stands for it.
+MOMENT_MS = 5 * 60 * 1000
+
+
+def score(pixels):
+    """kept² × shapes × colour of FINE × FINE pixels, r, g, b each a byte."""
+    side = FINE // CELL
+    area = CELL * CELL
+    total = cells_apart = bands = 0.0
+    for channel in range(3):
+        values = pixels[channel::3]
+        mean = sum(values) / len(values)
+        total += sum(v * v for v in values) / len(values) - mean * mean
+        cells = [0.0] * (side * side)
+        for y in range(FINE):
+            row = values[y * FINE:(y + 1) * FINE]
+            base = y // CELL * side
+            for x in range(side):
+                cells[base + x] += sum(row[x * CELL:(x + 1) * CELL]) / area
+        cells_apart += sum(c * c for c in cells) / len(cells) - mean * mean
+        rows = [sum(cells[y * side:(y + 1) * side]) / side for y in range(side)]
+        columns = [sum(cells[x::side]) / side for x in range(side)]
+        bands += sum(r * r for r in rows) / side - mean * mean + sum(c * c for c in columns) / side - mean * mean
+    if total <= 1e-9:
+        return 0.0
+    kept = max(0.0, min(1.0, cells_apart / total))
+    shapes = (max(0.0, cells_apart - bands) / 3) ** 0.5 / 255
+    red, green, blue = pixels[0::3], pixels[1::3], pixels[2::3]
+    grey = sum(max(r, g, b) - min(r, g, b) for r, g, b in zip(red, green, blue)) / len(red) / 255
+    colour = 0.3 + min(1.0, grey / 0.25)
+    return kept * kept * shapes * colour
+
+
+def small(paths):
+    """The thumbnails at `paths`, each FINE × FINE as r, g, b; None for one
+    that could not be read."""
+    frame = FINE * FINE * 3
+
+    def read(some):
+        listed = "\n".join("jpeg:" + str(path).replace("\\", "\\\\").replace("'", "\\'") for path in some)
+        done = subprocess.run(["magick", "-define", f"jpeg:size={FINE * 2}x{FINE * 2}", "@-", "-colorspace", "sRGB",
+                               "-alpha", "off", "-resize", f"{FINE}x{FINE}!", "-depth", "8", "rgb:-"],
+                              input=listed.encode(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        if done.returncode == 0 and len(done.stdout) == frame * len(some):
+            return [done.stdout[i * frame:(i + 1) * frame] for i in range(len(some))]
+        return None
+
+    out = read(paths)
+    if out is not None:
+        return out
+    # One of them is unreadable: each by itself, to find which.
+    out = []
+    for path in paths:
+        one = read([path])
+        out.append(one[0] if one else None)
+    return out
+
+
+def best(scores, dates):
+    """The ids to offer: the highest scores, one a moment."""
+    taken = set()
+    out = []
+    for photo in sorted(scores, key=lambda p: -scores[p][1]):
+        if scores[photo][1] <= 0:
+            break
+        date = dates.get(photo, 0)
+        moment = date // MOMENT_MS if date > 0 else photo
+        if moment in taken or (date > 0 and (moment - 1 in taken or moment + 1 in taken)):
+            continue
+        taken.add(moment)
+        out.append(photo)
+        if len(out) == BEST:
+            break
+    return out
+
+
+def emit(event, **values):
+    print(json.dumps(dict(event=event, **values)), flush=True)
+
+
+def write(path, value):
+    part = path.with_name(path.name + ".part")
+    part.write_text(json.dumps(value, separators=(",", ":")))
+    os.replace(part, path)
+
+
+def look(library, source, cache):
+    """One look through the library: the photos not scored yet, scored."""
+    with closing(sqlite3.connect(f"file:{library / 'library.sqlite'}?mode=ro", uri=True)) as db:
+        said = db.execute("SELECT value FROM meta WHERE key = 'source'").fetchone()
+        if not said or said[0] != source:
+            raise RuntimeError(f"the library at {library} is not {source}")
+        rows = db.execute("SELECT id, thumb_path, asset_date FROM assets "
+                          "WHERE NOT is_video AND thumb_path IS NOT NULL AND thumb_path != ''").fetchall()
+    kept = cache / "scores.json"
+    try:
+        saved = json.loads(kept.read_text())
+        scores = saved["scores"] if saved.get("recipe") == RECIPE else {}
+    except (OSError, ValueError, KeyError):
+        scores = {}
+    dates = {photo: date or 0 for photo, _, date in rows}
+    thumbs = {photo: thumb for photo, thumb, _ in rows}
+    gone = [photo for photo in scores if photo not in thumbs]
+    for photo in gone:
+        del scores[photo]
+    todo = [photo for photo in thumbs if scores.get(photo, [None])[0] != thumbs[photo]]
+
+    def tell(done):
+        write(cache / "suited.json", dict(recipe=RECIPE, total=len(thumbs), done=len(thumbs) - len(todo) + done,
+                                           photos=best(scores, dates)))
+        emit("suited", done=len(thumbs) - len(todo) + done, total=len(thumbs))
+
+    if not todo and not gone and (cache / "suited.json").exists():
+        return
+    told = time.monotonic()
+    for start in range(0, len(todo), BATCH):
+        some = todo[start:start + BATCH]
+        for photo, pixels in zip(some, small([library / thumbs[photo] for photo in some])):
+            scores[photo] = [thumbs[photo], round(score(pixels), 5) if pixels else 0]
+        if time.monotonic() - told > 5:
+            write(kept, dict(recipe=RECIPE, scores=scores))
+            tell(start + len(some))
+            told = time.monotonic()
+    write(kept, dict(recipe=RECIPE, scores=scores))
+    tell(len(todo))
+
+
+def exit_with_parent():
+    # pinholed closes this pipe when it shows another source, the plugin is
+    # turned off, background work is paused or it ends.
+    sys.stdin.buffer.read()
+    os._exit(0)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("operation", choices=("daemon",))
+    parser.add_argument("--library", type=Path, required=True)
+    parser.add_argument("--library-key", required=True)
+    parser.add_argument("--cache-dir", type=Path, required=True)
+    parser.add_argument("--managed-plugins", type=Path)
+    args = parser.parse_args()
+    os.umask(0o077)
+    threading.Thread(target=exit_with_parent, daemon=True).start()
+    os.nice(10)
+    if not shutil.which("magick"):
+        print("pinhole-mosaic: ImageMagick (magick) is not installed", file=sys.stderr, flush=True)
+        sys.stdin.buffer.read()
+        return
+    args.cache_dir.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            look(args.library.resolve(), args.library_key, args.cache_dir)
+        except (OSError, sqlite3.Error, RuntimeError) as error:
+            print(f"pinhole-mosaic: {error}", file=sys.stderr, flush=True)
+        time.sleep(60)
+
+
+if __name__ == "__main__":
+    main()
